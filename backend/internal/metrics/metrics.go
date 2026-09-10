@@ -567,8 +567,8 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
-		   block_read, block_write)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		   block_read, block_write, container_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -578,7 +578,8 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		  net_tx      = excluded.net_tx,
 		  pids        = excluded.pids,
 		  block_read  = excluded.block_read,
-		  block_write = excluded.block_write`)
+		  block_write = excluded.block_write,
+		  container_id = excluded.container_id`)
 	if err != nil {
 		return err
 	}
@@ -592,7 +593,7 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if _, err := stmt.ExecContext(ctx, ts, st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
-			int64(st.BlockRead), int64(st.BlockWrite)); err != nil {
+			int64(st.BlockRead), int64(st.BlockWrite), st.ID); err != nil {
 			return err
 		}
 	}

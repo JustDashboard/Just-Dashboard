@@ -13,6 +13,12 @@ since a tab was opened, and charts that start empty every visit cannot show last
 - Containers are sampled into `metric_container_samples`, keyed by **name, not id** — a compose redeploy
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
+- Samples also retain the observed container ID for release attribution. The additive `container_id`
+  column defaults to empty for old rows, which stay visible in name-continuous charts but cannot be
+  attributed to a release. `ContainerIdentityRange` reads 1..64 distinct IDs in one aggregation with
+  CPU/memory means, peaks and sample counts; its half-open window is limited to 24 hours and requested
+  resolution to 600 buckets per container. Empty series remain empty, and retention-disabled reads
+  return no samples. An `(container_id, ts)` index is installed after the column migration.
 - Container network/block totals are stored as Docker's **cumulative counters** and differenced in SQL
   (`MAX - MIN` over the bucket). A total can be re-bucketed later; a rate recorded against one interval
   cannot.

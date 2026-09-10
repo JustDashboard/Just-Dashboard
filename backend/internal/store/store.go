@@ -784,6 +784,8 @@ CREATE TABLE IF NOT EXISTS metric_samples (
 // to a 0.6.6 deploy_runs table; a fresh database reaches the same final shape
 // through this second block.
 const postColumnSchema = `
+CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
+  ON metric_container_samples(container_id, ts);
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
@@ -885,6 +887,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// sampled for the live view but never kept.
 	{"metric_container_samples", "block_read", "INTEGER NOT NULL DEFAULT 0"},
 	{"metric_container_samples", "block_write", "INTEGER NOT NULL DEFAULT 0"},
+	// Name continuity serves Docker charts; release attribution needs the exact
+	// observed container identity. Old samples deliberately remain unattributed.
+	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
 
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
