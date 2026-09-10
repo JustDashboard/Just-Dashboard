@@ -33,6 +33,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
 		r.Method(http.MethodGet, "/{id}/runs/{run}", s.handle(s.handleDeploymentRunGet))
+		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/stream", s.handle(s.handleDeploymentRunStream))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
 		r.Method(http.MethodGet, "/{id}/env", s.handle(s.handleDeployEnvList))
@@ -645,6 +646,26 @@ func (s *Server) handleDeploymentRunGet(w http.ResponseWriter, r *http.Request) 
 		return mapDeployError(deploy.ErrRunNotFound)
 	}
 	httpx.JSON(w, http.StatusOK, snapshot)
+	return nil
+}
+
+func (s *Server) handleDeploymentRunLogs(w http.ResponseWriter, r *http.Request) error {
+	projectID, runID, err := deploymentRunIDs(r)
+	if err != nil {
+		return err
+	}
+	snapshot, err := s.modules.deployRuns.Snapshot(r.Context(), runID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	if snapshot.Run.ProjectID != projectID {
+		return mapDeployError(deploy.ErrRunNotFound)
+	}
+	var owner deploy.RuntimeObserver
+	if s.modules.docker != nil {
+		owner = s.modules.docker
+	}
+	httpx.JSON(w, http.StatusOK, deploy.ObserveRunLogs(r.Context(), owner, *snapshot))
 	return nil
 }
 

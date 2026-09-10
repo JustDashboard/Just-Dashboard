@@ -307,7 +307,7 @@ export function DeploymentWorkspace() {
           releasesLoading={releases.loading}
         />
       )}
-      {activeTab === "logs" && <OwnedFeatureTab kind="logs" deployment={deployment} />}
+      {activeTab === "logs" && <DeploymentRuntime runtime={detail.data.runtime} />}
       {activeTab === "configuration" &&
         (normalized ? (
           <NormalizedConfigurationTab
@@ -465,10 +465,17 @@ function Overview({
       />
       <SummaryPanel
         icon={Logs}
-        title="Recent runtime logs"
-        rows={[["Status", "Runtime log attribution is not available yet"]]}
-        href="/logs"
-        actionLabel="Open system logs"
+        title="Runtime logs"
+        rows={[
+          [
+            "Sources",
+            runtime?.status === "available"
+              ? `${runtime.services.length} managed runtime services`
+              : "Docker evidence unavailable",
+          ],
+        ]}
+        href={`/deploy/${deployment.id}?tab=logs`}
+        actionLabel="Choose runtime logs"
       />
     </div>
   )

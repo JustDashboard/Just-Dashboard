@@ -647,6 +647,71 @@ test.describe("runtime log handoffs", () => {
   })
 })
 
+test("run runtime logs open the server-provided activation window and withhold unproven windows", async ({
+  page,
+}) => {
+  await mockDashboard(page)
+  const since = "2026-11-01T06:25:30.123Z"
+  const until = "2026-11-01T06:35:30.123Z"
+  const query = new URLSearchParams({ source: "docker:preview", mode: "search", since, until })
+  let activated = true
+  await page.route("**/api/v1/deploy/7/runs/84/logs", (route) =>
+    json(route, {
+      status: "available",
+      windowReason: activated ? "" : "This run has no completed activation evidence.",
+      sources: [
+        {
+          containerId: "preview",
+          name: "preview-web",
+          liveUrl: "/logs?source=docker%3Apreview",
+          activationUrl: activated ? `/logs?${query}` : undefined,
+        },
+      ],
+    }),
+  )
+  const searches: URL[] = []
+  await page.route("**/api/v1/logs/**", (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith("/sources"))
+      return json(route, {
+        sources: [{ id: "docker:preview", label: "preview-web", kind: "docker", rotated: false }],
+        units: [],
+        roots: [],
+        missing: {},
+      })
+    if (url.pathname.endsWith("/search")) {
+      searches.push(url)
+      return json(route, {
+        lines: [],
+        scanned: 0,
+        matched: 0,
+        truncated: false,
+        complete: true,
+        files: [],
+        histogram: [],
+        tookMillis: 1,
+      })
+    }
+    return json(route, {})
+  })
+  await page.goto("/deploy/7/runs/84")
+  const link = page.getByRole("link", { name: "Activation logs for preview-web" })
+  await expect(link).toHaveAttribute("href", `/logs?${query}`)
+  await link.focus()
+  await page.keyboard.press("Enter")
+  await expect.poll(() => searches.length).toBe(1)
+  expect(searches[0].searchParams.get("source")).toBe("docker:preview")
+  expect(searches[0].searchParams.get("since")).toBe(since)
+  expect(searches[0].searchParams.get("until")).toBe(until)
+  activated = false
+  await page.goto("/deploy/7/runs/84")
+  await expect(
+    page.getByText("This run has no completed activation evidence.", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "Activation logs for preview-web" })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Live logs for preview-web" })).toBeVisible()
+})
+
 const draft = {
   id: "browser-draft",
   ownerUsername: "operator",

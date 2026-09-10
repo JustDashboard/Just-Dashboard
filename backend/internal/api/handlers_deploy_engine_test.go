@@ -51,6 +51,24 @@ func TestDeploymentRunRoutesPersistBeforeAcceptedAndResumeByID(t *testing.T) {
 		snapshot.Steps[0].Key != deploy.StepLegacyPipeline {
 		t.Fatalf("persisted snapshot = %#v", snapshot)
 	}
+	logs := c.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/runs/%d/logs", project.ID, run.ID), "", nil)
+	var handoff deploy.RunLogs
+	if logs.Code != http.StatusOK || json.Unmarshal(logs.Body.Bytes(), &handoff) != nil || handoff.Status != "unavailable" || handoff.Reason == "" {
+		t.Fatalf("unavailable run logs = %d %s", logs.Code, logs.Body.String())
+	}
+	wrongProject := c.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/runs/%d/logs", project.ID+1, run.ID), "", nil)
+	if wrongProject.Code != http.StatusNotFound {
+		t.Fatalf("cross-project log handoff = %d", wrongProject.Code)
+	}
+	logPath := fmt.Sprintf("/api/v1/deploy/%d/runs/%d/logs", project.ID, run.ID)
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "run-log-reader", auth.RoleReadOnly)}
+	if response := reader.do(http.MethodGet, logPath, "", nil); response.Code != http.StatusOK {
+		t.Fatalf("read-only log handoff = %d %s", response.Code, response.Body.String())
+	}
+	anonymous := &client{t: t, h: s.Routes()}
+	if response := anonymous.do(http.MethodGet, logPath, "", nil); response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous log handoff = %d", response.Code)
+	}
 
 	conflict := c.do(http.MethodPost, path, `{"operation":"deploy"}`,
 		map[string]string{"Idempotency-Key": "browser-retry-1"})

@@ -234,6 +234,7 @@ means `X-Confirm` is enforced server-side. Every mutation is audited by middlewa
 | `PATCH /deploy/{id}/environments/{env}` | `system.admin`, session | none | `deploy.environment.update` |
 | `POST /deploy/{id}/environments/{env}/runs` | `service.control`; content-dependent admin authorization | ordinary only for dirty managed checkout or warnings | `deploy.run.request` |
 | `GET /deploy/{id}/runs[/{run}]` | `read` | none | — |
+| `GET /deploy/{id}/runs/{run}/logs` | `read`; run must belong to project | none | — |
 | `GET /deploy/{id}/runs/{run}/stream` | `read`, WebSocket origin | none | open event audited |
 | `POST /deploy/{id}/runs/{run}/cancel` | `service.control` | none | `deploy.run.cancel` |
 | `POST /deploy/{id}/runs/{run}/retry` | `service.control` | none | `deploy.run.retry` |

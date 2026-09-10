@@ -128,7 +128,14 @@ only renderer/executor/validation authority for their feature.
   unassessed diagnosis have distinct wording; the remaining C8 summaries are still in progress.
   Runtime rows also link to the exact container source in Logs. Logs preserves explicit time-window
   links and refuses to substitute another source when the requested container is no longer discoverable;
-  run-specific activation-window generation remains in progress.
+  `GET /deploy/{id}/runs/{run}/logs` checks project membership and filters Docker by the run's own
+  environment and candidate/release id, including preview environments. It provides live source links
+  and a ten-minute history window around the latest successful activation step's completion only when
+  its persisted evidence identifies that release and contains no recovery. It never uses the current
+  live release's activation timestamp to describe an older run. Missing/failed activation has no history
+  link; removed runtimes point the operator to the transcript or an external log archive. The run page
+  renders these application log links separately from the orchestrator transcript, and the project Logs
+  tab offers the observed runtime sources.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
   are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
 

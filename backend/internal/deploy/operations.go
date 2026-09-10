@@ -36,6 +36,10 @@ type RuntimeService struct {
 }
 
 func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID int64) RuntimeServices {
+	return observeRuntimeServices(ctx, owner, environmentID, liveReleaseID, 0)
+}
+
+func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID, onlyReleaseID int64) RuntimeServices {
 	result := RuntimeServices{Status: "unavailable", Services: []RuntimeService{}}
 	if owner == nil {
 		result.Reason = "Docker runtime evidence is unavailable. Open Docker to check the connection."
@@ -50,6 +54,9 @@ func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 	labels := map[string]string{
 		"io.just-dashboard.managed":        "true",
 		"io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10),
+	}
+	if onlyReleaseID > 0 {
+		labels["io.just-dashboard.release-id"] = strconv.FormatInt(onlyReleaseID, 10)
 	}
 	containers, err := owner.ListContainersWithLabels(ctx, labels)
 	if err != nil {
@@ -66,7 +73,7 @@ func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 			continue
 		}
 		releaseID, err := strconv.ParseInt(item.Labels["io.just-dashboard.release-id"], 10, 64)
-		if err != nil || releaseID <= 0 {
+		if err != nil || releaseID <= 0 || (onlyReleaseID > 0 && releaseID != onlyReleaseID) {
 			continue
 		}
 		health := item.Health

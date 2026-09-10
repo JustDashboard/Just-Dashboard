@@ -40,6 +40,7 @@ import {
   stepStateLabel,
 } from "@/components/deploy/deployment-ui"
 import { Button } from "@/components/ui/button"
+import { DeploymentRunLogs } from "@/components/deploy/deployment-run-logs"
 
 type TranscriptLine = {
   seq: number
@@ -382,6 +383,7 @@ export function DeploymentRunWorkspace() {
           </PanelBody>
         </Panel>
       </div>
+      <DeploymentRunLogs projectID={projectID} runID={runID} />
     </Page>
   )
 }
