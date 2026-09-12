@@ -26,44 +26,51 @@ export function PortsPanel() {
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
 
-  const exposed = data?.filter((l) => l.exposed).length ?? 0
 
   return (
     <Panel>
       <PanelHeader
         icon={Router}
         title="Listening ports"
-        description={`${exposed} of ${data?.length ?? 0} bound to a wildcard address and therefore reachable from off the machine`}
       />
       <PanelBody flush>
         <Table containerClassName="max-h-[calc(100svh-20rem)]">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead className="w-20">Port</TableHead>
-              <TableHead className="w-20">Proto</TableHead>
-              <TableHead>Bound to</TableHead>
+              <TableHead className="hidden w-20 sm:table-cell">Proto</TableHead>
+              <TableHead className="hidden md:table-cell">Bound to</TableHead>
               <TableHead className="w-full">Process</TableHead>
-              <TableHead>User</TableHead>
+              <TableHead className="hidden lg:table-cell">User</TableHead>
               <TableHead>Reach</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {data?.map((listener, i) => (
               <TableRow key={`${listener.protocol}-${listener.address}-${listener.port}-${i}`}>
-                <TableCell className="numeric font-mono text-[13px]">{listener.port}</TableCell>
-                <TableCell className="text-xs uppercase text-muted-foreground">
+                <TableCell className="numeric font-mono text-body">{listener.port}</TableCell>
+                <TableCell className="hidden text-muted-foreground uppercase sm:table-cell">
                   {listener.protocol}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{listener.address || "*"}</TableCell>
+                <TableCell className="hidden font-mono md:table-cell">
+                  {listener.address || "*"}
+                </TableCell>
                 <TableCell>
                   <div className="max-w-[22rem] min-w-0">
-                    <div className="truncate text-[13px]">{listener.process || "unknown"}</div>
-                    <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    <div className="truncate text-body">{listener.process || "unknown"}</div>
+                    <p className="truncate font-mono text-hint text-muted-foreground">
                       {listener.cmdline}
+                    </p>
+                    {/* Which address a port is bound to is the whole reason
+                        this page exists — it must not be the column that gets
+                        dropped on a narrow screen. */}
+                    <p className="truncate font-mono text-hint text-muted-foreground md:hidden">
+                      {listener.address || "*"}
+                      <span className="uppercase sm:hidden"> · {listener.protocol}</span>
                     </p>
                   </div>
                 </TableCell>
-                <TableCell className="text-xs">{listener.user ?? "—"}</TableCell>
+                <TableCell className="hidden lg:table-cell">{listener.user ?? "—"}</TableCell>
                 <TableCell>
                   {listener.exposed ? (
                     <Status verdict="warning" label="exposed" icon={Router} />

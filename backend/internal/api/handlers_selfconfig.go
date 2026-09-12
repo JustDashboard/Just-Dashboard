@@ -2,9 +2,8 @@ package api
 
 import (
 	"errors"
-	"net"
 	"net/http"
-	"strconv"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -44,18 +43,12 @@ func (s *Server) handleSelfConfigApply(w http.ResponseWriter, r *http.Request) e
 		return httpx.Err(http.StatusServiceUnavailable, "config_unsupported", rep.Reason)
 	}
 
-	// A change that moves the address is the one an operator cannot undo from
-	// their browser: when the dashboard comes back somewhere else, this tab is
-	// pointing at a port nothing is listening on any more. That earns the
-	// typed phrase — the new address itself, so what is confirmed is the fact
-	// that has to be read.
-	if selfcfg.MovesEndpoint(rep.Settings, next) {
-		phrase := net.JoinHostPort(next.Site, strconv.Itoa(next.Port))
-		if err := httpx.RequireTypedConfirmation(w, r, phrase); err != nil {
-			return err
-		}
-	}
-
+	// No typed phrase, deliberately. A change that moves the address is worth
+	// reading before it is made — but the reading happens in the dialog, which
+	// lists every before-and-after and states the URL the dashboard will answer
+	// on next. Making somebody transcribe a forty-character MagicDNS name on
+	// top of that tested their typing, not their attention, and the change is
+	// undone on its own anyway when the new configuration does not come back.
 	actor := httpx.MustPrincipal(r).Username()
 	run, err := s.modules.selfConfig.Apply(r.Context(), next, actor, httpx.ClientIP(r))
 	if err != nil {
@@ -86,6 +79,27 @@ func (s *Server) handleSelfConfigRestart(w http.ResponseWriter, r *http.Request)
 	}
 	httpx.SetAudit(r, "dashboard.restart", string(run.Action), map[string]any{"run": run.ID})
 	httpx.JSON(w, http.StatusAccepted, run)
+	return nil
+}
+
+// handleSelfConfigCertificate issues the Tailscale certificate now.
+//
+// The keeper would get there on its own, but "on its own" is up to ten minutes
+// after an operator flipped the one switch this was waiting for — and they are
+// looking at the browser warning while it counts down. This is that wait, made
+// pressable: it issues the certificate and restarts the proxy that serves it,
+// so the padlock arrives while the page they asked from is still open.
+func (s *Server) handleSelfConfigCertificate(w http.ResponseWriter, r *http.Request) error {
+	// Ensure is a no-op in any other mode, and a no-op reported as success is
+	// a button that lies about what it did.
+	if !strings.EqualFold(strings.TrimSpace(s.Cfg.TLSMode), selfcfg.TLSTailscale) {
+		return httpx.BadRequest("this dashboard is not set to use a Tailscale certificate, so there is none to issue")
+	}
+	if err := s.modules.certKeeper.Ensure(r.Context()); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "dashboard.config.certificate", s.Cfg.Site, nil)
+	httpx.JSON(w, http.StatusOK, selfcfg.Certificate(s.Cfg.DataDir, s.Cfg.Site))
 	return nil
 }
 

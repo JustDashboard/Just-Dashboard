@@ -225,6 +225,14 @@ func (e *Engine) schedule(ctx context.Context) {
 	ticker := time.NewTicker(e.config.PollEvery)
 	defer ticker.Stop()
 	for {
+		// A worker that dies mid-run stops heartbeating but leaves the run
+		// `running`. Reconciling only at startup meant the run stayed that way,
+		// with no transcript and no terminal state, until the process was
+		// restarted; a live worker keeps its own lease fresh, so sweeping here
+		// reclaims exactly the abandoned ones.
+		if err := e.reconcileExpired(ctx); err != nil && !errors.Is(err, context.Canceled) && e.log != nil {
+			e.log.Error("deployment lease recovery failed", "err", err)
+		}
 		if err := e.claimAvailable(ctx); err != nil && !errors.Is(err, context.Canceled) && e.log != nil {
 			e.log.Error("deployment queue claim failed", "err", err)
 		}

@@ -27,7 +27,6 @@ import {
 import { notify } from "@/lib/toast"
 import { wsUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { useTheme } from "@/hooks/use-theme"
 import { actionFor, formatChord, useKeymap } from "@/lib/terminal-keymap"
 import {
   chooseDroppedImage,
@@ -57,75 +56,41 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ShortcutsDialog } from "@/components/terminal/shortcuts-dialog"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Modal } from "@/components/modal"
+import { Pane } from "@/components/panel"
+import { copyText, copyTextQuietly } from "@/lib/clipboard"
 
 type Query = Record<string, string | number | boolean | undefined | null>
 
 type XtermTheme = NonNullable<Terminal["options"]["theme"]>
 
 /**
- * The last resort when a canvas 2D context is unavailable (a headless or
- * locked-down browser). The runtime resolver below is what actually runs.
+ * The neutral ANSI ramp (colours 0, 8, 7, 15) as a percentage of ink mixed into
+ * paper. Colour 8 (`brightBlack`) is the most-used of the four — git hashes,
+ * vim comments, `ls -l` metadata — so it is lifted far enough off the ground to
+ * stay clearly legible rather than merely present.
  */
-/**
- * The neutral ANSI ramp (colours 0, 8, 7, 15) as a fraction of ink mixed into
- * paper. `--foreground` and `--background` swap roles between modes, so one
- * formula cannot give "a dark grey" in both: in dark mode a little ink lifts
- * off the near-black ground; in light mode colour 0 has to sit near the ink or
- * it vanishes on white. Colour 8 (`brightBlack`) is the most-used of the four —
- * git hashes, vim comments, `ls -l` metadata — so it is kept clearly legible
- * either way.
- */
-const NEUTRAL_INK: Record<"dark" | "light", { black: number; brightBlack: number; white: number }> =
-  {
-    dark: { black: 18, brightBlack: 44, white: 74 },
-    light: { black: 86, brightBlack: 56, white: 44 },
-  }
+const NEUTRAL_INK = { black: 18, brightBlack: 44, white: 74 } as const
 
 /**
  * The last resort when a canvas 2D context is unavailable (a headless or
  * locked-down browser). The runtime resolver below is what actually runs.
  */
-const TERMINAL_FALLBACK: Record<"dark" | "light", XtermTheme> = {
-  dark: {
-    background: "#141414",
-    foreground: "#fafafa",
-    cursor: "#fafafa",
-    selectionBackground: "rgba(200,160,60,0.3)",
-    black: "#333333",
-    red: "#e5484d",
-    green: "#46a758",
-    yellow: "#d9a441",
-    blue: "#5b7fdb",
-    magenta: "#8e6fd6",
-    cyan: "#5ec9c3",
-    white: "#c2c2c6",
-    brightBlack: "#6b6b6b",
-    brightWhite: "#fafafa",
-  },
-  light: {
-    background: "#ffffff",
-    foreground: "#0a0a0a",
-    cursor: "#0a0a0a",
-    selectionBackground: "rgba(60,110,220,0.22)",
-    black: "#242424",
-    red: "#c62a2f",
-    green: "#2f7d3a",
-    yellow: "#9a6b1f",
-    blue: "#2f52c4",
-    magenta: "#6b46c1",
-    cyan: "#0e7490",
-    white: "#8a8a8a",
-    brightBlack: "#6b6b6b",
-    brightWhite: "#0a0a0a",
-  },
+const TERMINAL_FALLBACK: XtermTheme = {
+  background: "#141414",
+  foreground: "#fafafa",
+  cursor: "#fafafa",
+  selectionBackground: "rgba(200,160,60,0.3)",
+  black: "#333333",
+  red: "#e5484d",
+  green: "#46a758",
+  yellow: "#d9a441",
+  blue: "#5b7fdb",
+  magenta: "#8e6fd6",
+  cyan: "#5ec9c3",
+  white: "#c2c2c6",
+  brightBlack: "#6b6b6b",
+  brightWhite: "#fafafa",
 }
 
 /**
@@ -137,12 +102,12 @@ const TERMINAL_FALLBACK: Record<"dark" | "light", XtermTheme> = {
  * tracks the active theme in both modes: the background and foreground are the
  * app's surfaces, the accents are the status and chart colours the rest of the
  * UI uses, and the neutral ramp is mixed from foreground and background so it
- * stays legible whichever mode is on.
+ * moves with the palette rather than being a second set of hexes to maintain.
  */
-function resolveTerminalTheme(mode: "dark" | "light"): XtermTheme {
-  if (typeof document === "undefined") return TERMINAL_FALLBACK[mode]
+function resolveTerminalTheme(): XtermTheme {
+  if (typeof document === "undefined") return TERMINAL_FALLBACK
   const ctx = document.createElement("canvas").getContext("2d")
-  if (!ctx) return TERMINAL_FALLBACK[mode]
+  if (!ctx) return TERMINAL_FALLBACK
 
   const probe = document.createElement("span")
   probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"
@@ -175,8 +140,8 @@ function resolveTerminalTheme(mode: "dark" | "light"): XtermTheme {
           .padStart(2, "0")
       : hex
 
-  const fb = TERMINAL_FALLBACK[mode]
-  const n = NEUTRAL_INK[mode]
+  const fb = TERMINAL_FALLBACK
+  const n = NEUTRAL_INK
   const fg = token("--foreground", fb.foreground!)
   const bg = token("--surface-sunken", token("--background", fb.background!))
   const red = token("--destructive", fb.red!)
@@ -367,14 +332,12 @@ export function XtermPane({
   // socket effect — so it is a counter the effect depends on rather than
   // anything automatic.
   const [generation, setGeneration] = useState(0)
-  const { mode } = useTheme()
   const settings = useTerminalSettings()
   const snippets = useSnippets()
   const map = useKeymap()
 
-  // The live terminal, kept so that switching theme can re-colour it instead
-  // of tearing down the PTY session behind it. The mode is mirrored into a ref
-  // for the same reason: the connect effect must not depend on it.
+  // The live terminal, kept so settings can be applied to it instead of
+  // tearing down the PTY session behind it.
   const termRef = useRef<Terminal | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const fitRef = useRef<{ fit: () => void } | null>(null)
@@ -383,7 +346,6 @@ export function XtermPane({
   // finishes. It is assigned by the live socket effect so a returned path
   // travels through the same transport and copy-mode handling as typing.
   const inputRef = useRef<((data: string) => boolean) | null>(null)
-  const modeRef = useRef(mode)
   // Settings are read inside the connect effect, which must not re-run when
   // one changes: rebuilding the terminal would drop the scrollback and, on a
   // non-tmux host, the session with it. The effects below apply them to the
@@ -497,7 +459,7 @@ export function XtermPane({
         // "none" over a scrollback full of matches, which is worse than not
         // showing a count at all.
         allowProposedApi: true,
-        theme: resolveTerminalTheme(modeRef.current),
+        theme: resolveTerminalTheme(),
       })
       termRef.current = term
       const fit = new FitAddon()
@@ -617,7 +579,7 @@ export function XtermPane({
         term.onSelectionChange(() => {
           if (!settingsRef.current.copyOnSelect) return
           const selection = term.getSelection()
-          if (selection) void navigator.clipboard?.writeText(selection).catch(() => {})
+          if (selection) void copyTextQuietly(selection)
         }),
       )
       // The geometry itself is what the PTY has to be told about, so the send
@@ -939,11 +901,6 @@ export function XtermPane({
     scrolledBackRef.current = scrolledBack
   }, [scrolledBack])
 
-  useEffect(() => {
-    modeRef.current = mode
-    if (termRef.current) termRef.current.options.theme = resolveTerminalTheme(mode)
-  }, [mode])
-
   // The caller's way back to the keyboard. Read through `termRef` at call
   // time, so it keeps working across a reconnect rather than capturing the
   // terminal that existed when the pane mounted.
@@ -1142,11 +1099,11 @@ export function XtermPane({
   }, [])
 
   return (
-    <div
+    <Pane
       ref={frameRef}
       className={cn(
-        "relative flex min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        // In fullscreen the pane is the whole screen, so the rounded corners
+        "relative bg-surface-sunken",
+        // In fullscreen the pane is the whole screen, so the rounded-sm corners
         // and border would draw a frame around nothing.
         fullscreen && "rounded-none border-0",
         copyMode && "terminal-tmux",
@@ -1160,7 +1117,7 @@ export function XtermPane({
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
             {subtitle ?? path}
             {shellTitle && (
-              <span className="ml-2 rounded bg-muted px-1 py-px text-[10px] text-foreground">
+              <span className="ml-2 rounded-sm bg-muted px-1 py-px text-micro text-foreground">
                 {shellTitle}
               </span>
             )}
@@ -1185,7 +1142,7 @@ export function XtermPane({
               placeholder="Find in scrollback"
               className="h-7 w-44 text-xs"
             />
-            <span className="numeric w-14 shrink-0 text-center text-[10px] text-muted-foreground">
+            <span className="numeric w-14 shrink-0 text-center text-micro text-muted-foreground">
               {needle ? (matches.count ? `${matches.index + 1}/${matches.count}` : "none") : ""}
             </span>
             <FindToggle
@@ -1320,7 +1277,7 @@ export function XtermPane({
       )}
 
       {error && (
-        <p className="border-b border-hairline bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <p className="border-b border-hairline bg-wash-danger px-3 py-1.5 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -1330,7 +1287,7 @@ export function XtermPane({
           ref={hostRef}
           className={cn(
             "absolute inset-3 z-0 overflow-hidden transition-colors duration-150 motion-reduce:transition-none",
-            bell && "bg-warning/25",
+            bell && "bg-mark",
           )}
           style={bell ? undefined : { backgroundColor: "var(--background)" }}
           // Click-to-focus-a-pane is a native capture listener installed with
@@ -1391,7 +1348,7 @@ export function XtermPane({
           <Button
             size="xs"
             variant="secondary"
-            className="absolute right-7 bottom-4 z-20 pointer-events-auto shadow-md"
+            className="pointer-events-auto absolute right-7 bottom-4 z-20 shadow-md"
             onClick={() => {
               // Two scrollbacks can be behind this: the emulator's, when
               // there is no tmux, and tmux's own. Ending both is what "the
@@ -1422,14 +1379,14 @@ export function XtermPane({
           impossible on a phone, and this panel is reached from a phone more
           often than its author would like. */}
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-hairline bg-surface-header px-3 py-1.5">
-        <span className="mr-2 hidden text-[11px] text-muted-foreground sm:inline">Keys</span>
+        <span className="mr-2 hidden text-hint text-muted-foreground sm:inline">Keys</span>
         {CONTROL_KEYS.map((key) => (
           <Tooltip key={key.label}>
             <TooltipTrigger asChild>
               <Button
                 size="xs"
                 variant="ghost"
-                className="h-7 shrink-0 rounded-md border border-hairline px-2 font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                className="h-7 shrink-0 rounded-md border border-hairline px-2 font-mono text-hint text-muted-foreground hover:text-foreground"
                 onClick={() => send(key.bytes)}
               >
                 {key.label}
@@ -1450,7 +1407,7 @@ export function XtermPane({
       />
 
       <ShortcutsDialog open={shortcuts} onOpenChange={setShortcuts} />
-    </div>
+    </Pane>
   )
 }
 
@@ -1505,7 +1462,7 @@ function FindToggle({
           aria-pressed={on}
           className={cn(
             "size-7 shrink-0 p-0",
-            on ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+            on ? "bg-plot-primary text-primary" : "text-muted-foreground hover:text-foreground",
           )}
           onClick={onClick}
         >
@@ -1553,7 +1510,7 @@ function SnippetMenu({
             onSelect={() => onSend(snippet.command)}
           >
             <span>{snippet.label}</span>
-            <span className="font-mono text-[10px] text-muted-foreground">{snippet.command}</span>
+            <span className="font-mono text-micro text-muted-foreground">{snippet.command}</span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -1647,7 +1604,7 @@ function SettingSwitch({
     <div className="flex items-start justify-between gap-2">
       <span className="min-w-0">
         <span className="block">{label}</span>
-        {hint && <span className="block text-[10px] text-muted-foreground">{hint}</span>}
+        {hint && <span className="block text-micro text-muted-foreground">{hint}</span>}
       </span>
       <Switch
         aria-label={label}
@@ -1677,28 +1634,27 @@ function PasteConfirmation({
 }) {
   const lines = paste ? paste.text.replace(/\n$/, "").split("\n") : []
   return (
-    <Dialog open={paste !== null} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Paste {lines.length} lines?</DialogTitle>
-          <DialogDescription>
-            This text contains line breaks that can execute commands as soon as they reach the
-            terminal. Review every line before sending it.
-          </DialogDescription>
-        </DialogHeader>
-        <pre className="max-h-56 overflow-auto rounded-md border bg-surface-sunken p-2 font-mono text-[11px] whitespace-pre-wrap">
-          {paste?.text}
-        </pre>
-        <DialogFooter>
+    <Modal
+      open={paste !== null}
+      onOpenChange={(open) => !open && onCancel()}
+      title={<>Paste {lines.length} lines?</>}
+      description="This text contains line breaks that can execute commands as soon as they reach the
+            terminal. Review every line before sending it."
+      footer={
+        <>
           <Button size="sm" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
           <Button size="sm" onClick={onConfirm}>
             Paste and run
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <pre className="max-h-56 overflow-auto rounded-md border bg-surface-sunken p-2 font-mono text-hint whitespace-pre-wrap">
+        {paste?.text}
+      </pre>
+    </Modal>
   )
 }
 
@@ -1749,12 +1705,7 @@ async function copySelection(term: Terminal) {
 }
 
 async function writeClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    notify.success("Copied")
-  } catch {
-    notify.error("The browser refused clipboard access")
-  }
+  await copyText(text, "Copied")
 }
 
 /**

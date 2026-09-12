@@ -58,7 +58,7 @@ export function Histogram({
 
   return (
     <div className="rounded-lg border border-hairline bg-surface-sunken px-3 py-2">
-      <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[11px]">
+      <div className="mb-1.5 flex items-baseline justify-between gap-3 text-hint">
         <span className="eyebrow">
           Matches over time · one column is {widthLabel(bucketSeconds)}
         </span>
@@ -102,7 +102,7 @@ export function Histogram({
           </button>
         ))}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+      <div className="mt-1 flex items-center justify-between gap-3 text-micro text-muted-foreground">
         <span className="numeric">{edge(buckets[0].start)}</span>
         <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           {STACK.filter((s) => buckets.some((b) => (b.counts[s.level] ?? 0) > 0))

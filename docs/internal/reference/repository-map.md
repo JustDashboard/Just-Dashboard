@@ -30,7 +30,7 @@ services, handles signals, and supports the isolated self-update worker mode. Th
 | `config` | Environment parsing, defaults, bounds, legacy aliases, and network safety validation | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
 | `dbx` | SQL and NoSQL connections, classification, browsing, DDL, query, import/export, and dumps | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#databases-eight-engines-one-shape) |
 | `deploy` | Legacy compatibility plus normalized planning, artifacts, orchestration, activation, recovery, configuration, and automation | [`../deployments/implementation.md`](../deployments/implementation.md) |
-| `dockerx` | Docker SDK, container/image/network/volume operations, compose, builds, stats, events, scans, and diagnosis | [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#docker) |
+| `dockerx` | Docker SDK, container/image/network/volume operations, compose state, builds, stats, events, scans, diagnosis, and the derived layer — attention, exposure, image references, writable-layer analysis, failure diagnosis, anomalies, deploy preview, deployment history, cleanup | [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#docker) |
 | `files` | Root-contained browse/write/search/archive/preview/place operations | [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#files) |
 | `ghx` | GitHub device login and pull-request integration | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#github-sign-in) |
 | `gitx` | Repository discovery/status, graph, branches, remotes, diffs, ownership, and mutations | [`../backend/git-backups-users.md`](../backend/git-backups-users.md#git-working-copies) |
@@ -57,7 +57,7 @@ services, handles signals, and supports the isolated self-update worker mode. Th
 
 | Area | Responsibility | Detailed reference |
 | --- | --- | --- |
-| `src/app/` | App Router layouts plus 48 page entry points across account, dashboard, audit, backups, databases, deployments, Docker, files, Git, logs, metrics, packages, processes, proxy, security, users, terminal, appearance, and login | [`../frontend/feature-map.md`](../frontend/feature-map.md) |
+| `src/app/` | App Router layouts plus 48 page entry points across account, dashboard, audit, backups, databases, deployments, Docker, files, Git, logs, metrics, packages, processes, proxy, security, users, terminal, and login | [`../frontend/feature-map.md`](../frontend/feature-map.md) |
 | `src/components/ui/` | Low-level accessible controls; project composition lives above this layer | [`../frontend/shell-design.md`](../frontend/shell-design.md#the-design-system) |
 | `src/components/{database,deploy,docker,files,git,logs,metrics,packages,procs,proxy,security,terminal,update}/` | Feature panels, forms, tables, dialogs, visualizations, and workspaces | [`../frontend/features-terminal.md`](../frontend/features-terminal.md) |
 | `src/components/` top level | Shell, sidebar, command palette, page/panel/state primitives, editors, icons, and shared confirmations | [`../frontend/shell-design.md`](../frontend/shell-design.md) |

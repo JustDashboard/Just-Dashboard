@@ -8,6 +8,7 @@ import type { GitGraph, GitGraphCommit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -29,7 +30,22 @@ const PAD = 14 // px from the left edge to lane 0
 
 // Enough hues to tell adjacent lanes apart, each legible on the near-black and
 // near-white surfaces this panel renders against. Lanes past the end wrap.
-const LANES = ["#4c9ffe", "#5fd97b", "#e8a33d", "#c98bff", "#ff7a6b", "#3fc7c0", "#e567c7", "#9ab0c4"]
+//
+// The `--tag-*` tokens, which exist for exactly this: eight fixed hues, held at
+// one lightness that holds up against both cards, and deliberately *not*
+// computed from the palette — a lane's colour is an identity, and an identity
+// that shifted with the theme would stop being the same lane. This file used to
+// carry its own eight hex literals, which were the same idea arrived at twice.
+const LANES = [
+  "var(--tag-blue)",
+  "var(--tag-green)",
+  "var(--tag-amber)",
+  "var(--tag-violet)",
+  "var(--tag-red)",
+  "var(--tag-cyan)",
+  "var(--tag-pink)",
+  "var(--tag-slate)",
+]
 
 const laneColour = (col: number) => LANES[col % LANES.length]
 
@@ -49,7 +65,12 @@ export function GraphPanel({
   // move the history list makes, and the graph is one button away again.
   const show = async (c: GitGraphCommit) => {
     const subtitle = `${c.short} · ${c.author} · ${timestamp(c.at)}`
-    onSelectDiff({ kind: "diff", title: c.subject, subtitle: `${c.short} · loading…`, body: "Loading…" })
+    onSelectDiff({
+      kind: "diff",
+      title: c.subject,
+      subtitle: `${c.short} · loading…`,
+      body: "Loading…",
+    })
     try {
       const res = await get<{ diff: string }>("/git/diff", { path: repoPath, ref: c.sha })
       onSelectDiff({ kind: "diff", title: c.subject, subtitle, body: res.diff })
@@ -101,11 +122,11 @@ export function GraphPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-header px-3 py-2">
+      <PaneHeader className="gap-2 px-3">
         <BranchPlus className="size-3.5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium">Branch graph</p>
-          <p className="truncate text-[11px] text-muted-foreground">
+          <p className="truncate text-body font-medium">Branch graph</p>
+          <p className="truncate text-hint text-muted-foreground">
             {rows.length} commit{rows.length === 1 ? "" : "s"} across every local and remote branch
           </p>
         </div>
@@ -123,7 +144,7 @@ export function GraphPanel({
           </TooltipTrigger>
           <TooltipContent>Close the graph</TooltipContent>
         </Tooltip>
-      </div>
+      </PaneHeader>
 
       {rows.length === 0 ? (
         <EmptyState className="m-3" icon={BranchPlus} title="No commits yet" />
@@ -137,7 +158,14 @@ export function GraphPanel({
               aria-hidden
             >
               {edges.map((e) => (
-                <path key={e.key} d={e.d} fill="none" stroke={e.colour} strokeWidth={1.5} opacity={0.8} />
+                <path
+                  key={e.key}
+                  d={e.d}
+                  fill="none"
+                  stroke={e.colour}
+                  strokeWidth={1.5}
+                  opacity={0.8}
+                />
               ))}
               {rows.map((c, i) => (
                 <circle
@@ -169,7 +197,7 @@ function GraphRow({ commit, onClick }: { commit: GitGraphCommit; onClick: () => 
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2 pr-3 text-left hover:bg-[var(--row-hover)]"
+      className="flex w-full items-center gap-2 pr-3 text-left hover:bg-row-hover"
       style={{ height: ROW }}
     >
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -178,19 +206,19 @@ function GraphRow({ commit, onClick }: { commit: GitGraphCommit; onClick: () => 
             key={r.label}
             className={
               r.kind === "tag"
-                ? "shrink-0 rounded bg-warning/15 px-1 text-[10px] font-medium text-warning"
+                ? "shrink-0 rounded-sm bg-plot-warning px-1 text-micro font-medium text-warning"
                 : r.kind === "head"
-                  ? "shrink-0 rounded bg-success/15 px-1 text-[10px] font-medium text-success"
-                  : "shrink-0 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary"
+                  ? "shrink-0 rounded-sm bg-plot-success px-1 text-micro font-medium text-success"
+                  : "shrink-0 rounded-sm bg-wash-primary px-1 text-micro font-medium text-primary"
             }
           >
             {r.label}
           </span>
         ))}
-        <span className="truncate text-[13px]">{commit.subject}</span>
+        <span className="truncate text-body">{commit.subject}</span>
       </span>
-      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{commit.short}</span>
-      <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:block">
+      <span className="shrink-0 font-mono text-hint text-muted-foreground">{commit.short}</span>
+      <span className="hidden shrink-0 text-hint text-muted-foreground sm:block">
         {relativeTime(commit.at)}
       </span>
     </button>

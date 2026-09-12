@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
@@ -39,6 +40,8 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 	r.Route("/github", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleGitHubStatus))
 		r.Method(http.MethodGet, "/repo", s.handle(s.handleGitHubRepo))
+		r.Method(http.MethodGet, "/repos", s.handle(s.handleGitHubRepos))
+		r.Method(http.MethodGet, "/branches", s.handle(s.handleGitHubBranches))
 		r.Method(http.MethodGet, "/pulls", s.handle(s.handleGitHubPulls))
 
 		r.Group(func(r chi.Router) {
@@ -107,6 +110,45 @@ func (s *Server) handleGitHubRepo(w http.ResponseWriter, r *http.Request) error 
 		return ghError(err)
 	}
 	httpx.JSON(w, http.StatusOK, info)
+	return nil
+}
+
+// handleGitHubRepos lists what the signed-in account can deploy.
+//
+// Unlike the routes around it this one takes no ?path=: the whole point is to
+// choose a repository that has not been cloned onto this server yet, so the
+// credential consulted is the dashboard's own — the same one every deployment
+// clone will use.
+func (s *Server) handleGitHubRepos(w http.ResponseWriter, r *http.Request) error {
+	httpx.SkipAudit(r)
+	if !s.modules.github.Available() {
+		return httpx.Err(http.StatusServiceUnavailable, "not_installed", ghx.ErrNotInstalled.Error())
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	repos, err := s.modules.github.ListRepos(r.Context(), "", r.URL.Query().Get("query"), limit)
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, repos)
+	return nil
+}
+
+// handleGitHubBranches lists one repository's branches so a deployment can be
+// pointed at something other than the default without typing a ref from memory.
+func (s *Server) handleGitHubBranches(w http.ResponseWriter, r *http.Request) error {
+	httpx.SkipAudit(r)
+	if !s.modules.github.Available() {
+		return httpx.Err(http.StatusServiceUnavailable, "not_installed", ghx.ErrNotInstalled.Error())
+	}
+	repo := strings.TrimSpace(r.URL.Query().Get("repo"))
+	if repo == "" {
+		return httpx.BadRequest("name the repository as owner/name")
+	}
+	branches, err := s.modules.github.ListBranches(r.Context(), "", repo)
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, branches)
 	return nil
 }
 

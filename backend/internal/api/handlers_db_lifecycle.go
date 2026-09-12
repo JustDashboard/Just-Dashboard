@@ -4,12 +4,14 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/go-chi/chi/v5"
 )
 
 // The two ends of a database's life that the rest of the database surface does
@@ -180,4 +182,30 @@ func sameDatabase(conn *dbConnection, target string) bool {
 		return false
 	}
 	return strings.EqualFold(target, conn.Database)
+}
+
+// handleDBConnURL hands back the connection string this dashboard holds.
+//
+// Every other database route exists so nobody has to see a DSN. This one
+// exists because of what happens next: the string is pasted into another
+// deployment's DATABASE_URL, and a server the operator can browse but cannot
+// connect an application to is half a feature. The secret is already theirs —
+// it is readable from the container by anyone who can reach this route — so
+// the protection that matters is that the read is deliberate and recorded,
+// not that it is impossible.
+func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		return httpx.BadRequest("invalid id")
+	}
+	conn, dsn, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "database.connection.reveal", conn.Name,
+		map[string]any{"driver": string(conn.Driver)})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"id": conn.ID, "name": conn.Name, "driver": conn.Driver, "url": dsn,
+	})
+	return nil
 }

@@ -42,6 +42,7 @@ export function SidePanel({
   open: boolean
   onOpenChange: (open: boolean) => void
   title: React.ReactNode
+  /** Read to a screen reader, never drawn. */
   description?: React.ReactNode
   icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
@@ -60,16 +61,18 @@ export function SidePanel({
         <SheetHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12">
           <div className="flex min-w-0 items-start gap-2.5">
             {Icon && (
-              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/12 text-primary">
+              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-brand">
                 <Icon className="size-3.5" />
               </span>
             )}
             <div className="min-w-0 flex-1">
-              <SheetTitle className="flex min-w-0 flex-wrap items-center gap-2 text-[15px] leading-tight">
+              <SheetTitle className="flex min-w-0 flex-wrap items-center gap-2 text-title leading-tight">
                 {title}
               </SheetTitle>
+              {/* Not drawn — see the note in components/modal.tsx. Kept as
+                  the accessible description Radix asks for. */}
               {description && (
-                <SheetDescription className="text-xs break-all">{description}</SheetDescription>
+                <SheetDescription className="sr-only">{description}</SheetDescription>
               )}
             </div>
           </div>

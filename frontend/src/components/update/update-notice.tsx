@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ArrowCircleUp, CheckCircle, Cross, CrossCircle, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import type { Tone } from "@/components/tone"
 import { useAuth } from "@/hooks/use-auth"
 import { phaseLabel, useSelfUpdate } from "@/hooks/use-self-update"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -65,13 +66,16 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
       },
     })
 
-  const tone = running
-    ? "primary"
+  // The shared union from components/tone.ts, not a fifth local vocabulary.
+  // An update in flight or waiting is a *notice*, which this palette draws in
+  // the brand hue rather than in the ink reserved for commands.
+  const tone: "brand" | Extract<Tone, "success" | "danger"> = running
+    ? "brand"
     : outcome?.status === "failed"
-      ? "destructive"
+      ? "danger"
       : outcome?.status === "success"
         ? "success"
-        : "primary"
+        : "brand"
 
   if (collapsed) {
     return (
@@ -83,11 +87,10 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
               onClick={() => setSheet(true)}
               aria-label={running ? "Update in progress" : `Version ${target} is available`}
               className={cn(
-                "relative flex size-8 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50",
-                tone === "primary" && "bg-primary/15 text-primary hover:bg-primary/25",
-                tone === "success" && "bg-success/15 text-success hover:bg-success/25",
-                tone === "destructive" &&
-                  "bg-destructive/15 text-destructive hover:bg-destructive/25",
+                "relative flex size-8 items-center justify-center rounded-lg focus-ring transition-colors",
+                tone === "brand" && "bg-plot-brand text-brand hover:bg-plot-brand-hover",
+                tone === "success" && "bg-plot-success text-success hover:bg-plot-success-hover",
+                tone === "danger" && "bg-plot-danger text-destructive hover:bg-plot-danger-hover",
               )}
             >
               {running ? (
@@ -122,18 +125,18 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
       <div
         className={cn(
           "min-w-0 space-y-2 rounded-lg border p-2.5",
-          tone === "primary" && "border-primary/25 bg-primary/[0.07]",
-          tone === "success" && "border-success/25 bg-success/[0.07]",
-          tone === "destructive" && "border-destructive/25 bg-destructive/[0.07]",
+          tone === "brand" && "border-rule-brand bg-wash-brand",
+          tone === "success" && "border-rule-success bg-wash-success",
+          tone === "danger" && "border-rule-danger bg-wash-danger",
         )}
       >
         <div className="flex min-w-0 items-start gap-2">
           <span
             className={cn(
               "pt-px",
-              tone === "primary" && "text-primary",
+              tone === "brand" && "text-brand",
               tone === "success" && "text-success",
-              tone === "destructive" && "text-destructive",
+              tone === "danger" && "text-destructive",
             )}
           >
             {running ? (
@@ -149,30 +152,30 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
           <div className="min-w-0 flex-1">
             {running ? (
               <>
-                <p className="truncate text-[12px] leading-tight font-medium">
+                <p className="truncate text-xs leading-tight font-medium">
                   {restarting ? "Restarting" : phaseLabel(run)}
                 </p>
-                <p className="numeric truncate text-[11px] leading-tight text-muted-foreground">
+                <p className="numeric truncate text-hint leading-tight text-muted-foreground">
                   {run.fromVersion} → {run.toVersion}
                 </p>
               </>
             ) : outcome ? (
               <>
-                <p className="truncate text-[12px] leading-tight font-medium">
+                <p className="truncate text-xs leading-tight font-medium">
                   {outcome.status === "success"
                     ? `Updated to ${outcome.toVersion}`
                     : "Update failed"}
                 </p>
-                <p className="truncate text-[11px] leading-tight text-muted-foreground">
+                <p className="truncate text-hint leading-tight text-muted-foreground">
                   {outcome.status === "success" ? "See what changed" : "See what went wrong"}
                 </p>
               </>
             ) : (
               <>
-                <p className="truncate text-[12px] leading-tight font-medium">
+                <p className="truncate text-xs leading-tight font-medium">
                   Version <span className="numeric">{target}</span> is out
                 </p>
-                <p className="truncate text-[11px] leading-tight text-muted-foreground">
+                <p className="truncate text-hint leading-tight text-muted-foreground">
                   {headline?.title ?? "A new release is available"}
                 </p>
               </>
@@ -187,7 +190,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
               type="button"
               aria-label="Dismiss"
               onClick={() => dismiss().catch(() => {})}
-              className="-mt-0.5 -mr-0.5 shrink-0 rounded p-0.5 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50"
+              className="-mt-0.5 -mr-0.5 shrink-0 rounded-sm p-0.5 text-muted-foreground focus-ring transition-colors hover:text-foreground"
             >
               <Cross className="size-3" />
             </button>
@@ -215,7 +218,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
             or an unrecognised directory is a fine install, and hiding the
             notice would leave its operator never finding out at all. */}
         {available && !running && !outcome && !report.install.supported && (
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-hint leading-relaxed text-muted-foreground">
             This install updates by hand — {report.install.reason}
           </p>
         )}

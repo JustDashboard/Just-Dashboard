@@ -8,8 +8,10 @@ import { relativeTime } from "@/lib/format"
 import type { GitBranch, GitHubRepo, GitHubStatus, GitPullRequest as PR } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { GitHubMark } from "@/components/git/github-account"
-import { EmptyState, ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
+import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -17,20 +19,14 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ROW_REVEAL } from "@/components/icon-action"
+import { cn } from "@/lib/utils"
 
 /**
  * The open pull requests on this repository, and the button that opens one.
@@ -97,8 +93,8 @@ export function PullsPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {canControl && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-header/60 p-2.5">
-          <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+        <PaneHeader className="gap-2 px-2.5">
+          <p className="min-w-0 flex-1 truncate text-hint text-muted-foreground">
             {mine ? (
               <>
                 <span className="font-mono">{branch}</span> already has one open
@@ -122,7 +118,7 @@ export function PullsPanel({
               New pull request
             </Button>
           )}
-        </div>
+        </PaneHeader>
       )}
 
       <div className="min-h-0 flex-1 overflow-auto p-1.5">
@@ -140,32 +136,26 @@ export function PullsPanel({
               href={p.url}
               target="_blank"
               rel="noreferrer"
-              className="group flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--row-hover)]"
+              className="group flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-row-hover"
             >
               <GitPullRequest
                 className={`mt-0.5 size-4 shrink-0 ${p.draft ? "text-muted-foreground" : "text-success"}`}
               />
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate text-[13px]">{p.title}</span>
-                  {p.draft && (
-                    <Badge variant="secondary" className="shrink-0 font-normal">
-                      draft
-                    </Badge>
-                  )}
-                  {p.head === branch && (
-                    <Badge variant="warning" className="shrink-0 font-normal">
-                      this branch
-                    </Badge>
-                  )}
+                  <span className="truncate text-body">{p.title}</span>
+                  {p.draft && <Tag>draft</Tag>}
+                  {p.head === branch && <Tag tone="warning">this branch</Tag>}
                 </span>
-                <span className="block truncate text-[11px] text-muted-foreground">
+                <span className="block truncate text-hint text-muted-foreground">
                   #{p.number} · {p.head} → {p.base}
                   {p.author ? ` · ${p.author}` : ""}
                   {p.createdAt ? ` · ${relativeTime(p.createdAt)}` : ""}
                 </span>
               </span>
-              <External className="mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+              <External
+                className={cn("mt-0.5 size-3.5 shrink-0 text-muted-foreground", ROW_REVEAL)}
+              />
             </a>
           ))
         )}
@@ -270,82 +260,27 @@ function CreatePullDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={change}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <GitHubMark className="size-4" />
-            New pull request
-          </DialogTitle>
-          <DialogDescription>
-            {repo?.nameWithOwner ? `${repo.nameWithOwner} · ` : ""}
-            <span className="font-mono">{branch}</span> into{" "}
-            <span className="font-mono">{base || "…"}</span>. The branch is pushed first.
-          </DialogDescription>
-        </DialogHeader>
-
-        {error && (
-          <Notice title="Could not open the pull request" tone="danger">
-            <span className="break-words whitespace-pre-wrap">{error}</span>
-          </Notice>
-        )}
-        {repo?.permission === "READ" && (
-          <Notice title="You have read access to this repository" tone="warning">
-            GitHub will refuse a pull request from a branch here — it has to come from a fork.
-          </Notice>
-        )}
-
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="pr-title">Title</Label>
-            <Input
-              id="pr-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="What does this change?"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Merge into</Label>
-            <Select value={base} onValueChange={setBase}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choose a branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.name} value={b.name}>
-                    {b.name}
-                    {b.name === repo?.defaultBranch ? " · default" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pr-body">Description</Label>
-            <Textarea
-              id="pr-body"
-              rows={5}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="What a reviewer needs to know. Markdown works."
-              className="resize-none text-[13px]"
-            />
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground">
-            <Checkbox checked={draft} onCheckedChange={(v) => setDraft(Boolean(v))} />
-            Open as a draft — nobody is asked to review it yet
-          </label>
-        </div>
-
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={change}
+      icon={GitHubMark}
+      title="New pull request"
+      description={
+        <>
+          {repo?.nameWithOwner ? `${repo.nameWithOwner} · ` : ""}
+          <span className="font-mono">{branch}</span> into{" "}
+          <span className="font-mono">{base || "…"}</span>. The branch is pushed first.
+        </>
+      }
+      footer={
+        <>
           <Button variant="ghost" onClick={() => change(false)}>
             Cancel
           </Button>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button disabled={busy || !title.trim() || !base} onClick={create}>
-                {busy ? <Spinner className="size-4" /> : <GitPullRequest className="size-4" />}
+              <Button disabled={busy || !title.trim() || !base} onClick={create} pending={busy}>
+                <GitPullRequest className="size-4" />
                 Push and open
               </Button>
             </TooltipTrigger>
@@ -353,8 +288,62 @@ function CreatePullDialog({
               Pushes {branch} to the remote, then opens the pull request as your GitHub account
             </TooltipContent>
           </Tooltip>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      {error && (
+        <Notice title="Could not open the pull request" tone="danger">
+          <span className="break-words whitespace-pre-wrap">{error}</span>
+        </Notice>
+      )}
+      {repo?.permission === "READ" && (
+        <Notice title="You have read access to this repository" tone="warning">
+          GitHub will refuse a pull request from a branch here — it has to come from a fork.
+        </Notice>
+      )}
+
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="pr-title">Title</Label>
+          <Input
+            id="pr-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What does this change?"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Merge into</Label>
+          <Select value={base} onValueChange={setBase}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Choose a branch" />
+            </SelectTrigger>
+            <SelectContent>
+              {branches.map((b) => (
+                <SelectItem key={b.name} value={b.name}>
+                  {b.name}
+                  {b.name === repo?.defaultBranch ? " · default" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="pr-body">Description</Label>
+          <Textarea
+            id="pr-body"
+            rows={5}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="What a reviewer needs to know. Markdown works."
+            className="resize-none text-body"
+          />
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <Checkbox checked={draft} onCheckedChange={(v) => setDraft(Boolean(v))} />
+          Open as a draft — nobody is asked to review it yet
+        </label>
+      </div>
+    </Modal>
   )
 }

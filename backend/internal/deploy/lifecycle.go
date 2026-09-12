@@ -119,7 +119,7 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 			rows.Close()
 			return nil, err
 		}
-		name := fmt.Sprintf("just-dashboard-env-%d.conf", environmentID)
+		name := deploymentRouteName(environmentID)
 		add(RemovalTarget{Kind: "proxy_site", ResourceID: name, DisplayName: name,
 			Owner: "proxy", DeepLink: "/proxy/sites"})
 	}

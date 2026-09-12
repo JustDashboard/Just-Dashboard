@@ -10,12 +10,13 @@ import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Group, Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -29,14 +30,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 export default function SystemUsersPage() {
   const { confirm, dialog } = useConfirm()
@@ -63,7 +56,6 @@ export default function SystemUsersPage() {
       <PageHeader
         eyebrow="Operations"
         title="System users"
-        description="Operating system accounts on this host, separate from dashboard logins"
         actions={<CreateUserDialog onDone={refresh} />}
       />
 
@@ -72,9 +64,9 @@ export default function SystemUsersPage() {
 
       {data && (
         <Panel>
-          <PanelHeader icon={Users} title="Accounts" description={`${data.length} shown`} />
+          <PanelHeader icon={Users} title="Accounts" />
           <PanelToolbar>
-            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <label className="flex items-center gap-2 text-body text-muted-foreground">
               <Checkbox checked={showSystem} onCheckedChange={(v) => setShowSystem(v === true)} />
               Include system accounts
             </label>
@@ -97,45 +89,31 @@ export default function SystemUsersPage() {
                   <TableRow key={user.username} className="group">
                     <TableCell>
                       <div className="max-w-[14rem] min-w-0">
-                        <div className="truncate text-[13px] font-medium">{user.username}</div>
+                        <div className="truncate text-body font-medium">{user.username}</div>
                         {user.comment && (
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {user.comment}
-                          </p>
+                          <p className="truncate text-hint text-muted-foreground">{user.comment}</p>
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="numeric font-mono text-xs">{user.uid}</TableCell>
-                    <TableCell className="max-w-48 truncate text-xs text-muted-foreground">
+                    <TableCell className="numeric font-mono">{user.uid}</TableCell>
+                    <TableCell className="max-w-48 truncate text-muted-foreground">
                       {user.groups.join(", ")}
                     </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                    <TableCell className="font-mono text-hint text-muted-foreground">
                       {user.shell}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {user.lastLogin ? relativeTime(user.lastLogin) : "never"}
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        {user.locked && (
-                          <Badge variant="secondary" className="font-normal">
-                            locked
-                          </Badge>
-                        )}
-                        {user.noPassword && (
-                          <Badge variant="warning" className="font-normal">
-                            no password
-                          </Badge>
-                        )}
-                        {!user.canLogin && (
-                          <Badge variant="outline" className="font-normal">
-                            no shell
-                          </Badge>
-                        )}
+                        {user.locked && <Tag>locked</Tag>}
+                        {user.noPassword && <Tag tone="warning">no password</Tag>}
+                        {!user.canLogin && <Tag>no shell</Tag>}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                      <RowActions>
                         <Button size="xs" variant="ghost" onClick={() => setKeysFor(user.username)}>
                           <Key className="size-3" />
                           {user.sshKeyCount}
@@ -171,7 +149,7 @@ export default function SystemUsersPage() {
                         >
                           <Trash />
                         </IconAction>
-                      </div>
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -231,17 +209,23 @@ function CreateUserDialog({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <UserPlus className="size-4" />
-          New account
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New system account</DialogTitle>
-        </DialogHeader>
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <UserPlus className="size-4" />
+        New account
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title="New system account"
+        footer={
+          <>
+            <Button onClick={create} disabled={!username}>
+              Create
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="new-username">Username</Label>
@@ -286,13 +270,8 @@ function CreateUserDialog({ onDone }: { onDone: () => void }) {
             </p>
           </div>
         </div>
-        <DialogFooter>
-          <Button onClick={create} disabled={!username}>
-            Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }
 
@@ -348,16 +327,14 @@ function SSHKeysSheet({
           {error && <ErrorState error={error} />}
 
           {data?.keys.map((key) => (
-            <div key={key.fingerprint} className="rounded-lg border border-hairline p-3">
+            <Group key={key.fingerprint}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="font-normal">
-                      {key.type}
-                    </Badge>
-                    <span className="truncate text-[13px]">{key.comment || "no comment"}</span>
+                    <Tag>{key.type}</Tag>
+                    <span className="truncate text-body">{key.comment || "no comment"}</span>
                   </div>
-                  <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                  <p className="mt-1 truncate font-mono text-hint text-muted-foreground">
                     {key.fingerprint}
                   </p>
                 </div>
@@ -389,7 +366,7 @@ function SSHKeysSheet({
                   <Trash />
                 </Button>
               </div>
-            </div>
+            </Group>
           ))}
 
           {data?.keys.length === 0 && !loading && (

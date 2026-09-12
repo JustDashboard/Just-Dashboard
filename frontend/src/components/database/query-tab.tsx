@@ -31,22 +31,17 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { Badge } from "@/components/ui/badge"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, Notice, Spinner } from "@/components/state"
+import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 
 import { ResultGrid } from "@/components/database/result-grid"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 
@@ -201,7 +196,6 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
           <PanelHeader
             icon={Database}
             title="SQL"
-            description={`${conn.driver} · ${conn.database}`}
           />
           <PanelBody flush>
             <CodeEditor
@@ -213,8 +207,13 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
             />
           </PanelBody>
           <PanelFooter>
-            <Button size="sm" onClick={run} disabled={busy || !can("service.control")}>
-              {busy ? <Spinner /> : <Play className="size-3.5" />}
+            <Button
+              size="sm"
+              onClick={run}
+              disabled={busy || !can("service.control")}
+              pending={busy}
+            >
+              <Play className="size-3.5" />
               Run
             </Button>
             <Button size="sm" variant="outline" onClick={explain} disabled={busy || !sql.trim()}>
@@ -230,13 +229,9 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
               <FloppyDisk className="size-3.5" />
               Save
             </Button>
-            {risk && !risk.destructive && (
-              <Badge variant="secondary" className="font-normal">
-                {risk.level}
-              </Badge>
-            )}
+            {risk && !risk.destructive && <Tag>{risk.level}</Tag>}
             {outline.data && (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-hint text-muted-foreground">
                 {plural(Object.keys(outline.data.tables).length, "table")} available to autocomplete
               </span>
             )}
@@ -270,17 +265,15 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
                     ringSafeScroll,
                   )}
                 >
-                  {history.data?.length === 0 && (
-                    <p className="p-3 text-xs text-muted-foreground">No statements yet.</p>
-                  )}
+                  {history.data?.length === 0 && <EmptyNote>No statements yet.</EmptyNote>}
                   {history.data?.map((h) => (
                     <button
                       key={h.id}
                       onClick={() => setSql(h.sql)}
                       className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent"
                     >
-                      <span className="truncate font-mono text-[11px]">{h.sql}</span>
-                      <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className="truncate font-mono text-hint">{h.sql}</span>
+                      <span className="flex items-center gap-1.5 text-micro text-muted-foreground">
                         <span
                           className={cn(
                             "size-1.5 rounded-full",
@@ -300,9 +293,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
                     ringSafeScroll,
                   )}
                 >
-                  {saved.data?.length === 0 && (
-                    <p className="p-3 text-xs text-muted-foreground">No saved queries.</p>
-                  )}
+                  {saved.data?.length === 0 && <EmptyNote>No saved queries.</EmptyNote>}
                   {saved.data?.map((q) => (
                     <div
                       key={q.id}
@@ -313,19 +304,19 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
                         className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
                       >
                         <span className="truncate text-xs font-medium">{q.name}</span>
-                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                        <span className="truncate font-mono text-micro text-muted-foreground">
                           {q.sql}
                         </span>
                       </button>
                       {can("service.control") && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6 shrink-0 text-destructive opacity-0 group-hover:opacity-100"
+                        <IconAction
+                          label={`Delete the saved query ${q.name}`}
+                          reveal
+                          className="shrink-0 text-destructive"
                           onClick={() => deleteSnippet(q)}
                         >
-                          <Trash className="size-3.5" />
-                        </Button>
+                          <Trash />
+                        </IconAction>
                       )}
                     </div>
                   ))}
@@ -341,7 +332,6 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
           <PanelHeader
             icon={Monorepo}
             title="Query plan"
-            description="How the engine intends to run this — nothing was executed"
           />
           <PanelBody flush>
             <ResultGrid result={plan} />
@@ -354,7 +344,6 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
           <PanelHeader
             icon={Layout}
             title="Result"
-            description={result.statement}
             actions={
               result.columns.length > 0 && (
                 <>
@@ -371,7 +360,11 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
             }
           />
           <PanelBody flush>
-            <ResultGrid result={result} />
+            <ResultGrid
+              result={result}
+              emptyTitle="The statement ran and matched nothing"
+              emptyDescription="Not an error — the columns below are the shape it would have returned."
+            />
           </PanelBody>
         </Panel>
       )}
@@ -406,29 +399,30 @@ function SaveDialog({
     }
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Save query</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-1.5">
-          <Label htmlFor="snippet-name">Name</Label>
-          <Input
-            id="snippet-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Active users last 30 days"
-            autoFocus
-          />
-        </div>
-        <DialogFooter>
-          <Button onClick={save} disabled={!name.trim() || busy}>
-            {busy && <Spinner />}
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      title="Save query"
+      footer={
+        <>
+          <Button onClick={save} disabled={!name.trim() || busy} pending={busy}>
             Save
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="snippet-name">Name</Label>
+        <Input
+          id="snippet-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Active users last 30 days"
+          autoFocus
+        />
+      </div>
+    </Modal>
   )
 }
 

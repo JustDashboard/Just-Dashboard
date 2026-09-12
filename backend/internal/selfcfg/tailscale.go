@@ -52,6 +52,13 @@ const (
 	// never restarted is the normal case for this product, and it is exactly
 	// the install whose certificate would otherwise expire underneath it.
 	checkInterval = 12 * time.Hour
+	// firstRetry is the wait after a check that failed, doubling up to
+	// maxRetry while it keeps failing. A tailnet that will not issue is
+	// usually one switch in the admin console away from issuing, and the
+	// operator who has just flipped it is looking at the browser warning: the
+	// first re-attempt is a minute later, not twelve hours.
+	firstRetry = time.Minute
+	maxRetry   = 10 * time.Minute
 )
 
 // CertKeeper issues and renews the Tailscale certificate.
@@ -89,16 +96,19 @@ func (k *CertKeeper) Start(ctx context.Context) {
 	}
 	ctx, k.stop = context.WithCancel(ctx)
 	go func() {
-		ticker := time.NewTicker(checkInterval)
-		defer ticker.Stop()
+		retry := firstRetry
 		for {
+			wait := checkInterval
 			if err := k.Ensure(ctx); err != nil {
-				k.log.Warn("tailscale certificate not renewed", "site", k.site, "error", err)
+				k.log.Warn("tailscale certificate not renewed", "site", k.site, "error", err, "retry", retry)
+				wait, retry = retry, min(retry*2, maxRetry)
+			} else {
+				retry = firstRetry
 			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-time.After(wait):
 			}
 		}
 	}()
@@ -175,6 +185,15 @@ func Issue(ctx context.Context, site, dir string) error {
 		if detail == "" {
 			detail = err.Error()
 		}
+		// Tailscale words the "HTTPS is switched off for this tailnet" refusal
+		// as being about the account, which sends an operator to their billing
+		// page for something that is one switch in the admin console. Say the
+		// switch instead, in the same sentence the settings page uses.
+		if strings.Contains(detail, "does not support getting TLS certs") {
+			return fmt.Errorf("HTTPS is not enabled for this tailnet, so Tailscale will not issue a certificate "+
+				"for %s. Turn it on at https://login.tailscale.com/admin/dns — it is one switch. Until then the "+
+				"same address works with a self-signed certificate", site)
+		}
 		return fmt.Errorf("tailscale cert %s: %s", site, detail)
 	}
 	// The proxy runs as a different user inside its container and only ever
@@ -183,6 +202,42 @@ func Issue(ctx context.Context, site, dir string) error {
 	_ = os.Chmod(filepath.Join(dir, CertFile), 0o644)
 	_ = os.Chmod(filepath.Join(dir, KeyFile), 0o640)
 	return nil
+}
+
+// CertState is what is actually on disk for the configured address.
+//
+// It exists because JD_TLS=tailscale is a request, not a fact. The proxy falls
+// back to Caddy's internal CA when there is no certificate to serve, so the
+// dashboard answers either way — and a settings page that read the setting and
+// announced "trusted" would be printing the one word the padlock disagrees
+// with. This reads the certificate instead.
+type CertState struct {
+	Issued  bool       `json:"issued"`
+	Expires *time.Time `json:"expires,omitempty"`
+}
+
+// Certificate reports whether a certificate covering site is on disk.
+func Certificate(dataDir, site string) CertState {
+	cert, err := readCertificate(filepath.Join(dataDir, "certs", CertFile))
+	if err != nil || cert.VerifyHostname(site) != nil {
+		return CertState{}
+	}
+	return CertState{Issued: true, Expires: &cert.NotAfter}
+}
+
+// DropStaleCertificate removes a certificate that does not cover site.
+//
+// The proxy decides between a real certificate and its internal CA by whether
+// the files exist, so a certificate left over from the previous address would
+// be served under the new name — a browser error about the wrong host, which
+// is worse than the self-signed warning it replaced.
+func DropStaleCertificate(dataDir, site string) {
+	if Certificate(dataDir, site).Issued {
+		return
+	}
+	dir := filepath.Join(dataDir, "certs")
+	_ = os.Remove(filepath.Join(dir, CertFile))
+	_ = os.Remove(filepath.Join(dir, KeyFile))
 }
 
 func readCertificate(path string) (*x509.Certificate, error) {

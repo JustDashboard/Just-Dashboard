@@ -43,8 +43,8 @@ export function useSelfConfig() {
   const running = run?.status === "running" || run?.status === "pending"
 
   const apply = useCallback(
-    async (settings: DashboardSettings, confirm?: string) => {
-      const started = await put<DashboardConfigRun>("/dashboard/config", settings, { confirm })
+    async (settings: DashboardSettings) => {
+      const started = await put<DashboardConfigRun>("/dashboard/config", settings)
       // Straight to the fast poll: the first phase change lands within a
       // second or two, and waiting half a minute to notice would look broken.
       setLive(true)
@@ -64,6 +64,18 @@ export function useSelfConfig() {
     [refresh],
   )
 
+  /**
+   * Ask for the Tailscale certificate now.
+   *
+   * The keeper gets there on its own, but the operator who has just switched
+   * HTTPS on in their tailnet is looking at a browser warning and should not
+   * have to wait out a timer to see it go.
+   */
+  const issueCertificate = useCallback(async () => {
+    await post("/dashboard/config/certificate")
+    refresh()
+  }, [refresh])
+
   const dismiss = useCallback(async () => {
     await del("/dashboard/config/run")
     refresh()
@@ -81,9 +93,10 @@ export function useSelfConfig() {
       refresh,
       apply,
       restart,
+      issueCertificate,
       dismiss,
     }),
-    [report, poll.loading, error, running, refresh, apply, restart, dismiss],
+    [report, poll.loading, error, running, refresh, apply, restart, issueCertificate, dismiss],
   )
 }
 

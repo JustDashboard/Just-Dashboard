@@ -145,7 +145,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				spec.SecurityHeaders = true
 			}
 		case "root":
-			if location == "" || location == "/" {
+			if location == acmeChallengePath && value == deploymentACMEWebroot {
+				spec.ManagedACME = true
+			} else if location == "" || location == "/" {
 				spec.Root = value
 			} else if current != nil {
 				current.Root = value

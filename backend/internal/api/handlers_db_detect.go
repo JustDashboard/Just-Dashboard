@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"fmt"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +12,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -835,8 +834,15 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 			{Type: "volume", Source: name + "-data", Target: tmpl.dataPath},
 		},
 	}
-	if _, err := s.modules.docker.Create(ctx, spec, nil); err != nil {
+	created, err := s.modules.docker.Create(ctx, spec, nil)
+	if err != nil {
 		return httpx.BadRequest("could not start %s: %v", tmpl.label, err)
+	}
+	for _, binding := range created.Ports {
+		if binding.ContainerPort == tmpl.port && binding.Protocol == "tcp" && binding.HostIP == "127.0.0.1" {
+			port = binding.HostPort
+			break
+		}
 	}
 	httpx.SetAudit(r, "database.server.provision", name,
 		map[string]any{"engine": req.Engine, "image": tmpl.image, "port": port})
@@ -857,14 +863,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 // next free one above it otherwise — so a second Postgres does not fail to
 // start with a message about a port collision.
 func freeHostPort(preferred int) (int, error) {
-	for port := preferred; port < preferred+64 && port < 65536; port++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
-		if err == nil {
-			ln.Close()
-			return port, nil
-		}
-	}
-	return 0, fmt.Errorf("no free port near %d to publish this server on", preferred)
+	return portalloc.Select(preferred, 1024, nil, func(port int) error { return portalloc.Available("127.0.0.1", "tcp", port) })
 }
 
 // generatePassword makes one nobody has to remember. It is URL-safe because it

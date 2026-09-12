@@ -8,18 +8,10 @@ import { bytes } from "@/lib/format"
 import type { LogSource } from "@/lib/types"
 import { filterQuery, isFilterActive, resolveRange, TIME_RANGES } from "@/lib/log-filter"
 import type { LogFilterState, LogTimeRange } from "@/components/logs/types"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -49,6 +41,7 @@ export function ExportDialog({
   filter: LogFilterState
   boot: boolean
 }) {
+  const [open, setOpen] = useState(false)
   const [range, setRange] = useState<LogTimeRange>("all")
   const [since, setSince] = useState("")
   const [until, setUntil] = useState("")
@@ -75,22 +68,28 @@ export function ExportDialog({
     .join(", ")
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Download className="size-4" />
-          Export
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Export {source?.label ?? sourceId}</DialogTitle>
-          <DialogDescription>
-            A plain text file, oldest line first. Lines with no parseable timestamp are kept —
-            they continue the record above them.
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Download className="size-4" />
+        Export
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title={<>Export {source?.label ?? sourceId}</>}
+        description="A plain text file, oldest line first. Lines with no parseable timestamp are kept —
+            they continue the record above them."
+        footer={
+          <>
+            <Button asChild onClick={() => notify.success("Export started")}>
+              <a href={href} download>
+                <Download className="size-4" />
+                Download
+              </a>
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <Label>Window</Label>
@@ -141,8 +140,8 @@ export function ExportDialog({
           {hasArchives && (
             <label className="flex items-center gap-2.5 text-sm">
               <Switch checked={archives} onCheckedChange={setArchives} />
-              Include {source?.archives} rotated{" "}
-              {source?.archives === 1 ? "archive" : "archives"} ({bytes(source?.archiveBytes)})
+              Include {source?.archives} rotated {source?.archives === 1 ? "archive" : "archives"} (
+              {bytes(source?.archiveBytes)})
             </label>
           )}
 
@@ -150,16 +149,7 @@ export function ExportDialog({
             Downloads {summary}.
           </p>
         </div>
-
-        <DialogFooter>
-          <Button asChild onClick={() => notify.success("Export started")}>
-            <a href={href} download>
-              <Download className="size-4" />
-              Download
-            </a>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

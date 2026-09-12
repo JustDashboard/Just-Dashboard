@@ -1,0 +1,40 @@
+{
+  "id": "minio",
+  "version": "1.0.0",
+  "name": "MinIO",
+  "category": "tool",
+  "profile": "web",
+  "description": "S3-compatible object storage. The console and the S3 API are separate ports because they are separate audiences.",
+  "iconId": "database",
+  "docsUrl": "https://min.io/docs/minio/container/index.html",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://hub.docker.com/r/minio/minio",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "minio/minio:RELEASE.2025-01-20T14-49-07Z", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain for the S3 API" },
+    { "name": "username", "kind": "text", "label": "Root user", "default": "minioadmin", "required": true, "variable": "MINIO_ROOT_USER", "pattern": "^[a-zA-Z0-9_-]{3,64}$" }
+  ],
+  "secrets": [
+    { "name": "root-password", "variable": "MINIO_ROOT_PASSWORD", "label": "Root password", "length": 40, "description": "Generated here. The upstream default would otherwise be public knowledge." }
+  ],
+  "ports": [
+    { "name": "s3", "internal": 9000, "protocol": "tcp", "purpose": "The S3-compatible API", "exposure": "proxy", "primary": true },
+    { "name": "console", "internal": 9001, "protocol": "tcp", "purpose": "The management console", "exposure": "proxy" }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/data", "purpose": "Every object stored here", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
+  "checks": [
+    { "name": "Answers a health probe", "kind": "http", "phase": "readiness", "required": true, "path": "/minio/health/live", "timeoutSeconds": 60 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "MinIO upgrades read the existing data directory; downgrading across a release is not supported." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "domain": "s3.example.test" }, "digest": "sha256:ed371886e8cb0d012870495fc4fa31bcc3da701bd42e1e219d15ad7d8f431fff" }]
+}

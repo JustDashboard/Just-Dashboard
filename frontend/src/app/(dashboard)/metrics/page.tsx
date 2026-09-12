@@ -26,29 +26,23 @@ import {
 } from "@/hooks/use-metrics-history"
 import { useMetricsWindow } from "@/hooks/use-metrics-window"
 import {
-  coverageNote,
   historyRows,
   liveRows,
   liveStorageRows,
   storageRows,
-  rangeSpec,
-  retentionNote,
-  windowSeconds,
   type ChartRow,
-  type MetricsWindow,
   type StorageSeriesMeta,
 } from "@/lib/metrics-range"
-import { Page, PageHeader, Metric, MetricStrip, Section } from "@/components/page"
+import { Page, PageHeader, PageState, Metric, MetricStrip, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { utilisationBar, utilisationTone } from "@/components/stat-tile"
+import { Meter, utilisationTone } from "@/components/meter"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { HealthBadge } from "@/components/metrics/health-panel"
-import { RangePicker, windowSpanNote } from "@/components/metrics/range-picker"
+import { HealthVerdict } from "@/components/metrics/health-panel"
+import { RangePicker } from "@/components/metrics/range-picker"
 import type { Series } from "@/components/metrics/metric-chart"
 import { EmptyState, ErrorState } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -94,8 +88,20 @@ const netSeries: Series[] = [
 ]
 
 const ioSeries: Series[] = [
-  { key: "diskRead", label: "Read", color: "var(--chart-2)", kind: "area", peakKey: "diskReadPeak" },
-  { key: "diskWrite", label: "Write", color: "var(--chart-5)", kind: "area", peakKey: "diskWritePeak" },
+  {
+    key: "diskRead",
+    label: "Read",
+    color: "var(--chart-2)",
+    kind: "area",
+    peakKey: "diskReadPeak",
+  },
+  {
+    key: "diskWrite",
+    label: "Write",
+    color: "var(--chart-5)",
+    kind: "area",
+    peakKey: "diskWritePeak",
+  },
 ]
 
 const iopsSeries: Series[] = [
@@ -104,7 +110,13 @@ const iopsSeries: Series[] = [
 ]
 
 const latencySeries: Series[] = [
-  { key: "diskAwait", label: "Latency", color: "var(--chart-4)", kind: "area", peakKey: "diskAwaitPeak" },
+  {
+    key: "diskAwait",
+    label: "Latency",
+    color: "var(--chart-4)",
+    kind: "area",
+    peakKey: "diskAwaitPeak",
+  },
   { key: "diskBusy", label: "Busy", color: "var(--chart-3)" },
 ]
 
@@ -160,10 +172,11 @@ const PRESSURE_THRESHOLD = [{ value: 10, label: "stalling", tone: "warning" as c
 // Shared empties. A fresh `[]` each render is a new identity, which is exactly
 // the re-render these memos exist to avoid.
 const NO_ROWS: ChartRow[] = []
-const NO_STORAGE: { rows: Record<string, number | string | null>[]; series: StorageSeriesMeta[] } = {
-  rows: [],
-  series: [],
-}
+const NO_STORAGE: { rows: Record<string, number | string | null>[]; series: StorageSeriesMeta[] } =
+  {
+    rows: [],
+    series: [],
+  }
 
 export default function MetricsPage() {
   // Two sources, deliberately kept apart. The live socket is owned by the
@@ -206,22 +219,19 @@ export default function MetricsPage() {
     [storage.series],
   )
 
-  if (error && !snapshot) {
+  if (!snapshot || !host || (error && !snapshot)) {
     return (
-      <Page>
-        <PageHeader eyebrow="Server" title="Metrics" />
-        <ErrorState error={new Error(error)} />
-      </Page>
-    )
-  }
-
-  if (!snapshot || !host) {
-    return (
-      <Page>
-        <PageHeader eyebrow="Server" title="Metrics" description="Waiting for the first frame…" />
-        <Skeleton className="h-[16rem] rounded-xl" />
-        <Skeleton className="h-[16rem] rounded-xl" />
-      </Page>
+      <PageState
+        eyebrow="Server"
+        title="Metrics"
+        error={error && !snapshot ? new Error(error) : undefined}
+        skeleton={
+          <>
+            <Skeleton className="h-64 rounded-xl" />
+            <Skeleton className="h-64 rounded-xl" />
+          </>
+        }
+      />
     )
   }
 
@@ -236,18 +246,9 @@ export default function MetricsPage() {
       <PageHeader
         eyebrow="Server"
         title="Metrics"
-        description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>{host.cpuModel}</span>
-            <Dot />
-            <span>
-              {cores} {cores === 1 ? "core" : "cores"}
-            </span>
-          </span>
-        }
         actions={
           <div className="flex items-center gap-3">
-            {health && <HealthBadge status={health.status} />}
+            {health && <HealthVerdict status={health.status} />}
             <RangePicker controls={controls} />
           </div>
         }
@@ -255,7 +256,6 @@ export default function MetricsPage() {
 
       <Section
         title="Utilisation"
-        description={<SeriesCaption live={live} win={win} recorded={recorded} />}
       >
         {recorded.error && <ErrorState error={recorded.error} />}
 
@@ -273,7 +273,6 @@ export default function MetricsPage() {
           <ChartPanel
             icon={GridSquare}
             title="Memory and swap"
-            description="Share of total"
             rows={rows}
             series={memSeries}
             unit="%"
@@ -297,7 +296,6 @@ export default function MetricsPage() {
         <ChartPanel
           icon={ChartActivity}
           title="Network throughput"
-          description="All interfaces"
           rows={rows}
           series={netSeries}
           format={fmtRate}
@@ -317,7 +315,6 @@ export default function MetricsPage() {
           <ChartPanel
             icon={Servers}
             title="Capacity"
-            description="Used space per filesystem"
             rows={storage.rows as { ts: number }[]}
             series={storageSeries}
             unit="%"
@@ -333,7 +330,6 @@ export default function MetricsPage() {
           <ChartPanel
             icon={Servers}
             title="Disk throughput"
-            description="Bytes moved per second"
             rows={rows}
             series={ioSeries}
             format={fmtRate}
@@ -355,17 +351,11 @@ export default function MetricsPage() {
       */}
       <Section
         title="Saturation"
-        description="Whether work is waiting rather than running — the questions a utilisation percentage cannot answer"
       >
         <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
           <ChartPanel
             icon={Warning}
             title="Pressure"
-            description={
-              snapshot.pressure?.supported
-                ? "Share of time work was stalled waiting for a resource"
-                : "Not reported by this kernel"
-            }
             rows={rows}
             series={pressureSeries}
             unit="%"
@@ -384,7 +374,6 @@ export default function MetricsPage() {
           <ChartPanel
             icon={Gauge}
             title="Load average"
-            description={`Queued work against ${cores} ${cores === 1 ? "core" : "cores"}`}
             rows={rows}
             series={loadSeries}
             format={fmtLoad}
@@ -393,12 +382,13 @@ export default function MetricsPage() {
             showPeaks={showPeaks}
             height={165}
             thresholds={loadThreshold}
-            note={live ? "Load averages are read from the recorded series — pick a range above." : note}
+            note={
+              live ? "Load averages are read from the recorded series — pick a range above." : note
+            }
           />
           <ChartPanel
             icon={Servers}
             title="Disk operations"
-            description="Requests per second, which is what a device actually runs out of"
             rows={rows}
             series={iopsSeries}
             format={fmtOps}
@@ -411,7 +401,6 @@ export default function MetricsPage() {
           <ChartPanel
             icon={ChartActivity}
             title="Disk latency and busy time"
-            description="Milliseconds per request on the slowest device, and its iostat %util"
             rows={rows}
             series={latencySeries}
             format={fmtMillis}
@@ -427,7 +416,6 @@ export default function MetricsPage() {
           <ChartPanel
             icon={Router}
             title="Sockets"
-            description="Open TCP connections, and how many are waiting out their close"
             rows={rows}
             series={socketSeries}
             format={fmtCount}
@@ -442,11 +430,7 @@ export default function MetricsPage() {
             series={inodeSeries}
             events={events}
             onZoom={zoom}
-            note={
-              live
-                ? "Inode usage is only in the recorded history — pick a range above."
-                : note
-            }
+            note={live ? "Inode usage is only in the recorded history — pick a range above." : note}
           />
         </div>
       </Section>
@@ -457,7 +441,6 @@ export default function MetricsPage() {
             <PanelHeader
               icon={Cpu}
               title="Per-core utilisation"
-              description={`${cores} logical processors · right now`}
             />
             <PanelBody>
               <PerCoreBars cores={snapshot.cpu.perCore} />
@@ -487,7 +470,6 @@ function ProcessorPanel({
   onZoom,
   showPeaks,
   note,
-  model,
   now,
 }: {
   rows: ChartRow[]
@@ -507,7 +489,6 @@ function ProcessorPanel({
     <ChartPanel
       icon={Cpu}
       title="Processor"
-      description={model}
       rows={rows}
       series={breakdown ? cpuModeSeries : cpuSeries}
       unit="%"
@@ -529,10 +510,10 @@ function ProcessorPanel({
             size="sm"
             aria-label="Processor view"
           >
-            <ToggleGroupItem value="total" className="px-2 text-[11px]">
+            <ToggleGroupItem value="total" className="px-2 text-hint">
               Total
             </ToggleGroupItem>
-            <ToggleGroupItem value="modes" className="px-2 text-[11px]">
+            <ToggleGroupItem value="modes" className="px-2 text-hint">
               Breakdown
             </ToggleGroupItem>
           </ToggleGroup>
@@ -566,7 +547,6 @@ function InodePanel({
     <ChartPanel
       icon={Servers}
       title="Inodes"
-      description="A filesystem can run out of these while reporting free space"
       rows={rows}
       series={series}
       unit="%"
@@ -585,7 +565,10 @@ function InodePanel({
 /**
  * The "one runnable task per core" line, cached per core count.
  */
-let coreThresholdCache: { cores: number; value: { value: number; label: string; tone: "warning" }[] } | null = null
+let coreThresholdCache: {
+  cores: number
+  value: { value: number; label: string; tone: "warning" }[]
+} | null = null
 function coreThreshold(cores: number) {
   if (!coreThresholdCache || coreThresholdCache.cores !== cores) {
     coreThresholdCache = {
@@ -596,53 +579,7 @@ function coreThreshold(cores: number) {
   return coreThresholdCache.value
 }
 
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
-}
 
-/**
- * Says which series is on screen and how coarse it is.
- */
-function SeriesCaption({
-  live,
-  win,
-  recorded,
-}: {
-  live: boolean
-  win: MetricsWindow
-  recorded: HistoryState
-}) {
-  if (live) {
-    return (
-      <>Live feed, every 2 seconds · begins when this tab opened · drag across a chart to zoom</>
-    )
-  }
-  if (recorded.disabled) {
-    return <>History recording is turned off on this server (JD_METRICS_RETENTION=0)</>
-  }
-  const parts: string[] = []
-  const span = windowSpanNote(win)
-  if (span) parts.push(span)
-  parts.push(
-    recorded.history
-      ? `${bucketLabel(recorded.history.stepSeconds)} averages and peaks`
-      : `last ${rangeSpec(win.key).label}`,
-  )
-  const coverage = coverageNote(recorded.history)
-  if (coverage) parts.push(coverage)
-  const retention = retentionNote(recorded.history, {
-    ...rangeSpec(win.key),
-    seconds: windowSeconds(win),
-  })
-  if (retention) parts.push(retention)
-  return <>{parts.join(" · ")}</>
-}
-
-function bucketLabel(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)} minute`
-  return `${Math.round(seconds / 3600)} hour`
-}
 
 /**
  * What a chart shows when it has nothing to draw.
@@ -668,12 +605,15 @@ function PerCoreBars({ cores }: { cores: number[] }) {
     <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-1.5">
       {cores.map((value, i) => (
         <div key={i} className="flex min-w-0 items-center gap-2">
-          <span className="w-9 shrink-0 font-mono text-[10px] text-muted-foreground">cpu{i}</span>
-          <Progress
+          <span className="w-9 shrink-0 font-mono text-micro text-muted-foreground">cpu{i}</span>
+          <Meter
             value={value}
-            className={cn("h-1 flex-1", utilisationBar(utilisationTone(value)))}
+            tone={utilisationTone(value)}
+            size="thin"
+            label={`cpu${i}`}
+            className="flex-1"
           />
-          <span className="numeric w-8 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+          <span className="numeric w-8 shrink-0 text-right font-mono text-micro text-muted-foreground">
             {value.toFixed(0)}%
           </span>
         </div>
@@ -712,50 +652,49 @@ function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
       <PanelHeader
         icon={Servers}
         title="Filesystems"
-        description="Expand a mount to see what is using it"
       />
       <PanelBody className="space-y-4">
         {snapshot.mounts.map((mount) => {
           const tone = utilisationTone(mount.usedPercent)
-          const inodes =
-            mount.inodesTotal > 0 ? (mount.inodesUsed / mount.inodesTotal) * 100 : 0
+          const inodes = mount.inodesTotal > 0 ? (mount.inodesUsed / mount.inodesTotal) * 100 : 0
           return (
             <div key={mount.mountpoint} className="min-w-0 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-[13px] font-medium">{mount.mountpoint}</span>
-                    <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
-                      {mount.fstype}
-                    </Badge>
+                    <span className="truncate text-body font-medium">{mount.mountpoint}</span>
+                    <Tag>{mount.fstype}</Tag>
                     {inodes >= 80 && (
-                      <Badge variant="outline" className="shrink-0 border-warning/40 text-[10px] font-normal text-warning">
+                      <span className="numeric shrink-0 text-hint font-medium text-warning">
                         {inodes.toFixed(0)}% inodes
-                      </Badge>
+                      </span>
                     )}
                   </div>
-                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  <p className="truncate font-mono text-hint text-muted-foreground">
                     {mount.device}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <div className="numeric text-[13px]">
+                  <div className="numeric text-body">
                     {bytes(mount.used)}{" "}
                     <span className="text-muted-foreground">/ {bytes(mount.total)}</span>
                   </div>
-                  <p className="numeric text-[11px] text-muted-foreground">
+                  <p className="numeric text-hint text-muted-foreground">
                     {rate(mount.readRate)} read · {rate(mount.writeRate)} write
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Progress
+                <Meter
                   value={mount.usedPercent}
-                  className={cn("h-1 flex-1", utilisationBar(tone))}
+                  tone={tone}
+                  size="thin"
+                  label={mount.mountpoint}
+                  className="flex-1"
                 />
                 <span
                   className={cn(
-                    "numeric w-9 text-right font-mono text-[11px]",
+                    "numeric w-9 text-right font-mono text-hint",
                     tone === "danger"
                       ? "text-destructive"
                       : tone === "warning"
@@ -778,7 +717,7 @@ function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
               {breakdown[mount.mountpoint] && (
                 <div className="space-y-1 rounded-lg border border-hairline bg-surface-sunken p-2">
                   {breakdown[mount.mountpoint].map((entry) => (
-                    <div key={entry.path} className="flex justify-between gap-2 text-[11px]">
+                    <div key={entry.path} className="flex justify-between gap-2 text-hint">
                       <span className="truncate font-mono">{entry.name}</span>
                       <span className="numeric shrink-0 text-muted-foreground">
                         {bytes(entry.size)}
@@ -799,20 +738,12 @@ function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
 }
 
 function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
-  const total = useMemo(
-    () => ({
-      rx: snapshot.net.reduce((s, n) => s + n.bytesRecv, 0),
-      tx: snapshot.net.reduce((s, n) => s + n.bytesSent, 0),
-    }),
-    [snapshot.net],
-  )
 
   return (
     <Panel>
       <PanelHeader
         icon={NetworkDevice}
         title="Interfaces"
-        description={`${bytes(total.rx)} in · ${bytes(total.tx)} out since boot`}
       />
       <PanelBody flush>
         <Table>
@@ -841,16 +772,16 @@ function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
                     <span className="font-mono text-xs">{iface.interface}</span>
                   </div>
                   <p
-                    className="max-w-[14rem] truncate font-mono text-[11px] text-muted-foreground"
+                    className="max-w-[14rem] truncate font-mono text-hint text-muted-foreground"
                     title={iface.addrs.join(", ")}
                   >
                     {iface.addrs.join(", ") || "no address"}
                   </p>
                 </TableCell>
-                <TableCell className="numeric text-right font-mono text-xs">
+                <TableCell className="numeric text-right font-mono">
                   {rate(iface.recvRate)}
                 </TableCell>
-                <TableCell className="numeric text-right font-mono text-xs">
+                <TableCell className="numeric text-right font-mono">
                   {rate(iface.sendRate)}
                 </TableCell>
                 <TableCell

@@ -56,10 +56,12 @@ func TestC6PreflightSurfacesNetworkFirewallAndDependencyGates(t *testing.T) {
 	}
 
 	findings := preflightFindings(draft, configuration, observation, false)
-	assertC6Finding(t, findings, "port_conflict", PreflightBlocked, "")
+	assertC6Finding(t, findings, "port_conflict", PreflightWarning, "")
 	assertC6Finding(t, findings, "domain_conflict", PreflightBlocked, "/proxy/sites")
 	assertC6Finding(t, findings, "dns_unverified", PreflightUnavailable, "/proxy/sites")
-	assertC6Finding(t, findings, "certificate_unavailable", PreflightBlocked, "/certificates")
+	// certbot on this host means the release itself will order the certificate,
+	// so a name nobody has published before is reported rather than refused.
+	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/certificates")
 	assertC6Finding(t, findings, "public_bind", PreflightWarning, "")
 	assertC6Finding(t, findings, "firewall_mismatch", PreflightBlocked, "/security?tab=firewall")
 	assertC6Finding(t, findings, "database_unavailable", PreflightBlocked, "/databases/12")
@@ -67,7 +69,41 @@ func TestC6PreflightSurfacesNetworkFirewallAndDependencyGates(t *testing.T) {
 	assertC6Finding(t, findings, "backup_stale", PreflightWarning, "/backups/42")
 }
 
-func TestExecutionPreflightBlocksFrozenPortConflictBeforeBuild(t *testing.T) {
+// Without certbot nothing on this host can produce a certificate, and a plan
+// that cannot be activated should be refused while it is still a plan.
+func TestPreflightBlocksHTTPSOnAHostThatCannotIssue(t *testing.T) {
+	draft := &Draft{Data: DraftData{
+		Intent:    &DraftIntentConfig{Name: "site", Profile: ProfileWeb},
+		Source:    &DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/o/r.git", Ref: "main"},
+		Detection: &DetectionResult{Source: SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)}},
+	}}
+	configuration := PlanConfiguration{
+		Build:   BuildPlanConfig{Method: BuildNone, Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}},
+		Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{}},
+		Domains: []PlannedDomain{{Hostname: "app.example.test", HTTPS: true, Ownership: OwnershipManaged}},
+		Checks: []PlannedCheck{{
+			Name: "readiness", Kind: string(CheckHTTP), Phase: "readiness", Required: true,
+			Config: json.RawMessage(`{"path":"/"}`),
+		}},
+		Variables: []PlannedVariable{}, Dependencies: []PlannedDependency{},
+	}
+	observation := HostObservation{
+		Facilities: map[string]FacilityObservation{"docker": {Available: true}},
+		Domains: []DomainObservation{{
+			Hostname: "app.example.test", ProxyAvailable: true, DNSAvailable: true, PointsHere: true,
+			CertificateAvailable: false, CertificateAutomation: false,
+		}},
+	}
+	findings := preflightFindings(draft, configuration, observation, false)
+	assertC6Finding(t, findings, "certificate_unavailable", PreflightBlocked, "/certificates")
+	for _, item := range findings {
+		if item.Code == "certificate_automatic" {
+			t.Fatalf("a host without certbot claimed automatic issuance: %#v", item)
+		}
+	}
+}
+
+func TestExecutionPreflightAllowsRemappablePortConflict(t *testing.T) {
 	fixture := newReleaseStoreFixture(t)
 	planRuntime := RuntimePlanConfig{
 		InternalPort: 3000, HostPort: 18443, BindAddress: "127.0.0.1", Strategy: StrategyStopFirst,
@@ -87,7 +123,7 @@ func TestExecutionPreflightBlocksFrozenPortConflictBeforeBuild(t *testing.T) {
 	}}
 	executor := &NormalizedStepExecutor{store: fixture.runs, preflight: observer}
 	result := executor.analyzePlan(context.Background(), StepExecution{Run: *run}, plan)
-	if result.State != StepFailed || result.ErrorCode != "port_conflict" || observer.calls != 1 {
+	if result.State != StepFailed || result.ErrorCode != "readiness_missing" || observer.calls != 1 {
 		t.Fatalf("execution preflight = %#v, observations=%d", result, observer.calls)
 	}
 	if len(observer.requests) != 1 || observer.requests[0].ExistingProxySite !=

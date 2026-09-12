@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { rawUrl } from "@/components/files/preview-panel"
+import { PaneFooter, PaneHeader } from "@/components/panel"
 
 /**
  * Crop, rotate, resize and re-encode a picture, in the browser.
@@ -203,17 +204,19 @@ function ImageEditor({
     const out = document.createElement("canvas")
     out.width = Math.round(crop.w)
     out.height = Math.round(crop.h)
-    out.getContext("2d")?.drawImage(
-      current,
-      Math.round(crop.x),
-      Math.round(crop.y),
-      out.width,
-      out.height,
-      0,
-      0,
-      out.width,
-      out.height,
-    )
+    out
+      .getContext("2d")
+      ?.drawImage(
+        current,
+        Math.round(crop.x),
+        Math.round(crop.y),
+        out.width,
+        out.height,
+        0,
+        0,
+        out.width,
+        out.height,
+      )
     push(out)
   }
 
@@ -260,7 +263,9 @@ function ImageEditor({
         { method: "POST", credentials: "include", headers: mutationHeaders(), body: form },
       )
       if (!res.ok) throw new Error((await res.json()).error?.message ?? res.statusText)
-      notify.success(`Saved ${finalName}`, { description: `${bytes(blob.size)} · ${current.width}×${current.height}` })
+      notify.success(`Saved ${finalName}`, {
+        description: `${bytes(blob.size)} · ${current.width}×${current.height}`,
+      })
       onSaved(`${dir}/${finalName}`.replace(/\/{2,}/g, "/"))
       onClose()
     } catch (err) {
@@ -320,12 +325,12 @@ function ImageEditor({
     )
   }
   if (error || !current) {
-    return <p className="p-4 text-[13px] text-destructive">{error}</p>
+    return <p className="p-4 text-body text-destructive">{error}</p>
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-hairline bg-surface-header px-3 py-2">
+      <PaneHeader className="flex-wrap gap-1.5 px-3">
         <Button size="xs" variant="outline" onClick={() => rotate(-90)}>
           <RotateCounterClockwise className="size-3" />
           Left
@@ -368,11 +373,11 @@ function ImageEditor({
           <CornerUpLeft className="size-3" />
           Undo
         </Button>
-      </div>
+      </PaneHeader>
 
       <div
         ref={surfaceRef}
-        className="checkerboard relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto checkerboard p-4"
       >
         <div className="relative max-h-full">
           <canvas
@@ -385,7 +390,7 @@ function ImageEditor({
           />
           {crop && cropStyle && (
             <div
-              className="pointer-events-none absolute border-2 border-primary bg-primary/15"
+              className="pointer-events-none absolute border-2 border-primary bg-plot-primary"
               style={cropStyle}
             />
           )}
@@ -427,18 +432,15 @@ function ImageEditor({
                 }))
               }}
             />
-            <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <Checkbox
-                checked={lockRatio}
-                onCheckedChange={(v) => setLockRatio(v === true)}
-              />
+            <label className="flex items-center gap-1.5 text-hint text-muted-foreground">
+              <Checkbox checked={lockRatio} onCheckedChange={(v) => setLockRatio(v === true)} />
               Lock ratio
             </label>
             <Button size="xs" variant="outline" onClick={applyResize}>
               Resize
             </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             Now {current.width}×{current.height}
           </p>
         </div>
@@ -461,7 +463,7 @@ function ImageEditor({
           </div>
           {(["brightness", "contrast", "saturate"] as const).map((key) => (
             <div key={key} className="flex items-center gap-2">
-              <span className="w-16 text-[11px] text-muted-foreground capitalize">{key}</span>
+              <span className="w-16 text-hint text-muted-foreground capitalize">{key}</span>
               <Slider
                 value={[adjust[key]]}
                 min={0}
@@ -470,7 +472,7 @@ function ImageEditor({
                 className="flex-1"
                 onValueChange={([v]) => setAdjust((prev) => ({ ...prev, [key]: v }))}
               />
-              <span className="numeric w-9 text-right text-[11px] text-muted-foreground">
+              <span className="numeric w-9 text-right text-hint text-muted-foreground">
                 {adjust[key]}%
               </span>
             </div>
@@ -478,7 +480,7 @@ function ImageEditor({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-hairline bg-surface-header px-3 py-2.5">
+      <PaneFooter className="gap-2 px-3">
         <Select value={format} onValueChange={setFormat}>
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
@@ -491,7 +493,7 @@ function ImageEditor({
         </Select>
         {format !== "image/png" && (
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">Quality</span>
+            <span className="text-hint text-muted-foreground">Quality</span>
             <Slider
               value={[quality]}
               min={30}
@@ -500,7 +502,7 @@ function ImageEditor({
               className="w-24"
               onValueChange={([v]) => setQuality(v)}
             />
-            <span className="numeric w-8 text-[11px] text-muted-foreground">{quality}</span>
+            <span className="numeric w-8 text-hint text-muted-foreground">{quality}</span>
           </div>
         )}
         <Input
@@ -510,14 +512,19 @@ function ImageEditor({
           className="h-8 w-44 font-mono text-xs"
         />
         <span className="flex-1" />
-        <Button size="sm" variant="outline" disabled={saving || !saveAs.trim()} onClick={() => save(saveAs)}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={saving || !saveAs.trim()}
+          onClick={() => save(saveAs)}
+        >
           Save as
         </Button>
-        <Button size="sm" disabled={saving} onClick={() => save()}>
-          {saving ? <Spinner className="size-4" /> : <FloppyDisk className="size-4" />}
+        <Button size="sm" onClick={() => save()} pending={saving}>
+          <FloppyDisk className="size-4" />
           Save over original
         </Button>
-      </div>
+      </PaneFooter>
     </div>
   )
 }
@@ -556,7 +563,8 @@ function withExtension(name: string, mime: string) {
 function toBlob(canvas: HTMLCanvasElement, mime: string, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("the browser could not encode this image"))),
+      (blob) =>
+        blob ? resolve(blob) : reject(new Error("the browser could not encode this image")),
       mime,
       quality,
     )

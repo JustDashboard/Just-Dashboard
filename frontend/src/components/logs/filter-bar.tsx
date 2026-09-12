@@ -25,8 +25,9 @@ import {
 } from "@/lib/log-filter"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { Panel, PanelToolbar } from "@/components/panel"
-import { Button } from "@/components/ui/button"
+import { SearchInput } from "@/components/page"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -166,8 +167,7 @@ export function FilterBar({
             onSubmit()
           }}
         >
-          <MagnifyingGlass className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" />
-          <Input
+          <SearchInput
             ref={queryRef}
             value={filter.q}
             onChange={(e) => set({ q: e.target.value })}
@@ -176,33 +176,37 @@ export function FilterBar({
                 ? "Filter the stream — matched on the server, press / to focus"
                 : "Search this log's history — press Enter"
             }
-            className="h-8 pl-8 pr-[4.5rem] text-[13px]"
+            className="pr-[4.5rem]"
+            containerClassName="sm:w-full"
+            trailing={
+              <>
+                {filter.q && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-6"
+                    aria-label="Clear the filter"
+                    onClick={() => set({ q: "" })}
+                  >
+                    <Cross className="size-3" />
+                  </Button>
+                )}
+                <InputToggle
+                  active={filter.regex}
+                  onClick={() => set({ regex: !filter.regex })}
+                  icon={SlashForward}
+                  hint="Treat the search as a regular expression (RE2, the same one the server runs)"
+                />
+                <InputToggle
+                  active={!filter.ignoreCase}
+                  onClick={() => set({ ignoreCase: !filter.ignoreCase })}
+                  icon={TextUppercase}
+                  hint="Match case exactly"
+                />
+              </>
+            }
           />
-          <div className="absolute right-1 flex items-center gap-0.5">
-            {filter.q && (
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="size-6"
-                onClick={() => set({ q: "" })}
-              >
-                <Cross className="size-3" />
-              </Button>
-            )}
-            <InputToggle
-              active={filter.regex}
-              onClick={() => set({ regex: !filter.regex })}
-              icon={SlashForward}
-              hint="Treat the search as a regular expression (RE2, the same one the server runs)"
-            />
-            <InputToggle
-              active={!filter.ignoreCase}
-              onClick={() => set({ ignoreCase: !filter.ignoreCase })}
-              icon={TextUppercase}
-              hint="Match case exactly"
-            />
-          </div>
         </form>
 
         {mode === "search" && (
@@ -224,7 +228,7 @@ export function FilterBar({
         >
           <SettingsSliders className="size-3.5" />
           More
-          {advancedCount > 0 && <span className="numeric text-[10px]">{advancedCount}</span>}
+          {advancedCount > 0 && <span className="numeric text-micro">{advancedCount}</span>}
           <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
         </Button>
       </PanelToolbar>
@@ -241,7 +245,7 @@ export function FilterBar({
           {LOG_LEVELS.map((level) => (
             <Tooltip key={level}>
               <TooltipTrigger asChild>
-                <ToggleGroupItem value={level} className="gap-1 px-2 text-[11px]">
+                <ToggleGroupItem value={level} className="gap-1 px-2 text-hint">
                   {LEVEL_LABEL[level]}
                   {counts[level] > 0 && (
                     <span className="numeric opacity-60">{counts[level].toLocaleString()}</span>
@@ -271,7 +275,7 @@ export function FilterBar({
               value={filter.exclude}
               onChange={(e) => set({ exclude: e.target.value })}
               placeholder="e.g. /healthz"
-              className="h-8 w-48 text-[13px]"
+              className="h-8 w-48 text-body"
             />
           </Field>
 
@@ -318,7 +322,7 @@ export function FilterBar({
                       value={logTimeInput(since)}
                       step="0.001"
                       onChange={(e) => onSinceChange(e.target.value)}
-                      className="h-8 w-52 text-[13px]"
+                      className="h-8 w-52 text-body"
                     />
                   </Field>
                   <Field label="To">
@@ -327,7 +331,7 @@ export function FilterBar({
                       value={logTimeInput(until)}
                       step="0.001"
                       onChange={(e) => onUntilChange(e.target.value)}
-                      className="h-8 w-52 text-[13px]"
+                      className="h-8 w-52 text-body"
                     />
                   </Field>
                 </>
@@ -342,7 +346,7 @@ export function FilterBar({
                   size="sm"
                 >
                   {CONTEXT_CHOICES.map((n) => (
-                    <ToggleGroupItem key={n} value={String(n)} className="px-2 text-[11px]">
+                    <ToggleGroupItem key={n} value={String(n)} className="px-2 text-hint">
                       {n === 0 ? "none" : `±${n}`}
                     </ToggleGroupItem>
                   ))}
@@ -370,7 +374,7 @@ export function FilterBar({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <Label className="text-hint text-muted-foreground">{label}</Label>
       {children}
     </div>
   )
@@ -395,6 +399,8 @@ function InputToggle({
           size="icon"
           variant={active ? "secondary" : "ghost"}
           className="size-6"
+          aria-label={hint}
+          aria-pressed={active}
           onClick={onClick}
         >
           <Icon className="size-3.5" />
@@ -457,7 +463,7 @@ function UnitPicker({
                     className={cn("size-3.5", value === u.name ? "opacity-100" : "opacity-0")}
                   />
                   <span className="min-w-0 flex-1 truncate">{u.name}</span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">{u.active}</span>
+                  <span className="shrink-0 text-micro text-muted-foreground">{u.active}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

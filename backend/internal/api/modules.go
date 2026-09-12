@@ -13,6 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
@@ -39,23 +40,27 @@ type moduleSet struct {
 	docker       *dockerx.Client
 	dockerStats  *dockerx.StatsSampler
 	dockerEvents *dockerx.EventLog
-	pm2          *procs.PM2
-	systemd      *procs.Systemd
-	table        *procs.Table
-	cron         *procs.Cron
-	logs         *logsx.Service
-	term         *term.Manager
-	files        *files.Service
-	git          *gitx.Service
-	github       *ghx.Service
-	updates      *updates.Service
-	selfUpdate   *selfupdate.Service
-	selfConfig   *selfcfg.Service
-	certKeeper   *selfcfg.CertKeeper
-	proxy        *proxysvc.Service
-	dbs          *dbx.Manager
-	linuxUsers   *linuxusers.Service
-	netsec       *netsec.Service
+	// What a compose stack was before it was changed. Docker keeps no
+	// history, so a rollback has no target and "what changed" has no answer
+	// unless the dashboard writes it down first.
+	dockerDeploys *dockerx.DeploymentStore
+	pm2           *procs.PM2
+	systemd       *procs.Systemd
+	table         *procs.Table
+	cron          *procs.Cron
+	logs          *logsx.Service
+	term          *term.Manager
+	files         *files.Service
+	git           *gitx.Service
+	github        *ghx.Service
+	updates       *updates.Service
+	selfUpdate    *selfupdate.Service
+	selfConfig    *selfcfg.Service
+	certKeeper    *selfcfg.CertKeeper
+	proxy         *proxysvc.Service
+	dbs           *dbx.Manager
+	linuxUsers    *linuxusers.Service
+	netsec        *netsec.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -73,6 +78,9 @@ type moduleSet struct {
 	deployArtifacts  *deploy.ArtifactBuilder
 	deployAutomation *deploy.AutomationStore
 	deploySchedule   *deploy.AutomationScheduler
+	// Upstream game-version metadata, behind one bounded client and a short
+	// cache so opening the wizard does not hammer somebody else's API.
+	gameVersions *gameserver.Adapter
 }
 
 func (s *Server) initModules() {
@@ -80,6 +88,7 @@ func (s *Server) initModules() {
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler()
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a
 	// series kept for a week is worth measuring over even intervals, and an
 	// operator refreshing the container table would otherwise keep shortening
@@ -102,6 +111,7 @@ func (s *Server) initModules() {
 		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)
+	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()
 	s.modules.updates = updates.New()
@@ -182,6 +192,11 @@ func (s *Server) initModules() {
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),
 	).WithPreflightObserver(s.modules.deployPreflight).
 		WithBackupGate(newDeploymentBackupGate(s.modules.backupStore, s.modules.backupRunner)).
+		// Automatic HTTPS. Issuance is still the Certificates feature's code
+		// and activation still resolves an already-existing pair; what this
+		// join adds is that the run asks for one before it starts anything,
+		// instead of reaching a cutover that has nothing to serve.
+		WithCertificateIssuer(s.modules.proxy).
 		WithNotifications(s.modules.deployAutomation)
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,

@@ -1,7 +1,69 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import type { DeploymentRuntimeServices } from "../../src/lib/types"
+import type {
+  DeploymentOperations,
+  DeploymentRuntimeServices,
+  ReleaseComparisonResponse,
+} from "../../src/lib/types"
 
 const now = "2026-09-03T12:00:00Z"
+
+for (const normalized of [false, true]) {
+  test(`delete project is accessible and confirmed for ${normalized ? "normalized" : "legacy"} deployments`, async ({
+    page,
+  }) => {
+    await mockDashboard(page, { normalized })
+    let deleted = 0
+    await page.route("**/api/v1/deploy/7", async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback()
+      deleted++
+      await route.fulfill({ status: 204 })
+    })
+    await page.goto("/deploy/7")
+    await page.getByRole("button", { name: "Delete project", exact: true }).click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText("Running containers, routes, and persistent data remain")
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    expect(deleted).toBe(0)
+    await page.getByRole("button", { name: "Delete project", exact: true }).click()
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete project", exact: true })
+      .click()
+    await expect(page).toHaveURL(/\/deploy$/)
+    expect(deleted).toBe(1)
+  })
+}
+
+test("delete project keeps the project open when the server refuses", async ({ page }) => {
+  await mockDashboard(page, { normalized: true })
+  await page.route("**/api/v1/deploy/7", async (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback()
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "conflict", message: "Project is busy" } }),
+    })
+  })
+  await page.goto("/deploy/7")
+  await page.getByRole("button", { name: "Delete project", exact: true }).click()
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete project", exact: true })
+    .click()
+  await expect(page.getByText("Project is busy", { exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page).toHaveURL(/\/deploy\/7$/)
+})
+
+test("delete project is hidden without destructive capability", async ({ page }) => {
+  await mockDashboard(page, { normalized: true })
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"] }),
+  )
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: /api-production/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Delete project", exact: true })).toHaveCount(0)
+})
 
 const user = {
   authenticated: true,
@@ -116,9 +178,145 @@ const steps = [
   lastSeq: Number(ordinal),
 }))
 
+const healthyOperations: DeploymentOperations = {
+  observedAt: now,
+  releaseId: 20,
+  evidence: "release",
+  runtime: { status: "available", observedAt: now, services: [] },
+  domains: {
+    status: "available",
+    siteName: "just-dashboard-env-12.conf",
+    domains: [
+      {
+        hostname: "api.example.test",
+        https: true,
+        ownership: "managed",
+        route: "served",
+        servedBy: "just-dashboard-env-12.conf",
+        certificate: "valid",
+        certificateName: "api.example.test",
+        certificateDaysLeft: 70,
+        deepLink: "/proxy/sites?site=just-dashboard-env-12.conf",
+        certificateLink: "/proxy/certificates",
+      },
+    ],
+  },
+  storage: {
+    status: "available",
+    mounts: [
+      {
+        source: "api-data",
+        target: "/data",
+        kind: "volume",
+        ownership: "linked",
+        status: "present",
+        deepLink: "/docker/volumes?volume=api-data",
+      },
+    ],
+  },
+  backups: {
+    status: "available",
+    jobs: [
+      {
+        resourceId: "4",
+        required: true,
+        status: "present",
+        lastStatus: "success",
+        fresh: true,
+        deepLink: "/backups",
+      },
+    ],
+  },
+  dependencies: { status: "available", items: [] },
+  diagnosis: { status: "assessed", findings: [], silences: [] },
+}
+
+const releaseComparison: ReleaseComparisonResponse = {
+  comparison: {
+    fromReleaseId: 19,
+    toReleaseId: 20,
+    changes: { source: true, build: true, runtime: false, variables: true },
+    detail: {
+      status: "available",
+      fields: [
+        {
+          field: "source revision",
+          from: "99887766554433221100",
+          to: "a12bc34d56ef7890",
+          changed: true,
+        },
+        { field: "command", from: "bun start", to: "bun start", changed: false },
+        { field: "internal port", from: "3000", to: "8080", changed: true },
+      ],
+      variables: [
+        {
+          name: "API_TOKEN",
+          change: "changed",
+          from: "111111111111 · secret",
+          to: "222222222222 · secret",
+          detail: "Compared by value digest; values are never read here.",
+          secret: true,
+        },
+      ],
+      dependencies: [
+        {
+          name: "backup_job 4",
+          change: "unchanged",
+          from: "linked · backup",
+          to: "linked · backup",
+        },
+      ],
+      checks: [{ name: "ready", change: "added", to: "http · readiness · required" }],
+      domains: [
+        {
+          name: "api.example.test",
+          change: "unchanged",
+          from: "https · managed",
+          to: "https · managed",
+        },
+      ],
+    },
+    artifacts: [
+      {
+        kind: "image",
+        reference: "example.test/api:v2",
+        digest: `sha256:${"a".repeat(64)}`,
+        sizeBytes: 4096,
+        state: "available",
+        retained: true,
+        reason: "retained for rollback to release 2",
+      },
+    ],
+  },
+  update: {
+    status: "available",
+    reference: "example.test/api:v2",
+    state: "outdated",
+    localDigest: `sha256:${"a".repeat(64)}`,
+    remoteDigest: `sha256:${"b".repeat(64)}`,
+    checkedAt: now,
+  },
+  artifacts: [
+    {
+      kind: "image",
+      reference: "example.test/api:v2",
+      digest: `sha256:${"a".repeat(64)}`,
+      sizeBytes: 4096,
+      state: "available",
+      retained: true,
+      reason: "retained for rollback to release 2",
+    },
+  ],
+}
+
 async function mockDashboard(
   page: Page,
-  options: { normalized?: boolean; runtime?: DeploymentRuntimeServices } = {},
+  options: {
+    normalized?: boolean
+    runtime?: DeploymentRuntimeServices
+    operations?: DeploymentOperations
+    comparison?: ReleaseComparisonResponse
+  } = {},
 ) {
   let runState = run.state
   let mutationCount = 0
@@ -224,6 +422,10 @@ async function mockDashboard(
           activeRun: undefined,
         },
       }
+    } else if (path === "/deploy/7/operations") {
+      body = options.operations ?? healthyOperations
+    } else if (path === "/deploy/7/environments/12/releases/20/comparison") {
+      body = options.comparison ?? releaseComparison
     } else if (path === "/deploy/7/environments/12/releases") {
       body = options.normalized
         ? [
@@ -520,11 +722,10 @@ test("runtime services hand off to exact Docker panels and survive history and r
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
+    // One theme now, so one shot. The product ships dark only — there is no
+    // toggle to drive and no second palette to check against.
     if (width === 375 || width === 1440) {
-      await list.screenshot({ path: testInfo.outputPath(`runtime-${width}-dark.png`) })
-      await page.getByRole("button", { name: "Switch to light" }).click()
-      await list.screenshot({ path: testInfo.outputPath(`runtime-${width}-light.png`) })
-      await page.getByRole("button", { name: "Switch to dark" }).click()
+      await list.screenshot({ path: testInfo.outputPath(`runtime-${width}.png`) })
     }
   }
   const containerLink = page.getByRole("link", { name: "web-live", exact: true })
@@ -728,6 +929,110 @@ async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
 
+const blueprintCatalogue = [
+  {
+    id: "minecraft-java",
+    version: "1.0.0",
+    name: "Minecraft (Java Edition)",
+    category: "game",
+    profile: "game",
+    description: "A Minecraft Java Edition server.",
+    iconId: "game",
+    docsUrl: "https://docker-minecraft-server.readthedocs.io/en/latest/",
+    license: "Apache-2.0",
+    maintainer: "Just Dashboard",
+    reviewedAt: "2026-09-11",
+    image: "itzg/minecraft-server:2025.1.1-java21",
+    memoryMb: 2048,
+    requiresAcceptance: true,
+  },
+  {
+    id: "uptime-kuma",
+    version: "1.0.0",
+    name: "Uptime Kuma",
+    category: "http",
+    profile: "web",
+    description: "Self-hosted uptime monitoring.",
+    iconId: "monitoring",
+    docsUrl: "https://github.com/louislam/uptime-kuma/wiki",
+    license: "MIT",
+    maintainer: "Just Dashboard",
+    reviewedAt: "2026-09-11",
+    image: "louislam/uptime-kuma:1.23.16",
+    memoryMb: 512,
+  },
+]
+
+const minecraftBlueprint = {
+  ...blueprintCatalogue[0],
+  provenance: {
+    maintainer: "Just Dashboard",
+    license: "Apache-2.0",
+    upstreamUrl: "https://github.com/itzg/docker-minecraft-server",
+    reviewedAt: "2026-09-11",
+    minimumDashboard: "0.6.7",
+  },
+  resources: { memoryMb: 2048, minMemoryMb: 1024 },
+  update: {
+    detector: "minecraft-java",
+    notes: "Updating the server build never replaces the world.",
+    backupFirst: true,
+  },
+  inputs: [
+    {
+      name: "server-type",
+      kind: "choice",
+      label: "Server software",
+      default: "VANILLA",
+      required: true,
+      variable: "TYPE",
+      choices: [
+        { value: "VANILLA", label: "Vanilla", description: "The official server." },
+        { value: "PAPER", label: "Paper", description: "Accepts Bukkit plugins." },
+      ],
+    },
+    { name: "memory", kind: "memory", label: "Memory", default: "2048", minimum: 1024 },
+    {
+      name: "max-players",
+      kind: "number",
+      label: "Maximum players",
+      default: "20",
+      minimum: 1,
+      maximum: 1000,
+      variable: "MAX_PLAYERS",
+    },
+    {
+      name: "online-mode",
+      kind: "boolean",
+      label: "Verify accounts with Mojang",
+      default: "true",
+      variable: "ONLINE_MODE",
+      advanced: true,
+    },
+    {
+      name: "eula",
+      kind: "accept",
+      label: "I accept the Minecraft EULA",
+      required: true,
+      variable: "EULA",
+      acceptUrl: "https://aka.ms/MinecraftEULA",
+      description: "The server refuses to start without this.",
+    },
+  ],
+  secrets: [],
+}
+
+const minecraftVersions = {
+  status: "available",
+  source: "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
+  checkedAt: now,
+  recommended: "1.21.4",
+  versions: [
+    { id: "1.21.4", kind: "release", releasedAt: now, recommended: true, latest: true },
+    { id: "1.21.3", kind: "release", releasedAt: now },
+  ],
+}
+
 async function mockWizardJourney(page: Page) {
   let revision = 1
   let currentStep = "intent"
@@ -752,6 +1057,9 @@ async function mockWizardJourney(page: Page) {
     const method = request.method()
     if (path === "/auth/session") return json(route, user)
     if (path === "/dashboard/update") return json(route, { current: "0.6.7", latest: "0.6.7" })
+    if (path === "/deploy/blueprints/") return json(route, blueprintCatalogue)
+    if (path === "/deploy/blueprints/minecraft-java") return json(route, minecraftBlueprint)
+    if (path === "/deploy/blueprints/minecraft-java/versions") return json(route, minecraftVersions)
     if (path === "/deploy/drafts" && method === "POST") return json(route, currentDraft())
     if (path === "/deploy/drafts/journey-draft" && method === "GET") {
       return json(route, currentDraft())
@@ -868,6 +1176,126 @@ async function mockWizardJourney(page: Page) {
   }
 }
 
+/**
+ * The quick path, which is what /deploy/new answers with.
+ *
+ * It drives the same draft endpoints the wizard does, so the journey mock is
+ * reused; what is added here is the three things quick deploy asks of the
+ * server that the wizard never did — the repository list, the generated public
+ * hostname, and the run it starts at the end.
+ */
+async function mockQuickDeploy(page: Page) {
+  const journey = await mockWizardJourney(page)
+  let imported: Record<string, unknown> | undefined
+  let runs = 0
+  await page.route("**/api/v1/git/github**", (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/git/github/repos")
+      return json(route, [
+        {
+          nameWithOwner: "Wayy01/wesmokefish",
+          name: "wesmokefish",
+          owner: "Wayy01",
+          description: "A Next.js site",
+          url: "https://github.com/Wayy01/wesmokefish",
+          cloneUrl: "https://github.com/Wayy01/wesmokefish.git",
+          defaultBranch: "main",
+          language: "TypeScript",
+          private: false,
+          fork: false,
+          archived: false,
+        },
+      ])
+    if (path === "/git/github/branches")
+      return json(route, [{ name: "main", default: true }, { name: "preview" }])
+    return json(route, {
+      available: true,
+      account: { loggedIn: true, login: "Wayy01", gitConfigured: true },
+    })
+  })
+  await page.route("**/api/v1/deploy/hostname**", (route) =>
+    json(route, {
+      hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
+      base: "203-0-113-7.sslip.io",
+      covered: false,
+      certificateMethod: "nginx",
+      method: "sslip",
+      address: "203.0.113.7",
+      detail:
+        "Resolves to 203.0.113.7 with no DNS record to create. No certificate covers it yet; one can be issued for it from here.",
+    }),
+  )
+  await page.route("**/api/v1/deploy/77/environments/78/variables/import", (route) => {
+    imported = route.request().postDataJSON() as Record<string, unknown>
+    return json(route, { desiredRevision: 9, variables: [] })
+  })
+  await page.route("**/api/v1/deploy/77/environments/78/runs", (route) => {
+    runs += 1
+    return json(route, { id: 84, state: "queued" })
+  })
+  return { ...journey, imported: () => imported, runs: () => runs }
+}
+
+test("quick deploy takes a GitHub repository to a running release without the wizard", async ({
+  page,
+}) => {
+  const quick = await mockQuickDeploy(page)
+  // On a phone, because the first deploy is as likely to be started from one as
+  // the wizard is, and every primary action here is a 44px target.
+  await page.setViewportSize({ width: 375, height: 850 })
+  await page.goto("/deploy/new")
+
+  // Three outcomes, not eight: the lane is the only classification asked for.
+  await expect(page.getByRole("heading", { name: "What are you putting online?" })).toBeVisible()
+  await page.getByText("From GitHub", { exact: true }).click()
+
+  // The repository is picked from what the signed-in credential can reach,
+  // rather than typed as a clone URL from memory.
+  await expect(page.getByText("Signed in as Wayy01")).toBeVisible()
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main")
+  await page.getByRole("button", { name: "Continue" }).click()
+
+  // Detection fills the build in, and the public hostname is already chosen.
+  await expect(page.getByRole("textbox", { name: "Build command" })).toHaveValue("bun run build")
+  await expect(page.getByRole("textbox", { name: "Start command" })).toHaveValue("bun start")
+  await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("3000")
+  await expect(page.getByRole("textbox", { name: "Hostname" })).toHaveValue(
+    "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
+  )
+  // Nothing to press: the certificate is the run's own work, before it starts
+  // anything, and the screen says so rather than offering a button.
+  await expect(page.getByText("A certificate will be issued during the deploy")).toBeVisible()
+  await expect(page.getByRole("button", { name: /certificate/i })).toHaveCount(0)
+
+  await page
+    .getByRole("textbox", { name: "Environment variables" })
+    .fill("NEXT_PUBLIC_SITE_URL=https://example.test")
+  const deployButton = page.getByRole("button", { name: "Deploy", exact: true })
+  expect((await deployButton.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  await deployButton.click()
+
+  // One press: plan saved, preflight run, environment applied, release started.
+  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  expect(quick.commits()).toBe(1)
+  expect(quick.runs()).toBe(1)
+  expect(quick.imported()).toMatchObject({
+    dotenv: "NEXT_PUBLIC_SITE_URL=https://example.test",
+    scopes: ["runtime", "build"],
+  })
+  expect(quick.configuration()).toMatchObject({
+    build: { buildCommand: "bun run build", startCommand: "bun start" },
+    runtime: { internalPort: 3000 },
+    domains: [
+      { hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io", https: true, ownership: "managed" },
+    ],
+    checks: [{ kind: "http", phase: "readiness", required: true }],
+  })
+})
+
 test("deployment fleet stays useful across the responsive contract", async ({ page }, testInfo) => {
   await mockDashboard(page)
 
@@ -892,7 +1320,7 @@ test("deployment fleet stays useful across the responsive contract", async ({ pa
 test("wizard exposes outcome choices and focuses a linked validation summary", async ({ page }) => {
   await mockDashboard(page)
   await page.setViewportSize({ width: 375, height: 850 })
-  await page.goto("/deploy/new")
+  await page.goto("/deploy/new?mode=advanced")
 
   await expect(page.getByRole("heading", { name: "Deploy something" })).toBeVisible()
   await expect(page.getByRole("radio", { name: /Web app or API/ })).toBeChecked()
@@ -913,7 +1341,7 @@ test("public Git and expert settings reach a reviewed plan without leaving the w
   page,
 }) => {
   const journey = await mockWizardJourney(page)
-  await page.goto("/deploy/new")
+  await page.goto("/deploy/new?mode=advanced")
   await page.getByRole("textbox", { name: "Deployment name" }).fill("public-web")
   await page.getByRole("button", { name: "Continue" }).click()
   await expect(page.getByRole("heading", { name: "Connect the source" })).toBeVisible()
@@ -978,20 +1406,44 @@ test("Minecraft reaches a safe reviewed plan with explicit EULA acceptance and n
   page,
 }) => {
   const journey = await mockWizardJourney(page)
-  await page.goto("/deploy/new")
+  await page.goto("/deploy/new?mode=advanced")
   await page.getByRole("textbox", { name: "Deployment name" }).fill("minecraft-family")
   await page.getByText("Game server", { exact: true }).click()
   await page.getByRole("button", { name: "Continue" }).click()
-  await expect(page.getByRole("textbox", { name: "Image" })).toHaveValue(
-    "itzg/minecraft-server:java21",
+
+  // The reviewed catalogue is what a game server starts from, and it says who
+  // reviewed it and under which licence before anything is chosen.
+  await expect(page.getByRole("radio", { name: /Minecraft \(Java Edition\)/ })).toBeChecked()
+  await expect(page.getByText("itzg/minecraft-server:2025.1.1-java21")).toBeVisible()
+  await expect(page.getByText(/Reviewed 2026-09-11 by Just Dashboard/)).toBeVisible()
+  // A game blueprint offers only game blueprints; a web application is not one.
+  await expect(page.getByRole("radio", { name: /Uptime Kuma/ })).toHaveCount(0)
+
+  // Versions come from the upstream manifest, never from a guess.
+  await expect(page.getByText("2 releases read from the upstream manifest.")).toBeVisible()
+
+  // The EULA is accepted against its own linked agreement, in the open, and it
+  // is not an Advanced field.
+  const eula = page.getByRole("checkbox", { name: /I accept the Minecraft EULA/ })
+  await expect(eula).not.toBeChecked()
+  await expect(page.getByRole("link", { name: /Read the agreement/ })).toHaveAttribute(
+    "href",
+    "https://aka.ms/MinecraftEULA",
   )
+  await eula.check()
+
+  // Advanced blueprint settings stay folded away until asked for.
+  const advancedToggle = page.getByRole("button", { name: /advanced blueprint settings/ })
+  await expect(advancedToggle).toHaveAttribute("aria-expanded", "false")
+  await expect(page.getByText("Verify accounts with Mojang")).toHaveCount(0)
+  await advancedToggle.click()
+  await expect(page.getByText("Verify accounts with Mojang")).toBeVisible()
+  await advancedToggle.click()
+
   await page.getByRole("button", { name: "Inspect source" }).click()
   await page.getByRole("button", { name: "Use this detection" }).click()
   await expect(page.getByRole("spinbutton", { name: "Application port" })).toHaveValue("25565")
-  const eula = page.getByRole("checkbox", { name: /I accept the Minecraft EULA/ })
-  await expect(eula).not.toBeChecked()
-  await eula.check()
-  await expect(page.getByRole("button", { name: /Advanced/ })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: /Advanced/ }).first()).toHaveAttribute(
     "aria-expanded",
     "false",
   )
@@ -1077,6 +1529,10 @@ test("normalized configuration joins keep secrets masked and saved changes pendi
   await expect(page.getByText("Certificate required")).toBeVisible()
 
   await page.getByRole("link", { name: /Configuration/ }).click()
+  // The save toast overlaps the bottom-right of the page while it is showing.
+  // Waiting it out is the honest fix: forcing the click would test a button an
+  // operator could not have pressed either.
+  await page.locator("[data-sonner-toast]").first().waitFor({ state: "detached", timeout: 15000 })
   await page.getByRole("button", { name: "Preview managed targets" }).click()
   await expect(page.getByText("api-data", { exact: true })).toBeVisible()
   await expect(page.getByText(/typed confirmation/)).toBeVisible()
@@ -1242,4 +1698,421 @@ test("run reload restores closed and active states, then cancel and retry stay k
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/85$/)
   expect(dashboard.mutationCount()).toBe(2)
+})
+
+test("operational findings name what was measured and hand off to the owning module", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  const operations: DeploymentOperations = {
+    ...healthyOperations,
+    domains: {
+      status: "available",
+      siteName: "just-dashboard-env-12.conf",
+      domains: [
+        {
+          hostname: "api.example.test",
+          https: true,
+          ownership: "managed",
+          route: "foreign",
+          servedBy: "legacy.conf",
+          certificate: "expired",
+          certificateName: "api.example.test",
+          deepLink: "/proxy/sites?site=legacy.conf",
+          certificateLink: "/proxy/certificates",
+        },
+      ],
+    },
+    storage: {
+      status: "available",
+      mounts: [
+        {
+          source: "api-data",
+          target: "/data",
+          kind: "volume",
+          ownership: "linked",
+          status: "missing",
+          detail: "Docker volume was not found",
+          deepLink: "/docker/volumes?volume=api-data",
+        },
+      ],
+    },
+    backups: {
+      status: "unavailable",
+      reason: "Backups inventory is unavailable. Open Backups to check the module.",
+      jobs: [],
+    },
+    diagnosis: {
+      status: "partial",
+      findings: [
+        {
+          code: "storage_missing",
+          severity: "critical",
+          title: "Persistent storage for /data is not present",
+          measured: "The storage owner could not find api-data.",
+          means: "Data written to this path is not in the location the release declared.",
+          action: "Open the storage owner to confirm whether the volume or path was removed.",
+          owner: "docker",
+          deepLink: "/docker/volumes?volume=api-data",
+        },
+        {
+          code: "domain_foreign_route",
+          severity: "critical",
+          title: "api.example.test is served by another site",
+          measured:
+            "Site legacy.conf claims this server name; this deployment's generated site does not.",
+          means:
+            "Traffic for this hostname reaches whatever that site points at, not this release.",
+          action: "Open the conflicting site in Proxy and decide which one owns the hostname.",
+          owner: "proxy",
+          deepLink: "/proxy/sites?site=legacy.conf",
+        },
+        {
+          code: "plan_pending",
+          severity: "notice",
+          title: "Saved changes are not live",
+          measured: "Saved plan revision 3 is not the live release's revision 2.",
+          means: "What this page shows as configuration is not what is currently running.",
+          action: "Review the pending changes and deploy when they are ready.",
+          owner: "deploy",
+        },
+      ],
+      silences: [
+        {
+          subject: "backups",
+          reason: "Backups inventory is unavailable. Open Backups to check the module.",
+        },
+      ],
+    },
+  }
+  const dashboard = await mockDashboard(page, { normalized: true, operations })
+  for (const width of [375, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7")
+    await expect(page.getByText("Persistent storage for /data is not present")).toBeVisible()
+    await expect(page.getByText("The storage owner could not find api-data.")).toBeVisible()
+    await expect(page.getByText("api.example.test is served by another site")).toBeVisible()
+    // A silenced owner is stated as an unanswered question, never as a clean result.
+    await expect(page.getByText("Not assessed")).toBeVisible()
+    await expect(
+      page.getByText("Backups inventory is unavailable. Open Backups to check the module.").first(),
+    ).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    if (width === 375 || width === 1440) {
+      const findings = page.getByRole("region", { name: "Current findings" })
+      const panel = (await findings.count()) ? findings : page.locator("body")
+      await panel.screenshot({ path: testInfo.outputPath(`findings-${width}.png`) })
+    }
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/deploy/7")
+  const domains = page.getByRole("list", { name: "Deployment domains" })
+  await expect(domains.getByText("Another site", { exact: true })).toBeVisible()
+  await expect(domains.getByText("Certificate expired", { exact: true })).toBeVisible()
+  await expect(domains.getByText("Served by legacy.conf")).toBeVisible()
+
+  const mounts = page.getByRole("region", { name: "Persistent storage" })
+  await expect(mounts.getByText("missing", { exact: true })).toBeVisible()
+
+  // Keyboard-only handoff: the finding's own link opens the owning module.
+  const storageLink = page.getByRole("link", { name: "Open docker" }).first()
+  await storageLink.focus()
+  await expect(storageLink).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/\/docker\/volumes\?volume=api-data$/)
+
+  await page.goto("/deploy/7")
+  await page.getByRole("link", { name: "Open the serving site" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\?site=legacy\.conf$/)
+  expect(dashboard.mutationCount()).toBe(0)
+})
+
+test("a healthy deployment reports nothing and an absent module never reads as success", async ({
+  page,
+}) => {
+  const dashboard = await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7")
+  await expect(page.getByText("Nothing to report")).toBeVisible()
+  await expect(
+    page.getByText("Runtime, domains, storage, backups and dependencies were all read"),
+  ).toBeVisible()
+  await expect(page.getByText("Not assessed")).toHaveCount(0)
+  const domains = page.getByRole("list", { name: "Deployment domains" })
+  await expect(domains.getByText("Routed here", { exact: true })).toBeVisible()
+  await expect(domains.getByText("Certificate valid", { exact: true })).toBeVisible()
+
+  const degraded: DeploymentOperations = {
+    observedAt: now,
+    evidence: "none",
+    reason: "This deployment has no live release.",
+    runtime: {
+      status: "unavailable",
+      observedAt: now,
+      reason: "Docker runtime evidence is unavailable. Open Docker to check the connection.",
+      services: [],
+    },
+    domains: { status: "unavailable", reason: "No live release names them.", domains: [] },
+    storage: { status: "unavailable", reason: "No live release names them.", mounts: [] },
+    backups: { status: "unavailable", reason: "No live release names them.", jobs: [] },
+    dependencies: { status: "unavailable", reason: "No live release names them.", items: [] },
+    diagnosis: {
+      status: "partial",
+      findings: [],
+      silences: [
+        {
+          subject: "runtime",
+          reason:
+            "This deployment has no live release, so no runtime, domain or storage claim can be made.",
+        },
+      ],
+    },
+  }
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockDashboard(page, { normalized: true, operations: degraded })
+  await page.goto("/deploy/7")
+  await expect(page.getByText("Domain evidence unavailable")).toBeVisible()
+  await expect(page.getByText("Storage evidence unavailable")).toBeVisible()
+  await expect(page.getByText("Backup evidence unavailable")).toBeVisible()
+  await expect(page.getByText("No live release names them.").first()).toBeVisible()
+  expect(dashboard.mutationCount()).toBe(0)
+})
+
+test("release comparison names what changed and never renders a variable value", async ({
+  page,
+}) => {
+  const dashboard = await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7?tab=deployments")
+  await expect(page.getByText("Release 19 compared with release 20")).toBeVisible()
+  await expect(page.getByText("source revision")).toBeVisible()
+  await expect(page.getByText("99887766554433221100 → a12bc34d56ef7890")).toBeVisible()
+  await expect(page.getByText("3000 → 8080")).toBeVisible()
+  // Unchanged fields stay out of the way: the panel answers "what changed".
+  await expect(page.getByText("bun start → bun start")).toHaveCount(0)
+
+  const variables = page.getByRole("region", { name: "Variables" })
+  await expect(variables.getByText("API_TOKEN")).toBeVisible()
+  await expect(variables.getByText("digest only")).toBeVisible()
+  await expect(variables.getByText("111111111111 · secret → 222222222222 · secret")).toBeVisible()
+  await expect(
+    variables.getByText("Compared by value digest. No variable value is read to build this list."),
+  ).toBeVisible()
+
+  await expect(page.getByText("outdated", { exact: true })).toBeVisible()
+  await expect(page.getByText("The upstream tag now points at a different image.")).toBeVisible()
+
+  const artifacts = page.getByRole("region", { name: "Retained artifacts" })
+  await expect(artifacts.getByText("example.test/api:v2")).toBeVisible()
+  await expect(artifacts.getByText("retained", { exact: true })).toBeVisible()
+  await expect(artifacts.getByText("retained for rollback to release 2")).toBeVisible()
+  expect(dashboard.mutationCount()).toBe(0)
+})
+
+test("the game workspace sends commands, moderates players and edits only declared settings", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  const sent: string[] = []
+  let written: Record<string, string> | null = null
+  let players = {
+    supported: true,
+    status: "available",
+    online: 1,
+    maximum: 20,
+    names: ["Notch"],
+    observedAt: now,
+  }
+  await mockDashboard(page, { normalized: true })
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/deploy/7/game") {
+      return json(route, {
+        status: "available",
+        blueprintId: "minecraft-java",
+        edition: "java",
+        containerId: "mc123",
+        address: "play.example.test:25565",
+        console: true,
+        players,
+        files: [],
+      })
+    }
+    if (path === "/deploy/7/game/players" && request.method() === "GET") {
+      return json(route, players)
+    }
+    if (path === "/deploy/7/game/console") {
+      const body = request.postDataJSON() as { command: string }
+      sent.push(body.command)
+      return json(route, {
+        command: body.command,
+        output: "There are 1 of a max of 20 players online: Notch",
+        exitCode: 0,
+        executedAt: now,
+      })
+    }
+    if (path.startsWith("/deploy/7/game/players/")) {
+      const action = path.split("/").at(-1)
+      sent.push(`${action}:${(request.postDataJSON() as { name: string }).name}`)
+      players = { ...players, online: 0, names: [] }
+      return json(route, { command: action, output: "", exitCode: 0, executedAt: now })
+    }
+    if (path === "/deploy/7/game/properties" && request.method() === "GET") {
+      return json(route, {
+        status: "available",
+        path: "/data/server.properties",
+        raw: "#Minecraft server properties\nmotd=Old name\nmax-players=20\nexperimental=keep-me\n",
+        values: { motd: "Old name", "max-players": "20", experimental: "keep-me" },
+        restartRequired: true,
+        known: [
+          { key: "motd", kind: "text", label: "Server list description" },
+          {
+            key: "max-players",
+            kind: "number",
+            label: "Maximum players",
+            minimum: 1,
+            maximum: 1000,
+          },
+          {
+            key: "difficulty",
+            kind: "choice",
+            label: "Difficulty",
+            choices: [
+              { value: "easy", label: "Easy" },
+              { value: "normal", label: "Normal" },
+            ],
+          },
+        ],
+      })
+    }
+    if (path === "/deploy/7/game/properties" && request.method() === "PUT") {
+      written = (request.postDataJSON() as { changes: Record<string, string> }).changes
+      return json(route, { applied: Object.keys(written), restartRequired: true })
+    }
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "not_available", message: "Not mocked" } }),
+    })
+  })
+  // The workspace shows game tabs only for a game deployment.
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+
+  await page.goto("/deploy/7?tab=console")
+  await expect(page.getByRole("log", { name: "Console transcript" })).toBeVisible()
+  const field = page.getByRole("textbox", { name: "Command" })
+  await field.fill("list")
+  await page.getByRole("button", { name: "Send" }).click()
+  await expect(page.getByText("There are 1 of a max of 20 players online: Notch")).toBeVisible()
+  expect(sent).toContain("list")
+  // The previous command comes back with the up arrow rather than being retyped.
+  await field.focus()
+  await page.keyboard.press("ArrowUp")
+  await expect(field).toHaveValue("list")
+  await expect(page.getByText("Only plain game commands are accepted.")).toBeVisible()
+
+  await page.goto("/deploy/7?tab=players")
+  const list = page.getByRole("list", { name: "Online players" })
+  await expect(list.getByText("Notch")).toBeVisible()
+  await list.getByRole("button", { name: "Kick" }).click()
+  expect(sent).toContain("kick:Notch")
+
+  await page.goto("/deploy/7?tab=settings")
+  await expect(page.getByLabel("Server list description")).toHaveValue("Old name")
+  // A key the blueprint does not declare stays in the raw preview and gets no
+  // control of its own.
+  await expect(page.getByText("experimental=keep-me")).toBeVisible()
+  await expect(page.getByLabel("experimental")).toHaveCount(0)
+  await page.getByLabel("Server list description").fill("New name")
+  await expect(page.getByText("The server reads this file on start.")).toBeVisible()
+  await page.getByRole("button", { name: /^Save/ }).click()
+  await expect.poll(() => written).toEqual({ motd: "New name" })
+
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7?tab=console")
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`game-console-${width}.png`) })
+  }
+})
+
+test("importing an existing Minecraft server previews it before anything is copied", async ({
+  page,
+}) => {
+  const journey = await mockWizardJourney(page)
+  await page.route("**/api/v1/deploy/game/import/preview", async (route) => {
+    const path = (route.request().postDataJSON() as { path: string }).path
+    if (path !== "/srv/minecraft") {
+      return route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "invalid_import",
+            message: "no Minecraft server was found in that directory",
+          },
+        }),
+      })
+    }
+    return json(route, {
+      root: "/srv/minecraft",
+      edition: "java",
+      software: "paper",
+      version: "1.21.1",
+      evidence: [{ path: "paper-1.21.1-42.jar", reason: "the jar name identifies a paper server" }],
+      worldPaths: ["world", "world_nether"],
+      modPaths: ["plugins"],
+      configPaths: ["server.properties", "eula.txt"],
+      logPaths: ["logs"],
+      ignoredPaths: ["logs — regenerated by the server on every start"],
+      properties: { motd: "Imported server", "max-players": "40", difficulty: "hard" },
+      port: 25570,
+      totalBytes: 1048576,
+      eulaAccepted: true,
+      warnings: ["More than one world directory was found."],
+    })
+  })
+
+  await page.goto("/deploy/new?mode=advanced")
+  await page.getByRole("textbox", { name: "Deployment name" }).fill("imported-survival")
+  await page.getByText("Game server", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue" }).click()
+
+  await page.getByRole("button", { name: "I already have a server on this machine" }).click()
+  const pathField = page.getByRole("textbox", { name: "Server directory" })
+
+  // A directory that holds no server says so instead of guessing.
+  await pathField.fill("/srv/not-a-server")
+  await page.getByRole("button", { name: "Inspect", exact: true }).click()
+  await expect(page.getByText("That directory was not usable")).toBeVisible()
+
+  await pathField.fill("/srv/minecraft")
+  await page.getByRole("button", { name: "Inspect", exact: true }).click()
+  await expect(page.getByText("paper", { exact: true })).toBeVisible()
+  await expect(page.getByText("1.21.1", { exact: true })).toBeVisible()
+  await expect(page.getByText("port 25570", { exact: true })).toBeVisible()
+  await expect(page.getByText("EULA accepted", { exact: true })).toBeVisible()
+  await expect(page.getByText("world, world_nether")).toBeVisible()
+  // Runtime output is named as left behind rather than silently copied.
+  await expect(page.getByText("logs — regenerated by the server on every start")).toBeVisible()
+  // The reasoning is shown so the operator can disagree with it.
+  await expect(page.getByText("the jar name identifies a paper server")).toBeVisible()
+  await expect(page.getByText("More than one world directory was found.")).toBeVisible()
+
+  // What it found fills the fields in, and nothing has been committed. The
+  // imported version stays selected even though the upstream list no longer
+  // offers it: importing a server is not upgrading it.
+  await expect(page.getByRole("combobox", { name: "Minecraft version" })).toContainText("1.21.1")
+  await expect(page.getByLabel("Maximum players")).toHaveValue("40")
+  expect(journey.commits()).toBe(0)
 })

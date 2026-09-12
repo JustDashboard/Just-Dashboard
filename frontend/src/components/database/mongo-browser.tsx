@@ -22,11 +22,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -35,13 +34,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Table,
   TableBody,
@@ -52,6 +44,8 @@ import {
 } from "@/components/ui/table"
 import { ResultGrid } from "@/components/database/result-grid"
 import { ImportDialog } from "@/components/database/import-dialog"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 const PAGE = 100
@@ -223,7 +217,6 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
         <PanelHeader
           icon={Database}
           title="Collections"
-          description={`${collections.data?.length ?? 0}`}
         />
         <PanelBody className="space-y-3">
           {databases.data && databases.data.length > 1 && (
@@ -263,20 +256,18 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                 className={cn(
                   "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
                   collection === c.name
-                    ? "bg-primary/12 font-medium text-foreground"
+                    ? "bg-plot-primary font-medium text-foreground"
                     : "hover:bg-accent",
                 )}
               >
-                <span className="truncate text-[13px]">{c.name}</span>
-                <span className="truncate text-[11px] text-muted-foreground">
+                <span className="truncate text-body">{c.name}</span>
+                <span className="truncate text-hint text-muted-foreground">
                   {c.estimatedRows.toLocaleString()} docs
                   {c.size ? ` · ${bytes(c.size)}` : ""}
                 </span>
               </button>
             ))}
-            {collections.data?.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No collections.</p>
-            )}
+            {collections.data?.length === 0 && <EmptyNote>No collections.</EmptyNote>}
           </div>
         </PanelBody>
       </Panel>
@@ -294,11 +285,6 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
               <PanelHeader
                 icon={Layout}
                 title={collection ?? "Pick a collection"}
-                description={
-                  docs.data
-                    ? `${plural(docs.data.rowCount, "document")} in ${docs.data.duration}`
-                    : undefined
-                }
                 actions={
                   collection && (
                     <>
@@ -385,6 +371,8 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                     result={docs.data}
                     onEdit={canWrite ? editDoc : undefined}
                     onDelete={canWrite ? deleteDoc : undefined}
+                    emptyTitle="No documents"
+                    emptyDescription="Either the collection is empty or the filter above matched nothing in it."
                   />
                 )}
               </PanelBody>
@@ -393,7 +381,7 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
 
           <TabsContent value="indexes" className="min-w-0">
             <Panel>
-              <PanelHeader icon={CodeBracket} title="Indexes" description={collection} />
+              <PanelHeader icon={CodeBracket} title="Indexes" />
               <PanelBody flush>
                 {!collection && <EmptyState icon={CodeBracket} title="Select a collection" />}
                 {info.data && (
@@ -409,18 +397,14 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                       <TableBody>
                         {info.data.indexes.map((ix) => (
                           <TableRow key={ix.name}>
-                            <TableCell className="font-mono text-xs">
+                            <TableCell className="font-mono">
                               {ix.name}
-                              {ix.primary && (
-                                <Badge variant="secondary" className="ml-1.5 font-normal">
-                                  _id
-                                </Badge>
-                              )}
+                              {ix.primary && <Tag className="ml-1.5">_id</Tag>}
                             </TableCell>
-                            <TableCell className="font-mono text-xs text-muted-foreground">
+                            <TableCell className="font-mono text-muted-foreground">
                               {ix.columns.join(", ")}
                             </TableCell>
-                            <TableCell className="text-xs">{ix.unique ? "yes" : "no"}</TableCell>
+                            <TableCell>{ix.unique ? "yes" : "no"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -529,30 +513,31 @@ function DocumentDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2">
-          <CodeEditor className="h-80" language="json" value={json} onChange={setJson} />
-          {parseError && <p className="text-xs text-destructive">{parseError}</p>}
-          <p className="text-xs text-muted-foreground">
-            The whole document is replaced. <span className="font-mono">_id</span> is immutable and
-            is ignored if present.
-          </p>
-        </div>
-        <DialogFooter>
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="lg"
+      title={title}
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={Boolean(parseError) || busy}>
-            {busy && <Spinner />}
+          <Button onClick={save} disabled={Boolean(parseError) || busy} pending={busy}>
             Save
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        <CodeEditor className="h-80" language="json" value={json} onChange={setJson} />
+        {parseError && <p className="text-xs text-destructive">{parseError}</p>}
+        <p className="text-xs text-muted-foreground">
+          The whole document is replaced. <span className="font-mono">_id</span> is immutable and is
+          ignored if present.
+        </p>
+      </div>
+    </Modal>
   )
 }
 
@@ -625,27 +610,27 @@ function AggregateTab({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Panel>
-        <PanelHeader icon={AcronymJson} title="Aggregation pipeline" description={collection} />
+        <PanelHeader icon={AcronymJson} title="Aggregation pipeline" />
         <PanelBody flush>
           <CodeEditor className="h-56" language="json" value={pipeline} onChange={setPipeline} />
         </PanelBody>
         <PanelFooter>
-          <Button size="sm" onClick={run} disabled={busy || !can("service.control")}>
-            {busy ? <Spinner /> : <Play className="size-3.5" />}
+          <Button size="sm" onClick={run} disabled={busy || !can("service.control")} pending={busy}>
+            <Play className="size-3.5" />
             Run
           </Button>
-          {writes && (
-            <Badge variant="destructive" className="font-normal">
-              writes a collection
-            </Badge>
-          )}
+          {writes && <span className="text-xs text-destructive">writes a collection</span>}
         </PanelFooter>
       </Panel>
       {result && (
         <Panel>
           <PanelHeader icon={Layout} title="Result" />
           <PanelBody flush>
-            <ResultGrid result={result} />
+            <ResultGrid
+              result={result}
+              emptyTitle="The pipeline ran and returned nothing"
+              emptyDescription="Not an error — every stage completed and the last one emitted no documents."
+            />
           </PanelBody>
         </Panel>
       )}

@@ -43,6 +43,27 @@ type Container struct {
 	// the alternative is an inspect per container on every poll — sixty round
 	// trips to the socket to draw one table.
 	Mounts []MountPoint `json:"mounts,omitempty"`
+
+	// Exposure is the port list with its meaning attached: which of these
+	// bindings reach beyond this server and which do not. Computed once here
+	// rather than in each of the four components that render a port, all of
+	// which previously drew 0.0.0.0:5432 and 127.0.0.1:5432 the same way.
+	Exposure []PortExposure `json:"exposure"`
+
+	// What the container was told it may use, and whether anything is watching
+	// it. Filled by inspection for running containers only — a stopped
+	// container is not consuming anything, and inspecting every container on
+	// a host with a hundred of them to draw a table nobody is reading is the
+	// cost this listing exists to avoid.
+	MemoryLimit   int64   `json:"memoryLimit,omitempty"`
+	CPULimit      float64 `json:"cpuLimit,omitempty"`
+	HasHealthchk  bool    `json:"hasHealthcheck"`
+	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	Privileged    bool    `json:"privileged,omitempty"`
+	// Inspected says whether the three fields above are an answer or an
+	// absence, so the UI never renders "no memory limit" for a container it
+	// simply did not look at.
+	Inspected bool `json:"inspected"`
 }
 
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, error) {
@@ -121,14 +142,25 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 	return out, nil
 }
 
-// enrichUptime fills StartedAt for running containers. The list endpoint only
-// reports a human string ("Up 3 days"), which is useless for sorting or charts.
+// enrichUptime fills in what the listing endpoint cannot say.
+//
+// The list reports uptime as a human string ("Up 3 days"), which is useless
+// for sorting or charts, and says nothing at all about limits, health checks
+// or restart policy. All of it comes from one inspect per running container —
+// the same call that was already being made for the timestamp, so the extra
+// facts are free.
+//
+// Only running containers are inspected. A stopped one is consuming nothing,
+// and inspecting a hundred of them to draw a table would make the page slower
+// for information nobody is reading; `Inspected` marks the difference so the
+// UI never renders an absence as an answer.
 func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 	cli, err := c.api()
 	if err != nil {
 		return
 	}
 	for i := range list {
+		list[i].Exposure = DescribePorts(list[i].Ports)
 		if list[i].State != "running" {
 			continue
 		}
@@ -136,6 +168,7 @@ func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 		if err != nil || insp.State == nil {
 			continue
 		}
+		list[i].Inspected = true
 		if started, err := time.Parse(time.RFC3339Nano, insp.State.StartedAt); err == nil {
 			s := started.UTC()
 			list[i].StartedAt = &s
@@ -143,6 +176,18 @@ func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 		}
 		if insp.State.Health != nil {
 			list[i].Health = insp.State.Health.Status
+		}
+		list[i].HasHealthchk = healthFactsOf(insp).hasCheck
+		if insp.HostConfig != nil {
+			list[i].MemoryLimit = insp.HostConfig.Memory
+			list[i].RestartPolicy = string(insp.HostConfig.RestartPolicy.Name)
+			list[i].Privileged = insp.HostConfig.Privileged
+			switch {
+			case insp.HostConfig.NanoCPUs > 0:
+				list[i].CPULimit = float64(insp.HostConfig.NanoCPUs) / 1e9
+			case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
+				list[i].CPULimit = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
+			}
 		}
 	}
 }
@@ -207,6 +252,10 @@ var secretEnvHints = []string{
 	"SECRET", "PASSWORD", "PASSWD", "TOKEN", "CREDENTIAL", "PRIVATE",
 	"SALT", "SIGNATURE", "CIPHER", "APIKEY", "API_KEY", "AUTH", "DSN",
 	"_KEY", "KEY_", "MASTER_KEY", "ACCESS", "SESSION",
+	// A connection string carries the password inside it, so the variable
+	// name gives no hint that the value is a credential — DATABASE_URL is the
+	// single most common way a password ends up on screen.
+	"JWT", "DATABASE_URL", "DB_URL", "CONNECTION_STRING", "_URI", "WEBHOOK",
 }
 
 // IsSecretEnvKey reports whether an environment variable name conventionally
@@ -328,6 +377,17 @@ func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, erro
 		}
 		sort.Strings(d.Networks)
 		for portSpec, bindings := range insp.NetworkSettings.Ports {
+			if len(bindings) == 0 {
+				// An exposed port with no host binding. Docker reports it with
+				// an empty binding list, and dropping it here is why a
+				// container that publishes nothing looked identical to one
+				// whose ports simply were not read.
+				d.Ports = append(d.Ports, Port{
+					PrivatePort: uint16(portSpec.Int()),
+					Type:        portSpec.Proto(),
+				})
+				continue
+			}
 			for _, b := range bindings {
 				d.Ports = append(d.Ports, Port{
 					IP:          b.HostIP,
@@ -336,6 +396,18 @@ func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, erro
 					Type:        portSpec.Proto(),
 				})
 			}
+		}
+	}
+	d.Exposure = DescribePorts(d.Ports)
+	d.Inspected = true
+	d.HasHealthchk = healthFactsOf(insp).hasCheck
+	if insp.HostConfig != nil {
+		d.MemoryLimit = insp.HostConfig.Memory
+		switch {
+		case insp.HostConfig.NanoCPUs > 0:
+			d.CPULimit = float64(insp.HostConfig.NanoCPUs) / 1e9
+		case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
+			d.CPULimit = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
 		}
 	}
 	return d, nil

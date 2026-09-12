@@ -35,9 +35,10 @@ import type {
 } from "@/lib/types"
 import { humanize } from "@/components/deploy/deployment-ui"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -132,15 +133,11 @@ function PendingPanel({ pending }: { pending: DeploymentEnvironmentConfiguration
       <PanelHeader
         icon={RefreshClockwise}
         title={pending.pending ? "Pending deployment" : "Desired plan is live"}
-        description={
-          pending.pending
-            ? `Revision ${pending.desiredRevision} is saved; the live release remains on revision ${pending.livePlanRevision ?? "none"}.`
-            : `Revision ${pending.desiredRevision} is the active release.`
-        }
         actions={
-          <Badge variant={pending.pending ? "warning" : "success"}>
-            {pending.pending ? `${pending.changes.length} changes` : "Live"}
-          </Badge>
+          <Status
+            verdict={pending.pending ? "warning" : "ok"}
+            label={pending.pending ? `${pending.changes.length} changes` : "Live"}
+          />
         }
       />
       {pending.changes.length > 0 && (
@@ -151,7 +148,7 @@ function PendingPanel({ pending }: { pending: DeploymentEnvironmentConfiguration
                 key={`${change.kind}-${change.name}-${index}`}
                 className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs"
               >
-                <span className="min-w-0 break-words font-medium">{change.name}</span>
+                <span className="min-w-0 font-medium break-words">{change.name}</span>
                 <span className="text-muted-foreground">
                   {humanize(change.kind)} · {humanize(change.change)}
                 </span>
@@ -211,7 +208,6 @@ function RuntimeConfigurationForm({
       <PanelHeader
         icon={FloppyDisk}
         title="Runtime configuration"
-        description={`Build method ${humanize(configuration.build.method)} is preserved while these runtime settings change.`}
       />
       <PanelBody>
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -223,7 +219,7 @@ function RuntimeConfigurationForm({
               }
               disabled={!can("system.admin")}
             >
-              <SelectTrigger id="runtime-strategy" className="h-11 w-full sm:h-9">
+              <SelectTrigger id="runtime-strategy" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -242,7 +238,7 @@ function RuntimeConfigurationForm({
               value={runtime.bindAddress ?? ""}
               onChange={(event) => setRuntime({ ...runtime, bindAddress: event.target.value })}
               readOnly={!can("system.admin")}
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           <Field label="Application port" htmlFor="runtime-internal-port">
@@ -256,7 +252,6 @@ function RuntimeConfigurationForm({
                 setRuntime({ ...runtime, internalPort: Number(event.target.value) })
               }
               readOnly={!can("system.admin")}
-              className="h-11 sm:h-9"
             />
           </Field>
           <Field
@@ -272,7 +267,6 @@ function RuntimeConfigurationForm({
               value={runtime.hostPort ?? 0}
               onChange={(event) => setRuntime({ ...runtime, hostPort: Number(event.target.value) })}
               readOnly={!can("system.admin")}
-              className="h-11 sm:h-9"
             />
           </Field>
           <Field label="Runtime image" htmlFor="runtime-image" className="sm:col-span-2">
@@ -281,7 +275,7 @@ function RuntimeConfigurationForm({
               value={runtime.image ?? ""}
               onChange={(event) => setRuntime({ ...runtime, image: event.target.value })}
               readOnly={!can("system.admin")}
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           <Field
@@ -306,8 +300,7 @@ function RuntimeConfigurationForm({
         )}
         {can("system.admin") && (
           <div className="mt-4 flex justify-end">
-            <Button className="h-11 sm:h-9" onClick={save} disabled={busy}>
-              {busy && <Spinner className="size-4" />}
+            <Button onClick={save} pending={busy}>
               Save configuration
             </Button>
           </div>
@@ -455,7 +448,7 @@ function VariableWorkspace({
         {generated && (
           <Notice icon={Sparkles} tone="warning" title={`${generated.name} was generated`}>
             <p>This value is shown once. Store it now; the list will keep only a fixed mask.</p>
-            <Well className="mt-3 break-all select-all font-mono">{generated.value}</Well>
+            <Well className="mt-3 font-mono break-all select-all">{generated.value}</Well>
             <Button
               size="sm"
               variant="outline"
@@ -471,7 +464,6 @@ function VariableWorkspace({
             <PanelHeader
               icon={Plus}
               title="Add or update a variable"
-              description="Use a literal value or one full typed reference such as ${{credential.production-token}}."
             />
             <PanelBody className="space-y-4">
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -483,7 +475,7 @@ function VariableWorkspace({
                     autoCapitalize="characters"
                     autoComplete="off"
                     spellCheck={false}
-                    className="h-11 font-mono sm:h-9"
+                    className="font-mono"
                   />
                 </Field>
                 <Field label={reference ? "Typed reference" : "Value"} htmlFor="variable-value">
@@ -494,7 +486,7 @@ function VariableWorkspace({
                     onChange={(event) => setValue(event.target.value)}
                     autoComplete="off"
                     spellCheck={false}
-                    className="h-11 font-mono sm:h-9"
+                    className="font-mono"
                   />
                 </Field>
               </div>
@@ -527,22 +519,18 @@ function VariableWorkspace({
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button className="h-11 sm:h-9" onClick={save} disabled={Boolean(busy)}>
-                  {busy === "save" && <Spinner className="size-4" />} Save variable
+                <Button onClick={save} disabled={Boolean(busy)} pending={busy === "save"}>
+                  Save variable
                 </Button>
                 <Button
-                  className="h-11 sm:h-9"
                   variant="outline"
                   onClick={generate}
                   disabled={Boolean(busy)}
+                  pending={busy === "generate"}
                 >
-                  {busy === "generate" && <Spinner className="size-4" />} Generate secret
+                  Generate secret
                 </Button>
-                <Button
-                  className="h-11 sm:h-9"
-                  variant="ghost"
-                  onClick={() => setShowImport((open) => !open)}
-                >
+                <Button variant="ghost" onClick={() => setShowImport((open) => !open)}>
                   Import dotenv
                 </Button>
               </div>
@@ -560,11 +548,12 @@ function VariableWorkspace({
                     placeholder={'API_URL=https://api.example.test\nTOKEN="multiline\\nvalue"'}
                   />
                   <Button
-                    className="mt-3 h-11 sm:h-9"
+                    className="mt-3"
                     onClick={importDotenv}
                     disabled={Boolean(busy)}
+                    pending={busy === "import"}
                   >
-                    {busy === "import" && <Spinner className="size-4" />} Import variables
+                    Import variables
                   </Button>
                 </Field>
               )}
@@ -575,7 +564,6 @@ function VariableWorkspace({
           <PanelHeader
             icon={Key}
             title="Scoped variables"
-            description="Secret values and secret reference leaves use a fixed mask. Reveal is a separate audited admin action."
           />
           <PanelBody flush>
             {configuration.variables.length === 0 ? (
@@ -592,19 +580,19 @@ function VariableWorkspace({
                     <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="break-all font-mono text-xs font-medium">
+                          <span className="font-mono text-xs font-medium break-all">
                             {variable.name}
                           </span>
-                          {variable.pending && <Badge variant="warning">Pending</Badge>}
-                          <Badge variant="outline">{variable.sensitivity}</Badge>
+                          {variable.pending && <Tag tone="warning">Pending</Tag>}
+                          <Tag>{variable.sensitivity}</Tag>
                         </div>
-                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                        <p className="mt-1 font-mono text-xs break-all text-muted-foreground">
                           {revealed[variable.name] ??
                             (variable.reference
                               ? `${variable.reference.kind}.${variable.reference.target}`
                               : variable.masked)}
                         </p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
+                        <p className="mt-1 text-hint text-muted-foreground">
                           {variable.scopes.map(humanize).join(" · ")} · revision {variable.revision}{" "}
                           · {relativeTime(variable.createdAt)}
                         </p>
@@ -778,7 +766,6 @@ function NetworkForm({
         <PanelHeader
           icon={Globe}
           title="Domains"
-          description="The Proxy owner renders routes; DNS and TLS inventory are observed independently before deployment."
           actions={
             can("system.admin") && (
               <Button
@@ -803,9 +790,9 @@ function NetworkForm({
             />
           )}
           {domains.map((domain, index) => (
-            <div
+            <Group
               key={index}
-              className="grid min-w-0 gap-3 rounded-lg border border-hairline p-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto_auto] sm:items-end"
+              className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto_auto] sm:items-end"
             >
               <Field label={`Domain ${index + 1}`} htmlFor={`domain-${index}`}>
                 <Input
@@ -821,7 +808,7 @@ function NetworkForm({
                     )
                   }
                   readOnly={!can("system.admin")}
-                  className="h-11 font-mono sm:h-9"
+                  className="font-mono"
                 />
               </Field>
               <Field label="Ownership" htmlFor={`domain-ownership-${index}`}>
@@ -836,7 +823,7 @@ function NetworkForm({
                   }
                   disabled={!can("system.admin")}
                 >
-                  <SelectTrigger id={`domain-ownership-${index}`} className="h-11 w-full sm:h-9">
+                  <SelectTrigger id={`domain-ownership-${index}`} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -862,13 +849,13 @@ function NetworkForm({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-11 text-destructive sm:h-9"
+                  className="text-destructive"
                   onClick={() => setDomains(domains.filter((_, itemIndex) => itemIndex !== index))}
                 >
                   <Trash className="size-3.5" /> Remove
                 </Button>
               )}
-            </div>
+            </Group>
           ))}
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -877,8 +864,8 @@ function NetworkForm({
           )}
           {can("system.admin") && (
             <div className="flex justify-end">
-              <Button className="h-11 sm:h-9" onClick={save} disabled={busy}>
-                {busy && <Spinner className="size-4" />} Save network plan
+              <Button onClick={save} pending={busy}>
+                Save network plan
               </Button>
             </div>
           )}
@@ -986,7 +973,6 @@ function StorageForm({
         <PanelHeader
           icon={Database}
           title="Persistent mounts"
-          description="Managed storage may appear in a later removal plan; linked and observed storage never does."
           actions={
             can("system.admin") && (
               <Button
@@ -1011,9 +997,9 @@ function StorageForm({
             />
           )}
           {mounts.map((mount, index) => (
-            <div
+            <Group
               key={index}
-              className="grid min-w-0 gap-3 rounded-lg border border-hairline p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem_auto_auto] lg:items-end"
+              className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem_auto_auto] lg:items-end"
             >
               <Field label={`Source ${index + 1}`} htmlFor={`mount-source-${index}`}>
                 <Input
@@ -1027,7 +1013,7 @@ function StorageForm({
                       ),
                     )
                   }
-                  className="h-11 font-mono sm:h-9"
+                  className="font-mono"
                 />
               </Field>
               <Field label="Container path" htmlFor={`mount-target-${index}`}>
@@ -1042,7 +1028,7 @@ function StorageForm({
                       ),
                     )
                   }
-                  className="h-11 font-mono sm:h-9"
+                  className="font-mono"
                 />
               </Field>
               <Field label="Ownership" htmlFor={`mount-ownership-${index}`}>
@@ -1057,7 +1043,7 @@ function StorageForm({
                   }
                   disabled={!can("system.admin")}
                 >
-                  <SelectTrigger id={`mount-ownership-${index}`} className="h-11 w-full sm:h-9">
+                  <SelectTrigger id={`mount-ownership-${index}`} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1084,13 +1070,13 @@ function StorageForm({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-11 text-destructive sm:h-9"
+                  className="text-destructive"
                   onClick={() => setMounts(mounts.filter((_, itemIndex) => itemIndex !== index))}
                 >
                   <Trash className="size-3.5" /> Remove
                 </Button>
               )}
-            </div>
+            </Group>
           ))}
         </PanelBody>
       </Panel>
@@ -1098,7 +1084,6 @@ function StorageForm({
         <PanelHeader
           icon={ShieldCheck}
           title="Backups & dependencies"
-          description="Backups, Docker storage, and database records stay owned by their existing features."
           actions={
             can("system.admin") && (
               <div className="flex flex-wrap gap-1">
@@ -1144,8 +1129,8 @@ function StorageForm({
           )}
           {can("system.admin") && (
             <div className="flex justify-end">
-              <Button className="h-11 sm:h-9" onClick={save} disabled={busy}>
-                {busy && <Spinner className="size-4" />} Save storage plan
+              <Button onClick={save} pending={busy}>
+                Save storage plan
               </Button>
             </div>
           )}
@@ -1182,15 +1167,10 @@ function DependencyRow({
         ? "/databases"
         : "/docker?tab=volumes"
   return (
-    <div className="space-y-3 rounded-lg border border-hairline p-3">
+    <Group className="space-y-3">
       <div className="grid min-w-0 gap-3 sm:grid-cols-[8rem_minmax(0,1fr)_8rem_auto] sm:items-end">
         <Field label="Kind" htmlFor={`dependency-kind-${index}`}>
-          <Input
-            id={`dependency-kind-${index}`}
-            value={humanize(dependency.kind)}
-            readOnly
-            className="h-11 sm:h-9"
-          />
+          <Input id={`dependency-kind-${index}`} value={humanize(dependency.kind)} readOnly />
         </Field>
         <Field label="Resource id" htmlFor={`dependency-resource-${index}`}>
           <Input
@@ -1198,7 +1178,7 @@ function DependencyRow({
             value={dependency.resourceId ?? ""}
             readOnly={readOnly}
             onChange={(event) => onChange({ ...dependency, resourceId: event.target.value })}
-            className="h-11 font-mono sm:h-9"
+            className="font-mono"
           />
         </Field>
         <Field label="Ownership" htmlFor={`dependency-ownership-${index}`}>
@@ -1209,7 +1189,7 @@ function DependencyRow({
             }
             disabled={readOnly}
           >
-            <SelectTrigger id={`dependency-ownership-${index}`} className="h-11 w-full sm:h-9">
+            <SelectTrigger id={`dependency-ownership-${index}`} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1220,12 +1200,7 @@ function DependencyRow({
           </Select>
         </Field>
         {!readOnly && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-11 text-destructive sm:h-9"
-            onClick={onRemove}
-          >
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={onRemove}>
             <Trash className="size-3.5" /> Remove
           </Button>
         )}
@@ -1263,7 +1238,7 @@ function DependencyRow({
                   config: { ...config, maxAgeSeconds: Number(event.target.value) * 3600 },
                 })
               }
-              className="h-11 w-32 sm:h-9"
+              className="w-32"
             />
           </Field>
         </div>
@@ -1273,7 +1248,7 @@ function DependencyRow({
           Open {humanize(dependency.kind)} owner <ArrowRight className="size-3.5" />
         </Link>
       </Button>
-    </div>
+    </Group>
   )
 }
 
@@ -1297,7 +1272,6 @@ function BackupEvidence({
       <PanelHeader
         icon={ShieldCheck}
         title="Latest backup gate evidence"
-        description="Restore evidence is reported separately from artifact freshness; absence never appears as a pass."
       />
       <PanelBody>
         {loading ? (
@@ -1313,9 +1287,9 @@ function BackupEvidence({
         ) : (
           <div className="space-y-2">
             {evidence.map((item) => (
-              <div
+              <Group
                 key={`${item.jobId}-${item.runId ?? 0}`}
-                className="grid min-w-0 gap-2 rounded-lg border border-hairline p-3 text-xs sm:grid-cols-4"
+                className="grid min-w-0 gap-2 text-xs sm:grid-cols-4"
               >
                 <EvidenceValue label="Backup job" value={`#${item.jobId}`} />
                 <EvidenceValue label="Run" value={item.runId ? `#${item.runId}` : "Unavailable"} />
@@ -1330,7 +1304,7 @@ function BackupEvidence({
                     {item.detail ? ` · ${item.detail}` : ""}
                   </p>
                 )}
-              </div>
+              </Group>
             ))}
           </div>
         )}
@@ -1367,7 +1341,7 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
       description: (
         <div className="space-y-2">
           <p>Only this exact managed {humanize(target.kind)} target will be removed.</p>
-          <Well className="break-all font-mono">{target.resourceId}</Well>
+          <Well className="font-mono break-all">{target.resourceId}</Well>
           {target.data && (
             <p className="font-medium text-destructive">This target contains persistent data.</p>
           )}
@@ -1386,11 +1360,10 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
 
   return (
     <>
-      <Panel className="border-destructive/30">
+      <Panel className="border-rule-danger">
         <PanelHeader
           icon={Archive}
           title="Archive & managed resources"
-          description="Archiving disables triggers and hides the deployment. It does not stop runtime or delete data."
           actions={
             can("system.admin") && (
               <Button
@@ -1398,8 +1371,9 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
                 variant="outline"
                 onClick={() => void loadPlan()}
                 disabled={Boolean(busy)}
+                pending={busy === "preview"}
               >
-                {busy === "preview" && <Spinner className="size-3.5" />} Preview managed targets
+                Preview managed targets
               </Button>
             )
           }
@@ -1420,8 +1394,8 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
                       className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-hairline p-3"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="break-all text-xs font-medium">{target.displayName}</p>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-xs font-medium break-all">{target.displayName}</p>
+                        <p className="text-hint text-muted-foreground">
                           {humanize(target.kind)} · {target.owner} · {target.confirmationType}{" "}
                           confirmation{target.data ? " · persistent data" : ""}
                         </p>
@@ -1438,7 +1412,7 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
               {!plan.archived && can("destructive") && (
                 <Button
                   variant="destructive"
-                  className="mt-2 h-11 sm:h-9"
+                  className="mt-2"
                   onClick={() =>
                     confirm({
                       title: "Archive deployment",
@@ -1498,7 +1472,7 @@ function PostureCard({
       <PanelHeader
         icon={Icon}
         title={title}
-        actions={warning ? <Badge variant="warning">Review</Badge> : undefined}
+        actions={warning ? <Status verdict="warning" label="Review" /> : undefined}
       />
       <PanelBody className="space-y-2">
         <p className="text-sm font-medium">{value}</p>

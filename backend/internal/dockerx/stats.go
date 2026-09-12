@@ -18,14 +18,48 @@ type ContainerStats struct {
 	TS         time.Time `json:"ts"`
 	CPUPercent float64   `json:"cpuPercent"`
 	MemUsage   uint64    `json:"memUsage"`
-	MemLimit   uint64    `json:"memLimit"`
-	MemPercent float64   `json:"memPercent"`
-	NetRx      uint64    `json:"netRx"`
-	NetTx      uint64    `json:"netTx"`
-	BlockRead  uint64    `json:"blockRead"`
-	BlockWrite uint64    `json:"blockWrite"`
-	PIDs       uint64    `json:"pids"`
-	OnlineCPUs uint32    `json:"onlineCpus"`
+	// MemLimit is what the kernel will enforce, which for a container with no
+	// limit of its own is the whole machine.
+	MemLimit uint64 `json:"memLimit"`
+	// MemLimited says whether that figure is a decision somebody made.
+	//
+	// Without it the two cases are indistinguishable on the wire, and the
+	// table showed "97 MB / 62.7 GB" for a container nobody had limited —
+	// a denominator that is not a budget, beside a percentage of it that means
+	// nothing. When this is false the UI says "no limit" and offers the share
+	// of the host instead, which is the fact that actually exists.
+	MemLimited bool `json:"memLimited"`
+	// MemPercent is of MemLimit, so it is only a meaningful number when
+	// MemLimited is true. MemHostPercent is of the whole machine and is always
+	// meaningful.
+	MemPercent     float64 `json:"memPercent"`
+	MemHostPercent float64 `json:"memHostPercent,omitempty"`
+
+	// CPUPercent counts one core as 100%, which is what `docker stats` prints
+	// and is not what most people assume. HostCPUs is carried beside it so the
+	// UI can say "of 8 cores" rather than leaving the reader to guess whether
+	// 400% is possible. CPULimit is the container's own quota in cores, zero
+	// when it has none.
+	HostCPUs   int     `json:"hostCpus,omitempty"`
+	CPULimit   float64 `json:"cpuLimit,omitempty"`
+	NetRx      uint64  `json:"netRx"`
+	NetTx      uint64  `json:"netTx"`
+	BlockRead  uint64  `json:"blockRead"`
+	BlockWrite uint64  `json:"blockWrite"`
+	PIDs       uint64  `json:"pids"`
+	OnlineCPUs uint32  `json:"onlineCpus"`
+
+	// SizeRw is the container's writable layer, folded into the sample so the
+	// history can answer "how fast is this growing".
+	//
+	// "Writable layer: 38.7 GB" is a figure nobody can act on: either it has
+	// been that for six months and is the size of the thing, or it was 26 GB
+	// yesterday and the disk has two days left. Only a series can tell those
+	// apart, and this is the cheapest place to record one — the disk-usage
+	// walk is already cached and already refreshed in the background, so
+	// reading it here costs nothing and asking the daemon for sizes per
+	// container would cost a layer walk per sample.
+	SizeRw int64 `json:"sizeRw,omitempty"`
 
 	// Cumulative CPU counters, carried so a caller sampling repeatedly can
 	// work out utilisation itself. They are nanosecond totals since the
@@ -48,6 +82,10 @@ func (c *Client) StatsStream(ctx context.Context, id string, out chan<- Containe
 	}
 	defer resp.Body.Close()
 
+	// The container's own limits, read once rather than per frame: they cannot
+	// change while it runs, and the alternative is an inspect a second.
+	limit := c.resourceLimitsOf(ctx, id)
+
 	dec := json.NewDecoder(resp.Body)
 	for {
 		var raw container.StatsResponse
@@ -57,12 +95,51 @@ func (c *Client) StatsStream(ctx context.Context, id string, out chan<- Containe
 			}
 			return err
 		}
+		st := convertStats(id, raw)
+		frame := []ContainerStats{st}
+		c.applyHostCapacity(ctx, frame)
+		st = frame[0]
+		st.MemLimited = limit.memory > 0
+		if !st.MemLimited {
+			st.MemPercent = 0
+		} else {
+			st.MemLimit = uint64(limit.memory)
+			st.MemPercent = round2(float64(st.MemUsage) / float64(limit.memory) * 100)
+		}
+		st.CPULimit = limit.cpus
 		select {
 		case <-ctx.Done():
 			return nil
-		case out <- convertStats(id, raw):
+		case out <- st:
 		}
 	}
+}
+
+// containerLimits is what a container was told it may use, as opposed to what
+// the kernel reports it is allowed to use — which for an unlimited container
+// is the whole machine.
+type containerLimits struct {
+	memory int64
+	cpus   float64
+}
+
+func (c *Client) resourceLimitsOf(ctx context.Context, id string) containerLimits {
+	cli, err := c.api()
+	if err != nil {
+		return containerLimits{}
+	}
+	insp, err := cli.ContainerInspect(ctx, id)
+	if err != nil || insp.HostConfig == nil {
+		return containerLimits{}
+	}
+	out := containerLimits{memory: insp.HostConfig.Memory}
+	switch {
+	case insp.HostConfig.NanoCPUs > 0:
+		out.cpus = float64(insp.HostConfig.NanoCPUs) / 1e9
+	case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
+		out.cpus = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
+	}
+	return out
 }
 
 // StatsSampler turns Docker's cheap one-shot stats into current utilisation.
@@ -97,6 +174,36 @@ func (c *Client) NewStatsSampler() *StatsSampler {
 	return &StatsSampler{client: c, prev: map[string]cpuCounters{}}
 }
 
+// applyHostCapacity separates "limited to the whole machine" from "not
+// limited", which the Engine reports identically.
+//
+// A container with no cgroup memory limit has `MemoryStats.Limit` set to the
+// host's total RAM. Read literally that is a 62.7 GB budget nobody set, and a
+// percentage of it that says a container using 400 MB is at 0.6% of its
+// limit — a sentence with no meaning. The only way to tell the two apart is to
+// know what the machine has, so that is looked up once and compared.
+func (c *Client) applyHostCapacity(ctx context.Context, out []ContainerStats) {
+	memTotal, cpus := c.HostCapacity(ctx)
+	for i := range out {
+		if cpus > 0 {
+			out[i].HostCPUs = cpus
+		}
+		if memTotal <= 0 {
+			continue
+		}
+		if out[i].MemUsage > 0 {
+			out[i].MemHostPercent = round2(float64(out[i].MemUsage) / float64(memTotal) * 100)
+		}
+		// A megabyte of tolerance: some kernels report the machine's memory
+		// a few pages under what the daemon does, and a container that reads
+		// as limited to 62.6 of 62.7 GB is not limited.
+		if out[i].MemLimit == 0 || int64(out[i].MemLimit)+(1<<20) >= memTotal {
+			out[i].MemLimited = false
+			out[i].MemPercent = 0
+		}
+	}
+}
+
 // Sample reads every named container once.
 //
 // The first call for a container reports no CPU percentage, because there is
@@ -129,7 +236,34 @@ func (s *StatsSampler) Sample(ctx context.Context, ids []string) ([]ContainerSta
 		out = append(out, st)
 	}
 	s.forget(seen)
+	s.client.applyHostCapacity(ctx, out)
+	s.client.applyWritableSizes(ctx, out)
 	return out, nil
+}
+
+// applyWritableSizes folds the cached disk-usage walk into a stats batch.
+//
+// Reads the cache and never forces a refresh: a sampler running every fifteen
+// seconds must not trigger a walk of every layer on the host. A batch taken
+// before the first walk completes simply carries no size, which the history
+// records as absent rather than as zero.
+func (c *Client) applyWritableSizes(ctx context.Context, out []ContainerStats) {
+	if len(out) == 0 {
+		return
+	}
+	du := c.diskUsage(ctx)
+	if du == nil {
+		return
+	}
+	sizes := make(map[string]int64, len(du.Containers))
+	for _, ct := range du.Containers {
+		sizes[ct.ID] = ct.SizeRw
+	}
+	for i := range out {
+		if size, ok := sizes[out[i].ID]; ok {
+			out[i].SizeRw = size
+		}
+	}
 }
 
 // SampleAll reads every running container, which is what a recorder wants: it
@@ -224,6 +358,7 @@ func convertStats(id string, raw container.StatsResponse) ContainerStats {
 	if s.MemLimit > 0 {
 		s.MemPercent = round2(float64(usage) / float64(s.MemLimit) * 100)
 	}
+	s.MemLimited = s.MemLimit > 0
 
 	s.CPUTotal = raw.CPUStats.CPUUsage.TotalUsage
 	s.SystemCPU = raw.CPUStats.SystemUsage

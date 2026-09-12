@@ -26,9 +26,9 @@ import { InstallPanel } from "@/components/packages/install-panel"
 import { PackageSheet } from "@/components/packages/package-sheet"
 import { Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { StatTile } from "@/components/stat-tile"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -179,8 +179,7 @@ export default function PackagesPage() {
   // that refreshed an hour ago.
   const indexStale = Boolean(
     data?.indexAge &&
-      new Date(data.readAt).getTime() - new Date(data.indexAge).getTime() >
-        7 * 24 * 60 * 60 * 1000,
+    new Date(data.readAt).getTime() - new Date(data.indexAge).getTime() > 7 * 24 * 60 * 60 * 1000,
   )
 
   return (
@@ -189,7 +188,6 @@ export default function PackagesPage() {
       <PageHeader
         eyebrow="Operations"
         title="Packages"
-        description="Every piece of software on this server — what it is, whether it is behind, and adding or removing one"
         actions={
           <>
             <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
@@ -220,7 +218,7 @@ export default function PackagesPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+      <StatGrid columns={4}>
         <StatTile
           label="Installed"
           icon={Box}
@@ -272,7 +270,7 @@ export default function PackagesPage() {
           value={data?.totalSize ? bytes(data.totalSize) : "—"}
           hint="what the installed packages occupy"
         />
-      </div>
+      </StatGrid>
 
       {/* The decision. Security updates are the reason to be on this page in a
           hurry, and the button to act is here rather than three tabs in. */}
@@ -281,7 +279,6 @@ export default function PackagesPage() {
           <PanelHeader
             icon={ShieldOff}
             title={`${report.securityCount} security update${report.securityCount === 1 ? "" : "s"} outstanding`}
-            description="Apply these first — the full upgrade can wait for a quieter moment"
             actions={
               <Button size="sm" disabled={applying} onClick={() => upgrade(true)}>
                 <ShieldOff className="size-4" />
@@ -295,9 +292,7 @@ export default function PackagesPage() {
       {report?.rebootRequired && (
         <Notice tone="warning" icon={RotateCounterClockwise} title="This server needs a reboot">
           An installed update cannot take effect until the machine restarts
-          {report.rebootPackages?.length
-            ? `: ${report.rebootPackages.slice(0, 6).join(", ")}`
-            : ""}
+          {report.rebootPackages?.length ? `: ${report.rebootPackages.slice(0, 6).join(", ")}` : ""}
           . Reboot from the Terminal when it suits you — the dashboard will not do it for you.
         </Notice>
       )}
@@ -346,12 +341,14 @@ export default function PackagesPage() {
             <TabsTrigger value="updates">
               Updates
               {(data.upgradeCount ?? 0) > 0 && (
-                <Badge
-                  variant={(data.securityCount ?? 0) > 0 ? "warning" : "notice"}
-                  className="ml-1.5 font-normal"
+                <span
+                  className={cn(
+                    "numeric ml-1.5 text-hint font-medium",
+                    (data.securityCount ?? 0) > 0 ? "text-warning" : "text-muted-foreground",
+                  )}
                 >
                   {data.upgradeCount}
-                </Badge>
+                </span>
               )}
             </TabsTrigger>
             <TabsTrigger value="install">Add software</TabsTrigger>
@@ -362,7 +359,6 @@ export default function PackagesPage() {
               <PanelHeader
                 icon={Puzzle}
                 title="Installed packages"
-                description={`${visible.length.toLocaleString()} shown of ${data.packages.length.toLocaleString()}`}
                 actions={
                   <Button
                     variant="ghost"
@@ -412,10 +408,7 @@ export default function PackagesPage() {
                     }
                   />
                 ) : (
-                  <PackageTable
-                    packages={visible.slice(0, MAX_ROWS)}
-                    onInspect={setInspect}
-                  />
+                  <PackageTable packages={visible.slice(0, MAX_ROWS)} onInspect={setInspect} />
                 )}
               </PanelBody>
               {visible.length > MAX_ROWS && (
@@ -437,11 +430,6 @@ export default function PackagesPage() {
               <PanelHeader
                 icon={ArrowCircleUp}
                 title="Waiting to be upgraded"
-                description={
-                  report
-                    ? `${report.packages.length} package${report.packages.length === 1 ? "" : "s"} · checked ${relativeTime(report.lastChecked)}`
-                    : "reading the package database"
-                }
                 actions={
                   canUpgrade && (
                     <Button
@@ -488,21 +476,17 @@ export default function PackagesPage() {
                         >
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <span className="text-[13px] font-medium">{p.name}</span>
-                              {p.security && (
-                                <Badge variant="warning" className="font-normal">
-                                  security
-                                </Badge>
-                              )}
+                              <span className="text-body font-medium">{p.name}</span>
+                              {p.security && <Tag tone="warning">security</Tag>}
                             </div>
                           </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
+                          <TableCell className="font-mono text-muted-foreground">
                             {p.current || "—"}
                           </TableCell>
-                          <TableCell className="font-mono text-xs">{p.candidate}</TableCell>
+                          <TableCell className="font-mono">{p.candidate}</TableCell>
                           <TableCell>
                             <p
-                              className="max-w-[18rem] truncate font-mono text-[11px] text-muted-foreground"
+                              className="max-w-[18rem] truncate font-mono text-hint text-muted-foreground"
                               title={p.origin}
                             >
                               {p.origin || "—"}
@@ -518,11 +502,7 @@ export default function PackagesPage() {
           </TabsContent>
 
           <TabsContent value="install">
-            <InstallPanel
-              manager={data.manager}
-              onJob={console_.attach}
-              onInspect={setInspect}
-            />
+            <InstallPanel manager={data.manager} onJob={console_.attach} onInspect={setInspect} />
           </TabsContent>
         </Tabs>
       )}
@@ -559,21 +539,13 @@ function PackageTable({
           <TableRow key={p.name} className="cursor-pointer" onClick={() => onInspect(p.name)}>
             <TableCell>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[13px] font-medium">{p.name}</span>
+                <span className="font-mono text-body font-medium">{p.name}</span>
                 {p.security ? (
-                  <Badge variant="warning" className="font-normal">
-                    security
-                  </Badge>
+                  <Tag tone="warning">security</Tag>
                 ) : p.upgradable ? (
-                  <Badge variant="notice" className="font-normal">
-                    {p.upgradable}
-                  </Badge>
+                  <span className="font-mono text-hint text-muted-foreground">{p.upgradable}</span>
                 ) : null}
-                {p.essential && (
-                  <Badge variant="ghost" className="text-muted-foreground">
-                    essential
-                  </Badge>
-                )}
+                {p.essential && <Tag>essential</Tag>}
               </div>
             </TableCell>
             <TableCell>
@@ -589,7 +561,7 @@ function PackageTable({
             >
               {p.version}
             </TableCell>
-            <TableCell className="numeric text-right text-xs text-muted-foreground">
+            <TableCell className="numeric text-right text-muted-foreground">
               {p.size ? bytes(p.size) : "—"}
             </TableCell>
           </TableRow>

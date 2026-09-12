@@ -10,9 +10,11 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ImportDialog } from "@/components/proxy/import-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
+import { Modal } from "@/components/modal"
+import { RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -34,15 +36,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 /**
  * Certificates, issued and renewed from the page that says they are expiring.
@@ -138,14 +131,6 @@ export function CertbotPanel({ onChanged }: { onChanged?: () => void }) {
           <PanelHeader
             icon={ShieldCheck}
             title="certbot"
-            description={
-              [
-                data.version,
-                data.autoRenew ? `auto-renewing via ${data.renewSource}` : "no renewal scheduled",
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            }
             actions={
               admin && (
                 <>
@@ -185,27 +170,21 @@ export function CertbotPanel({ onChanged }: { onChanged?: () => void }) {
                 <TableBody>
                   {data.certs.map((cert) => (
                     <TableRow key={cert.name} className="group">
-                      <TableCell className="text-[13px] font-medium">{cert.name}</TableCell>
-                      <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+                      <TableCell className="text-body font-medium">{cert.name}</TableCell>
+                      <TableCell className="max-w-xs truncate text-muted-foreground">
                         {cert.domains.join(", ")}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={
-                            !cert.valid
-                              ? "destructive"
-                              : cert.daysLeft <= 14
-                                ? "warning"
-                                : "success"
+                        <Status
+                          verdict={
+                            !cert.valid ? "critical" : cert.daysLeft <= 14 ? "warning" : "ok"
                           }
-                          className="font-normal"
-                        >
-                          {cert.valid ? `${cert.daysLeft}d left` : "expired"}
-                        </Badge>
+                          label={cert.valid ? `${cert.daysLeft}d left` : "expired"}
+                        />
                       </TableCell>
                       <TableCell>
                         {admin && (
-                          <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                          <RowActions className="gap-1">
                             <Button
                               size="xs"
                               variant="ghost"
@@ -218,10 +197,9 @@ export function CertbotPanel({ onChanged }: { onChanged?: () => void }) {
                             <Button
                               size="xs"
                               variant="ghost"
-                              disabled={busy === cert.name}
                               onClick={() => renew(cert.name, false)}
+                              pending={busy === cert.name}
                             >
-                              {busy === cert.name && <Spinner className="size-3" />}
                               Renew
                             </Button>
                             <Button
@@ -277,7 +255,7 @@ export function CertbotPanel({ onChanged }: { onChanged?: () => void }) {
                             >
                               Revoke
                             </Button>
-                          </span>
+                          </RowActions>
                         )}
                       </TableCell>
                     </TableRow>
@@ -344,18 +322,30 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">Issue certificate</Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Issue a certificate</DialogTitle>
-          <DialogDescription>
-            Let&rsquo;s Encrypt proves you control the domain, then signs a certificate for ninety
-            days. The renewal is automatic once the first one works.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        Issue certificate
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title="Issue a certificate"
+        description="Let&rsquo;s Encrypt proves you control the domain, then signs a certificate for ninety
+              days. The renewal is automatic once the first one works."
+        footer={
+          <>
+            <Button
+              onClick={submit}
+              disabled={
+                busy || !domains.trim() || !email.trim() || (method === "dns" && !dnsProvider)
+              }
+              pending={busy}
+            >
+              {staging ? "Run the test" : "Issue"}
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="issue-domains">Domains</Label>
@@ -366,7 +356,7 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
               placeholder="app.example.com www.app.example.com"
               className="font-mono text-xs"
             />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-hint text-muted-foreground">
               Every name must already resolve to this server, or the challenge cannot reach it.
             </p>
           </div>
@@ -378,7 +368,7 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
             />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-hint text-muted-foreground">
               Where expiry warnings go if renewal ever stops working.
             </p>
           </div>
@@ -392,20 +382,20 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
               size="sm"
               className="w-full"
             >
-              <ToggleGroupItem value="nginx" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="nginx" className="flex-1 text-hint">
                 Through nginx
               </ToggleGroupItem>
-              <ToggleGroupItem value="webroot" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="webroot" className="flex-1 text-hint">
                 A folder
               </ToggleGroupItem>
-              <ToggleGroupItem value="standalone" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="standalone" className="flex-1 text-hint">
                 Standalone
               </ToggleGroupItem>
-              <ToggleGroupItem value="dns" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="dns" className="flex-1 text-hint">
                 DNS
               </ToggleGroupItem>
             </ToggleGroup>
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
+            <p className="text-hint leading-relaxed text-muted-foreground">
               {method === "nginx" &&
                 "certbot asks the running nginx to serve the challenge. The right answer when nginx is already serving these domains."}
               {method === "webroot" &&
@@ -419,13 +409,12 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
           {wantsWildcard && method !== "dns" && (
             <Notice tone="warning" icon={Warning} title="A wildcard needs the DNS challenge">
               Let&rsquo;s Encrypt will not sign <code className="font-mono">*.example.com</code>{" "}
-              against an HTTP challenge, whatever the web server is doing. Switch the method to
-              DNS.
+              against an HTTP challenge, whatever the web server is doing. Switch the method to DNS.
             </Notice>
           )}
 
           {method === "dns" && (
-            <div className="space-y-3 rounded-lg border border-hairline bg-surface-sunken p-3">
+            <Well plain className="space-y-3">
               <div className="space-y-1.5">
                 <Label>DNS provider</Label>
                 <Select value={dnsProvider} onValueChange={setDnsProvider}>
@@ -445,7 +434,9 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
               {provider && !provider.installed && (
                 <Notice tone="warning" icon={Warning} title="The plugin is missing">
                   Install <code className="font-mono">python3-certbot-{provider.plugin}</code> (or{" "}
-                  <code className="font-mono">certbot plugin install certbot-{provider.plugin}</code>{" "}
+                  <code className="font-mono">
+                    certbot plugin install certbot-{provider.plugin}
+                  </code>{" "}
                   on a snap install) before issuing.
                 </Notice>
               )}
@@ -457,23 +448,23 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
                     value={credentials}
                     onChange={(e) => setCredentials(e.target.value)}
                     rows={4}
-                    className="font-mono text-[11px]"
+                    className="font-mono text-hint"
                     placeholder={provider.credentials}
                   />
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="text-hint leading-relaxed text-muted-foreground">
                     Saved to a file only root can read, and never shown again. Leave empty to reuse
                     what is already stored for {provider.name}.
                   </p>
                 </div>
               )}
               {provider && (
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                <p className="text-hint leading-relaxed text-muted-foreground">
                   certbot waits {provider.defaultWait}s for the record to propagate before asking
                   Let&rsquo;s Encrypt to look. A challenge that fails on the first try is almost
                   always that wait being too short rather than a wrong token.
                 </p>
               )}
-            </div>
+            </Well>
           )}
 
           {method === "webroot" && (
@@ -490,7 +481,7 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
           <div className="flex items-start justify-between gap-3 rounded-lg border border-hairline bg-surface-sunken p-2.5">
             <div className="min-w-0 space-y-0.5">
               <Label className="font-normal">Test run first</Label>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <p className="text-hint leading-relaxed text-muted-foreground">
                 Issues from Let&rsquo;s Encrypt&rsquo;s staging authority: not trusted by browsers,
                 and not rate-limited. The real limit is five failures an hour and it is easy to
                 reach, so this is the right first attempt.
@@ -505,18 +496,7 @@ function IssueDialog({ onStarted }: { onStarted: (job: Job) => void }) {
             </Notice>
           )}
         </div>
-        <DialogFooter>
-          <Button
-            onClick={submit}
-            disabled={
-              busy || !domains.trim() || !email.trim() || (method === "dns" && !dnsProvider)
-            }
-          >
-            {busy && <Spinner className="size-4" />}
-            {staging ? "Run the test" : "Issue"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

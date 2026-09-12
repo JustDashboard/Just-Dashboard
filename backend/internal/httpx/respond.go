@@ -22,7 +22,49 @@ type APIError struct {
 	// at all, because the dialog asked for `my` and the server wanted the
 	// whole name.
 	Phrase string `json:"phrase,omitempty"`
-	err    error
+
+	// What the request was trying to do, to what, and why it did not work.
+	//
+	// "Something went wrong" is what a client shows when the server sent it a
+	// sentence and nothing else. These fields let it show the sentence a
+	// person would have written — which resource, which operation, the likely
+	// reason, and the raw error from the subsystem underneath, kept for the
+	// expandable details rather than pasted into the headline.
+	Resource  string `json:"resource,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Raw       string `json:"raw,omitempty"`
+	// Retryable marks an error worth offering a retry for: a timeout or a
+	// daemon that was briefly unreachable, as opposed to a request that will
+	// fail identically every time.
+	Retryable bool `json:"retryable,omitempty"`
+
+	err error
+}
+
+// Describe attaches what was being attempted to an error.
+//
+// Chained rather than set at construction because the layer that knows the
+// resource and the operation is usually the handler, and the layer that
+// produced the error is usually below it.
+func (e *APIError) Describe(operation, resource string) *APIError {
+	out := *e
+	out.Operation, out.Resource = operation, resource
+	return &out
+}
+
+// Because records the likely reason and the raw error behind it.
+func (e *APIError) Because(reason, raw string) *APIError {
+	out := *e
+	out.Reason, out.Raw = reason, raw
+	return &out
+}
+
+// Retry marks the error as worth trying again.
+func (e *APIError) Retry() *APIError {
+	out := *e
+	out.Retryable = true
+	return &out
 }
 
 func (e *APIError) Error() string {

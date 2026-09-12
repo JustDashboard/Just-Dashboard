@@ -9,25 +9,19 @@ import type { ComposeStack } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
-import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
-import { StatusDot } from "@/components/status-dot"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Status, StatusDot } from "@/components/status-dot"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { RowLink } from "@/components/page"
+import { cn } from "@/lib/utils"
 import { PortLink, type ConfirmFn } from "@/components/docker/shared"
+import { StackStateBadge } from "@/components/docker/stack-state"
 import { StackDetailPanel } from "@/components/docker/stack-detail"
 import { Hint, Term } from "@/components/docker/explain"
-import { Badge } from "@/components/ui/badge"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 
 /**
  * The stack list, which is now a way in rather than the whole feature.
@@ -78,8 +72,9 @@ export function StacksTab({ confirm }: { confirm: ConfirmFn }) {
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Hint>
-              {data.length} stack{data.length === 1 ? "" : "s"}. Open one to edit its compose file,
-              watch a deploy, or read every service&apos;s logs together.
+              {data.filter((s) => s.deployed).length} active · {data.length} detected. A stack is a
+              compose file on disk; an active one is a compose file that currently owns containers.
+              Open one to edit it, preview a deploy, or read every service&apos;s logs together.
             </Hint>
             {newStack}
           </div>
@@ -125,19 +120,19 @@ function StackCard({
 }) {
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
-  const healthy = stack.running === stack.total && stack.total > 0
   const unhealthy = stack.services.filter((s) => s.health === "unhealthy").length
 
   // The one action worth having on a card: an application that is down and
-  // should not be. Everything else needs the panel, where the output is.
-  const bringUp = async () => {
+  // should not be. Everything else needs the panel, where the output is —
+  // and where a deploy can be previewed before it runs.
+  const deploy = async () => {
     setBusy(true)
     try {
       await post(`/docker/stacks/${encodeURIComponent(stack.name)}/up`)
-      notify.success(`${stack.name} is up`)
+      notify.success(`${stack.name} deployed`)
       onChanged()
     } catch (err) {
-      notify.error(`Could not start ${stack.name}`, err)
+      notify.error(`Could not deploy ${stack.name}`, err)
     } finally {
       setBusy(false)
     }
@@ -148,33 +143,35 @@ function StackCard({
       <PanelHeader
         icon={Layers}
         title={
-          <RowLink className="text-[13px] leading-tight" onClick={onOpen}>
+          <RowLink className="text-body leading-tight" onClick={onOpen}>
             {stack.name}
           </RowLink>
         }
-        description={stack.workingDir || "location unknown"}
         actions={
           <>
-            {unhealthy > 0 && (
-              <Badge variant="destructive" className="font-normal">
-                {unhealthy} unhealthy
-              </Badge>
-            )}
-            <Badge variant={healthy ? "success" : "secondary"} className="font-normal">
-              {stack.running}/{stack.total} up
-            </Badge>
+            {unhealthy > 0 && <Status verdict="critical" label={`${unhealthy} unhealthy`} />}
+            <StackStateBadge stack={stack} />
           </>
         }
       />
       <PanelBody className="space-y-1.5">
+        {/* The sentence rather than a fraction: "0/0 up" is not a state. */}
+        <p className="text-hint text-muted-foreground">{stack.summary}</p>
         {stack.services.map((svc) => (
           <div
             key={svc.container || svc.name}
-            className="flex min-w-0 items-center justify-between gap-2 text-[13px]"
+            className="flex min-w-0 items-center justify-between gap-2 text-body"
           >
             <span className="flex min-w-0 items-center gap-2">
-              <StatusDot state={svc.state} />
-              <span className="truncate">{svc.name}</span>
+              <StatusDot state={svc.missing ? "unknown" : svc.state} />
+              <span className={cn("truncate", svc.missing && "text-muted-foreground")}>
+                {svc.name}
+              </span>
+              {svc.missing && (
+                <span className="shrink-0 text-micro text-muted-foreground">
+                  declared, no container
+                </span>
+              )}
             </span>
             <span className="flex shrink-0 flex-wrap justify-end gap-1">
               {svc.ports
@@ -186,15 +183,17 @@ function StackCard({
             </span>
           </div>
         ))}
-        {stack.services.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            Nothing running. Its compose file is on disk and can be brought up.
+        {stack.orphans.length > 0 && (
+          <p className="text-hint text-warning">
+            {stack.orphans.join(", ")} {stack.orphans.length === 1 ? "is" : "are"} running under
+            this project name and no longer in the compose file. A deploy removes{" "}
+            {stack.orphans.length === 1 ? "it" : "them"}.
           </p>
         )}
       </PanelBody>
       <PanelFooter>
         {!stack.managed ? (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             No compose file reachable from this dashboard, so this stack is read-only here.
           </p>
         ) : (
@@ -202,10 +201,10 @@ function StackCard({
             <Button size="sm" variant="outline" onClick={onOpen}>
               Open
             </Button>
-            {can("service.control") && stack.running < stack.total && (
-              <Button size="sm" variant="ghost" onClick={bringUp} disabled={busy}>
-                {busy ? <Spinner className="size-3.5" /> : <Play className="size-3.5" />}
-                Bring up
+            {can("service.control") && stack.state !== "running" && (
+              <Button size="sm" variant="ghost" onClick={deploy} pending={busy}>
+                <Play className="size-3.5" />
+                {stack.deployed ? "Deploy" : "Deploy for the first time"}
               </Button>
             )}
             {stack.workingDir && (
@@ -259,63 +258,59 @@ function NewStackDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="size-4" />
-            New stack
-          </DialogTitle>
-          <DialogDescription>
-            Creates a directory with a starter compose file in it. Nothing runs until you bring it
-            up.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="stack-name" className="text-xs">
-              Name
-            </Label>
-            <Input
-              id="stack-name"
-              value={name}
-              spellCheck={false}
-              placeholder="my-app"
-              onChange={(e) => setName(e.target.value)}
-            />
-            <Hint>
-              Lower-case letters, digits, dashes and underscores. Compose uses it to name the
-              containers and the network it creates.
-            </Hint>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="stack-dir" className="text-xs">
-              Directory
-            </Label>
-            <Input
-              id="stack-dir"
-              value={dir}
-              spellCheck={false}
-              className="font-mono text-xs"
-              placeholder="leave empty for the default compose directory"
-              onChange={(e) => setDir(e.target.value)}
-            />
-            <Hint>
-              It has to be under one of the server&apos;s configured compose directories, or the
-              dashboard will not find the stack again once it is stopped.
-            </Hint>
-          </div>
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      icon={Plus}
+      title="New stack"
+      description="Creates a directory with a starter compose file in it. Nothing runs until you bring it
+            up."
+      footer={
+        <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={create} disabled={busy || !name.trim()}>
-            {busy && <Spinner className="size-4" />}
+          <Button onClick={create} disabled={busy || !name.trim()} pending={busy}>
             Create
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="stack-name" className="text-xs">
+            Name
+          </Label>
+          <Input
+            id="stack-name"
+            value={name}
+            spellCheck={false}
+            placeholder="my-app"
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Hint>
+            Lower-case letters, digits, dashes and underscores. Compose uses it to name the
+            containers and the network it creates.
+          </Hint>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="stack-dir" className="text-xs">
+            Directory
+          </Label>
+          <Input
+            id="stack-dir"
+            value={dir}
+            spellCheck={false}
+            className="font-mono text-xs"
+            placeholder="leave empty for the default compose directory"
+            onChange={(e) => setDir(e.target.value)}
+          />
+          <Hint>
+            It has to be under one of the server&apos;s configured compose directories, or the
+            dashboard will not find the stack again once it is stopped.
+          </Hint>
+        </div>
+      </div>
+    </Modal>
   )
 }

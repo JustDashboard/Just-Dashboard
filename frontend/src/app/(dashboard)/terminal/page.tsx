@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page } from "@/components/page"
+import { Pane, PaneHeader } from "@/components/panel"
 import { XtermPane } from "@/components/xterm-pane"
 import { SessionRail } from "@/components/terminal/session-rail"
 import { WindowStrip } from "@/components/terminal/window-strip"
@@ -453,10 +454,8 @@ export default function TerminalPage() {
               fullscreenActive={immersive}
             />
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-              <div className="flex items-center gap-1 border-b border-hairline bg-surface-header px-2 py-1.5">
-                {terminalHeader}
-              </div>
+            <Pane className="flex-1">
+              <PaneHeader className="gap-1">{terminalHeader}</PaneHeader>
               <EmptyState
                 className="flex-1"
                 icon={TerminalWindow}
@@ -469,7 +468,7 @@ export default function TerminalPage() {
                   </Button>
                 }
               />
-            </div>
+            </Pane>
           )}
         </div>
 

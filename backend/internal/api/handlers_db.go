@@ -54,6 +54,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDBConnUpdate))
+			r.Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
 			})

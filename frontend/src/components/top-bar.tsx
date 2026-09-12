@@ -2,13 +2,12 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ChevronRight, Cpu, GridSquare, MagnifyingGlass, Moon, Sun } from "@/components/icons"
+import { ChevronRight, Cpu, GridSquare, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { percent } from "@/lib/format"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth } from "@/hooks/use-metrics-history"
-import { HealthBadge } from "@/components/metrics/health-panel"
-import { useTheme } from "@/hooks/use-theme"
+import { HealthVerdict } from "@/components/metrics/health-panel"
 import { navLocation } from "@/components/app-sidebar"
 import { useCommandPalette } from "@/components/command-palette"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -34,7 +33,7 @@ export function TopBar() {
     <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md md:px-4">
       <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
 
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px]">
+      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-body">
         {here?.group && (
           <>
             <span className="hidden truncate text-muted-foreground sm:inline">{here.group}</span>
@@ -64,7 +63,6 @@ export function TopBar() {
         <MagnifyingGlass className="size-4" />
       </Button>
 
-      <ThemeToggle />
     </header>
   )
 }
@@ -95,7 +93,7 @@ function Vitals() {
         // chrome is a badge nobody looks at, which makes it useless on the day
         // it turns red.
         <Link href="/" aria-label="Health findings" className="hidden items-center sm:flex">
-          <HealthBadge status={health.status} />
+          <HealthVerdict status={health.status} />
         </Link>
       )}
       {snapshot && (
@@ -123,7 +121,7 @@ function Vitals() {
       )}
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-hint font-medium text-muted-foreground">
             <span
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
@@ -161,7 +159,7 @@ function Reading({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
           <Icon className="size-3.5" />
           <span
             className={cn(
@@ -181,26 +179,3 @@ function Reading({
   )
 }
 
-/** Flips between light and dark, reachable from anywhere rather than only
- *  from the Appearance page — it's a preference you tune while looking at
- *  the screen you are tuning it for. */
-function ThemeToggle() {
-  const { mode, toggle } = useTheme()
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={mode === "dark" ? "Switch to light" : "Switch to dark"}
-          className="text-muted-foreground"
-          onClick={toggle}
-        >
-          {mode === "dark" ? <Moon className="size-4" /> : <Sun className="size-4" />}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{mode === "dark" ? "Switch to light" : "Switch to dark"}</TooltipContent>
-    </Tooltip>
-  )
-}

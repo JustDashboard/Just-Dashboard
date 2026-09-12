@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input"
 import { EmptyState, ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ConfirmRequest } from "@/components/files/file-tree"
+import { RowActions, rowReveal } from "@/components/icon-action"
 
 type DiffRequest = {
   title: string
@@ -172,9 +173,9 @@ export function GitTools({
             key={t}
             onClick={() => setTab(t)}
             className={cn(
-              "rounded px-2 py-1 text-[12px] capitalize transition-colors",
+              "rounded-sm px-2 py-1 text-xs capitalize transition-colors",
               tab === t
-                ? "bg-primary/12 text-primary"
+                ? "bg-plot-primary text-primary"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
@@ -225,7 +226,7 @@ function RepoHeader({
       />
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="min-w-0 max-w-[9rem] truncate font-mono text-[12px] font-medium">
+          <span className="max-w-[9rem] min-w-0 truncate font-mono text-xs font-medium">
             {repo.branch}
           </span>
         </TooltipTrigger>
@@ -532,10 +533,10 @@ function ChangesTab({
             }}
             placeholder={amend ? "Amend message (blank keeps the previous one)" : "Commit message"}
             rows={2}
-            className="w-full resize-none rounded-md border border-input bg-transparent px-2 py-1.5 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            className="w-full resize-none rounded-md border border-input bg-transparent px-2 py-1.5 font-mono text-xs focus-ring"
           />
           <div className="flex items-center gap-2">
-            <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+            <label className="flex cursor-pointer items-center gap-1.5 text-hint text-muted-foreground">
               <Checkbox
                 checked={amend}
                 onCheckedChange={(v) => setAmend(Boolean(v))}
@@ -573,7 +574,7 @@ function ChangesTab({
             </Tooltip>
           </div>
           {staged.length === 0 && (message.trim() || amend) && (
-            <p className="text-[11px] text-muted-foreground">Stage something first.</p>
+            <p className="text-hint text-muted-foreground">Stage something first.</p>
           )}
         </div>
       )}
@@ -610,7 +611,8 @@ function HistoryTab({
 
   if (log.error) return <ErrorState error={log.error} className="m-3" />
   if (log.loading && !log.data) return <LoadingRows className="p-3" rows={5} />
-  if (!log.data?.length) return <EmptyState className="m-3" icon={ClockRewind} title="No commits yet" />
+  if (!log.data?.length)
+    return <EmptyState className="m-3" icon={ClockRewind} title="No commits yet" />
 
   return (
     <div className="min-h-0 flex-1 space-y-0.5 overflow-auto p-1">
@@ -619,18 +621,18 @@ function HistoryTab({
           <TooltipTrigger asChild>
             <button
               onClick={() => show(c)}
-              className="flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--row-hover)]"
+              className="flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-row-hover"
             >
               <GitCommitIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px]">{c.subject}</p>
-                <p className="truncate text-[10px] text-muted-foreground">
+                <p className="truncate text-xs">{c.subject}</p>
+                <p className="truncate text-micro text-muted-foreground">
                   <span className="font-mono">{c.short}</span> · {c.author} · {relativeTime(c.at)}
                   {c.isMerge ? " · merge" : ""}
                 </p>
               </div>
               {(c.insertions > 0 || c.deletions > 0) && (
-                <span className="numeric shrink-0 font-mono text-[10px]">
+                <span className="numeric shrink-0 font-mono text-micro">
                   <span className="text-(--git-added)">+{c.insertions}</span>{" "}
                   <span className="text-(--git-deleted)">−{c.deletions}</span>
                 </span>
@@ -687,7 +689,7 @@ function BranchesTab({
             value={newBranch}
             onChange={(e) => setNewBranch(e.target.value)}
             placeholder="New branch from HEAD"
-            className="h-7 text-[12px]"
+            className="h-7 text-xs"
           />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -708,7 +710,7 @@ function BranchesTab({
         {branches.data?.map((b) => (
           <div
             key={b.name}
-            className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--row-hover)]"
+            className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-row-hover"
           >
             <GitBranchIcon
               className={cn(
@@ -717,15 +719,15 @@ function BranchesTab({
               )}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate font-mono text-[12px]">
+              <p className="truncate font-mono text-xs">
                 {b.name}
-                {b.current && <span className="ml-1.5 text-[10px] text-success">current</span>}
+                {b.current && <span className="ml-1.5 text-micro text-success">current</span>}
                 {b.remote && (
-                  <span className="ml-1.5 text-[10px] text-muted-foreground">remote</span>
+                  <span className="ml-1.5 text-micro text-muted-foreground">remote</span>
                 )}
               </p>
               {b.subject && (
-                <p className="truncate text-[10px] text-muted-foreground">{b.subject}</p>
+                <p className="truncate text-micro text-muted-foreground">{b.subject}</p>
               )}
             </div>
             <AheadBehind ahead={b.ahead} behind={b.behind} />
@@ -736,7 +738,7 @@ function BranchesTab({
                     size="xs"
                     variant="ghost"
                     disabled={!!busy}
-                    className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    className={cn("shrink-0", rowReveal())}
                     onClick={() =>
                       run(`Switched to ${b.name}`, () =>
                         post<GitResult>("/git/checkout", { ref: b.name }, { query: q }),
@@ -761,7 +763,7 @@ function BranchesTab({
 function AheadBehind({ ahead, behind }: { ahead: number; behind: number }) {
   if (!ahead && !behind) return null
   return (
-    <span className="numeric flex items-center gap-1 font-mono text-[11px]">
+    <span className="numeric flex items-center gap-1 font-mono text-hint">
       {ahead > 0 && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -807,8 +809,8 @@ function FileGroup({
         <span
           className={cn("size-1.5 rounded-full", tone === "success" ? "bg-success" : "bg-warning")}
         />
-        <span className="text-[11px] font-medium">{label}</span>
-        <span className="numeric text-[10px] text-muted-foreground">{count}</span>
+        <span className="text-hint font-medium">{label}</span>
+        <span className="numeric text-micro text-muted-foreground">{count}</span>
         <span className="flex-1" />
         {action}
       </div>
@@ -829,12 +831,12 @@ function FileRow({
   const tone = gitTone(file)
   return (
     <div
-      className="group relative flex min-w-0 items-center gap-2 bg-(--git-tint) px-2 py-1 before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-[''] hover:bg-[var(--row-hover)]"
+      className="group relative flex min-w-0 items-center gap-2 bg-(--git-tint) px-2 py-1 before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-[''] hover:bg-row-hover"
       style={gitStyle(tone)}
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="w-6 shrink-0 text-center font-mono text-[10px] text-(--git-colour)">
+          <span className="w-6 shrink-0 text-center font-mono text-micro text-(--git-colour)">
             {gitLetter(file)}
           </span>
         </TooltipTrigger>
@@ -848,15 +850,13 @@ function FileRow({
       <button
         onClick={onDiff}
         className={cn(
-          "min-w-0 flex-1 truncate text-left font-mono text-[12px] text-(--git-colour) hover:underline",
+          "min-w-0 flex-1 truncate text-left font-mono text-xs text-(--git-colour) hover:underline",
           file.label === "deleted" && "line-through",
         )}
       >
         {file.path}
       </button>
-      <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-        {action}
-      </div>
+      <RowActions className="gap-0">{action}</RowActions>
     </div>
   )
 }
@@ -958,9 +958,9 @@ function GroupButton({
           disabled={disabled}
           onClick={onClick}
           className={cn(
-            "rounded px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
+            "rounded-sm px-1.5 py-0.5 text-hint transition-colors disabled:opacity-40",
             danger
-              ? "text-destructive hover:bg-destructive/10"
+              ? "text-destructive hover:bg-wash-danger"
               : "text-muted-foreground hover:bg-accent hover:text-foreground",
           )}
         >

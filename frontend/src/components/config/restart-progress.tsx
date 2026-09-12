@@ -1,7 +1,13 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { CheckCircle, CrossCircle, External, RotateCounterClockwise } from "@/components/icons"
+import {
+  CheckCircle,
+  ChevronDown,
+  CrossCircle,
+  External,
+  RotateCounterClockwise,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime } from "@/lib/format"
 import type { DashboardConfigRun } from "@/lib/types"
@@ -52,7 +58,7 @@ export function RestartProgress({
           )}
         </span>
         <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-[13px] leading-tight font-medium">
+          <p className="text-body leading-tight font-medium">
             {running
               ? restarting
                 ? "Restarting the dashboard"
@@ -63,7 +69,7 @@ export function RestartProgress({
                   ? "Change undone — the dashboard is as it was"
                   : `${headline(run)} failed`}
           </p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             started {relativeTime(run.startedAt)}
             {run.actor ? ` by ${run.actor}` : ""}
             {run.finishedAt ? ` · finished ${relativeTime(run.finishedAt)}` : ""}
@@ -77,35 +83,38 @@ export function RestartProgress({
       </div>
 
       {run.changes && run.changes.length > 0 && (
-        <ul className="space-y-1 rounded-xl border border-hairline bg-surface-sunken p-2.5 text-[12px]">
+        <ul className="space-y-1 rounded-xl border border-hairline bg-surface-sunken p-2.5 text-xs">
           {run.changes.map((change) => (
             <li key={change.key} className="flex flex-wrap items-baseline gap-x-2">
               <span className="font-medium">{change.label}</span>
-              <span className="font-mono text-[11px] text-muted-foreground line-through">
+              <span className="font-mono text-hint text-muted-foreground line-through">
                 {change.from || "—"}
               </span>
               <span className="text-muted-foreground">→</span>
-              <span className="font-mono text-[11px]">{change.to || "—"}</span>
+              <span className="font-mono text-hint">{change.to || "—"}</span>
             </li>
           ))}
         </ul>
       )}
 
+      {/* One banner while it runs, not three. The only thing the reader has to
+          do is not reload, and the only thing they have to know is where it
+          comes back — so that is all this says. */}
       {running && (
-        <Notice title="The dashboard restarts itself, so this page loses contact for a moment">
-          Every container in the stack is recreated, this one included.{" "}
-          <b className="text-foreground">Do not reload</b> — the tab already has everything it needs
-          to keep watching, and a reload during the restart is the one thing that cannot recover
-          itself. If the new configuration does not come up, the previous one is put back
-          automatically.
-        </Notice>
-      )}
-
-      {running && moved && (
-        <Notice title="This change moves the address" tone="warning">
-          When it finishes, the dashboard answers at{" "}
-          <code className="font-mono">{run.endpoint}</code> — this tab is pointing at the old one,
-          so open that address rather than reloading this page.
+        <Notice title="Do not reload this page" tone="warning">
+          {moved ? (
+            <>
+              The stack is being recreated. It comes back at{" "}
+              <code className="font-mono">{run.endpoint}</code>, so open that address when this
+              finishes rather than reloading here.
+            </>
+          ) : (
+            <>
+              The stack is being recreated, this tab&rsquo;s server included. It already has
+              everything it needs to keep watching; a reload is the one thing that cannot recover
+              itself.
+            </>
+          )}
         </Notice>
       )}
 
@@ -113,7 +122,7 @@ export function RestartProgress({
         <Notice title="The dashboard has moved" tone="success">
           <p>
             It now answers at <code className="font-mono">{run.endpoint}</code>. This tab is still
-            talking to the old address, which will stop working as soon as the browser next tries.
+            on the old address.
           </p>
           <Button className="mt-2" size="sm" variant="outline" asChild>
             <a href={run.endpoint}>
@@ -124,11 +133,20 @@ export function RestartProgress({
         </Notice>
       )}
 
+      {/* A caveat on a run that otherwise worked — today, a Tailscale
+          certificate that could not be issued, so the address moved but the
+          padlock has not arrived yet. */}
+      {run.note && run.status !== "rolled_back" && (
+        <Notice title="Worth knowing" tone="warning">
+          <span className="break-words whitespace-pre-wrap">{run.note}</span>
+        </Notice>
+      )}
+
       {run.status === "rolled_back" && (
         <Notice title="The change was undone" tone="warning">
           <p className="mb-1">
-            The new configuration did not answer, so the previous one was restored and the dashboard
-            came back on it. Nothing about how you reach it has changed.
+            The new configuration did not answer, so the previous one was put back. Nothing about
+            how you reach the dashboard has changed.
           </p>
           {run.error && <span className="break-words whitespace-pre-wrap">{run.error}</span>}
         </Notice>
@@ -140,7 +158,24 @@ export function RestartProgress({
         </Notice>
       )}
 
-      {log && <Transcript text={log} follow={running} />}
+      {/* The transcript is the answer to "why did that fail", which is a
+          question nobody has while it is working. It stays open while the run
+          is live and folds itself away once there is an outcome to read
+          instead. */}
+      {log &&
+        (running ? (
+          <Transcript text={log} follow />
+        ) : (
+          <details className="group min-w-0">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+              Transcript
+            </summary>
+            <div className="pt-2">
+              <Transcript text={log} />
+            </div>
+          </details>
+        ))}
     </div>
   )
 }
@@ -180,7 +215,7 @@ function Transcript({ text, follow }: { text: string; follow?: boolean }) {
         // still growing yanks them back down every two seconds.
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
       }}
-      className="max-h-64 min-h-16 overflow-auto rounded-xl border border-hairline bg-surface-sunken p-2.5 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap"
+      className="max-h-64 min-h-16 overflow-auto rounded-xl border border-hairline bg-surface-sunken p-2.5 font-mono text-hint leading-relaxed break-all whitespace-pre-wrap"
     >
       {text.trimEnd()}
     </pre>

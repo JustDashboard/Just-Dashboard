@@ -17,7 +17,6 @@ import {
   TerminalWindow,
   Trash,
 } from "@/components/icons"
-import { notify } from "@/lib/toast"
 import { downloadUrl } from "@/lib/api"
 import type { FileEntry } from "@/lib/types"
 import {
@@ -26,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
+import { copyText } from "@/lib/clipboard"
 
 /** Archives the backend can extract in place. */
 const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2)$/i
@@ -73,11 +73,7 @@ export function FileActionsMenu({
   actions: FileActions
   children: React.ReactNode
 }) {
-  const copyPath = () =>
-    navigator.clipboard
-      ?.writeText(entry.path)
-      .then(() => notify.success("Path copied"))
-      .catch(() => notify.error("The browser refused clipboard access"))
+  const copyPath = () => void copyText(entry.path, "Path copied")
 
   const archive = !entry.isDir && isArchive(entry.name)
   const image = !entry.isDir && isImage(entry.name)

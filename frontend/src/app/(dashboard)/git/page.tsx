@@ -6,6 +6,7 @@ import { Check, GitBranch, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import type { GitRepo } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
@@ -14,7 +15,6 @@ import { GitHelp } from "@/components/git/help"
 import { GitHubAccountControl } from "@/components/git/github-account"
 import { RepoWorkspace } from "@/components/git/repo-workspace"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   stickyTableHeader,
@@ -58,7 +58,6 @@ export default function GitPage() {
     )
   }, [repos.data, filter])
 
-  const dirty = repos.data?.repos.filter((r) => r.dirty).length ?? 0
 
   // A selected repository takes the whole page: the working copy is a place to
   // work, not a panel to peek at, and it needs the room for the tree, the
@@ -82,7 +81,6 @@ export default function GitPage() {
       <PageHeader
         eyebrow="Access"
         title="Git"
-        description="Every repository on this server — open one to browse its files, stage and commit changes, and manage branches"
         actions={
           <>
             {/* Who this dashboard is to GitHub, before a repository is chosen:
@@ -121,7 +119,6 @@ export default function GitPage() {
             <PanelHeader
               icon={GitBranch}
               title="Repositories"
-              description={`${repos.data.repos.length} found${dirty ? ` · ${dirty} with uncommitted changes` : ""}`}
             />
             <PanelToolbar>
               <SearchInput
@@ -143,12 +140,16 @@ export default function GitPage() {
                 </TableHeader>
                 <TableBody>
                   {visible.map((repo) => (
-                    <TableRow key={repo.path} className="group" onActivate={() => setSelected(repo)}>
+                    <TableRow
+                      key={repo.path}
+                      className="group"
+                      onActivate={() => setSelected(repo)}
+                    >
                       <TableCell>
                         <div className="max-w-[22rem] min-w-0">
                           <RowLink onClick={() => setSelected(repo)}>{repo.name}</RowLink>
                           <p
-                            className="truncate font-mono text-[11px] text-muted-foreground"
+                            className="truncate font-mono text-hint text-muted-foreground"
                             title={repo.path}
                           >
                             {repo.path}
@@ -156,19 +157,27 @@ export default function GitPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={repo.detached ? "destructive" : "secondary"}
-                          className="font-normal"
+                        <span
+                          className={cn(
+                            "inline-flex min-w-0 items-center gap-1.5 text-xs",
+                            repo.detached && "text-destructive",
+                          )}
+                          title={repo.detached ? "Detached HEAD" : undefined}
                         >
-                          <GitBranch className="size-3" />
-                          {repo.branch || "—"}
-                        </Badge>
+                          <GitBranch
+                            className={cn(
+                              "size-3 shrink-0",
+                              repo.detached ? "text-destructive" : "text-muted-foreground",
+                            )}
+                          />
+                          <span className="truncate font-mono">{repo.branch || "—"}</span>
+                        </span>
                       </TableCell>
                       <TableCell>
                         {repo.dirty ? (
-                          <Badge variant="warning" className="font-normal">
+                          <span className="numeric text-xs text-warning">
                             {repo.changes} change{repo.changes === 1 ? "" : "s"}
-                          </Badge>
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                             <Check className="size-3" /> clean
@@ -183,7 +192,7 @@ export default function GitPage() {
                           <p className="truncate text-xs" title={repo.subject}>
                             {repo.subject || "—"}
                           </p>
-                          <p className="truncate text-[11px] text-muted-foreground">
+                          <p className="truncate text-hint text-muted-foreground">
                             {repo.author}
                             {repo.commitAt ? ` · ${relativeTime(repo.commitAt)}` : ""}
                           </p>

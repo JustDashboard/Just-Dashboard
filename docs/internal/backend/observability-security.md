@@ -13,6 +13,12 @@ since a tab was opened, and charts that start empty every visit cannot show last
 - Containers are sampled into `metric_container_samples`, keyed by **name, not id** — a compose redeploy
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
+- The sample carries `size_rw`, the writable layer, taken from the **cached** disk walk rather than by
+  asking the daemon for sizes: a sampler running every fifteen seconds must never trigger a walk of every
+  layer on the host. It is what makes "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a
+  container that has held it for six months from one whose disk has two days left. Zero means the walk
+  had not completed when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
+  measurement rather than as an empty layer.
 - Samples also retain the observed container ID for release attribution. The additive `container_id`
   column defaults to empty for old rows, which stay visible in name-continuous charts but cannot be
   attributed to a release. `ContainerIdentityRange` reads 1..64 distinct IDs in one aggregation with

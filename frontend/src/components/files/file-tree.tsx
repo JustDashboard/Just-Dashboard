@@ -21,6 +21,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/state"
+import { RowActions } from "@/components/icon-action"
+import { PaneHeader } from "@/components/panel"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /** What the inline confirm surface needs; the tools panel renders it. */
@@ -202,9 +204,9 @@ export function FileTree({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-hairline bg-surface-header/60 px-2 py-1.5">
+      <PaneHeader className="gap-1">
         <span
-          className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+          className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground"
           title={root}
         >
           {root}
@@ -231,7 +233,7 @@ export function FileTree({
             </TreeButton>
           </>
         )}
-        <label className="flex cursor-pointer items-center gap-1 px-1 text-[10px] text-muted-foreground">
+        <label className="flex cursor-pointer items-center gap-1 px-1 text-micro text-muted-foreground">
           <Checkbox
             checked={showHidden}
             onCheckedChange={(v) => setShowHidden(v === true)}
@@ -247,7 +249,7 @@ export function FileTree({
         <TreeButton label="Refresh" onClick={() => reload(root)}>
           <RefreshClockwise className="size-3.5" />
         </TreeButton>
-      </div>
+      </PaneHeader>
 
       <div className="min-h-0 flex-1 overflow-auto py-1">
         <TreeLevel
@@ -326,7 +328,7 @@ function TreeLevel(props: LevelProps) {
       )}
       {loadingThis && !entries && (
         <div
-          className="flex items-center gap-2 px-2 py-1 text-[11px] text-muted-foreground"
+          className="flex items-center gap-2 px-2 py-1 text-hint text-muted-foreground"
           style={{ paddingLeft: indent + 16 }}
         >
           <Spinner className="size-3" />
@@ -335,7 +337,7 @@ function TreeLevel(props: LevelProps) {
       )}
       {error && (
         <div
-          className="truncate px-2 py-1 text-[11px] text-destructive"
+          className="truncate px-2 py-1 text-hint text-destructive"
           style={{ paddingLeft: indent + 16 }}
           title={error}
         >
@@ -344,7 +346,7 @@ function TreeLevel(props: LevelProps) {
       )}
       {entries?.length === 0 && creating?.parent !== parent && (
         <div
-          className="px-2 py-1 text-[11px] text-muted-foreground italic"
+          className="px-2 py-1 text-hint text-muted-foreground italic"
           style={{ paddingLeft: indent + 16 }}
         >
           empty
@@ -390,15 +392,15 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
     <>
       <div
         className={cn(
-          "group relative flex items-center gap-1 py-[3px] pr-1 text-[13px] hover:bg-[var(--row-hover)]",
+          "group relative flex items-center gap-1 py-[3px] pr-1 text-body hover:bg-row-hover",
           // The tint and the rule down the edge are the same fact as the
           // letter, said in a way that survives being scanned rather than
           // read: a wall of filenames with one green line in it answers
           // "what did I touch" without any of them being looked at.
           tone &&
             "bg-(--git-tint) before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-['']",
-          activeFile === entry.path && "bg-primary/10",
-          entry.isDir && activeDir === entry.path && "bg-primary/10",
+          activeFile === entry.path && "bg-accent",
+          entry.isDir && activeDir === entry.path && "bg-accent",
         )}
         style={{ paddingLeft: indent, ...(tone ? gitStyle(tone) : null) }}
       >
@@ -441,7 +443,7 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
           ) : null}
         </button>
 
-        <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <RowActions className="gap-0">
           {entry.isDir && props.canWrite && (
             <>
               <TreeButton
@@ -474,7 +476,7 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
               <Trash className="size-3" />
             </TreeButton>
           )}
-        </div>
+        </RowActions>
       </div>
 
       {entry.isDir && isOpen && (
@@ -522,7 +524,7 @@ function CreateRow({
         }}
         onBlur={() => (value.trim() ? onSubmit(value) : onCancel())}
         placeholder={kind === "folder" ? "folder name" : "file name"}
-        className="h-6 flex-1 font-mono text-[12px]"
+        className="h-6 flex-1 font-mono text-xs"
       />
     </div>
   )
@@ -543,7 +545,7 @@ function StatusMark({ change }: { change: GitFileChange }) {
       <TooltipTrigger asChild>
         <span
           className={cn(
-            "ml-auto shrink-0 rounded px-1 font-mono text-[10px] leading-none",
+            "ml-auto shrink-0 rounded-sm px-1 font-mono text-micro leading-none",
             "bg-(--git-tint) text-(--git-colour)",
             change.staged && "ring-1 ring-(--git-edge)",
           )}

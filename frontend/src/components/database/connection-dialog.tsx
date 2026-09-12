@@ -9,7 +9,8 @@ import type { DbConnection, DbDriver, DbDriverInfo } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/state"
+
+import { Modal } from "@/components/modal"
 import {
   Select,
   SelectContent,
@@ -17,13 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 
 /**
  * Add or edit a connection, with a Test button that dials the DSN before it is
@@ -105,97 +99,96 @@ export function ConnectionDialog({
   const canSave = name !== "" && (editing || dsn !== "")
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit connection" : "Add database connection"}</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="conn-name">Name</Label>
-            <Input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Driver</Label>
-            <Select
-              value={driver}
-              onValueChange={(v) => setDriver(v as DbDriver)}
-              disabled={editing}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(drivers.data ?? []).map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {d.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {editing && (
-              <p className="text-xs text-muted-foreground">
-                The driver is fixed once a connection exists.
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="conn-dsn">
-              {driver === "sqlite" ? "Database file path" : "Connection string"}
-              {editing && (
-                <span className="ml-1.5 text-muted-foreground">(leave blank to keep)</span>
-              )}
-            </Label>
-            <Input
-              id="conn-dsn"
-              value={dsn}
-              onChange={(e) => {
-                setDsn(e.target.value)
-                setTestResult(null)
-              }}
-              className="font-mono text-xs"
-              placeholder={info?.placeholder}
-            />
-            <p className="text-xs text-muted-foreground">
-              Encrypted with the dashboard&apos;s master key and never returned to a browser.
-            </p>
-          </div>
-
-          {testResult && (
-            <div
-              className={
-                "flex items-start gap-2 rounded-md border p-2.5 text-xs " +
-                (testResult.ok
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-destructive/30 bg-destructive/10 text-destructive")
-              }
-            >
-              {testResult.ok ? (
-                <CheckCircle className="mt-0.5 size-4 shrink-0" />
-              ) : (
-                <CrossCircle className="mt-0.5 size-4 shrink-0" />
-              )}
-              <span className="min-w-0 break-words">
-                {testResult.ok
-                  ? testResult.version
-                    ? `Connected — ${testResult.version}`
-                    : "Connected"
-                  : testResult.error}
-              </span>
-            </div>
-          )}
-        </div>
-        <DialogFooter className="sm:justify-between">
-          <Button variant="outline" onClick={test} disabled={testing || dsn === ""}>
-            {testing ? <Spinner /> : <Router className="size-4" />}
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={editing ? "Edit connection" : "Add database connection"}
+      footer={
+        <>
+          <Button
+            variant="outline"
+            onClick={test}
+            disabled={testing || dsn === ""}
+            pending={testing}
+          >
+            <Router className="size-4" />
             Test connection
           </Button>
-          <Button onClick={save} disabled={!canSave || saving}>
-            {saving && <Spinner />}
+          <Button onClick={save} disabled={!canSave || saving} pending={saving}>
             {editing ? "Save" : "Add"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="conn-name">Name</Label>
+          <Input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Driver</Label>
+          <Select value={driver} onValueChange={(v) => setDriver(v as DbDriver)} disabled={editing}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(drivers.data ?? []).map((d) => (
+                <SelectItem key={d.id} value={d.id}>
+                  {d.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {editing && (
+            <p className="text-xs text-muted-foreground">
+              The driver is fixed once a connection exists.
+            </p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="conn-dsn">
+            {driver === "sqlite" ? "Database file path" : "Connection string"}
+            {editing && <span className="ml-1.5 text-muted-foreground">(leave blank to keep)</span>}
+          </Label>
+          <Input
+            id="conn-dsn"
+            value={dsn}
+            onChange={(e) => {
+              setDsn(e.target.value)
+              setTestResult(null)
+            }}
+            className="font-mono text-xs"
+            placeholder={info?.placeholder}
+          />
+          <p className="text-xs text-muted-foreground">
+            Encrypted with the dashboard&apos;s master key and never returned to a browser.
+          </p>
+        </div>
+
+        {testResult && (
+          <div
+            className={
+              "flex items-start gap-2 rounded-md border p-2.5 text-xs " +
+              (testResult.ok
+                ? "border-rule-success bg-wash-success text-success"
+                : "border-rule-danger bg-wash-danger text-destructive")
+            }
+          >
+            {testResult.ok ? (
+              <CheckCircle className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <CrossCircle className="mt-0.5 size-4 shrink-0" />
+            )}
+            <span className="min-w-0 break-words">
+              {testResult.ok
+                ? testResult.version
+                  ? `Connected — ${testResult.version}`
+                  : "Connected"
+                : testResult.error}
+            </span>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }

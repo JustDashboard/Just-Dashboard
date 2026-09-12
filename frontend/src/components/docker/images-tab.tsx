@@ -26,7 +26,7 @@ import {
   Notice,
   Spinner,
 } from "@/components/state"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
@@ -35,18 +35,12 @@ import { DiskPanel } from "@/components/docker/disk-panel"
 import { Hint, Term } from "@/components/docker/explain"
 import { usePullProgress } from "@/components/docker/create-container"
 import { BuildDialog } from "@/components/docker/build-dialog"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   stickyTableHeader,
   Table,
@@ -132,7 +126,6 @@ export function ImagesTab({ confirm }: { confirm: ConfirmFn }) {
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
 
-  const total = data?.reduce((s, i) => s + i.size, 0) ?? 0
   const outdated = Object.values(updates.data ?? {}).filter((u) => u.state === "outdated")
 
   return (
@@ -159,7 +152,6 @@ export function ImagesTab({ confirm }: { confirm: ConfirmFn }) {
         <PanelHeader
           icon={Box}
           title="Images"
-          description={`${data?.length ?? 0} images · ${bytes(total)} on disk`}
           actions={
             <>
               <IconAction
@@ -225,7 +217,13 @@ export function ImagesTab({ confirm }: { confirm: ConfirmFn }) {
             <TableHeader className={stickyTableHeader}>
               <TableRow>
                 <TableHead className="w-full">Repository</TableHead>
-                <TableHead>Version</TableHead>
+                {/*
+                  Named for what it answers rather than "Version", which was
+                  carrying three unrelated ideas at once: which tag this is,
+                  whether the tag still points where it did, and whether the
+                  image has a name at all.
+                */}
+                <TableHead>Registry</TableHead>
                 <TableHead className="text-right">Size</TableHead>
                 <TableHead className="text-right">Used by</TableHead>
                 <TableHead>Created</TableHead>
@@ -247,68 +245,80 @@ export function ImagesTab({ confirm }: { confirm: ConfirmFn }) {
                         <RowLink mono onClick={() => setSelected(image.id)}>
                           {image.repoTags.length ? image.repoTags.join(", ") : <em>untagged</em>}
                         </RowLink>
-                        <p className="font-mono text-[11px] text-muted-foreground">
+                        <p className="font-mono text-hint text-muted-foreground">
                           {image.id.replace("sha256:", "").slice(0, 12)}
                         </p>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <UpdateBadge status={update} dangling={image.dangling} />
+                      <UpdateState status={update} dangling={image.dangling} />
                     </TableCell>
-                    <TableCell className="numeric text-right font-mono text-xs">
+                    <TableCell className="numeric text-right font-mono">
                       {bytes(image.size)}
                     </TableCell>
-                    <TableCell className="numeric text-right text-xs">
+                    <TableCell className="numeric text-right">
                       {image.containers > 0 ? (
                         image.containers
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {relativeTime(image.created)}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                      <RowActions>
                         {can("service.control") && tag && (
                           <IconAction label={`Pull a fresh ${tag}`} onClick={() => setPulling(tag)}>
                             <Download />
                           </IconAction>
                         )}
-                        {can("destructive") && (
-                          <IconAction
-                            label="Remove"
-                            className="text-destructive"
-                            onClick={() =>
-                              confirm({
-                                title: "Delete image",
-                                confirmLabel: "Delete",
-                                description: (
-                                  <>
-                                    <p>
-                                      Deletes <b>{imagePhrase(image)}</b>.
-                                    </p>
-                                    <p>
-                                      {image.containers > 0
-                                        ? `${image.containers} container(s) were created from it — they keep running, but will not start again without pulling it back.`
-                                        : "No container is using it. Anything that needs it later will have to pull it again."}
-                                    </p>
-                                  </>
-                                ),
-                                action: async (c) => {
-                                  await del(`/docker/images/${encodeURIComponent(image.id)}`, {
-                                    confirm: c,
-                                    query: { force: true },
-                                  })
-                                  refresh()
-                                },
-                              })
-                            }
-                          >
-                            <Trash />
-                          </IconAction>
-                        )}
-                      </div>
+                        {/*
+                          An image a container was built from is not deletable
+                          in any useful sense: Docker refuses, and forcing it
+                          leaves a running container whose image is gone and
+                          which cannot start again. The old row offered the
+                          button anyway and passed force=true, which is the
+                          worst of both.
+                        */}
+                        {can("destructive") &&
+                          (image.containers > 0 ? (
+                            <span className="px-2 text-hint whitespace-nowrap text-muted-foreground">
+                              used by {image.containers}
+                            </span>
+                          ) : (
+                            <IconAction
+                              label="Remove"
+                              className="text-destructive"
+                              onClick={() =>
+                                confirm({
+                                  title: "Delete image",
+                                  confirmLabel: "Delete",
+                                  description: (
+                                    <>
+                                      <p>
+                                        Deletes <b>{imagePhrase(image)}</b>.
+                                      </p>
+                                      <p>
+                                        No container is using it. Anything that needs it later has
+                                        to pull or rebuild it — which for an image built here and
+                                        never pushed means rebuilding from source.
+                                      </p>
+                                    </>
+                                  ),
+                                  action: async (c) => {
+                                    await del(`/docker/images/${encodeURIComponent(image.id)}`, {
+                                      confirm: c,
+                                    })
+                                    refresh()
+                                  },
+                                })
+                              }
+                            >
+                              <Trash />
+                            </IconAction>
+                          ))}
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 )
@@ -341,7 +351,7 @@ export function ImagesTab({ confirm }: { confirm: ConfirmFn }) {
 }
 
 /** The version column: what the registry says about this tag now. */
-function UpdateBadge({
+function UpdateState({
   status,
   dangling,
 }: {
@@ -349,24 +359,32 @@ function UpdateBadge({
   dangling: boolean
 }) {
   if (dangling) {
-    return (
-      <Badge variant="secondary" className="font-normal">
-        dangling
-      </Badge>
-    )
+    return <Tag>dangling</Tag>
   }
-  if (!status) return <span className="text-[11px] text-muted-foreground">—</span>
+  if (!status) return <span className="text-hint text-muted-foreground">—</span>
 
   if (status.state === "outdated") {
+    return <Status verdict="warning" label="update available" />
+  }
+  if (status.state === "pinned") {
+    // A digest reference cannot change, so "no update" and "not checked" are
+    // both the wrong thing to say about it. This is the state the images tab
+    // should be teaching people to want.
     return (
-      <Badge variant="warning" className="font-normal">
-        update available
-      </Badge>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="flex cursor-help items-center gap-1.5 text-hint text-muted-foreground">
+            <CheckCircle className="size-3" />
+            pinned
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{status.reason}</TooltipContent>
+      </Tooltip>
     )
   }
   if (status.state === "current") {
     return (
-      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
         <CheckCircle className="size-3 text-success" />
         current
       </span>
@@ -377,7 +395,7 @@ function UpdateBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="flex cursor-help items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="flex cursor-help items-center gap-1.5 text-hint text-muted-foreground">
           <Question className="size-3" />
           {status.state === "local" ? "built here" : "not checked"}
         </span>
@@ -388,6 +406,76 @@ function UpdateBadge({
 }
 
 /* ---------------------------------------------------------------- detail -- */
+
+/**
+ * How this image is named, and what follows from that.
+ *
+ * The four cases are genuinely different and were being drawn the same way: a
+ * registry tag can be pulled and checked; a digest reference is pinned and
+ * cannot go out of date; an image built here has no registry copy to fall back
+ * on if it is removed; and a dangling image has no name at all and is reachable
+ * only by its id.
+ */
+function ImageReference({ data }: { data: ImageDetail }) {
+  return (
+    <section className="space-y-2 rounded-lg border border-hairline p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-body">{data.ref}</span>
+        {data.dangling && <Tag>untagged</Tag>}
+        {data.kind === "digest" && <Tag tone="success">digest pinned</Tag>}
+        {data.movingTag && <Tag tone="warning">moving tag</Tag>}
+        {data.localBuild && !data.dangling && <Tag>built here</Tag>}
+      </div>
+
+      {data.repoTags.length > 1 && (
+        <p className="text-hint text-muted-foreground">
+          Also tagged {data.repoTags.slice(1).join(", ")}. Removing one tag leaves the image; it
+          goes when the last tag does.
+        </p>
+      )}
+
+      {data.movingTag && (
+        <Hint>
+          A moving tag means whatever it pointed at the last time it was pulled. Two servers running
+          &ldquo;the same&rdquo; tag can be running different software, and there is no version to
+          roll back to. Pinning it to a digest makes an update something you choose rather than
+          something that happens when a container restarts.
+        </Hint>
+      )}
+
+      {data.localBuild && !data.dangling && (
+        <Hint>
+          This copy was built on this server and never pushed, so there is no registry copy to pull
+          back. Deleting it means rebuilding from source.
+        </Hint>
+      )}
+
+      {data.dangling && (
+        <Hint>
+          Every tag this image had has been taken by a rebuild, so nothing refers to it by name. It
+          is reachable only by its id and is what a cleanup sweep removes first.
+        </Hint>
+      )}
+
+      {data.repoDigests.length > 0 && (
+        <details className="text-hint">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            Registry digests
+          </summary>
+          <ul className="mt-1 space-y-0.5 font-mono break-all text-muted-foreground">
+            {data.repoDigests.map((digest) => (
+              <li key={digest}>{digest}</li>
+            ))}
+          </ul>
+          <p className="mt-1 text-muted-foreground">
+            Using one of these in place of the tag is what &ldquo;pin the digest&rdquo; means: the
+            reference then names one exact image and cannot move.
+          </p>
+        </details>
+      )}
+    </section>
+  )
+}
 
 function ImageDetailPanel({
   imageId,
@@ -416,6 +504,15 @@ function ImageDetailPanel({
       {loading && !data && <LoadingRows />}
       {data && (
         <div className="space-y-5">
+          {/*
+            What this image can be asked to do, before anything about what it
+            contains. An image built here and never pushed cannot be pulled
+            back if it is deleted; one named only by a digest cannot go out of
+            date; a dangling one has no name at all. All three used to look
+            identical to a tagged registry image.
+          */}
+          <ImageReference data={data} />
+
           <DetailList>
             <Detail label="Size">{bytes(data.size)}</Detail>
             <Detail label="Created">{relativeTime(data.created)}</Detail>
@@ -441,9 +538,9 @@ function ImageDetailPanel({
               <p className="eyebrow">Ports the image expects to serve on</p>
               <div className="flex flex-wrap gap-1.5">
                 {data.exposedPorts.map((p) => (
-                  <Badge key={p} variant="outline" className="font-mono text-[10px] font-normal">
+                  <Tag key={p} mono>
                     {p}
-                  </Badge>
+                  </Tag>
                 ))}
               </div>
               <Hint>
@@ -458,9 +555,9 @@ function ImageDetailPanel({
               <p className="eyebrow">Paths the image expects storage at</p>
               <div className="flex flex-wrap gap-1.5">
                 {data.volumePaths.map((p) => (
-                  <Badge key={p} variant="outline" className="font-mono text-[10px] font-normal">
+                  <Tag key={p} mono>
                     {p}
-                  </Badge>
+                  </Tag>
                 ))}
               </div>
               <Hint>
@@ -482,12 +579,7 @@ function ImageDetailPanel({
                 {data.usedBy.map((c) => (
                   <div key={c.id} className="flex items-center justify-between gap-2 text-xs">
                     <span className="truncate">{c.name}</span>
-                    <Badge
-                      variant={c.state === "running" ? "success" : "secondary"}
-                      className="font-normal"
-                    >
-                      {c.state}
-                    </Badge>
+                    <Status state={c.state} />
                   </div>
                 ))}
               </div>
@@ -506,7 +598,7 @@ function ImageDetailPanel({
               {data.layers.map((layer, i) => (
                 <div
                   key={`${layer.id}-${i}`}
-                  className="flex items-start gap-2 rounded-md px-2 py-1 font-mono text-[11px] hover:bg-[var(--row-hover)]"
+                  className="flex items-start gap-2 rounded-md px-2 py-1 font-mono text-hint hover:bg-row-hover"
                 >
                   <span className="w-16 shrink-0 text-right text-muted-foreground">
                     {layer.size > 0 ? bytes(layer.size, 0) : "—"}
@@ -573,7 +665,7 @@ function PullDialog({
   }
 
   return (
-    <Dialog
+    <Modal
       open={open}
       onOpenChange={(next) => {
         // Never close mid-pull: the socket is what drives it, and unmounting
@@ -583,47 +675,42 @@ function PullDialog({
         pull.reset()
         onClose()
       }}
-    >
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Download className="size-4" />
-            Pull an image
-          </DialogTitle>
-          <DialogDescription>
-            Downloads it to this server. Containers already running an older copy keep running it
-            until they are recreated.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          <Input
-            value={ref}
-            spellCheck={false}
-            placeholder="nginx:alpine"
-            className="font-mono"
-            onChange={(e) => setRef(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && ref.trim() && !pull.active && start()}
-          />
-          <Hint>
-            Leave the version off and you get <span className="font-mono">latest</span>, which is{" "}
-            <Term name="tag">whatever the publisher last pushed</Term>.
-          </Hint>
-        </div>
-        {(pull.active || pull.lines.length > 0) && (
-          <Well className="max-h-56">
-            {pull.lines.length === 0 ? "Starting…" : pull.lines.join("\n")}
-          </Well>
-        )}
-        <DialogFooter>
+      size="lg"
+      icon={Download}
+      title="Pull an image"
+      description="Downloads it to this server. Containers already running an older copy keep running it
+            until they are recreated."
+      footer={
+        <>
           <Button variant="outline" onClick={onClose} disabled={pull.active}>
             Close
           </Button>
-          <Button onClick={start} disabled={!ref.trim() || pull.active}>
-            {pull.active ? <Spinner className="size-4" /> : <Servers className="size-4" />}
+          <Button onClick={start} disabled={!ref.trim() || pull.active} pending={pull.active}>
+            <Servers className="size-4" />
             Pull
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        <Input
+          value={ref}
+          spellCheck={false}
+          placeholder="nginx:alpine"
+          className="font-mono"
+          onChange={(e) => setRef(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ref.trim() && !pull.active && start()}
+        />
+        <Hint>
+          Leave the version off and you get <span className="font-mono">latest</span>, which is{" "}
+          <Term name="tag">whatever the publisher last pushed</Term>.
+        </Hint>
+      </div>
+      {(pull.active || pull.lines.length > 0) && (
+        <Well className="max-h-56">
+          {pull.lines.length === 0 ? "Starting…" : pull.lines.join("\n")}
+        </Well>
+      )}
+    </Modal>
   )
 }

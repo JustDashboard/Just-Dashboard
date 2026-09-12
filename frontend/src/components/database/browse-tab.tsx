@@ -48,7 +48,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { ResultGrid } from "@/components/database/result-grid"
 import { RowEditor } from "@/components/database/row-editor"
 import { ImportDialog } from "@/components/database/import-dialog"
@@ -58,6 +58,7 @@ import {
   CreateTableDialog,
   RenameDialog,
 } from "@/components/database/ddl-dialogs"
+import { copyText } from "@/lib/clipboard"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 export type TableSelection = { schema: string; table: string }
@@ -106,11 +107,11 @@ export function BrowseTab({
   const { can } = useAuth()
   const [textFilter, setTextFilter] = useState("")
   const [schemaFilter, setSchemaFilter] = useState("all")
+  const [count, setCount] = useState<number | null>(null)
   const [offset, setOffset] = useState(0)
   const [sort, setSort] = useState<{ column: string; desc: boolean } | null>(null)
   const [filters, setFilters] = useState<DbFilter[]>([])
   const [showFilters, setShowFilters] = useState(false)
-  const [count, setCount] = useState<number | null>(null)
   const [counting, setCounting] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [editor, setEditor] = useState<{
@@ -279,8 +280,7 @@ export function BrowseTab({
         table,
         rows: recs,
       })
-      await navigator.clipboard.writeText(res.sql)
-      notify.success(`Copied ${plural(recs.length, "row")} as SQL`)
+      await copyText(res.sql, `Copied ${plural(recs.length, "row")} as SQL`)
     } catch (err) {
       notify.error("Could not copy", err)
     }
@@ -420,7 +420,6 @@ export function BrowseTab({
         <PanelHeader
           icon={Database}
           title="Tables"
-          description={`${visibleTables.length} of ${tables.data?.length ?? 0}`}
           actions={
             canDDL && (
               <Button size="sm" variant="outline" onClick={() => setDialog("createTable")}>
@@ -462,12 +461,12 @@ export function BrowseTab({
                 className={cn(
                   "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
                   table === t.name && selection?.schema === t.schema
-                    ? "bg-primary/12 font-medium text-foreground"
+                    ? "bg-plot-primary font-medium text-foreground"
                     : "hover:bg-accent",
                 )}
               >
-                <span className="truncate text-[13px]">{t.name}</span>
-                <span className="truncate text-[11px] text-muted-foreground">
+                <span className="truncate text-body">{t.name}</span>
+                <span className="truncate text-hint text-muted-foreground">
                   {schemaNames.length > 1 ? `${t.schema} · ` : ""}
                   {t.type}
                   {t.estimatedRows > 0 && ` · ${plural(t.estimatedRows, "row")}`}
@@ -476,11 +475,9 @@ export function BrowseTab({
               </button>
             ))}
             {tables.loading && <LoadingRows rows={4} />}
-            {tables.data?.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No tables found.</p>
-            )}
+            {tables.data?.length === 0 && <EmptyNote>No tables found.</EmptyNote>}
             {tables.data && tables.data.length > 0 && visibleTables.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No tables match the filter.</p>
+              <EmptyNote>No tables match the filter.</EmptyNote>
             )}
           </div>
         </PanelBody>
@@ -490,13 +487,6 @@ export function BrowseTab({
         <PanelHeader
           icon={Layout}
           title={table ?? "Pick a table"}
-          description={
-            rows.data
-              ? `${plural(rows.data.rowCount, "row")} in ${rows.data.duration}${
-                  count !== null ? ` · ${count.toLocaleString()} total` : ""
-                }`
-              : undefined
-          }
           actions={
             table && (
               <>
@@ -552,6 +542,14 @@ export function BrowseTab({
                 >
                   Next
                 </Button>
+                {count !== null && (
+                  // The counted total, where it was asked for. It used to be a
+                  // sentence under the panel's title; the number is the whole
+                  // content of that sentence.
+                  <span className="numeric text-hint text-muted-foreground">
+                    {count.toLocaleString()} rows
+                  </span>
+                )}
                 <TableMenu
                   canWrite={canWrite}
                   canDDL={canDDL}
@@ -603,7 +601,7 @@ export function BrowseTab({
                 Add condition
               </Button>
               {activeFilters.length > 0 && (
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-hint text-muted-foreground">
                   Applied on the server, across the whole table — not just this page.
                 </span>
               )}
@@ -617,7 +615,7 @@ export function BrowseTab({
           {table && rows.data && (
             <>
               {canWrite && pk.length === 0 && detail.data && (
-                <p className="border-b border-hairline bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
+                <p className="border-b border-hairline bg-muted/30 px-4 py-1.5 text-hint text-muted-foreground">
                   This table has no primary key, so rows cannot be edited individually. Use the
                   Query tab with an explicit WHERE clause.
                 </p>
@@ -636,6 +634,16 @@ export function BrowseTab({
                 onDelete={canEditRows ? deleteRow : undefined}
                 onDuplicate={canWrite ? duplicateRow : undefined}
                 onCopySQL={copyAsInsert}
+                emptyTitle={
+                  activeFilters.length > 0
+                    ? "No rows match these conditions"
+                    : "This table is empty"
+                }
+                emptyDescription={
+                  activeFilters.length > 0
+                    ? "The conditions are applied on the server, across the whole table — so this is every row, not just this page."
+                    : `${table} exists and has its columns, but nothing has been written to it yet.`
+                }
               />
             </>
           )}
@@ -748,8 +756,8 @@ function TableMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost">
-          {counting ? <Spinner /> : <MoreHorizontal className="size-4" />}
+        <Button size="sm" variant="ghost" pending={counting}>
+          <MoreHorizontal className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
@@ -846,7 +854,13 @@ function FilterRow({
         className="h-8 max-w-xs font-mono text-xs"
         placeholder={needsValue ? "value" : ""}
       />
-      <Button size="icon" variant="ghost" className="size-7" onClick={onRemove}>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        aria-label="Remove this filter"
+        onClick={onRemove}
+      >
         <Cross className="size-3.5" />
       </Button>
     </div>

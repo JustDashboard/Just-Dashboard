@@ -117,7 +117,7 @@ export function ResizeHandle({
         // sits over that edge so no second divider line is drawn. Hidden below
         // `lg`, where the layout stacks and a vertical edge resizes nothing.
         "group hidden w-2 shrink-0 cursor-col-resize touch-none select-none lg:block",
-        "focus-visible:ring-ring/60 rounded-full outline-none focus-visible:ring-2",
+        "rounded-full focus-ring",
         className,
       )}
     >

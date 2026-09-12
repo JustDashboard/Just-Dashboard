@@ -19,6 +19,8 @@ import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { GitExplain } from "@/components/git/help"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { RowActions } from "@/components/icon-action"
+import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -277,11 +279,11 @@ export function ChangesPanel({
             }}
             placeholder="Describe what you changed…"
             rows={3}
-            className="resize-none font-mono text-[12px]"
+            className="resize-none font-mono text-xs"
           />
           <div className="flex items-center gap-2">
             {committer && (
-              <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              <span className="min-w-0 truncate text-hint text-muted-foreground">
                 as {committer}
               </span>
             )}
@@ -317,7 +319,7 @@ export function ChangesPanel({
             </Tooltip>
           </div>
           {staged.length === 0 && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-hint text-muted-foreground">
               Stage at least one change above before committing.
             </p>
           )}
@@ -344,16 +346,16 @@ function Group({
 }) {
   return (
     <div>
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-hairline bg-surface-header/95 px-3 py-1.5 backdrop-blur">
+      <PaneHeader className="sticky top-0 z-10 gap-2 px-3 backdrop-blur">
         <span
           className={cn("size-1.5 rounded-full", tone === "success" ? "bg-success" : "bg-warning")}
         />
-        <span className="text-[12px] font-medium">{label}</span>
+        <span className="text-xs font-medium">{label}</span>
         <GitExplain name={explain} />
-        <span className="numeric text-[11px] text-muted-foreground">{count}</span>
+        <span className="numeric text-hint text-muted-foreground">{count}</span>
         <span className="flex-1" />
         {action}
-      </div>
+      </PaneHeader>
       {children}
     </div>
   )
@@ -376,14 +378,14 @@ function FileRow({
       className={cn(
         "group relative flex min-w-0 items-center gap-2 bg-(--git-tint) px-3 py-1.5",
         "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-['']",
-        "hover:bg-[var(--row-hover)]",
-        active && "bg-primary/10",
+        "hover:bg-row-hover",
+        active && "bg-accent",
       )}
       style={gitStyle(tone)}
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="w-5 shrink-0 text-center font-mono text-[10px] text-(--git-colour)">
+          <span className="w-5 shrink-0 text-center font-mono text-micro text-(--git-colour)">
             {gitLetter(file)}
           </span>
         </TooltipTrigger>
@@ -394,15 +396,13 @@ function FileRow({
       <button
         onClick={onClick}
         className={cn(
-          "min-w-0 flex-1 truncate text-left font-mono text-[12px] text-(--git-colour) hover:underline",
+          "min-w-0 flex-1 truncate text-left font-mono text-xs text-(--git-colour) hover:underline",
           file.label === "deleted" && "line-through",
         )}
       >
         {file.path}
       </button>
-      <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-        {actions}
-      </div>
+      <RowActions className="gap-0">{actions}</RowActions>
     </div>
   )
 }
@@ -467,9 +467,9 @@ function GroupAction({
           disabled={disabled}
           onClick={onClick}
           className={cn(
-            "rounded px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
+            "rounded-sm px-1.5 py-0.5 text-hint transition-colors disabled:opacity-40",
             danger
-              ? "text-destructive hover:bg-destructive/10"
+              ? "text-destructive hover:bg-wash-danger"
               : "text-muted-foreground hover:bg-accent hover:text-foreground",
           )}
         >

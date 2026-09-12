@@ -286,6 +286,11 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 			Internal: insp.Internal, Attachable: insp.Attachable, IPv6: insp.EnableIPv6,
 			Created: insp.Created.UTC(), Labels: insp.Labels, Subnets: []string{},
 			Containers: len(insp.Containers),
+			// The list view fills UsedBy by joining against the containers;
+			// this route never did, so it went out as `null` and the detail
+			// panel's `usedBy.length` took the page down. Members below carries
+			// the same answer in more detail, and this stays a list.
+			UsedBy: []string{},
 		},
 		Options: insp.Options,
 		Members: []NetworkMember{},
@@ -323,6 +328,7 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 			}
 		}
 		d.Members = append(d.Members, m)
+		d.UsedBy = append(d.UsedBy, m.Name)
 	}
 	sort.Slice(d.Members, func(i, j int) bool { return d.Members[i].Name < d.Members[j].Name })
 	return d, nil

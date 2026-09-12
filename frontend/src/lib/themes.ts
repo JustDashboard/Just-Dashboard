@@ -1,36 +1,35 @@
 /**
- * Light and dark. Nothing else.
+ * Dark. Only dark.
  *
- * This used to be a registry of twelve named palettes; the product now ships
- * one palette ("Just Dashboard", defined in `app/globals.css`'s `:root` and
- * `.dark` blocks) in two modes. What's left here is the part that doesn't
- * belong in a component: where the choice is stored, and the script that
- * applies it before first paint.
+ * This was a registry of twelve named palettes, then one palette in two modes,
+ * and is now one palette. The light mode was removed rather than left to rot:
+ * every tinted surface, every status hue, every chart colour and every terminal
+ * ANSI slot had to be chosen twice and checked twice, and the second set was
+ * seen by almost nobody — this is a console you keep open beside the thing you
+ * are fixing, not a document you print.
+ *
+ * What is left is the one line of bootstrap the document still needs. It is
+ * kept as a script rather than hard-coded into the markup because the class is
+ * also what the generated shadcn primitives' `dark:` variants key off, and the
+ * root element has to carry it before anything paints either way.
  */
 
-export type ThemeMode = "light" | "dark"
-
-export const DEFAULT_MODE: ThemeMode = "dark"
-
-/** Where the choice is kept. Shared with the pre-paint script in the layout. */
+/** Where the removed preference used to be kept. Cleared on first load. */
 export const THEME_STORAGE_KEY = "just-dashboard.theme"
 
-export function isThemeMode(v: string | null | undefined): v is ThemeMode {
-  return v === "light" || v === "dark"
-}
-
 /**
- * The script the root layout inlines in <head>, before anything paints.
+ * Inlined in <head>, before anything paints.
  *
- * Reading the stored mode after hydration would show one frame of the
- * default instead — which, for someone who chose light, is a full-screen
- * flash of near-black on every navigation that reloads the document.
+ * Two jobs: put `.dark` on the root so the `dark:` variants resolve, and tell
+ * the browser the page is dark so its own form controls, scrollbars and
+ * `color-scheme`-derived defaults match. It also drops the stored light/dark
+ * choice from anyone upgrading, so the key does not sit in localStorage
+ * forever meaning nothing.
  */
 export function themeBootstrapScript(): string {
   return (
-    `(function(){try{var d=document.documentElement,` +
-    `m=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)}),` +
-    `l=m==="light"||(m!=="dark"&&${JSON.stringify(DEFAULT_MODE)}==="light");` +
-    `d.className=l?"light":"dark";d.style.colorScheme=l?"light":"dark"}catch(e){}})()`
+    `(function(){try{var d=document.documentElement;` +
+    `d.classList.add("dark");d.style.colorScheme="dark";` +
+    `localStorage.removeItem(${JSON.stringify(THEME_STORAGE_KEY)})}catch(e){}})()`
   )
 }

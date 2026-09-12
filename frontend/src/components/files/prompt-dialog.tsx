@@ -5,14 +5,8 @@ import { notify } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/state"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+
+import { Modal } from "@/components/modal"
 
 export type PromptRequest = {
   title: string
@@ -96,48 +90,49 @@ function PromptBody({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{request.title}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2">
-          {request.label && (
-            <Label htmlFor="prompt-input" className="text-xs text-muted-foreground">
-              {request.label}
-            </Label>
-          )}
-          <Input
-            id="prompt-input"
-            autoFocus
-            autoComplete="off"
-            spellCheck={false}
-            value={value}
-            onFocus={onFocus}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && run()}
-            placeholder={request.placeholder}
-          />
-          {error ? (
-            <p className="text-[11px] text-destructive">{error}</p>
-          ) : (
-            request.hint && (
-              <p className="font-mono text-[11px] break-all text-muted-foreground">
-                {request.hint(value.trim())}
-              </p>
-            )
-          )}
-        </div>
-        <DialogFooter>
+    <Modal
+      open
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      size="sm"
+      title={request.title}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={run} disabled={busy || !value.trim() || !!error}>
-            {busy && <Spinner className="size-4" />}
+          <Button onClick={run} disabled={busy || !value.trim() || !!error} pending={busy}>
             {request.confirmLabel ?? "OK"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        {request.label && (
+          <Label htmlFor="prompt-input" className="text-xs text-muted-foreground">
+            {request.label}
+          </Label>
+        )}
+        <Input
+          id="prompt-input"
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          onFocus={onFocus}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && run()}
+          placeholder={request.placeholder}
+        />
+        {error ? (
+          <p className="text-hint text-destructive">{error}</p>
+        ) : (
+          request.hint && (
+            <p className="font-mono text-hint break-all text-muted-foreground">
+              {request.hint(value.trim())}
+            </p>
+          )
+        )}
+      </div>
+    </Modal>
   )
 }

@@ -2,7 +2,7 @@
 
 import { Copy, Key, Layout, Linked, Monorepo, Pencil, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { plural } from "@/lib/format"
+import { } from "@/lib/format"
 import { del, get } from "@/lib/api"
 import type { DbConnection, DbDriverInfo, DbTableDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -10,10 +10,11 @@ import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { RenameDialog } from "@/components/database/ddl-dialogs"
-import { Badge } from "@/components/ui/badge"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Tag } from "@/components/tag"
 import {
   Table,
   TableBody,
@@ -22,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { copyText } from "@/lib/clipboard"
 
 /** The Structure tab: a table's columns, primary key, indexes, foreign keys and
  *  the DDL that would recreate it — the reference view every database tool has
@@ -106,7 +108,6 @@ export function StructureTab({
         <PanelHeader
           icon={Monorepo}
           title="Columns"
-          description={plural(d.columns.length, "column")}
         />
         <PanelBody flush>
           <Table>
@@ -123,50 +124,35 @@ export function StructureTab({
             <TableBody>
               {d.columns.map((c) => (
                 <TableRow key={c.name} className="group">
-                  <TableCell className="font-mono text-xs font-medium">{c.name}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
+                  <TableCell className="font-mono font-medium">{c.name}</TableCell>
+                  <TableCell className="font-mono text-muted-foreground">
                     {c.type.toLowerCase()}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell>
                     {c.nullable ? (
                       <span className="text-muted-foreground">yes</span>
                     ) : (
                       <span className="text-foreground">no</span>
                     )}
                   </TableCell>
-                  <TableCell className="max-w-40 truncate font-mono text-xs text-muted-foreground">
+                  <TableCell className="max-w-40 truncate font-mono text-muted-foreground">
                     {c.default || "—"}
                   </TableCell>
-                  <TableCell>
-                    {pk.has(c.name) && (
-                      <Badge variant="secondary" className="gap-1 font-normal">
-                        <Key className="size-3" />
-                        pk
-                      </Badge>
-                    )}
-                  </TableCell>
+                  <TableCell>{pk.has(c.name) && <Tag icon={Key}>pk</Tag>}</TableCell>
                   {canEdit && (
                     <TableCell className="w-20">
-                      <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6"
-                          title="Rename column"
-                          onClick={() => setRenaming(c.name)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6 text-destructive"
-                          title="Drop column"
+                      <RowActions>
+                        <IconAction label="Rename column" onClick={() => setRenaming(c.name)}>
+                          <Pencil />
+                        </IconAction>
+                        <IconAction
+                          label="Drop column"
+                          className="text-destructive"
                           onClick={() => dropColumn(c.name)}
                         >
-                          <Trash className="size-3.5" />
-                        </Button>
-                      </div>
+                          <Trash />
+                        </IconAction>
+                      </RowActions>
                     </TableCell>
                   )}
                 </TableRow>
@@ -178,10 +164,10 @@ export function StructureTab({
 
       <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
         <Panel>
-          <PanelHeader icon={Key} title="Indexes" description={`${d.indexes.length}`} />
+          <PanelHeader icon={Key} title="Indexes" />
           <PanelBody flush>
             {d.indexes.length === 0 ? (
-              <p className="p-4 text-xs text-muted-foreground">No indexes.</p>
+              <EmptyNote>No indexes.</EmptyNote>
             ) : (
               <Table>
                 <TableHeader>
@@ -195,30 +181,25 @@ export function StructureTab({
                 <TableBody>
                   {d.indexes.map((ix) => (
                     <TableRow key={ix.name} className="group">
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono">
                         {ix.name}
-                        {ix.primary && (
-                          <Badge variant="secondary" className="ml-1.5 font-normal">
-                            primary
-                          </Badge>
-                        )}
+                        {ix.primary && <Tag className="ml-1.5">primary</Tag>}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono text-muted-foreground">
                         {ix.columns.join(", ")}
                       </TableCell>
-                      <TableCell className="text-xs">{ix.unique ? "yes" : "no"}</TableCell>
+                      <TableCell>{ix.unique ? "yes" : "no"}</TableCell>
                       {canEdit && (
                         <TableCell className="w-10">
                           {!ix.primary && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-6 text-destructive opacity-0 group-hover:opacity-100"
-                              title="Drop index"
+                            <IconAction
+                              label="Drop index"
+                              reveal
+                              className="text-destructive"
                               onClick={() => dropIndex(ix.name)}
                             >
-                              <Trash className="size-3.5" />
-                            </Button>
+                              <Trash />
+                            </IconAction>
                           )}
                         </TableCell>
                       )}
@@ -231,10 +212,10 @@ export function StructureTab({
         </Panel>
 
         <Panel>
-          <PanelHeader icon={Linked} title="Foreign keys" description={`${d.foreignKeys.length}`} />
+          <PanelHeader icon={Linked} title="Foreign keys" />
           <PanelBody flush>
             {d.foreignKeys.length === 0 ? (
-              <p className="p-4 text-xs text-muted-foreground">No foreign keys.</p>
+              <EmptyNote>No foreign keys.</EmptyNote>
             ) : (
               <Table>
                 <TableHeader>
@@ -247,13 +228,11 @@ export function StructureTab({
                 <TableBody>
                   {d.foreignKeys.map((fk) => (
                     <TableRow key={fk.name}>
-                      <TableCell className="font-mono text-xs">{fk.columns.join(", ")}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono">{fk.columns.join(", ")}</TableCell>
+                      <TableCell className="font-mono text-muted-foreground">
                         {fk.refTable}({fk.refColumns.join(", ")})
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {fk.onDelete || "—"}
-                      </TableCell>
+                      <TableCell className="text-muted-foreground">{fk.onDelete || "—"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -281,19 +260,11 @@ export function StructureTab({
           <PanelHeader
             icon={Layout}
             title="Definition"
-            description={
-              conn.driver === "postgres" ? "generated from structure" : "as reported by the engine"
-            }
             actions={
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(d.createSql!)
-                    .then(() => notify.success("Copied DDL"))
-                    .catch(() => notify.error("Could not copy"))
-                }
+                onClick={() => void copyText(d.createSql!, "Copied DDL")}
               >
                 <Copy className="size-3.5" />
                 Copy

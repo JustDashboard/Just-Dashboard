@@ -1,7 +1,7 @@
 "use client"
 
 import { CheckCircle, Information, ShieldOff, Warning } from "@/components/icons"
-import { relativeTime } from "@/lib/format"
+import { } from "@/lib/format"
 import type { Health } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -46,9 +46,6 @@ export function HealthPanel({
       <PanelHeader
         icon={ok ? CheckCircle : iconFor(health.status)}
         title="Health"
-        description={`Checked ${relativeTime(health.checkedAt)}${
-          health.recorded ? " · against the last hour" : ""
-        }`}
         actions={<Status verdict={health.status} label={verdictLabel(health.status)} />}
       />
       <PanelBody>
@@ -66,7 +63,13 @@ export function HealthPanel({
 }
 
 /** The one-word verdict, small enough for the top bar and a panel header alike. */
-export function HealthBadge({ status, className }: { status: Health["status"]; className?: string }) {
+export function HealthVerdict({
+  status,
+  className,
+}: {
+  status: Health["status"]
+  className?: string
+}) {
   return <Status verdict={status} label={verdictLabel(status)} className={className} />
 }
 

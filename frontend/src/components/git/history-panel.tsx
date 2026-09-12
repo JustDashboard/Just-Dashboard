@@ -10,6 +10,8 @@ import type { GitPreview } from "@/components/git/preview-panel"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { rowReveal } from "@/components/icon-action"
+import { cn } from "@/lib/utils"
 
 /**
  * The repository's history. Each commit opens as a diff in the preview column,
@@ -39,7 +41,12 @@ export function HistoryPanel({
   )
 
   const show = async (c: GitCommit) => {
-    onSelectDiff({ kind: "diff", title: c.subject, subtitle: `${c.short} · loading…`, body: "Loading…" })
+    onSelectDiff({
+      kind: "diff",
+      title: c.subject,
+      subtitle: `${c.short} · loading…`,
+      body: "Loading…",
+    })
     try {
       const res = await get<{ diff: string }>("/git/diff", { path: repoPath, ref: c.sha })
       onSelectDiff({
@@ -92,18 +99,18 @@ export function HistoryPanel({
       {log.data.map((c, i) => (
         <div
           key={c.sha}
-          className="group flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--row-hover)]"
+          className="group flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-row-hover"
         >
           <GitCommitIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <button onClick={() => show(c)} className="min-w-0 flex-1 text-left">
-            <p className="truncate text-[13px]">{c.subject}</p>
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="truncate text-body">{c.subject}</p>
+            <p className="truncate text-hint text-muted-foreground">
               <span className="font-mono">{c.short}</span> · {c.author} · {relativeTime(c.at)}
               {c.isMerge ? " · merge" : ""}
             </p>
           </button>
           {(c.insertions > 0 || c.deletions > 0) && (
-            <span className="numeric mt-0.5 shrink-0 font-mono text-[11px]">
+            <span className="numeric mt-0.5 shrink-0 font-mono text-hint">
               <span className="text-(--git-added)">+{c.insertions}</span>{" "}
               <span className="text-(--git-deleted)">−{c.deletions}</span>
             </span>
@@ -116,7 +123,10 @@ export function HistoryPanel({
                   size="sm"
                   variant="ghost"
                   aria-label="Undo to here"
-                  className="size-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                  className={cn(
+                    "size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground",
+                    rowReveal(),
+                  )}
                   onClick={() => resetTo(c)}
                 >
                   <CornerUpLeft className="size-3.5" />

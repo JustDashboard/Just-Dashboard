@@ -48,8 +48,7 @@ const (
 	// ActionApply writes new settings and restarts into them.
 	ActionApply Action = "apply"
 	// ActionRestart recreates the containers with the configuration already on
-	// disk. It is the "have you tried turning it off and on again" button, and
-	// it is the safest thing on the page: nothing is written.
+	// disk, relocating ports that another service has since occupied.
 	ActionRestart Action = "restart"
 	// ActionRebuild rebuilds the images first. Same configuration, new
 	// binaries — what an operator wants after editing the checkout by hand.
@@ -101,6 +100,12 @@ type Run struct {
 	// showing this record can no longer reach the dashboard that wrote it.
 	Endpoint  string `json:"endpoint,omitempty"`
 	Container string `json:"container"`
+
+	// Note is something an operator has to know about a run that otherwise
+	// worked. There is one today: a Tailscale certificate that could not be
+	// issued, so the new address is served with a self-signed one until the
+	// tailnet will issue the real thing.
+	Note string `json:"note,omitempty"`
 
 	Actor      string     `json:"actor"`
 	StartedAt  time.Time  `json:"startedAt"`

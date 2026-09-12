@@ -10,14 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Spinner } from "@/components/state"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+
+import { Modal } from "@/components/modal"
 
 type FieldState = { value: string; isNull: boolean }
 
@@ -91,71 +85,71 @@ export function RowEditor({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{mode === "insert" ? "Insert row" : "Edit row"}</DialogTitle>
-        </DialogHeader>
-        <div className={cn("grid max-h-[60vh] gap-3 overflow-y-auto", ringSafeScroll)}>
-          {columns.map((c) => {
-            const f = fields[c.name] ?? { value: "", isNull: false }
-            const isPk = primaryKey.includes(c.name)
-            const long = /text|json|xml|blob|bytea/i.test(c.type)
-            return (
-              <div key={c.name} className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor={`f-${c.name}`} className="font-mono text-xs">
-                    {c.name}
-                    <span className="ml-1.5 font-sans font-normal text-muted-foreground">
-                      {c.type.toLowerCase()}
-                      {isPk && " · pk"}
-                      {!c.nullable && " · required"}
-                    </span>
-                  </Label>
-                  {c.nullable && (
-                    <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <Checkbox
-                        checked={f.isNull}
-                        onCheckedChange={(v) => set(c.name, { isNull: Boolean(v) })}
-                      />
-                      null
-                    </label>
-                  )}
-                </div>
-                {long ? (
-                  <Textarea
-                    id={`f-${c.name}`}
-                    value={f.isNull ? "" : f.value}
-                    disabled={f.isNull}
-                    onChange={(e) => set(c.name, { value: e.target.value })}
-                    className="min-h-20 font-mono text-xs"
-                    placeholder={f.isNull ? "null" : c.default || ""}
-                  />
-                ) : (
-                  <Input
-                    id={`f-${c.name}`}
-                    value={f.isNull ? "" : f.value}
-                    disabled={f.isNull}
-                    onChange={(e) => set(c.name, { value: e.target.value })}
-                    className="font-mono text-xs"
-                    placeholder={f.isNull ? "null" : c.default || ""}
-                  />
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={mode === "insert" ? "Insert row" : "Edit row"}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy}>
-            {busy && <Spinner />}
+          <Button onClick={submit} pending={busy}>
             {mode === "insert" ? "Insert" : "Save changes"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className={cn("grid max-h-[60vh] gap-3 overflow-y-auto", ringSafeScroll)}>
+        {columns.map((c) => {
+          const f = fields[c.name] ?? { value: "", isNull: false }
+          const isPk = primaryKey.includes(c.name)
+          const long = /text|json|xml|blob|bytea/i.test(c.type)
+          return (
+            <div key={c.name} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor={`f-${c.name}`} className="font-mono text-xs">
+                  {c.name}
+                  <span className="ml-1.5 font-sans font-normal text-muted-foreground">
+                    {c.type.toLowerCase()}
+                    {isPk && " · pk"}
+                    {!c.nullable && " · required"}
+                  </span>
+                </Label>
+                {c.nullable && (
+                  <label className="flex items-center gap-1.5 text-hint text-muted-foreground">
+                    <Checkbox
+                      checked={f.isNull}
+                      onCheckedChange={(v) => set(c.name, { isNull: Boolean(v) })}
+                    />
+                    null
+                  </label>
+                )}
+              </div>
+              {long ? (
+                <Textarea
+                  id={`f-${c.name}`}
+                  value={f.isNull ? "" : f.value}
+                  disabled={f.isNull}
+                  onChange={(e) => set(c.name, { value: e.target.value })}
+                  className="min-h-20 font-mono text-xs"
+                  placeholder={f.isNull ? "null" : c.default || ""}
+                />
+              ) : (
+                <Input
+                  id={`f-${c.name}`}
+                  value={f.isNull ? "" : f.value}
+                  disabled={f.isNull}
+                  onChange={(e) => set(c.name, { value: e.target.value })}
+                  className="font-mono text-xs"
+                  placeholder={f.isNull ? "null" : c.default || ""}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Modal>
   )
 }
 

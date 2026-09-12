@@ -71,13 +71,6 @@ export function DashboardUpdatePanel() {
         <PanelHeader
           icon={Sparkles}
           title="Just Dashboard"
-          description={
-            report.available
-              ? `Version ${report.version} — ${target} is available`
-              : report.check.enabled
-                ? `Version ${report.version} — the newest published version`
-                : `Version ${report.version} — version checks are turned off`
-          }
           actions={
             <>
               <Button
@@ -112,11 +105,11 @@ export function DashboardUpdatePanel() {
 
           {!running && report.available && headline && (
             <div className="space-y-1">
-              <p className="text-[13px] font-medium">
+              <p className="text-body font-medium">
                 <span className="numeric">{headline.version}</span> — {headline.title}
               </p>
               {headline.summary && (
-                <p className="text-[13px] leading-relaxed text-muted-foreground">
+                <p className="text-body leading-relaxed text-muted-foreground">
                   {headline.summary}
                 </p>
               )}
@@ -129,7 +122,7 @@ export function DashboardUpdatePanel() {
           )}
 
           {!run && !report.available && (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               {report.check.enabled
                 ? `Checked ${relativeTime(report.check.checkedAt)} against ${report.check.repo} (${report.check.ref}).`
                 : "This install never asks whether a newer version exists. The release notes below are the ones compiled into the version you are running."}
@@ -161,7 +154,7 @@ export function DashboardUpdatePanel() {
                 rather than resetting, so they survive unless the new version changes the same lines
                 — in which case it stops and tells you, rather than discarding them.
               </p>
-              <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
+              <ul className="mt-1 space-y-0.5 font-mono text-hint">
                 {report.install.dirty?.slice(0, 6).map((line) => (
                   <li key={line}>{line}</li>
                 ))}

@@ -20,8 +20,11 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
+import { RowActions, rowReveal } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -42,39 +45,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
 
 export default function AccountPage() {
+  const { can } = useAuth()
   const [tab, setTab] = useViewState("account.tab", "security")
-  const { status, can } = useAuth()
 
   return (
     <Page>
       <PageHeader
         eyebrow="You"
         title="Account"
-        description={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{status?.user?.username}</span>
-            <Badge variant="outline" className="font-normal capitalize">
-              {status?.user?.role}
-            </Badge>
-            <Badge
-              variant={status?.user?.totpEnabled ? "success" : "warning"}
-              className="font-normal"
-            >
-              {status?.user?.totpEnabled ? "2FA enabled" : "2FA not enrolled"}
-            </Badge>
-          </span>
-        }
       />
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
         <TabsList>
@@ -134,7 +115,6 @@ function SecurityTab() {
         <PanelHeader
           icon={LockClosed}
           title="Change password"
-          description="At least 12 characters, mixing three character classes"
         />
         <PanelBody className="space-y-3">
           <div className="space-y-1.5">
@@ -172,8 +152,7 @@ function SecurityTab() {
           </p>
         </PanelBody>
         <PanelFooter>
-          <Button size="sm" onClick={change} disabled={busy || !current || !next}>
-            {busy && <Spinner className="size-4" />}
+          <Button size="sm" onClick={change} disabled={busy || !current || !next} pending={busy}>
             Change password
           </Button>
         </PanelFooter>
@@ -262,11 +241,11 @@ function TwoFactorPanel() {
       <PanelHeader
         icon={ShieldCheck}
         title="Two-factor authentication"
-        description="A code from your authenticator app, checked at every sign in"
         actions={
-          <Badge variant={enrolled ? "success" : "secondary"} className="font-normal">
-            {enrolled ? "enabled" : required ? "required — not yet enrolled" : "not enrolled"}
-          </Badge>
+          <Status
+            verdict={enrolled ? "ok" : required ? "warning" : "notice"}
+            label={enrolled ? "enabled" : required ? "required — not yet enrolled" : "not enrolled"}
+          />
         }
       />
       <PanelBody className="space-y-3">
@@ -294,7 +273,7 @@ function TwoFactorPanel() {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>Secret</Label>
-              <Well className="font-mono text-[13px] tracking-widest break-all">
+              <Well className="font-mono text-body tracking-widest break-all">
                 {enrollment.secret}
               </Well>
               <p className="text-xs text-muted-foreground">
@@ -377,8 +356,13 @@ function TwoFactorPanel() {
 
         {disabling && (
           <>
-            <Button size="sm" variant="destructive" disabled={busy || !password} onClick={disable}>
-              {busy && <Spinner className="size-4" />}
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={busy || !password}
+              onClick={disable}
+              pending={busy}
+            >
               Turn two-factor off
             </Button>
             <Button
@@ -397,8 +381,7 @@ function TwoFactorPanel() {
         {!enrolled &&
           (enrollment ? (
             <>
-              <Button size="sm" disabled={busy || code.length < 6} onClick={enable}>
-                {busy && <Spinner className="size-4" />}
+              <Button size="sm" disabled={busy || code.length < 6} onClick={enable} pending={busy}>
                 Enable two-factor
               </Button>
               <Button
@@ -413,8 +396,7 @@ function TwoFactorPanel() {
               </Button>
             </>
           ) : (
-            <Button size="sm" disabled={busy} onClick={begin}>
-              {busy && <Spinner className="size-4" />}
+            <Button size="sm" onClick={begin} pending={busy}>
               Enable two-factor
             </Button>
           ))}
@@ -442,7 +424,6 @@ function SessionsTab() {
       <PanelHeader
         icon={DesktopDevice}
         title="Active sessions"
-        description="Signing one out takes effect immediately"
       />
       <PanelBody flush>
         <Table>
@@ -458,19 +439,15 @@ function SessionsTab() {
           <TableBody>
             {data?.map((session) => (
               <TableRow key={session.id} className="group">
-                <TableCell className="font-mono text-xs">
+                <TableCell className="font-mono">
                   {session.ip}
-                  {session.current && (
-                    <Badge variant="success" className="ml-2 text-[10px] font-normal">
-                      this session
-                    </Badge>
-                  )}
+                  {session.current && <Tag className="ml-2">this session</Tag>}
                 </TableCell>
-                <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+                <TableCell className="max-w-xs truncate text-muted-foreground">
                   {session.userAgent}
                 </TableCell>
-                <TableCell className="text-xs">{timestamp(session.createdAt)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">
+                <TableCell>{timestamp(session.createdAt)}</TableCell>
+                <TableCell className="text-muted-foreground">
                   {relativeTime(session.lastSeenAt)}
                 </TableCell>
                 <TableCell>
@@ -478,7 +455,7 @@ function SessionsTab() {
                     <Button
                       size="xs"
                       variant="ghost"
-                      className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                      className={cn("text-destructive", rowReveal())}
                       onClick={async () => {
                         await del(`/account/sessions/${session.id}`)
                         notify.success("Session revoked")
@@ -518,7 +495,6 @@ function TokensTab() {
         <PanelHeader
           icon={Key}
           title="API tokens"
-          description="A token can never exceed the role of the account that minted it, and is demoted automatically if that account is"
           actions={<CreateTokenDialog onDone={refresh} />}
         />
         <PanelBody flush>
@@ -539,24 +515,20 @@ function TokensTab() {
               <TableBody>
                 {data.map((token) => (
                   <TableRow key={token.id} className={token.revoked ? "opacity-50" : undefined}>
-                    <TableCell className="text-[13px] font-medium">{token.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{token.prefix}…</TableCell>
+                    <TableCell className="text-body font-medium">{token.name}</TableCell>
+                    <TableCell className="font-mono">{token.prefix}…</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-normal">
-                        {token.role}
-                      </Badge>
+                      <Tag>{token.role}</Tag>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {token.lastUsedAt ? relativeTime(token.lastUsedAt) : "never"}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {token.expiresAt ? relativeTime(token.expiresAt) : "never"}
                     </TableCell>
                     <TableCell>
                       {token.revoked ? (
-                        <Badge variant="secondary" className="font-normal">
-                          revoked
-                        </Badge>
+                        <span className="text-xs text-muted-foreground">revoked</span>
                       ) : (
                         <Button
                           size="icon-xs"
@@ -634,30 +606,38 @@ function CreateTokenDialog({ onDone }: { onDone: () => void }) {
         : ["readonly"]
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o)
-        if (!o) {
-          setSecret(null)
-          setName("")
-        }
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="size-4" />
-          New token
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New API token</DialogTitle>
-          <DialogDescription>
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <Plus className="size-4" />
+        New token
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o)
+          if (!o) {
+            setSecret(null)
+            setName("")
+          }
+        }}
+        title="New API token"
+        description={
+          <>
             Send it as <code className="font-mono">Authorization: Bearer …</code>
-          </DialogDescription>
-        </DialogHeader>
-
+          </>
+        }
+        footer={
+          <>
+            {secret ? (
+              <Button onClick={() => setOpen(false)}>Done</Button>
+            ) : (
+              <Button onClick={create} disabled={!name}>
+                Create
+              </Button>
+            )}
+          </>
+        }
+      >
         {secret ? (
           <Notice tone="warning" icon={Key} title="Copy it now — it is not shown again">
             <code className="font-mono text-xs break-all">{secret}</code>
@@ -702,18 +682,8 @@ function CreateTokenDialog({ onDone }: { onDone: () => void }) {
             </div>
           </div>
         )}
-
-        <DialogFooter>
-          {secret ? (
-            <Button onClick={() => setOpen(false)}>Done</Button>
-          ) : (
-            <Button onClick={create} disabled={!name}>
-              Create
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }
 
@@ -741,7 +711,6 @@ function UsersTab() {
         <PanelHeader
           icon={UserSettings}
           title="Dashboard users"
-          description="Separate from the host's own Linux accounts"
           actions={<CreateDashboardUserDialog onDone={refresh} />}
         />
         <PanelBody flush>
@@ -762,17 +731,13 @@ function UsersTab() {
               <TableBody>
                 {data.map((user) => (
                   <TableRow key={user.id} className="group">
-                    <TableCell className="text-[13px] font-medium">
+                    <TableCell className="text-body font-medium">
                       {user.username}
-                      {user.id === status?.user?.id && (
-                        <Badge variant="outline" className="ml-2 text-[10px] font-normal">
-                          you
-                        </Badge>
-                      )}
+                      {user.id === status?.user?.id && <Tag className="ml-2">you</Tag>}
                       {user.mustChangePassword && (
-                        <Badge variant="warning" className="ml-2 text-[10px] font-normal">
+                        <span className="ml-2 text-hint font-normal text-warning">
                           must change password
-                        </Badge>
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -788,14 +753,12 @@ function UsersTab() {
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={user.totpEnabled ? "success" : "secondary"}
-                        className="font-normal"
-                      >
-                        {user.totpEnabled ? "enrolled" : "pending"}
-                      </Badge>
+                      <Status
+                        state={user.totpEnabled ? "enabled" : "created"}
+                        label={user.totpEnabled ? "enrolled" : "pending"}
+                      />
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {user.lastLoginAt.startsWith("0001")
                         ? "never"
                         : relativeTime(user.lastLoginAt)}
@@ -807,7 +770,7 @@ function UsersTab() {
                       />
                     </TableCell>
                     <TableCell>
-                      <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                      <RowActions className="gap-1">
                         <Button
                           size="xs"
                           variant="ghost"
@@ -845,7 +808,7 @@ function UsersTab() {
                         >
                           <Trash />
                         </Button>
-                      </div>
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -881,17 +844,24 @@ function CreateDashboardUserDialog({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <UserSettings className="size-4" />
-          New user
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>New dashboard user</DialogTitle>
-        </DialogHeader>
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <UserSettings className="size-4" />
+        New user
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        size="sm"
+        title="New dashboard user"
+        footer={
+          <>
+            <Button onClick={create} disabled={!username || !password}>
+              Create
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="du-name">Username</Label>
@@ -923,12 +893,7 @@ function CreateDashboardUserDialog({ onDone }: { onDone: () => void }) {
             </Select>
           </div>
         </div>
-        <DialogFooter>
-          <Button onClick={create} disabled={!username || !password}>
-            Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

@@ -38,6 +38,40 @@ type Client struct {
 	duVal  *dtypes.DiskUsage
 	duAt   time.Time
 	duBusy bool
+
+	// How much memory and how many CPUs this host has, cached forever.
+	//
+	// Needed to read a container's own numbers honestly. Docker reports a
+	// container with no memory limit as having a limit equal to the machine's
+	// RAM, which a dashboard then shows as "97 MB / 62.7 GB" — a budget that
+	// does not exist, next to a percentage of it that means nothing. The only
+	// way to tell "limited to all of it" from "not limited" is to know what
+	// all of it is. Neither number changes while the process runs.
+	hostMu     sync.Mutex
+	hostMemory int64
+	hostCPUs   int
+}
+
+// HostCapacity is the memory and CPU this server has, as Docker sees it.
+//
+// Read once and kept: it is what makes "no limit" and "0.4% of this server"
+// sayable instead of showing host RAM as though a container had asked for it.
+func (c *Client) HostCapacity(ctx context.Context) (memory int64, cpus int) {
+	c.hostMu.Lock()
+	memory, cpus = c.hostMemory, c.hostCPUs
+	c.hostMu.Unlock()
+	if memory > 0 {
+		return memory, cpus
+	}
+	info, err := c.Info(ctx)
+	if err != nil {
+		return 0, 0
+	}
+	c.hostMu.Lock()
+	c.hostMemory, c.hostCPUs = info.MemTotal, info.NCPU
+	memory, cpus = c.hostMemory, c.hostCPUs
+	c.hostMu.Unlock()
+	return memory, cpus
 }
 
 // diskUsageTTL is how long a cached disk-usage reading stays authoritative.
@@ -143,7 +177,13 @@ func (c *Client) api() (*client.Client, error) {
 	return c.cli, nil
 }
 
+// Close tolerates a nil client so a host with no Docker can shut the dashboard
+// down. Every other module is optional at shutdown; this one was not, and a
+// degraded install panicked on the way out.
 func (c *Client) Close() error {
+	if c == nil {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cli != nil {

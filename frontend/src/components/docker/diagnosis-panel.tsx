@@ -12,7 +12,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { DockerDiagnosis, DockerFinding } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -63,24 +63,15 @@ export function DiagnosisPanel({
       <PanelHeader
         icon={Lifebuoy}
         title="What needs attention"
-        description={
-          diagnosis.findings.length === 0
-            ? `${diagnosis.checked} containers checked, nothing to report`
-            : `${diagnosis.findings.length} across ${diagnosis.checked} containers`
-        }
         actions={
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-3">
             {(["critical", "warning", "notice"] as const).map((level) =>
               counts[level] ? (
-                <Badge
+                <Status
                   key={level}
-                  variant={
-                    level === "critical" ? "destructive" : level === "warning" ? "warning" : "secondary"
-                  }
-                  className="font-normal"
-                >
-                  {counts[level]} {LEVEL[level].label.toLowerCase()}
-                </Badge>
+                  verdict={level}
+                  label={`${counts[level]} ${LEVEL[level].label.toLowerCase()}`}
+                />
               ) : null,
             )}
           </div>
@@ -88,7 +79,7 @@ export function DiagnosisPanel({
       />
       <PanelBody className={diagnosis.findings.length ? "space-y-2" : undefined}>
         {diagnosis.findings.length === 0 ? (
-          <div className="flex items-center gap-3 text-[13px]">
+          <div className="flex items-center gap-3 text-body">
             <CheckCircle className="size-4 shrink-0 text-success" />
             <span className="min-w-0">
               Nothing is failing, restarting in a loop, published wider than it needs to be, or
@@ -105,13 +96,7 @@ export function DiagnosisPanel({
   )
 }
 
-function FindingRow({
-  finding,
-  onAction,
-}: {
-  finding: DockerFinding
-  onAction?: FindingAction
-}) {
+function FindingRow({ finding, onAction }: { finding: DockerFinding; onAction?: FindingAction }) {
   // Collapsed by default: the title is the finding, the body is the argument
   // for it. A list where every entry is three paragraphs is one nobody reads.
   const [open, setOpen] = useState(false)
@@ -127,7 +112,7 @@ function FindingRow({
       >
         <Icon className={cn("mt-0.5 size-3.5 shrink-0", meta.tone)} />
         <span className="min-w-0 flex-1">
-          <span className="block text-[13px] leading-snug font-medium">{finding.title}</span>
+          <span className="block text-body leading-snug font-medium">{finding.title}</span>
           {!open && (
             <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
               {finding.detail}

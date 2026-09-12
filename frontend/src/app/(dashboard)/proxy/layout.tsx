@@ -1,10 +1,8 @@
 "use client"
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
 import { get } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
+import { SectionNav } from "@/components/tabs"
 import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-context"
 
 /**
@@ -28,7 +26,6 @@ const TABS = [
 ]
 
 export default function ProxyLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
   const status = usePoll((signal) => get<ProxyStatus>("/proxy/status", undefined, signal), 60_000)
 
   return (
@@ -39,27 +36,7 @@ export default function ProxyLayout({ children }: { children: React.ReactNode })
         hasNginx: status.data?.nginx ?? false,
       }}
     >
-      <div className="sticky top-0 z-10 border-b border-hairline bg-background/85 backdrop-blur-md">
-        <nav className="mx-auto flex w-full max-w-[1600px] gap-1 overflow-x-auto px-4 md:px-6">
-          {TABS.map((tab) => {
-            const active =
-              tab.href === "/proxy" ? pathname === "/proxy" : pathname.startsWith(tab.href)
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "inline-flex h-11 shrink-0 items-center border-b-2 border-transparent px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-                  active && "border-primary text-foreground",
-                )}
-              >
-                {tab.title}
-              </Link>
-            )
-          })}
-        </nav>
-      </div>
+      <SectionNav tabs={TABS} />
       {children}
     </ProxyProvider>
   )

@@ -42,7 +42,7 @@ export function Sparkline({
   if (!path) {
     return (
       <span
-        className={cn("inline-block align-middle text-[11px] text-muted-foreground", className)}
+        className={cn("inline-block align-middle text-hint text-muted-foreground", className)}
         style={{ width, height }}
       />
     )
@@ -54,7 +54,7 @@ export function Sparkline({
       width={width}
       height={height}
       preserveAspectRatio="none"
-      className={cn("inline-block align-middle overflow-visible", className)}
+      className={cn("inline-block overflow-visible align-middle", className)}
       role="img"
       aria-label={label}
     >

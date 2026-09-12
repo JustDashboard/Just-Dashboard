@@ -62,6 +62,7 @@ type dockerReleaseRuntimeMetadata struct {
 	ComposeFiles       []string `json:"composeFiles,omitempty"`
 	OverrideFile       string   `json:"overrideFile,omitempty"`
 	PrimaryContainerID string   `json:"primaryContainerId,omitempty"`
+	ContainerIDs       []string `json:"containerIds,omitempty"`
 	VariableNames      []string `json:"variableNames"`
 }
 
@@ -147,6 +148,12 @@ func (o *DockerRuntimeOwner) startContainer(
 	if err != nil {
 		return StartedRuntime{}, err
 	}
+	for _, binding := range result.Ports {
+		if binding.ContainerPort == plan.InternalPort && binding.Protocol == "tcp" {
+			request.Host, request.Port = binding.HostIP, binding.HostPort
+			break
+		}
+	}
 	metadata := dockerReleaseRuntimeMetadata{
 		Version: 1, Strategy: string(plan.Strategy), Image: image,
 		ImageDigest: request.Snapshot.Image.Digest, ConfigDigest: request.Snapshot.Image.ConfigDigest,
@@ -188,21 +195,29 @@ func (o *DockerRuntimeOwner) startCompose(
 	if err := o.client.RunComposeRelease(ctx, spec, dockerx.ComposeReleaseUp, runtimeGrace(request.Snapshot.Plan), composeBuildEmitter(emit)); err != nil {
 		return StartedRuntime{}, err
 	}
-	primaryID := ""
 	primaryService := resolved.Services[0].Plan.Name
-	containers, err := o.client.ListContainers(ctx, true)
+	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{
+		"io.just-dashboard.managed":        "true",
+		"io.just-dashboard.environment-id": strconv.FormatInt(request.Release.EnvironmentID, 10),
+		"io.just-dashboard.release-id":     strconv.FormatInt(request.Release.ID, 10),
+	})
 	if err != nil {
 		return StartedRuntime{}, err
 	}
-	for _, container := range containers {
-		if container.Labels["com.docker.compose.project"] == project &&
-			container.Labels["com.docker.compose.service"] == primaryService {
-			primaryID = container.ID
-			break
-		}
-	}
+	containerIDs, primaryID := composeRuntimeIdentities(containers, request.Release.EnvironmentID, request.Release.ID, project, primaryService)
 	if primaryID == "" {
 		return StartedRuntime{}, fmt.Errorf("%w: Compose primary service was not created", ErrRuntimeUnavailable)
+	}
+	for _, candidate := range containers {
+		if candidate.ID != primaryID {
+			continue
+		}
+		for _, port := range candidate.Ports {
+			if int(port.PrivatePort) == request.Snapshot.Plan.InternalPort && port.Type == "tcp" && port.PublicPort > 0 {
+				request.Host, request.Port = port.IP, int(port.PublicPort)
+				break
+			}
+		}
 	}
 	variableNames := make([]string, 0, len(request.RuntimeVariables))
 	for name := range request.RuntimeVariables {
@@ -213,7 +228,7 @@ func (o *DockerRuntimeOwner) startCompose(
 		Version: 1, Strategy: string(request.Snapshot.Plan.Strategy), PortLeaseToken: request.PortLeaseToken,
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		ComposeFiles: append([]string(nil), resolved.Files...), OverrideFile: override,
-		PrimaryContainerID: primaryID, VariableNames: variableNames,
+		PrimaryContainerID: primaryID, ContainerIDs: containerIDs, VariableNames: variableNames,
 	}
 	return StartedRuntime{
 		Input: ReleaseRuntimeInput{
@@ -222,6 +237,32 @@ func (o *DockerRuntimeOwner) startCompose(
 		},
 		Target: CheckTarget{ContainerID: primaryID, Host: runtimeCheckHost(request.Host), Port: request.Port},
 	}, nil
+}
+
+func composeRuntimeIdentities(containers []dockerx.Container, environmentID, releaseID int64, project, primaryService string) ([]string, string) {
+	ids := []string{}
+	primaryIDs := []string{}
+	seen := map[string]bool{}
+	for _, container := range containers {
+		labels := container.Labels
+		if container.ID == "" || seen[container.ID] || labels["io.just-dashboard.managed"] != "true" ||
+			labels["io.just-dashboard.environment-id"] != strconv.FormatInt(environmentID, 10) ||
+			labels["io.just-dashboard.release-id"] != strconv.FormatInt(releaseID, 10) ||
+			labels["com.docker.compose.project"] != project || strings.EqualFold(labels["com.docker.compose.oneoff"], "true") {
+			continue
+		}
+		seen[container.ID] = true
+		ids = append(ids, container.ID)
+		if labels["com.docker.compose.service"] == primaryService {
+			primaryIDs = append(primaryIDs, container.ID)
+		}
+	}
+	sort.Strings(ids)
+	sort.Strings(primaryIDs)
+	if len(primaryIDs) == 0 {
+		return ids, ""
+	}
+	return ids, primaryIDs[0]
 }
 
 func immutableRuntimeImage(image ResolvedImage) string {

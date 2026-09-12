@@ -12,9 +12,10 @@ import {
   TerminalWindow,
   Warning,
 } from "@/components/icons"
-import { relativeTime } from "@/lib/format"
+import { } from "@/lib/format"
 import type { Posture, SecurityFinding } from "@/lib/types"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Metric, MetricStrip } from "@/components/page"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { FindingList, type Finding } from "@/components/metrics/finding-list"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -58,17 +59,31 @@ export function PosturePanel({
   if (!posture) return null
 
   const ok = posture.findings.length === 0
+  const count = (level: SecurityFinding["level"]) =>
+    posture.findings.filter((f) => f.level === level).length
 
   return (
     <Panel className={className}>
       <PanelHeader
         icon={ok ? ShieldCheck : Bug}
         title="Security posture"
-        description={`${posture.checks} checks · ${relativeTime(posture.checkedAt)}${
-          posture.skipped.length > 0 ? ` · not checked: ${posture.skipped.join(", ")}` : ""
-        }`}
         actions={<PostureBadge status={posture.status} />}
       />
+      {/* The severity split as figures rather than as a sentence in the
+          description. Three findings and three critical findings are not the
+          same morning, and the header used to read identically either way. */}
+      <PanelToolbar>
+        <MetricStrip>
+          <Metric label="critical" value={count("critical")} />
+          <Metric label="warning" value={count("warning")} />
+          <Metric label="notice" value={count("notice")} />
+          <Metric
+            label="not checked"
+            value={posture.skipped.length}
+            hint={posture.skipped.length > 0 ? posture.skipped.join(", ") : undefined}
+          />
+        </MetricStrip>
+      </PanelToolbar>
       <PanelBody>
         <FindingList
           findings={posture.findings.map((f) => toFinding(f, onFix))}
@@ -79,7 +94,14 @@ export function PosturePanel({
   )
 }
 
-/** Findings filtered to one area, for rendering next to the panel that fixes them. */
+/**
+ * Findings filtered to one area, for rendering above the panel that fixes them.
+ *
+ * Framed like everything else on the page. It used to render the bare
+ * accordion straight onto the page ground, so the one line that said what was
+ * wrong with this firewall read as a stray row floating above the content —
+ * the least contained thing on screen carrying the most urgent sentence.
+ */
 export function AreaFindings({
   posture,
   area,
@@ -94,10 +116,27 @@ export function AreaFindings({
   const areas = Array.isArray(area) ? area : [area]
   const findings = posture?.findings.filter((f) => areas.includes(f.area)) ?? []
   if (findings.length === 0) return null
+  const worst = findings.some((f) => f.level === "critical")
+    ? "critical"
+    : findings.some((f) => f.level === "warning")
+      ? "warning"
+      : "notice"
   return (
-    <div className={className}>
-      <FindingList findings={findings.map((f) => toFinding(f, onFix))} />
-    </div>
+    <Panel className={className}>
+      <PanelHeader
+        icon={worst === "notice" ? Information : Warning}
+        title="Needs attention"
+        actions={
+          <Status
+            verdict={worst}
+            label={`${findings.length} finding${findings.length === 1 ? "" : "s"}`}
+          />
+        }
+      />
+      <PanelBody>
+        <FindingList findings={findings.map((f) => toFinding(f, onFix))} />
+      </PanelBody>
+    </Panel>
   )
 }
 

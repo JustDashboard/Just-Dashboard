@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 )
 
 // The settings an operator can change from inside the dashboard.
@@ -230,15 +232,6 @@ func Diff(old, next Settings) []Change {
 	return out
 }
 
-// MovesEndpoint reports whether a change takes the address out from under the
-// browser that asked for it. The UI needs this to say "open this URL
-// afterwards" rather than "the page will come back", which is the difference
-// between a restart that looks like a restart and one that looks like a
-// dashboard that never returned.
-func MovesEndpoint(old, next Settings) bool {
-	return old.Site != next.Site || old.Port != next.Port || old.TLS != next.TLS || old.Bind != next.Bind
-}
-
 // ErrNoChange is an apply that would write the file it just read.
 var ErrNoChange = errors.New("nothing about this configuration is different")
 
@@ -295,15 +288,16 @@ func (s *Settings) Validate(old Settings, clientIP string, free func(port int) e
 	}
 
 	ports := []struct {
-		name  string
-		value int
-		was   int
+		name   string
+		value  int
+		was    int
+		target *int
 	}{
-		{"dashboard port", s.Port, old.Port},
-		{"frontend port", s.FrontendPort, old.FrontendPort},
-		{"backend port", s.BackendPort, old.BackendPort},
+		{"dashboard port", s.Port, old.Port, &s.Port},
+		{"frontend port", s.FrontendPort, old.FrontendPort, &s.FrontendPort},
+		{"backend port", s.BackendPort, old.BackendPort, &s.BackendPort},
 	}
-	seen := map[int]string{}
+	seen := map[int]bool{}
 	for _, p := range ports {
 		if p.value < 1 || p.value > 65535 {
 			return fmt.Errorf("the %s must be between 1 and 65535", p.name)
@@ -312,18 +306,22 @@ func (s *Settings) Validate(old Settings, clientIP string, free func(port int) e
 			return fmt.Errorf("the %s is %d; ports below 1024 are reserved for the system's own services "+
 				"and collide with whatever already runs there", p.name, p.value)
 		}
-		if other, clash := seen[p.value]; clash {
-			return fmt.Errorf("the %s and the %s cannot both be %d", other, p.name, p.value)
-		}
-		seen[p.value] = p.name
-		// Only a port that is *moving* is probed. The three it is on now are
-		// held by this very stack, so testing those would report the dashboard
-		// as colliding with itself and refuse every other change on the form.
-		if p.value != p.was && free != nil {
-			if err := free(p.value); err != nil {
-				return fmt.Errorf("the %s cannot be %d: %w", p.name, p.value, err)
+		selected, err := portalloc.Select(p.value, 1024, seen, func(candidate int) error {
+			if candidate == p.was {
+				return nil
 			}
+			if candidate == old.Port || candidate == old.FrontendPort || candidate == old.BackendPort {
+				return portalloc.ErrReserved
+			}
+			if free != nil {
+				return free(candidate)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("select %s: %w", p.name, err)
 		}
+		*p.target, seen[selected] = selected, true
 	}
 
 	nets, err := parseCIDRList(s.AllowedCIDRs)

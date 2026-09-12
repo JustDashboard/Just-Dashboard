@@ -9,9 +9,10 @@ import { notify } from "@/lib/toast"
 import type { DeploymentActiveWork, DeploymentFleet, DeploymentSummary } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader, SearchInput } from "@/components/page"
+import { Detail, DetailList, Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import {
   DeploymentStatus,
   HealthStatus,
@@ -19,7 +20,6 @@ import {
   reachableAt,
   releaseLabel,
 } from "@/components/deploy/deployment-ui"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -88,7 +88,6 @@ export default function DeployPage() {
       <PageHeader
         eyebrow="Operations"
         title="Deployments"
-        description="See what is changing now, what is live, and what needs your attention."
         actions={
           can("system.admin") && (
             <Button size="sm" asChild>
@@ -125,7 +124,6 @@ export default function DeployPage() {
           <PanelHeader
             icon={CloudUpload}
             title="Deployment fleet"
-            description={`${fleet.data.deployments.length} ${fleet.data.deployments.length === 1 ? "deployment" : "deployments"} on this server`}
           />
           <PanelToolbar>
             <SearchInput
@@ -215,19 +213,26 @@ export default function DeployPage() {
                 icon={CloudUpload}
                 title={
                   fleet.data.deployments.length === 0
-                    ? "Nothing is deployed yet"
+                    ? "Nothing has been deployed through this dashboard yet"
                     : "No deployments match"
                 }
                 description={
                   fleet.data.deployments.length === 0
-                    ? "Start with a repository, image, Compose stack, game server, or existing workload."
+                    ? "This page covers workloads the deploy engine created and tracks. Containers and Compose stacks already running on the host are not listed here until you adopt one — start from a repository, image, Compose stack, game server, or an existing workload."
                     : "Change or clear the filters to see the rest of the fleet."
                 }
                 action={
-                  fleet.data.deployments.length === 0 && can("system.admin") ? (
-                    <Button size="sm" asChild>
-                      <Link href="/deploy/new">Deploy something</Link>
-                    </Button>
+                  fleet.data.deployments.length === 0 ? (
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {can("system.admin") && (
+                        <Button size="sm" asChild>
+                          <Link href="/deploy/new">Deploy something</Link>
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href="/docker/stacks">See what is already running</Link>
+                      </Button>
+                    </div>
                   ) : undefined
                 }
               />
@@ -260,9 +265,8 @@ function ActiveWorkStrip({
       <PanelHeader
         icon={Clock}
         title={<span id="active-work-title">Active work</span>}
-        description={`${work.filter((item) => item.run.state !== "queued").length} active · ${work.filter((item) => item.run.state === "queued").length} queued`}
         actions={
-          <span className="numeric text-[11px] text-muted-foreground">
+          <span className="numeric text-hint text-muted-foreground">
             Build slots {slots.heavyUsed}/{slots.heavyCapacity} · control slots {slots.lightUsed}/
             {slots.lightCapacity}
           </span>
@@ -278,17 +282,17 @@ function ActiveWorkStrip({
               <div className="min-w-40 flex-1">
                 <Link
                   href={`/deploy/${item.run.projectId}/runs/${item.run.id}`}
-                  className="text-[13px] font-medium hover:underline"
+                  className="text-body font-medium hover:underline"
                 >
                   {item.projectName}
                 </Link>
-                <p className="truncate text-[11px] text-muted-foreground">
+                <p className="truncate text-hint text-muted-foreground">
                   {item.environment} ·{" "}
                   {item.currentStep ? humanize(item.currentStep) : "Waiting for next step"}
                 </p>
               </div>
               <DeploymentStatus state={item.run.state} />
-              <span className="numeric text-[11px] text-muted-foreground">
+              <span className="numeric text-hint text-muted-foreground">
                 {item.queuePosition
                   ? `Queue ${item.queuePosition}`
                   : relativeTime(item.run.claimedAt ?? item.run.requestedAt)}
@@ -339,26 +343,23 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
             <TableRow key={deployment.id}>
               <TableCell>
                 <Link href={`/deploy/${deployment.id}`} className="block min-w-0 hover:underline">
-                  <span className="block truncate text-[13px] font-medium">{deployment.name}</span>
-                  <span className="block text-[11px] text-muted-foreground">
+                  <span className="block truncate text-body font-medium">{deployment.name}</span>
+                  <span className="block text-hint text-muted-foreground">
                     {humanize(deployment.profile)}
                   </span>
                 </Link>
               </TableCell>
-              <TableCell className="text-xs">{deployment.environmentName}</TableCell>
-              <TableCell className="max-w-40 font-mono text-xs" title={deployment.sourceRevision}>
+              <TableCell>{deployment.environmentName}</TableCell>
+              <TableCell className="max-w-40 font-mono" title={deployment.sourceRevision}>
                 {releaseLabel(deployment)}
               </TableCell>
-              <TableCell
-                className="max-w-48 truncate font-mono text-xs"
-                title={deployment.endpoint}
-              >
+              <TableCell className="max-w-48 truncate font-mono" title={deployment.endpoint}>
                 {reachableAt(deployment)}
               </TableCell>
               <TableCell>
                 <HealthStatus health={deployment.health} />
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">Not attributed</TableCell>
+              <TableCell className="text-muted-foreground">Not attributed</TableCell>
               <TableCell>
                 {deployment.lastRun ? (
                   <DeploymentStatus state={deployment.lastRun.state} />
@@ -368,9 +369,9 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
               </TableCell>
               <TableCell>
                 {deployment.pendingChanges ? (
-                  <Badge variant="warning">Pending deployment</Badge>
+                  <Status verdict="warning" label="Pending deployment" />
                 ) : (
-                  <span className="text-xs text-muted-foreground">Live</span>
+                  <Status state="running" label="Live" />
                 )}
               </TableCell>
               <TableCell>
@@ -395,41 +396,42 @@ function FleetCards({ deployments }: { deployments: DeploymentSummary[] }) {
         <li key={deployment.id} className="min-w-0 bg-card">
           <Link
             href={`/deploy/${deployment.id}`}
-            className="flex min-h-40 min-w-0 flex-col gap-3 p-4 hover:bg-[var(--row-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+            className="flex min-h-40 min-w-0 flex-col gap-3 p-4 focus-ring-inset hover:bg-row-hover"
           >
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium">{deployment.name}</p>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="truncate text-body font-medium">{deployment.name}</p>
+                <p className="text-hint text-muted-foreground">
                   {humanize(deployment.profile)} · {deployment.environmentName}
                 </p>
               </div>
-              {deployment.pendingChanges && <Badge variant="warning">Pending</Badge>}
+              {deployment.pendingChanges && <Status verdict="warning" label="Pending" />}
             </div>
-            <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
-              <dt className="text-muted-foreground">Release</dt>
-              <dd className="truncate text-right font-mono" title={deployment.sourceRevision}>
-                {releaseLabel(deployment)}
-              </dd>
-              <dt className="text-muted-foreground">Reachable at</dt>
-              <dd className="truncate text-right font-mono" title={deployment.endpoint}>
-                {reachableAt(deployment)}
-              </dd>
-              <dt className="text-muted-foreground">Health</dt>
-              <dd className="justify-self-end">
+            <DetailList>
+              <Detail label="Release">
+                <span className="block truncate font-mono" title={deployment.sourceRevision}>
+                  {releaseLabel(deployment)}
+                </span>
+              </Detail>
+              <Detail label="Reachable at">
+                <span className="block truncate font-mono" title={deployment.endpoint}>
+                  {reachableAt(deployment)}
+                </span>
+              </Detail>
+              <Detail label="Health">
                 <HealthStatus health={deployment.health} />
-              </dd>
-              <dt className="text-muted-foreground">Pressure</dt>
-              <dd className="justify-self-end text-muted-foreground">Not attributed</dd>
-              <dt className="text-muted-foreground">Last deploy</dt>
-              <dd className="justify-self-end">
+              </Detail>
+              <Detail label="Pressure" className="text-muted-foreground">
+                Not attributed
+              </Detail>
+              <Detail label="Last deploy">
                 {deployment.lastRun ? (
                   <DeploymentStatus state={deployment.lastRun.state} />
                 ) : (
                   "Never"
                 )}
-              </dd>
-            </dl>
+              </Detail>
+            </DetailList>
           </Link>
         </li>
       ))}

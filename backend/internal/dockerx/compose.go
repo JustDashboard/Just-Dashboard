@@ -3,8 +3,8 @@ package dockerx
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -46,8 +46,41 @@ type ComposeStack struct {
 	ConfigFiles []string         `json:"configFiles"`
 	Services    []ComposeService `json:"services"`
 	Running     int              `json:"running"`
-	Total       int              `json:"total"`
-	Managed     bool             `json:"managed"`
+	// Total is how many services the compose file declares — not how many
+	// containers exist. Those are different questions, and answering the
+	// second while labelling it the first is what produced "0/0 up" for a
+	// stack that had never been deployed and "1/1 up" for one whose second
+	// service had failed to create.
+	Total   int  `json:"total"`
+	Managed bool `json:"managed"`
+
+	// Declared is the service list from the compose file, and DeclaredSource
+	// says where it came from: "compose" is `docker compose config`, which
+	// resolves includes, profiles and variables; "file" is a direct read of
+	// the YAML, which is what a polling list can afford and does not resolve
+	// any of that; "" means no file was reachable. The distinction is on the
+	// wire because a count that might be wrong should say so.
+	Declared       []string `json:"declared"`
+	DeclaredSource string   `json:"declaredSource,omitempty"`
+
+	// Containers is how many containers Docker holds for this project,
+	// running or not. Deployed is whether that number is above zero — the
+	// difference between "a compose file exists" and "this is a thing on the
+	// server", which the overview and the stacks page used to count
+	// differently and report as two different stack totals.
+	Containers int  `json:"containers"`
+	Deployed   bool `json:"deployed"`
+
+	// Orphans are running containers labelled with this project that the
+	// compose file does not declare. They are what a renamed or removed
+	// service leaves behind, and nothing in Docker will ever mention them
+	// again.
+	Orphans []string `json:"orphans"`
+
+	// State is the word, Summary the sentence. Both are computed here so
+	// every surface that shows a stack says the same thing about it.
+	State   StackState `json:"state"`
+	Summary string     `json:"summary"`
 }
 
 // ListStacks groups running containers by compose project and then folds in
@@ -95,7 +128,7 @@ func (c *Client) ListStacks(ctx context.Context, roots []string) ([]ComposeStack
 			Health:    it.Health,
 			Ports:     ports,
 		})
-		st.Total++
+		st.Containers++
 		if it.State == "running" {
 			st.Running++
 		}
@@ -124,10 +157,95 @@ func (c *Client) ListStacks(ctx context.Context, roots []string) ([]ComposeStack
 		// Only a stack whose compose file we can locate can be acted on;
 		// the UI greys out up/down for the rest instead of failing later.
 		st.Managed = st.WorkingDir != "" && dirExists(st.WorkingDir)
+		resolveStackShape(st)
 		out = append(out, *st)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	// Running stacks first, then stopped ones, then compose files that have
+	// never been up. Alphabetical alone put a directory of leftover test
+	// compose files ahead of the services actually carrying traffic, purely
+	// because of where their names fell — and the first screenful is the one
+	// an operator reads when something is wrong.
+	sort.Slice(out, func(i, j int) bool {
+		if a, b := stackRank(out[i]), stackRank(out[j]); a != b {
+			return a < b
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out, nil
+}
+
+// stackRank orders a stack by how much it is currently doing.
+func stackRank(st ComposeStack) int {
+	switch {
+	case st.Running > 0:
+		return 0
+	case st.Containers > 0:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// resolveStackShape fills in what a stack *should* consist of, then says what
+// it is doing.
+//
+// Reading the compose file directly rather than asking compose: this runs for
+// every stack on a list that polls every fifteen seconds, and `docker compose
+// config` is a subprocess each time. The stack detail asks compose properly
+// and overwrites this with the better answer — see StackDetail — which is why
+// DeclaredSource exists rather than the two silently disagreeing.
+func resolveStackShape(st *ComposeStack) {
+	if len(st.ConfigFiles) > 0 {
+		if declared := declaredServicesFromFile(st.ConfigFiles); len(declared) > 0 {
+			st.Declared = declared
+			st.DeclaredSource = "file"
+		}
+	}
+	if st.Declared == nil {
+		st.Declared = []string{}
+	}
+	st.Orphans = orphanServices(st)
+	st.Deployed = st.Containers > 0
+	st.Total = len(st.Declared)
+	if st.Total == 0 {
+		// No file to count from. Reporting the container count as the total
+		// would be claiming the file declares exactly what happens to be
+		// running, which is precisely what was wrong before.
+		st.Total = st.Containers
+	}
+	// A service the file declares with no container is invisible in Docker:
+	// `docker ps` cannot list what does not exist, so a service that failed to
+	// create looks the same as one that was never written down.
+	present := map[string]bool{}
+	for _, svc := range st.Services {
+		present[svc.Name] = true
+	}
+	for _, name := range st.Declared {
+		if !present[name] {
+			st.Services = append(st.Services, ComposeService{Name: name, Missing: true, Ports: []Port{}})
+		}
+	}
+	sort.Slice(st.Services, func(i, j int) bool { return st.Services[i].Name < st.Services[j].Name })
+	st.State, st.Summary = describeStack(st)
+}
+
+// orphanServices names running containers the compose file does not declare.
+func orphanServices(st *ComposeStack) []string {
+	if len(st.Declared) == 0 {
+		return []string{}
+	}
+	declared := map[string]bool{}
+	for _, name := range st.Declared {
+		declared[name] = true
+	}
+	out := []string{}
+	for _, svc := range st.Services {
+		if !svc.Missing && !declared[svc.Name] {
+			out = append(out, svc.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func splitConfigFiles(v string) []string {
@@ -238,25 +356,20 @@ func (c *Client) RunCompose(ctx context.Context, dir string, action ComposeActio
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "COMPOSE_PROGRESS=plain", "DOCKER_CLI_HINTS=false")
+	environment := append(os.Environ(), "COMPOSE_PROGRESS=plain", "DOCKER_CLI_HINTS=false")
+	base, err := composePortBase(dir, environment)
+	if err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-
-	res := &ComposeResult{
-		Action:   action,
-		Stack:    filepath.Base(dir),
-		Output:   buf.String(),
-		Duration: time.Since(start).Round(time.Millisecond).String(),
-	}
-	if cmd.ProcessState != nil {
-		res.ExitCode = cmd.ProcessState.ExitCode()
-	}
-	if err != nil && res.ExitCode == 0 {
-		res.ExitCode = -1
+	code, err := runComposePorts(ctx, dir, base, args[1:], environment, filepath.Join(dir, ".just-dashboard-ports.yml"), func(line LogLine) error { fmt.Fprintln(&buf, line.Text); return nil })
+	res := &ComposeResult{Action: action, Stack: filepath.Base(dir), Output: buf.String(), Duration: time.Since(start).Round(time.Millisecond).String(), ExitCode: code}
+	if err != nil {
+		if res.ExitCode == 0 {
+			res.ExitCode = -1
+		}
+		fmt.Fprintln(&buf, err)
+		res.Output = buf.String()
 	}
 	return res, nil
 }

@@ -10,6 +10,7 @@ import type { Job, JobLine } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
+import { Pane, PaneHeader } from "@/components/panel"
 
 /**
  * Watching an operation that outlives the page.
@@ -149,13 +150,8 @@ export function JobConsole({
   const dropped = job.lines - lines.length
 
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-header px-3 py-1.5">
+    <Pane className={cn("bg-surface-sunken", className)}>
+      <PaneHeader className="flex-wrap gap-2 px-3">
         <JobIcon status={job.status} />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {job.title}
@@ -176,15 +172,15 @@ export function JobConsole({
             Dismiss
           </Button>
         )}
-      </div>
+      </PaneHeader>
 
       {job.error && (
-        <p className="border-b border-hairline bg-destructive/[0.06] px-3 py-1.5 text-[11px] text-destructive">
+        <p className="border-b border-hairline bg-wash-danger px-3 py-1.5 text-hint text-destructive">
           {job.error}
         </p>
       )}
       {running && (
-        <p className="border-b border-hairline px-3 py-1.5 text-[11px] text-muted-foreground">
+        <p className="border-b border-hairline px-3 py-1.5 text-hint text-muted-foreground">
           This keeps running if you close the page — reopen it from the recent list.
         </p>
       )}
@@ -196,7 +192,7 @@ export function JobConsole({
           if (!el) return
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
         }}
-        className="max-h-80 min-h-24 overflow-auto p-2.5 font-mono text-[11px] leading-relaxed"
+        className="max-h-80 min-h-24 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
       >
         {dropped > 0 && (
           <div className="mb-1.5 text-muted-foreground">
@@ -222,13 +218,12 @@ export function JobConsole({
           ))
         )}
       </div>
-    </div>
+    </Pane>
   )
 }
 
 function JobIcon({ status }: { status: Job["status"] }) {
-  if (status === "running")
-    return <Spinner className="size-3.5 text-muted-foreground" />
+  if (status === "running") return <Spinner className="size-3.5 text-muted-foreground" />
   if (status === "succeeded") return <CheckCircle className="size-3.5 text-success" />
   if (status === "cancelled") return <Slash className="size-3.5 text-muted-foreground" />
   return <CrossCircle className="size-3.5 text-destructive" />
@@ -280,7 +275,7 @@ export function RecentJobs({
           onClick={() => onOpen(job.id)}
           title={`${job.title} · ${job.status}${job.startedBy ? ` · started by ${job.startedBy}` : ""}`}
           className={cn(
-            "raised flex max-w-56 items-center gap-1.5 rounded-md border border-hairline bg-control px-2 py-1 text-[11px] transition-colors hover:bg-control-hover",
+            "flex max-w-56 items-center gap-1.5 rounded-md border border-hairline bg-control px-2 py-1 text-hint transition-colors hover:bg-control-hover",
             job.status === "failed" ? "text-destructive" : "text-muted-foreground",
           )}
         >

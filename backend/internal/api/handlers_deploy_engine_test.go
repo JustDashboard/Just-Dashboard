@@ -69,6 +69,16 @@ func TestDeploymentRunRoutesPersistBeforeAcceptedAndResumeByID(t *testing.T) {
 	if response := anonymous.do(http.MethodGet, logPath, "", nil); response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous log handoff = %d", response.Code)
 	}
+	metricsPath := fmt.Sprintf("/api/v1/deploy/%d/runs/%d/metrics", project.ID, run.ID)
+	if response := reader.do(http.MethodGet, metricsPath, "", nil); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"unavailable"`) {
+		t.Fatalf("read-only bare-host metrics = %d %s", response.Code, response.Body.String())
+	}
+	if response := anonymous.do(http.MethodGet, metricsPath, "", nil); response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous metrics = %d", response.Code)
+	}
+	if response := reader.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/runs/%d/metrics", project.ID+1, run.ID), "", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-project metrics = %d", response.Code)
+	}
 
 	conflict := c.do(http.MethodPost, path, `{"operation":"deploy"}`,
 		map[string]string{"Idempotency-Key": "browser-retry-1"})
@@ -178,7 +188,7 @@ func TestNormalizedActionsUseDistinctImmutableReleaseSemantics(t *testing.T) {
 		t.Fatalf("redeploy run = %#v", redeployRun)
 	}
 	redeploySteps, err := s.modules.deployRuns.Steps(t.Context(), redeployRun.ID)
-	if err != nil || len(redeploySteps) != 9 || redeploySteps[0].Key != deploy.StepRenderRuntime {
+	if err != nil || len(redeploySteps) != 10 || redeploySteps[0].Key != deploy.StepRenderRuntime {
 		t.Fatalf("redeploy steps = %#v, error=%v", redeploySteps, err)
 	}
 	secondRelease := cloneAndActivateSyntheticRelease(t, s, redeployRun, firstRelease.Release.ID, "v2")
@@ -244,7 +254,7 @@ func TestNormalizedActionsUseDistinctImmutableReleaseSemantics(t *testing.T) {
 	rollbackSteps, _ := s.modules.deployRuns.Steps(t.Context(), rollbackRun.ID)
 	if rollbackRun.Operation != deploy.OperationRollback || rollbackRun.Trigger != deploy.TriggerRollback ||
 		rollbackRun.Priority != 1000 || rollbackRun.PlanRevision != firstRelease.Release.PlanRevision ||
-		len(rollbackSteps) != 9 || rollbackSteps[0].Key != deploy.StepRenderRuntime {
+		len(rollbackSteps) != 10 || rollbackSteps[0].Key != deploy.StepRenderRuntime {
 		t.Fatalf("rollback run/steps = %#v / %#v", rollbackRun, rollbackSteps)
 	}
 	wrongRoute := c.do(http.MethodPost, path, fmt.Sprintf(`{"operation":"rollback","releaseId":%d}`, firstRelease.Release.ID), nil)

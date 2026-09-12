@@ -10,7 +10,9 @@ import { useAuth } from "@/hooks/use-auth"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { EmptyState, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -115,11 +117,6 @@ export function InstallPanel({
       <PanelHeader
         icon={MagnifyingGlass}
         title="Add software"
-        description={
-          manager
-            ? `Searches every package ${manager} can reach from this host`
-            : "Searches the repositories this host is configured with"
-        }
       />
       <PanelToolbar>
         <div className="relative w-full sm:w-96">
@@ -154,13 +151,19 @@ export function InstallPanel({
         {!shownError && shown.length === 0 && (
           <EmptyState
             icon={MagnifyingGlass}
-            title={typing ? "Keep typing" : needle ? "Nothing matches that" : "Search for something to install"}
+            title={
+              typing
+                ? "Keep typing"
+                : needle
+                  ? "Nothing matches that"
+                  : "Search for something to install"
+            }
             description={
               typing
                 ? "Two letters is the shortest search worth running."
                 : needle
                   ? "Try a shorter or more general word — every package this host can reach is searched by name first, and by description when the name finds nothing."
-                  : "Names are matched first, so typing what you actually want puts it at the top. If you only know what the software does, type that instead — \"web server\", \"password manager\" — and the descriptions are searched too."
+                  : 'Names are matched first, so typing what you actually want puts it at the top. If you only know what the software does, type that instead — "web server", "password manager" — and the descriptions are searched too.'
             }
           />
         )}
@@ -173,8 +176,8 @@ export function InstallPanel({
                 <li
                   key={result.name}
                   className={cn(
-                    "flex min-w-0 items-start gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40",
-                    queued && "bg-primary/5",
+                    "flex min-w-0 items-start gap-3 px-4 py-2.5 transition-colors hover:bg-row-hover",
+                    queued && "bg-wash-primary",
                   )}
                 >
                   <button
@@ -183,25 +186,16 @@ export function InstallPanel({
                     className="min-w-0 flex-1 space-y-0.5 text-left"
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="truncate font-mono text-[13px] font-medium">
+                      <span className="truncate font-mono text-body font-medium">
                         {result.name}
                       </span>
                       {result.version && (
-                        <span className="numeric text-[11px] text-muted-foreground">
+                        <span className="numeric text-hint text-muted-foreground">
                           {result.version}
                         </span>
                       )}
-                      {result.installed && (
-                        <Badge variant="success" className="font-normal">
-                          <Check className="size-3" />
-                          Installed
-                        </Badge>
-                      )}
-                      {result.repository && (
-                        <Badge variant="notice" className="font-normal">
-                          {result.repository}
-                        </Badge>
-                      )}
+                      {result.installed && <Status verdict="ok" icon={Check} label="Installed" />}
+                      {result.repository && <Tag>{result.repository}</Tag>}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {result.summary || "No description published"}
@@ -209,14 +203,12 @@ export function InstallPanel({
                   </button>
 
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="What is this, and what will it give me?"
+                    <IconAction
+                      label="What is this, and what will it give me?"
                       onClick={() => onInspect(result.name)}
                     >
-                      <Information className="size-4" />
-                    </Button>
+                      <Information />
+                    </IconAction>
                     {canInstall && !result.installed && (
                       <Button
                         size="sm"

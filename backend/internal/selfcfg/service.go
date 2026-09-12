@@ -109,6 +109,10 @@ type Report struct {
 	// operator picks that certificate — rather than rejecting what they typed
 	// because they had to guess at three facts the machine already knew.
 	Tailscale Identity `json:"tailscale"`
+	// Certificate is what is on disk for the address above, which is not the
+	// same question as which mode is configured: a Tailscale install with no
+	// certificate yet answers on Caddy's internal CA.
+	Certificate CertState `json:"certificate"`
 	// Drift is the file disagreeing with the running process, which is what an
 	// operator who edited .env over ssh and never restarted is looking at. It
 	// covers only the settings this backend can observe about itself.
@@ -138,6 +142,7 @@ func (s *Service) Report(ctx context.Context) Report {
 	rep.Endpoint = rep.Settings.Endpoint()
 	rep.Drift = s.drift(rep.Settings)
 	rep.Tailscale = s.Tailnet(ctx)
+	rep.Certificate = Certificate(s.dataDir, rep.Settings.Site)
 
 	if run, err := s.store.Load(); err == nil && run != nil {
 		rep.Run = run
@@ -233,16 +238,31 @@ func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP stri
 		return nil, ErrNoChange
 	}
 
-	// Switching to a Tailscale certificate obtains it *now*, before anything
-	// is written. The proxy cannot start without the file, so an install that
-	// wrote the setting first and discovered the tailnet had HTTPS turned off
-	// afterwards would take the dashboard down and recover it by rollback —
-	// a minute of outage to deliver an error message that was available up
-	// front. Refusing here costs nothing and says exactly what is wrong.
+	// Switching to a Tailscale certificate obtains it *now*, before anything is
+	// written, so the proxy has the file by the time it restarts.
+	//
+	// A tailnet that will not issue one is a caveat rather than a refusal, and
+	// that is the whole point: the useful half of this mode is the address, not
+	// the issuer. The proxy falls back to its internal CA when there is no
+	// certificate to serve, so the dashboard still answers at the MagicDNS name
+	// from every device on the tailnet — with the warning it already had — and
+	// CertKeeper swaps in the real certificate on its own once HTTPS is turned
+	// on. Refusing the apply used to leave an operator with a greyed-out option
+	// and no way to move at all.
+	note := ""
 	if next.TLS == TLSTailscale && (current.TLS != TLSTailscale || current.Site != next.Site) {
 		if err := Issue(ctx, next.Site, filepath.Join(s.dataDir, "certs")); err != nil {
-			return nil, fmt.Errorf("no certificate could be issued for %s, so the dashboard was left as it is: %w",
-				next.Site, err)
+			// Anything left from the previous address would be served under
+			// the new name, which browsers reject harder than a self-signed
+			// certificate.
+			DropStaleCertificate(s.dataDir, next.Site)
+			// Short, because it is read on a page and not in a log: the
+			// detail is in the transcript and the settings page says what to
+			// switch on.
+			note = "No Tailscale certificate could be issued yet, so " + next.Site +
+				" answers with a self-signed one for now. The dashboard keeps trying and swaps in the real one on its own."
+			s.log.Warn("tailscale certificate not issued; falling back to a self-signed one",
+				"site", next.Site, "error", err)
 		}
 	}
 
@@ -262,6 +282,7 @@ func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP stri
 		Health:         healthURL(next.BackendPort),
 		RollbackHealth: healthURL(current.BackendPort),
 		Endpoint:       next.Endpoint(),
+		Note:           note,
 		Actor:          actor,
 	})
 	if err != nil {

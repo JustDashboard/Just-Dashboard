@@ -1,15 +1,16 @@
 "use client"
 
 import { useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { FileText } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { AuditEntry } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -26,8 +27,17 @@ import {
 const PAGE_SIZE = 100
 
 export default function AuditPage() {
+  // `?action=` is how the Docker event feed hands off: an event correlated to
+  // an audit entry offers a link, and a link that lands on an unfiltered list
+  // of everything the dashboard has ever done is not the entry it promised.
+  //
+  // Read once as an initial value rather than kept in sync, like the other
+  // deep links in this product — the URL is where the reader arrived, not
+  // where they are now, and re-applying it on every keystroke would fight the
+  // filter box.
+  const initialAction = useSearchParams().get("action") ?? ""
   const [username, setUsername] = useState("")
-  const [action, setAction] = useState("")
+  const [action, setAction] = useState(initialAction)
   const [onlyFailed, setOnlyFailed] = useState(false)
   const [offset, setOffset] = useState(0)
 
@@ -47,7 +57,6 @@ export default function AuditPage() {
       <PageHeader
         eyebrow="Operations"
         title="Audit log"
-        description="Every state-changing request, with who made it and from where"
       />
 
       {error && <ErrorState error={error} />}
@@ -58,7 +67,6 @@ export default function AuditPage() {
           <PanelHeader
             icon={FileText}
             title="Recorded requests"
-            description={`${data.total.toLocaleString()} entries kept`}
           />
           <PanelToolbar>
             <SearchInput
@@ -77,9 +85,9 @@ export default function AuditPage() {
                 setOffset(0)
               }}
               placeholder="Action, e.g. docker.container"
-              className="h-8 w-60 text-[13px]"
+              className="h-8 w-60 text-body"
             />
-            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <label className="flex items-center gap-2 text-body text-muted-foreground">
               <Checkbox
                 checked={onlyFailed}
                 onCheckedChange={(v) => {
@@ -104,23 +112,20 @@ export default function AuditPage() {
               </TableHeader>
               <TableBody>
                 {data.entries.map((entry) => (
-                  <TableRow
-                    key={entry.id}
-                    className={entry.success ? undefined : "bg-destructive/[0.06]"}
-                  >
-                    <TableCell className="text-xs">
+                  <TableRow key={entry.id} className={entry.success ? undefined : "bg-wash-danger"}>
+                    <TableCell>
                       <div>{timestamp(entry.ts)}</div>
-                      <p className="text-[11px] text-muted-foreground">{relativeTime(entry.ts)}</p>
+                      <p className="text-hint text-muted-foreground">{relativeTime(entry.ts)}</p>
                     </TableCell>
                     <TableCell>
-                      <div className="text-[13px]">{entry.username || <em>anonymous</em>}</div>
-                      <p className="font-mono text-[11px] text-muted-foreground">
+                      <div className="text-body">{entry.username || <em>anonymous</em>}</div>
+                      <p className="font-mono text-hint text-muted-foreground">
                         {entry.ip} · {entry.actor}
                       </p>
                     </TableCell>
                     <TableCell>
                       <div className="font-mono text-xs">{entry.action}</div>
-                      <p className="font-mono text-[11px] text-muted-foreground">
+                      <p className="font-mono text-hint text-muted-foreground">
                         {entry.method} {entry.path}
                       </p>
                     </TableCell>
@@ -128,7 +133,7 @@ export default function AuditPage() {
                       <div className="truncate font-mono text-xs">{entry.target}</div>
                       {entry.detail && (
                         <p
-                          className="truncate text-[11px] text-muted-foreground"
+                          className="truncate text-hint text-muted-foreground"
                           title={entry.detail}
                         >
                           {entry.detail}
@@ -136,12 +141,14 @@ export default function AuditPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={entry.success ? "secondary" : "destructive"}
-                        className="numeric font-normal"
+                      <span
+                        className={cn(
+                          "numeric text-xs",
+                          entry.success ? "text-muted-foreground" : "text-destructive",
+                        )}
                       >
                         {entry.status}
-                      </Badge>
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))}

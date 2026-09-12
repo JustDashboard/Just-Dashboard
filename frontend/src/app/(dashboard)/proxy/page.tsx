@@ -6,11 +6,11 @@ import { Globe, Router, Servers, ShieldCheck } from "@/components/icons"
 import { get } from "@/lib/api"
 import type { Certificate, Listener, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageHeader, Section } from "@/components/page"
+import { Page, PageHeader, PageState, Section } from "@/components/page"
 import { Panel, PanelBody } from "@/components/panel"
-import { StatTile } from "@/components/stat-tile"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { StatusDot } from "@/components/status-dot"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { EmptyState } from "@/components/state"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { ExpiryStatus } from "@/components/proxy/expiry-status"
 
@@ -18,7 +18,10 @@ export default function ProxyOverviewPage() {
   const { status, loading } = useProxy()
 
   const vhosts = usePoll<VHost[]>((signal) => get("/proxy/vhosts", undefined, signal), 30_000)
-  const certs = usePoll<Certificate[]>((signal) => get("/certificates/", undefined, signal), 300_000)
+  const certs = usePoll<Certificate[]>(
+    (signal) => get("/certificates/", undefined, signal),
+    300_000,
+  )
   const ports = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 30_000)
 
   const hosts = vhosts.data ?? []
@@ -30,12 +33,7 @@ export default function ProxyOverviewPage() {
   )
 
   if (loading && !status) {
-    return (
-      <Page>
-        <PageHeader eyebrow="Network" title="Proxy & TLS" />
-        <LoadingPanel />
-      </Page>
-    )
+    return <PageState eyebrow="Network" title="Proxy & TLS" />
   }
 
   const engine = status?.nginx
@@ -49,20 +47,9 @@ export default function ProxyOverviewPage() {
       <PageHeader
         eyebrow="Network"
         title="Proxy & TLS"
-        description={
-          status
-            ? [
-                status.nginx && status.nginxVersion,
-                status.caddy && status.caddyVersion,
-                status.certbot && "certbot",
-              ]
-                .filter(Boolean)
-                .join(" · ") || "No reverse proxy detected"
-            : undefined
-        }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
+      <StatGrid columns={4}>
         <StatTile
           label="Reverse proxy"
           icon={Servers}
@@ -72,7 +59,7 @@ export default function ProxyOverviewPage() {
         />
         <Link href="/proxy/sites" className="block min-w-0">
           <StatTile
-            className="h-full transition-colors hover:border-primary/30"
+            className="h-full transition-colors hover:border-rule-brand"
             label="Sites"
             icon={Globe}
             value={hosts.length}
@@ -81,21 +68,23 @@ export default function ProxyOverviewPage() {
         </Link>
         <Link href="/proxy/certificates" className="block min-w-0">
           <StatTile
-            className="h-full transition-colors hover:border-primary/30"
+            className="h-full transition-colors hover:border-rule-brand"
             label="Certificates"
             icon={ShieldCheck}
             value={certs.data?.length ?? "—"}
-            hint={
-              badCerts.length > 0
-                ? `${badCerts.length} need attention`
-                : "all valid"
+            hint={badCerts.length > 0 ? `${badCerts.length} need attention` : "all valid"}
+            tone={
+              badCerts.some((c) => c.expired || c.error)
+                ? "danger"
+                : badCerts.length
+                  ? "warning"
+                  : "success"
             }
-            tone={badCerts.some((c) => c.expired || c.error) ? "danger" : badCerts.length ? "warning" : "success"}
           />
         </Link>
         <Link href="/proxy/ports" className="block min-w-0">
           <StatTile
-            className="h-full transition-colors hover:border-primary/30"
+            className="h-full transition-colors hover:border-rule-brand"
             label="Exposed ports"
             icon={Router}
             value={exposed.length}
@@ -103,7 +92,7 @@ export default function ProxyOverviewPage() {
             tone={exposed.length ? "warning" : "success"}
           />
         </Link>
-      </div>
+      </StatGrid>
 
       {(badCerts.length > 0 || exposed.length > 0) && (
         <Section title="Needs attention">
@@ -114,11 +103,11 @@ export default function ProxyOverviewPage() {
                   <li key={`cert-${cert.path || cert.name}`}>
                     <Link
                       href="/proxy/certificates"
-                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--row-hover)]"
+                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 hover:bg-row-hover"
                     >
                       <span className="flex min-w-0 items-center gap-2.5">
                         <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-[13px] font-medium">{cert.name}</span>
+                        <span className="truncate text-body font-medium">{cert.name}</span>
                       </span>
                       <ExpiryStatus cert={cert} />
                     </Link>
@@ -128,15 +117,15 @@ export default function ProxyOverviewPage() {
                   <li key={`port-${listener.port}-${i}`}>
                     <Link
                       href="/proxy/ports"
-                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--row-hover)]"
+                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 hover:bg-row-hover"
                     >
                       <span className="flex min-w-0 items-center gap-2.5">
                         <StatusDot tone="warning" />
-                        <span className="truncate text-[13px] font-medium">
+                        <span className="truncate text-body font-medium">
                           {listener.process || "unknown"}
                         </span>
                       </span>
-                      <span className="numeric shrink-0 font-mono text-[11px] text-muted-foreground">
+                      <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
                         :{listener.port} {listener.protocol}
                       </span>
                     </Link>

@@ -23,6 +23,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { rowReveal } from "@/components/icon-action"
+import { cn } from "@/lib/utils"
 
 /**
  * Certbot's own issue/renew/revoke, the certificates on disk, and the domains
@@ -61,7 +63,6 @@ export function CertsPanel() {
         <PanelHeader
           icon={ShieldCheck}
           title="Installed certificates"
-          description="Every certificate on disk, including the ones certbot did not put there"
         />
         <PanelBody flush>
           {certs.loading && <LoadingPanel />}
@@ -74,7 +75,6 @@ export function CertsPanel() {
         <PanelHeader
           icon={Globe}
           title="Watched domains"
-          description="Checked with a live TLS handshake, which catches a certificate renewed on disk but never reloaded"
           actions={
             <Button variant="outline" size="sm" onClick={() => watched.refresh()}>
               <RefreshClockwise className="size-3.5" />
@@ -89,7 +89,7 @@ export function CertsPanel() {
               onChange={(e) => setDomain(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addDomain()}
               placeholder="example.com"
-              className="h-8 w-full text-[13px] sm:w-72"
+              className="h-8 w-full text-body sm:w-72"
             />
             <Button size="sm" onClick={addDomain} disabled={!domain}>
               Watch
@@ -115,11 +115,11 @@ export function CertsPanel() {
               <TableBody>
                 {watched.data.map((row) => (
                   <TableRow key={row.id} className="group">
-                    <TableCell className="text-[13px] font-medium">{row.domain}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-body font-medium">{row.domain}</TableCell>
+                    <TableCell className="text-muted-foreground">
                       {row.certificate?.issuer ?? "—"}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell>
                       {row.certificate ? timestamp(row.certificate.notAfter) : "—"}
                     </TableCell>
                     <TableCell>
@@ -130,7 +130,7 @@ export function CertsPanel() {
                         <Button
                           size="xs"
                           variant="ghost"
-                          className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                          className={cn("text-destructive", rowReveal())}
                           onClick={async () => {
                             await del(`/certificates/watched/${row.id}`)
                             watched.refresh()
@@ -169,13 +169,13 @@ function CertTable({ certs }: { certs: Certificate[] }) {
           <TableRow key={cert.path || cert.name}>
             <TableCell>
               <div className="max-w-[16rem] min-w-0">
-                <div className="truncate text-[13px] font-medium">{cert.name}</div>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">{cert.source}</p>
+                <div className="truncate text-body font-medium">{cert.name}</div>
+                <p className="truncate font-mono text-hint text-muted-foreground">{cert.source}</p>
               </div>
             </TableCell>
-            <TableCell className="max-w-xs truncate text-xs">{cert.domains.join(", ")}</TableCell>
-            <TableCell className="text-xs text-muted-foreground">{cert.issuer}</TableCell>
-            <TableCell className="text-xs">{timestamp(cert.notAfter)}</TableCell>
+            <TableCell className="max-w-xs truncate">{cert.domains.join(", ")}</TableCell>
+            <TableCell className="text-muted-foreground">{cert.issuer}</TableCell>
+            <TableCell>{timestamp(cert.notAfter)}</TableCell>
             <TableCell>
               <ExpiryStatus cert={cert} />
             </TableCell>

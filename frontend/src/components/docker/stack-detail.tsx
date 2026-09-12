@@ -28,12 +28,18 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { PortLink, type ConfirmFn } from "@/components/docker/shared"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { Hint, Term } from "@/components/docker/explain"
+import { DeployPreviewPanel, DeploymentHistoryPanel } from "@/components/docker/deploy-preview"
+import {
+  COMPOSE_ACTIONS,
+  StackStateBadge,
+  type ComposeActionKey,
+} from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
 import { LogViewer } from "@/components/log-viewer"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -147,17 +153,10 @@ function StackBody({
       title={
         <>
           {name}
-          {data && (
-            <Badge
-              variant={data.running === data.total && data.total > 0 ? "success" : "secondary"}
-              className="font-normal"
-            >
-              {data.running}/{data.total} up
-            </Badge>
-          )}
+          {data && <StackStateBadge stack={data} />}
         </>
       }
-      description={data?.workingDir}
+      description={data ? `${data.summary} · ${data.workingDir}` : undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
       actions={
         data && <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
@@ -177,11 +176,7 @@ function StackBody({
             </Notice>
           )}
           {data.declaredError && (
-            <Notice
-              title="This stack's compose file does not parse"
-              icon={Warning}
-              tone="danger"
-            >
+            <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
               {data.declaredError}
             </Notice>
           )}
@@ -197,7 +192,10 @@ function StackBody({
           <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
             <TabsList className="w-fit shrink-0">
               <TabsTrigger value="services">Services</TabsTrigger>
+              {/* What a deploy would change, before it changes it. */}
+              <TabsTrigger value="preview">Deploy preview</TabsTrigger>
               <TabsTrigger value="compose">Compose file</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
             <TabsContent value="services" className="min-h-0 flex-1 space-y-2 overflow-y-auto">
@@ -218,8 +216,14 @@ function StackBody({
                 />
               )}
             </TabsContent>
+            <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "preview" && <DeployPreviewPanel stack={data.name} />}
+            </TabsContent>
             <TabsContent value="compose" className="min-h-0 flex-1">
               <ComposeEditor stack={data} onSaved={reload} canWrite={can("file.write")} />
+            </TabsContent>
+            <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
             </TabsContent>
             <TabsContent value="logs" className="min-h-0 flex-1">
               {tab === "logs" && <StackLogs stack={data.name} active />}
@@ -249,13 +253,41 @@ function StackActions({
     fn().catch((err) => notify.error(String(err)))
   }
 
+  /**
+   * Compose's verbs, named for what they do to the server.
+   *
+   * `Up`, `Update` and `Down` are precise and mean nothing without the compose
+   * reference — and `Down` is the worst of the three, because it sounds like
+   * the opposite of `Up` and is not: it deletes the containers and the project
+   * network. Every button here says what it does, and every confirmation
+   * carries both the blast radius and the exact command being run, so an
+   * operator who knows compose can check the translation.
+   */
+  const act = (action: ComposeActionKey, extra?: React.ReactNode) => {
+    const meta = COMPOSE_ACTIONS[action]
+    confirmRun(
+      action,
+      meta.label,
+      <>
+        <p>
+          <b>{data.name}</b> — {meta.blastRadius}
+        </p>
+        {extra}
+        <p className="font-mono text-hint text-muted-foreground">{meta.command}</p>
+      </>,
+    )
+  }
+
   return (
     <>
       {can("service.control") && (
         <>
-          <Button size="sm" disabled={busy} onClick={quiet(() => run("up"))}>
-            {busy ? <Spinner className="size-3.5" /> : <Play className="size-3.5" />}
-            Up
+          {/* Deploy is not destructive: it starts what is missing and replaces
+              what changed. It gets no confirmation for the same reason it is
+              the primary button. */}
+          <Button size="sm" onClick={quiet(() => run("up"))} pending={busy}>
+            <Play className="size-3.5" />
+            {COMPOSE_ACTIONS.up.label}
           </Button>
           {/*
             The one button most self-hosted stacks exist to press. Everywhere
@@ -264,52 +296,22 @@ function StackActions({
             stack alone rather than taking it half down and failing.
           */}
           {can("destructive") && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() =>
-                confirmRun(
-                  "update",
-                  "Update this stack",
-                  <>
-                    <p>
-                      Pulls a newer image for every service in <b>{data.name}</b>, then recreates
-                      the ones that changed. Services whose image did not move are left running.
-                    </p>
-                    <p>Anything being recreated is interrupted while it restarts.</p>
-                  </>,
-                )
-              }
-            >
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => act("update")}>
               <ArrowCircleUp className="size-3.5" />
-              Update
+              {COMPOSE_ACTIONS.update.label}
             </Button>
           )}
           <Button size="sm" variant="outline" disabled={busy} onClick={quiet(() => run("build"))}>
             <Wrench className="size-3.5" />
-            Build
+            {COMPOSE_ACTIONS.build.label}
           </Button>
         </>
       )}
       {can("destructive") && (
         <>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              confirmRun(
-                "restart",
-                "Restart this stack",
-                <p>
-                  Every service in <b>{data.name}</b> stops and starts again.
-                </p>,
-              )
-            }
-          >
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => act("restart")}>
             <RotateClockwise className="size-3.5" />
-            Restart
+            {COMPOSE_ACTIONS.restart.label}
           </Button>
           <Button
             size="sm"
@@ -317,21 +319,17 @@ function StackActions({
             className="text-destructive"
             disabled={busy}
             onClick={() =>
-              confirmRun(
+              act(
                 "down",
-                "Down this stack",
-                <>
-                  <p>
-                    Stops and removes every container in <b>{data.name}</b>, and the network compose
-                    created for it.
-                  </p>
-                  <p>Named volumes survive — the data is not deleted.</p>
-                </>,
+                <p>
+                  Deploying afterwards brings the stack back from the same compose file, and the
+                  volumes it left behind are still there for it.
+                </p>,
               )
             }
           >
             <StopCircle className="size-3.5" />
-            Down
+            {COMPOSE_ACTIONS.down.label}
           </Button>
         </>
       )}
@@ -372,14 +370,12 @@ function StackLinks({ data }: { data: StackDetail }) {
             <GitBranch className="size-3" />
             {data.git.branch ?? "repository"}
             {data.git.dirty && (
-              <Badge variant="warning" className="ml-1 px-1 py-0 text-[10px] font-normal">
-                {data.git.changes} uncommitted
-              </Badge>
+              <span className="numeric text-hint text-warning">{data.git.changes} uncommitted</span>
             )}
             {data.git.behind > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1 py-0 text-[10px] font-normal">
+              <span className="numeric text-hint text-muted-foreground">
                 {data.git.behind} behind
-              </Badge>
+              </span>
             )}
           </Link>
         </Button>
@@ -406,24 +402,20 @@ function ServiceRow({
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-hairline px-3 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[13px] font-medium">{service.name}</span>
+          <span className="truncate text-body font-medium">{service.name}</span>
           {service.missing ? (
-            <Badge variant="warning" className="font-normal">
-              not created
-            </Badge>
+            <Status verdict="warning" label="not created" />
           ) : (
             <Status state={service.state} />
           )}
           {service.health && service.health !== "healthy" && (
-            <Badge
-              variant={service.health === "unhealthy" ? "destructive" : "secondary"}
-              className="font-normal"
-            >
-              {service.health}
-            </Badge>
+            <Status
+              verdict={service.health === "unhealthy" ? "critical" : "notice"}
+              label={service.health}
+            />
           )}
         </div>
-        <p className="truncate font-mono text-[11px] text-muted-foreground">
+        <p className="truncate font-mono text-hint text-muted-foreground">
           {service.missing
             ? "declared in the compose file, but no container exists for it"
             : service.image}
@@ -558,20 +550,16 @@ function ComposeEditor({
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <Code className="size-3.5 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground">
           {stack.configPath}
         </span>
-        {dirty && (
-          <Badge variant="warning" className="font-normal">
-            unsaved
-          </Badge>
-        )}
+        {dirty && <Tag tone="warning">unsaved</Tag>}
         <Button size="xs" variant="outline" onClick={check} disabled={busy}>
           Check
         </Button>
         {canWrite && (
-          <Button size="xs" onClick={() => save()} disabled={busy || !dirty}>
-            {busy ? <Spinner className="size-3" /> : <FloppyDisk className="size-3" />}
+          <Button size="xs" onClick={() => save()} disabled={busy || !dirty} pending={busy}>
+            <FloppyDisk className="size-3" />
             Save
           </Button>
         )}
@@ -587,7 +575,7 @@ function ComposeEditor({
 
       {validation && !validation.valid && (
         <Notice title="Compose will not accept this" icon={Warning} tone="danger">
-          <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{validation.error}</pre>
+          <pre className="mt-1 font-mono text-hint whitespace-pre-wrap">{validation.error}</pre>
           {canWrite && (
             <Button size="xs" variant="outline" className="mt-2" onClick={() => save(true)}>
               Save it anyway

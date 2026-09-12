@@ -9,7 +9,7 @@ import { DashboardUpdatePanel } from "@/components/update/update-panel"
 import { ReleaseList } from "@/components/update/release-notes"
 import { Page, PageHeader, Section, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { StatTile } from "@/components/stat-tile"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -59,10 +59,9 @@ export default function DashboardVersionPage() {
       <PageHeader
         eyebrow="Operations"
         title="Dashboard"
-        description="The version this panel is running, what changed in every version before it, and installing the next one"
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+      <StatGrid columns={4}>
         <StatTile
           label="Installed"
           icon={Sparkles}
@@ -101,7 +100,7 @@ export default function DashboardVersionPage() {
           value={report?.check.ref ?? "—"}
           hint={report?.check.repo}
         />
-      </div>
+      </StatGrid>
 
       {error && <ErrorState error={error} />}
       {loading && !report && (
@@ -116,13 +115,11 @@ export default function DashboardVersionPage() {
       {report && (
         <Section
           title="Version history"
-          description="Every release this build knows about, newest first"
         >
           <Panel>
             <PanelHeader
               icon={ClockRewind}
               title="Release notes"
-              description={`${visible.length} of ${all.length} release${all.length === 1 ? "" : "s"}`}
             />
             <PanelToolbar>
               <SearchInput

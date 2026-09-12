@@ -1,12 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Database, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { plural } from "@/lib/format"
 import type { DbConnection, DbCredentialServer, DbDriverInfo, DbSyncResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -14,6 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { Page, PageHeader } from "@/components/page"
 import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { TabLink } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -49,7 +48,10 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
     (signal) => get<DbConnection[]>("/databases/", undefined, signal),
     60_000,
   )
-  const drivers = usePoll((signal) => get<DbDriverInfo[]>("/databases/drivers", undefined, signal), 0)
+  const drivers = usePoll(
+    (signal) => get<DbDriverInfo[]>("/databases/drivers", undefined, signal),
+    0,
+  )
 
   const [addOpen, setAddOpen] = useState(false)
   const [newOpen, setNewOpen] = useState(false)
@@ -254,8 +256,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
                 <SelectContent>
                   {(list ?? []).map((c) => (
                     <SelectItem key={c.id} value={c.id.toString()}>
-                      {c.name} ·{" "}
-                      {drivers.data?.find((d) => d.id === c.driver)?.label ?? c.driver}
+                      {c.name} · {drivers.data?.find((d) => d.id === c.driver)?.label ?? c.driver}
                       {c.host ? ` · ${c.host}` : ""}
                     </SelectItem>
                   ))}
@@ -277,17 +278,9 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
                     ? pathname === "/databases"
                     : pathname.startsWith(tab.href)
                 return (
-                  <Link
-                    key={tab.href}
-                    href={hrefFor(tab.href)}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "inline-flex h-9 shrink-0 items-center border-b-2 border-transparent px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-                      active && "border-primary text-foreground",
-                    )}
-                  >
+                  <TabLink key={tab.href} href={hrefFor(tab.href)} selected={active}>
                     {tab.title}
-                  </Link>
+                  </TabLink>
                 )
               })}
             </nav>
@@ -333,10 +326,7 @@ function ConnectionStatus({ id }: { id: number }) {
   if (!data) return <Spinner className="text-muted-foreground" />
   return (
     <span title={data.error}>
-      <Status
-        verdict={data.ok ? "ok" : "critical"}
-        label={data.ok ? "connected" : "unreachable"}
-      />
+      <Status verdict={data.ok ? "ok" : "critical"} label={data.ok ? "connected" : "unreachable"} />
     </span>
   )
 }

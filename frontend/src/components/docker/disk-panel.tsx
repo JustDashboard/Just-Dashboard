@@ -5,7 +5,7 @@ import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { prune, pruneContainers, pruneSummary, RECLAIM_SAFE } from "@/lib/docker-prune"
-import type { DockerDiskUsage, DockerDiskUsageLine } from "@/lib/types"
+import type { DiskDefinition, DockerDiskUsage, DockerDiskUsageLine } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -13,6 +13,7 @@ import { LoadingRows } from "@/components/state"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Term } from "@/components/docker/explain"
 import { Button } from "@/components/ui/button"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 /**
  * Where the disk went, and the buttons that get it back.
@@ -53,20 +54,12 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
   }
 
   const safe = data ? data.images.reclaimable + data.buildCache.reclaimable : 0
-  const total = data
-    ? data.images.size + data.containers.size + data.volumes.size + data.buildCache.size
-    : 0
 
   return (
     <Panel>
       <PanelHeader
         icon={Servers}
         title="Disk"
-        description={
-          data
-            ? `${bytes(total)} used by Docker · ${bytes(safe)} can be reclaimed`
-            : "what Docker is holding on this server"
-        }
         actions={
           can("destructive") &&
           safe > 0 && (
@@ -103,6 +96,19 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
         }
       />
       <PanelBody flush>
+        {/*
+          The reason two honest figures on this page look like a contradiction:
+          adding up every image's own size counts a shared layer once per image
+          that uses it. Naming the gap turns "these numbers do not add up" into
+          "these numbers measure different things, and here is by how much".
+        */}
+        {data && data.sharedLayers > 0 && (
+          <p className="border-b border-hairline px-4 py-2 text-hint text-muted-foreground">
+            Adding up every image&apos;s own size gives {bytes(data.imagesSize)}, but the layers
+            occupy {bytes(data.layersSize)}: {bytes(data.sharedLayers)} is shared between images and
+            stored once. The figure below is what the disk actually holds.
+          </p>
+        )}
         {loading && !data ? (
           <LoadingRows rows={4} />
         ) : (
@@ -110,6 +116,7 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
             <DiskRow
               label="Images"
               line={data?.images}
+              definition={definitionFor(data, "images")}
               unit="image"
               hint="layers pulled or built on this server"
               onReclaim={
@@ -141,6 +148,7 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
             <DiskRow
               label="Build cache"
               line={data?.buildCache}
+              definition={definitionFor(data, "buildCache")}
               unit="entry"
               hint="BuildKit's layer cache, kept after every build"
               onReclaim={
@@ -170,6 +178,7 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
             <DiskRow
               label="Containers"
               line={data?.containers}
+              definition={definitionFor(data, "writableLayer")}
               unit="container"
               hint="what each one has written above its image"
               onReclaim={
@@ -209,6 +218,7 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
             <DiskRow
               label="Local volumes"
               line={data?.volumes}
+              definition={definitionFor(data, "volumes")}
               unit="volume"
               hint="the only line here that holds data — reclaim these one at a time"
             />
@@ -219,17 +229,33 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
   )
 }
 
+function definitionFor(data: DockerDiskUsage | undefined, key: string): DiskDefinition | undefined {
+  return data?.definitions?.find((d) => d.key === key)
+}
+
+/**
+ * One line of the disk breakdown, with what its figure actually measures one
+ * hover away.
+ *
+ * Three different numbers on this page are all spelled "size" — the
+ * deduplicated bytes the image layers occupy, the sum of every image's own
+ * reported size, and a container's writable layer — and two of them cannot be
+ * added to each other. The definitions come from the server so the word means
+ * the same thing here as it does in a finding that quotes it.
+ */
 function DiskRow({
   label,
   line,
   unit,
   hint,
+  definition,
   onReclaim,
 }: {
   label: string
   line: DockerDiskUsageLine | undefined
   unit: string
   hint: string
+  definition?: DiskDefinition
   onReclaim?: () => void
 }) {
   if (!line) return null
@@ -237,7 +263,33 @@ function DiskRow({
   return (
     <li className="flex min-w-0 items-center gap-3 px-4 py-2.5">
       <span className="min-w-0 flex-1">
-        <span className="block text-[13px] font-medium">{label}</span>
+        <span className="block text-body font-medium">
+          {definition ? (
+            <HoverCard openDelay={200}>
+              <HoverCardTrigger asChild>
+                <button
+                  type="button"
+                  className="cursor-help underline decoration-dotted underline-offset-4"
+                >
+                  {label}
+                </button>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-80 space-y-1 text-xs leading-relaxed">
+                <p className="text-body font-medium">{definition.label}</p>
+                <p className="text-muted-foreground">{definition.measures}</p>
+                {definition.excludes && (
+                  <p className="text-muted-foreground">
+                    <span className="font-medium">Not counted: </span>
+                    {definition.excludes}
+                  </p>
+                )}
+                <p className="text-micro text-muted-foreground">Read from {definition.source}.</p>
+              </HoverCardContent>
+            </HoverCard>
+          ) : (
+            label
+          )}
+        </span>
         <span className="block truncate text-xs text-muted-foreground">
           {line.total} {unit}
           {line.total === 1 ? "" : "s"}
@@ -245,8 +297,8 @@ function DiskRow({
         </span>
       </span>
       <span className="shrink-0 text-right">
-        <span className="numeric block text-[13px]">{bytes(line.size)}</span>
-        <span className="numeric block text-[11px] text-muted-foreground">
+        <span className="numeric block text-body">{bytes(line.size)}</span>
+        <span className="numeric block text-hint text-muted-foreground">
           {line.reclaimable > 0 ? `${bytes(line.reclaimable)} reclaimable` : "nothing to reclaim"}
         </span>
       </span>

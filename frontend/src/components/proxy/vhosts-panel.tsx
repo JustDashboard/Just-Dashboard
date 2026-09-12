@@ -7,18 +7,19 @@ import { del, get, post, put } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { RowLink } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { SiteForm } from "@/components/proxy/site-form"
 import { Button } from "@/components/ui/button"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Switch } from "@/components/ui/switch"
 import {
   stickyTableHeader,
@@ -41,6 +42,9 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
   const [editing, setEditing] = useState<VHost | null>(null)
   const [formSite, setFormSite] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
+  // In the URL so a deployment finding can link straight at the site serving
+  // its hostname, and so the browser's back button restores the selection.
+  const [requested, setRequested] = useQuerySelection("site")
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
     30000,
@@ -48,8 +52,28 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
   const admin = can("system.admin")
 
   const openForm = (name: string | null) => {
+    setRequested(null)
     setFormSite(name)
     setFormOpen(true)
+  }
+
+  // A ?site= link from elsewhere in the dashboard opens that site as soon as
+  // its row loads. The open panel is derived from the URL rather than copied
+  // into state, so the back button closes it and a reload reopens it.
+  const linked = requested ? data?.find((vhost) => vhost.name === requested) : undefined
+  const rawEditing = editing ?? (linked && linked.kind !== "nginx" ? linked : null)
+  const formIsOpen = formOpen || linked?.kind === "nginx"
+  const formEditing = formOpen ? formSite : (linked?.name ?? null)
+
+  const closeForm = (open: boolean) => {
+    setFormOpen(open)
+    if (!open) setRequested(null)
+  }
+
+  const closeRaw = (open: boolean) => {
+    if (open) return
+    setEditing(null)
+    setRequested(null)
   }
 
   const toggle = async (vhost: VHost, enabled: boolean) => {
@@ -86,7 +110,6 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
   if (error) return <ErrorState error={error} />
 
   const hosts = data ?? []
-  const secured = hosts.filter((v) => v.tls).length
 
   return (
     <>
@@ -95,7 +118,6 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
           <PanelHeader
             icon={Globe}
             title="Sites"
-            description={`${hosts.length} defined · ${secured} on TLS`}
             actions={
               admin &&
               hasNginx && (
@@ -150,17 +172,17 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
                           >
                             {vhost.name}
                           </RowLink>
-                          <p className="truncate font-mono text-[11px] text-muted-foreground">
+                          <p className="truncate font-mono text-hint text-muted-foreground">
                             {vhost.path}
                           </p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs">
+                      <TableCell>
                         {vhost.serverNames.join(", ") || (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="font-mono text-[11px] text-muted-foreground">
+                      <TableCell className="font-mono text-hint text-muted-foreground">
                         {vhost.upstreams.slice(0, 2).join(", ") || "—"}
                       </TableCell>
                       <TableCell>
@@ -198,7 +220,7 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                        <RowActions>
                           <IconAction label="Edit the raw config" onClick={() => setEditing(vhost)}>
                             <Code />
                           </IconAction>
@@ -228,7 +250,7 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
                               <Trash />
                             </IconAction>
                           )}
-                        </span>
+                        </RowActions>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -241,8 +263,13 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
         {admin && <AuthFilesPanel />}
       </div>
 
-      <SiteForm open={formOpen} editing={formSite} onOpenChange={setFormOpen} onSaved={refresh} />
-      <ConfigEditor vhost={editing} onOpenChange={(o) => !o && setEditing(null)} onSaved={refresh} />
+      <SiteForm
+        open={formIsOpen}
+        editing={formEditing}
+        onOpenChange={closeForm}
+        onSaved={refresh}
+      />
+      <ConfigEditor vhost={rawEditing} onOpenChange={closeRaw} onSaved={refresh} />
       {dialog}
     </>
   )
@@ -335,8 +362,7 @@ function ConfigEditorBody({
       footer={
         can("system.admin") && vhost ? (
           <>
-            <Button size="sm" variant="outline" onClick={validate} disabled={busy}>
-              {busy && <Spinner className="size-4" />}
+            <Button size="sm" variant="outline" onClick={validate} pending={busy}>
               Test config
             </Button>
             <span className="flex-1" />
@@ -378,8 +404,8 @@ function ConfigEditorBody({
           className={cn(
             "flex shrink-0 items-start gap-2 rounded-lg border p-3 text-xs",
             validation.valid
-              ? "border-success/40 bg-success/10"
-              : "border-destructive/40 bg-destructive/10",
+              ? "border-rule-success bg-wash-success"
+              : "border-rule-danger bg-wash-danger",
           )}
         >
           {validation.valid ? (

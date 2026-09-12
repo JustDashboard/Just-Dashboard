@@ -52,16 +52,16 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
     >
       <button
         onClick={() => onOpen(table.schema, table.name)}
-        className="flex w-full items-center gap-2 border-b border-hairline bg-surface-header px-2.5 text-left transition-colors hover:bg-[var(--row-hover)]"
+        className="flex w-full items-center gap-2 border-b border-hairline bg-surface-header px-2.5 text-left transition-colors hover:bg-row-hover"
         style={{ height: HEADER_HEIGHT }}
         title={`Open ${table.name}`}
       >
         <Layout className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px] font-semibold">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs font-semibold">
           {table.name}
         </span>
         {table.rows > 0 && (
-          <span className="shrink-0 rounded bg-muted px-1 text-[9.5px] font-medium tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded-sm bg-muted px-1 text-micro font-medium text-muted-foreground tabular-nums">
             {compactRows(table.rows)}
           </span>
         )}
@@ -73,7 +73,7 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
         ))}
         {hidden > 0 && (
           <div
-            className="flex items-center gap-1.5 bg-surface-sunken px-2.5 text-[10px] text-muted-foreground"
+            className="flex items-center gap-1.5 bg-surface-sunken px-2.5 text-micro text-muted-foreground"
             style={{ height: ROW_HEIGHT }}
           >
             <Eye className="size-3" />
@@ -82,7 +82,7 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
         )}
         {columns.length === 0 && (
           <div
-            className="px-2.5 text-[10px] text-muted-foreground italic"
+            className="px-2.5 text-micro text-muted-foreground italic"
             style={{ height: ROW_HEIGHT, lineHeight: `${ROW_HEIGHT}px` }}
           >
             no columns readable
@@ -101,7 +101,7 @@ function ColumnRow({ table, column }: { table: string; column: DbGraphColumn }) 
   const handleStyle = { opacity: 0, width: 1, height: 1, border: 0, minWidth: 0, minHeight: 0 }
   return (
     <div
-      className="relative flex items-center gap-2 px-2.5 transition-colors hover:bg-[var(--row-hover)]"
+      className="relative flex items-center gap-2 px-2.5 transition-colors hover:bg-row-hover"
       style={{ height: ROW_HEIGHT }}
       title={`${column.name} · ${column.type}${column.nullable ? " · nullable" : " · not null"}`}
     >
@@ -144,7 +144,7 @@ function ColumnRow({ table, column }: { table: string; column: DbGraphColumn }) 
       )}
       <span
         className={cn(
-          "min-w-0 flex-1 truncate font-mono text-[11px]",
+          "min-w-0 flex-1 truncate font-mono text-hint",
           column.primaryKey ? "font-semibold text-foreground" : "text-foreground/80",
         )}
       >
@@ -152,7 +152,7 @@ function ColumnRow({ table, column }: { table: string; column: DbGraphColumn }) 
       </span>
       <span
         className={cn(
-          "shrink-0 truncate font-mono text-[10px]",
+          "shrink-0 truncate font-mono text-micro",
           column.nullable ? "text-muted-foreground/60" : "text-muted-foreground",
         )}
       >

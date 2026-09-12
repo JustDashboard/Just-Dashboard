@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import {
   ArrowCircleUp,
   Box,
-  Layers,
   Pause,
   Play,
   Plus,
@@ -17,7 +16,7 @@ import {
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { prune, pruneSummary, RECLAIM_SAFE } from "@/lib/docker-prune"
-import { bytes, percent, truncateMiddle } from "@/lib/format"
+import { percent, truncateMiddle } from "@/lib/format"
 import type {
   Container,
   ContainerSparkline,
@@ -31,18 +30,18 @@ import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { ContainerDetailSheet } from "@/components/docker/container-detail"
 import { CreateContainerPanel } from "@/components/docker/create-container"
-import { DiagnosisPanel } from "@/components/docker/diagnosis-panel"
-import { PortLink } from "@/components/docker/shared"
+import { AttentionPanel, RuntimeHealthPanel } from "@/components/docker/attention"
+import { PortList } from "@/components/docker/exposure"
+import { ContainerName, CpuCell, IssuesCell, MemoryCell } from "@/components/docker/container-cells"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import {
   stickyTableHeader,
   Table,
@@ -265,8 +264,7 @@ export default function ContainersPage() {
     )
   }, [containers, filter])
 
-  const running = containers.filter((c) => c.state === "running").length
-  const findings = health.data?.findings.length ?? 0
+  const attention = health.data?.attention.total ?? 0
 
   return (
     <Page>
@@ -283,7 +281,13 @@ export default function ContainersPage() {
         }
       />
 
-      {findings > 0 && <DiagnosisPanel diagnosis={health.data} onAction={runFix} />}
+      {/*
+        Runtime first, then everything else. They are separate panels because
+        they answer separate questions: one clears itself when the thing it
+        describes recovers, the other does not.
+      */}
+      <RuntimeHealthPanel runtime={health.data?.runtime} />
+      {attention > 0 && <AttentionPanel diagnosis={health.data} onAction={runFix} />}
 
       {socketError && <ErrorState error={new Error(socketError)} />}
 
@@ -291,7 +295,6 @@ export default function ContainersPage() {
         <PanelHeader
           icon={Box}
           title="Containers"
-          description={`${running} running of ${containers.length}`}
         />
         <PanelToolbar>
           <SearchInput
@@ -305,19 +308,28 @@ export default function ContainersPage() {
             <TableHeader className={stickyTableHeader}>
               <TableRow>
                 <TableHead className="w-full">Container</TableHead>
-                <TableHead>Image</TableHead>
+                <TableHead className="hidden md:table-cell">Image</TableHead>
+                {/*
+                  Status is runtime and nothing else. It used to carry the
+                  worst finding about the container underneath the state, so a
+                  perfectly healthy container reading "Running" also read
+                  "publishes PostgreSQL on every interface" in the same cell —
+                  two different kinds of fact in one column. Diagnostics have
+                  their own column now.
+                */}
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">CPU</TableHead>
-                <TableHead className="text-right">Memory</TableHead>
-                <TableHead className="text-right">Last hour</TableHead>
-                <TableHead>Ports</TableHead>
+                <TableHead className="hidden text-right sm:table-cell">CPU</TableHead>
+                <TableHead className="hidden text-right sm:table-cell">Memory</TableHead>
+                {/* Named, because a sparkline cannot say what it is charting. */}
+                <TableHead className="hidden text-right xl:table-cell">CPU · 1h</TableHead>
+                <TableHead className="hidden lg:table-cell">Ports</TableHead>
+                <TableHead className="text-center">Issues</TableHead>
                 <TableHead className="w-px" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {visible.map((container) => {
                 const stat = stats[container.id]
-                const worst = worstFinding(health.data, container.id)
                 return (
                   <TableRow
                     key={container.id}
@@ -325,82 +337,52 @@ export default function ContainersPage() {
                     onActivate={() => setSelected(container.id)}
                   >
                     <TableCell>
-                      <div className="max-w-[18rem] min-w-0">
-                        <RowLink onClick={() => setSelected(container.id)}>
-                          {container.name}
-                        </RowLink>
-                        {container.composeStack && (
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            <Layers className="mr-1 inline size-3" />
-                            {container.composeStack}/{container.composeService}
-                          </p>
-                        )}
-                      </div>
+                      <ContainerName
+                        container={container}
+                        onOpen={() => setSelected(container.id)}
+                      />
                     </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                    <TableCell className="hidden font-mono text-hint text-muted-foreground md:table-cell">
                       {truncateMiddle(container.image, 34)}
                     </TableCell>
                     <TableCell>
+                      {/*
+                        Runtime only. "Running · Healthy · 2h 18m" is one kind
+                        of fact; what is wrong with the container's
+                        configuration is another, and it has its own column.
+                      */}
                       <Status state={container.state} label={container.status} />
-                      {worst ? (
-                        <p
-                          className={`mt-1 line-clamp-1 max-w-[16rem] text-[11px] ${
-                            worst.level === "critical" ? "text-destructive" : "text-warning"
-                          }`}
-                          title={worst.detail}
-                        >
-                          {worst.title}
-                        </p>
-                      ) : (
-                        container.health && (
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            {container.health}
-                          </p>
-                        )
-                      )}
+                      <p className="mt-0.5 text-hint text-muted-foreground">
+                        {container.state === "running"
+                          ? container.health
+                            ? container.health
+                            : container.inspected
+                              ? "no health check"
+                              : ""
+                          : ""}
+                      </p>
                     </TableCell>
-                    <TableCell className="text-right">
-                      {stat ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <Progress value={Math.min(stat.cpuPercent, 100)} className="h-1 w-10" />
-                          <span className="numeric w-10 font-mono text-[11px]">
-                            {percent(stat.cpuPercent)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">—</span>
-                      )}
+                    <TableCell className="hidden text-right sm:table-cell">
+                      <CpuCell stat={stat} container={container} />
                     </TableCell>
-                    <TableCell className="numeric text-right font-mono text-[11px]">
-                      {stat ? (
-                        <>
-                          {bytes(stat.memUsage)}
-                          <span className="text-muted-foreground"> / {bytes(stat.memLimit)}</span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
+                    <TableCell className="hidden text-right sm:table-cell">
+                      <MemoryCell stat={stat} container={container} />
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="hidden text-right xl:table-cell">
                       <ContainerTrend trend={trendByName.get(container.name)} />
                     </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {container.ports
-                          .filter((p) => p.publicPort)
-                          .slice(0, 3)
-                          .map((p, i) => (
-                            <PortLink
-                              key={i}
-                              ip={p.ip}
-                              port={p.publicPort ?? 0}
-                              target={p.privatePort}
-                            />
-                          ))}
-                      </div>
+                    <TableCell className="hidden lg:table-cell">
+                      <PortList ports={container.exposure ?? []} />
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                      <IssuesCell
+                        diagnosis={health.data}
+                        containerId={container.id}
+                        onOpen={() => setSelected(container.id)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <RowActions>
                         {container.state === "running" ? (
                           <>
                             {can("service.control") && (
@@ -526,14 +508,14 @@ export default function ContainersPage() {
                             <Trash />
                           </IconAction>
                         )}
-                      </div>
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 )
               })}
               {visible.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="p-0">
+                  <TableCell colSpan={9} className="p-0">
                     <EmptyState
                       icon={Box}
                       title={filter ? "No containers match that filter" : "Nothing running yet"}
@@ -585,16 +567,6 @@ export default function ContainersPage() {
   )
 }
 
-/** The most severe thing the diagnosis has to say about one container. */
-function worstFinding(
-  diagnosis: DockerDiagnosis | undefined,
-  id: string,
-): DockerFinding | undefined {
-  return (diagnosis?.findings ?? []).find(
-    (f) => f.targetId === id && (f.level === "critical" || f.level === "warning"),
-  )
-}
-
 /**
  * One container's last hour, in a table cell. The peak is spelled out beside
  * the line because a sparkline cannot carry a scale: two rows whose lines look
@@ -602,7 +574,7 @@ function worstFinding(
  */
 function ContainerTrend({ trend }: { trend?: ContainerSparkline }) {
   if (!trend || trend.cpu.length === 0) {
-    return <span className="text-[11px] text-muted-foreground">—</span>
+    return <span className="text-hint text-muted-foreground">—</span>
   }
   return (
     <span className="flex items-center justify-end gap-2">
@@ -611,7 +583,7 @@ function ContainerTrend({ trend }: { trend?: ContainerSparkline }) {
         label={`CPU over the last hour, peaking at ${percent(trend.cpuPeak)}`}
         color="var(--chart-1)"
       />
-      <span className="numeric w-11 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+      <span className="numeric w-11 shrink-0 text-right font-mono text-hint text-muted-foreground">
         {percent(trend.cpuPeak, 0)}
       </span>
     </span>

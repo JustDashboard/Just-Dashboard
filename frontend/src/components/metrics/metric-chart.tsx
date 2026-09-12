@@ -1,6 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import {
   Area,
   CartesianGrid,
@@ -322,7 +330,7 @@ export function MetricChart({
               strokeOpacity={0.4}
             />
           )}
-          </ComposedChart>
+        </ComposedChart>
       </ChartContainer>
     </div>
   )
@@ -385,7 +393,10 @@ type PlotArea = { left: number; top: number; width: number; height: number }
  * between versions. Re-measured on resize and whenever the data changes shape,
  * which is when an axis can grow a digit and shift the plot sideways.
  */
-function usePlotArea(ref: React.RefObject<HTMLDivElement | null>, revision: number): PlotArea | null {
+function usePlotArea(
+  ref: React.RefObject<HTMLDivElement | null>,
+  revision: number,
+): PlotArea | null {
   const [plot, setPlot] = useState<PlotArea | null>(null)
 
   useEffect(() => {
@@ -473,7 +484,7 @@ function MetricTooltip({
 
   return (
     <div className="min-w-[11rem] rounded-lg border border-hairline bg-popover/95 px-2.5 py-2 text-popover-foreground shadow-md backdrop-blur-sm">
-      <p className="numeric mb-1.5 text-[11px] text-muted-foreground">{rowInstant(label)}</p>
+      <p className="numeric mb-1.5 text-hint text-muted-foreground">{rowInstant(label)}</p>
       <div className="space-y-1">
         {series.map((s) => {
           const value = at.get(s.key)
@@ -481,7 +492,7 @@ function MetricTooltip({
           const peak = s.peakKey ? at.get(s.peakKey) : undefined
           const render = s.format ?? ((v: number) => (unit === "%" ? `${v}${unit}` : format(v)))
           return (
-            <div key={s.key} className="flex items-center gap-2 text-[11px]">
+            <div key={s.key} className="flex items-center gap-2 text-hint">
               <span
                 aria-hidden
                 className="size-2 shrink-0 rounded-[2px]"
@@ -501,7 +512,7 @@ function MetricTooltip({
       {near.length > 0 && (
         <div className="mt-1.5 space-y-0.5 border-t border-hairline pt-1.5">
           {near.map((m, i) => (
-            <p key={i} className="flex items-center gap-1.5 text-[11px]">
+            <p key={i} className="flex items-center gap-1.5 text-hint">
               <span
                 aria-hidden
                 className="size-1.5 shrink-0 rounded-full"

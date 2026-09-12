@@ -49,7 +49,7 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   fetch: {
     title: "Fetch",
-    body: "Ask the server what has changed without touching your files. It updates the \"you are N behind\" count so you know a pull is waiting, and it can never lose anything.",
+    body: 'Ask the server what has changed without touching your files. It updates the "you are N behind" count so you know a pull is waiting, and it can never lose anything.',
   },
   stash: {
     title: "Stash",
@@ -57,7 +57,7 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   remote: {
     title: "Remote (origin)",
-    body: "The shared copy of the repository, usually on a server like GitHub. \"origin\" is the default name for it. Push sends to it, pull brings from it.",
+    body: 'The shared copy of the repository, usually on a server like GitHub. "origin" is the default name for it. Push sends to it, pull brings from it.',
   },
   aheadBehind: {
     title: "Ahead and behind",
@@ -69,7 +69,7 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   head: {
     title: "HEAD",
-    body: "Shorthand for the commit you are currently on — normally the tip of the current branch. \"Reset to HEAD\" means \"put everything back to the last commit\".",
+    body: 'Shorthand for the commit you are currently on — normally the tip of the current branch. "Reset to HEAD" means "put everything back to the last commit".',
   },
 }
 
@@ -87,7 +87,7 @@ export function GitTerm({ name, children }: { name: string; children?: React.Rea
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-[13px] font-medium">{entry?.title ?? name}</p>
+        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
         <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
       </HoverCardContent>
     </HoverCard>
@@ -109,7 +109,7 @@ export function GitExplain({ name, className }: { name: string; className?: stri
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-[13px] font-medium">{entry?.title ?? name}</p>
+        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
         <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
       </HoverCardContent>
     </HoverCard>
@@ -120,7 +120,11 @@ const STEPS = [
   { n: 1, title: "Stage", body: "Tick the changed files you want to save together." },
   { n: 2, title: "Describe", body: "Write a short message saying what you changed." },
   { n: 3, title: "Commit", body: "Save them as one point in this repository's history." },
-  { n: 4, title: "Push", body: "Send your commits to the shared copy so they are safe and shared." },
+  {
+    n: 4,
+    title: "Push",
+    body: "Send your commits to the shared copy so they are safe and shared.",
+  },
 ]
 
 /** The "new to git?" button: the four-step flow plus the words behind it. */
@@ -135,7 +139,7 @@ export function GitHelp() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 space-y-3">
         <div>
-          <p className="text-[13px] font-medium">Saving your work, step by step</p>
+          <p className="text-body font-medium">Saving your work, step by step</p>
           <p className="text-xs text-muted-foreground">
             The same four moves every time. You never have to touch the command line.
           </p>
@@ -143,18 +147,20 @@ export function GitHelp() {
         <ol className="space-y-2">
           {STEPS.map((s) => (
             <li key={s.n} className="flex gap-2.5">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[11px] font-semibold text-primary">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-plot-primary text-hint font-semibold text-primary">
                 {s.n}
               </span>
               <div className="min-w-0">
-                <p className="text-[13px] leading-tight font-medium">{s.title}</p>
-                <p className="text-[11px] leading-snug text-muted-foreground">{s.body}</p>
+                <p className="text-body leading-tight font-medium">{s.title}</p>
+                <p className="text-hint leading-snug text-muted-foreground">{s.body}</p>
               </div>
             </li>
           ))}
         </ol>
         <div className="space-y-1.5 border-t border-hairline pt-2.5 text-xs">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase">Words you will see</p>
+          <p className="text-hint font-medium text-muted-foreground uppercase">
+            Words you will see
+          </p>
           {(["branch", "stash", "fetch", "pull", "aheadBehind"] as const).map((k) => (
             <p key={k} className="leading-snug">
               <span className="font-medium">{GIT_GLOSSARY[k].title}</span>{" "}

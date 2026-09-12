@@ -20,6 +20,10 @@ type MaterializedSource struct {
 	Digest    string `json:"digest,omitempty"`
 }
 
+// releaseWorkspaceRef names the one ref a materialized workspace carries, so
+// the fetched objects stay reachable for the life of the run.
+const releaseWorkspaceRef = "refs/just-dashboard/release"
+
 type materializedSourceMarker struct {
 	Source   DraftSourceConfig `json:"source"`
 	Identity SourceIdentity    `json:"identity"`
@@ -168,7 +172,11 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 
 	a.gitMu.Lock()
 	defer a.gitMu.Unlock()
-	mirrorRoot := filepath.Join(cacheRoot, "git-mirrors")
+	// Planning keeps its own shallow, blob-filtered mirror so inspection stays
+	// bounded. A release needs every object of one revision, and those two
+	// shapes cannot share a mirror: a later planning fetch re-shallows it and
+	// the promisor configuration keeps large blobs absent for good.
+	mirrorRoot := filepath.Join(cacheRoot, "git-release-mirrors")
 	if err := makePrivateDirectory(mirrorRoot); err != nil {
 		return err
 	}
@@ -188,10 +196,7 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 			return fmt.Errorf("%w: source ref moved after preflight; refusing a different revision", ErrSourceUnavailable)
 		}
 	}
-	if err := cloneExactGit(ctx, mirror, target, identity.Revision, nil); err != nil {
-		return err
-	}
-	if _, err := runPlanningGit(ctx, target, environment, "remote", "set-url", "origin", remote); err != nil {
+	if err := fetchExactGit(ctx, mirror, remote, target, identity.Revision, nil); err != nil {
 		return err
 	}
 	return materializeGitExtras(ctx, target, environment, source)
@@ -210,26 +215,41 @@ func (a *HostSourceAnalyzer) materializeLocalGit(
 	if _, err := runPlanningGit(ctx, local, nil, "cat-file", "-e", identity.Revision+"^{commit}"); err != nil {
 		return fmt.Errorf("%w: recorded local Git object is unavailable", ErrSourceUnavailable)
 	}
-	if err := cloneExactGit(ctx, local, target, identity.Revision, nil); err != nil {
+	if err := fetchExactGit(ctx, local, local, target, identity.Revision, nil); err != nil {
 		return err
 	}
 	return materializeGitExtras(ctx, target, nil, source)
 }
 
-func cloneExactGit(
+// fetchExactGit materializes exactly one revision into a fresh workspace
+// repository. Cloning is deliberately avoided: `git clone --local` silently
+// ignores the local copy when its source is shallow and falls back to the wire
+// protocol, which returns nothing from a mirror that publishes no branch refs
+// and leaves the failure to surface as an unreadable tree at checkout.
+func fetchExactGit(
 	ctx context.Context,
-	repository, target, revision string,
+	repository, origin, target, revision string,
 	environment []string,
 ) error {
 	if err := os.RemoveAll(target); err != nil {
 		return err
 	}
-	cloneCtx, cancelClone := context.WithTimeout(ctx, 10*time.Minute)
-	_, err := runPlanningGit(cloneCtx, "", environment,
-		"clone", "--local", "--no-hardlinks", "--no-checkout", "--", repository, target)
-	cancelClone()
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return err
+	}
+	if _, err := runPlanningGit(ctx, "", environment, "init", "--quiet", "--", target); err != nil {
+		return fmt.Errorf("%w: contained release workspace could not be created", ErrSourceUnavailable)
+	}
+	if _, err := runPlanningGit(ctx, target, environment, "remote", "add", "origin", origin); err != nil {
+		return fmt.Errorf("%w: contained release workspace could not be created", ErrSourceUnavailable)
+	}
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Minute)
+	_, err := runPlanningGit(fetchCtx, target, environment,
+		"fetch", "--force", "--no-tags", "--depth=1", "--", repository,
+		"+"+revision+":"+releaseWorkspaceRef)
+	cancelFetch()
 	if err != nil {
-		return fmt.Errorf("%w: contained release clone failed", ErrSourceUnavailable)
+		return fmt.Errorf("%w: exact release fetch failed", ErrSourceUnavailable)
 	}
 	checkoutCtx, cancelCheckout := context.WithTimeout(ctx, 10*time.Minute)
 	_, err = runPlanningGit(checkoutCtx, target, environment, "checkout", "--detach", "--force", revision)

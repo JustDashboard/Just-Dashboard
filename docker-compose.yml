@@ -137,8 +137,8 @@ services:
     # dashboard's own certificate, with nothing anywhere saying why. With the
     # port published instead, Docker itself refuses: `docker compose up` stops
     # with "Bind for 127.0.0.1:3000 failed: port is already allocated", naming
-    # the port, before anything is serving. A loud failure at the moment of
-    # the mistake beats a quiet one discovered days later.
+    # the port, before anything is serving. The installer and lifecycle runner
+    # detect that conflict, persist an available port in .env, and retry.
     #
     # Inside the container the port is always 3000; only the host side is a
     # variable, because only the host side can collide.

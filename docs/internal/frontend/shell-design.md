@@ -16,57 +16,80 @@ redirect to `/login` is convenience, not a control; every API call behind it is 
 lets a page ask for the remaining height (`<Page fill>`) instead of growing past the viewport.
 
 `components/app-sidebar.tsx` exports the nav registry (`NAV`, `PERSONAL_NAV`) so `command-palette.tsx`
-offers the same destinations without a second list. Items may carry a `capability`, and the sidebar hides
-what the role cannot use. ⌘K covers every page plus the theme toggle.
+offers the same destinations without a second list — 43 entries plus the two personal ones. Items may
+carry a `capability`, and the sidebar hides what the role cannot use. ⌘K covers every page.
 
 ## The design system
 
-Two files define the visual language, and pages compose them rather than hand-rolling layout:
+A small set of files defines the visual language, and pages compose them rather than hand-rolling
+layout. [`design-system.md`](design-system.md) states the rules in full; this is the map.
 
 - `components/page.tsx` — `Page` (one measure, gutter and rhythm; `fill` for terminal and logs, whose
-  content *is* the viewport), `PageHeader`, `Section`, `Toolbar`, `SearchInput`, `Metric`/`MetricStrip`,
-  `DetailList`/`Detail`.
-- `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`, `Well`. A
-  panel is *the* content block: a framed surface with a tinted header strip and a hairline, so it reads as
-  "chrome, then content" and a toolbar or full-bleed table sits flush beneath without a second edge.
+  content *is* the viewport), `PageHeader`, `PageState`, `Section`, `Toolbar`, `SearchInput`,
+  `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink`. **None of the heading primitives takes a
+  `description`** — see rule 5 in [`design-system.md`](design-system.md).
+- `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`; `Pane`,
+  `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a tinted
+  header strip and a hairline, so it reads as "chrome, then content" and a toolbar or full-bleed table
+  sits flush beneath without a second edge. A **pane** is the same frame, for a working
+  region of the page rather than a block of content on it — a session rail, a file tree, a log console.
+  Neither lifts; the distinction is semantic and shows in how the two are composed and in their header
+  heights.
+- `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
+  input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
+  `Modal` and `SidePanel` share one anatomy: icon plot, title, tinted strip, a body that is the only
+  part that scrolls, a footer strip. Their `description` is rendered `sr-only` — Radix wants an
+  accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
+  components** — a page or a feature panel never opens one itself.
+- `components/tabs.tsx` — every switcher: `SectionNav` (the sticky strip under the top bar), `TabLink`,
+  `FilterChip`, `ChipCount`.
+- `components/stat-tile.tsx` — `StatTile` (name and figure on one line, an optional meter and one hint)
+  and `StatGrid`, which frames a run of them as a single object with hairlines between cells rather
+  than as a row of separate cards.
+- `components/status-dot.tsx` — `Status`, the one live-state indicator: a coloured dot and a word.
+  `components/tag.tsx` — `Tag`, the squared hairline mark for a *fixed property* of a row.
+  **There is no badge and no pill in this product**; `ui/badge.tsx` was deleted so the decision cannot
+  come back by accident. A count is `.numeric` text, a state is a `Status`, a property is a `Tag`, and
+  anything longer than three words is prose.
+- `components/icon-action.tsx` — `IconAction` (an icon-only row control with a real tooltip label) and
+  `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
+  and is always visible on touch).
 
-**Reach for `Panel`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a feature
-page — before these existed, fourteen pages read as fourteen products. `components/state.tsx` does the
-same for the non-happy paths (`Spinner`, `LoadingRows`, `LoadingPanel`, `EmptyState`, `ErrorState`,
-`Notice`). `min-w-0` on the frame and its children is load-bearing: a wide table's intrinsic width would
-otherwise widen the flex column and take the whole shell sideways instead of scrolling inside its panel.
+**Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
+feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`
+does the same for the non-happy paths (`Spinner`, `LoadingRows`, `LoadingPanel`, `EmptyState`,
+`EmptyNote`, `ErrorState`, `Notice`). `min-w-0` on the frame and its children is load-bearing: a wide
+table's intrinsic width would otherwise widen the flex column and take the whole shell sideways instead
+of scrolling inside its panel.
 
-**Anything meant to sit in front of what is behind it stands up off the page.** `raised` (a `@utility` in
-`globals.css`) draws three lines from the `--raise-*` tokens — a light hairline on top, a dark lip below,
-a shadow under — inverting on `:active`. The tokens are translucent black and white rather than colours,
-because the same three lines sit on a white primary, a red destructive and a near-black outline alike;
-`--control`/`--control-hover` are the shared resting face. Hover goes *darker* and is named per mode
-rather than computed, since mixing in more `--foreground` lights the button up on dark mode. Light mode
-is not the dark values scaled — the gloss sits on the variant's colour, not on the page. A surface
-wanting a deeper shadow overrides the token (`[--raise-drop:var(--shadow-lg)]`) rather than adding a
-`shadow-*` utility, which would win the cascade and delete the shine and the lip.
+**Nothing lifts.** Cards, buttons, tabs, tiles and the sign-in panel used to carry a `raised` utility —
+a gradient gloss, a light hairline on the top edge, a dark lip below, a drop shadow, and an inversion on
+`:active`. It is gone. Forty-nine surfaces all claiming to stand in front of the page is a page with no
+foreground, and five CSS properties were saying what a one-pixel border already says.
 
-The same class covers cards: a card is a very large button nobody presses, and the earlier split (a
-gradient `.card-sheen` on panels, three lines on buttons) made one claim in two visual languages.
+A surface separates by a step of ground (`--background` → `--card` → `--control`), a border, and a
+`--hairline` where a header meets a body. `shadow-*` is reserved for the three things that genuinely
+float above the page: popover, dropdown, dialog. Press feedback is colour — `active:bg-control-active`
+on a control with a face, the accent wash on a ghost — so nothing translates and nothing casts a shadow
+to say it was pressed.
 
-Two deliberate exceptions:
+The nav's own treatment did not change with it, because it never used the lift: the current destination
+takes the sidebar accent fill, a brand-blue icon and a `font-medium` label against the `font-normal` of
+the rest. The rail is the one surface dense enough to need three weights, and the group labels above the
+entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
 
-- **The nav stays flat.** The lift works by making one thing stand out from what is behind it, which stops
-  meaning anything when forty-nine rows claim it at once; a nav is a *list*. The current destination uses
-  the sidebar accent fill and medium label weight at both navigation depths, keeping location visible
-  without an inverted primary pill competing with the page. What survived the experiment is the spacing:
-  `SidebarMenu`/`SidebarMenuSub` at `gap-2`.
-- **Ghost and link buttons stay flat**, and so do inputs and textareas. Ghost is 142 of ~400 buttons — the
-  quiet action at the end of a table row — and giving it a face turns every row into a strip of controls
-  competing with its own data. A page where fields and buttons are equally raised has no hierarchy left.
-  Where a control is a *toggle*, the **unpressed** state is the raised one; pressing puts it down.
-
-`components/logo.tsx` is the wordmark and nothing else — "Just" in `text-primary`, "Dashboard" in the text
+`components/logo.tsx` is the wordmark and nothing else — "Just" in `text-brand`, "Dashboard" in the text
 colour, the version as small muted text beside it. No mark, no tile, no strapline. It is the only
 rendering of the product's name, so sidebar, sign-in and splash agree and a rename is one file. `LogoMark`
 is the single letter the collapsed rail falls back to.
 
-`components/ui/*` is generated shadcn/ui (new-york, zinc, 35 primitives) with its icons rewired to
+**Selection is `bg-accent`, everywhere.** The active session in the terminal rail, a pressed
+`ToggleGroupItem`, an applied `FilterChip`, a highlighted command row, a selected table row, the current
+file in the tree and the current sidebar entry all take the same neutral wash. Neither the primary tint
+nor the brand hue is ever spent on "this one is chosen": ink is a *command*, blue is *where you are*, and
+a filter borrowing either reads as the page's main action.
+
+`components/ui/*` is generated shadcn/ui (new-york, zinc) with its icons rewired to
 the Heroicons vocabulary in `components/icons.tsx` — compose rather than
 edit. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `files/`, `git/`, `logs/`,
 `metrics/`, `packages/`, `procs/`, `proxy/`, `security/`, `terminal/`, `update/`.

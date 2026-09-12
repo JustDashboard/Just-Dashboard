@@ -18,8 +18,9 @@ import { cn } from "@/lib/utils"
 import type { ScanFinding, TLSScan } from "@/lib/types"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -59,7 +60,6 @@ export function TLSReport() {
         <PanelHeader
           icon={Inspect}
           title="Live TLS report"
-          description="A handshake, a version probe, the chain as presented and the headers the site actually sends"
         />
         <PanelToolbar>
           <Input
@@ -67,10 +67,9 @@ export function TLSReport() {
             onChange={(e) => setDomain(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && domain.trim() && run()}
             placeholder="app.example.com"
-            className="h-8 w-full text-[13px] sm:w-72"
+            className="h-8 w-full text-body sm:w-72"
           />
-          <Button size="sm" onClick={run} disabled={busy || !domain.trim()}>
-            {busy && <Spinner className="size-4" />}
+          <Button size="sm" onClick={run} disabled={busy || !domain.trim()} pending={busy}>
             Scan
           </Button>
         </PanelToolbar>
@@ -83,7 +82,7 @@ export function TLSReport() {
             />
           )}
           {busy && (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               Handshaking, probing each TLS version separately, and fetching the headers…
             </p>
           )}
@@ -100,33 +99,29 @@ export function TLSReport() {
                 {scan.protocols.map((protocol) => (
                   <div
                     key={protocol.name}
-                    className="flex items-start justify-between gap-3 text-[13px]"
+                    className="flex items-start justify-between gap-3 text-body"
                   >
                     <span className="font-mono text-xs">{protocol.name}</span>
                     <span className="flex min-w-0 flex-col items-end gap-0.5">
-                      <Badge
-                        variant={
+                      <Status
+                        verdict={
                           protocol.status === "offered"
                             ? isOldProtocol(protocol.name)
-                              ? "destructive"
-                              : "success"
-                            : protocol.status === "unknown"
-                              ? "secondary"
-                              : "outline"
+                              ? "critical"
+                              : "ok"
+                            : "notice"
                         }
-                        className="font-normal"
-                      >
-                        {protocol.status}
-                      </Badge>
+                        label={protocol.status}
+                      />
                       {protocol.detail && (
-                        <span className="max-w-56 text-right text-[11px] leading-tight text-muted-foreground">
+                        <span className="max-w-56 text-right text-hint leading-tight text-muted-foreground">
                           {protocol.detail}
                         </span>
                       )}
                     </span>
                   </div>
                 ))}
-                <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+                <p className="pt-1 text-hint leading-relaxed text-muted-foreground">
                   Each version is asked for on a connection of its own, so the answer is the
                   server&rsquo;s rather than a negotiation. &ldquo;unknown&rdquo; means this
                   dashboard&rsquo;s own TLS library would not make the request — reporting that as
@@ -159,7 +154,7 @@ export function TLSReport() {
                     {scan.negotiated} · {scan.cipherSuite}
                   </Detail>
                   <Detail label="OCSP stapled">{scan.ocspStapled ? "yes" : "no"}</Detail>
-                  <Detail label="SHA-256" className="font-mono text-[10px] break-all">
+                  <Detail label="SHA-256" className="font-mono text-micro break-all">
                     {scan.fingerprint}
                   </Detail>
                 </DetailList>
@@ -171,11 +166,6 @@ export function TLSReport() {
             <PanelHeader
               icon={LockClosed}
               title="Chain as presented"
-              description={
-                scan.chainComplete
-                  ? `${scan.chain.length} certificates sent`
-                  : "Only the leaf was sent — desktop browsers paper over this from cache; phones, curl and payment gateways do not"
-              }
             />
             <PanelBody className="space-y-1.5">
               {scan.chain.map((link, i) => (
@@ -183,19 +173,13 @@ export function TLSReport() {
                   key={`${link.subject}-${i}`}
                   className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border border-hairline bg-surface-sunken p-2.5"
                 >
-                  <span className="text-[13px] font-medium">{link.subject}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    issued by {link.issuer}
-                  </span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">
+                  <span className="text-body font-medium">{link.subject}</span>
+                  <span className="text-hint text-muted-foreground">issued by {link.issuer}</span>
+                  <span className="ml-auto text-hint text-muted-foreground">
                     {link.keyType}
                     {link.keyBits ? ` ${link.keyBits}` : ""} · expires {relativeTime(link.notAfter)}
                   </span>
-                  {link.isCa && (
-                    <Badge variant="secondary" className="font-normal">
-                      CA
-                    </Badge>
-                  )}
+                  {link.isCa && <Tag>CA</Tag>}
                 </div>
               ))}
             </PanelBody>
@@ -206,46 +190,38 @@ export function TLSReport() {
               <PanelHeader
                 icon={ShieldOff}
                 title="HTTP behaviour"
-                description={`Answered ${scan.http.statusCode}${scan.http.server ? ` · ${scan.http.server}` : ""}`}
               />
               <PanelBody className="space-y-2.5">
-                <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <div className="flex flex-wrap items-center gap-2 text-body">
                   <span>Plain HTTP</span>
                   {scan.http.plainError ? (
-                    <Badge variant="secondary" className="font-normal">
-                      refused connection
-                    </Badge>
+                    <Status verdict="notice" label="refused connection" />
                   ) : scan.http.plainRedirects ? (
-                    <Badge variant="success" className="font-normal">
-                      redirects to HTTPS
-                    </Badge>
+                    <Status verdict="ok" label="redirects to HTTPS" />
                   ) : (
-                    <Badge variant="destructive" className="font-normal">
-                      answers {scan.http.plainStatus} without redirecting
-                    </Badge>
+                    <Status
+                      verdict="critical"
+                      label={`answers ${scan.http.plainStatus} without redirecting`}
+                    />
                   )}
                   {scan.http.plainLocation && (
-                    <code className="font-mono text-[11px] text-muted-foreground">
+                    <code className="font-mono text-hint text-muted-foreground">
                       {scan.http.plainLocation}
                     </code>
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <div className="flex flex-wrap items-center gap-2 text-body">
                   <span>HSTS</span>
                   {scan.http.hsts ? (
-                    <Badge
-                      variant={scan.http.hsts.maxAge >= 15552000 ? "success" : "warning"}
-                      className="font-normal"
-                    >
-                      max-age {scan.http.hsts.maxAge}
-                      {scan.http.hsts.includeSubDomains && " · subdomains"}
-                      {scan.http.hsts.preload && " · preload"}
-                    </Badge>
+                    <Status
+                      verdict={scan.http.hsts.maxAge >= 15552000 ? "ok" : "warning"}
+                      label={`max-age ${scan.http.hsts.maxAge}${
+                        scan.http.hsts.includeSubDomains ? " · subdomains" : ""
+                      }${scan.http.hsts.preload ? " · preload" : ""}`}
+                    />
                   ) : (
-                    <Badge variant="secondary" className="font-normal">
-                      not set
-                    </Badge>
+                    <Status verdict="notice" label="not set" />
                   )}
                 </div>
 
@@ -265,14 +241,14 @@ export function TLSReport() {
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="font-mono text-[11px]">
+                        <p className="font-mono text-hint">
                           {header.name}
                           {header.value && (
                             <span className="ml-2 text-muted-foreground">{header.value}</span>
                           )}
                         </p>
                         {!header.present && (
-                          <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          <p className="text-hint leading-relaxed text-muted-foreground">
                             {header.detail}
                           </p>
                         )}
@@ -293,12 +269,12 @@ function ScanSummary({ scan }: { scan: TLSScan }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <GradeBadge grade={scan.grade} />
+        <TlsGrade grade={scan.grade} />
         <div className="min-w-0">
-          <p className="text-[13px] font-medium">{scan.domain}</p>
+          <p className="text-body font-medium">{scan.domain}</p>
           <p className="text-xs text-muted-foreground">{scan.summary}</p>
         </div>
-        <span className="ml-auto text-[11px] text-muted-foreground">
+        <span className="ml-auto text-hint text-muted-foreground">
           checked {relativeTime(scan.checkedAt)}
         </span>
       </div>
@@ -331,9 +307,9 @@ function FindingRow({ finding }: { finding: ScanFinding }) {
       className={cn(
         "flex min-w-0 gap-2.5 rounded-lg border p-2.5",
         finding.level === "critical"
-          ? "border-destructive/30 bg-destructive/5"
+          ? "border-rule-danger bg-wash-danger"
           : finding.level === "warning"
-            ? "border-warning/30 bg-warning/5"
+            ? "border-rule-warning bg-wash-warning"
             : "border-hairline bg-surface-sunken",
       )}
     >
@@ -349,10 +325,10 @@ function FindingRow({ finding }: { finding: ScanFinding }) {
         )}
       />
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-[13px] font-medium">{finding.title}</p>
-        <p className="text-[11px] leading-relaxed text-muted-foreground">{finding.detail}</p>
+        <p className="text-body font-medium">{finding.title}</p>
+        <p className="text-hint leading-relaxed text-muted-foreground">{finding.detail}</p>
         {finding.advice && (
-          <p className="text-[11px] leading-relaxed text-foreground/80">{finding.advice}</p>
+          <p className="text-hint leading-relaxed text-foreground/80">{finding.advice}</p>
         )}
       </div>
     </div>
@@ -365,15 +341,20 @@ function LevelIcon({ level, className }: { level: string; className?: string }) 
   return <Information className={className} />
 }
 
-export function GradeBadge({ grade, className }: { grade: string; className?: string }) {
+/**
+ * The overall verdict as a plate rather than a tag: it is the one thing on the
+ * page that is meant to be seen from across the room, and it is a grade rather
+ * than a property of a row.
+ */
+export function TlsGrade({ grade, className }: { grade: string; className?: string }) {
   const tone =
     grade === "A+" || grade === "A"
-      ? "border-success/30 bg-success/10 text-success"
+      ? "border-rule-success bg-wash-success text-success"
       : grade === "B"
-        ? "border-warning/30 bg-warning/10 text-warning"
+        ? "border-rule-warning bg-wash-warning text-warning"
         : grade === "C"
-          ? "border-warning/40 bg-warning/15 text-warning"
-          : "border-destructive/30 bg-destructive/10 text-destructive"
+          ? "border-rule-warning bg-plot-warning text-warning"
+          : "border-rule-danger bg-wash-danger text-destructive"
   return (
     <span
       className={cn(

@@ -43,8 +43,10 @@ type SiteSpec struct {
 	CertPath   string `json:"certPath,omitempty"`
 	KeyPath    string `json:"keyPath,omitempty"`
 	ForceHTTPS bool   `json:"forceHttps"`
-	HSTS       bool   `json:"hsts"`
-	HTTP2      bool   `json:"http2"`
+	// ManagedACME selects the fixed host/container-shared deployment webroot.
+	ManagedACME bool `json:"managedAcme,omitempty"`
+	HSTS        bool `json:"hsts"`
+	HTTP2       bool `json:"http2"`
 
 	WebSockets      bool   `json:"webSockets"`
 	Gzip            bool   `json:"gzip"`

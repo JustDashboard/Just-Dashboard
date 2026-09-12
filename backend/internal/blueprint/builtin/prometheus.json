@@ -1,0 +1,38 @@
+{
+  "id": "prometheus",
+  "version": "1.0.0",
+  "name": "Prometheus",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A metrics database that scrapes targets you configure. Its own dashboard is minimal; Grafana is the usual front end.",
+  "iconId": "monitoring",
+  "docsUrl": "https://prometheus.io/docs/introduction/overview/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://hub.docker.com/r/prom/prometheus",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "prom/prometheus:v3.1.0", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Prometheus has no authentication of its own. Put it behind the proxy and restrict it." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 9090, "protocol": "tcp", "purpose": "Query interface and API", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/prometheus", "purpose": "The time series database", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
+  "checks": [
+    { "name": "Answers a health probe", "kind": "http", "phase": "readiness", "required": true, "path": "/-/healthy", "timeoutSeconds": 60 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "files": [
+    { "path": "/etc/prometheus/prometheus.yml", "label": "Scrape configuration", "format": "yaml", "restartRequired": true }
+  ],
+  "update": { "detector": "registry", "notes": "Prometheus reads the TSDB written by the previous version." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:fd2acb89efc6677d8d18ef88f284fa5d70042c136eabef40cc6adc42f5f0de1c" }]
+}

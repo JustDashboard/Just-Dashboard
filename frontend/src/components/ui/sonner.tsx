@@ -2,7 +2,6 @@
 
 import { createPortal } from "react-dom"
 import { CheckCircle, CrossCircle, Information, LoaderCircle, Warning } from "@/components/icons"
-import { useTheme } from "@/hooks/use-theme"
 import { usePortalContainer } from "@/lib/portal-container"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
@@ -45,12 +44,11 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
 const Toaster = ({ ...props }: ToasterProps) => {
   // Sonner paints its own surface, so it has to be told which way the active
   // palette leans or a light theme gets black toasts.
-  const { mode } = useTheme()
   const fullscreen = usePortalContainer()
 
   const toaster = (
     <Sonner
-      theme={mode}
+      theme="dark"
       className="toaster group"
       icons={{
         success: <CheckCircle className="size-4 text-success" />,

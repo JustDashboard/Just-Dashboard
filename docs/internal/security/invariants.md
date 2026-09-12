@@ -30,6 +30,22 @@ A change that weakens any of these has to say so explicitly.
    on a populated table without one) and **no entry is ever removed** — the list is the path from every
    shipped schema to the current one, not a description of the current one.
 
+9. A blueprint is data, never a script. `internal/blueprint` parses with unknown fields rejected and
+   validates at package initialization, so a built-in that breaks the supply-chain policy cannot reach a
+   running dashboard. Install/release/startup/stop steps come from a closed operation vocabulary; there is
+   no "run this string" kind, and adding one would be adding a second request-defined shell by another
+   name. No blueprint may ship a default credential, publish a database port, declare a stateful workload
+   without persistence, download without https plus a size limit and a checksum or declared version
+   source, name an uncontained path, or take privilege without a written reason.
+10. The game console is not a shell. `gameserver.ValidateCommand` refuses anything carrying a shell
+    metacharacter, newline or NUL, the command reaches Docker exec as separate argv elements, and player
+    actions come from a closed set with the account name validated before interpolation. The same
+    validator gates the console route and the scheduler, so a schedule cannot send what the console
+    refuses.
+11. Diagnosis claims only what an owner returned. An unavailable module is recorded as a *silence* with a
+    reason — never as a healthy result, and never as a problem. A finding that cannot name an action or a
+    deep link says which external action is required instead.
+
 ## Invariant 2: what two-factor still guarantees
 
 Two-factor used to be unconditional, and the reasoning was sound for the install the product was first

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Logs } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
@@ -27,7 +27,6 @@ export function DeploymentRunLogs({ projectID, runID }: { projectID: number; run
       <PanelHeader
         icon={Logs}
         title="Application runtime logs"
-        description="Container output is separate from this deployment’s transcript. History covers five minutes before and after activation completed."
       />
       <PanelBody className="space-y-3">
         {result.error ? (
@@ -35,15 +34,12 @@ export function DeploymentRunLogs({ projectID, runID }: { projectID: number; run
         ) : !result.data ? (
           <LoadingRows />
         ) : result.data.status === "unavailable" ? (
-          <Notice title="Runtime logs unavailable" icon={Logs}>
-            {result.data.reason}
-          </Notice>
+          <EmptyNote>{result.data.reason}</EmptyNote>
         ) : result.data.sources.length === 0 ? (
-          <EmptyState
-            icon={Logs}
-            title="No retained runtime for this run"
-            description="Docker has no matching container for this run’s release. Review the deployment transcript or your external log archive."
-          />
+          <EmptyNote>
+            Docker has no matching container for this run’s release. Review the deployment
+            transcript or your external log archive.
+          </EmptyNote>
         ) : (
           <>
             {result.data.windowReason && (
@@ -55,7 +51,7 @@ export function DeploymentRunLogs({ projectID, runID }: { projectID: number; run
                   key={source.containerId}
                   className="flex min-w-0 flex-wrap items-center justify-between gap-3 py-3"
                 >
-                  <span className="min-w-0 break-all text-sm font-medium">
+                  <span className="min-w-0 text-sm font-medium break-all">
                     {source.name || source.containerId}
                   </span>
                   <div className="flex flex-wrap gap-2">

@@ -324,18 +324,18 @@ func (s *Service) Status(ctx context.Context, path string) (*Status, error) {
 }
 
 type Commit struct {
-	SHA      string    `json:"sha"`
-	Short    string    `json:"short"`
-	Subject  string    `json:"subject"`
-	Author   string    `json:"author"`
-	Email    string    `json:"email"`
-	At       time.Time `json:"at"`
-	Refs     string    `json:"refs,omitempty"`
-	Insert   int       `json:"insertions"`
-	Delete   int       `json:"deletions"`
-	Files    int       `json:"files"`
-	IsMerge  bool      `json:"isMerge"`
-	Parents  []string  `json:"parents,omitempty"`
+	SHA     string    `json:"sha"`
+	Short   string    `json:"short"`
+	Subject string    `json:"subject"`
+	Author  string    `json:"author"`
+	Email   string    `json:"email"`
+	At      time.Time `json:"at"`
+	Refs    string    `json:"refs,omitempty"`
+	Insert  int       `json:"insertions"`
+	Delete  int       `json:"deletions"`
+	Files   int       `json:"files"`
+	IsMerge bool      `json:"isMerge"`
+	Parents []string  `json:"parents,omitempty"`
 }
 
 // commitFields is the unit-separated pretty-format both Log and Graph read:

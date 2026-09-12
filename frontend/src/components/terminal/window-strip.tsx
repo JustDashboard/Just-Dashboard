@@ -113,9 +113,9 @@ function WindowTab({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       className={cn(
-        "flex h-8 min-w-28 max-w-48 shrink-0 items-center rounded-md border px-1.5 transition-colors",
+        "flex h-8 max-w-48 min-w-28 shrink-0 items-center rounded-md border px-1.5 transition-colors",
         active
-          ? "border-hairline bg-[var(--control)] text-foreground"
+          ? "border-hairline bg-accent text-foreground"
           : "border-transparent text-muted-foreground hover:bg-row-hover hover:text-foreground",
         inserting && "border-l-primary",
       )}
@@ -123,7 +123,7 @@ function WindowTab({
       <button
         aria-current={active ? "page" : undefined}
         title={window.name}
-        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-sm focus-ring"
         onClick={onSelect}
         onDoubleClick={onRename}
       >

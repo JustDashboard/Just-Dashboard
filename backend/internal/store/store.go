@@ -777,6 +777,42 @@ CREATE TABLE IF NOT EXISTS metric_samples (
   disk_percent   REAL NOT NULL DEFAULT 0,
   uptime_seconds INTEGER NOT NULL DEFAULT 0
 );
+
+-- What a compose stack looked like before somebody changed it.
+--
+-- Docker keeps no history. Bringing a compose project up replaces what was
+-- running, and the previous configuration is gone unless it happened to be
+-- committed -- so "what changed" and "put it back" are questions nothing on
+-- the server can answer. This is the smallest record that makes both
+-- answerable: the compose file as it was, the image digests that were
+-- actually running, and who did it.
+--
+-- Deliberately not one of the deploy_* tables above. Those describe this
+-- dashboard's own deployment pipeline, with projects, environments and
+-- releases; this describes a compose stack somebody brought up by hand, which
+-- most stacks on most servers are. Rows are append-only and pruned by count
+-- per project.
+CREATE TABLE IF NOT EXISTS docker_stack_deployments (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  project       TEXT NOT NULL,
+  working_dir   TEXT NOT NULL DEFAULT '',
+  config_hash   TEXT NOT NULL DEFAULT '',
+  config        TEXT NOT NULL DEFAULT '',
+  services      TEXT NOT NULL DEFAULT '[]',
+  image_digests TEXT NOT NULL DEFAULT '{}',
+  env_hash      TEXT NOT NULL DEFAULT '',
+  git_commit    TEXT NOT NULL DEFAULT '',
+  git_branch    TEXT NOT NULL DEFAULT '',
+  git_dirty     INTEGER NOT NULL DEFAULT 0,
+  actor         TEXT NOT NULL DEFAULT '',
+  source        TEXT NOT NULL DEFAULT '',
+  action        TEXT NOT NULL DEFAULT '',
+  result        TEXT NOT NULL DEFAULT '',
+  detail        TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stack_deployments_project
+  ON docker_stack_deployments(project, created_at DESC);
 `
 
 // Indexes that name added columns must run after applyAddedColumns. Putting
@@ -887,6 +923,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// sampled for the live view but never kept.
 	{"metric_container_samples", "block_read", "INTEGER NOT NULL DEFAULT 0"},
 	{"metric_container_samples", "block_write", "INTEGER NOT NULL DEFAULT 0"},
+	// The writable layer, sampled alongside everything else. A static figure
+	// cannot tell a container that has held 38 GB for six months from one that
+	// gained 12 GB today, and only the second is a disk about to fill.
+	{"metric_container_samples", "size_rw", "INTEGER NOT NULL DEFAULT 0"},
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},

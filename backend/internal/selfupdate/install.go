@@ -181,6 +181,7 @@ func (i *Installer) updaterArgs(run *Run, loc *Location) []string {
 		// The stack this is upgrading runs on the host network; so does this,
 		// so `git fetch` resolves names exactly as the host's own git would.
 		"--network", "host",
+		"--pid", "host",
 		// Never restarted. A half-run upgrade replayed at boot on a machine
 		// that has been rebooted mid-update is not a recovery, it is a second
 		// unattended upgrade nobody asked for.

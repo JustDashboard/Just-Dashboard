@@ -513,9 +513,11 @@ func (s *OrchestrationStore) Release(ctx context.Context, releaseID int64) (*Rel
 }
 
 type ReleaseComparison struct {
-	FromReleaseID int64           `json:"fromReleaseId"`
-	ToReleaseID   int64           `json:"toReleaseId"`
-	Changes       map[string]bool `json:"changes"`
+	FromReleaseID int64                   `json:"fromReleaseId"`
+	ToReleaseID   int64                   `json:"toReleaseId"`
+	Changes       map[string]bool         `json:"changes"`
+	Detail        ReleaseDetailComparison `json:"detail"`
+	Artifacts     []ReleaseArtifactStatus `json:"artifacts"`
 }
 
 func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID int64) (*ReleaseComparison, error) {

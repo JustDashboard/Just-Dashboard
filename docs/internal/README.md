@@ -42,14 +42,16 @@ strategy, and feature ownership behind those rules.
   C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
 - [`../plans/0.6.7-deployments/README.md`](../plans/0.6.7-deployments/README.md) — frozen contracts, ADRs,
   checkpoint reviews, remaining delivery work, and acceptance evidence.
+- [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
+  no lift, the colour roles, the component vocabulary, and which surface to reach for.
 - [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, layout primitives,
-  design system, accessibility, Monaco, and charts.
+  accessibility, Monaco, and charts.
 - [`frontend/features-terminal.md`](frontend/features-terminal.md) — Docker/security/package feature UX and
   the terminal workspace, renderer, shortcuts, clipboard, reconnect, and layout behavior.
 - [`frontend/feature-map.md`](frontend/feature-map.md) — every route area, its user-facing
   responsibility, component owner, and cross-feature handoffs.
 - [`frontend/data-theming.md`](frontend/data-theming.md) — API and WebSocket clients, polling, metrics state,
-  confirmations, self-update state, and light/dark theming.
+  confirmations, and self-update state.
 
 ## Contributor reference
 

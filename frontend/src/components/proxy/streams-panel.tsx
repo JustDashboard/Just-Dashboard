@@ -12,10 +12,10 @@ import { CodeEditor } from "@/components/code-editor"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { RowLink } from "@/components/page"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
+import { Status } from "@/components/status-dot"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -74,14 +74,14 @@ export function StreamsPanel() {
                 <code className="font-mono">nginx.conf</code> includes this directory, anything
                 configured here is written and ignored.
               </p>
-              <pre className="overflow-x-auto rounded-lg border border-hairline bg-surface-sunken p-2.5 font-mono text-[11px]">
+              <pre className="overflow-x-auto rounded-lg border border-hairline bg-surface-sunken p-2.5 font-mono text-hint">
                 {data.snippet}
               </pre>
               <p>
                 Add that at the top level of nginx.conf — beside the{" "}
-                <code className="font-mono">http</code> block, not inside it. The dashboard does
-                not edit nginx.conf itself: every other configuration on the host depends on that
-                file, and a bad write there is a server that will not start.
+                <code className="font-mono">http</code> block, not inside it. The dashboard does not
+                edit nginx.conf itself: every other configuration on the host depends on that file,
+                and a bad write there is a server that will not start.
               </p>
             </div>
           </Notice>
@@ -91,12 +91,20 @@ export function StreamsPanel() {
           <PanelHeader
             icon={Connection}
             title="Port forwarding"
-            description={`${data.streams.length} stream${data.streams.length === 1 ? "" : "s"} · for services that do not speak HTTP`}
             actions={
               admin && (
-                <Button size="sm" onClick={() => open(null)}>
+                // Kept enabled when nginx is not reading the directory yet:
+                // staging the forward before editing nginx.conf is a
+                // reasonable order to work in. What it must not do is look
+                // like the thing that makes the port live, so it says which
+                // of the two it is.
+                <Button
+                  size="sm"
+                  variant={data.included ? "default" : "outline"}
+                  onClick={() => open(null)}
+                >
                   <Plus className="size-4" />
-                  New stream
+                  {data.included ? "New stream" : "Prepare a stream"}
                 </Button>
               )
             }
@@ -125,37 +133,36 @@ export function StreamsPanel() {
                       <TableCell>
                         <RowLink onClick={() => open(stream)}>{stream.name}</RowLink>
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono">
                         {stream.listen}
                         <span className="ml-1 text-muted-foreground uppercase">
                           {stream.protocol}
                         </span>
                       </TableCell>
-                      <TableCell className="font-mono text-xs">{stream.upstream}</TableCell>
+                      <TableCell className="font-mono">{stream.upstream}</TableCell>
                       <TableCell>
                         {stream.allowFrom.length > 0 ? (
-                          <span className="font-mono text-[11px]">
-                            {stream.allowFrom.join(", ")}
-                          </span>
+                          <span className="font-mono text-hint">{stream.allowFrom.join(", ")}</span>
                         ) : (
-                          <Badge variant="destructive" className="font-normal">
-                            anyone
-                          </Badge>
+                          <Status verdict="critical" label="anyone" />
                         )}
                       </TableCell>
                       <TableCell>
                         {admin && (
                           <IconAction
+                            reveal
                             label="Delete stream"
-                            className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                            className="text-destructive"
                             onClick={() =>
                               confirm({
                                 title: `Delete ${stream.name}`,
                                 confirmLabel: "Delete and reload",
                                 description: (
                                   <p>
-                                    Port {stream.listen} stops being forwarded as soon as nginx
-                                    reloads. The previous file is kept as{" "}
+                                    {data.included
+                                      ? `Port ${stream.listen} stops being forwarded as soon as nginx reloads.`
+                                      : `nginx is not reading these yet, so port ${stream.listen} was never forwarded — this removes the file before it ever took effect.`}{" "}
+                                    The previous file is kept as{" "}
                                     <code className="font-mono">{stream.name}.conf.bak</code>.
                                   </p>
                                 ),
@@ -183,6 +190,8 @@ export function StreamsPanel() {
         key={editing?.name ?? "new"}
         open={formOpen}
         spec={editing}
+        included={data.included}
+        snippet={data.snippet}
         onOpenChange={setFormOpen}
         onSaved={refresh}
       />
@@ -203,11 +212,17 @@ const BLANK: StreamSpec = {
 function StreamForm({
   open,
   spec: initial,
+  included,
+  snippet,
   onOpenChange,
   onSaved,
 }: {
   open: boolean
   spec: StreamSpec | null
+  /** Whether nginx.conf actually includes the stream directory. Everything
+   *  this form says about taking effect is conditional on it. */
+  included: boolean
+  snippet: string
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
@@ -233,9 +248,13 @@ function StreamForm({
           setPreviewError("")
           return
         }
-        post<{ content: string }>("/proxy/streams/preview", { spec: body }, {
-          signal: controller.signal,
-        })
+        post<{ content: string }>(
+          "/proxy/streams/preview",
+          { spec: body },
+          {
+            signal: controller.signal,
+          },
+        )
           .then((r) => {
             setPreview(r.content)
             setPreviewError("")
@@ -267,9 +286,18 @@ function StreamForm({
         reload: true,
         overwrite: initial !== null,
       })
-      notify.success(`${spec.name} forwarding`, {
-        description: res.warnings[0],
-      })
+      // The success message is the last thing between an operator and the
+      // belief that the port is now forwarded. Without the include line it is
+      // not, and saying "forwarding" here is how they find out hours later.
+      if (included) {
+        notify.success(`${spec.name} forwarding`, { description: res.warnings[0] })
+      } else {
+        notify.warning(`${spec.name} saved, not yet live`, {
+          description:
+            res.warnings[0] ??
+            "nginx.conf still has no stream block including this directory, so nginx is not reading the file.",
+        })
+      }
       onSaved()
       onOpenChange(false)
     } catch (err) {
@@ -290,21 +318,38 @@ function StreamForm({
       bodyClassName="flex min-h-0 flex-1 flex-col gap-4 p-4"
       footer={
         <>
-          <span className="mr-auto text-[11px] text-muted-foreground">
-            Tested with nginx&rsquo;s own parser before it takes effect.
+          <span className="mr-auto text-hint text-muted-foreground">
+            {included
+              ? "Tested with nginx’s own parser before it takes effect."
+              : "Tested with nginx’s own parser, then written — but not read until nginx.conf includes this directory."}
           </span>
           <Button
             size="sm"
             onClick={save}
             disabled={busy || !spec.name || !spec.listen || !spec.upstream}
+            pending={busy}
           >
-            {busy && <Spinner className="size-4" />}
-            Save and reload
+            {included ? "Save and reload" : "Save for later"}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
+        {!included && (
+          <Notice tone="warning" icon={Warning} title="This will not forward anything yet">
+            <div className="space-y-2">
+              <p>
+                nginx.conf has no <code className="font-mono">stream</code> block including this
+                directory, so what you save here is written and ignored. Add the snippet below at
+                the top level of nginx.conf — beside the <code className="font-mono">http</code>{" "}
+                block, not inside it — and this stream starts forwarding on the next reload.
+              </p>
+              <pre className="overflow-x-auto rounded-lg border border-hairline bg-surface-sunken p-2.5 font-mono text-hint">
+                {snippet}
+              </pre>
+            </div>
+          </Notice>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="stream-name">Name</Label>
           <Input
@@ -340,10 +385,10 @@ function StreamForm({
               size="sm"
               className="w-full"
             >
-              <ToggleGroupItem value="tcp" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="tcp" className="flex-1 text-hint">
                 TCP
               </ToggleGroupItem>
-              <ToggleGroupItem value="udp" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="udp" className="flex-1 text-hint">
                 UDP
               </ToggleGroupItem>
             </ToggleGroup>
@@ -370,7 +415,7 @@ function StreamForm({
             placeholder="10.0.0.0/8, 203.0.113.9"
             className="font-mono text-xs"
           />
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-hint leading-relaxed text-muted-foreground">
             A stream has no authentication of any kind — anything that reaches this port is through
             to the backend. Leave this empty only when the service behind it authenticates for
             itself.
@@ -380,9 +425,9 @@ function StreamForm({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-0.5">
             <Label className="font-normal">Send the PROXY header</Label>
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Lets the backend see the real client address. It has to be expecting the header, or
-              it reads it as the first bytes of the connection and fails in a way that looks like a
+            <p className="text-hint leading-relaxed text-muted-foreground">
+              Lets the backend see the real client address. It has to be expecting the header, or it
+              reads it as the first bytes of the connection and fails in a way that looks like a
               protocol mismatch.
             </p>
           </div>

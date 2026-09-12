@@ -67,7 +67,7 @@ func TestStepTransitionTableExhaustivelyAllowsOnlyFrozenEdges(t *testing.T) {
 	}
 	allow(StepPending, StepBlocked, StepRunning, StepSkipped, StepCancelled, StepUnavailable)
 	allow(StepBlocked, StepPending, StepRunning, StepFailed, StepCancelled, StepUnavailable)
-	allow(StepRunning, StepPassed, StepWarning, StepFailed, StepCancelled, StepUnavailable)
+	allow(StepRunning, StepPassed, StepWarning, StepFailed, StepSkipped, StepCancelled, StepUnavailable)
 	allow(StepFailed, StepPending)
 
 	for _, from := range allStepStates {
@@ -81,8 +81,8 @@ func TestStepTransitionTableExhaustivelyAllowsOnlyFrozenEdges(t *testing.T) {
 }
 
 func TestDefaultReleasePathHasEveryFrozenStepOnce(t *testing.T) {
-	if len(DefaultStepKeys) != 15 {
-		t.Fatalf("default release path has %d steps, want 15", len(DefaultStepKeys))
+	if len(DefaultStepKeys) != 16 {
+		t.Fatalf("default release path has %d steps, want 16", len(DefaultStepKeys))
 	}
 	seen := map[StepKey]bool{}
 	for _, step := range DefaultStepKeys {

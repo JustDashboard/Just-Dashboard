@@ -8,8 +8,9 @@ import { bytes } from "@/lib/format"
 import type { FileContent } from "@/lib/types"
 import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -136,18 +137,10 @@ function FilePreview({
         onClose={onClose}
         trailing={
           <>
-            {dirty && (
-              <Badge variant="warning" className="font-normal">
-                unsaved
-              </Badge>
-            )}
+            {dirty && <Tag tone="warning">unsaved</Tag>}
             {file && !file.binary && canWrite && (
-              <Button size="xs" onClick={save} disabled={!dirty || saving}>
-                {saving ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <FloppyDisk className="size-3.5" />
-                )}
+              <Button size="xs" onClick={save} disabled={!dirty || saving} pending={saving}>
+                <FloppyDisk className="size-3.5" />
                 Save
               </Button>
             )}
@@ -190,14 +183,14 @@ function PreviewHeader({
   onClose: () => void
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-header px-3 py-2">
+    <PaneHeader className="gap-2 px-3">
       <Icon className="size-3.5 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
-        <p className="truncate font-mono text-[13px]" title={title}>
+        <p className="truncate font-mono text-body" title={title}>
           {title}
         </p>
         {subtitle && (
-          <p className="truncate text-[11px] text-muted-foreground" title={subtitle}>
+          <p className="truncate text-hint text-muted-foreground" title={subtitle}>
             {subtitle}
           </p>
         )}
@@ -217,6 +210,6 @@ function PreviewHeader({
         </TooltipTrigger>
         <TooltipContent>Close the preview</TooltipContent>
       </Tooltip>
-    </div>
+    </PaneHeader>
   )
 }

@@ -391,6 +391,121 @@ type DiskUsage struct {
 	ContainersLine DiskUsageLine `json:"containers"`
 	VolumesLine    DiskUsageLine `json:"volumes"`
 	BuildCacheLine DiskUsageLine `json:"buildCache"`
+
+	// SharedLayers is the difference between adding up every image's own size
+	// and what the images actually occupy.
+	//
+	// It is the reason two honest figures on one page can look like a
+	// contradiction. `Images` above is the sum of what each image reports, and
+	// an image that shares three quarters of its layers with another reports
+	// all of them; `LayersSize` is what the disk holds, counting each layer
+	// once. Naming the gap is what turns "these two numbers disagree" into
+	// "these two numbers measure different things, and here is by how much".
+	SharedLayers int64 `json:"sharedLayers"`
+
+	// Writable is every container's own layer, largest first, so "what is
+	// filling the disk" is answerable without a second walk. Reported here
+	// rather than on the container listing because the Engine will not put
+	// SizeRw in a listing unless it is asked to walk every layer, which is far
+	// too expensive for a table that polls.
+	Writable []ContainerDisk `json:"writable"`
+
+	// Definitions say what each figure counts, so a tooltip is data rather
+	// than prose repeated in four components — and so nothing on screen can
+	// quietly redefine a word.
+	Definitions []DiskDefinition `json:"definitions"`
+}
+
+// ContainerDisk is one container's writable layer.
+type ContainerDisk struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+	Stack string `json:"stack,omitempty"`
+	// SizeRw is what has been written into the container's own filesystem
+	// since it was created from its image. Volumes and bind mounts are not in
+	// it: those are storage, this is the part that disappears on recreate.
+	SizeRw int64 `json:"sizeRw"`
+	// SizeRootFs is the writable layer plus the image underneath it — Docker's
+	// "virtual size". Carried because `docker ps -s` shows it and an operator
+	// comparing the two screens should find the same numbers, and marked as
+	// what it is so nobody adds it to an image total and counts it twice.
+	SizeRootFs int64 `json:"sizeRootFs"`
+}
+
+// DiskDefinition is what one figure on the disk page actually measures.
+type DiskDefinition struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Measures string `json:"measures"`
+	Excludes string `json:"excludes,omitempty"`
+	// Source is which Docker API the number came from. Two figures from
+	// different endpoints are not always comparable, and saying so is better
+	// than letting somebody subtract one from the other.
+	Source string `json:"source"`
+}
+
+// diskDefinitions is the single place these words are defined. Changing a
+// label here changes it everywhere it is shown.
+func diskDefinitions() []DiskDefinition {
+	return []DiskDefinition{
+		{
+			Key:      "images",
+			Label:    "Images",
+			Measures: "What the image layers occupy on disk, counting a layer shared between images once.",
+			Excludes: "Container writable layers, volumes and build cache.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "imagesApparent",
+			Label:    "Images, added up",
+			Measures: "Every image's own reported size, summed. An image shares layers with others and reports all of them, so this is always larger than what the disk holds.",
+			Excludes: "Nothing — that is the problem with it. Use it to compare two images, never to work out free space.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "writableLayer",
+			Label:    "Writable layer",
+			Measures: "Data written into a container's own filesystem since it was created.",
+			Excludes: "Named volumes, bind mounts, and the image the container started from.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "virtualSize",
+			Label:    "Virtual size",
+			Measures: "A container's writable layer plus the image beneath it.",
+			Excludes: "Named volumes and bind mounts.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "volumes",
+			Label:    "Volumes",
+			Measures: "What Docker-managed volumes hold on disk.",
+			Excludes: "Bind mounts, which are ordinary directories on this server and are not Docker's to measure.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "buildCache",
+			Label:    "Build cache",
+			Measures: "Intermediate layers BuildKit keeps to make the next build faster, counting a record shared with another once.",
+			Excludes: "Anything a running container needs.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "reclaimable",
+			Label:    "Reclaimable",
+			Measures: "What a prune would actually give back. An unused image whose layers are all shared with a running one frees nothing when it goes.",
+			Excludes: "Volumes, always. They are the one Docker object that is the data.",
+			Source:   "docker system df",
+		},
+		{
+			Key:      "logs",
+			Label:    "Container logs",
+			Measures: "The json-file log each container writes, measured on the host filesystem.",
+			Excludes: "Everything else. This is not part of the writable layer and is not in any line above.",
+			Source:   "the daemon's data root, read directly",
+		},
+	}
 }
 
 // Reclaimable is everything a prune could give back without touching a volume.
@@ -433,6 +548,7 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 	// the images line's business, and adding it here would report the same
 	// bytes twice.
 	out.ContainersLine.Total = len(du.Containers)
+	out.Writable = make([]ContainerDisk, 0, len(du.Containers))
 	for _, ct := range du.Containers {
 		out.Containers += ct.SizeRw
 		out.ContainersLine.Size += ct.SizeRw
@@ -441,7 +557,17 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 		} else {
 			out.ContainersLine.Reclaimable += ct.SizeRw
 		}
+		name := ""
+		if len(ct.Names) > 0 {
+			name = strings.TrimPrefix(ct.Names[0], "/")
+		}
+		out.Writable = append(out.Writable, ContainerDisk{
+			ID: ct.ID, Name: name, State: ct.State,
+			Stack:  ct.Labels[labelProject],
+			SizeRw: ct.SizeRw, SizeRootFs: ct.SizeRootFs,
+		})
 	}
+	sort.Slice(out.Writable, func(i, j int) bool { return out.Writable[i].SizeRw > out.Writable[j].SizeRw })
 
 	out.VolumesLine.Total = len(du.Volumes)
 	for _, v := range du.Volumes {
@@ -476,6 +602,14 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 	if out.BuildCacheLine.Reclaimable < 0 {
 		out.BuildCacheLine.Reclaimable = 0
 	}
+
+	// The gap between "every image's size, added up" and "what the images
+	// occupy". Reported rather than hidden, because both figures are true and
+	// a page showing them without this reads as arithmetic that does not work.
+	if out.SharedLayers = out.Images - out.LayersSize; out.SharedLayers < 0 {
+		out.SharedLayers = 0
+	}
+	out.Definitions = diskDefinitions()
 	return out, nil
 }
 
@@ -558,18 +692,13 @@ func (c *Client) pruneNetworks(ctx context.Context) (PruneReport, error) {
 
 // ImageRef normalises a user-supplied reference so "nginx" pulls nginx:latest
 // rather than failing, matching CLI behaviour.
-func ImageRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ref
-	}
-	lastColon := strings.LastIndex(ref, ":")
-	lastSlash := strings.LastIndex(ref, "/")
-	if lastColon <= lastSlash {
-		return ref + ":latest"
-	}
-	return ref
-}
+//
+// The rules live in imageref.go, where the difference between a name, a digest
+// and a bare image id is written down once. This used to append `:latest` to
+// anything without a colon after the last slash, which meant an image id
+// arrived at the daemon as `sha256:ab…` — read as the repository `sha256` and
+// the tag `ab…` — and inspecting an image by id could not work.
+func ImageRef(ref string) string { return NormalizeImageRef(ref) }
 
 // orEmpty turns a nil slice into an empty one, so it marshals as `[]` rather
 // than `null`. Every list-shaped field on the wire goes through this or is

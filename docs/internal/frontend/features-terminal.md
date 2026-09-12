@@ -9,26 +9,53 @@
   rather than the mechanism. The rule it enforces is that **explanation is quiet**: a form that shouts
   every caveat is as unusable as one that explains nothing.
 - `create-container.tsx`'s three entry points matter more than the form. **Paste a command** covers the
-  common case (`lib/docker-run.ts` parses leniently and returns an honest list of what it could not
-  represent). **Start from something common** is `lib/docker-templates.ts` — a dozen images almost every
-  server runs, every one bound to 127.0.0.1; a set of starting points, not an app store, which is what
-  goes stale and becomes the maintenance burden in Yacht and CasaOS. **From scratch** is for people who
-  know what they want. The Command tab shows the server-rendered `docker run` and compose, live.
+  common case: `lib/docker-run.ts` parses leniently and returns three things — the spec, warnings about
+  what it could not read, and `unsupported`, the flags it *understood* and the form has nowhere to put.
+  The last is kept separate on purpose. `--gpus all` dropped without a word produces a container that
+  starts and then has no GPU, and the operator finds out from the application failing; the panel says so
+  and keeps the original command beside the form. **Start from something common** is
+  `lib/docker-templates.ts` — images almost every server runs across five categories, every one bound to
+  127.0.0.1; a set of starting points, not an app store, which is what goes stale and becomes the
+  maintenance burden in Yacht and CasaOS. **From scratch** is for people who know what they want. The
+  Command tab shows the server-rendered `docker run` and compose, live. Port bindings are offered as
+  *who should reach this* rather than as an address, populated from the machine's real interfaces so the
+  LAN option names one rather than gesturing at the idea.
 - `run-console.tsx` deliberately **does not** let `useSocket` reconnect: reconnecting re-issues the GET,
   and re-issuing the GET runs the command again — a redeploy fired twice because a VPN blinked is not a
   re-render. A dropped socket ends the run and says so.
-- `diagnosis-panel.tsx` renders findings collapsed by default (a list, not a wall of argument) with the
-  remedy as a button where the server named one; `ContainerFindings` filters the page's single pass.
+- `attention.tsx` renders the half of the diagnosis that is not runtime — collapsed by default (a list,
+  not a wall of argument), filterable by severity, with the remedy as a button where the server named
+  one; `ContainerFindings` filters the page's single pass. `RuntimeHealthPanel` is the other half and
+  counts what is *fine* as well as what is not, because a list of problems can never say "eight healthy,
+  four with no health check at all" — and that last number is what stops "all healthy" meaning "nothing
+  is being watched".
+- `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
+  outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
+  which filters were applied and tabbing looked like the selection moving.
+- `exposure.tsx` draws a published port so the two cases that matter look different, and `RouteRow`
+  shows the full trace — binding, reverse proxy, firewall — with the reasoning behind each verdict and
+  an explicit *inferred* where one was worked out rather than read.
+- `container-cells.tsx` holds the three cells that were saying something other than what they meant:
+  memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
+  as 100%), and a Status column carrying the worst security finding underneath the runtime state.
+- `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
+  removable object costs, and what a compose deploy is expected to change — including the sentence about
+  volumes, stated whether or not any are affected.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
   place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
   tagged by service, links to Files, git and a shell in the stack's directory. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
-  URL), writable-layer view, editable limits, raw inspect, Update/Duplicate/Rename. `build-dialog.tsx` is
-  where the git panel and Docker stop being two products: a repository we already pull is a build context.
+  URL), the writable-layer investigator, the failure diagnosis, editable limits, raw inspect, and
+  Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
+  container, because the next deploy silently undoes them days later. `build-dialog.tsx` is where the git
+  panel and Docker stop being two products: a repository we already pull is a build context.
 
-Three deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`. The first two are
-read once as an initial value rather than kept in sync — the URL is where the reader arrived, not where
-they are now — and the terminal one opens a session exactly once per mount, because a shell is a process.
+Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
+All but the terminal one are read once as an initial value rather than kept in sync — the URL is where
+the reader arrived, not where they are now — and the terminal one opens a session exactly once per
+mount, because a shell is a process. The audit link is how the Docker event feed hands off a correlated
+event; landing on an unfiltered list of everything the dashboard has ever done is not the entry it
+promised.
 
 Docker's `/docker/containers?container=` and `/docker/stacks?stack=` select the owning detail panel.
 `useQuerySelection` keeps panel selection in browser history so reload and back/forward restore it;
@@ -47,6 +74,23 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row. `ConnectionsPanel` and `OffendersPanel` both offer a one-click firewall deny — the join that
 makes the pages one product, since the address the ban log keeps naming deserves a rule outliving the ban.
+
+The security section is eight pages of the same three shapes, and the rules it follows are the ones the
+[design system](shell-design.md#the-design-system) already states:
+
+- **A finding is content, not a floating line.** `AreaFindings` renders inside a `Panel` with the rest of
+  the page rather than dropping a bare accordion onto the page ground, where the most urgent sentence on
+  screen was also the least contained thing on it.
+- **A standing fact is not a banner.** Text that never changes — the firewall's lockout guard, "a probe
+  answers outward, not inward" — is stated *once*, in the footer of the thing it qualifies or at the top
+  of the page it applies to, never repeated per card. Only a `Notice` that explains why the control under
+  it will refuse (sshd with no key on the host) stays above the control.
+- **Repeated things are rows, not cards.** `JailsPanel` is one table of jails with the addresses each is
+  holding behind a `SidePanel`, and `ToolsPanel` filters twenty one-line probe forms by group and by
+  name. Both were grids of same-sized cards whose content was nothing like the same size.
+- **The slack in a table belongs to the widest column.** `w-full` goes on the comment, the process list,
+  the watched paths — never on the short first column, which is what put eight hundred pixels of nothing
+  between an address and the number beside it.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
@@ -85,7 +129,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   visual affordance, so the layout draws no extra divider. Arrow keys and double-click reset remain the
   non-drag alternatives.
 - `lib/terminal-settings.ts` keeps scrollback and behaviour in localStorage — on the screen, not the
-  account, for the reason the theme is. Font metrics are deliberately fixed: user-selectable line height,
+  account, because it belongs to the machine you are sitting at. Font metrics are deliberately fixed: user-selectable line height,
   spacing and fonts made the emulator grid cease to be a stable terminal grid.
 - `lib/terminal-keymap.ts` is every shortcut, all rebindable. A chord must get past the browser, the page
   and the shell, and no default suits everybody. Ctrl+Alt is the default family (neither browser nor shell

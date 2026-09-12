@@ -84,6 +84,23 @@ func TestLastMeaningfulLine(t *testing.T) {
 	}
 }
 
+func TestCertbotErrorPreservesCauseBeforeHelpFooter(t *testing.T) {
+	const footer = "\nAsk for help or search for solutions at https://community.letsencrypt.org. See the logfile /var/log/letsencrypt/letsencrypt.log or re-run Certbot with -v for more details."
+	for _, reason := range []string{
+		"Could not bind TCP port 80 because it is already in use by another process.",
+		"Error creating new order :: too many certificates already issued",
+	} {
+		if got := lastMeaningfulLine(reason + footer); got != reason {
+			t.Fatalf("got %q, want %q", got, reason)
+		}
+	}
+	const detail = "100.110.34.31: Fetching http://app.sslip.io/.well-known/acme-challenge/token: Timeout during connect"
+	out := "Certbot failed to authenticate some domains\n  Domain: app.sslip.io\n  Type: connection\n  Detail: " + detail + "\n\nSome challenges have failed." + footer
+	if got := lastMeaningfulLine(out); got != detail {
+		t.Fatalf("lost ACME validation cause: %q", got)
+	}
+}
+
 func TestIssueValidation(t *testing.T) {
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
 	cases := []struct {
@@ -169,5 +186,54 @@ func TestRenewArgsShape(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(all, " "), "--cert-name") {
 		t.Errorf("renew-all should not name a lineage: %q", all)
+	}
+}
+
+// The image ships certbot without the nginx plugin, while the host it runs on
+// has an nginx binary. Reading the plugin list is what keeps the deployment
+// from ordering over a challenge this certbot cannot answer.
+func TestCertbotAuthenticatorsReadsOnlyPluginsThatCanAnswerAChallenge(t *testing.T) {
+	const containerOutput = `
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+* standalone
+Description: Runs an HTTP server locally
+Interfaces: Authenticator, Plugin
+Entry point: EntryPoint(name='standalone')
+
+* webroot
+Description: Saves the necessary validation files
+Interfaces: Authenticator, Plugin
+Entry point: EntryPoint(name='webroot')
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+`
+	got := certbotAuthenticators(containerOutput)
+	if got["nginx"] {
+		t.Fatal("nginx reported as an authenticator without its plugin")
+	}
+	for _, want := range []string{"standalone", "webroot"} {
+		if !got[want] {
+			t.Fatalf("%s authenticator was not detected in %#v", want, got)
+		}
+	}
+
+	const hostOutput = `
+* nginx
+Description: Nginx Web Server plugin
+Interfaces: Authenticator, Installer, Plugin
+Entry point: EntryPoint(name='nginx')
+
+* dns-route53
+Description: Obtain certificates using a DNS TXT record
+Interfaces: Plugin
+Entry point: EntryPoint(name='dns-route53')
+`
+	got = certbotAuthenticators(hostOutput)
+	if !got["nginx"] {
+		t.Fatal("nginx plugin was not detected as an authenticator")
+	}
+	// Listed but not an Authenticator: it cannot answer the HTTP-01 challenge
+	// a deployment orders over, and must not be selected as though it could.
+	if got["dns-route53"] {
+		t.Fatal("a non-authenticator plugin was offered as a challenge method")
 	}
 }

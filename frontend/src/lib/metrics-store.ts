@@ -211,7 +211,9 @@ function toPoint(snapshot: Snapshot): MetricsPoint {
     dread,
     dwrite,
     cpuUser: snapshot.cpu.modes?.user ?? 0,
-    cpuSystem: (snapshot.cpu.modes?.system ?? 0) + (snapshot.cpu.modes?.irq ?? 0) +
+    cpuSystem:
+      (snapshot.cpu.modes?.system ?? 0) +
+      (snapshot.cpu.modes?.irq ?? 0) +
       (snapshot.cpu.modes?.softirq ?? 0),
     cpuIowait: snapshot.cpu.modes?.iowait ?? 0,
     cpuSteal: snapshot.cpu.modes?.steal ?? 0,

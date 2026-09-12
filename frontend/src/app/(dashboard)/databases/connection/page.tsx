@@ -13,10 +13,10 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, DetailList, Detail } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/state"
 import { ConnectionDialog } from "@/components/database/connection-dialog"
 import { useDatabase } from "@/components/database/db-context"
+import { } from "@/components/tag"
 
 export default function ConnectionPage() {
   const { can } = useAuth()
@@ -48,20 +48,6 @@ export default function ConnectionPage() {
       <PageHeader
         eyebrow="Databases"
         title={conn.name}
-        description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Badge variant="outline" className="font-normal">
-              {label}
-            </Badge>
-            <span>{conn.host ? `${conn.host}:${conn.port}` : "on this server"}</span>
-            {conn.database && (
-              <>
-                <span className="text-muted-foreground/40">·</span>
-                <span className="font-mono text-xs">{conn.database}</span>
-              </>
-            )}
-          </span>
-        }
         actions={
           <>
             {can("service.control") && <BackupButton conn={conn} />}
@@ -112,8 +98,8 @@ export default function ConnectionPage() {
                           </p>
                           <p>
                             Nothing here can bring it back — take a dump first if you might want it.
-                            If this database was started from this page, its container keeps running;
-                            remove that from Docker.
+                            If this database was started from this page, its container keeps
+                            running; remove that from Docker.
                           </p>
                         </div>
                       ),
@@ -158,12 +144,16 @@ export default function ConnectionPage() {
           <PanelHeader
             icon={Layout}
             title={
-              objectWord === "collection" ? "Collections" : objectWord === "keyspace" ? "Keys" : "Tables"
+              objectWord === "collection"
+                ? "Collections"
+                : objectWord === "keyspace"
+                  ? "Keys"
+                  : "Tables"
             }
             actions={
               <Link
                 href={hrefFor("/databases")}
-                className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
               >
                 Browse <ArrowRight className="size-3" />
               </Link>
@@ -236,8 +226,8 @@ function BackupButton({ conn }: { conn: DbConnection }) {
     }
   }
   return (
-    <Button size="sm" variant="outline" onClick={run} disabled={busy}>
-      {busy ? <Spinner /> : <CloudDownload className="size-4" />}
+    <Button size="sm" variant="outline" onClick={run} pending={busy}>
+      <CloudDownload className="size-4" />
       Dump &amp; download
     </Button>
   )

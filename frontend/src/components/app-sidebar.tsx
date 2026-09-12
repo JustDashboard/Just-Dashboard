@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation"
 import {
   Archive,
   ArrowUpDown,
-  BlendMode,
   Box,
   Bug,
   ChevronRight,
@@ -202,10 +201,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
 ]
 
 /** Entries that live in the footer menu rather than a nav group. */
-export const PERSONAL_NAV: NavItem[] = [
-  { title: "Account", href: "/account", icon: ShieldCheck },
-  { title: "Appearance", href: "/appearance", icon: BlendMode },
-]
+export const PERSONAL_NAV: NavItem[] = [{ title: "Account", href: "/account", icon: ShieldCheck }]
 
 /** Whether a nav entry owns the given path. */
 export function navMatches(href: string, pathname: string) {
@@ -256,7 +252,7 @@ export function AppSidebar() {
             width saying nothing the name did not. */}
         <Link
           href="/"
-          className="flex h-8 min-w-0 items-center rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 group-data-[collapsible=icon]:justify-center"
+          className="flex h-8 min-w-0 items-center rounded-lg focus-ring group-data-[collapsible=icon]:justify-center"
         >
           <Logo className="group-data-[collapsible=icon]:hidden" />
           <LogoMark className="hidden group-data-[collapsible=icon]:block" />
@@ -268,11 +264,11 @@ export function AppSidebar() {
         <button
           type="button"
           onClick={palette.open}
-          className="raised flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-2 text-left text-[13px] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0"
+          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <MagnifyingGlass className="size-3.5 shrink-0" />
           <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search</span>
-          <kbd className="pointer-events-none rounded border border-sidebar-border bg-sidebar px-1 font-mono text-[10px] group-data-[collapsible=icon]:hidden">
+          <kbd className="pointer-events-none rounded-sm border border-sidebar-border bg-sidebar px-1 font-mono text-micro group-data-[collapsible=icon]:hidden">
             ⌘K
           </kbd>
         </button>
@@ -296,7 +292,7 @@ export function AppSidebar() {
                           asChild
                           isActive={isActive(item.href)}
                           tooltip={item.title}
-                          className="h-8 text-[13px]"
+                          className="h-8 text-body"
                         >
                           <Link href={item.href}>
                             <item.icon className="size-4" />
@@ -362,7 +358,7 @@ function NavParent({ item, pathname }: { item: NavItem; pathname: string }) {
           asChild
           isActive={inSection}
           tooltip={item.title}
-          className="h-8 text-[13px]"
+          className="h-8 text-body"
         >
           <Link href={item.href}>
             <item.icon className="size-4" />
@@ -393,7 +389,7 @@ function NavParent({ item, pathname }: { item: NavItem; pathname: string }) {
           <SidebarMenuButton
             aria-label={`${open ? "Collapse" : "Expand"} ${item.title}`}
             className={cn(
-              "h-8 text-[13px] [&>svg:last-child]:transition-transform [&>svg:last-child]:duration-200",
+              "h-8 text-body [&>svg:last-child]:transition-transform [&>svg:last-child]:duration-200",
               "data-[state=open]:[&>svg:last-child]:rotate-90",
               // Somewhere in this section: quiet accent tint and a
               // primary-coloured icon, so the row reads as "you are in here"
@@ -450,16 +446,16 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="raised flex w-full min-w-0 items-center gap-2.5 rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-1.5 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 data-[state=open]:bg-sidebar-accent group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:p-0"
+          className="flex w-full min-w-0 items-center gap-2.5 rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-1.5 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
         >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/15 text-[11px] font-semibold text-primary">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-primary text-hint font-semibold text-primary">
             {initials}
           </span>
           <span className="grid min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-[13px] leading-tight font-medium">
+            <span className="truncate text-body leading-tight font-medium">
               {user?.username ?? "not signed in"}
             </span>
-            <span className="truncate text-[11px] leading-tight text-muted-foreground capitalize">
+            <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
               {user?.role ?? "—"}
             </span>
           </span>
@@ -473,8 +469,8 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
         sideOffset={8}
       >
         <DropdownMenuLabel className="flex flex-col gap-0.5">
-          <span className="text-[13px]">{user?.username}</span>
-          <span className="text-[11px] font-normal text-muted-foreground">
+          <span className="text-body">{user?.username}</span>
+          <span className="text-hint font-normal text-muted-foreground">
             {user?.totpEnabled ? "Two-factor enabled" : "Two-factor not enrolled"}
           </span>
         </DropdownMenuLabel>

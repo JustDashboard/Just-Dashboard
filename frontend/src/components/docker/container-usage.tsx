@@ -5,26 +5,24 @@ import { get, ApiError } from "@/lib/api"
 import { bytes, percent, rate } from "@/lib/format"
 import {
   containerRows,
-  coverageNote,
   HISTORY_RANGES,
   memoryLimit,
   rangeSpec,
-  retentionNote,
   windowQuery,
   windowRefreshMs,
   type ContainerRow,
 } from "@/lib/metrics-range"
-import type { ContainerHistory } from "@/lib/types"
+import type { AnomalyReport, ContainerHistory } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMetricEvents } from "@/hooks/use-metrics-history"
 import { useMetricsWindow } from "@/hooks/use-metrics-window"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Metric, MetricStrip } from "@/components/page"
-import { ErrorState } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
 import type { Series } from "@/components/metrics/metric-chart"
-import { ChartActivity, Cpu, GridSquare, Servers } from "@/components/icons"
+import { ChartActivity, Cpu, GridSquare, Servers, Warning } from "@/components/icons"
 
 const cpuSeries: Series[] = [
   { key: "cpu", label: "CPU", color: "var(--chart-1)", kind: "area", peakKey: "cpuPeak" },
@@ -57,13 +55,56 @@ const blockSeries: Series[] = [
  * stats across a page load, so it would draw an empty chart that fills in over
  * the next few minutes — the exact behaviour this panel exists to replace.
  */
+/**
+ * What this container's recorded history says has changed.
+ *
+ * Every claim here is a pattern read out of a series rather than a state
+ * Docker reported, so every row says it was inferred and none of them fires on
+ * a spike — a core pinned for one sample is a busy moment, and a panel that
+ * calls that an anomaly is a panel people learn to close.
+ */
+function ContainerAnomalies({ containerId }: { containerId: string }) {
+  const { data } = usePoll<AnomalyReport>(
+    (signal) =>
+      get<AnomalyReport>(
+        `/docker/containers/${encodeURIComponent(containerId)}/anomalies`,
+        undefined,
+        signal,
+      ),
+    0,
+    [containerId],
+  )
+  if (!data || data.anomalies.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {data.anomalies.map((anomaly) => (
+        <Notice
+          key={anomaly.id}
+          title={anomaly.title}
+          icon={Warning}
+          tone={anomaly.severity === "critical" ? "danger" : "warning"}
+        >
+          <p>{anomaly.detail}</p>
+          {anomaly.advice && <p className="mt-1">{anomaly.advice}</p>}
+          <p className="mt-1 text-hint text-muted-foreground">
+            Read from {data.samples} samples over the last {anomaly.window}, and inferred from their
+            shape rather than reported by Docker.
+          </p>
+        </Notice>
+      ))}
+    </div>
+  )
+}
+
 export function ContainerUsage({ containerId, name }: { containerId: string; name: string }) {
   const controls = useMetricsWindow()
   const win = controls.window
   // The host's shared range preference starts on "1h", but a container has no
   // live series to fall back on, so a "live" preference has to resolve to the
   // narrowest recorded window rather than to nothing at all.
-  const effective = win.key === "live" && win.from === undefined ? { ...win, key: "1h" as const } : win
+  const effective =
+    win.key === "live" && win.from === undefined ? { ...win, key: "1h" as const } : win
   const params = windowQuery(effective, rangeSpec(effective.key).points)
   const signature = JSON.stringify(params)
 
@@ -116,10 +157,18 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
 
   return (
     <div className="space-y-3">
+      {/*
+        Rate of change, above the charts that show it.
+        "Writable layer: 38.7 GB" is a number nobody can act on; "+6.4 GB
+        today" is. The same is true of memory — a container at 400 MB is a
+        fact, a container whose floor has doubled in a day is a leak — and the
+        history to say either has been recorded all along with nothing reading
+        it for this purpose.
+      */}
+      <ContainerAnomalies containerId={containerId} />
       <ChartPanel
         icon={Cpu}
         title="Processor"
-        description={caption(data, rangeSpec(effective.key).label)}
         actions={<RangePicker controls={controls} ranges={HISTORY_RANGES} />}
         rows={rows}
         series={cpuSeries}
@@ -143,9 +192,6 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
       <ChartPanel
         icon={GridSquare}
         title="Memory"
-        description={
-          limit > 0 ? `Against a ${bytes(limit)} limit` : "No limit set — bounded only by the host"
-        }
         rows={rows}
         series={memSeries}
         format={(v) => bytes(v)}
@@ -175,11 +221,6 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
         <ChartPanel
           icon={ChartActivity}
           title="Network"
-          description={
-            hasNetwork
-              ? "Bytes per second in and out of this container"
-              : "Not measured for this container"
-          }
           // An all-zero series is passed as no series at all, so the panel
           // renders the explanation rather than a flat line at the bottom of
           // an axis labelled in single bytes.
@@ -200,7 +241,6 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
         <ChartPanel
           icon={Servers}
           title="Block I/O"
-          description="Reads and writes against the host's devices"
           rows={rows}
           series={blockSeries}
           format={(v) => rate(v)}
@@ -225,19 +265,4 @@ function summarise(rows: ContainerRow[]): { cpu: number | null; mem: number | nu
     if (row.memPeak !== null && (mem === null || row.memPeak > mem)) mem = row.memPeak
   }
   return { cpu, mem }
-}
-
-function caption(history: ContainerHistory | undefined, label: string): string {
-  const parts = [history ? bucketLabel(history.stepSeconds) : `last ${label}`]
-  const coverage = coverageNote(history)
-  if (coverage) parts.push(coverage)
-  const retention = retentionNote(history, rangeSpec("7d"))
-  if (retention) parts.push(retention)
-  return parts.join(" · ")
-}
-
-function bucketLabel(seconds: number): string {
-  if (seconds < 60) return `${seconds}s averages and peaks`
-  if (seconds < 3600) return `${Math.round(seconds / 60)} minute averages and peaks`
-  return `${Math.round(seconds / 3600)} hour averages and peaks`
 }

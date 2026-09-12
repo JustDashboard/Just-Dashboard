@@ -52,6 +52,34 @@ type Event struct {
 	// handful of actions that mean something broke, "notice" for the ones
 	// worth noticing, "info" for the rest.
 	Level string `json:"level"`
+
+	// Source is who did this, as far as the event itself can say: "compose"
+	// when the object carries compose's project labels, "daemon" for something
+	// Docker did on its own — a restart policy firing, an OOM kill — and
+	// "docker" otherwise.
+	//
+	// "The dashboard did this" cannot be read from the event: Docker records
+	// what happened, never who asked. That answer comes from correlating
+	// against the audit log, which the API layer does, and which is why
+	// Trigger below is separate from this.
+	Source string `json:"source"`
+
+	// Trigger is the audit entry this event was caused by, when one can be
+	// matched. The distinction it makes is the one an operator actually wants
+	// on an unexplained restart: something in this dashboard did it, or
+	// something outside it did.
+	Trigger *EventTrigger `json:"trigger,omitempty"`
+}
+
+// EventTrigger links a Docker event to the dashboard action that caused it.
+type EventTrigger struct {
+	AuditID int64  `json:"auditId"`
+	Action  string `json:"action"`
+	Actor   string `json:"actor"`
+	// Confidence is always "likely": the match is a time window and a target
+	// name, not a causal record, and two things happening within a few seconds
+	// of each other is evidence rather than proof.
+	Confidence string `json:"confidence"`
 }
 
 // eventBufferSize is roughly an hour of a busy host, and a week of a quiet
@@ -300,8 +328,30 @@ func convertEvent(msg events.Message) Event {
 		// image is its tag and for a volume is its name.
 		ev.Name = ShortID(msg.Actor.ID)
 	}
+	ev.Source = eventSource(ev)
 	ev.Level, ev.Message = describeEvent(ev)
 	return ev
+}
+
+// eventSource says what kind of thing produced an event, from the event alone.
+//
+// Deliberately does not try to say "the dashboard did this": Docker records
+// what happened and never who asked, so any claim about a human actor has to
+// come from the audit log. What can be read here is whether compose owns the
+// object, and whether the daemon acted on its own.
+func eventSource(ev Event) string {
+	switch {
+	case ev.Type == "daemon":
+		return "daemon"
+	case ev.Action == "oom" || ev.Action == "die" || strings.HasPrefix(ev.Action, "health_status"):
+		// Nobody asks for these. They are the daemon and the kernel reporting
+		// something that happened to a container rather than to it.
+		return "daemon"
+	case ev.Stack != "":
+		return "compose"
+	default:
+		return "docker"
+	}
 }
 
 // describeEvent turns the object/action pair into a sentence and a severity.

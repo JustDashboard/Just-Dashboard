@@ -44,12 +44,11 @@
   did not come up and was undone — because showing that as either success or failure would misreport it.
   The form on `/dashboard/configuration` **derives** its draft from the poll rather than mirroring it into
   state: a copy refreshed every two seconds would wipe half-typed input during a restart.
-- **Theming is light and dark, one palette**, in `globals.css`'s `:root` and `.dark`. `lib/themes.ts` holds
-  only what does not belong in a component: `ThemeMode`, `DEFAULT_MODE` (dark), the storage key, and
-  `themeBootstrapScript()`. That script is inlined in `<head>` so the stored choice applies **before first
-  paint**, with the request's CSP nonce — reading it after hydration flashes a screen of near-black at
-  anyone who chose light, on every navigation that reloads the document; `<html>` carries
-  `suppressHydrationWarning` for exactly that.
-  `hooks/use-theme.tsx` treats the document as the store (`useSyncExternalStore` over the root class)
-  rather than holding a second copy to sync in an effect. The choice is in localStorage, not on the
-  account: it belongs to the screen you are sitting at. `/appearance` is the page; ⌘K is the shortcut.
+- **There is one theme.** The light palette was removed: every tinted surface, status hue, chart colour
+  and terminal ANSI slot had to be chosen twice and verified twice, and the second set was seen by almost
+  nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —
+  `themeBootstrapScript()`, inlined in `<head>` with the request's CSP nonce — which puts `.dark` on the
+  root element before first paint so the generated shadcn primitives' `dark:` variants resolve, sets
+  `color-scheme`, and clears the stored light/dark preference from anyone upgrading. `hooks/use-theme.tsx`,
+  the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
+  `suppressHydrationWarning` because the class is still applied by script.

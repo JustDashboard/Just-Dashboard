@@ -8,7 +8,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
-import { StatusDot, type Tone } from "@/components/status-dot"
+import { StatusDot, type DotTone } from "@/components/status-dot"
 
 /**
  * A verdict's findings, as a plain list rather than a stack of tinted boxes.
@@ -37,8 +37,8 @@ export type Finding = {
   action?: { label: string; onClick: () => void }
 }
 
-const LEVEL_TONE: Record<Finding["level"], Tone> = {
-  critical: "critical",
+const LEVEL_TONE: Record<Finding["level"], DotTone> = {
+  critical: "danger",
   warning: "warning",
   notice: "notice",
 }
@@ -52,7 +52,7 @@ export function FindingList({
 }) {
   if (findings.length === 0) {
     return (
-      <div className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
+      <div className="flex items-center gap-2.5 text-body text-muted-foreground">
         <CheckCircle className="size-4 shrink-0 text-success" />
         <span className="min-w-0">{emptyLabel}</span>
       </div>
@@ -63,12 +63,15 @@ export function FindingList({
     <Accordion type="multiple" className="min-w-0">
       {findings.map((finding) => (
         <AccordionItem key={finding.id} value={finding.id} className="border-hairline">
-          <AccordionTrigger className="items-center gap-3 py-2.5 text-[13px] hover:no-underline">
+          <AccordionTrigger className="min-w-0 items-center gap-3 py-2.5 text-body hover:no-underline">
             <span className="flex min-w-0 flex-1 items-center gap-2.5">
               <StatusDot tone={LEVEL_TONE[finding.level]} />
               <span className="truncate font-medium">{finding.title}</span>
             </span>
-            <span className="line-clamp-1 max-w-[45%] shrink-0 text-[11px] font-normal text-muted-foreground">
+            {/* Dropped on a phone rather than clipped: the row is a title, a
+                severity dot and a chevron, and at 390px the meta had nowhere
+                to go but past the panel's own edge. */}
+            <span className="hidden max-w-[45%] shrink-0 text-hint font-normal text-muted-foreground sm:line-clamp-1">
               {finding.meta ?? finding.detail}
             </span>
           </AccordionTrigger>

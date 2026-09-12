@@ -5,7 +5,7 @@ import { Box } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { relativeTime } from "@/lib/format"
 import type { DeploymentRuntimeServices } from "@/lib/types"
@@ -16,11 +16,6 @@ export function DeploymentRuntime({ runtime }: { runtime?: DeploymentRuntimeServ
       <PanelHeader
         icon={Box}
         title="Runtime services"
-        description={
-          runtime?.status === "available"
-            ? `Docker observation ${relativeTime(runtime.observedAt)}`
-            : "Current Docker evidence"
-        }
         actions={
           <Button variant="ghost" size="sm" asChild>
             <Link href="/docker/containers">Open Docker</Link>
@@ -47,13 +42,11 @@ export function DeploymentRuntime({ runtime }: { runtime?: DeploymentRuntimeServ
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <Link
                     href={`/docker/containers?${new URLSearchParams({ container: service.containerId })}`}
-                    className="inline-flex min-h-9 min-w-0 items-center break-all text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    className="inline-flex min-h-9 min-w-0 items-center text-sm font-medium break-all underline-offset-4 focus-ring hover:underline"
                   >
                     {service.name || service.containerId}
                   </Link>
-                  <Badge variant="secondary">
-                    {service.liveRelease ? "Live release" : "Other release"}
-                  </Badge>
+                  <Tag>{service.liveRelease ? "Live release" : "Other release"}</Tag>
                   <Status state={service.state} />
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -62,14 +55,14 @@ export function DeploymentRuntime({ runtime }: { runtime?: DeploymentRuntimeServ
                 </p>
                 <Link
                   href={`/logs?${new URLSearchParams({ source: `docker:${service.containerId}` })}`}
-                  className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
+                  className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
                 >
                   Open runtime logs for {service.name || service.containerId}
                 </Link>
                 {service.stack && (
                   <Link
                     href={`/docker/stacks?${new URLSearchParams({ stack: service.stack })}`}
-                    className="inline-flex min-h-9 items-center break-all text-xs underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
+                    className="inline-flex min-h-9 items-center text-xs break-all underline underline-offset-4 focus-ring"
                   >
                     Open stack {service.stack}
                     {service.service && ` · ${service.service}`}

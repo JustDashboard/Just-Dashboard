@@ -34,7 +34,6 @@ import { PullsPanel } from "@/components/git/pulls-panel"
 import { PreviewPanel, type GitPreview } from "@/components/git/preview-panel"
 import { Panel } from "@/components/panel"
 import { Page } from "@/components/page"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -159,10 +158,10 @@ export function RepoWorkspace({
           <TooltipContent>Back to all repositories</TooltipContent>
         </Tooltip>
         <div className="min-w-0">
-          <p className="truncate text-[13px] font-medium" title={repo.path}>
+          <p className="truncate text-body font-medium" title={repo.path}>
             {repo.name}
           </p>
-          <p className="truncate font-mono text-[10px] text-muted-foreground" title={repo.path}>
+          <p className="truncate font-mono text-micro text-muted-foreground" title={repo.path}>
             {repo.path}
             {head.remote ? ` · ${head.remote}` : ""}
           </p>
@@ -174,11 +173,20 @@ export function RepoWorkspace({
             two-line title block where it read as floating between the rows. */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <button onClick={() => setTab("branches")} className="shrink-0">
-              <Badge variant={head.detached ? "destructive" : "secondary"} className="font-normal">
-                <GitBranch className="size-3" />
-                {head.branch || "—"}
-              </Badge>
+            <button
+              onClick={() => setTab("branches")}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 text-xs hover:underline",
+                head.detached && "text-destructive",
+              )}
+            >
+              <GitBranch
+                className={cn(
+                  "size-3 shrink-0",
+                  head.detached ? "text-destructive" : "text-muted-foreground",
+                )}
+              />
+              <span className="font-mono">{head.branch || "—"}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent>
@@ -239,7 +247,7 @@ export function RepoWorkspace({
                   <ChevronDoubleDown className="size-4" />
                   Pull
                   {head.behind > 0 && (
-                    <span className="numeric ml-0.5 rounded bg-warning/20 px-1 text-[10px] text-warning">
+                    <span className="numeric ml-0.5 rounded-sm bg-plot-warning px-1 text-micro text-warning">
                       {head.behind}
                     </span>
                   )}
@@ -261,7 +269,7 @@ export function RepoWorkspace({
                   <ChevronDoubleUp className="size-4" />
                   Push
                   {head.ahead > 0 && (
-                    <span className="numeric ml-0.5 rounded bg-primary-foreground/20 px-1 text-[10px]">
+                    <span className="numeric ml-0.5 rounded-sm bg-primary-foreground/20 px-1 text-micro">
                       {head.ahead}
                     </span>
                   )}
@@ -317,7 +325,7 @@ export function RepoWorkspace({
               <TabsTrigger value="changes">
                 Changes
                 {changeCount > 0 && (
-                  <span className="numeric ml-1.5 rounded bg-warning/20 px-1 text-[10px] text-warning">
+                  <span className="numeric ml-1.5 rounded-sm bg-plot-warning px-1 text-micro text-warning">
                     {changeCount}
                   </span>
                 )}

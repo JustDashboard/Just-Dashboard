@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 )
 
 // The program the sibling container runs.
@@ -106,7 +108,31 @@ func applyStack(ctx context.Context, store *Store, run *Run, out io.Writer) erro
 	if _, err := os.Stat(run.Dir); err != nil {
 		return fmt.Errorf("%s is not there — the checkout this dashboard was installed from has moved or was not mounted", run.Dir)
 	}
-	if err := composeUp(ctx, run, run.Action == ActionRebuild, run.Action != ActionApply, out); err != nil {
+	compose := run.Compose
+	if compose == "" {
+		compose = "docker-compose.yml"
+	}
+	if run.Action == ActionRebuild {
+		if err := stream(ctx, run.Dir, out, "docker", "compose", "-f", compose, "build"); err != nil {
+			return err
+		}
+	}
+	err := stackports.Start(ctx, run.Dir, run.Compose, out, func() error {
+		return composeUp(ctx, run, false, run.Action != ActionApply, out)
+	}, func(selected stackports.Selection) error {
+		if selected.Health() == "" {
+			return nil
+		}
+		if selected.Changed && run.Backup == "" {
+			run.Backup, run.EnvPath, run.RollbackHealth = selected.Backup, selected.EnvPath, run.Health
+		}
+		run.Health, run.Endpoint = selected.Health(), selected.Endpoint
+		return store.Update(func(r *Run) {
+			r.Health, r.Endpoint = run.Health, run.Endpoint
+			r.Backup, r.EnvPath, r.RollbackHealth = run.Backup, run.EnvPath, run.RollbackHealth
+		})
+	})
+	if err != nil {
 		return err
 	}
 	_ = store.Update(func(r *Run) { r.Phase = PhaseWaiting })
@@ -158,7 +184,7 @@ func composeUp(ctx context.Context, run *Run, build, force bool, out io.Writer) 
 	if compose == "" {
 		compose = "docker-compose.yml"
 	}
-	args := []string{"compose", "-f", compose, "up", "-d", "--remove-orphans"}
+	args := []string{"compose", "-f", compose, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "90"}
 	if build {
 		args = append(args, "--build")
 	}

@@ -9,9 +9,7 @@ type ClipboardItemLike = {
 }
 
 export type ImageChoice =
-  | { kind: "none" }
-  | { kind: "image"; file: File }
-  | { kind: "unsupported"; mime: string }
+  { kind: "none" } | { kind: "image"; file: File } | { kind: "unsupported"; mime: string }
 
 type PasteEventLike = {
   clipboardData: { items: ArrayLike<ClipboardItemLike> } | null
@@ -63,9 +61,7 @@ export function chooseDroppedImage(files: ArrayLike<File>): ImageChoice {
   for (const file of list) {
     if (supported.has(file.type.toLowerCase())) return { kind: "image", file }
   }
-  return list.length
-    ? { kind: "unsupported", mime: list[0].type || "unknown" }
-    : { kind: "none" }
+  return list.length ? { kind: "unsupported", mime: list[0].type || "unknown" } : { kind: "none" }
 }
 
 export type TerminalImageUpload = {

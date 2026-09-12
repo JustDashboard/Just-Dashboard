@@ -32,12 +32,12 @@ export function Logo({
       <span
         className={cn(
           "truncate leading-tight font-semibold tracking-tight",
-          size === "sm" && "text-[15px]",
-          size === "md" && "text-[17px]",
-          size === "lg" && "text-[22px]",
+          size === "sm" && "text-mark-sm",
+          size === "md" && "text-mark-md",
+          size === "lg" && "text-mark-lg",
         )}
       >
-        <span className="text-primary">Just</span> Dashboard
+        <span className="text-brand">Just</span> Dashboard
       </span>
       {version && <LogoVersion />}
     </span>
@@ -53,7 +53,7 @@ export function Logo({
  */
 export function LogoVersion({ className }: { className?: string }) {
   return (
-    <span className={cn("numeric shrink-0 text-[11px] text-muted-foreground", className)}>
+    <span className={cn("numeric shrink-0 text-hint text-muted-foreground", className)}>
       {VERSION}
     </span>
   )
@@ -67,6 +67,6 @@ export function LogoVersion({ className }: { className?: string }) {
  */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <span className={cn("text-[17px] leading-none font-semibold text-primary", className)}>J</span>
+    <span className={cn("text-mark-md leading-none font-semibold text-brand", className)}>J</span>
   )
 }

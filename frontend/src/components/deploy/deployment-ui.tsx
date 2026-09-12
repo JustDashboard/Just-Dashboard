@@ -129,6 +129,10 @@ export const RELEASE_GROUPS = [
   { label: "Source", keys: ["resolve_source", "acquire_source", "analyze_plan"] },
   { label: "Build", keys: ["prepare_context", "build_artifact"] },
   { label: "Release", keys: ["render_runtime", "release_task", "backup_gate"] },
+  // Its own node rather than a detail of Release: a deployment publishing a
+  // name for the first time spends real seconds here talking to a certificate
+  // authority, and a progress bar that reads "Release" throughout looks stuck.
+  { label: "Certificate", keys: ["provision_certificate"] },
   { label: "Start", keys: ["start_candidate"] },
   { label: "Verify", keys: ["verify_readiness", "verify_smoke"] },
   { label: "Route", keys: ["activate", "retire_previous", "record_release", "notify"] },
@@ -184,7 +188,13 @@ export function ReleasePath({
     <ol
       aria-label={labelledBy ? undefined : "Release path"}
       aria-labelledby={labelledBy}
-      className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 lg:grid-cols-6"
+      className={cn(
+        "grid min-w-0 gap-x-3 gap-y-4",
+        // One node per column at xl, where the rail fits on a single line. A
+        // connector drawn from a node that has wrapped onto a second row points
+        // at nothing, so the rail only claims to be a sequence where it is one.
+        groups.length === 1 ? "grid-cols-1" : "grid-cols-2 sm:grid-cols-4 xl:grid-cols-7",
+      )}
     >
       {groups.map((group, index) => {
         const state = groupedState(steps, group.keys)
@@ -197,23 +207,23 @@ export function ReleasePath({
             {index > 0 && (
               <span
                 aria-hidden="true"
-                className="absolute top-3 right-[calc(50%+1.1rem)] hidden h-px w-[calc(100%-1.7rem)] bg-hairline lg:block"
+                className="absolute top-3 right-[calc(50%+1.1rem)] hidden h-px w-[calc(100%-1.7rem)] bg-hairline xl:block"
               />
             )}
             <div className="flex min-w-0 items-center gap-2 lg:flex-col lg:gap-1.5 lg:text-center">
               <span
                 className={cn(
                   "flex size-7 shrink-0 items-center justify-center rounded-full border bg-card",
-                  state === "running" && "border-warning/60 ring-4 ring-warning/10",
-                  (state === "failed" || state === "blocked") && "border-destructive/50",
-                  state === "passed" && "border-success/35",
+                  state === "running" && "border-rule-warning ring-4 ring-warning/10",
+                  (state === "failed" || state === "blocked") && "border-rule-danger",
+                  state === "passed" && "border-rule-success",
                 )}
               >
                 <NodeIcon state={state} />
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-xs font-medium">{group.label}</span>
-                <span className="block text-[10px] text-muted-foreground">
+                <span className="block text-micro text-muted-foreground">
                   {stepStateLabel(state)}
                 </span>
               </span>
@@ -274,8 +284,9 @@ export const PROJECT_TABS = [
   ["storage", "Storage & backups"],
   ["automations", "Automations"],
   ["metrics", "Metrics"],
-  ["console", "Console & files"],
+  ["console", "Console"],
   ["players", "Players"],
+  ["settings", "Server settings"],
 ] as const
 
 export function ProjectTabs({
@@ -292,35 +303,37 @@ export function ProjectTabs({
   return (
     <nav
       aria-label="Deployment sections"
-      className="max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="max-w-full [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden"
     >
       <ul className="flex w-max min-w-full gap-1 border-b border-hairline">
-        {PROJECT_TABS.filter(([key]) => key !== "players" || profile === "game").map(
-          ([key, label]) => (
-            <li key={key}>
-              <Link
-                href={`/deploy/${projectId}?tab=${key}`}
-                aria-current={active === key ? "page" : undefined}
-                className={cn(
-                  "relative flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                  active === key &&
-                    "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-foreground",
+        {/* Console, Players and Server settings belong to a game server; an
+            ordinary web deployment has a terminal in Docker instead. */}
+        {PROJECT_TABS.filter(
+          ([key]) => !["players", "console", "settings"].includes(key) || profile === "game",
+        ).map(([key, label]) => (
+          <li key={key}>
+            <Link
+              href={`/deploy/${projectId}?tab=${key}`}
+              aria-current={active === key ? "page" : undefined}
+              className={cn(
+                "relative flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap text-muted-foreground focus-ring transition-colors hover:text-foreground",
+                active === key &&
+                  "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-foreground",
+              )}
+            >
+              {label}
+              {pending &&
+                ["configuration", "variables", "network", "storage", "automations"].includes(
+                  key,
+                ) && (
+                  <span
+                    className="size-1.5 rounded-full bg-warning"
+                    aria-label="Pending deployment"
+                  />
                 )}
-              >
-                {label}
-                {pending &&
-                  ["configuration", "variables", "network", "storage", "automations"].includes(
-                    key,
-                  ) && (
-                    <span
-                      className="size-1.5 rounded-full bg-warning"
-                      aria-label="Pending deployment"
-                    />
-                  )}
-              </Link>
-            </li>
-          ),
-        )}
+            </Link>
+          </li>
+        ))}
       </ul>
     </nav>
   )

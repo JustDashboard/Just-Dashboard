@@ -35,7 +35,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { TableNode, type TableNodeData } from "@/components/database/diagram/table-node"
 import { RelationEdge } from "@/components/database/diagram/relation-edge"
@@ -84,7 +83,7 @@ export function ErDiagram({
   if (graph.data.tables.length === 0) {
     return (
       <Panel className="min-h-0 flex-1">
-        <PanelHeader icon={NetworkDevice} title="Schema" description="Nothing to draw" />
+        <PanelHeader icon={NetworkDevice} title="Schema" />
         <EmptyState icon={NetworkDevice} title="No tables in this schema" />
       </Panel>
     )
@@ -199,7 +198,6 @@ function Canvas({
       <PanelHeader
         icon={NetworkDevice}
         title="Schema"
-        description={`${graph.tables.length} ${graph.tables.length === 1 ? "table" : "tables"} · ${graph.edges.length} ${graph.edges.length === 1 ? "relationship" : "relationships"}`}
         actions={
           <>
             <SearchInput
@@ -270,7 +268,7 @@ function Canvas({
           <MiniMap
             pannable
             zoomable
-            className="!bottom-3 !right-3 !h-24 !w-40 overflow-hidden !rounded-md !border !bg-card"
+            className="!right-3 !bottom-3 !h-24 !w-40 overflow-hidden !rounded-md !border !bg-card"
             maskColor="color-mix(in oklab, var(--color-background) 70%, transparent)"
             nodeColor="color-mix(in oklab, var(--color-chart-1) 55%, var(--color-muted))"
             nodeStrokeWidth={0}
@@ -292,14 +290,14 @@ function Canvas({
 function Toolbar({ focus, onClear }: { focus: string | null; onClear: () => void }) {
   const flow = useReactFlow()
   return (
-    <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2">
+    <div className="pointer-events-none absolute top-3 left-3 flex items-center gap-2">
       <div className="pointer-events-auto flex items-center gap-0.5 rounded-md border bg-card p-0.5 shadow-sm">
         <Button
           size="icon"
           variant="ghost"
           className="size-7"
           onClick={() => flow.zoomIn({ duration: 150 })}
-          title="Zoom in"
+          aria-label="Zoom in"
         >
           <Plus className="size-3.5" />
         </Button>
@@ -308,7 +306,7 @@ function Toolbar({ focus, onClear }: { focus: string | null; onClear: () => void
           variant="ghost"
           className="size-7"
           onClick={() => flow.zoomOut({ duration: 150 })}
-          title="Zoom out"
+          aria-label="Zoom out"
         >
           <Minus className="size-3.5" />
         </Button>
@@ -317,22 +315,23 @@ function Toolbar({ focus, onClear }: { focus: string | null; onClear: () => void
           variant="ghost"
           className="size-7"
           onClick={() => flow.fitView({ padding: 0.15, duration: 300 })}
-          title="Fit to view"
+          aria-label="Fit to view"
         >
           <Fullscreen className="size-3.5" />
         </Button>
       </div>
       {focus && (
-        <Badge
-          variant="secondary"
-          className="pointer-events-auto cursor-pointer gap-1 font-normal"
+        <Button
+          size="xs"
+          variant="outline"
+          className="pointer-events-auto"
           onClick={onClear}
           title="Show the whole schema again"
         >
           <Crosshair className="size-3" />
           {focus}
           <span className="text-muted-foreground">· clear</span>
-        </Badge>
+        </Button>
       )}
     </div>
   )
@@ -340,7 +339,7 @@ function Toolbar({ focus, onClear }: { focus: string | null; onClear: () => void
 
 function Legend() {
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-3 rounded-md border bg-card/90 px-2.5 py-1.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur">
+    <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-3 rounded-md border bg-card/90 px-2.5 py-1.5 text-micro text-muted-foreground shadow-sm backdrop-blur">
       <span className="flex items-center gap-1">
         <Key className="size-3 text-chart-2" /> primary key
       </span>

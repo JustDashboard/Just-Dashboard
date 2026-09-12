@@ -406,6 +406,9 @@ func TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct(t *testing.
 			if err != nil || len(fleet.Deployments) != 1 || fleet.Deployments[0].Health != string(test.want) {
 				t.Fatalf("fleet health = %#v, error=%v, want %s", fleet, err, test.want)
 			}
+			if fleet.Deployments[0].HostPort != 32111 {
+				t.Fatalf("fleet showed the planned port instead of actual binding: %+v", fleet.Deployments[0])
+			}
 		})
 	}
 }

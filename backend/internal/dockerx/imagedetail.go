@@ -54,6 +54,22 @@ type ImageDetail struct {
 	Layers []ImageLayer `json:"layers"`
 	// UsedBy names the containers built from this image, running or not.
 	UsedBy []ImageUser `json:"usedBy"`
+
+	// How this image can be referred to, and what that allows.
+	//
+	// Kind is what the *requested* reference was — a tag, a digest, a bare
+	// image id, or Docker's dangling placeholder. Ref is the name the UI
+	// should lead with. Pullable and Checkable say whether the pull and
+	// "check for updates" controls have anything to act on: an image built
+	// here has no registry to ask, and offering the button anyway is offering
+	// a button whose only outcome is an error.
+	Kind       ImageRefKind `json:"kind"`
+	Ref        string       `json:"ref"`
+	Pullable   bool         `json:"pullable"`
+	Checkable  bool         `json:"checkable"`
+	MovingTag  bool         `json:"movingTag"`
+	Dangling   bool         `json:"dangling"`
+	LocalBuild bool         `json:"localBuild"`
 }
 
 // ImageLayer is one line of `docker history`, which is the only place the
@@ -77,11 +93,21 @@ type ImageUser struct {
 	Service string `json:"service,omitempty"`
 }
 
+// InspectImage answers for any of the four things an image string can be.
+//
+// The requested reference is classified before it reaches the Engine rather
+// than normalised blindly. An id and a digest are exact and are passed
+// through; only a name gets the implicit `:latest`. Sending an id through the
+// name path is what produced `invalid reference format: repository name
+// (library/sha256…) must be lowercase` for every attempt to open an image by
+// its id — including every dangling image, which has no other handle.
 func (c *Client) InspectImage(ctx context.Context, ref string) (*ImageDetail, error) {
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
 	}
+	requested := ClassifyImageRef(ref)
+	ref = NormalizeImageRef(ref)
 	insp, err := cli.ImageInspect(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -143,7 +169,37 @@ func (c *Client) InspectImage(ctx context.Context, ref string) (*ImageDetail, er
 		}
 	}
 	d.UsedBy = c.imageUsers(ctx, insp.ID)
+	d.describeReference(requested)
 	return d, nil
+}
+
+// describeReference records what this image can be asked to do.
+//
+// An image with no repository digest never came from a registry: it was built
+// on this host, so "no update available" and "cannot be checked" are the same
+// sentence and the UI should say the true one. A dangling image has no name at
+// all, which is why it is reachable only by id and why nothing here offers to
+// pull it.
+func (d *ImageDetail) describeReference(requested ImageRefKind) {
+	d.Ref = PreferredRef(d.ID, d.RepoTags, d.RepoDigests)
+	d.Dangling = len(d.RepoTags) == 0 ||
+		(len(d.RepoTags) == 1 && ClassifyImageRef(d.RepoTags[0]) == RefDangling)
+	d.LocalBuild = len(d.RepoDigests) == 0
+
+	d.Kind = requested
+	if d.Kind == RefUnknown || d.Kind == RefDangling {
+		d.Kind = ClassifyImageRef(d.Ref)
+	}
+	if d.Dangling {
+		d.Kind = RefDangling
+	}
+
+	// Pulling and checking are properties of the *name*, not of the request:
+	// an image opened by id that still carries a tag can be pulled by that
+	// tag, and saying otherwise would hide a working control.
+	d.Pullable = !d.Dangling && Pullable(d.Ref)
+	d.Checkable = d.Pullable && !d.LocalBuild && Checkable(d.Ref)
+	d.MovingTag = MovingTag(d.Ref)
 }
 
 // cleanHistoryLine strips the wrapper the classic builder records around every
@@ -200,6 +256,8 @@ type UpdateStatus struct {
 	//              nothing to compare against and that is not a failure.
 	//   unknown  — the registry could not be asked. Private registries
 	//              needing credentials land here, as do rate limits.
+	//   pinned   — named by digest, so it is the same image every time and
+	//              there is nothing to check.
 	State        string    `json:"state"`
 	LocalDigest  string    `json:"localDigest,omitempty"`
 	RemoteDigest string    `json:"remoteDigest,omitempty"`
@@ -249,6 +307,23 @@ func (c *Client) CheckUpdate(ctx context.Context, ref string, force bool) Update
 
 func (c *Client) checkUpdate(ctx context.Context, ref string) UpdateStatus {
 	out := UpdateStatus{Ref: ref, State: "unknown", CheckedAt: time.Now().UTC()}
+	// A reference that cannot move has no update to find, and reporting that
+	// as "unknown" reads as a failed check rather than as the answer. A digest
+	// reference is pinned by construction; a bare image id is a local object
+	// with no registry name at all.
+	switch ClassifyImageRef(ref) {
+	case RefDigest:
+		out.State = "pinned"
+		out.Reason = "this reference names an exact image by digest, so it cannot change under you"
+		if _, digest, ok := strings.Cut(ref, "@"); ok {
+			out.LocalDigest = digest
+		}
+		return out
+	case RefID, RefDangling:
+		out.State = "local"
+		out.Reason = "this image has no registry name, so there is nothing to compare it against"
+		return out
+	}
 	cli, err := c.api()
 	if err != nil {
 		out.Reason = err.Error()

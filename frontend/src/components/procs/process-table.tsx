@@ -13,7 +13,7 @@ import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -48,13 +48,6 @@ import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 
 type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
-
-const SORT_LABEL: Record<Exclude<ProcessSort, "auto">, string> = {
-  cpu: "CPU",
-  memory: "memory",
-  io: "disk I/O",
-  uptime: "uptime",
-}
 
 function automaticFocus(snapshot: Snapshot | undefined): {
   sort: Exclude<ProcessSort, "auto">
@@ -113,12 +106,6 @@ export function ProcessTableTab() {
 
   const data = processList.data
   const memTotal = snapshot?.memory.total ?? 0
-  const focusDescription =
-    sort === "auto"
-      ? automatic.sort === "io" && data && !data.ratesReady
-        ? `Automatic focus: sampling disk I/O because ${automatic.reason}`
-        : `Automatic focus: ${SORT_LABEL[automatic.sort]} because ${automatic.reason}`
-      : `Focused by ${SORT_LABEL[effectiveSort]}`
 
   return (
     <>
@@ -126,13 +113,6 @@ export function ProcessTableTab() {
         <PanelHeader
           icon={Cpu}
           title="Live processes"
-          description={
-            data
-              ? data.truncated
-                ? `Showing ${data.processes.length} of ${data.total} matches · ${focusDescription}`
-                : `${data.total} matches from ${data.available} processes · ${focusDescription}`
-              : "Reading the host process table"
-          }
           actions={
             snapshot && (
               <MetricStrip>
@@ -194,15 +174,15 @@ export function ProcessTableTab() {
           <Table containerClassName="max-h-[calc(100svh-23rem)]">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead className="w-20">PID</TableHead>
+                <TableHead className="hidden w-20 sm:table-cell">PID</TableHead>
                 <TableHead className="w-full">Process</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>State</TableHead>
+                <TableHead className="hidden lg:table-cell">Owner</TableHead>
+                <TableHead className="hidden xl:table-cell">User</TableHead>
+                <TableHead className="hidden md:table-cell">State</TableHead>
                 <TableHead className="text-right">CPU</TableHead>
-                <TableHead className="text-right">Memory</TableHead>
-                <TableHead className="text-right">Disk I/O</TableHead>
-                <TableHead>Started</TableHead>
+                <TableHead className="hidden text-right sm:table-cell">Memory</TableHead>
+                <TableHead className="hidden text-right xl:table-cell">Disk I/O</TableHead>
+                <TableHead className="hidden lg:table-cell">Started</TableHead>
                 <TableHead className="w-px" />
               </TableRow>
             </TableHeader>
@@ -213,26 +193,34 @@ export function ProcessTableTab() {
                   className="group"
                   onActivate={() => setSelected(process)}
                 >
-                  <TableCell className="numeric font-mono text-xs">{process.pid}</TableCell>
+                  <TableCell className="numeric hidden font-mono sm:table-cell">
+                    {process.pid}
+                  </TableCell>
                   <TableCell>
                     <div className="max-w-[28rem] min-w-0">
                       <RowLink onClick={() => setSelected(process)}>{process.name}</RowLink>
                       <p
-                        className="truncate font-mono text-[11px] text-muted-foreground"
+                        className="truncate font-mono text-hint text-muted-foreground"
                         title={process.cmdline}
                       >
                         {process.cmdline || "Kernel worker"}
                       </p>
+                      {/* PID and state have their own columns from sm and md
+                          up. Below that they come here rather than being
+                          dropped: a process you cannot identify by number is
+                          one you cannot act on from a phone. */}
+                      <p className="mt-0.5 font-mono text-hint text-muted-foreground md:hidden">
+                        <span className="sm:hidden">{process.pid} · </span>
+                        {process.state}
+                      </p>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <div className="max-w-40 min-w-0">
-                      <Badge variant="outline" className="font-normal">
-                        {managerName(process.manager)}
-                      </Badge>
+                      <Tag>{managerName(process.manager)}</Tag>
                       {process.managerName && (
                         <p
-                          className="mt-0.5 truncate text-[11px] text-muted-foreground"
+                          className="mt-0.5 truncate text-hint text-muted-foreground"
                           title={process.managerName}
                         >
                           {process.managerName}
@@ -240,8 +228,8 @@ export function ProcessTableTab() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs">{process.username || "—"}</TableCell>
-                  <TableCell>
+                  <TableCell className="hidden xl:table-cell">{process.username || "—"}</TableCell>
+                  <TableCell className="hidden md:table-cell">
                     <Status state={processStateTone(process.state)} label={process.state} />
                   </TableCell>
                   <TableCell
@@ -256,7 +244,7 @@ export function ProcessTableTab() {
                   >
                     {percent(process.cpuPercent)}
                   </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
+                  <TableCell className="numeric hidden text-right font-mono sm:table-cell">
                     {bytes(process.rss)}
                     {memTotal > 0 && (
                       <span className="ml-1 text-muted-foreground">
@@ -264,14 +252,14 @@ export function ProcessTableTab() {
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs text-muted-foreground">
+                  <TableCell className="numeric hidden text-right font-mono text-muted-foreground xl:table-cell">
                     {!data.ratesReady
                       ? "Sampling…"
                       : (process.ioReadRate ?? 0) + (process.ioWriteRate ?? 0) > 0
                         ? `${bytes((process.ioReadRate ?? 0) + (process.ioWriteRate ?? 0))}/s`
                         : "—"}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="hidden text-muted-foreground lg:table-cell">
                     {relativeTime(process.createTime)}
                   </TableCell>
                   <TableCell>
@@ -490,7 +478,6 @@ function ProcessDetail({
       <Panel>
         <PanelHeader
           title="Identity"
-          description="What started it and where its code lives"
           actions={<Status state={processStateTone(row.state)} label={row.state} />}
         />
         <PanelBody>
@@ -502,10 +489,10 @@ function ProcessDetail({
             <Detail label="Parent PID" className="font-mono">
               {row.ppid || "—"}
             </Detail>
-            <Detail label="Executable" className="break-all font-mono">
+            <Detail label="Executable" className="font-mono break-all">
               {row.exe || "Not reported"}
             </Detail>
-            <Detail label="Working directory" className="break-all font-mono">
+            <Detail label="Working directory" className="font-mono break-all">
               {row.cwd || "Not reported"}
             </Detail>
             <Detail label="Started">{relativeTime(row.createTime)}</Detail>
@@ -530,7 +517,7 @@ function ProcessDetail({
       </Panel>
 
       <Panel>
-        <PanelHeader title="Resources" description="Current counters from the host kernel" />
+        <PanelHeader title="Resources" />
         <PanelBody>
           <DetailList>
             <Detail label="CPU">{percent(row.cpuPercent)}</Detail>
@@ -550,7 +537,6 @@ function ProcessDetail({
         <Panel>
           <PanelHeader
             title="Control"
-            description="Scheduling priority is reversible; signals act immediately"
           />
           <PanelBody className="space-y-4">
             {can("system.admin") && (

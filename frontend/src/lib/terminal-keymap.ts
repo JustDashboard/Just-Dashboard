@@ -62,9 +62,27 @@ export type ShortcutSpec = {
 
 export const SHORTCUTS: ShortcutSpec[] = [
   // Sessions.
-  { action: "session.prev", scope: "navigation", group: "Sessions", label: "Previous session", chord: "Ctrl+Alt+ArrowUp" },
-  { action: "session.next", scope: "navigation", group: "Sessions", label: "Next session", chord: "Ctrl+Alt+ArrowDown" },
-  { action: "session.new", scope: "navigation", group: "Sessions", label: "New session", chord: "Ctrl+Alt+KeyN" },
+  {
+    action: "session.prev",
+    scope: "navigation",
+    group: "Sessions",
+    label: "Previous session",
+    chord: "Ctrl+Alt+ArrowUp",
+  },
+  {
+    action: "session.next",
+    scope: "navigation",
+    group: "Sessions",
+    label: "Next session",
+    chord: "Ctrl+Alt+ArrowDown",
+  },
+  {
+    action: "session.new",
+    scope: "navigation",
+    group: "Sessions",
+    label: "New session",
+    chord: "Ctrl+Alt+KeyN",
+  },
   ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
     action: `session.${n}` as ShortcutAction,
     scope: "navigation" as const,
@@ -74,10 +92,34 @@ export const SHORTCUTS: ShortcutSpec[] = [
   })),
 
   // Windows.
-  { action: "window.prev", scope: "navigation", group: "Windows", label: "Previous window", chord: "Ctrl+Alt+ArrowLeft" },
-  { action: "window.next", scope: "navigation", group: "Windows", label: "Next window", chord: "Ctrl+Alt+ArrowRight" },
-  { action: "window.new", scope: "navigation", group: "Windows", label: "New window", chord: "Ctrl+Alt+KeyT" },
-  { action: "window.close", scope: "navigation", group: "Windows", label: "Close window", chord: "Ctrl+Alt+KeyW" },
+  {
+    action: "window.prev",
+    scope: "navigation",
+    group: "Windows",
+    label: "Previous window",
+    chord: "Ctrl+Alt+ArrowLeft",
+  },
+  {
+    action: "window.next",
+    scope: "navigation",
+    group: "Windows",
+    label: "Next window",
+    chord: "Ctrl+Alt+ArrowRight",
+  },
+  {
+    action: "window.new",
+    scope: "navigation",
+    group: "Windows",
+    label: "New window",
+    chord: "Ctrl+Alt+KeyT",
+  },
+  {
+    action: "window.close",
+    scope: "navigation",
+    group: "Windows",
+    label: "Close window",
+    chord: "Ctrl+Alt+KeyW",
+  },
   ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => ({
     action: `window.${n}` as ShortcutAction,
     scope: "navigation" as const,
@@ -90,16 +132,64 @@ export const SHORTCUTS: ShortcutSpec[] = [
   // a pair: a panel you cannot see is the only reason to press either, so two
   // separate bindings would mean remembering which of them you needed while
   // looking at the wrong half of the screen.
-  { action: "workspace.rail", scope: "navigation", group: "Workspace", label: "Sessions panel", chord: "Ctrl+Alt+KeyB" },
-  { action: "workspace.tools", scope: "navigation", group: "Workspace", label: "Files & git panel", chord: "Ctrl+Alt+KeyJ" },
+  {
+    action: "workspace.rail",
+    scope: "navigation",
+    group: "Workspace",
+    label: "Sessions panel",
+    chord: "Ctrl+Alt+KeyB",
+  },
+  {
+    action: "workspace.tools",
+    scope: "navigation",
+    group: "Workspace",
+    label: "Files & git panel",
+    chord: "Ctrl+Alt+KeyJ",
+  },
 
   // The emulator's own.
-  { action: "terminal.copy", scope: "terminal", group: "Terminal", label: "Copy the selection", chord: "Ctrl+Shift+KeyC" },
-  { action: "terminal.paste", scope: "terminal", group: "Terminal", label: "Paste", chord: "Ctrl+Shift+KeyV" },
-  { action: "terminal.search", scope: "terminal", group: "Terminal", label: "Search the scrollback", chord: "Ctrl+Shift+KeyF" },
-  { action: "terminal.clear", scope: "terminal", group: "Terminal", label: "Clear the screen", chord: "Ctrl+Shift+KeyK" },
-  { action: "terminal.fullscreen", scope: "terminal", group: "Terminal", label: "Fullscreen", chord: "Ctrl+Alt+KeyF" },
-  { action: "terminal.shortcuts", scope: "terminal", group: "Terminal", label: "Show the shortcuts", chord: "Ctrl+Alt+Slash" },
+  {
+    action: "terminal.copy",
+    scope: "terminal",
+    group: "Terminal",
+    label: "Copy the selection",
+    chord: "Ctrl+Shift+KeyC",
+  },
+  {
+    action: "terminal.paste",
+    scope: "terminal",
+    group: "Terminal",
+    label: "Paste",
+    chord: "Ctrl+Shift+KeyV",
+  },
+  {
+    action: "terminal.search",
+    scope: "terminal",
+    group: "Terminal",
+    label: "Search the scrollback",
+    chord: "Ctrl+Shift+KeyF",
+  },
+  {
+    action: "terminal.clear",
+    scope: "terminal",
+    group: "Terminal",
+    label: "Clear the screen",
+    chord: "Ctrl+Shift+KeyK",
+  },
+  {
+    action: "terminal.fullscreen",
+    scope: "terminal",
+    group: "Terminal",
+    label: "Fullscreen",
+    chord: "Ctrl+Alt+KeyF",
+  },
+  {
+    action: "terminal.shortcuts",
+    scope: "terminal",
+    group: "Terminal",
+    label: "Show the shortcuts",
+    chord: "Ctrl+Alt+Slash",
+  },
 ]
 
 const DEFAULTS: Record<string, string> = Object.fromEntries(

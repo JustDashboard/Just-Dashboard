@@ -11,6 +11,7 @@ import { FileActionsMenu, type RowCaps } from "@/components/files/file-actions"
 import { rawUrl } from "@/components/files/preview-panel"
 import { Button } from "@/components/ui/button"
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { rowReveal } from "@/components/icon-action"
 
 /**
  * The listing as tiles rather than rows.
@@ -124,17 +125,14 @@ function Tile({
       data-state={selected ? "selected" : undefined}
       className={cn(
         "group relative flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-transparent p-2 text-center transition-colors",
-        "hover:border-hairline hover:bg-accent/50",
-        active && "border-primary/40 bg-primary/[0.06]",
-        selected && "border-primary/60 bg-primary/10",
+        "hover:border-hairline hover:bg-menu-hover",
+        active && "border-border bg-accent",
+        selected && "border-border bg-accent",
       )}
       title={entry.name}
     >
       <span
-        className={cn(
-          "absolute top-1.5 left-1.5 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
-          selected && "opacity-100",
-        )}
+        className={cn("absolute top-1.5 left-1.5 z-10", rowReveal(), selected && "opacity-100")}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
@@ -147,7 +145,7 @@ function Tile({
       </span>
 
       <span
-        className="absolute top-1 right-1 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+        className={cn("absolute top-1 right-1 z-10", rowReveal())}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
@@ -169,7 +167,7 @@ function Tile({
         className={cn(
           "flex w-full items-center justify-center rounded-md",
           size === "sm" ? "h-14" : size === "lg" ? "h-28" : "h-20",
-          thumbnail && "checkerboard overflow-hidden border border-hairline",
+          thumbnail && "overflow-hidden border border-hairline checkerboard",
         )}
       >
         {thumbnail ? (
@@ -187,8 +185,8 @@ function Tile({
       </span>
 
       <span className="w-full min-w-0">
-        <span className="line-clamp-2 text-[12px] leading-snug break-words">{entry.name}</span>
-        <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+        <span className="line-clamp-2 text-xs leading-snug break-words">{entry.name}</span>
+        <span className="mt-0.5 block truncate text-micro text-muted-foreground">
           {entry.isDir ? relativeTime(entry.modified) : bytes(entry.size)}
         </span>
       </span>

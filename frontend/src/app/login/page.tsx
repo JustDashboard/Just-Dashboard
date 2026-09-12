@@ -19,8 +19,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
 import { Logo } from "@/components/logo"
+import { useCopy } from "@/hooks/use-copy"
+import { Well } from "@/components/panel"
 
 type Step = "credentials" | "totp" | "enroll"
 
@@ -151,18 +153,18 @@ export default function LoginPage() {
             decoration pretending to be information. */}
         <Steps current={recoveryCodes ? "totp" : step} enrolling={step === "enroll"} />
 
-        <div className="raised mt-5 w-full rounded-2xl border bg-card p-6 sm:p-7">
+        <div className="mt-5 w-full rounded-xl border bg-card p-6 sm:p-7">
           {recoveryCodes ? (
             <RecoveryCodes codes={recoveryCodes} onDone={finishEnrollment} />
           ) : (
             <>
               <header className="mb-6 space-y-1.5 text-center">
-                <h1 className="text-[17px] leading-tight font-semibold">
+                <h1 className="text-lg leading-tight font-semibold">
                   {step === "credentials" && "Sign in"}
                   {step === "totp" && "Two-factor code"}
                   {step === "enroll" && "Set up two-factor"}
                 </h1>
-                <p className="text-[13px] leading-relaxed text-muted-foreground text-balance">
+                <p className="text-body leading-relaxed text-balance text-muted-foreground">
                   {step === "credentials" && "Administrator access to this server."}
                   {step === "totp" && "Enter the six-digit code from your authenticator app."}
                   {step === "enroll" &&
@@ -209,8 +211,7 @@ export default function LoginPage() {
                       </button>
                     </div>
                   </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
-                    {busy ? <Spinner className="size-4" /> : null}
+                  <Button type="submit" className="w-full" pending={busy}>
                     Continue
                     {!busy && <ArrowRight className="size-4" />}
                   </Button>
@@ -240,8 +241,7 @@ export default function LoginPage() {
                       required
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={busy || !code}>
-                    {busy && <Spinner className="size-4" />}
+                  <Button type="submit" className="w-full" disabled={busy || !code} pending={busy}>
                     Verify
                   </Button>
                   <button
@@ -266,8 +266,7 @@ export default function LoginPage() {
                       The seed is generated on the server and sealed with the dashboard&apos;s
                       master key. It is shown to you exactly once, here.
                     </Notice>
-                    <Button className="w-full" onClick={beginEnrollment} disabled={busy}>
-                      {busy && <Spinner className="size-4" />}
+                    <Button className="w-full" onClick={beginEnrollment} pending={busy}>
                       Generate a secret
                     </Button>
                   </div>
@@ -288,8 +287,12 @@ export default function LoginPage() {
                         required
                       />
                     </div>
-                    <Button type="submit" className="w-full" disabled={busy || code.length < 6}>
-                      {busy && <Spinner className="size-4" />}
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={busy || code.length < 6}
+                      pending={busy}
+                    >
                       Enable two-factor
                     </Button>
                   </form>
@@ -298,7 +301,7 @@ export default function LoginPage() {
           )}
         </div>
 
-        <p className="mt-6 max-w-[22rem] text-center text-[11px] leading-relaxed text-balance text-muted-foreground">
+        <p className="mt-6 max-w-[22rem] text-center text-hint leading-relaxed text-balance text-muted-foreground">
           This host only accepts connections from its configured allowlist, and every sign-in
           attempt — successful or not — is recorded.
         </p>
@@ -342,7 +345,7 @@ function Steps({ current, enrolling }: { current: Step; enrolling: boolean }) {
             />
             <span
               className={cn(
-                "flex items-center gap-1 text-[10px] font-semibold tracking-[0.14em] uppercase transition-colors",
+                "flex items-center gap-1 text-micro font-semibold tracking-[0.14em] uppercase transition-colors",
                 active ? "text-foreground" : "text-muted-foreground",
               )}
             >
@@ -362,31 +365,21 @@ function Steps({ current, enrolling }: { current: Step; enrolling: boolean }) {
  * already holding the authenticator.
  */
 function SecretBlock({ secret, otpauthUrl }: { secret: string; otpauthUrl: string }) {
-  const [copied, setCopied] = useState(false)
+  const { copy, copied } = useCopy()
   const grouped = secret.replace(/\s+/g, "").match(/.{1,4}/g) ?? [secret]
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(secret)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      notify.error("Could not copy", "Select the text and copy it by hand.")
-    }
-  }
 
   return (
     <div className="space-y-2">
       <Label>Secret</Label>
       <div className="flex flex-wrap gap-1 rounded-lg border border-hairline bg-surface-sunken p-2.5">
         {grouped.map((chunk, i) => (
-          <code key={i} className="font-mono text-[13px] tracking-widest">
+          <code key={i} className="font-mono text-body tracking-widest">
             {chunk}
           </code>
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={copy}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void copy(secret)}>
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy secret"}
         </Button>
@@ -402,37 +395,32 @@ function SecretBlock({ secret, otpauthUrl }: { secret: string; otpauthUrl: strin
 }
 
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(codes.join("\n"))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      notify.error("Could not copy", "Select the codes and copy them by hand.")
-    }
-  }
+  const { copy, copied } = useCopy()
 
   return (
     <div className="space-y-4">
       <header className="space-y-1.5 text-center">
-        <h1 className="text-[17px] leading-tight font-semibold">Save your recovery codes</h1>
-        <p className="text-[13px] leading-relaxed text-muted-foreground text-balance">
+        <h1 className="text-lg leading-tight font-semibold">Save your recovery codes</h1>
+        <p className="text-body leading-relaxed text-balance text-muted-foreground">
           Each one works once, in place of your authenticator. This is the only time they are shown.
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg border border-hairline bg-surface-sunken p-3 font-mono text-xs">
+      <Well plain className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         {codes.map((c) => (
           <span key={c} className="tracking-wider">
             {c}
           </span>
         ))}
-      </div>
+      </Well>
 
       <div className="flex gap-2">
-        <Button type="button" variant="outline" className="flex-1" onClick={copy}>
+        <Button
+          type="button"
+          variant="outline"
+          className="flex-1"
+          onClick={() => void copy(codes.join("\n"))}
+        >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {copied ? "Copied" : "Copy all"}
         </Button>

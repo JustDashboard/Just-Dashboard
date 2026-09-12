@@ -5,20 +5,12 @@ import { CheckCircle, CloudUpload, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import type { ImportResult } from "@/lib/types"
-import { Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 /**
  * Not every certificate comes from Let's Encrypt.
@@ -60,28 +52,37 @@ export function ImportDialog({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (!next) setResult(null)
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <CloudUpload className="size-3.5" />
-          Import
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Import a certificate</DialogTitle>
-          <DialogDescription>
-            For a certificate you bought or were given. Nothing here renews it — that is what the
-            expiry column is for.
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <CloudUpload className="size-3.5" />
+        Import
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (!next) setResult(null)
+        }}
+        size="lg"
+        title="Import a certificate"
+        description="For a certificate you bought or were given. Nothing here renews it — that is what the
+              expiry column is for."
+        footer={
+          <>
+            {result ? (
+              <Button onClick={() => setOpen(false)}>Done</Button>
+            ) : (
+              <Button
+                onClick={submit}
+                disabled={busy || !name.trim() || !certificate.trim() || !key.trim()}
+                pending={busy}
+              >
+                Check and import
+              </Button>
+            )}
+          </>
+        }
+      >
         {result ? (
           <div className="space-y-3">
             <Notice tone="success" icon={CheckCircle} title={`${result.name} is on disk`}>
@@ -115,7 +116,7 @@ export function ImportDialog({ onDone }: { onDone: () => void }) {
                 placeholder="example-com"
                 className="font-mono text-xs"
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-hint text-muted-foreground">
                 Names the directory it is stored in. Kept outside certbot&rsquo;s tree so a renewal
                 run can never prune a certificate it did not issue.
               </p>
@@ -127,10 +128,10 @@ export function ImportDialog({ onDone }: { onDone: () => void }) {
                 value={certificate}
                 onChange={(e) => setCertificate(e.target.value)}
                 rows={6}
-                className="font-mono text-[10px]"
+                className="font-mono text-micro"
                 placeholder={"-----BEGIN CERTIFICATE-----\n…"}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-hint text-muted-foreground">
                 Paste the full chain if your authority gave you one — leaf first, then the
                 intermediates. Desktop browsers paper over a missing intermediate from cache;
                 phones, curl and payment gateways do not.
@@ -143,27 +144,13 @@ export function ImportDialog({ onDone }: { onDone: () => void }) {
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 rows={5}
-                className="font-mono text-[10px]"
+                className="font-mono text-micro"
                 placeholder={"-----BEGIN PRIVATE KEY-----\n…"}
               />
             </div>
           </div>
         )}
-
-        <DialogFooter>
-          {result ? (
-            <Button onClick={() => setOpen(false)}>Done</Button>
-          ) : (
-            <Button
-              onClick={submit}
-              disabled={busy || !name.trim() || !certificate.trim() || !key.trim()}
-            >
-              {busy && <Spinner className="size-4" />}
-              Check and import
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

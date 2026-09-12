@@ -21,15 +21,15 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { UnitJournalSheet } from "@/components/procs/unit-journal"
 import { PM2LogSheet } from "@/components/procs/pm2-logs"
 import { ProcessTableTab } from "@/components/procs/process-table"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
+import { Tag } from "@/components/tag"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -60,7 +60,6 @@ export default function ProcessesPage() {
       <PageHeader
         eyebrow="Server"
         title="Processes"
-        description="Live resource use, service ownership, application control and schedules"
       />
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
         <TabsList>
@@ -85,10 +84,6 @@ export default function ProcessesPage() {
     </Page>
   )
 }
-
-/** The hover-revealed action cluster every row in this page uses. */
-const ROW_ACTIONS =
-  "flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
 
 function PM2Tab() {
   const { can } = useAuth()
@@ -141,7 +136,6 @@ function PM2Tab() {
     }
   }
 
-  const online = data.processes.filter((p) => p.status === "online").length
 
   return (
     <>
@@ -149,7 +143,6 @@ function PM2Tab() {
         <PanelHeader
           icon={ChartActivity}
           title="PM2 applications"
-          description={`${online} online of ${data.processes.length}`}
           actions={
             can("service.control") && (
               <Button
@@ -183,7 +176,7 @@ function PM2Tab() {
                   <TableCell>
                     <div className="max-w-[22rem] min-w-0">
                       <RowLink onClick={() => setLogsFor(proc.name)}>{proc.name}</RowLink>
-                      <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      <p className="truncate font-mono text-hint text-muted-foreground">
                         {proc.scriptPath}
                       </p>
                     </div>
@@ -191,13 +184,13 @@ function PM2Tab() {
                   <TableCell>
                     <Status state={proc.status} />
                   </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
+                  <TableCell className="numeric text-right font-mono">
                     {percent(proc.cpu)}
                   </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
+                  <TableCell className="numeric text-right font-mono">
                     {bytes(proc.memory)}
                   </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
+                  <TableCell className="numeric text-right font-mono">
                     {proc.restarts}
                     {proc.unstableRestarts > 0 && (
                       <span className="ml-1 text-destructive">
@@ -205,11 +198,11 @@ function PM2Tab() {
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {proc.uptimeMs > 0 ? duration(proc.uptimeMs / 1000) : "—"}
                   </TableCell>
                   <TableCell>
-                    <div className={ROW_ACTIONS}>
+                    <RowActions>
                       {proc.status !== "online" && can("service.control") && (
                         <IconAction
                           label="Start"
@@ -286,7 +279,7 @@ function PM2Tab() {
                           </IconAction>
                         </>
                       )}
-                    </div>
+                    </RowActions>
                   </TableCell>
                 </TableRow>
               ))}
@@ -345,18 +338,8 @@ function SystemdTab() {
         <PanelHeader
           icon={ListOrdered}
           title="systemd units"
-          description={
-            visible.length > 200
-              ? `Showing 200 of ${visible.length} matches · ${data.units.length} units detected`
-              : `${visible.length} shown of ${data.units.length}`
-          }
-          actions={
-            failed > 0 && (
-              <Badge variant="destructive" className="font-normal">
-                {failed} failed
-              </Badge>
-            )
-          }
+          advanced
+          actions={failed > 0 && <Status verdict="critical" label={`${failed} failed`} />}
         />
         <PanelToolbar>
           <SearchInput
@@ -396,9 +379,7 @@ function SystemdTab() {
                   <TableCell>
                     <div className="max-w-[26rem] min-w-0">
                       <RowLink onClick={() => setJournalFor(unit.name)}>{unit.name}</RowLink>
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {unit.description}
-                      </p>
+                      <p className="truncate text-hint text-muted-foreground">{unit.description}</p>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -408,12 +389,10 @@ function SystemdTab() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Badge variant={unit.enabled ? "outline" : "secondary"} className="font-normal">
-                      {unit.unitFileState || "unknown"}
-                    </Badge>
+                    <Tag>{unit.unitFileState || "unknown"}</Tag>
                   </TableCell>
                   <TableCell>
-                    <div className={ROW_ACTIONS}>
+                    <RowActions>
                       {unit.activeState !== "active" && can("service.control") && (
                         <IconAction
                           label="Start"
@@ -477,7 +456,7 @@ function SystemdTab() {
                             {unit.enabled ? "Disable" : "Enable"}
                           </Button>
                         )}
-                    </div>
+                    </RowActions>
                   </TableCell>
                 </TableRow>
               ))}
@@ -519,7 +498,7 @@ function CronTab() {
           <PanelHeader
             icon={Clock}
             title="User crontab"
-            description={crontab.data?.source}
+            advanced
             actions={
               <Select
                 value={user}
@@ -570,20 +549,18 @@ function CronTab() {
                     <TableBody>
                       {crontab.data.jobs.map((job) => (
                         <TableRow key={job.line}>
-                          <TableCell className="font-mono text-xs">{job.schedule}</TableCell>
+                          <TableCell className="font-mono">{job.schedule}</TableCell>
                           <TableCell className="whitespace-normal">
                             <div className="font-mono text-xs break-all">{job.command}</div>
                             {job.comment && (
-                              <p className="text-[11px] text-muted-foreground">{job.comment}</p>
+                              <p className="text-hint text-muted-foreground">{job.comment}</p>
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              variant={job.disabled ? "secondary" : "success"}
-                              className="font-normal"
-                            >
-                              {job.disabled ? "disabled" : "active"}
-                            </Badge>
+                            <Status
+                              state={job.disabled ? "inactive" : "active"}
+                              label={job.disabled ? "disabled" : "active"}
+                            />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -592,11 +569,11 @@ function CronTab() {
                 </PanelBody>
               )}
               {can("system.admin") && (
-                <div className="border-t border-hairline bg-surface-header/60 px-4 py-2.5">
+                <PanelFooter>
                   <Button variant="outline" size="sm" onClick={() => setDraft(crontab.data!.raw)}>
                     Edit crontab
                   </Button>
-                </div>
+                </PanelFooter>
               )}
             </>
           )}
@@ -648,21 +625,20 @@ function CronTab() {
           <PanelHeader
             icon={Clock}
             title="System cron"
-            description="Package-managed schedules from /etc/crontab and /etc/cron.d, read-only"
           />
           <PanelBody className="space-y-4">
             {system.data?.map((file) => (
               <div key={file.source} className="min-w-0 space-y-1.5">
-                <p className="font-mono text-[11px] text-muted-foreground">{file.source}</p>
+                <p className="font-mono text-hint text-muted-foreground">{file.source}</p>
                 {file.jobs.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No jobs.</p>
+                  <EmptyNote>No jobs.</EmptyNote>
                 ) : (
                   <Well className="space-y-1 p-2">
                     {file.jobs.map((job, i) => (
                       <div
                         key={i}
                         className={cn(
-                          "flex gap-3 text-[11px]",
+                          "flex gap-3 text-hint",
                           // A commented-out schedule is real syntax, not a
                           // running job — /etc/crontab ships one as its own
                           // worked example. Dimming it keeps the two apart.

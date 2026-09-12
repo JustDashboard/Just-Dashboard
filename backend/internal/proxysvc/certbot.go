@@ -337,9 +337,22 @@ func certbotRun(ctx context.Context, limit time.Duration, args ...string) (strin
 // prints a paragraph and buries the reason near the end.
 func lastMeaningfulLine(out string) string {
 	lines := strings.Split(out, "\n")
+	// Validation details precede the generic failure summary and help footer.
+	var details []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Detail:") {
+			details = append(details, strings.TrimSpace(strings.TrimPrefix(line, "Detail:")))
+		}
+	}
+	if len(details) > 0 {
+		return strings.Join(details, "; ")
+	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
-		if line == "" || strings.HasPrefix(line, "-") {
+		if line == "" || strings.HasPrefix(line, "-") ||
+			strings.HasPrefix(line, "Ask for help or search for solutions") ||
+			strings.HasPrefix(line, "See the logfile") || strings.HasPrefix(line, "Saving debug log") {
 			continue
 		}
 		return line

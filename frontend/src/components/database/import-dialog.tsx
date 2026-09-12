@@ -11,17 +11,11 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Spinner } from "@/components/state"
+
 import { Well } from "@/components/panel"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { useConfirm } from "@/components/confirm-dialog"
+import { Modal } from "@/components/modal"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 
@@ -118,118 +112,119 @@ export function ImportDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Import into {table}</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <Tabs value={format} onValueChange={(v) => setFormat(v as "csv" | "json")}>
-            <TabsList>
-              <TabsTrigger value="csv">CSV</TabsTrigger>
-              <TabsTrigger value="json">JSON</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="import-data">Data</Label>
-              <label className="cursor-pointer text-xs text-primary hover:underline">
-                Choose a file
-                <input
-                  type="file"
-                  accept=".csv,.json,.txt,text/csv,application/json"
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])}
-                />
-              </label>
-            </div>
-            <Textarea
-              id="import-data"
-              value={data}
-              onChange={(e) => setData(e.target.value)}
-              className="h-40 font-mono text-xs"
-              placeholder={
-                format === "csv"
-                  ? detail?.columns.map((c) => c.name).join(",") || "id,name"
-                  : '[{"name": "…"}]'
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              Sent in one request, so this tops out around 4 MB. A larger load belongs in the
-              engine&apos;s own bulk loader.
-              {documentStore &&
-                " JSON may be an array or one document per line, which is what mongoexport writes."}
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            {format === "csv" && (
-              <>
-                <label className="flex items-center gap-2 text-xs">
-                  <Checkbox checked={hasHeader} onCheckedChange={(v) => setHasHeader(Boolean(v))} />
-                  First row is a header
-                </label>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="null-as" className="shrink-0 text-xs">
-                    NULL is
-                  </Label>
-                  <Input
-                    id="null-as"
-                    value={nullAs}
-                    onChange={(e) => setNullAs(e.target.value)}
-                    className="h-7 font-mono text-xs"
-                    placeholder="(empty string)"
-                  />
-                </div>
-              </>
-            )}
-            <label className="flex items-center gap-2 text-xs">
-              <Checkbox checked={stopOnError} onCheckedChange={(v) => setStopOnError(Boolean(v))} />
-              Stop at the first bad row
-            </label>
-            <label className="flex items-center gap-2 text-xs text-destructive">
-              <Checkbox checked={truncate} onCheckedChange={(v) => setTruncate(Boolean(v))} />
-              Replace existing contents
-            </label>
-            {documentStore && (
-              <p className="col-span-full text-[11px] text-muted-foreground">
-                A standalone MongoDB server has no transaction to wrap this in, so a failure partway
-                leaves what already landed in place. The result below says exactly how much that
-                was.
-              </p>
-            )}
-          </div>
-
-          {result && (
-            <div className="space-y-1">
-              <p className="text-xs">
-                <b>{result.inserted}</b> inserted
-                {result.failed > 0 && (
-                  <>
-                    , <b className="text-destructive">{result.failed}</b> failed
-                  </>
-                )}
-              </p>
-              {result.errors.length > 0 && (
-                <Well className="max-h-28 font-mono text-[11px]">
-                  {result.errors.join("\n")}
-                  {result.errorsTruncated && "\n… more not shown"}
-                </Well>
-              )}
-            </div>
-          )}
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={<>Import into {table}</>}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Close
           </Button>
-          <Button onClick={submit} disabled={!data.trim() || busy}>
-            {busy ? <Spinner /> : <CloudUpload className="size-4" />}
+          <Button onClick={submit} disabled={!data.trim() || busy} pending={busy}>
+            <CloudUpload className="size-4" />
             Import
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-3">
+        <Tabs value={format} onValueChange={(v) => setFormat(v as "csv" | "json")}>
+          <TabsList>
+            <TabsTrigger value="csv">CSV</TabsTrigger>
+            <TabsTrigger value="json">JSON</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="import-data">Data</Label>
+            <label className="cursor-pointer text-xs text-primary hover:underline">
+              Choose a file
+              <input
+                type="file"
+                accept=".csv,.json,.txt,text/csv,application/json"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])}
+              />
+            </label>
+          </div>
+          <Textarea
+            id="import-data"
+            value={data}
+            onChange={(e) => setData(e.target.value)}
+            className="h-40 font-mono text-xs"
+            placeholder={
+              format === "csv"
+                ? detail?.columns.map((c) => c.name).join(",") || "id,name"
+                : '[{"name": "…"}]'
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Sent in one request, so this tops out around 4 MB. A larger load belongs in the
+            engine&apos;s own bulk loader.
+            {documentStore &&
+              " JSON may be an array or one document per line, which is what mongoexport writes."}
+          </p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          {format === "csv" && (
+            <>
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox checked={hasHeader} onCheckedChange={(v) => setHasHeader(Boolean(v))} />
+                First row is a header
+              </label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="null-as" className="shrink-0 text-xs">
+                  NULL is
+                </Label>
+                <Input
+                  id="null-as"
+                  value={nullAs}
+                  onChange={(e) => setNullAs(e.target.value)}
+                  className="h-7 font-mono text-xs"
+                  placeholder="(empty string)"
+                />
+              </div>
+            </>
+          )}
+          <label className="flex items-center gap-2 text-xs">
+            <Checkbox checked={stopOnError} onCheckedChange={(v) => setStopOnError(Boolean(v))} />
+            Stop at the first bad row
+          </label>
+          <label className="flex items-center gap-2 text-xs text-destructive">
+            <Checkbox checked={truncate} onCheckedChange={(v) => setTruncate(Boolean(v))} />
+            Replace existing contents
+          </label>
+          {documentStore && (
+            <p className="col-span-full text-hint text-muted-foreground">
+              A standalone MongoDB server has no transaction to wrap this in, so a failure partway
+              leaves what already landed in place. The result below says exactly how much that was.
+            </p>
+          )}
+        </div>
+
+        {result && (
+          <div className="space-y-1">
+            <p className="text-xs">
+              <b>{result.inserted}</b> inserted
+              {result.failed > 0 && (
+                <>
+                  , <b className="text-destructive">{result.failed}</b> failed
+                </>
+              )}
+            </p>
+            {result.errors.length > 0 && (
+              <Well className="max-h-28 font-mono text-hint">
+                {result.errors.join("\n")}
+                {result.errorsTruncated && "\n… more not shown"}
+              </Well>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }

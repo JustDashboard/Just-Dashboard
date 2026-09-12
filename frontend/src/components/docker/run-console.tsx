@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
+import { Pane, PaneHeader } from "@/components/panel"
 
 /**
  * Watching a long command run, instead of waiting for one.
@@ -84,7 +85,10 @@ export function useRunConsole() {
     if (live.current !== "running") return
     setLines((prev) => [
       ...prev,
-      { stream: "stderr", text: "— connection lost, so this run was stopped. Nothing was retried." },
+      {
+        stream: "stderr",
+        text: "— connection lost, so this run was stopped. Nothing was retried.",
+      },
     ])
     settle("failed")
   }, [])
@@ -145,13 +149,8 @@ export function RunConsole({
   if (state === "idle") return null
 
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        className,
-      )}
-    >
-      <div className="flex items-center gap-2 border-b border-hairline bg-surface-header px-3 py-1.5">
+    <Pane className={cn("bg-surface-sunken", className)}>
+      <PaneHeader className="gap-2 px-3">
         {state === "running" && <Spinner className="size-3.5 text-muted-foreground" />}
         {state === "ok" && <CheckCircle className="size-3.5 text-success" />}
         {state === "failed" && <CrossCircle className="size-3.5 text-destructive" />}
@@ -168,7 +167,7 @@ export function RunConsole({
             Dismiss
           </Button>
         )}
-      </div>
+      </PaneHeader>
       <div
         ref={scrollRef}
         onScroll={() => {
@@ -176,7 +175,7 @@ export function RunConsole({
           if (!el) return
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
         }}
-        className="max-h-72 min-h-24 overflow-auto p-2.5 font-mono text-[11px] leading-relaxed"
+        className="max-h-72 min-h-24 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
       >
         {lines.length === 0 ? (
           <p className="text-muted-foreground">Starting…</p>
@@ -192,14 +191,12 @@ export function RunConsole({
                 line.stream === "stderr" && "text-warning",
               )}
             >
-              {line.service && (
-                <span className="mr-2 text-muted-foreground">{line.service} |</span>
-              )}
+              {line.service && <span className="mr-2 text-muted-foreground">{line.service} |</span>}
               {line.text}
             </div>
           ))
         )}
       </div>
-    </div>
+    </Pane>
   )
 }

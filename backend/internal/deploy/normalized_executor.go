@@ -57,6 +57,8 @@ type NormalizedStepExecutor struct {
 	proxy         ActivationProxy
 	workspaceRoot string
 	notifications *AutomationStore
+
+	certificates CertificateIssuer
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -173,6 +175,8 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.runReleaseTasks(ctx, execution, plan)
 	case StepBackupGate:
 		return e.backupGate(ctx, plan)
+	case StepProvisionCertificate:
+		return e.provisionCertificate(ctx, execution)
 	case StepStartCandidate:
 		return e.startCandidate(ctx, execution, plan)
 	case StepVerifyReadiness:
@@ -289,7 +293,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 		Configuration: &configuration,
 	}}
 	request := preflightObservationRequest(draft, configuration)
-	request.ExistingProxySite = fmt.Sprintf("just-dashboard-env-%d.conf", execution.Run.EnvironmentID)
+	request.ExistingProxySite = deploymentRouteName(execution.Run.EnvironmentID)
 	live, liveErr := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
 	if liveErr == nil {
 		runtime, runtimeErr := e.store.RuntimeForRelease(ctx, live.Release.ID)

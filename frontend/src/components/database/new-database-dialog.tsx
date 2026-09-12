@@ -10,14 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/state"
-import { cn } from "@/lib/utils"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Modal } from "@/components/modal"
+import { ChoiceCard } from "@/components/choice-card"
 
 /**
  * Making a database, which is the thing somebody on this page actually wants.
@@ -113,82 +107,12 @@ export function NewDatabaseDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New database</DialogTitle>
-        </DialogHeader>
-
-        {busy ? (
-          <div className="flex flex-col items-center gap-3 py-8 text-sm text-muted-foreground">
-            <Spinner className="size-6 text-primary" />
-            {busy}
-            <p className="text-[11px]">
-              It connects itself when it is ready. This can take a minute the first time, while the
-              image is pulled.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-2">
-              {options.data?.map((o) => (
-                <button
-                  key={o.engine}
-                  onClick={() => setEngine(o.engine)}
-                  className={cn(
-                    "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
-                    engine === o.engine
-                      ? "border-primary bg-primary/10"
-                      : "raised border-border bg-control hover:bg-control-hover",
-                  )}
-                >
-                  <span className="flex items-center gap-1.5 text-[13px] font-medium">
-                    <Database className="size-3.5 text-muted-foreground" />
-                    {o.label}
-                  </span>
-                  <span className="truncate font-mono text-[10px] text-muted-foreground">
-                    {o.image}
-                  </span>
-                </button>
-              ))}
-              {!options.data && <Spinner />}
-            </div>
-
-            {selected && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="newdb-name">Name</Label>
-                  <Input
-                    id="newdb-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={`jd-${selected.engine}`}
-                    className="font-mono text-xs"
-                  />
-                </div>
-                {selected.driver !== "redis" && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="newdb-database">Database</Label>
-                    <Input
-                      id="newdb-database"
-                      value={database}
-                      onChange={(e) => setDatabase(e.target.value)}
-                      placeholder="app"
-                      className="font-mono text-xs"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Runs on this server, published to localhost only, with a generated password you never
-              have to type. It appears in the picker as soon as it answers.
-            </p>
-          </div>
-        )}
-
-        <DialogFooter className="sm:justify-between">
+    <Modal
+      open={open}
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      title="New database"
+      footer={
+        <>
           {/* The manual form has not gone away, it has stopped being the
               default: a managed Postgres or a database on another machine is
               not a container here and cannot be detected. */}
@@ -214,8 +138,73 @@ export function NewDatabaseDialog({
               Create
             </Button>
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      {busy ? (
+        <div className="flex flex-col items-center gap-3 py-8 text-sm text-muted-foreground">
+          <Spinner className="size-6 text-primary" />
+          {busy}
+          <p className="text-hint">
+            It connects itself when it is ready. This can take a minute the first time, while the
+            image is pulled.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            {options.data?.map((o) => (
+              <ChoiceCard
+                key={o.engine}
+                selected={engine === o.engine}
+                onClick={() => setEngine(o.engine)}
+                className="min-h-0 gap-0.5"
+              >
+                <span className="flex items-center gap-1.5 text-body font-medium">
+                  <Database className="size-3.5 text-muted-foreground" />
+                  {o.label}
+                </span>
+                <span className="truncate font-mono text-micro text-muted-foreground">
+                  {o.image}
+                </span>
+              </ChoiceCard>
+            ))}
+            {!options.data && <Spinner />}
+          </div>
+
+          {selected && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="newdb-name">Name</Label>
+                <Input
+                  id="newdb-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={`jd-${selected.engine}`}
+                  className="font-mono text-xs"
+                />
+              </div>
+              {selected.driver !== "redis" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="newdb-database">Database</Label>
+                  <Input
+                    id="newdb-database"
+                    value={database}
+                    onChange={(e) => setDatabase(e.target.value)}
+                    placeholder="app"
+                    className="font-mono text-xs"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <p className="text-hint leading-relaxed text-muted-foreground">
+            Runs on this server, published to localhost only, with a generated password you never
+            have to type. It appears in the picker as soon as it answers.
+          </p>
+        </div>
+      )}
+    </Modal>
   )
 }

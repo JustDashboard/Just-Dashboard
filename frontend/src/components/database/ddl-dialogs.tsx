@@ -7,20 +7,14 @@ import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import type { DbDriverInfo, DbNewColumn, DbTableDetail } from "@/lib/types"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/state"
+
 import { Well } from "@/components/panel"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Modal } from "@/components/modal"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command,
@@ -96,150 +90,147 @@ export function CreateTableDialog({
   const valid = table.trim() !== "" && columns.some((c) => c.name && c.type)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Create table</DialogTitle>
-          <DialogDescription>
-            In <span className="font-mono text-xs">{schema || "the default schema"}</span>. The
-            statement this builds is shown below before anything runs.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="ddl-table">Table name</Label>
-            <Input
-              id="ddl-table"
-              value={table}
-              onChange={(e) => setTable(e.target.value)}
-              className="font-mono text-xs"
-              autoFocus
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Columns</Label>
-              <span className="text-[11px] text-muted-foreground">
-                {plural(columns.filter((c) => c.name && c.type).length, "column")} defined
-              </span>
-            </div>
-
-            {/* A header row, because four unlabelled fields in a line is a
-                puzzle. The widths are shared with the rows below through the
-                same grid template, so they stay aligned as the dialog resizes. */}
-            <div className={cn(COLUMN_GRID, "px-1 pb-1")}>
-              <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                Name
-              </span>
-              <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                Type
-              </span>
-              <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                Default
-              </span>
-              <span className="text-center text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                Key
-              </span>
-              {/* No header over the remove button: a column of one icon needs
-                  no title, and giving it one made "Key" look like it belonged
-                  to the wrong pair of controls. */}
-              <span className="w-8" />
-            </div>
-
-            <div className={cn("max-h-64 space-y-1.5 overflow-y-auto", ringSafeScroll)}>
-              {columns.map((c, i) => (
-                <div key={i} className={COLUMN_GRID}>
-                  <Input
-                    placeholder="id"
-                    value={c.name}
-                    onChange={(e) => setCol(i, { name: e.target.value })}
-                    className="h-8 font-mono text-xs"
-                  />
-                  <TypePicker
-                    types={types}
-                    value={c.type}
-                    onChange={(v) => setCol(i, { type: v })}
-                  />
-                  <Input
-                    placeholder="—"
-                    value={c.default ?? ""}
-                    onChange={(e) => setCol(i, { default: e.target.value })}
-                    className="h-8 font-mono text-xs"
-                    title="A SQL expression, quoted if it is a string: 'none', 0, now()"
-                  />
-                  {/* Toggles rather than checkboxes with two-letter labels:
-                      "pk" and "req" are abbreviations of abbreviations, and at
-                      this size the box and its word were two targets to hit. */}
-                  <div className="flex items-center gap-1">
-                    <FlagToggle
-                      on={Boolean(c.primaryKey)}
-                      onClick={() => setCol(i, { primaryKey: !c.primaryKey })}
-                      title="Primary key"
-                    >
-                      <Key className="size-3" />
-                      PK
-                    </FlagToggle>
-                    <FlagToggle
-                      on={Boolean(c.notNull)}
-                      onClick={() => setCol(i, { notNull: !c.notNull })}
-                      title="Not null — every row must have a value"
-                    >
-                      <Star className="size-3" />
-                      Req
-                    </FlagToggle>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 text-muted-foreground hover:text-destructive"
-                    disabled={columns.length === 1}
-                    onClick={() => setColumns((cs) => cs.filter((_, j) => j !== i))}
-                    title={columns.length === 1 ? "A table needs a column" : "Remove this column"}
-                  >
-                    <Trash className="size-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setColumns((cs) => [...cs, { ...EMPTY_COLUMN }])}
-            >
-              <Plus className="size-3.5" />
-              Add column
-            </Button>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-[11px] tracking-wide text-muted-foreground uppercase">
-              Statement
-            </Label>
-            {/* whitespace-pre-wrap, because the statement's shape — one column
-                per line — is most of what makes it readable at a glance. */}
-            <Well className="max-h-32 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-              {valid ? (
-                previewCreate(schema, table, columns)
-              ) : (
-                <span className="text-muted-foreground italic">
-                  Name the table and give at least one column a name and a type.
-                </span>
-              )}
-            </Well>
-          </div>
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="xl"
+      title="Create table"
+      description={
+        <>
+          In <span className="font-mono text-xs">{schema || "the default schema"}</span>. The
+          statement this builds is shown below before anything runs.
+        </>
+      }
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!valid || busy}>
-            {busy && <Spinner />}
+          <Button onClick={submit} disabled={!valid || busy} pending={busy}>
             Create table
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="ddl-table">Table name</Label>
+          <Input
+            id="ddl-table"
+            value={table}
+            onChange={(e) => setTable(e.target.value)}
+            className="font-mono text-xs"
+            autoFocus
+          />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Columns</Label>
+            <span className="text-hint text-muted-foreground">
+              {plural(columns.filter((c) => c.name && c.type).length, "column")} defined
+            </span>
+          </div>
+
+          {/* A header row, because four unlabelled fields in a line is a
+                puzzle. The widths are shared with the rows below through the
+                same grid template, so they stay aligned as the dialog resizes. */}
+          <div className={cn(COLUMN_GRID, "px-1 pb-1")}>
+            <span className="text-micro font-medium tracking-wide text-muted-foreground uppercase">
+              Name
+            </span>
+            <span className="text-micro font-medium tracking-wide text-muted-foreground uppercase">
+              Type
+            </span>
+            <span className="text-micro font-medium tracking-wide text-muted-foreground uppercase">
+              Default
+            </span>
+            <span className="text-center text-micro font-medium tracking-wide text-muted-foreground uppercase">
+              Key
+            </span>
+            {/* No header over the remove button: a column of one icon needs
+                  no title, and giving it one made "Key" look like it belonged
+                  to the wrong pair of controls. */}
+            <span className="w-8" />
+          </div>
+
+          <div className={cn("max-h-64 space-y-1.5 overflow-y-auto", ringSafeScroll)}>
+            {columns.map((c, i) => (
+              <div key={i} className={COLUMN_GRID}>
+                <Input
+                  placeholder="id"
+                  value={c.name}
+                  onChange={(e) => setCol(i, { name: e.target.value })}
+                  className="h-8 font-mono text-xs"
+                />
+                <TypePicker types={types} value={c.type} onChange={(v) => setCol(i, { type: v })} />
+                <Input
+                  placeholder="—"
+                  value={c.default ?? ""}
+                  onChange={(e) => setCol(i, { default: e.target.value })}
+                  className="h-8 font-mono text-xs"
+                  title="A SQL expression, quoted if it is a string: 'none', 0, now()"
+                />
+                {/* Toggles rather than checkboxes with two-letter labels:
+                      "pk" and "req" are abbreviations of abbreviations, and at
+                      this size the box and its word were two targets to hit. */}
+                <div className="flex items-center gap-1">
+                  <FlagToggle
+                    on={Boolean(c.primaryKey)}
+                    onClick={() => setCol(i, { primaryKey: !c.primaryKey })}
+                    title="Primary key"
+                  >
+                    <Key className="size-3" />
+                    PK
+                  </FlagToggle>
+                  <FlagToggle
+                    on={Boolean(c.notNull)}
+                    onClick={() => setCol(i, { notNull: !c.notNull })}
+                    title="Not null — every row must have a value"
+                  >
+                    <Star className="size-3" />
+                    Req
+                  </FlagToggle>
+                </div>
+                <IconAction
+                  label={columns.length === 1 ? "A table needs a column" : "Remove this column"}
+                  className="text-muted-foreground hover:text-destructive"
+                  disabled={columns.length === 1}
+                  onClick={() => setColumns((cs) => cs.filter((_, j) => j !== i))}
+                >
+                  <Trash />
+                </IconAction>
+              </div>
+            ))}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setColumns((cs) => [...cs, { ...EMPTY_COLUMN }])}
+          >
+            <Plus className="size-3.5" />
+            Add column
+          </Button>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-hint tracking-wide text-muted-foreground uppercase">
+            Statement
+          </Label>
+          {/* whitespace-pre-wrap, because the statement's shape — one column
+                per line — is most of what makes it readable at a glance. */}
+          <Well className="max-h-32 overflow-auto font-mono text-hint leading-relaxed whitespace-pre-wrap">
+            {valid ? (
+              previewCreate(schema, table, columns)
+            ) : (
+              <span className="text-muted-foreground italic">
+                Name the table and give at least one column a name and a type.
+              </span>
+            )}
+          </Well>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -273,7 +264,7 @@ function TypePicker({
         onChange={(e) => onChange(e.target.value)}
         placeholder="text"
         aria-label="Column type"
-        className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
+        className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs focus-ring placeholder:text-muted-foreground"
       />
       {types.length > 0 && (
         <Popover open={open} onOpenChange={setOpen}>
@@ -376,63 +367,64 @@ export function AddColumnDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add column to {table}</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label>Name</Label>
-            <Input
-              value={col.name}
-              onChange={(e) => setCol({ ...col, name: e.target.value })}
-              className="font-mono text-xs"
-              autoFocus
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Type</Label>
-            <TypePicker
-              types={info?.columnTypes ?? []}
-              value={col.type}
-              onChange={(v) => setCol({ ...col, type: v })}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Default</Label>
-            <Input
-              value={col.default ?? ""}
-              onChange={(e) => setCol({ ...col, default: e.target.value })}
-              className="font-mono text-xs"
-              placeholder="literal, e.g. 0 or 'draft'"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <Checkbox
-              checked={col.notNull}
-              onCheckedChange={(v) => setCol({ ...col, notNull: Boolean(v) })}
-            />
-            Required (NOT NULL)
-          </label>
-          {col.notNull && !col.default && (
-            <p className="text-xs text-destructive">
-              A required column added to a table with existing rows needs a default, or every
-              existing row would violate it.
-            </p>
-          )}
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      title={<>Add column to {table}</>}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!col.name || !col.type || busy}>
-            {busy && <Spinner />}
+          <Button onClick={submit} disabled={!col.name || !col.type || busy} pending={busy}>
             Add column
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-3">
+        <div className="space-y-1.5">
+          <Label>Name</Label>
+          <Input
+            value={col.name}
+            onChange={(e) => setCol({ ...col, name: e.target.value })}
+            className="font-mono text-xs"
+            autoFocus
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Type</Label>
+          <TypePicker
+            types={info?.columnTypes ?? []}
+            value={col.type}
+            onChange={(v) => setCol({ ...col, type: v })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Default</Label>
+          <Input
+            value={col.default ?? ""}
+            onChange={(e) => setCol({ ...col, default: e.target.value })}
+            className="font-mono text-xs"
+            placeholder="literal, e.g. 0 or 'draft'"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={col.notNull}
+            onCheckedChange={(v) => setCol({ ...col, notNull: Boolean(v) })}
+          />
+          Required (NOT NULL)
+        </label>
+        {col.notNull && !col.default && (
+          <p className="text-xs text-destructive">
+            A required column added to a table with existing rows needs a default, or every existing
+            row would violate it.
+          </p>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -484,65 +476,66 @@ export function CreateIndexDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create index on {table}</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label>Index name</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="font-mono text-xs"
-              placeholder={`idx_${table}_…`}
-              autoFocus
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Columns — order matters</Label>
-            <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-md border border-hairline p-1.5">
-              {detail?.columns.map((c) => (
-                <label
-                  key={c.name}
-                  className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-accent"
-                >
-                  <Checkbox
-                    checked={fields.includes(c.name)}
-                    onCheckedChange={() => toggle(c.name)}
-                  />
-                  <span className="font-mono">{c.name}</span>
-                  <span className="text-muted-foreground">{c.type.toLowerCase()}</span>
-                  {fields.includes(c.name) && (
-                    <span className="ml-auto text-[10px] text-primary">
-                      #{fields.indexOf(c.name) + 1}
-                    </span>
-                  )}
-                </label>
-              ))}
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <Checkbox checked={unique} onCheckedChange={(v) => setUnique(Boolean(v))} />
-            Unique
-          </label>
-          <p className="text-xs text-muted-foreground">
-            Building an index can lock or rewrite a large table. On a busy server, do it when you
-            can afford the write.
-          </p>
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      title={<>Create index on {table}</>}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!name || fields.length === 0 || busy}>
-            {busy && <Spinner />}
+          <Button onClick={submit} disabled={!name || fields.length === 0 || busy} pending={busy}>
             Create index
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-3">
+        <div className="space-y-1.5">
+          <Label>Index name</Label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="font-mono text-xs"
+            placeholder={`idx_${table}_…`}
+            autoFocus
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Columns — order matters</Label>
+          <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-md border border-hairline p-1.5">
+            {detail?.columns.map((c) => (
+              <label
+                key={c.name}
+                className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-xs hover:bg-accent"
+              >
+                <Checkbox
+                  checked={fields.includes(c.name)}
+                  onCheckedChange={() => toggle(c.name)}
+                />
+                <span className="font-mono">{c.name}</span>
+                <span className="text-muted-foreground">{c.type.toLowerCase()}</span>
+                {fields.includes(c.name) && (
+                  <span className="ml-auto text-micro text-primary">
+                    #{fields.indexOf(c.name) + 1}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox checked={unique} onCheckedChange={(v) => setUnique(Boolean(v))} />
+          Unique
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Building an index can lock or rewrite a large table. On a busy server, do it when you can
+          afford the write.
+        </p>
+      </div>
+    </Modal>
   )
 }
 
@@ -591,31 +584,32 @@ export function RenameDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Rename {kind}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-1.5">
-          <Label>New name for {current}</Label>
-          <Input
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="font-mono text-xs"
-            autoFocus
-          />
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      title={<>Rename {kind}</>}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!to || to === current || busy}>
-            {busy && <Spinner />}
+          <Button onClick={submit} disabled={!to || to === current || busy} pending={busy}>
             Rename
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-1.5">
+        <Label>New name for {current}</Label>
+        <Input
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          className="font-mono text-xs"
+          autoFocus
+        />
+      </div>
+    </Modal>
   )
 }
 
@@ -651,10 +645,10 @@ function FlagToggle({
       title={title}
       aria-pressed={on}
       className={cn(
-        "inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[10px] font-medium tracking-wide uppercase transition-colors",
+        "inline-flex h-8 items-center gap-1 rounded-md border px-2 text-micro font-medium tracking-wide uppercase transition-colors",
         on
-          ? "border-primary bg-primary/15 text-primary"
-          : "raised border-border bg-control text-muted-foreground hover:bg-control-hover",
+          ? "border-primary bg-plot-primary text-primary"
+          : "border-border bg-control text-muted-foreground hover:bg-control-hover",
       )}
     >
       {children}

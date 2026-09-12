@@ -22,14 +22,15 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
-import { Page, PageHeader, Metric, MetricStrip, Section } from "@/components/page"
+import { Page, PageHeader, PageState, Metric, MetricStrip, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatTile, utilisationTone } from "@/components/stat-tile"
-import { HealthBadge, HealthPanel } from "@/components/metrics/health-panel"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { utilisationTone } from "@/components/meter"
+import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { eventColor } from "@/components/metrics/metric-chart"
-import { ErrorState } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+
+import { Tag } from "@/components/tag"
 import { Skeleton } from "@/components/ui/skeleton"
 
 // A fixed hour, not the metrics page's draggable window: the landing page is a
@@ -52,26 +53,25 @@ export default function OverviewPage() {
     }
   }, [recorded.history])
 
-  if (error && !snapshot) {
+  // The hostname is the page's title once it is known and "Overview" until
+  // then, so the heading does not change under the reader — see `PageState`.
+  if (!snapshot || !host || (error && !snapshot)) {
     return (
-      <Page>
-        <PageHeader eyebrow="Server" title="Overview" />
-        <ErrorState error={new Error(error)} />
-      </Page>
-    )
-  }
-
-  if (!snapshot || !host) {
-    return (
-      <Page>
-        <PageHeader eyebrow="Server" title="Overview" description="Waiting for the first frame…" />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[7.5rem] rounded-xl" />
-          ))}
-        </div>
-        <Skeleton className="h-[12rem] rounded-xl" />
-      </Page>
+      <PageState
+        eyebrow="Server"
+        title={host?.hostname ?? "Overview"}
+        error={error && !snapshot ? new Error(error) : undefined}
+        skeleton={
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-30 rounded-xl" />
+              ))}
+            </div>
+            <Skeleton className="h-48 rounded-xl" />
+          </>
+        }
+      />
     )
   }
 
@@ -90,23 +90,6 @@ export default function OverviewPage() {
       <PageHeader
         eyebrow="Server"
         title={host.hostname}
-        description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>
-              {host.platform} {host.platformVersion}
-            </span>
-            <Dot />
-            <span>kernel {host.kernelVersion}</span>
-            <Dot />
-            <span>{host.kernelArch}</span>
-            {host.virtualization && (
-              <Badge variant="outline" className="font-normal">
-                {host.virtualization}
-              </Badge>
-            )}
-            {health && <HealthBadge status={health.status} />}
-          </span>
-        }
         actions={
           <MetricStrip>
             <Metric label="Uptime" value={duration(snapshot.uptimeSeconds)} />
@@ -116,7 +99,23 @@ export default function OverviewPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
+      {/* What this machine is. This was the page header's description, and it
+          is the one place where that slot held data rather than a caption —
+          the platform, the kernel and the architecture are the subject of the
+          page, not an explanation of it. So it stays, as its own row. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
+        <span>
+          {host.platform} {host.platformVersion}
+        </span>
+        <Dot />
+        <span>kernel {host.kernelVersion}</span>
+        <Dot />
+        <span>{host.kernelArch}</span>
+        {host.virtualization && <Tag>{host.virtualization}</Tag>}
+        {health && <HealthVerdict status={health.status} />}
+      </div>
+
+      <StatGrid columns={4}>
         <StatTile
           label="CPU"
           icon={Cpu}
@@ -130,11 +129,11 @@ export default function OverviewPage() {
           }
           trailing={
             modes && modes.steal >= 1 ? (
-              <span className="numeric text-[11px] font-medium text-destructive">
+              <span className="numeric text-hint font-medium text-destructive">
                 {percent(modes.steal, 0)} steal
               </span>
             ) : (
-              <span className="text-[11px] text-muted-foreground">{cores} cores</span>
+              <span className="text-hint text-muted-foreground">{cores} cores</span>
             )
           }
         />
@@ -145,7 +144,7 @@ export default function OverviewPage() {
           meter={100 - availPercent}
           tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
           hint={`${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
-          trailing={<span className="text-[11px] text-muted-foreground">available</span>}
+          trailing={<span className="text-hint text-muted-foreground">available</span>}
         />
         <StatTile
           label="Load"
@@ -155,7 +154,7 @@ export default function OverviewPage() {
           tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
           hint={`${snapshot.cpu.loadAvg5.toFixed(2)} · ${snapshot.cpu.loadAvg15.toFixed(2)} over 5 and 15 min`}
           trailing={
-            <span className="numeric text-[11px] text-muted-foreground">
+            <span className="numeric text-hint text-muted-foreground">
               {(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core
             </span>
           }
@@ -165,9 +164,9 @@ export default function OverviewPage() {
           icon={ChartActivity}
           value={rate(throughput.rx)}
           hint={`${rate(throughput.tx)} out · ${snapshot.sockets?.tcpInUse ?? 0} TCP sockets`}
-          trailing={<span className="text-[11px] text-muted-foreground">in</span>}
+          trailing={<span className="text-hint text-muted-foreground">in</span>}
         />
-      </div>
+      </StatGrid>
 
       <HealthPanel health={health} loading={healthLoading} />
 
@@ -254,7 +253,7 @@ function TrendsPanel({
         actions={
           <Link
             href="/metrics"
-            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
           >
             Metrics <ArrowRight className="size-3" />
           </Link>
@@ -265,10 +264,10 @@ function TrendsPanel({
           <div key={item.label} className="min-w-0 space-y-1.5">
             <div className="flex min-w-0 items-baseline justify-between gap-2">
               <span className="eyebrow truncate">{item.label}</span>
-              <span className="numeric shrink-0 text-[13px] font-medium">{item.value}</span>
+              <span className="numeric shrink-0 text-body font-medium">{item.value}</span>
             </div>
             {disabled || item.data.length < 2 ? (
-              <div className="flex h-8 items-center text-[11px] text-muted-foreground">
+              <div className="flex h-8 items-center text-hint text-muted-foreground">
                 {disabled ? "History off" : "Collecting…"}
               </div>
             ) : (
@@ -301,7 +300,7 @@ function ActivityPanel({ events }: { events: MetricEvent[] }) {
       <PanelHeader icon={CloudUpload} title="Recent activity" />
       <PanelBody className={newestFirst.length === 0 ? undefined : "max-h-[15rem] overflow-y-auto"}>
         {newestFirst.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">Nothing in the last hour.</p>
+          <p className="text-body text-muted-foreground">Nothing in the last hour.</p>
         ) : (
           <ol className="space-y-2.5">
             {newestFirst.map((event, i) => (
@@ -313,12 +312,12 @@ function ActivityPanel({ events }: { events: MetricEvent[] }) {
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-baseline justify-between gap-2">
-                    <span className="truncate text-[13px]">{event.title}</span>
-                    <span className="numeric shrink-0 text-[11px] text-muted-foreground">
+                    <span className="truncate text-body">{event.title}</span>
+                    <span className="numeric shrink-0 text-hint text-muted-foreground">
                       {clock(event.ts)}
                     </span>
                   </div>
-                  <p className="truncate text-[11px] text-muted-foreground">
+                  <p className="truncate text-hint text-muted-foreground">
                     {relativeTime(event.ts)}
                     {event.detail ? ` · ${event.detail}` : ""}
                   </p>
@@ -370,27 +369,27 @@ function ServiceCard({
 }) {
   return (
     <Link href={href} className="group block min-w-0">
-      <Panel className="h-full transition-colors group-hover:border-primary/30 group-hover:bg-[var(--row-hover)]">
+      <Panel className="h-full transition-colors group-hover:border-rule-brand group-hover:bg-row-hover">
         <PanelBody className="flex flex-col gap-3">
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/12 text-primary">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-brand">
                 <Icon className="size-3.5" />
               </span>
-              <span className="truncate text-[13px] font-medium">{title}</span>
+              <span className="truncate text-body font-medium">{title}</span>
             </div>
             <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
           </div>
           {loading ? (
             <Skeleton className="h-6 w-24" />
           ) : unavailable ? (
-            <p className="text-[13px] text-muted-foreground">Not available on this host</p>
+            <p className="text-body text-muted-foreground">Not available on this host</p>
           ) : value == null ? (
-            <p className="text-[13px] text-muted-foreground">Unreachable</p>
+            <p className="text-body text-muted-foreground">Unreachable</p>
           ) : (
             <div className="min-w-0">
               <p className="numeric truncate text-lg leading-tight font-semibold">{value}</p>
-              {hint && <p className="truncate text-[11px] text-muted-foreground">{hint}</p>}
+              {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
             </div>
           )}
         </PanelBody>

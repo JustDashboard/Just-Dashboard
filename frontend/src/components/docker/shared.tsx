@@ -2,7 +2,7 @@
 
 import { External } from "@/components/icons"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 
 /**
  * The small things every Docker tab needs: the confirmation opener handed down
@@ -30,21 +30,14 @@ export function PortLink({ ip, port, target }: { ip?: string; port: number; targ
   const label = `${port} → ${target}`
   const host = !ip || ip === "0.0.0.0" || ip === "::" ? "" : ip
   if (!host) {
-    return (
-      <Badge variant="outline" className="font-mono text-[10px] font-normal">
-        {label}
-      </Badge>
-    )
+    return <Tag mono>{label}</Tag>
   }
   return (
-    <a
-      href={`http://${host}:${port}`}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10px] transition-colors hover:border-primary/40 hover:text-primary"
-    >
-      {label}
-      <External className="size-2.5" />
-    </a>
+    <Tag mono asChild className="transition-colors hover:border-rule-primary hover:text-primary">
+      <a href={`http://${host}:${port}`} target="_blank" rel="noreferrer">
+        {label}
+        <External className="size-2.5" />
+      </a>
+    </Tag>
   )
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Cross, RotateCounterClockwise, Warning } from "@/components/icons"
+import { Modal } from "@/components/modal"
 import { cn } from "@/lib/utils"
 import {
   SHORTCUTS,
@@ -16,14 +17,7 @@ import {
   useKeymap,
 } from "@/lib/terminal-keymap"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { rowReveal } from "@/components/icon-action"
 
 /**
  * The shortcut sheet, which is also where they are changed.
@@ -87,108 +81,19 @@ export function ShortcutsDialog({
   }, [recording, map]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Dialog
+    <Modal
       open={open}
       onOpenChange={(next) => {
         setRecording(null)
         setRejected(null)
         onOpenChange(next)
       }}
-    >
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>
-            Click a chord to rebind it. Ctrl+Alt and Ctrl+Shift are the two families neither the
-            browser nor the shell has a use for.
-          </DialogDescription>
-        </DialogHeader>
-
-        {rejected && (
-          <p className="flex items-center gap-2 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
-            <Warning className="size-3.5 shrink-0" />
-            {rejected}
-          </p>
-        )}
-
-        <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
-          {groups.map(([group, specs]) => (
-            <section key={group}>
-              <p className="eyebrow mb-1.5">{group}</p>
-              <div className="space-y-0.5">
-                {specs.map((spec) => {
-                  const chord = map[spec.action]
-                  const isRecording = recording === spec.action
-                  return (
-                    <div
-                      key={spec.action}
-                      className="group flex items-center gap-2 rounded-md px-1.5 py-1 text-xs transition-colors hover:bg-[var(--row-hover)]"
-                    >
-                      <span className="min-w-0 flex-1 truncate">{spec.label}</span>
-                      {isCustomised(spec.action) && !isRecording && (
-                        <button
-                          className="opacity-0 transition-opacity group-hover:opacity-100"
-                          title="Back to the default"
-                          onClick={() => resetShortcut(spec.action)}
-                        >
-                          <RotateCounterClockwise className="size-3 text-muted-foreground hover:text-foreground" />
-                        </button>
-                      )}
-                      {chord && !isRecording && (
-                        <button
-                          className="opacity-0 transition-opacity group-hover:opacity-100"
-                          title="Unbind"
-                          onClick={() => bindShortcut(spec.action, "")}
-                        >
-                          <Cross className="size-3 text-muted-foreground hover:text-destructive" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setRejected(null)
-                          setRecording(isRecording ? null : spec.action)
-                        }}
-                        className={cn(
-                          "min-w-28 shrink-0 rounded-md border px-2 py-0.5 text-center font-mono text-[11px] transition-colors",
-                          isRecording
-                            ? "animate-pulse border-primary bg-primary/15 text-primary"
-                            : chord
-                              ? "raised border-hairline bg-control text-foreground hover:border-primary/50"
-                              : "border-dashed border-hairline text-muted-foreground hover:border-primary/50",
-                        )}
-                      >
-                        {isRecording ? "press a chord" : formatChord(chord)}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        {/* The familiar terminal conventions that are not rebindable. */}
-        <section className="rounded-md border border-hairline bg-surface-sunken p-2.5">
-          <p className="eyebrow mb-1.5">Mouse &amp; clipboard</p>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-            {[
-              ["Wheel", "Scroll back through the session's history"],
-              ["Click", "Focus the terminal"],
-              ["Drag", "Select text"],
-              ["Ctrl + C", "Copy the selection — or interrupt, when nothing is selected"],
-              ["Ctrl + V", "Paste"],
-              ["Middle click", "Paste"],
-              ["Ctrl + wheel", "Text size"],
-            ].map(([keys, what]) => (
-              <div key={keys} className="contents">
-                <dt className="font-mono text-[11px] whitespace-nowrap text-foreground">{keys}</dt>
-                <dd className="text-muted-foreground">{what}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-
-        <DialogFooter className="sm:justify-between">
+      size="lg"
+      title="Keyboard shortcuts"
+      description="Click a chord to rebind it. Ctrl+Alt and Ctrl+Shift are the two families neither the
+            browser nor the shell has a use for."
+      footer={
+        <>
           <Button size="sm" variant="ghost" onClick={() => resetAllShortcuts()}>
             <RotateCounterClockwise className="size-3.5" />
             Reset all
@@ -196,8 +101,92 @@ export function ShortcutsDialog({
           <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
             Done
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      {rejected && (
+        <p className="flex items-center gap-2 rounded-md border border-rule-warning bg-wash-warning px-2.5 py-1.5 text-xs text-warning">
+          <Warning className="size-3.5 shrink-0" />
+          {rejected}
+        </p>
+      )}
+
+      <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
+        {groups.map(([group, specs]) => (
+          <section key={group}>
+            <p className="eyebrow mb-1.5">{group}</p>
+            <div className="space-y-0.5">
+              {specs.map((spec) => {
+                const chord = map[spec.action]
+                const isRecording = recording === spec.action
+                return (
+                  <div
+                    key={spec.action}
+                    className="group flex items-center gap-2 rounded-md px-1.5 py-1 text-xs transition-colors hover:bg-row-hover"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{spec.label}</span>
+                    {isCustomised(spec.action) && !isRecording && (
+                      <button
+                        className={rowReveal()}
+                        title="Back to the default"
+                        onClick={() => resetShortcut(spec.action)}
+                      >
+                        <RotateCounterClockwise className="size-3 text-muted-foreground hover:text-foreground" />
+                      </button>
+                    )}
+                    {chord && !isRecording && (
+                      <button
+                        className={rowReveal()}
+                        title="Unbind"
+                        onClick={() => bindShortcut(spec.action, "")}
+                      >
+                        <Cross className="size-3 text-muted-foreground hover:text-destructive" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setRejected(null)
+                        setRecording(isRecording ? null : spec.action)
+                      }}
+                      className={cn(
+                        "min-w-28 shrink-0 rounded-md border px-2 py-0.5 text-center font-mono text-hint transition-colors",
+                        isRecording
+                          ? "animate-pulse border-primary bg-plot-primary text-primary"
+                          : chord
+                            ? "border-hairline bg-control text-foreground hover:border-rule-primary"
+                            : "border-dashed border-hairline text-muted-foreground hover:border-rule-primary",
+                      )}
+                    >
+                      {isRecording ? "press a chord" : formatChord(chord)}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {/* The familiar terminal conventions that are not rebindable. */}
+      <section className="rounded-md border border-hairline bg-surface-sunken p-2.5">
+        <p className="eyebrow mb-1.5">Mouse &amp; clipboard</p>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+          {[
+            ["Wheel", "Scroll back through the session's history"],
+            ["Click", "Focus the terminal"],
+            ["Drag", "Select text"],
+            ["Ctrl + C", "Copy the selection — or interrupt, when nothing is selected"],
+            ["Ctrl + V", "Paste"],
+            ["Middle click", "Paste"],
+            ["Ctrl + wheel", "Text size"],
+          ].map(([keys, what]) => (
+            <div key={keys} className="contents">
+              <dt className="font-mono text-hint whitespace-nowrap text-foreground">{keys}</dt>
+              <dd className="text-muted-foreground">{what}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </Modal>
   )
 }

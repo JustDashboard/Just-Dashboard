@@ -1,0 +1,43 @@
+{
+  "id": "nginx-static",
+  "version": "1.0.0",
+  "name": "Nginx static site",
+  "category": "http",
+  "profile": "web",
+  "description": "Serves a directory of files over HTTP behind the dashboard's reverse proxy. The usual first thing a new server runs.",
+  "iconId": "globe",
+  "docsUrl": "https://nginx.org/en/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "BSD-2-Clause",
+    "upstreamUrl": "https://hub.docker.com/_/nginx",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "nginx:1.27-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "description": "The hostname this site answers on. The dashboard generates the proxy site and can issue its certificate.",
+      "advanced": false
+    }
+  ],
+  "ports": [
+    { "name": "http", "internal": 80, "protocol": "tcp", "purpose": "HTTP requests from the reverse proxy", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "site", "target": "/usr/share/nginx/html", "purpose": "The files this site serves", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 128, "minMemoryMb": 32 },
+  "checks": [
+    { "name": "Serves the site root", "kind": "http", "phase": "readiness", "required": true, "path": "/", "timeoutSeconds": 20 }
+  ],
+  "operations": {
+    "stop": [{ "kind": "stop_signal", "signal": "SIGQUIT" }]
+  },
+  "update": { "detector": "registry", "notes": "Nginx stable tags move within a minor series for security fixes." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "domain": "site.example.test" }, "digest": "sha256:f43dfbf18908980238aece279bf6a432cb4378e65d15a40c29d9f09e34589523" }]
+}

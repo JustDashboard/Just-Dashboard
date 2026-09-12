@@ -579,7 +579,7 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 		tls = tls || domain.HTTPS
 	}
 	return proxysvc.DeploymentRoute{
-		Name: fmt.Sprintf("just-dashboard-env-%d.conf", environmentID), Domains: names,
+		Name: deploymentRouteName(environmentID), Domains: names,
 		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
 		TLS:      tls, ForceHTTPS: tls,
 	}
@@ -734,7 +734,7 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 		if remover, ok := e.proxy.(interface {
 			RemoveDeploymentRoute(context.Context, string) error
 		}); ok {
-			return remover.RemoveDeploymentRoute(cleanupCtx, fmt.Sprintf("just-dashboard-env-%d.conf", execution.Run.EnvironmentID))
+			return remover.RemoveDeploymentRoute(cleanupCtx, deploymentRouteName(execution.Run.EnvironmentID))
 		}
 		return nil
 	}
@@ -847,6 +847,17 @@ func (e *NormalizedStepExecutor) releaseSnapshot(
 func (e *NormalizedStepExecutor) decodeReleaseSnapshot(
 	release *ReleaseWithArtifacts,
 ) (*ReleaseWithArtifacts, runtimeReleaseSnapshot, error) {
+	snapshot, err := decodeReleaseRuntimeSnapshot(release)
+	if err != nil {
+		return nil, runtimeReleaseSnapshot{}, err
+	}
+	return release, snapshot, nil
+}
+
+// decodeReleaseRuntimeSnapshot is the only reader of the runtime_config
+// artifact. Operational summaries read the same verified snapshot the executor
+// acts on rather than parsing release metadata a second time.
+func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeReleaseSnapshot, error) {
 	for _, artifact := range release.Artifacts {
 		if artifact.Kind != ArtifactRuntimeConfig || artifact.State != "available" {
 			continue
@@ -856,19 +867,19 @@ func (e *NormalizedStepExecutor) decodeReleaseSnapshot(
 		}
 		if json.Unmarshal(artifact.Metadata, &envelope) != nil || len(envelope.Snapshot) == 0 ||
 			digestBytes(envelope.Snapshot) != artifact.Digest || artifact.Digest != release.Release.ConfigDigest {
-			return nil, runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot digest is inconsistent", ErrArtifactMissing)
+			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot digest is inconsistent", ErrArtifactMissing)
 		}
 		var snapshot runtimeReleaseSnapshot
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
-			return nil, runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
+			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
 		if snapshot.Plan.Strategy != release.Release.Strategy ||
 			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
-			return nil, runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
+			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
-		return release, snapshot, nil
+		return snapshot, nil
 	}
-	return nil, runtimeReleaseSnapshot{}, fmt.Errorf("%w: release runtime artifact is unavailable", ErrArtifactMissing)
+	return runtimeReleaseSnapshot{}, fmt.Errorf("%w: release runtime artifact is unavailable", ErrArtifactMissing)
 }
 
 func operationTargetReleaseID(run EngineRun) (int64, error) {

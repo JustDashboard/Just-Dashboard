@@ -1,13 +1,25 @@
 import { cn } from "@/lib/utils"
+import type { Tone } from "@/components/tone"
+import { Meter } from "@/components/meter"
 
 /**
  * A single headline figure.
  *
- * The order is fixed — name, number, meter, detail — because a row of these is
- * read as a table: the eye lands on one column of numbers, not on four cards
- * that each start somewhere different. The name is small caps above the
- * figure rather than beside it, which is what lets the figure be the largest
- * thing in the tile without the label competing for the same line.
+ * These used to be four-line cards: an eyebrow, a 24px figure on its own line,
+ * a meter, and a hint — `p-4`, `gap-2.5`, about 120px tall each. Four of them
+ * across the top of Overview spent a fifth of a laptop screen on four numbers,
+ * and the page's actual content started below the fold.
+ *
+ * The name and the figure share a line now. That was previously argued against
+ * — "the label would compete for the same line as the figure" — but the
+ * competition was a function of the figure being 24px. At `text-base` against a
+ * 10px eyebrow there is no contest, and putting them on one line is what lets a
+ * row of these scan horizontally as label → value the way a table does, which
+ * is what the original docstring said it wanted all along.
+ *
+ * The order is still fixed — name, number, meter, detail — because a row of
+ * them is read as a table: the eye lands on one column of numbers, not on four
+ * cards that each start somewhere different.
  */
 export function StatTile({
   label,
@@ -21,80 +33,97 @@ export function StatTile({
 }: {
   label: React.ReactNode
   value: React.ReactNode
+  /** One short line under the figure. Omit it — most of these did not earn it. */
   hint?: React.ReactNode
   icon?: React.ComponentType<{ className?: string }>
   /** 0–100. Draws the utilisation bar under the figure. */
   meter?: number
   tone?: Tone
-  /** A badge or delta chip pinned to the right of the figure. */
+  /** The figure's unit or a delta, set beside it rather than under it. */
   trailing?: React.ReactNode
   className?: string
 }) {
   return (
     <div
+      data-slot="stat-tile"
       className={cn(
-        "raised flex min-w-0 flex-col gap-2.5 rounded-xl border bg-card p-4 text-card-foreground",
+        "flex min-w-0 flex-col justify-center gap-1.5 rounded-lg border bg-card px-3 py-2.5 text-card-foreground",
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        {Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" />}
-        <p className="eyebrow truncate">{label}</p>
-      </div>
-
-      <div className="flex min-w-0 items-baseline justify-between gap-2">
-        <span
-          className={cn(
-            "numeric truncate text-2xl leading-none font-semibold",
-            tone === "warning" && "text-warning",
-            tone === "danger" && "text-destructive",
-            tone === "success" && "text-success",
-          )}
-        >
-          {value}
+      <div className="flex min-w-0 items-baseline justify-between gap-3">
+        <p className="eyebrow flex min-w-0 items-center gap-1.5 truncate">
+          {Icon && <Icon className="size-3 shrink-0 self-center" />}
+          <span className="truncate">{label}</span>
+        </p>
+        <span className="flex shrink-0 items-baseline gap-1.5">
+          <span
+            className={cn(
+              "numeric truncate text-base leading-none font-semibold",
+              tone === "warning" && "text-warning",
+              tone === "danger" && "text-destructive",
+              tone === "success" && "text-success",
+            )}
+          >
+            {value}
+          </span>
+          {trailing && <span className="text-hint text-muted-foreground">{trailing}</span>}
         </span>
-        {trailing && <span className="shrink-0">{trailing}</span>}
       </div>
 
       {meter !== undefined && (
-        <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className={cn("h-full rounded-full transition-[width]", meterFill(tone))}
-            style={{ width: `${Math.max(0, Math.min(meter, 100))}%` }}
-          />
-        </div>
+        <Meter
+          value={meter}
+          tone={tone}
+          size="thin"
+          label={typeof label === "string" ? label : undefined}
+        />
       )}
 
-      {hint && <p className="truncate text-[11px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
     </div>
   )
 }
 
-export type Tone = "default" | "success" | "warning" | "danger"
-
-function meterFill(tone: Tone) {
-  if (tone === "danger") return "bg-destructive"
-  if (tone === "warning") return "bg-warning"
-  if (tone === "success") return "bg-success"
-  return "bg-primary"
-}
-
 /**
- * Bar colours for a utilisation tone on a shadcn Progress, where the fill is a
- * child slot. A figure that has gone amber next to a bar that is still the
- * default blue reads as two different measurements.
+ * A run of `StatTile`s as one object rather than as a row of separate cards.
+ *
+ * Four bordered cards with a gap between them draw eight vertical edges to
+ * separate four numbers. One frame with a hairline between each cell draws
+ * three, reads as the table the tiles were always trying to be, and saves the
+ * gap as well. The tiles inside drop their own border and radius.
+ *
+ * `columns` is the count at the widest breakpoint; below it they stack two-up
+ * and then one-up, which is the arrangement every call site had written out by
+ * hand as `sm:grid-cols-2 xl:grid-cols-4`.
  */
-export function utilisationBar(tone: Tone) {
-  if (tone === "danger")
-    return "bg-destructive/20 [&>[data-slot=progress-indicator]]:bg-destructive"
-  if (tone === "warning") return "bg-warning/20 [&>[data-slot=progress-indicator]]:bg-warning"
-  if (tone === "success") return "bg-success/20 [&>[data-slot=progress-indicator]]:bg-success"
-  return ""
-}
-
-/** Thresholds used consistently wherever a utilisation figure is coloured. */
-export function utilisationTone(percent: number): Tone {
-  if (percent >= 90) return "danger"
-  if (percent >= 75) return "warning"
-  return "default"
+export function StatGrid({
+  columns = 4,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & { columns?: 2 | 3 | 4 }) {
+  return (
+    <div
+      data-slot="stat-grid"
+      className={cn(
+        "grid min-w-0 overflow-hidden rounded-xl border bg-card",
+        // The tile drops its own frame wherever it sits — some call sites wrap
+        // one in a <Link>, so this has to reach a grandchild, not just a child.
+        "[&_[data-slot=stat-tile]]:rounded-none [&_[data-slot=stat-tile]]:border-0",
+        "[&>*]:min-w-0 [&>a]:block [&>a]:h-full",
+        // A hairline between cells and only between them: the grid's own border
+        // is the outside edge, so a cell starting a row draws no left edge and
+        // the first row draws no top one.
+        "[&>*]:border-hairline [&>*]:border-t [&>*:first-child]:border-t-0",
+        "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
+        "grid-cols-1 sm:grid-cols-2",
+        columns === 3 &&
+          "lg:grid-cols-3 lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0 lg:[&>*:nth-child(2n+1)]:border-l",
+        columns === 4 &&
+          "xl:grid-cols-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0 xl:[&>*:nth-child(2n+1)]:border-l",
+        className,
+      )}
+      {...props}
+    />
+  )
 }

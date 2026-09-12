@@ -143,3 +143,44 @@ func runPlanningGitOutput(t *testing.T, dir string, args ...string) string {
 	}
 	return output
 }
+
+func TestExactGitMaterializationSurvivesAShallowBlobFilteredMirror(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	runPlanningGitFixture(t, repository, "init", "--initial-branch", "main")
+	runPlanningGitFixture(t, repository, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, repository, "config", "user.name", "Fixture")
+	writeBuildFixture(t, repository, "message.txt", "release-one\n")
+	runPlanningGitFixture(t, repository, "add", "message.txt")
+	runPlanningGitFixture(t, repository, "commit", "-m", "release one")
+	large := strings.Repeat("large-release-asset\n", 120_000)
+	writeBuildFixture(t, repository, "public/asset.bin", large)
+	writeBuildFixture(t, repository, "message.txt", "release-two\n")
+	runPlanningGitFixture(t, repository, "add", "-A")
+	runPlanningGitFixture(t, repository, "commit", "-m", "release two")
+	revision := strings.TrimSpace(runPlanningGitOutput(t, repository, "rev-parse", "HEAD"))
+
+	// The planning mirror is shallow, blob filtered, and publishes no branch
+	// ref, which is exactly what made a local clone copy nothing at all.
+	mirror := filepath.Join(t.TempDir(), "mirror.git")
+	runPlanningGitFixture(t, t.TempDir(), "init", "--bare", "--", mirror)
+	runPlanningGitFixture(t, mirror, "config", "remote.origin.url", repository)
+	runPlanningGitFixture(t, mirror, "fetch", "--force", "--depth=1", "--no-tags",
+		"origin", "+refs/heads/main:refs/just-dashboard/planning/one")
+
+	target := filepath.Join(t.TempDir(), "source")
+	if err := fetchExactGit(context.Background(), mirror, repository, target, revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	if head := strings.TrimSpace(runPlanningGitOutput(t, target, "rev-parse", "HEAD")); head != revision {
+		t.Fatalf("materialized head = %q, want %q", head, revision)
+	}
+	content, err := os.ReadFile(filepath.Join(target, "public/asset.bin"))
+	if err != nil || string(content) != large {
+		t.Fatalf("large release asset was not materialized: %v", err)
+	}
+	origin := strings.TrimSpace(runPlanningGitOutput(t, target, "remote", "get-url", "origin"))
+	if origin != repository {
+		t.Fatalf("workspace origin = %q, want %q", origin, repository)
+	}
+}

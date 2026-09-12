@@ -145,6 +145,20 @@ func describeDomainCheck(c *DomainCheck) string {
 	}
 }
 
+// PublicAddresses lists this machine's globally routable addresses, for
+// callers outside this package that need to name the server to the internet —
+// a generated hostname has to resolve to one of these or it is decoration.
+func PublicAddresses() []string { return hostAddresses() }
+
+var sharedAddressSpace = mustParseCIDR("100.64.0.0/10")
+
+// IsPublicAddress excludes CGNAT explicitly: Go's IsPrivate covers RFC1918
+// and IPv6 ULA, but treats Tailscale's shared address space as global unicast.
+func IsPublicAddress(ip net.IP) bool {
+	return ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() &&
+		!ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !sharedAddressSpace.Contains(ip)
+}
+
 // hostAddresses lists this machine's globally routable addresses. Private and
 // loopback ones are left out deliberately: a public DNS record can never point
 // at them, so including them could only produce a false match.
@@ -168,7 +182,7 @@ func hostAddresses() []string {
 				continue
 			}
 			ip := ipn.IP
-			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || !ip.IsGlobalUnicast() {
+			if !IsPublicAddress(ip) {
 				continue
 			}
 			out = append(out, ip.String())

@@ -1,13 +1,11 @@
 "use client"
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import type { FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
+import { SectionNav } from "@/components/tabs"
 import { SecurityProvider } from "@/components/security/security-context"
 
 /**
@@ -34,7 +32,6 @@ const TABS = [
 ]
 
 export default function SecurityLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
   const { confirm, dialog } = useConfirm()
 
   const posture = usePoll<Posture>((signal) => get("/security/posture", undefined, signal), 120_000)
@@ -109,27 +106,7 @@ export default function SecurityLayout({ children }: { children: React.ReactNode
         applyFix,
       }}
     >
-      <div className="sticky top-0 z-10 border-b border-hairline bg-background/85 backdrop-blur-md">
-        <nav className="mx-auto flex w-full max-w-[1600px] gap-1 overflow-x-auto px-4 md:px-6">
-          {TABS.map((tab) => {
-            const active =
-              tab.href === "/security" ? pathname === "/security" : pathname.startsWith(tab.href)
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "inline-flex h-11 shrink-0 items-center border-b-2 border-transparent px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-                  active && "border-primary text-foreground",
-                )}
-              >
-                {tab.title}
-              </Link>
-            )
-          })}
-        </nav>
-      </div>
+      <SectionNav tabs={TABS} />
       {children}
       {dialog}
     </SecurityProvider>

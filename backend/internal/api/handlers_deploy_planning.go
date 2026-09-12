@@ -164,9 +164,11 @@ func (s *Server) handleDeploymentDraftCommit(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
+	scheduled := s.applyBlueprintSchedules(r, draft, result)
 	httpx.SetAudit(r, "deploy.create", resultProjectTarget(result), map[string]any{
 		"draftId": chi.URLParam(r, "draft"), "environmentId": result.EnvironmentID,
 		"planRevision": result.PlanRevision, "created": result.Created,
+		"blueprintSchedules": scheduled,
 	})
 	status := http.StatusCreated
 	if !result.Created {
@@ -334,4 +336,31 @@ func mapDeploymentPlanningError(err error) error {
 	default:
 		return httpx.Internal(err)
 	}
+}
+
+// applyBlueprintSchedules creates the schedules a blueprint marked as defaults,
+// once, when its deployment is first created. A failure here is recorded in the
+// audit entry rather than failing the deployment: the schedules are a
+// convenience, and the deployment already exists by this point.
+func (s *Server) applyBlueprintSchedules(
+	r *http.Request,
+	draft *deploy.Draft,
+	result *deploy.DraftCommitResult,
+) []string {
+	if !result.Created || draft.Data.Source == nil ||
+		draft.Data.Source.Mode != deploy.SourceModeBlueprint || s.modules.deployAutomation == nil {
+		return nil
+	}
+	plan, err := deploy.RenderBlueprintPlan(*draft.Data.Source, draft.Data.Intent.Name)
+	if err != nil {
+		return nil
+	}
+	created := []string{}
+	for _, write := range deploy.BlueprintSchedules(plan.Rendered) {
+		if _, err := s.modules.deployAutomation.CreateSchedule(
+			r.Context(), result.ProjectID, result.EnvironmentID, write); err == nil {
+			created = append(created, write.Name)
+		}
+	}
+	return created
 }

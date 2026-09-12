@@ -3,141 +3,57 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* The palette — "Just Dashboard", from tweakcn — plus everything the layout
-   needs that the palette doesn't define.
-
-   `.light` and `.dark`, not `:root` and `.dark`: `<html>` always carries
-   exactly one of the two (the bootstrap script and `useTheme` both toggle
-   them as a pair), and `:root` only ever matches the root element itself —
-   never a nested one. A theme preview swatch needs to force its *own*
-   colours regardless of which mode the page around it is in, and a rule that
-   can only ever match `<html>` cannot do that; a class can be put on
-   anything. `:root` is left for the handful of tokens that do not vary by
-   mode at all. */
+/* The palette — "Just Dashboard".
+ *
+ * One mode. The light palette was removed rather than left unmaintained: this
+ * is a console you keep open on a second monitor while something is wrong, and
+ * shipping two grounds meant every tinted surface, every status hue and every
+ * chart colour had to be tuned twice and verified twice. The product is dark,
+ * and the tokens below say so once.
+ *
+ * `<html>` still carries `.dark` so the `dark:` variants inside the generated
+ * shadcn primitives keep resolving; the values themselves live on `:root`,
+ * which is now the only place a colour is named.
+ */
 :root {
   --radius: 0.5rem;
-}
 
-.light {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0 0 0);
-
-  /* Primary is ink, not a hue: press-worthy actions read as the strongest
-     mark on the page rather than as "the blue one" among several. Blue is
-     kept in reserve as the accent, for the handful of things that are a
-     choice rather than a command — the active nav item, a focus ring. */
-  --primary: oklch(0 0 0);
-  --primary-foreground: oklch(1 0 0);
-
-  --secondary: oklch(0.9702 0 0);
-  --secondary-foreground: oklch(0.2046 0 0);
-  --muted: oklch(0.9702 0 0);
-  --muted-foreground: oklch(0.5555 0 0);
-  --destructive: oklch(0.7106 0.1661 22.2162);
-  --destructive-foreground: oklch(1 0 0);
-
-  /* Status colours live as tokens so a running container, a healthy mount and
-     an up interface are the same green everywhere, and stay tunable in one
-     place. Not part of the palette itself — darker and more saturated than
-     the dark-mode pair below, which is what a status colour needs to stay
-     legible against a white card rather than a near-black one. */
-  --success: oklch(0.58 0.142 162);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.68 0.15 70);
-  --warning-foreground: oklch(0.24 0.05 70);
-
-  --border: oklch(0.937 0 0);
-  --input: oklch(0.937 0 0);
-  --ring: oklch(0.5731 0.2145 258.2467);
-
-  --chart-1: oklch(0.5731 0.2145 258.2467);
-  --chart-2: oklch(0.7837 0.1587 72.9913);
-  --chart-3: oklch(0.673 0.2146 25.0397);
-  --chart-4: oklch(0.5413 0.2466 293.009);
-  --chart-5: oklch(0.6959 0.1491 162.4796);
-
-  --sidebar: oklch(0.9851 0 0);
-  --sidebar-foreground: oklch(0.2046 0 0);
-  /* The tweakcn export set this to the accent blue, independently of
-     --primary — which reads as a second, competing brand colour the moment
-     it sits next to the black/white buttons everywhere else. The "you are
-     here" mark in the nav should be the same ink as "press this". */
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: oklch(0.937 0 0);
-  --sidebar-accent-foreground: oklch(0 0 0);
-  --sidebar-border: oklch(0.937 0 0);
-  --sidebar-ring: oklch(0.5731 0.2145 258.2467);
-
-  /* Git status on a light card needs its own lightness, not just its own
-     hue — these are text, and the dark-mode set below reads as ink on white
-     rather than as colour. Same convention every git client uses:
-     green-means-added, so the hues stay fixed and only travel with the
-     mode. */
-  --git-added: oklch(0.5 0.16 152);
-  --git-modified: oklch(0.53 0.13 70);
-  --git-deleted: oklch(0.52 0.21 25);
-  --git-untracked: oklch(0.5 0.11 200);
-  --git-renamed: oklch(0.49 0.17 265);
-  --git-conflict: oklch(0.51 0.22 8);
-
-  --shadow-color: #000000;
-  --shadow-opacity: 0.08;
-  --shadow-blur: 12px;
-  --shadow-spread: 0px;
-  --shadow-offset-x: 0px;
-  --shadow-offset-y: 2px;
-  --tracking-normal: -0.02em;
-  --shadow-2xs: 0px 2px 12px 0px hsl(0 0% 0% / 0.04);
-  --shadow-xs: 0px 2px 12px 0px hsl(0 0% 0% / 0.04);
-  --shadow-sm: 0px 2px 12px 0px hsl(0 0% 0% / 0.08), 0px 1px 2px -1px hsl(0 0% 0% / 0.08);
-  --shadow: 0px 2px 12px 0px hsl(0 0% 0% / 0.08), 0px 1px 2px -1px hsl(0 0% 0% / 0.08);
-  --shadow-md: 0px 2px 12px 0px hsl(0 0% 0% / 0.08), 0px 2px 4px -1px hsl(0 0% 0% / 0.08);
-  --shadow-lg: 0px 2px 12px 0px hsl(0 0% 0% / 0.08), 0px 4px 6px -1px hsl(0 0% 0% / 0.08);
-  --shadow-xl: 0px 2px 12px 0px hsl(0 0% 0% / 0.08), 0px 8px 10px -1px hsl(0 0% 0% / 0.08);
-  --shadow-2xl: 0px 2px 12px 0px hsl(0 0% 0% / 0.2);
-
-  /* Raised controls — see the note on these in `.dark`.
-
-     The shine survives the trip to light mode because the face is a step off
-     white rather than white itself, so a pure-white top edge still reads
-     against it. What has to come down hard is the drop — a shadow tuned to
-     separate a control from a near-black page is a smudge on a white one — and
-     the gloss, which is the one value that cannot simply be scaled from the
-     dark set. It sits on top of the *variant's* colour, not on the page, so on
-     light mode's black primary and its red destructive a gloss strong enough
-     to be visible against white is a full light-to-dark sweep down the face:
-     the glassy 2005 button, arrived at by tuning against the wrong surface. */
-  /* Darker on hover, and only a little: on a near-white face a small step
-     towards black is already a large perceptual move. */
-  --control-hover: color-mix(in oklab, var(--control) 94%, #000 6%);
-
-  --raise-shine: oklch(1 0 0 / 0.44);
-  --raise-gloss: oklch(1 0 0 / 0.13);
-  --raise-lip: oklch(0 0 0 / 0.08);
-  --raise-press: oklch(0 0 0 / 0.07);
-  --raise-drop: 0 1px 1px 0 oklch(0 0 0 / 0.05), 0 2px 4px -2px oklch(0 0 0 / 0.07);
-}
-
-.dark {
   --background: oklch(0.1448 0 0);
   --foreground: oklch(1 0 0);
   --card: oklch(0.1776 0 0);
   --card-foreground: oklch(1 0 0);
   --popover: oklch(0.1776 0 0);
   --popover-foreground: oklch(1 0 0);
+
+  /* Primary is ink, not a hue: a press-worthy action reads as the strongest
+     mark on the page rather than as "the blue one" among several. The brand
+     hues below are what carry identity and attention instead — which is the
+     division this palette always described and only half enforced. */
   --primary: oklch(1 0 0);
   --primary-foreground: oklch(0 0 0);
+
   --secondary: oklch(0.2178 0 0);
   --secondary-foreground: oklch(0.9461 0 0);
   --muted: oklch(0.2002 0 0);
   --muted-foreground: oklch(0.7118 0.0129 286.0665);
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1 0 0);
+
+  /* ---- The two brand hues ------------------------------------------------
+   *
+   * Blue says *where you are*: the wordmark, the current nav entry, the plot
+   * behind a panel's icon, the first chart series. Amber says *pay attention
+   * here now*: the focus ring, a search hit, a cursor readout. Neither is ever
+   * a fill for a command — that stays ink — so the page still has exactly one
+   * thing that looks pressable and now also has somewhere to be from.
+   *
+   * The blue is lifted to 0.72 rather than the 0.5731 the old light palette
+   * used: that value was chosen against white, and on a 0.14 ground it reads
+   * as a dark smudge rather than as a colour. */
+  --brand: oklch(0.72 0.152 258);
+  --brand-foreground: oklch(0.16 0.03 258);
+  --signal: oklch(0.7837 0.1587 72.9913);
+  --signal-foreground: oklch(0.19 0.04 73);
 
   --success: oklch(0.72 0.163 162);
   --success-foreground: oklch(0.18 0.05 162);
@@ -146,9 +62,12 @@
 
   --border: oklch(0.252 0 0);
   --input: oklch(0.252 0 0);
-  --ring: oklch(0.7837 0.1587 72.9913);
+  /* Focus is amber. It is the one mark that has to be found instantly on a
+     screen otherwise made of blue-grey neutrals, and it never collides with
+     the brand blue that marks location. */
+  --ring: var(--signal);
 
-  --chart-1: oklch(0.5731 0.2145 258.2467);
+  --chart-1: var(--brand);
   --chart-2: oklch(0.7837 0.1587 72.9913);
   --chart-3: oklch(0.673 0.2146 25.0397);
   --chart-4: oklch(0.6056 0.2189 292.7172);
@@ -156,15 +75,17 @@
 
   --sidebar: oklch(0.1344 0 0);
   --sidebar-foreground: oklch(0.9461 0 0);
-  /* See the light block's comment: matches --primary rather than the
-     tweakcn export's independent accent blue. */
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
+  /* The "you are here" mark is the brand blue, not the ink. Ink is what you
+     press; blue is where you are. */
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: oklch(0.2178 0 0);
   --sidebar-accent-foreground: oklch(1 0 0);
   --sidebar-border: oklch(0.252 0 0);
-  --sidebar-ring: oklch(0.5731 0.2145 258.2467);
+  --sidebar-ring: var(--signal);
 
+  /* Git status. The convention every git client uses — green means added — so
+     the hues are fixed and only the lightness is tuned to this ground. */
   --git-added: oklch(0.68 0.16 152);
   --git-modified: oklch(0.72 0.14 78);
   --git-deleted: oklch(0.65 0.19 25);
@@ -172,59 +93,29 @@
   --git-renamed: oklch(0.67 0.15 265);
   --git-conflict: oklch(0.66 0.21 8);
 
+  /* Shadows are for things that genuinely float above the page — a popover, a
+     dropdown, a dialog. They are no longer spent on cards and buttons, which
+     now separate by ground step and border alone. */
   --shadow-color: #000000;
-  --shadow-opacity: 0.6;
-  --shadow-blur: 30px;
-  --shadow-spread: -5px;
-  --shadow-offset-x: 0px;
-  --shadow-offset-y: 10px;
   --tracking-normal: -0.02em;
-  --shadow-2xs: 0px 10px 30px -5px hsl(0 0% 0% / 0.3);
-  --shadow-xs: 0px 10px 30px -5px hsl(0 0% 0% / 0.3);
-  --shadow-sm: 0px 10px 30px -5px hsl(0 0% 0% / 0.6), 0px 1px 2px -6px hsl(0 0% 0% / 0.6);
-  --shadow: 0px 10px 30px -5px hsl(0 0% 0% / 0.6), 0px 1px 2px -6px hsl(0 0% 0% / 0.6);
-  --shadow-md: 0px 10px 30px -5px hsl(0 0% 0% / 0.6), 0px 2px 4px -6px hsl(0 0% 0% / 0.6);
-  --shadow-lg: 0px 10px 30px -5px hsl(0 0% 0% / 0.6), 0px 4px 6px -6px hsl(0 0% 0% / 0.6);
-  --shadow-xl: 0px 10px 30px -5px hsl(0 0% 0% / 0.6), 0px 8px 10px -6px hsl(0 0% 0% / 0.6);
-  --shadow-2xl: 0px 10px 30px -5px hsl(0 0% 0% / 1.5);
+  --shadow-2xs: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  --shadow-sm: 0 2px 6px -2px oklch(0 0 0 / 0.5);
+  --shadow: 0 2px 6px -2px oklch(0 0 0 / 0.5);
+  --shadow-md: 0 6px 16px -6px oklch(0 0 0 / 0.6);
+  --shadow-lg: 0 12px 28px -10px oklch(0 0 0 / 0.68);
+  --shadow-xl: 0 20px 44px -16px oklch(0 0 0 / 0.72);
+  --shadow-2xl: 0 28px 60px -20px oklch(0 0 0 / 0.8);
 
-  /* Raised controls.
+  /* ---- Derived surfaces --------------------------------------------------
+   *
+   * Computed from the tokens above with `color-mix`, so there is one place a
+   * relationship is stated. With a single mode these now resolve identically
+   * wherever they are read, which is what the old two-block arrangement could
+   * never quite promise for a nested preview. */
 
-     A button in this product is a physical object: a face a shade lighter than
-     the surface under it, a hairline of light along its top edge where a lamp
-     above would catch it, a dark lip at the bottom, and a shadow on the page
-     below. Together they are what make a button read as something to press
-     rather than as a rectangle of colour — and the same three lines, at a
-     larger scale, are what make a panel read as a surface rather than as a
-     region of slightly different grey.
-
-     Held as translucent black and white rather than as opaque colours, because
-     the same three lines have to sit on top of every variant's own background
-     — a white primary, a red destructive, a near-black outline — and a token
-     that named a colour could only ever be right for one of them. */
-  /* Darker on hover. Sized to stay clear of `--card` underneath it — a hover
-     that lands on the card's own value reads as the button going flush with
-     the page rather than as it responding. */
-  --control-hover: color-mix(in oklab, var(--control) 88%, #000 12%);
-
-  --raise-shine: oklch(1 0 0 / 0.1);
-  --raise-gloss: oklch(1 0 0 / 0.045);
-  --raise-lip: oklch(0 0 0 / 0.3);
-  --raise-press: oklch(0 0 0 / 0.24);
-  --raise-drop: 0 1px 1.5px 0 oklch(0 0 0 / 0.4), 0 2px 5px -2px oklch(0 0 0 / 0.35);
-}
-
-/* ---------------------------------------------------------------------------
-   Derived surfaces.
-
-   Neither the palette above nor the tag tokens below vary by light or dark
-   separately from this: everything here is *computed* from the tokens above
-   via color-mix, so it follows whichever of the two blocks is in force with
-   no per-mode entry of its own.
-   --------------------------------------------------------------------------- */
-:root {
-  /* The strip at the top of a panel, and any toolbar that sits inside one.
-     A shade off the card so a header reads as chrome, not as a first row. */
+  /* The strip at the top of a panel, and any toolbar inside one. A shade off
+     the card so a header reads as chrome, not as a first row. */
   --surface-header: color-mix(in oklab, var(--muted) 42%, var(--card));
 
   /* A recessed well inside a panel: code blocks, log output, previews. */
@@ -235,72 +126,77 @@
   --hairline: color-mix(in oklab, var(--border) 70%, transparent);
 
   /* Row banding and hover, expressed against the card rather than as a
-     translucent grey, so it lands the same way on the light and the dark
-     card. */
+     translucent grey. */
   --row-hover: color-mix(in oklab, var(--muted) 55%, transparent);
 
-  /* The generic hover/highlight wash — what a dropdown item, a select
-     option, a ghost or outline button, a tab, a command-palette row all turn
-     when the pointer (or the keyboard) lands on them. This is `--accent` in
-     every generated shadcn primitive, and the tweakcn export set `--accent`
-     to the same vivid blue as `--ring` — which reads as "everything is
-     blue" the instant a menu opens, since this token is what nearly every
-     interactive surface in the app is built on. Computed a step off `--muted`
-     instead, the relationship the previous palette used, so the blue stays
-     where the theme actually wants it seen: the focus ring, the charts, the
-     one deliberate highlight — not the hover state of every button.
-
-     How far off `--muted` is the whole question, because this token is both
-     the hover wash and the selected fill: the active session in the terminal
-     rail, the pressed panel toggles, a highlighted command row. At 18% it
-     landed a third of the way from the card to white on dark mode — a pale
-     slab that read as a separate surface pasted onto the panel rather than as
-     one row of it being picked out, and the mirror of it in light mode was the
-     grey slab `--menu-hover` was carved out to escape. 8% is the step the
-     sidebar's own selected fill already takes from the sidebar (0.13 → 0.22),
-     so "this one is chosen" is the same size of move in the nav and in a
-     panel, and it stays clear of `--row-hover` and `--menu-hover` underneath
-     it, which is what keeps hover and selected distinguishable. */
+  /* The selected fill and the firmer hover wash: a dropdown item, a ghost or
+     outline button, a tab, a command-palette row, the active session in the
+     terminal rail. Deliberately neutral — "this one is chosen" is never the
+     brand hue and never the primary tint, or a filter starts reading as the
+     page's main action. */
   --accent: color-mix(in oklab, var(--muted) 92%, var(--foreground) 8%);
   --accent-foreground: var(--foreground);
 
-  /* The hover/selected wash for the surfaces where `--accent` was too heavy —
-     a menu that opens under the pointer, a select's option list, a command
-     row. `--accent` still backs ghost and outline buttons and the tabs, where
-     a firmer highlight is wanted; this is a shade lighter, computed against
-     the card the way `--row-hover` is, because a dropdown item and a table
-     row are the same gesture and should land the same way. In light mode the
-     old value mixed 18% ink into near-white and read as a grey slab. */
+  /* The lighter wash for surfaces where `--accent` is too heavy — a menu that
+     opens under the pointer, a select's option list, a command row. */
   --menu-hover: color-mix(in oklab, var(--muted) 75%, transparent);
 
-  /* The resting face of a raised control: a step lighter than the card it sits
-     on, which on the dark mode is what puts a button *in front of* the page
-     rather than flush with it. Outline and secondary buttons, select triggers
-     and toggles all take it, so "how light is a button" has one answer instead
-     of one per component — and it moves with the palette rather than being a
-     hex somebody matched by eye.
+  /* The resting face of a control: outline and secondary buttons, select
+     triggers, toggles. One answer to "how light is a button", moved with the
+     palette rather than matched by eye.
+     Hover goes *up* rather than down. That was the other way round while
+     controls were drawn with a lift and a shadow to separate them from the
+     card; with the lift gone, settling a button towards the card's own value
+     reads as it disappearing rather than as it responding. */
+  --control: color-mix(in oklab, var(--card) 92%, var(--foreground) 8%);
+  --control-hover: color-mix(in oklab, var(--control) 86%, var(--foreground) 14%);
+  --control-active: color-mix(in oklab, var(--control) 90%, #000 10%);
 
-     `--control-hover` is per mode rather than computed here with it, because
-     the two are not the same operation. This token used to mix *more
-     foreground* into the card for both, which on light mode is black and
-     darkens the face — and on dark mode is white, so the button lit up under
-     the pointer and read as the one thing on the page being switched on. A
-     control should settle towards the surface as you approach it, the way it
-     settles all the way in when pressed; and "a bit darker" is a different
-     distance on a near-black face than on a near-white one, so each mode
-     names its own. */
-  --control: color-mix(in oklab, var(--card) 94%, var(--foreground) 6%);
+  /* The tinted surfaces a *tone* takes. Three roles, so that each is decided
+     once instead of by eye at every call site:
+   *
+   *   plot — the rounded square behind an icon in a header, a notice, a modal.
+   *   wash — the ground of a banner that is tinted rather than framed.
+   *   rule — the border of that banner, and of a tinted tag.
+   *
+   * Mixed against `transparent` rather than against a surface, because these
+   * sit on the card, on the header strip and in a sunken well alike. */
+  --plot-brand: color-mix(in oklab, var(--brand) 16%, transparent);
+  --plot-signal: color-mix(in oklab, var(--signal) 16%, transparent);
+  --plot-primary: color-mix(in oklab, var(--primary) 12%, transparent);
+  --plot-success: color-mix(in oklab, var(--success) 12%, transparent);
+  --plot-warning: color-mix(in oklab, var(--warning) 12%, transparent);
+  --plot-danger: color-mix(in oklab, var(--destructive) 12%, transparent);
+  --plot-neutral: color-mix(in oklab, var(--foreground) 8%, transparent);
+
+  --wash-brand: color-mix(in oklab, var(--brand) 8%, transparent);
+  --wash-primary: color-mix(in oklab, var(--primary) 6%, transparent);
+  --wash-success: color-mix(in oklab, var(--success) 7%, transparent);
+  --wash-warning: color-mix(in oklab, var(--warning) 7%, transparent);
+  --wash-danger: color-mix(in oklab, var(--destructive) 6%, transparent);
+
+  /* A plot that is also a button steps up one tint under the pointer. */
+  --plot-brand-hover: color-mix(in oklab, var(--brand) 26%, transparent);
+  --plot-primary-hover: color-mix(in oklab, var(--primary) 20%, transparent);
+  --plot-success-hover: color-mix(in oklab, var(--success) 20%, transparent);
+  --plot-danger-hover: color-mix(in oklab, var(--destructive) 20%, transparent);
+
+  /* A transient highlight that has to be *seen* rather than recede: a search
+     match in the log console, the flash when a terminal rings its bell. */
+  --mark: color-mix(in oklab, var(--signal) 32%, transparent);
+
+  --rule-brand: color-mix(in oklab, var(--brand) 32%, transparent);
+  --rule-primary: color-mix(in oklab, var(--primary) 30%, transparent);
+  --rule-success: color-mix(in oklab, var(--success) 32%, transparent);
+  --rule-warning: color-mix(in oklab, var(--warning) 35%, transparent);
+  --rule-danger: color-mix(in oklab, var(--destructive) 30%, transparent);
 
   /* Colour tags, for the terminal rail: a folder, the sessions inside it and
      the windows inside those.
-
-     Fixed hues rather than computed from the palette, and deliberately the one
-     exception to the rule above. A tag is a label the operator applied — "the
-     red one is production" — and a label that changed hue with the theme would
-     stop being the same label. What *is* computed is everything drawn from it:
-     the tint behind a row and the rule down its edge are color-mix against the
-     surface they sit on, so one lightness holds up against a near-black card
-     and a near-white one alike. */
+   *
+   * Fixed hues, and deliberately the one exception to the rule above. A tag is
+   * a label the operator applied — "the red one is production" — and a label
+   * that moved with the palette would stop being the same label. */
   --tag-slate: oklch(0.68 0.035 260);
   --tag-red: oklch(0.66 0.19 25);
   --tag-amber: oklch(0.75 0.15 75);
@@ -310,6 +206,7 @@
   --tag-violet: oklch(0.65 0.18 295);
   --tag-pink: oklch(0.68 0.19 350);
 }
+
 
 @theme inline {
   /* System font stacks rather than a webfont: this dashboard is built and run
@@ -338,6 +235,12 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  /* The two brand hues, so `text-brand` and `border-signal` are real
+     utilities. Blue is location, amber is attention — see the note above. */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
@@ -361,10 +264,63 @@
 
   --color-control: var(--control);
   --color-control-hover: var(--control-hover);
+  --color-control-active: var(--control-active);
 
   --color-surface-header: var(--surface-header);
   --color-surface-sunken: var(--surface-sunken);
   --color-hairline: var(--hairline);
+  /* Registered so `bg-row-hover` is a real utility. It was written both as
+     `bg-row-hover` and as `bg-[var(--row-hover)]` across the app, and only the
+     second one did anything — which is why the terminal rail's rows and the
+     window strip's tabs had no hover state at all. */
+  --color-row-hover: var(--row-hover);
+  --color-menu-hover: var(--menu-hover);
+
+  /* Registered so `bg-plot-warning` and `border-rule-danger` are real
+     utilities. Without this the tokens above would only be reachable as
+     `bg-[var(--plot-warning)]`, which is the spelling that let the hand-mixed
+     opacities in in the first place. */
+  --color-plot-brand: var(--plot-brand);
+  --color-plot-brand-hover: var(--plot-brand-hover);
+  --color-plot-signal: var(--plot-signal);
+  --color-wash-brand: var(--wash-brand);
+  --color-rule-brand: var(--rule-brand);
+  --color-plot-primary: var(--plot-primary);
+  --color-plot-success: var(--plot-success);
+  --color-plot-warning: var(--plot-warning);
+  --color-plot-danger: var(--plot-danger);
+  --color-plot-neutral: var(--plot-neutral);
+  --color-wash-primary: var(--wash-primary);
+  --color-wash-success: var(--wash-success);
+  --color-wash-warning: var(--wash-warning);
+  --color-wash-danger: var(--wash-danger);
+  --color-plot-primary-hover: var(--plot-primary-hover);
+  --color-plot-success-hover: var(--plot-success-hover);
+  --color-plot-danger-hover: var(--plot-danger-hover);
+  --color-mark: var(--mark);
+  --color-rule-primary: var(--rule-primary);
+  --color-rule-success: var(--rule-success);
+  --color-rule-warning: var(--rule-warning);
+  --color-rule-danger: var(--rule-danger);
+
+  /* The three sizes the product uses constantly and had been typing as
+     arbitrary values — `text-[13px]` 192 times, `text-[11px]` 408, `text-[10px]`
+     94 — which is how `text-[12px]` (30 uses, byte-identical to `text-xs`) and
+     one-off 9, 15, 17 and 22px slipped in beside them. Named here so the ladder
+     is `micro → hint → xs → body → sm → …` and an arbitrary value is visibly a
+     departure from it rather than the normal way to write a size. */
+  --text-micro: 0.625rem; /* 10px — eyebrows, tags, the smallest legible mark */
+  --text-hint: 0.6875rem; /* 11px — a row's secondary line */
+  --text-body: 0.8125rem; /* 13px — body and row text; the product's default */
+  --text-title: 0.9375rem; /* 15px — the title of a surface that opens */
+
+  /* The wordmark's own ramp. A logo is not body type — it is a drawing of the
+     product's name — so it gets its own three sizes rather than borrowing steps
+     from the reading scale it has no relationship to. Named here only so the
+     one file that uses them is not the one place still typing a raw pixel. */
+  --text-mark-sm: 0.9375rem;
+  --text-mark-md: 1.0625rem;
+  --text-mark-lg: 1.375rem;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -463,6 +419,65 @@
   }
 }
 
+@layer base {
+  /* Somebody who has asked the system to stop moving things has asked for all
+   * of it, not for the subset each component remembered to guard. The app ships
+   * 35 animations — pulsing skeletons, spinners, Radix's enter and exit, a
+   * looping progress bar — against five `motion-reduce:` guards, all of them in
+   * one feature. Stated once, at the root, so a new animation is covered by
+   * default instead of by being remembered.
+   *
+   * Durations rather than `animation: none`: a keyframe animation that never
+   * runs never reaches its final frame, so a dialog that fades in would stay at
+   * zero opacity. Collapsing the duration runs it instantly instead. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* The focus ring. One appearance, two placements.
+ *
+ * This was six treatments for one meaning — a 3px translucent halo on inputs
+ * and buttons, a 2px offset ring in the tab strip, an inset ring on the section
+ * nav, plus `ring-4`, `ring-ring/40` and `ring-ring/60` one-offs — because rule
+ * 5 said focus is "a ring drawn outside the control" without saying which ring.
+ *
+ * Drawn with `outline` rather than Tailwind's `ring`, which is a box-shadow.
+ * That began as a collision — the lift also set `box-shadow`, so on every
+ * raised control the two fought over one property and the winner depended on
+ * utility ordering — and the lift is gone, but the reasons to keep an outline
+ * outlived it: it follows `border-radius`, it cannot be overwritten by a
+ * `shadow-*` utility landing on the same element, and it works on a `<tr>`,
+ * which a box-shadow ring does not do reliably.
+ *
+ * The transparent resting outline is deliberate: it reserves the space, so a
+ * control does not shift when it takes focus, and it survives forced-colors
+ * mode where `outline-color` is overridden but `outline-style` is not. */
+@utility focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:focus-visible {
+    outline-color: var(--ring);
+  }
+}
+
+/* The same ring for a control with no room outside itself to draw one — a tab
+ * in a strip that would clip it, a table row, a segment in a toolbar. */
+@utility focus-ring-inset {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  &:focus-visible {
+    outline-color: var(--ring);
+  }
+}
+
 @layer components {
   /* The small caps label that opens a section, a panel header or a stat tile.
    *
@@ -470,7 +485,7 @@
    * page to read as one system — that it is a class rather than six copies of
    * the same four utilities. */
   .eyebrow {
-    @apply text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase;
+    @apply text-micro font-semibold tracking-[0.14em] text-muted-foreground uppercase;
   }
 
   /* Any figure meant to be compared with the one above or below it. Tabular
@@ -481,77 +496,24 @@
   }
 }
 
-/* The lift. One definition, for every surface in the app that is meant to sit
-   in front of the one behind it — a button, a select, a tab, a nav item, a
-   panel, a stat tile, the sign-in card.
-
-   This began as two: `.card-sheen` drew a gradient on a panel and this drew
-   three lines on a control, which meant a card and a button were making the
-   same claim in two visual languages and only one of them was convincing.
-   They are the same claim, so they are now the same code — a card is just a
-   very large button that nobody presses.
-
-   A `@utility` rather than a class in `@layer components`, for two reasons: a
-   tab is only raised while it is the active one, and `data-[state=active]:raised`
-   is a variant Tailwind can only compose onto a utility; and it settles the
-   ordering, since `box-shadow` in the components layer is overridden by any
-   `shadow-*` utility landing on the same element. That is why everything
-   taking this drops the `shadow-*` it used to carry — and why a surface
-   wanting a deeper drop overrides the token (`[--raise-drop:var(--shadow-lg)]`
-   on the floating confirm) rather than adding a second shadow that would
-   silently delete the shine and the lip.
-
-   Three lines, drawn from the tokens in `.light`/`.dark`: a hairline of light
-   on the top edge, a dark lip on the bottom, and a shadow on the page. The
-   gloss fades out by the halfway mark rather than running the full height,
-   because a gradient that reaches the bottom edge reads as a two-tone fill
-   instead of as a curved surface catching a light. */
-@utility raised {
-  background-image: linear-gradient(180deg, var(--raise-gloss), transparent 55%);
-  box-shadow:
-    inset 0 1px 0 0 var(--raise-shine),
-    inset 0 -1px 0 0 var(--raise-lip),
-    var(--raise-drop);
-
-  /* Pressed: the light moves to the other side. The gloss inverts into a
-     shadow cast from the top edge inwards and the drop goes away entirely, so
-     the control sits down *into* the page instead of standing on it — which is
-     the only reason it was worth drawing standing up.
-
-     Only where there is something to press. A card is a very large button that
-     nobody presses, and that second half of the claim was missing: a click
-     anywhere on a panel, a stat tile or the sign-in card sank the whole surface
-     a pixel and took its shadow away, so selecting a line of log output or
-     dragging across a table read as pressing a control that then did nothing.
-     The selector is what a pointer can actually activate — what the browser or
-     ARIA already calls a control — rather than a class somebody has to remember
-     to add, so a new raised div is inert by default and a new raised button
-     presses without being told to.
-
-     Guarded on `:disabled` and `aria-disabled` rather than trusting
-     `pointer-events-none`: Radix disables its triggers with the attribute, and
-     those still take a pointer. */
-  &:is(
-      button,
-      a[href],
-      summary,
-      label,
-      [role="button"],
-      [role="tab"],
-      [role="menuitem"],
-      [role="menuitemcheckbox"],
-      [role="menuitemradio"],
-      [role="option"],
-      [role="checkbox"],
-      [role="radio"],
-      [role="switch"],
-      [role="slider"]
-    ):active:not(:disabled):not([aria-disabled="true"]) {
-    background-image: linear-gradient(180deg, var(--raise-press), transparent 60%);
-    box-shadow: inset 0 1px 2px 0 var(--raise-press);
-    transform: translateY(1px);
-  }
-}
+/* There is no lift.
+ *
+ * Cards, buttons, tabs, tiles and the sign-in panel used to be drawn as
+ * physical objects: a face a shade lighter than the surface under them, a
+ * hairline of light along the top edge, a dark lip below, a shadow on the
+ * page, and an inversion on `:active`. Removed deliberately. Forty-nine
+ * surfaces all claiming to stand in front of the page is a page with no
+ * foreground, and the treatment cost every one of them a gradient, three inset
+ * shadows and a transform to say what a one-pixel border already says.
+ *
+ * What separates a surface now is what it is made of: a step of ground
+ * (`--card` over `--background`, `--control` over `--card`), a border, and a
+ * hairline where a header meets a body. Shadows are kept for the three things
+ * that genuinely float — popover, dropdown, dialog — where the page really is
+ * behind them.
+ *
+ * Press feedback moved to colour: `--control-active` on the controls that have
+ * a face, nothing at all on the ones that do not. */
 
 /* The sign-in screen is the only full-bleed surface in the app, and a flat
  * rectangle of one colour is a poor first impression. Two washes of whatever
@@ -561,12 +523,12 @@
   background-image:
     radial-gradient(
       52% 40% at 50% -4%,
-      color-mix(in oklab, var(--primary) 20%, transparent),
+      color-mix(in oklab, var(--brand) 16%, transparent),
       transparent 70%
     ),
     radial-gradient(
       44% 44% at 8% 104%,
-      color-mix(in oklab, var(--chart-3) 12%, transparent),
+      color-mix(in oklab, var(--signal) 9%, transparent),
       transparent 72%
     );
 }
@@ -592,16 +554,14 @@
 /* A table header is chrome, not data. The tint separates it from the rows
  * without a heavier rule, and being opaque rather than a translucent utility
  * it also holds up as a sticky header with rows scrolling under it. */
-[data-slot="panel"] [data-slot="table-container"] thead,
-[data-slot="card"] [data-slot="table-container"] thead {
+[data-slot="panel"] [data-slot="table-container"] thead {
   background-color: var(--surface-header);
 }
 
 /* An empty state nested in a panel would draw a second frame just inside the
  * first. The panel is already the container — the dashed border is for when
  * the empty state stands on its own. */
-[data-slot="panel"] [data-slot="empty-state"],
-[data-slot="card"] [data-slot="empty-state"] {
+[data-slot="panel"] [data-slot="empty-state"] {
   border: 0;
 }
 
@@ -647,16 +607,14 @@
   > [data-slot="panel-body"][data-flush]
   > [data-slot="table-container"]
   tr
-  > *:first-child,
-[data-slot="card"] > [data-slot="card-content"] > [data-slot="table-container"] tr > *:first-child {
+  > *:first-child {
   padding-left: 1rem;
 }
 [data-slot="panel"]
   > [data-slot="panel-body"][data-flush]
   > [data-slot="table-container"]
   tr
-  > *:last-child,
-[data-slot="card"] > [data-slot="card-content"] > [data-slot="table-container"] tr > *:last-child {
+  > *:last-child {
   padding-right: 1rem;
 }
 

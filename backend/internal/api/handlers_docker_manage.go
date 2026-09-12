@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
-	"github.com/go-chi/chi/v5"
 )
 
 // The write half of the Docker surface: creating containers, volumes and
@@ -66,7 +67,7 @@ func (s *Server) handleContainerCreate(w http.ResponseWriter, r *http.Request) e
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.container.create", res.Name, map[string]any{
-		"image": spec.Image, "id": res.ID, "started": res.Started,
+		"image": spec.Image, "id": res.ID, "started": res.Started, "ports": res.Ports,
 	})
 	httpx.JSON(w, http.StatusCreated, res)
 	return nil
@@ -151,7 +152,7 @@ func (s *Server) handleContainerPreview(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleContainerSpec(w http.ResponseWriter, r *http.Request) error {
-	spec, err := s.modules.docker.SpecOf(r.Context(), chi.URLParam(r, "id"))
+	spec, err := s.modules.docker.SpecOf(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -169,7 +170,7 @@ func (s *Server) handleContainerSpec(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleContainerRecreate(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	detail, err := s.modules.docker.Inspect(r.Context(), id)
 	if err != nil {
 		return s.dockerErr(err)
@@ -208,7 +209,7 @@ func (s *Server) handleContainerRecreate(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleContainerRename(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -231,7 +232,7 @@ func (s *Server) handleContainerRename(w http.ResponseWriter, r *http.Request) e
 // running — the one part of a container's configuration Docker will let you
 // edit in place, and the one an operator most often gets wrong first time.
 func (s *Server) handleContainerResources(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	var limits dockerx.ResourceLimits
 	if err := httpx.DecodeJSON(r, &limits); err != nil {
 		return err
@@ -259,7 +260,7 @@ func (s *Server) handleContainerResources(w http.ResponseWriter, r *http.Request
 // thing experienced operators reach for when they suspect the UI is lying to
 // them — which is a reasonable suspicion to be able to check.
 func (s *Server) handleContainerRaw(w http.ResponseWriter, r *http.Request) error {
-	detail, err := s.modules.docker.InspectRaw(r.Context(), chi.URLParam(r, "id"))
+	detail, err := s.modules.docker.InspectRaw(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -273,29 +274,27 @@ func (s *Server) handleContainerRaw(w http.ResponseWriter, r *http.Request) erro
 // redactRawEnv masks the environment inside a decoded inspect document.
 //
 // The raw view would otherwise be a way around the redaction the typed view
-// applies — the same secrets, one route over. It walks the two places the
-// Engine puts an environment rather than every string in the document, because
-// a blanket scrub would mangle labels and commands that legitimately contain
-// the word "key".
+// applies — the same secrets, one route over. It walks Config.Env, the one
+// place container inspect puts an environment, rather than every string in the
+// document: a blanket scrub would mangle labels and commands that legitimately
+// contain the word "key".
 func redactRawEnv(doc map[string]any) {
-	for _, section := range []string{"Config"} {
-		cfg, ok := doc[section].(map[string]any)
+	cfg, ok := doc["Config"].(map[string]any)
+	if !ok {
+		return
+	}
+	env, ok := cfg["Env"].([]any)
+	if !ok {
+		return
+	}
+	for i, entry := range env {
+		line, ok := entry.(string)
 		if !ok {
 			continue
 		}
-		env, ok := cfg["Env"].([]any)
-		if !ok {
-			continue
-		}
-		for i, entry := range env {
-			line, ok := entry.(string)
-			if !ok {
-				continue
-			}
-			name, _, found := strings.Cut(line, "=")
-			if found && dockerx.IsSecretEnvKey(name) {
-				env[i] = name + "=" + dockerx.RedactedEnvValue
-			}
+		name, _, found := strings.Cut(line, "=")
+		if found && dockerx.IsSecretEnvKey(name) {
+			env[i] = name + "=" + dockerx.RedactedEnvValue
 		}
 	}
 }
@@ -308,7 +307,7 @@ func redactRawEnv(doc map[string]any) {
 // shows exactly that here, and that data is destroyed the next time the
 // container is recreated.
 func (s *Server) handleContainerChanges(w http.ResponseWriter, r *http.Request) error {
-	changes, err := s.modules.docker.Changes(r.Context(), chi.URLParam(r, "id"))
+	changes, err := s.modules.docker.Changes(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -319,7 +318,7 @@ func (s *Server) handleContainerChanges(w http.ResponseWriter, r *http.Request) 
 // ---------------------------------------------------------------- images ---
 
 func (s *Server) handleImageDetail(w http.ResponseWriter, r *http.Request) error {
-	detail, err := s.modules.docker.InspectImage(r.Context(), chi.URLParam(r, "id"))
+	detail, err := s.modules.docker.InspectImage(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -357,7 +356,7 @@ func (s *Server) handleImageUpdates(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleImageTag(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	var req struct {
 		Tag string `json:"tag"`
 	}
@@ -447,7 +446,7 @@ func (s *Server) handleNetworkCreate(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleNetworkConnect(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	var req struct {
 		Container string   `json:"container"`
 		Aliases   []string `json:"aliases,omitempty"`
@@ -467,7 +466,7 @@ func (s *Server) handleNetworkConnect(w http.ResponseWriter, r *http.Request) er
 }
 
 func (s *Server) handleNetworkDisconnect(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	var req struct {
 		Container string `json:"container"`
 		Force     bool   `json:"force,omitempty"`
@@ -504,10 +503,12 @@ func (s *Server) handleNetworkPrune(w http.ResponseWriter, r *http.Request) erro
 type StackDetail struct {
 	dockerx.ComposeStack
 	ConfigPath string `json:"configPath,omitempty"`
-	// Declared is what the compose file says should exist. A service listed
-	// here with no container is a service that failed to start and that
-	// nothing else in Docker will ever mention.
-	Declared []string `json:"declared"`
+	// The declared service list lives on the embedded ComposeStack, together
+	// with the state and summary derived from it. It used to be shadowed here,
+	// which meant the detail view could replace the list with compose's
+	// authoritative answer while everything computed from it — the state, the
+	// orphan list, the "3/4 services" line — still described the weaker one.
+	//
 	// DeclaredError carries a compose file that no longer parses, which is
 	// itself the most important thing to say about a stack.
 	DeclaredError string `json:"declaredError,omitempty"`
@@ -535,25 +536,35 @@ type StackGit struct {
 }
 
 func (s *Server) handleStackDetail(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	stack, err := s.findStack(r, name)
 	if err != nil {
 		return err
 	}
-	detail := StackDetail{ComposeStack: *stack, Declared: []string{}}
+	detail := StackDetail{ComposeStack: *stack}
 	if path, err := dockerx.ComposeFileFor(stack); err == nil {
 		detail.ConfigPath = path
 	}
 	if stack.Managed {
 		ctx, cancel := timeoutCtx(r, 45*time.Second)
 		defer cancel()
+		// The authoritative service list, which resolves includes, profiles,
+		// extends and variable substitution. The stack *list* cannot afford a
+		// subprocess per stack, so it reads the YAML directly and marks the
+		// answer as such; this replaces it with the real one and says so.
 		declared, err := s.modules.docker.DeclaredServices(ctx, stack.WorkingDir)
 		if err != nil {
 			detail.DeclaredError = err.Error()
 		} else {
-			detail.Declared = declared
+			detail.ComposeStack.Declared = declared
+			detail.ComposeStack.DeclaredSource = "compose"
 			detail.Services = mergeDeclared(detail.Services, declared)
-			detail.Total = len(detail.Services)
+			// Total is the count of *declared* services, never of containers.
+			// It used to be len(detail.Services), which folded orphans — a
+			// container for a service the file no longer has — into the total
+			// and made a stack with an orphan read as "4/5 up" forever.
+			detail.Total = len(declared)
+			detail.ComposeStack = dockerx.RestateStack(detail.ComposeStack)
 		}
 		detail.Git = s.stackGit(r, stack.WorkingDir)
 	}
@@ -620,7 +631,7 @@ func (s *Server) stackGit(r *http.Request, dir string) *StackGit {
 }
 
 func (s *Server) handleStackValidate(w http.ResponseWriter, r *http.Request) error {
-	stack, err := s.findStack(r, chi.URLParam(r, "name"))
+	stack, err := s.findStack(r, httpx.URLParam(r, "name"))
 	if err != nil {
 		return err
 	}
@@ -648,7 +659,7 @@ func (s *Server) handleStackValidate(w http.ResponseWriter, r *http.Request) err
 // thing, and the second is only discovered after the stack comes back up
 // wrong.
 func (s *Server) handleStackConfigWrite(w http.ResponseWriter, r *http.Request) error {
-	stack, err := s.findStack(r, chi.URLParam(r, "name"))
+	stack, err := s.findStack(r, httpx.URLParam(r, "name"))
 	if err != nil {
 		return err
 	}
@@ -789,7 +800,7 @@ func underAnyRoot(path string, roots []string) bool {
 // The destructive actions are checked here with the same phrase and the same
 // budget the POST routes use, so the socket is not a way around either.
 func (s *Server) handleStackRun(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	stack, err := s.findStack(r, name)
 	if err != nil {
 		return err
@@ -824,9 +835,62 @@ func (s *Server) handleStackRun(w http.ResponseWriter, r *http.Request) error {
 	s.recordAudit(r, "docker.stack."+string(action), name, map[string]any{
 		"dir": stack.WorkingDir, "service": service, "streamed": true,
 	})
+	// The state being replaced, written down before it is replaced. Docker
+	// keeps no history of its own, so this is the only moment the previous
+	// compose file and the digests that were actually running can be captured;
+	// afterwards they are gone and "roll back" has no target.
+	s.recordStackDeployment(r, stack, string(action))
 	return s.streamLines(w, r, func(ctx context.Context, out chan<- dockerx.LogLine) (int, error) {
 		return s.modules.docker.RunComposeStream(ctx, stack.WorkingDir, action, service, out)
 	})
+}
+
+// recordStackDeployment snapshots a stack immediately before it is changed.
+//
+// Best effort by design: a stack whose compose file cannot be read is still
+// worth deploying, and a history table that could fail a deploy would be a
+// worse feature than no history at all. Failures are logged and dropped.
+func (s *Server) recordStackDeployment(r *http.Request, stack *dockerx.ComposeStack, action string) {
+	if s.modules.dockerDeploys == nil || !composeChangesState(dockerx.ComposeAction(action)) {
+		return
+	}
+	config := ""
+	if len(stack.ConfigFiles) > 0 {
+		config, _ = dockerx.ReadComposeFile(stack.ConfigFiles[0])
+	}
+	snap := s.modules.docker.SnapshotStack(r.Context(), stack, config)
+	snap.Action = action
+	snap.Actor = httpx.MustPrincipal(r).Username()
+	snap.Source = "dashboard"
+	snap.Result = "replaced"
+	// Environment values are hashed, never stored: an .env file beside a
+	// compose file holds every password the stack uses, and a history table is
+	// exactly the wrong place for them.
+	if len(stack.ConfigFiles) > 0 {
+		if env, err := dockerx.ReadComposeFile(filepath.Join(stack.WorkingDir, ".env")); err == nil {
+			snap.EnvHash = dockerx.HashConfig(env)
+		}
+	}
+	if git := s.stackGit(r, stack.WorkingDir); git != nil {
+		snap.GitCommit, snap.GitBranch, snap.GitDirty = git.Commit, git.Branch, git.Dirty
+	}
+	if _, err := s.modules.dockerDeploys.Record(r.Context(), snap); err != nil {
+		s.Log.Warn("could not record stack deployment history", "stack", stack.Name, "error", err)
+	}
+}
+
+// composeChangesState names the actions that replace what is running, which
+// are the ones worth a history entry. Pulling an image or validating a file
+// changes nothing and would fill the table with rows describing no change.
+func composeChangesState(action dockerx.ComposeAction) bool {
+	switch action {
+	case dockerx.ComposeUp, dockerx.ComposeDown, dockerx.ComposeRestart,
+		dockerx.ComposeUpdate, dockerx.ComposeRecreate, dockerx.ComposeStop,
+		dockerx.ComposeStart:
+		return true
+	default:
+		return false
+	}
 }
 
 // composeIsDestructive names the actions that interrupt something already
@@ -871,7 +935,7 @@ func requireComposePhraseWS(w http.ResponseWriter, r *http.Request, action docke
 // stays readable, which is what `docker compose logs -f` does and what nothing
 // in this dashboard could do until now.
 func (s *Server) handleStackLogStream(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	stack, err := s.findStack(r, name)
 	if err != nil {
 		return err
@@ -971,8 +1035,10 @@ func (s *Server) handleDockerEvents(w http.ResponseWriter, r *http.Request) erro
 		kinds = strings.Split(raw, ",")
 	}
 	running, since, buffered := s.modules.dockerEvents.Status()
+	events := s.modules.dockerEvents.Recent(atoiDefault(q.Get("limit"), 200), kinds, q.Get("search"))
+	s.correlateEvents(r, events)
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"events": s.modules.dockerEvents.Recent(atoiDefault(q.Get("limit"), 200), kinds, q.Get("search")),
+		"events": events,
 		// A feed with nothing in it means one of two very different things,
 		// and the client cannot tell them apart without this.
 		"listening": running,
@@ -980,6 +1046,82 @@ func (s *Server) handleDockerEvents(w http.ResponseWriter, r *http.Request) erro
 		"buffered":  buffered,
 	})
 	return nil
+}
+
+// correlateEvents answers "did something in this dashboard do that".
+//
+// Docker records what happened and never who asked, so an operator finding a
+// container removed at 03:14 has no way to tell a colleague pressing a button
+// from a cron job on the host from somebody in an SSH session. This dashboard
+// writes down everything it does, and the two records can be laid against each
+// other: an audit entry naming the same object within a few seconds of the
+// event is almost certainly its cause.
+//
+// Almost. It is a time window and a name, not a causal link, so the match is
+// reported as "likely" and the audit entry is offered for the operator to
+// check rather than asserted as the reason.
+func (s *Server) correlateEvents(r *http.Request, events []dockerx.Event) {
+	if len(events) == 0 || s.Audit == nil {
+		return
+	}
+	oldest := events[len(events)-1].Time
+	entries, _, err := s.Audit.List(r.Context(), audit.Filter{
+		Action: "docker.",
+		Since:  oldest.Add(-eventCorrelationWindow),
+		Limit:  500,
+	})
+	if err != nil {
+		return
+	}
+	for i := range events {
+		ev := &events[i]
+		for j := range entries {
+			entry := &entries[j]
+			if !entry.Success {
+				continue
+			}
+			gap := ev.Time.Sub(entry.TS)
+			if gap < 0 {
+				gap = -gap
+			}
+			if gap > eventCorrelationWindow || !auditNames(entry, ev) {
+				continue
+			}
+			ev.Source = "dashboard"
+			ev.Trigger = &dockerx.EventTrigger{
+				AuditID: entry.ID, Action: entry.Action,
+				Actor: entry.Username, Confidence: "likely",
+			}
+			break
+		}
+	}
+}
+
+// eventCorrelationWindow is how far apart an audit entry and a Docker event can
+// be and still plausibly be the same act. A compose deploy takes seconds to
+// reach the container it recreates; a minute is generous without being long
+// enough to sweep in an unrelated action on the same object.
+const eventCorrelationWindow = time.Minute
+
+// auditNames reports whether an audit entry is about the object an event
+// concerns. Audit targets are recorded as names where a name exists and as ids
+// where one does not, and a stack action names the project every one of its
+// containers is labelled with — so all three are checked.
+func auditNames(entry *audit.Entry, ev *dockerx.Event) bool {
+	target := strings.TrimSpace(entry.Target)
+	if target == "" {
+		return false
+	}
+	switch {
+	case target == ev.Name, target == ev.ID, target == ev.Stack:
+		return true
+	case ev.ID != "" && strings.HasPrefix(ev.ID, target) && len(target) >= 12:
+		return true
+	case ev.Image != "" && target == ev.Image:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) handleDockerEventStream(w http.ResponseWriter, r *http.Request) error {
@@ -1097,40 +1239,113 @@ func (s *Server) streamLines(w http.ResponseWriter, r *http.Request, run func(co
 // panels, and joining them is what turns "it is running on port 3000" into
 // "it is at https://app.example.com". Nothing else in this class knows about
 // the reverse proxy in front of it, because nothing else manages one.
+// PortRoute is one published port, traced from the container to as far out as
+// this dashboard can actually see.
+//
+// This is the correlation nothing else in this class of tool does. A Docker
+// panel knows the binding; a proxy panel knows the vhost; a firewall panel
+// knows the rules. Whether a database is reachable from the internet is a
+// question none of them can answer alone, and all three live in this product.
+//
+// What it deliberately does not do is overclaim. "Bound to every interface" is
+// a fact. "Reachable from the internet" depends on the firewall, on routing,
+// and on whatever sits in front of this machine — so the verdict says which of
+// those it actually knows, and says "unknown" rather than guessing.
 type PortRoute struct {
 	HostIP        string `json:"hostIp,omitempty"`
 	HostPort      int    `json:"hostPort"`
 	ContainerPort int    `json:"containerPort"`
+	Protocol      string `json:"protocol"`
 	// Public reports whether this port is published on every interface, which
 	// is the case the security panel cares about.
 	Public bool `json:"public"`
+	// Scope, Label and Binding are the exposure model's words for the binding,
+	// so this route and the container's port list describe it identically.
+	Scope   string `json:"scope"`
+	Label   string `json:"label"`
+	Binding string `json:"binding"`
 	// VHost and URL are set when a reverse-proxy site forwards to this port.
 	VHost string `json:"vhost,omitempty"`
 	URL   string `json:"url,omitempty"`
 	TLS   bool   `json:"tls,omitempty"`
+
+	// Firewall is what the host firewall says about this port, and Reach is
+	// the conclusion drawn from the binding, the proxy and the firewall
+	// together. Both carry their own "unknown", because a dashboard that
+	// cannot read the firewall must say so rather than reporting silence as
+	// safety.
+	Firewall FirewallView `json:"firewall"`
+	Reach    string       `json:"reach"`
+	// Reasoning is the sentence behind Reach, in the order the facts were
+	// established, so an operator can disagree with the conclusion rather than
+	// merely accept it.
+	Reasoning string `json:"reasoning"`
+	// Inferred marks a verdict the dashboard worked out rather than read.
+	Inferred bool `json:"inferred"`
 }
 
+// FirewallView is the host firewall's opinion of one port.
+type FirewallView struct {
+	// Known is false when there is no firewall this dashboard can read, which
+	// is a different answer from "nothing is blocked".
+	Known bool `json:"known"`
+	// Backend and Enabled describe the firewall itself.
+	Backend string `json:"backend,omitempty"`
+	Enabled bool   `json:"enabled,omitempty"`
+	// Verdict is "allowed", "denied", "default" or "unknown" — "default"
+	// meaning no rule names this port and the default inbound policy decides.
+	Verdict string `json:"verdict"`
+	// Rule is the matching rule as the firewall itself prints it.
+	Rule string `json:"rule,omitempty"`
+	// DefaultIncoming is the policy that applies when no rule matches.
+	DefaultIncoming string `json:"defaultIncoming,omitempty"`
+	// DockerBypass records the thing almost nobody knows: Docker publishes
+	// ports by writing its own NAT rules, which are consulted before ufw's
+	// filter chain. On a host using ufw a published port is reachable even
+	// when ufw says the port is denied.
+	DockerBypass bool `json:"dockerBypass,omitempty"`
+}
+
+const (
+	reachServerOnly = "server-only"
+	reachProxied    = "proxied"
+	reachExternal   = "external"
+	reachBlocked    = "blocked"
+	reachUnknown    = "unknown"
+)
+
 func (s *Server) handleContainerRoutes(w http.ResponseWriter, r *http.Request) error {
-	detail, err := s.modules.docker.Inspect(r.Context(), chi.URLParam(r, "id"))
+	detail, err := s.modules.docker.Inspect(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
 	// The proxy being absent is the ordinary case on a host that does not run
-	// one, and produces routes with no vhost rather than an error.
+	// one, and produces routes with no vhost rather than an error. The same
+	// goes for the firewall: a host with none is not a host with a broken
+	// dashboard, it is a host whose reachability the dashboard cannot judge.
 	vhosts, _ := s.modules.proxy.ListVHosts(r.Context())
+	fw, fwErr := s.modules.netsec.Status(r.Context())
+	if fwErr != nil {
+		fw = nil
+	}
 
 	out := []PortRoute{}
-	for _, p := range detail.Ports {
-		if p.PublicPort == 0 {
+	for _, p := range detail.Exposure {
+		if p.HostPort == 0 {
 			continue
 		}
 		route := PortRoute{
-			HostIP:        p.IP,
-			HostPort:      int(p.PublicPort),
-			ContainerPort: int(p.PrivatePort),
-			Public:        p.IP == "" || p.IP == "0.0.0.0" || p.IP == "::",
+			HostIP:        p.HostIP,
+			HostPort:      p.HostPort,
+			ContainerPort: p.ContainerPort,
+			Protocol:      p.Protocol,
+			Public:        p.Scope == dockerx.ScopeAll,
+			Scope:         string(p.Scope),
+			Label:         p.Label,
+			Binding:       p.Summary,
+			URL:           p.URL(),
 		}
-		if v := matchVHost(vhosts, int(p.PublicPort)); v != nil {
+		if v := matchVHost(vhosts, p.HostPort); v != nil {
 			route.VHost = v.Name
 			route.TLS = v.TLS
 			if len(v.ServerNames) > 0 {
@@ -1141,10 +1356,141 @@ func (s *Server) handleContainerRoutes(w http.ResponseWriter, r *http.Request) e
 				route.URL = scheme + "://" + v.ServerNames[0]
 			}
 		}
+		route.Firewall = firewallViewFor(fw, p)
+		route.Reach, route.Reasoning, route.Inferred = judgeReach(p, route)
 		out = append(out, route)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+// firewallViewFor finds the rule, if any, that names this port.
+//
+// Matching on the port number alone. A firewall rule can carry an address, a
+// range and an interface, and reproducing the kernel's matching order here
+// would be a second, worse firewall. What this is for is answering "is there a
+// rule about this port at all", which is the question in front of an operator
+// looking at a published database.
+func firewallViewFor(status *netsec.FirewallStatus, port dockerx.PortExposure) FirewallView {
+	if status == nil || !status.Available {
+		return FirewallView{Verdict: "unknown"}
+	}
+	view := FirewallView{
+		Known:           true,
+		Backend:         string(status.Backend),
+		Enabled:         status.Enabled,
+		Verdict:         "default",
+		DefaultIncoming: status.Policy.Incoming,
+		// ufw and iptables both sit behind Docker's own NAT rules. firewalld
+		// on a modern host puts Docker in a zone and does govern it, so the
+		// caveat is not stated where it does not apply.
+		DockerBypass: port.Scope == dockerx.ScopeAll &&
+			(status.Backend == netsec.BackendUFW || status.Backend == netsec.BackendIPTables),
+	}
+	if !status.Enabled {
+		view.Verdict = "allowed"
+		view.Rule = "the firewall is not enabled"
+		return view
+	}
+	needle := strconv.Itoa(port.HostPort)
+	for _, rule := range status.Rules {
+		if !portRuleMatches(rule.Port, needle) {
+			continue
+		}
+		if rule.Protocol != "" && port.Protocol != "" &&
+			!strings.EqualFold(rule.Protocol, port.Protocol) {
+			continue
+		}
+		view.Rule = rule.Raw
+		if strings.Contains(strings.ToLower(rule.Action), "deny") ||
+			strings.Contains(strings.ToLower(rule.Action), "reject") ||
+			strings.Contains(strings.ToLower(rule.Action), "drop") {
+			view.Verdict = "denied"
+		} else {
+			view.Verdict = "allowed"
+		}
+		return view
+	}
+	return view
+}
+
+// portRuleMatches handles the three spellings a firewall uses for a port: the
+// number, a range, and a comma-separated list.
+func portRuleMatches(rulePort, want string) bool {
+	rulePort = strings.TrimSpace(rulePort)
+	if rulePort == "" {
+		return false
+	}
+	for _, part := range strings.Split(rulePort, ",") {
+		part = strings.TrimSpace(part)
+		if part == want {
+			return true
+		}
+		if lo, hi, found := strings.Cut(part, ":"); found {
+			if inPortRange(lo, hi, want) {
+				return true
+			}
+		}
+		if lo, hi, found := strings.Cut(part, "-"); found {
+			if inPortRange(lo, hi, want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func inPortRange(lo, hi, want string) bool {
+	low, err1 := strconv.Atoi(strings.TrimSpace(lo))
+	high, err2 := strconv.Atoi(strings.TrimSpace(hi))
+	n, err3 := strconv.Atoi(want)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return false
+	}
+	return n >= low && n <= high
+}
+
+// judgeReach draws the conclusion, and says how confident it is entitled to be.
+//
+// The order matters: a binding that cannot leave the machine is settled by the
+// binding alone and no firewall can change it, which is the one verdict here
+// that is a fact rather than an inference.
+func judgeReach(port dockerx.PortExposure, route PortRoute) (reach, reasoning string, inferred bool) {
+	switch port.Scope {
+	case dockerx.ScopeLoopback:
+		if route.VHost != "" {
+			return reachProxied, "Bound to loopback, so nothing outside this server reaches it directly. " +
+				route.VHost + " forwards to it, which is how traffic gets in — and means the proxy's own TLS, logging and access rules apply.", false
+		}
+		return reachServerOnly, "Bound to loopback. Only processes on this server can reach it, whatever the firewall says.", false
+	case dockerx.ScopePrivate:
+		return reachUnknown, "Bound to " + port.HostIP + " only. Whether that address is reachable from outside depends on what network it belongs to, which this dashboard cannot see.", true
+	}
+
+	// Published on every interface. From here the firewall decides, and the
+	// honest answers are "we read the firewall and it says X" or "we could not
+	// read one".
+	switch {
+	case !route.Firewall.Known:
+		return reachUnknown, "Bound to every interface on this server. No firewall this dashboard can read is present, so whether the internet reaches it depends on the network in front of this machine.", true
+	case route.Firewall.Verdict == "denied" && !route.Firewall.DockerBypass:
+		return reachBlocked, "Bound to every interface, but the firewall denies this port: " + route.Firewall.Rule + ".", true
+	case route.Firewall.Verdict == "denied" && route.Firewall.DockerBypass:
+		// The trap. Worth spelling out every time, because the operator has
+		// evidence in front of them that says the opposite.
+		return reachExternal, "Bound to every interface. The firewall has a rule denying this port, but Docker publishes ports with NAT rules that are consulted before " +
+			route.Firewall.Backend + "'s filter chain — so the rule does not apply to it and the port is reachable anyway.", true
+	case route.Firewall.Verdict == "allowed":
+		return reachExternal, "Bound to every interface and allowed by the firewall: " + route.Firewall.Rule + ".", true
+	case strings.HasPrefix(strings.ToLower(route.Firewall.DefaultIncoming), "deny") && !route.Firewall.DockerBypass:
+		return reachBlocked, "Bound to every interface. No firewall rule names this port and the default incoming policy is to deny.", true
+	case route.Firewall.DockerBypass:
+		return reachExternal, "Bound to every interface. Docker's own NAT rules are consulted before " +
+			route.Firewall.Backend + "'s, so this port is reachable regardless of the default policy.", true
+	default:
+		return reachExternal, "Bound to every interface, and the firewall's default incoming policy is " +
+			route.Firewall.DefaultIncoming + ".", true
+	}
 }
 
 // matchVHost finds a proxy site forwarding to a port on this machine.

@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 )
 
@@ -74,7 +74,10 @@ type StartRequest struct {
 	Health         string
 	RollbackHealth string
 	Endpoint       string
-	Actor          string
+	// Note is a caveat about the configuration being applied, recorded on the
+	// run so the page that watches the restart can say it afterwards.
+	Note  string
+	Actor string
 }
 
 // Start launches the sibling and returns as soon as it is running.
@@ -105,6 +108,7 @@ func (a *Applier) Start(ctx context.Context, loc *selfupdate.Location, req Start
 		Health:         req.Health,
 		RollbackHealth: req.RollbackHealth,
 		Endpoint:       req.Endpoint,
+		Note:           req.Note,
 		Container:      RestartContainer,
 		Actor:          req.Actor,
 		StartedAt:      time.Now().UTC(),
@@ -115,6 +119,9 @@ func (a *Applier) Start(ctx context.Context, loc *selfupdate.Location, req Start
 		fmt.Fprintf(f, "stack: %s (%s)\n", run.Dir, run.Compose)
 		for _, c := range run.Changes {
 			fmt.Fprintf(f, "  %s: %s → %s\n", c.Label, c.From, c.To)
+		}
+		if run.Note != "" {
+			fmt.Fprintf(f, "note: %s\n", run.Note)
 		}
 		fmt.Fprintln(f)
 		f.Close()
@@ -177,6 +184,7 @@ func (a *Applier) siblingArgs(run *Run) []string {
 		// Host network, so the health probe reaches a loopback port on the
 		// host rather than one inside a container namespace.
 		"--network", "host",
+		"--pid", "host",
 		// Never restarted: a half-applied configuration replayed at boot is a
 		// second unattended restart nobody asked for.
 		"--restart", "no",
@@ -260,14 +268,8 @@ func headline(run *Run) string {
 
 // PortFree reports whether a TCP port can be taken on this host.
 //
-// The dashboard's backend runs in the host's network namespace, so binding
-// here tests the same namespace the stack will bind in. Loopback rather than a
-// wildcard: a wildcard bind would succeed while some other service holds the
-// port on one specific interface, which is the collision worth catching.
+// Check the host namespace conservatively across IPv4 interfaces. The lifecycle
+// runner then verifies ownership and the exact bind addresses before startup.
 func PortFree(port int) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return fmt.Errorf("something on this machine is already listening on it")
-	}
-	return ln.Close()
+	return portalloc.Available("0.0.0.0", "tcp", port)
 }

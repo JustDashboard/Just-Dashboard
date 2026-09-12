@@ -1,6 +1,7 @@
 "use client"
 
-import { NetworkDevice, ShieldCheck } from "@/components/icons"
+import { useMemo } from "react"
+import { NetworkDevice, Shield } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import type { Connections } from "@/lib/types"
@@ -8,11 +9,11 @@ import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Metric, MetricStrip } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { ReachBadge } from "@/components/security/reach-badge"
+import { IconAction, RowActions } from "@/components/icon-action"
+import { Reach } from "@/components/security/reach"
 import { Status } from "@/components/status-dot"
-import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   stickyTableHeader,
@@ -41,11 +42,14 @@ export function ConnectionsPanel() {
     10000,
   )
 
+  const peers = useMemo(
+    () => (data?.peers ?? []).filter((p) => scope === "all" || !p.private),
+    [data?.peers, scope],
+  )
+  const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
+
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
-
-  const peers = (data?.peers ?? []).filter((p) => scope === "all" || !p.private)
-  const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
 
   const block = async (ip: string) => {
     try {
@@ -67,98 +71,96 @@ export function ConnectionsPanel() {
       <PanelHeader
         icon={NetworkDevice}
         title="Live connections"
-        description="Who is talking to this machine right now"
         actions={
           <Status
             verdict={fromInternet > 0 ? "notice" : "ok"}
             label={
-              fromInternet > 0
-                ? `${fromInternet} from the internet`
-                : "none from the internet"
+              fromInternet > 0 ? `${fromInternet} from the internet` : "none from the internet"
             }
           />
         }
       />
-      <PanelToolbar>
+      {/* One strip, not two. The figures and the filter that changes which
+          rows they describe belong on the same line: stacked, the filter read
+          as a second, unrelated header and the panel grew three horizontal
+          rules before its first row of data. */}
+      <PanelToolbar className="gap-x-6">
         <MetricStrip>
           <Metric label="remote addresses" value={data?.peers.length ?? 0} />
           <Metric label="sockets" value={data?.total ?? 0} />
           <Metric label="listening" value={data?.listening ?? 0} />
           <Metric label="loopback" value={data?.loopback ?? 0} hint="never left the machine" />
         </MetricStrip>
-      </PanelToolbar>
-      <PanelToolbar>
+        <span className="flex-1" />
         <ToggleGroup
           type="single"
           value={scope}
           onValueChange={(next) => next && setScope(next as "all" | "public")}
           variant="outline"
           size="sm"
+          className="self-end"
           aria-label="Which peers to show"
         >
-          <ToggleGroupItem value="all" className="px-2.5 text-[11px]">
+          <ToggleGroupItem value="all" className="px-2.5 text-hint">
             Everything
           </ToggleGroupItem>
-          <ToggleGroupItem value="public" className="px-2.5 text-[11px]">
-            From the internet
+          <ToggleGroupItem value="public" className="px-2.5 text-hint">
+            From the internet {fromInternet}
           </ToggleGroupItem>
         </ToggleGroup>
-        <span className="text-[11px] text-muted-foreground">
-          Most of a healthy host&rsquo;s connections are private, which is what makes the public
-          ones worth looking at.
-        </span>
       </PanelToolbar>
       <PanelBody flush>
         {peers.length === 0 ? (
           <EmptyState
             icon={NetworkDevice}
             title={scope === "public" ? "Nothing connected from the internet" : "No connections"}
+            className="border-0"
           />
         ) : (
           <Table containerClassName="max-h-[calc(100svh-26rem)]">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead className="w-full">Remote address</TableHead>
+                <TableHead>Remote address</TableHead>
+                <TableHead>Origin</TableHead>
                 <TableHead>Sockets</TableHead>
                 <TableHead>Reaching</TableHead>
-                <TableHead>Process</TableHead>
-                <TableHead>Origin</TableHead>
+                <TableHead className="w-full">Process</TableHead>
                 <TableHead className="w-px" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {peers.map((peer) => (
                 <TableRow key={peer.address} className="group">
-                  <TableCell className="font-mono text-xs">{peer.address}</TableCell>
-                  <TableCell className="numeric text-xs">
+                  <TableCell className="font-mono">{peer.address}</TableCell>
+                  <TableCell>
+                    <Reach scope={peer.private ? "private" : "internet"} />
+                  </TableCell>
+                  <TableCell className="numeric">
                     {peer.established}
                     {peer.count !== peer.established && (
                       <span className="text-muted-foreground"> / {peer.count}</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell>
                     <span className="font-mono">{peer.ports.slice(0, 4).join(", ")}</span>
                     {peer.service && (
                       <span className="ml-1.5 text-muted-foreground">{peer.service}</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {peer.processes.join(", ") || "—"}
                   </TableCell>
                   <TableCell>
-                    <ReachBadge scope={peer.private ? "private" : "internet"} />
-                  </TableCell>
-                  <TableCell>
                     {can("system.admin") && !peer.private && (
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                        onClick={() => block(peer.address)}
-                      >
-                        <ShieldCheck className="size-3.5" />
-                        Block
-                      </Button>
+                      <RowActions className="justify-end">
+                        <IconAction
+                          label="Block this address at the firewall"
+                          className="text-destructive"
+                          onClick={() => block(peer.address)}
+                        >
+                          <Shield />
+                        </IconAction>
+                      </RowActions>
                     )}
                   </TableCell>
                 </TableRow>
@@ -167,6 +169,10 @@ export function ConnectionsPanel() {
           </Table>
         )}
       </PanelBody>
+      <PanelFooter className="text-hint text-muted-foreground">
+        Most of a healthy host&rsquo;s connections are private, which is what makes the public ones
+        worth looking at.
+      </PanelFooter>
     </Panel>
   )
 }

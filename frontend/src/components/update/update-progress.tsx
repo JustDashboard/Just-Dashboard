@@ -45,7 +45,7 @@ export function UpdateProgress({
           {run.status === "failed" && <CrossCircle className="size-4 text-destructive" />}
         </span>
         <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-[13px] leading-tight font-medium">
+          <p className="text-body leading-tight font-medium">
             {running
               ? restarting
                 ? "Restarting the dashboard"
@@ -54,7 +54,7 @@ export function UpdateProgress({
                 ? `Updated to ${run.toVersion}`
                 : `Update to ${run.toVersion} failed`}
           </p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             {run.fromVersion} → {run.toVersion} · started {relativeTime(run.startedAt)}
             {run.actor ? ` by ${run.actor}` : ""}
           </p>
@@ -107,7 +107,7 @@ function Transcript({ text, follow }: { text: string; follow?: boolean }) {
         // still growing yanks them back down every two seconds.
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
       }}
-      className="max-h-64 min-h-16 overflow-auto rounded-xl border border-hairline bg-surface-sunken p-2.5 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap"
+      className="max-h-64 min-h-16 overflow-auto rounded-xl border border-hairline bg-surface-sunken p-2.5 font-mono text-hint leading-relaxed break-all whitespace-pre-wrap"
     >
       {text.trimEnd()}
     </pre>

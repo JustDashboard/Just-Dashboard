@@ -2,7 +2,13 @@
 
 import { ChevronLeft, ChevronRight, MagnifyingGlassMinus } from "@/components/icons"
 import { timestamp } from "@/lib/format"
-import { RANGES, windowLabel, type MetricsWindow, type RangeKey, type RangeSpec } from "@/lib/metrics-range"
+import {
+  RANGES,
+  windowLabel,
+  type MetricsWindow,
+  type RangeKey,
+  type RangeSpec,
+} from "@/lib/metrics-range"
 import type { WindowControls } from "@/hooks/use-metrics-window"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -34,7 +40,7 @@ export function RangePicker({
     <div className="flex flex-wrap items-center gap-1.5">
       {zoomed && (
         <>
-          <span className="numeric rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
+          <span className="numeric rounded-md border border-rule-primary bg-wash-primary px-2 py-1 text-hint font-medium text-primary">
             {windowLabel(win)} window
           </span>
           <Button
@@ -84,7 +90,7 @@ export function RangePicker({
         aria-label="Chart time range"
       >
         {ranges.map((option) => (
-          <ToggleGroupItem key={option.key} value={option.key} className="px-2.5 text-[11px]">
+          <ToggleGroupItem key={option.key} value={option.key} className="px-2.5 text-hint">
             {option.label}
           </ToggleGroupItem>
         ))}

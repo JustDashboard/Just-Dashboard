@@ -10,6 +10,7 @@ import { CodeEditor } from "@/components/code-editor"
 import { Button } from "@/components/ui/button"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { EmptyState, Notice, Spinner } from "@/components/state"
+import { copyText } from "@/lib/clipboard"
 
 /**
  * Code generation, done the way a server panel honestly can: introspect the
@@ -71,14 +72,12 @@ export function OrmTab({ conn, schema }: { conn: DbConnection; schema: string })
     URL.revokeObjectURL(url)
   }
 
-  const current = targets.data?.find((t) => t.id === target)
 
   return (
     <Panel>
       <PanelHeader
         icon={Sparkles}
         title="Generate from this schema"
-        description={current?.description ?? "Introspect this database into a ready-to-review file"}
         actions={
           <div className="flex flex-wrap items-center gap-1.5">
             {targets.data?.map((t) => (
@@ -124,12 +123,7 @@ export function OrmTab({ conn, schema }: { conn: DbConnection; schema: string })
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
-              navigator.clipboard
-                .writeText(output.schema)
-                .then(() => notify.success("Copied schema"))
-                .catch(() => notify.error("Could not copy"))
-            }
+            onClick={() => void copyText(output.schema, "Copied schema")}
           >
             <Copy className="size-3.5" />
             Copy

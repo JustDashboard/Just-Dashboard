@@ -87,7 +87,10 @@ function subscribe(listener: () => void) {
  * font settings make, and invisible here because the panel is inside a
  * client-rendered page.
  */
-export function usePanelSize(key: string, fallback: number): [number, (px: number, commit?: boolean) => void, () => void] {
+export function usePanelSize(
+  key: string,
+  fallback: number,
+): [number, (px: number, commit?: boolean) => void, () => void] {
   const width = useSyncExternalStore(
     subscribe,
     () => load()[key] ?? fallback,

@@ -6,7 +6,6 @@ import {
   Cross,
   FolderClosed,
   FolderPlus,
-  MagnifyingGlass,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -18,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { relativeTime, truncateMiddle } from "@/lib/format"
 import type { TerminalFolder, TerminalWorkspace } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
+import { SearchInput } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -30,7 +30,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, rowReveal } from "@/components/icon-action"
+import { Pane, PaneHeader } from "@/components/panel"
 
 type RowHandlers = {
   activeId: string | null
@@ -115,14 +116,8 @@ export function SessionRail({
   }
 
   return (
-    <aside
-      aria-label="Terminal sessions"
-      className={cn(
-        "flex min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border bg-card",
-        className,
-      )}
-    >
-      <div className="flex shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-1.5">
+    <Pane aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
+      <PaneHeader className="gap-1">
         <Terminal className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">Sessions</span>
         <span className="flex-1" />
@@ -132,18 +127,16 @@ export function SessionRail({
         <IconAction label="New session" className="size-7" onClick={() => onNew()}>
           <Plus />
         </IconAction>
-      </div>
+      </PaneHeader>
       <div className="border-b border-hairline p-2">
-        <div className="relative">
-          <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={filter}
-            spellCheck={false}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter sessions"
-            className="h-7 pl-7 text-xs"
-          />
-        </div>
+        <SearchInput
+          dense
+          value={filter}
+          spellCheck={false}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filter sessions"
+          containerClassName="sm:w-full"
+        />
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {creatingFolder && (
@@ -174,7 +167,7 @@ export function SessionRail({
         {groups.unfiled.length > 0 && (
           <div className="space-y-1" data-folder="">
             {folders.length > 0 && (
-              <p className="px-1 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="px-1 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
                 Unfiled
               </p>
             )}
@@ -189,7 +182,7 @@ export function SessionRail({
           </p>
         )}
       </div>
-    </aside>
+    </Pane>
   )
 }
 
@@ -227,7 +220,7 @@ function FolderGroup({
     <div className="min-w-0" data-folder={folder.name}>
       <div className="group/folder flex items-center gap-1 px-1 py-0.5">
         <button
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 text-left focus-ring hover:text-foreground"
           onClick={onToggle}
         >
           <ChevronDown
@@ -236,11 +229,11 @@ function FolderGroup({
               collapsed && "-rotate-90",
             )}
           />
-          <span className="truncate text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <span className="truncate text-hint font-medium tracking-wide text-muted-foreground uppercase">
             {folder.name}
           </span>
         </button>
-        <span className="flex shrink-0 opacity-0 group-hover/folder:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <span className={cn("flex shrink-0", rowReveal("folder"))}>
           <IconAction
             label={`New session in ${folder.name}`}
             className="size-6"
@@ -328,11 +321,11 @@ function SessionRow({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
             {session.favourite && <Pin className="size-2.5 shrink-0 text-muted-foreground" />}
-            <span className={cn("truncate text-[13px] leading-tight", active && "font-medium")}>
+            <span className={cn("truncate text-body leading-tight", active && "font-medium")}>
               {session.title}
             </span>
           </span>
-          <span className="block truncate font-mono text-[10px] leading-tight text-muted-foreground">
+          <span className="block truncate font-mono text-micro leading-tight text-muted-foreground">
             {session.cwd ? truncateMiddle(session.cwd, 26) : relativeTime(session.createdAt)}
           </span>
         </span>
@@ -344,7 +337,7 @@ function SessionRow({
         size="icon-sm"
         variant="ghost"
         aria-label={`Close ${session.title}`}
-        className="size-6 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+        className={cn("size-6 shrink-0 text-muted-foreground hover:text-destructive", rowReveal())}
         onClick={() => onClose(session)}
       >
         <Cross className="size-3.5" />
@@ -355,7 +348,7 @@ function SessionRow({
             size="icon-sm"
             variant="ghost"
             aria-label={`More for ${session.title}`}
-            className="size-6 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+            className={cn("size-6 shrink-0", rowReveal())}
           >
             <MoreHorizontal />
           </Button>

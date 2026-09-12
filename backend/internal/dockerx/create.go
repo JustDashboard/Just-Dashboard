@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
@@ -206,10 +208,11 @@ type ResourceLimits struct {
 // container that now exists, and everything about the request that was
 // accepted but is probably not what they meant.
 type CreateResult struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Warnings []string `json:"warnings"`
-	Started  bool     `json:"started"`
+	ID       string        `json:"id"`
+	Name     string        `json:"name"`
+	Warnings []string      `json:"warnings"`
+	Started  bool          `json:"started"`
+	Ports    []PortMapping `json:"ports"`
 }
 
 var (
@@ -287,35 +290,83 @@ func (c *Client) Create(ctx context.Context, spec ContainerSpec, progress chan<-
 		return nil, err
 	}
 
-	created, err := cli.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, spec.Name)
-	if err != nil {
-		return nil, err
-	}
-	warnings = append(warnings, created.Warnings...)
+	for attempt := 0; attempt < 4; attempt++ {
+		created, err := cli.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, spec.Name)
+		if err != nil {
+			return nil, err
+		}
+		warnings = append(warnings, created.Warnings...)
 
-	// Networks beyond the first: the create call takes exactly one, and
-	// passing more is accepted and ignored, which is worse than an error.
-	for _, extra := range extraNetworks(spec) {
-		if err := cli.NetworkConnect(ctx, extra, created.ID, nil); err != nil {
-			warnings = append(warnings, fmt.Sprintf("created, but could not attach network %s: %v", extra, err))
+		// Networks beyond the first: the create call takes exactly one, and
+		// passing more is accepted and ignored, which is worse than an error.
+		for _, extra := range extraNetworks(spec) {
+			if err := cli.NetworkConnect(ctx, extra, created.ID, nil); err != nil {
+				warnings = append(warnings, fmt.Sprintf("created, but could not attach network %s: %v", extra, err))
+			}
 		}
-	}
 
-	res := &CreateResult{ID: created.ID, Name: spec.Name, Warnings: warnings}
-	if spec.Start {
-		if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-			// The container exists and is inspectable, which is what the
-			// operator needs in order to find out why it would not start.
-			return res, fmt.Errorf("created %s but it would not start: %w", ShortID(created.ID), err)
+		res := &CreateResult{ID: created.ID, Name: spec.Name, Warnings: warnings}
+		if spec.Start {
+			if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+				if portalloc.IsConflict(err) && len(hostCfg.PortBindings) > 0 && attempt < 3 {
+					// Only the new, unstarted container is removed. Its volumes and
+					// the process already holding the preferred port remain intact.
+					if removeErr := cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{}); removeErr != nil {
+						return res, fmt.Errorf("port conflict: %v; could not remove unstarted candidate: %w", err, removeErr)
+					}
+					if err := relocateBindings(hostCfg.PortBindings); err != nil {
+						return res, err
+					}
+					warnings = append(warnings, "A requested host port was occupied; available host ports were selected and saved. See the published ports for the addresses to use.")
+					continue
+				}
+				// The container exists and is inspectable, which is what the
+				// operator needs in order to find out why it would not start.
+				return res, fmt.Errorf("created %s but it would not start: %w", ShortID(created.ID), err)
+			}
+			res.Started = true
 		}
-		res.Started = true
+		res.Ports = append([]PortMapping{}, spec.Ports...)
+		if res.Name == "" || (res.Started && len(hostCfg.PortBindings) > 0) {
+			if insp, err := cli.ContainerInspect(ctx, created.ID); err == nil {
+				res.Name = strings.TrimPrefix(insp.Name, "/")
+				if res.Started && insp.NetworkSettings != nil {
+					res.Ports = publishedMappings(insp.NetworkSettings.Ports)
+				}
+				if res.Started && len(hostCfg.PortBindings) > 0 && (insp.NetworkSettings == nil || len(res.Ports) == 0) {
+					return res, errors.New("container started but Docker reported no published ports")
+				}
+			} else {
+				return res, fmt.Errorf("container started but its published ports could not be read: %w", err)
+			}
+		}
+		return res, nil
 	}
-	if res.Name == "" {
-		if insp, err := cli.ContainerInspect(ctx, created.ID); err == nil {
-			res.Name = strings.TrimPrefix(insp.Name, "/")
+	return nil, errors.New("could not publish container ports after repeated conflicts")
+}
+
+func publishedMappings(ports nat.PortMap) []PortMapping {
+	result := []PortMapping{}
+	for port, bindings := range ports {
+		for _, binding := range bindings {
+			hostPort, _ := strconv.Atoi(binding.HostPort)
+			result = append(result, PortMapping{HostIP: binding.HostIP, HostPort: hostPort, ContainerPort: port.Int(), Protocol: port.Proto()})
 		}
 	}
-	return res, nil
+	sort.Slice(result, func(i, j int) bool {
+		a, b := result[i], result[j]
+		if a.ContainerPort != b.ContainerPort {
+			return a.ContainerPort < b.ContainerPort
+		}
+		if a.Protocol != b.Protocol {
+			return a.Protocol < b.Protocol
+		}
+		if a.HostIP != b.HostIP {
+			return a.HostIP < b.HostIP
+		}
+		return a.HostPort < b.HostPort
+	})
+	return result
 }
 
 func extraNetworks(spec ContainerSpec) []string {
@@ -890,4 +941,50 @@ func (c *Client) Rename(ctx context.Context, id, name string) error {
 		return errors.New("a container name may contain letters, digits, and _ . - after the first character")
 	}
 	return cli.ContainerRename(ctx, id, name)
+}
+
+// Concrete bindings survive stop/start; Docker's empty published-port setting
+// allocates a different number on each start and would invalidate saved routes.
+func relocateBindings(ports nat.PortMap) error {
+	groups := map[string][]struct {
+		port  nat.Port
+		index int
+	}{}
+	for port, bindings := range ports {
+		for index, binding := range bindings {
+			groups[binding.HostPort] = append(groups[binding.HostPort], struct {
+				port  nat.Port
+				index int
+			}{port, index})
+		}
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	reserved := map[int]bool{}
+	for _, key := range keys {
+		preferred, _ := strconv.Atoi(key)
+		preferred = max(1024, preferred)
+		selected, err := portalloc.Select(preferred, 1024, reserved, func(candidate int) error {
+			for _, entry := range groups[key] {
+				binding := ports[entry.port][entry.index]
+				if err := portalloc.Available(binding.HostIP, entry.port.Proto(), candidate); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		reserved[selected] = true
+		for _, entry := range groups[key] {
+			bindings := ports[entry.port]
+			bindings[entry.index].HostPort = strconv.Itoa(selected)
+			ports[entry.port] = bindings
+		}
+	}
+	return nil
 }

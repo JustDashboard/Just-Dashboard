@@ -1,0 +1,99 @@
+{
+  "id": "minecraft-bedrock",
+  "version": "1.0.0",
+  "name": "Minecraft (Bedrock Edition)",
+  "category": "game",
+  "profile": "game",
+  "description": "A Minecraft Bedrock server for console, mobile and Windows players. Bedrock speaks UDP, so its port is published directly and cannot go behind the HTTP proxy.",
+  "iconId": "game",
+  "docsUrl": "https://github.com/itzg/docker-minecraft-bedrock-server",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/itzg/docker-minecraft-bedrock-server",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7",
+    "updateNotes": "The image is pinned; the Bedrock server build is resolved at deployment and recorded on the release."
+  },
+  "image": { "reference": "itzg/minecraft-bedrock-server:2025.1.0", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "version", "kind": "text", "label": "Bedrock version", "default": "LATEST", "required": true, "variable": "VERSION", "pattern": "^(LATEST|PREVIEW|[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?)$", "description": "Bedrock clients update themselves, so a server left behind stops accepting them." },
+    { "name": "server-name", "kind": "text", "label": "Server name", "default": "A Minecraft Server", "variable": "SERVER_NAME", "pattern": "^[^\\x00-\\x1f]{1,59}$" },
+    { "name": "max-players", "kind": "number", "label": "Maximum players", "default": "10", "minimum": 1, "maximum": 100, "variable": "MAX_PLAYERS" },
+    {
+      "name": "difficulty",
+      "kind": "choice",
+      "label": "Difficulty",
+      "default": "normal",
+      "variable": "DIFFICULTY",
+      "choices": [
+        { "value": "peaceful", "label": "Peaceful" },
+        { "value": "easy", "label": "Easy" },
+        { "value": "normal", "label": "Normal" },
+        { "value": "hard", "label": "Hard" }
+      ]
+    },
+    {
+      "name": "game-mode",
+      "kind": "choice",
+      "label": "Game mode",
+      "default": "survival",
+      "variable": "GAMEMODE",
+      "choices": [
+        { "value": "survival", "label": "Survival" },
+        { "value": "creative", "label": "Creative" },
+        { "value": "adventure", "label": "Adventure" }
+      ]
+    },
+    { "name": "whitelist", "kind": "boolean", "label": "Allow list only", "default": "false", "variable": "ALLOW_LIST" },
+    { "name": "online-mode", "kind": "boolean", "label": "Verify Xbox Live accounts", "default": "true", "variable": "ONLINE_MODE", "advanced": true },
+    { "name": "view-distance", "kind": "number", "label": "View distance", "default": "10", "minimum": 3, "maximum": 32, "variable": "VIEW_DISTANCE", "advanced": true },
+    { "name": "memory", "kind": "memory", "label": "Memory", "default": "1024", "minimum": 512, "maximum": 16384, "description": "Bedrock is lighter than Java. 1 GB is comfortable for a small server." },
+    { "name": "eula", "kind": "accept", "label": "I accept the Minecraft EULA", "required": true, "variable": "EULA", "acceptUrl": "https://aka.ms/MinecraftEULA", "description": "The server refuses to start without this, and the acceptance is recorded with your name and the time." }
+  ],
+  "ports": [
+    { "name": "bedrock", "internal": 19132, "protocol": "udp", "purpose": "Minecraft Bedrock clients connect here", "exposure": "direct", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/data", "purpose": "Worlds, allow lists and server configuration", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
+  "checks": [
+    { "name": "Server process is healthy", "kind": "docker_health", "phase": "readiness", "required": true, "timeoutSeconds": 600 }
+  ],
+  "operations": {
+    "stop": [
+      { "kind": "console_command", "value": "say Server stopping in 10 seconds" },
+      { "kind": "console_command", "value": "save hold" },
+      { "kind": "console_command", "value": "stop" },
+      { "kind": "stop_signal", "signal": "SIGTERM" }
+    ]
+  },
+  "files": [
+    {
+      "path": "/data/server.properties",
+      "label": "Server properties",
+      "format": "properties",
+      "restartRequired": true,
+      "properties": [
+        { "key": "server-name", "kind": "text", "label": "Server name" },
+        { "key": "max-players", "kind": "number", "label": "Maximum players", "minimum": 1, "maximum": 100 },
+        { "key": "difficulty", "kind": "choice", "label": "Difficulty", "choices": [
+          { "value": "peaceful", "label": "Peaceful" },
+          { "value": "easy", "label": "Easy" },
+          { "value": "normal", "label": "Normal" },
+          { "value": "hard", "label": "Hard" }
+        ] },
+        { "key": "allow-list", "kind": "boolean", "label": "Allow list only" },
+        { "key": "online-mode", "kind": "boolean", "label": "Verify Xbox Live accounts" },
+        { "key": "view-distance", "kind": "number", "label": "View distance", "minimum": 3, "maximum": 32 }
+      ]
+    }
+  ],
+  "automation": [
+    { "name": "Nightly world backup", "description": "Holds the save, then backs it up, every night at 04:00.", "cron": "0 4 * * *", "timezone": "UTC", "actions": ["save", "backup"], "default": true }
+  ],
+  "update": { "detector": "minecraft-bedrock", "backupFirst": true, "notes": "Bedrock worlds are upgraded in place on first start and cannot be opened by an older server afterwards." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "eula": "true" }, "digest": "sha256:39f1700f59cd24d25e78db143a9aa26656fbad390bb9576775de8127f0278915" }]
+}

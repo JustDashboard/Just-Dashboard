@@ -33,7 +33,6 @@ import { SeriesLegend } from "@/components/metrics/series-legend"
  */
 export const ChartPanel = memo(function ChartPanel({
   title,
-  description,
   icon,
   actions,
   rows,
@@ -54,7 +53,6 @@ export const ChartPanel = memo(function ChartPanel({
   footer,
 }: {
   title: string
-  description?: React.ReactNode
   icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
   rows: ChartRowLike[]
@@ -92,7 +90,7 @@ export const ChartPanel = memo(function ChartPanel({
 
   return (
     <Panel className={className}>
-      <PanelHeader icon={icon} title={title} description={description} actions={actions} />
+      <PanelHeader icon={icon} title={title} actions={actions} />
       <PanelBody className="flex flex-1 flex-col gap-3">
         {empty ? (
           <ChartPlaceholder note={note ?? "Nothing recorded in this window."} height={height} />

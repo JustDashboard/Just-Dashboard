@@ -342,13 +342,20 @@ func packageCandidate(marker *detectedMarkers) []DetectedCandidate {
 		candidate.Confidence = ConfidenceLow
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "choose one JavaScript package manager and remove competing lockfiles")
 	}
+	// The runner has to be the one the lockfile names. The build recipe picks
+	// its base image from that lockfile — a bun.lock project builds on
+	// oven/bun, which has no npm on it at all — so "npm run build" was not a
+	// harmless stylistic default: it was a build that died on `npm: not found`
+	// after a successful install, with nothing in the configuration screen
+	// saying which field was wrong.
+	runner := jsRunner(marker.lockfiles)
 	if command := manifest.Scripts["build"]; command != "" {
-		candidate.BuildCommand = "npm run build"
+		candidate.BuildCommand = runner + " run build"
 		candidate.Evidence = append(candidate.Evidence,
 			DetectionEvidence{Path: marker.packagePath, Reason: "build script: " + boundedEvidence(command)})
 	}
 	if command := manifest.Scripts["start"]; command != "" {
-		candidate.StartCommand = "npm start"
+		candidate.StartCommand = runner + " run start"
 		candidate.Profile = ProfileWeb
 		candidate.Port = 3000
 		candidate.Evidence = append(candidate.Evidence,
@@ -374,6 +381,25 @@ func packageCandidate(marker *detectedMarkers) []DetectedCandidate {
 		candidate.Confidence, candidate.Port = ConfidenceHigh, 3000
 	}
 	return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, candidate)}
+}
+
+// jsRunner names the package manager the checkout's single lockfile implies.
+// With no lockfile, or with several, npm is the guess that fails most legibly:
+// the recipe refuses a build it cannot pin before any command is run.
+func jsRunner(lockfiles []string) string {
+	if len(lockfiles) != 1 {
+		return "npm"
+	}
+	switch filepath.Base(lockfiles[0]) {
+	case "bun.lock", "bun.lockb":
+		return "bun"
+	case "pnpm-lock.yaml":
+		return "pnpm"
+	case "yarn.lock":
+		return "yarn"
+	default:
+		return "npm"
+	}
 }
 
 func detectedPythonLock(files map[string][]byte) (string, bool) {

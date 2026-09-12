@@ -1,0 +1,48 @@
+{
+  "id": "gitea",
+  "version": "1.0.0",
+  "name": "Gitea",
+  "category": "tool",
+  "profile": "web",
+  "description": "A self-hosted Git service with pull requests, issues and CI hooks. SSH is a direct port because the proxy cannot carry the Git SSH protocol.",
+  "iconId": "git",
+  "docsUrl": "https://docs.gitea.com/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/go-gitea/gitea",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "gitea/gitea:1.22.6-rootless", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Gitea writes this into clone URLs, so changing it later rewrites what users copy." },
+    { "name": "ssh-port", "kind": "number", "label": "SSH port", "default": "2222", "minimum": 1024, "maximum": 65535, "advanced": true, "description": "Published directly on the host. Port 22 belongs to the host's own SSH server." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 3000, "protocol": "tcp", "purpose": "Web interface and HTTPS clone", "exposure": "proxy", "primary": true },
+    { "name": "ssh", "internal": 2222, "protocol": "tcp", "purpose": "Git over SSH, which a reverse proxy cannot carry", "exposure": "direct" }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/var/lib/gitea", "purpose": "Repositories, avatars and the database", "data": true, "backup": true },
+    { "name": "config", "target": "/etc/gitea", "purpose": "Gitea's own configuration file", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 512, "minMemoryMb": 256 },
+  "checks": [
+    { "name": "Web interface answers", "kind": "http", "phase": "readiness", "required": true, "path": "/api/healthz", "timeoutSeconds": 90 },
+    { "name": "SSH accepts connections", "kind": "tcp", "phase": "smoke", "required": false, "port": "ssh", "timeoutSeconds": 20 }
+  ],
+  "operations": {
+    "startup": [
+      { "kind": "set_variable", "name": "GITEA__server__ROOT_URL", "value": "https://{{input.domain}}/" },
+      { "kind": "set_variable", "name": "GITEA__server__SSH_PORT", "value": "{{input.ssh-port}}" }
+    ],
+    "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }]
+  },
+  "files": [
+    { "path": "/etc/gitea/app.ini", "label": "Gitea configuration", "format": "raw", "restartRequired": true, "description": "The file Gitea writes on first run. Edits here survive restarts; the environment variables above win on every start." }
+  ],
+  "update": { "detector": "registry", "backupFirst": true, "notes": "Gitea migrates its database on first start after an upgrade and does not migrate back." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "domain": "git.example.test" }, "digest": "sha256:d065f104af72d49b3822f6cab8d9b87ae3fa5077349f9846e1e43c1ee3af1d55" }]
+}

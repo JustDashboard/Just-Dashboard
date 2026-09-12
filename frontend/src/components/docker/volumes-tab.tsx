@@ -8,26 +8,21 @@ import { del, get, post } from "@/lib/api"
 import { bytes, truncateMiddle } from "@/lib/format"
 import type { VolumeDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
-import { EmptyState, ErrorState, LoadingPanel, LoadingRows, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, RowLink } from "@/components/page"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Hint, Term } from "@/components/docker/explain"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   stickyTableHeader,
   Table,
@@ -50,7 +45,8 @@ import {
  */
 export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
   const { can } = useAuth()
-  const [selected, setSelected] = useState<string | null>(null)
+  // In the URL so a deployment can link straight at the volume it depends on.
+  const [selected, setSelected] = useQuerySelection("volume")
   const [creating, setCreating] = useState(false)
 
   const { data, error, loading, refresh } = usePoll(
@@ -61,7 +57,6 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
   if (error) return <ErrorState error={error} />
 
   const unused = (data ?? []).filter((v) => !v.inUse)
-  const reclaimable = unused.reduce((s, v) => s + v.size, 0)
 
   return (
     <div className="space-y-4">
@@ -69,13 +64,11 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
         <PanelHeader
           icon={Servers}
           title="Volumes"
-          description={
-            unused.length > 0
-              ? `${data?.length ?? 0} volumes · ${unused.length} attached to nothing, holding ${bytes(reclaimable)}`
-              : `${data?.length ?? 0} volumes, all in use`
-          }
           actions={
             <>
+              {unused.length > 0 && (
+                <Tag tone="warning">{unused.length} unused</Tag>
+              )}
               {can("service.control") && (
                 <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                   <Plus className="size-4" />
@@ -146,53 +139,66 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
                       <RowLink mono onClick={() => setSelected(volume.name)}>
                         {truncateMiddle(volume.name, 40)}
                       </RowLink>
-                      <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      <p className="truncate font-mono text-hint text-muted-foreground">
                         {volume.mountpoint}
                       </p>
                     </div>
                   </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
-                    {volume.size ? bytes(volume.size) : "—"}
+                  <TableCell className="numeric text-right font-mono">
+                    <VolumeSize volume={volume} />
                   </TableCell>
                   <TableCell>
                     <UsedByCell volume={volume} />
                   </TableCell>
                   <TableCell>
-                    {can("destructive") && (
-                      <IconAction
-                        label="Remove"
-                        className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                        onClick={() =>
-                          confirm({
-                            title: "Delete volume",
-                            phrase: volume.name,
-                            confirmLabel: "Delete",
-                            description: (
-                              <>
-                                <p className="text-destructive">
-                                  Everything stored in <b>{volume.name}</b> is destroyed
-                                  permanently.
-                                </p>
-                                {volume.usedBy.length > 0 && (
-                                  <p>
-                                    {volume.usedBy.length} container(s) mount it:{" "}
-                                    {volume.usedBy.map((u) => u.name).join(", ")}.
+                    {/*
+                      Docker refuses to remove a volume something mounts, so
+                      the button is disabled rather than offered and answered
+                      with a 409. What replaces it is the reason: "in use by 2
+                      containers" is the sentence the operator needed, and the
+                      old UI made them press a button to find it out.
+                    */}
+                    {can("destructive") &&
+                      (volume.usedBy.length > 0 ? (
+                        <span className="block text-hint whitespace-nowrap text-muted-foreground">
+                          in use by {volume.usedBy.length}
+                        </span>
+                      ) : (
+                        <IconAction
+                          reveal
+                          label="Remove"
+                          className="text-destructive"
+                          onClick={() =>
+                            confirm({
+                              title: "Delete volume",
+                              phrase: volume.name,
+                              confirmLabel: "Delete",
+                              description: (
+                                <>
+                                  <p className="text-destructive">
+                                    Everything stored in <b>{volume.name}</b> is destroyed
+                                    permanently.
                                   </p>
-                                )}
-                              </>
-                            ),
-                            action: async (c) => {
-                              await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, {
-                                confirm: c,
-                              })
-                              refresh()
-                            },
-                          })
-                        }
-                      >
-                        <Trash />
-                      </IconAction>
-                    )}
+                                  <p>
+                                    Nothing mounts it right now. A volume outlives the container
+                                    that created it, so this is often the data from something that
+                                    was removed and rebuilt — check what is in it first if you are
+                                    not sure.
+                                  </p>
+                                </>
+                              ),
+                              action: async (c) => {
+                                await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, {
+                                  confirm: c,
+                                })
+                                refresh()
+                              },
+                            })
+                          }
+                        >
+                          <Trash />
+                        </IconAction>
+                      ))}
                   </TableCell>
                 </TableRow>
               ))}
@@ -223,23 +229,54 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
   )
 }
 
+/**
+ * A volume's size, with "not measured" distinguished from "empty".
+ *
+ * An em dash was doing duty for three different answers — zero bytes, a size
+ * Docker has not walked yet, and a driver that cannot report one — and the
+ * operator deciding whether a volume is safe to delete could not tell which
+ * they were looking at. Docker only fills the figure in for local volumes it
+ * has walked, so the absence is common and worth naming.
+ */
+/**
+ * Whether this volume is likely to hold a database's own files.
+ *
+ * A guess from the mount path and the containers using it, and treated as one:
+ * it decides whether a warning is shown, never whether an action is allowed.
+ * Getting it wrong in one direction costs a sentence somebody did not need; in
+ * the other it costs a corrupted database, so it leans towards warning.
+ */
+function looksLikeDatabase(volume: VolumeDetail): boolean {
+  if (volume.usedBy.length === 0) return false
+  const hints = /(postgres|mysql|mariadb|mongo|redis|elastic|clickhouse|cassandra|influx|couch)/i
+  return (
+    hints.test(volume.name) ||
+    volume.usedBy.some((u) => hints.test(u.name) || hints.test(u.destination))
+  )
+}
+
+function VolumeSize({ volume }: { volume: VolumeDetail }) {
+  if (volume.size > 0) return <>{bytes(volume.size)}</>
+  if (volume.driver !== "local") {
+    return <span className="text-hint text-muted-foreground">not measurable</span>
+  }
+  return <span className="text-hint text-muted-foreground">not measured</span>
+}
+
 function UsedByCell({ volume }: { volume: VolumeDetail }) {
   if (volume.usedBy.length === 0) {
-    return (
-      <Badge variant="secondary" className="font-normal">
-        unused
-      </Badge>
-    )
+    return <Status tone="stopped" label="unused" />
   }
   const running = volume.usedBy.filter((u) => u.state === "running").length
   return (
     <span className="flex flex-wrap items-center gap-1">
-      <Badge variant={running > 0 ? "success" : "warning"} className="font-normal">
-        {volume.usedBy.length} container{volume.usedBy.length === 1 ? "" : "s"}
-      </Badge>
+      <Status
+        tone={running > 0 ? "running" : "warning"}
+        label={`${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"}`}
+      />
       {running === 0 && (
         // The row Docker's own prune would delete while calling it unused.
-        <span className="text-[11px] text-muted-foreground">stopped — prune would delete this</span>
+        <span className="text-hint text-muted-foreground">stopped — prune would delete this</span>
       )}
     </span>
   )
@@ -273,7 +310,9 @@ function VolumeDetailPanel({
       {data && (
         <div className="space-y-5">
           <DetailList>
-            <Detail label="Size">{data.size ? bytes(data.size) : "not measured"}</Detail>
+            <Detail label="Size">
+              <VolumeSize volume={data} />
+            </Detail>
             <Detail label="Driver">{data.driver}</Detail>
             <Detail label="Created">{data.createdAt || "—"}</Detail>
             <Detail label="On disk at">
@@ -286,14 +325,29 @@ function VolumeDetailPanel({
             file manager. Being able to look inside one — to check a backup
             landed, to read a config a container wrote — is the difference
             between a volume being an opaque handle and being storage.
+
+            The warning is not decoration. A database's files are consistent
+            only from the database's point of view; editing one underneath a
+            running Postgres is how a volume stops being restorable, and the
+            file manager gives no hint that this directory is different from
+            any other.
           */}
           {data.mountpoint && (
-            <Button size="sm" variant="outline" asChild>
-              <Link href={`/files?path=${encodeURIComponent(data.mountpoint)}`}>
-                <FolderOpen className="size-3.5" />
-                Browse its contents
-              </Link>
-            </Button>
+            <div className="space-y-1.5">
+              <Button size="sm" variant="outline" asChild>
+                <Link href={`/files?path=${encodeURIComponent(data.mountpoint)}`}>
+                  <FolderOpen className="size-3.5" />
+                  Browse its contents
+                </Link>
+              </Button>
+              {looksLikeDatabase(data) && (
+                <Hint className="text-warning">
+                  This looks like a database volume and something is using it. Reading is safe;
+                  changing or deleting a file underneath a running database corrupts it in ways that
+                  only show up later. Stop the container first if you need to write here.
+                </Hint>
+              )}
+            </div>
           )}
 
           <section className="space-y-1.5">
@@ -313,22 +367,16 @@ function VolumeDetailPanel({
                   >
                     <span className="min-w-0">
                       <span className="truncate font-medium">{u.name}</span>
-                      <span className="ml-2 font-mono text-[11px] text-muted-foreground">
+                      <span className="ml-2 font-mono text-hint text-muted-foreground">
                         at {u.destination}
                       </span>
+                      {u.stack && (
+                        <span className="ml-2 text-hint text-muted-foreground">· {u.stack}</span>
+                      )}
                     </span>
                     <span className="flex shrink-0 gap-1">
-                      {u.readOnly && (
-                        <Badge variant="outline" className="font-normal">
-                          read-only
-                        </Badge>
-                      )}
-                      <Badge
-                        variant={u.state === "running" ? "success" : "secondary"}
-                        className="font-normal"
-                      >
-                        {u.state}
-                      </Badge>
+                      {u.readOnly && <Tag>read-only</Tag>}
+                      <Status state={u.state} />
                     </span>
                   </div>
                 ))}
@@ -369,46 +417,43 @@ function NewVolumeDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="size-4" />
-            New volume
-          </DialogTitle>
-          <DialogDescription>
-            Storage Docker manages, ready to mount into a container. Empty until something writes to
-            it.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-1.5">
-          <Label htmlFor="volume-name" className="text-xs">
-            Name
-          </Label>
-          <Input
-            id="volume-name"
-            value={name}
-            spellCheck={false}
-            className="font-mono"
-            placeholder="my-app-data"
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && name.trim() && create()}
-          />
-          <Hint>
-            Name it after what will be in it. Volumes outlive the containers that use them, and in
-            six months the name is all you will have to go on.
-          </Hint>
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      size="sm"
+      icon={Plus}
+      title="New volume"
+      description="Storage Docker manages, ready to mount into a container. Empty until something writes to
+            it."
+      footer={
+        <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={create} disabled={busy || !name.trim()}>
-            {busy && <Spinner className="size-4" />}
+          <Button onClick={create} disabled={busy || !name.trim()} pending={busy}>
             Create
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="volume-name" className="text-xs">
+          Name
+        </Label>
+        <Input
+          id="volume-name"
+          value={name}
+          spellCheck={false}
+          className="font-mono"
+          placeholder="my-app-data"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && create()}
+        />
+        <Hint>
+          Name it after what will be in it. Volumes outlive the containers that use them, and in six
+          months the name is all you will have to go on.
+        </Hint>
+      </div>
+    </Modal>
   )
 }

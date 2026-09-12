@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ChevronDoubleDown, MagnifyingGlass, Pause, Play } from "@/components/icons"
+import { Pane, PaneHeader } from "@/components/panel"
 import { cn } from "@/lib/utils"
 import { clock } from "@/lib/format"
+import { fieldValue, structuredOf } from "@/lib/log-format"
 import type { LogLine } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 
 const LEVEL_CLASS: Record<string, string> = {
   critical: "text-destructive",
@@ -40,6 +41,10 @@ export function LogViewer({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
   const [filter, setFilter] = useState("")
+  // Formatting a structured line hides fields it judged redundant, and the one
+  // time that judgement is wrong is the time you are debugging the logger
+  // itself. Raw is always one click away.
+  const [raw, setRaw] = useState(false)
 
   useEffect(() => {
     if (!following) return
@@ -55,21 +60,19 @@ export function LogViewer({
   }
 
   const needle = filter.toLowerCase()
+  // Filtering matches the original text, not the formatted line: a field the
+  // formatter dropped is still a thing somebody searches for.
   const visible = needle ? lines.filter((l) => l.text.toLowerCase().includes(needle)) : lines
+  const anyStructured = !raw && visible.some((line) => structuredOf(line) !== null)
 
   return (
     // bg-surface-sunken rather than a flat black: this pane appears inside a
     // light palette too, where a black rectangle is a hole in the page rather
     // than a terminal.
-    <div
-      className={cn(
-        "flex min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-header px-2.5 py-2">
+    <Pane className={cn("bg-surface-sunken", className)}>
+      <PaneHeader className="flex-wrap gap-2 px-2.5">
         <div className="relative min-w-40 flex-1">
-          <MagnifyingGlass className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <MagnifyingGlass className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -78,9 +81,9 @@ export function LogViewer({
           />
         </div>
         {toolbar}
-        <Badge variant="outline" className="numeric text-[10px] font-normal">
+        <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
           {visible.length} lines
-        </Badge>
+        </span>
         <Button
           size="sm"
           variant={following ? "secondary" : "ghost"}
@@ -95,12 +98,23 @@ export function LogViewer({
           {following ? <Pause className="size-3" /> : <Play className="size-3" />}
           {following ? "Following" : "Paused"}
         </Button>
+        {(anyStructured || raw) && (
+          <Button
+            size="sm"
+            variant={raw ? "secondary" : "ghost"}
+            className="h-7 px-2 text-xs"
+            onClick={() => setRaw((r) => !r)}
+            title={raw ? "Read JSON lines as messages" : "Show the lines exactly as they arrived"}
+          >
+            {raw ? "Formatted" : "Raw"}
+          </Button>
+        )}
         {onClear && (
           <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onClear}>
             Clear
           </Button>
         )}
-      </div>
+      </PaneHeader>
 
       <div
         ref={scrollRef}
@@ -110,18 +124,41 @@ export function LogViewer({
         {visible.length === 0 ? (
           <p className="text-muted-foreground">{emptyMessage}</p>
         ) : (
-          visible.map((line, i) => (
-            <div key={i} className="flex gap-3 whitespace-pre-wrap break-all">
-              {showTimestamps && (
-                <span className="shrink-0 select-none text-muted-foreground/60">
-                  {line.timestamp ? clock(line.timestamp) : ""}
-                </span>
-              )}
-              <span className={cn("flex-1", line.level && LEVEL_CLASS[line.level])}>
-                {line.text}
-              </span>
-            </div>
-          ))
+          visible.map((line, i) => {
+            const structured = raw ? null : structuredOf(line)
+            const level = line.level ?? structured?.level
+            return (
+              <div key={i} className="flex gap-3 break-all whitespace-pre-wrap">
+                {showTimestamps && (
+                  <span className="shrink-0 text-muted-foreground/60 select-none">
+                    {line.timestamp ? clock(line.timestamp) : ""}
+                  </span>
+                )}
+                {structured ? (
+                  <span className="min-w-0 flex-1">
+                    {structured.level && (
+                      <span
+                        className={cn(
+                          "mr-2 uppercase select-none",
+                          LEVEL_CLASS[structured.level] ?? "text-muted-foreground",
+                        )}
+                      >
+                        {structured.level}
+                      </span>
+                    )}
+                    <span className={cn(level && LEVEL_CLASS[level])}>{structured.message}</span>
+                    {structured.fields.map(([key, value]) => (
+                      <span key={key} className="ml-2 text-muted-foreground/70">
+                        {key}=<span className="text-muted-foreground">{fieldValue(value)}</span>
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className={cn("flex-1", level && LEVEL_CLASS[level])}>{line.text}</span>
+                )}
+              </div>
+            )
+          })
         )}
       </div>
 
@@ -137,6 +174,6 @@ export function LogViewer({
           Jump to latest
         </button>
       )}
-    </div>
+    </Pane>
   )
 }

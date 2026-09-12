@@ -1,0 +1,47 @@
+{
+  "id": "n8n",
+  "version": "1.0.0",
+  "name": "n8n",
+  "category": "automation",
+  "profile": "web",
+  "description": "A workflow automation server. Its credentials are encrypted with a key generated here; losing that key loses every stored credential.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.n8n.io/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Sustainable Use License",
+    "upstreamUrl": "https://github.com/n8n-io/n8n",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7",
+    "updateNotes": "Reviewed under the Sustainable Use License: internal business use is permitted, resale as a hosted service is not."
+  },
+  "image": { "reference": "n8nio/n8n:1.70.1", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Webhook URLs are built from this, so external services break if it changes." },
+    { "name": "timezone", "kind": "text", "label": "Schedule timezone", "default": "UTC", "variable": "GENERIC_TIMEZONE", "pattern": "^[A-Za-z0-9_+/-]{1,64}$", "description": "Cron nodes fire against this timezone." }
+  ],
+  "secrets": [
+    { "name": "encryption-key", "variable": "N8N_ENCRYPTION_KEY", "label": "Credential encryption key", "length": 48, "description": "Stored credentials are unreadable without this. Back it up with the data volume." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 5678, "protocol": "tcp", "purpose": "Editor interface and webhook endpoints", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/home/node/.n8n", "purpose": "Workflows, executions and encrypted credentials", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
+  "checks": [
+    { "name": "Editor answers", "kind": "http", "phase": "readiness", "required": true, "path": "/healthz", "timeoutSeconds": 120 }
+  ],
+  "operations": {
+    "startup": [
+      { "kind": "set_variable", "name": "N8N_HOST", "value": "{{input.domain}}" },
+      { "kind": "set_variable", "name": "WEBHOOK_URL", "value": "https://{{input.domain}}/" },
+      { "kind": "set_variable", "name": "N8N_PROTOCOL", "value": "https" }
+    ],
+    "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }]
+  },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "n8n runs database migrations on start and does not support downgrading across them." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "domain": "flows.example.test" }, "digest": "sha256:91454865cd3b921e7ec2f47b6c53bd6370df3dc674f31a0679b181622ad96cec" }]
+}

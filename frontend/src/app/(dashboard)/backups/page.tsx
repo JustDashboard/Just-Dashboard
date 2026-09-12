@@ -14,7 +14,8 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/p
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -35,14 +36,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 export default function BackupsPage() {
   const { can } = useAuth()
@@ -68,7 +61,6 @@ export default function BackupsPage() {
       <PageHeader
         eyebrow="Operations"
         title="Backups"
-        description="Scheduled archives to local disk or S3-compatible storage"
         actions={can("system.admin") && <JobDialog onDone={refresh} />}
       />
 
@@ -88,21 +80,13 @@ export default function BackupsPage() {
             <PanelHeader
               icon={Archive}
               title={job.name}
-              description={`${job.sources.length} source(s) → ${
-                job.targetKind === "local"
-                  ? job.target.path
-                  : `${job.targetKind}://${job.target.bucket}/${job.target.prefix ?? ""}`
-              }`}
               actions={
                 <>
-                  {job.hasCredentials && (
-                    <Badge variant="outline" className="text-[10px] font-normal">
-                      keys stored
-                    </Badge>
-                  )}
-                  <Badge variant={job.enabled ? "success" : "secondary"} className="font-normal">
-                    {job.enabled ? "enabled" : "paused"}
-                  </Badge>
+                  {job.hasCredentials && <Tag>keys stored</Tag>}
+                  <Status
+                    state={job.enabled ? "enabled" : "stopped"}
+                    label={job.enabled ? "enabled" : "paused"}
+                  />
                 </>
               }
             />
@@ -249,17 +233,17 @@ function HistorySheet({
                 <TableBody>
                   {data?.runs.map((run) => (
                     <TableRow key={run.id}>
-                      <TableCell className="text-xs">
+                      <TableCell>
                         <div>{timestamp(run.startedAt)}</div>
-                        <p className="text-[11px] text-muted-foreground">{run.trigger}</p>
+                        <p className="text-hint text-muted-foreground">{run.trigger}</p>
                       </TableCell>
                       <TableCell>
                         <Status state={run.status} />
                       </TableCell>
-                      <TableCell className="numeric text-right font-mono text-xs">
+                      <TableCell className="numeric text-right font-mono">
                         {run.sizeBytes ? bytes(run.sizeBytes) : "—"}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground">
                         {run.duration ?? "running"}
                       </TableCell>
                       <TableCell>
@@ -293,7 +277,7 @@ function HistorySheet({
                 {logFor.log || "No output recorded."}
               </Well>
               {logFor.artifact && (
-                <p className="font-mono text-[11px] break-all text-muted-foreground">
+                <p className="font-mono text-hint break-all text-muted-foreground">
                   {logFor.artifact}
                 </p>
               )}
@@ -319,61 +303,62 @@ function RestoreButton({
   const [destination, setDestination] = useState("/tmp/restore")
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="xs" variant="ghost">
-          <CloudDownload className="size-3" />
-          Restore
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Restore run {run.id}</DialogTitle>
-        </DialogHeader>
+    <>
+      <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
+        <CloudDownload className="size-3" />
+        Restore
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title={<>Restore run {run.id}</>}
+        footer={
+          <>
+            <Button
+              onClick={() => {
+                setOpen(false)
+                confirm({
+                  title: "Restore backup",
+                  phrase: destination,
+                  confirmLabel: "Restore",
+                  description: (
+                    <p className="text-destructive">
+                      Unpacks the archive into <b>{destination}</b>, overwriting files that already
+                      exist there.
+                    </p>
+                  ),
+                  action: async (c) => {
+                    const res = await post<{ entries: number; bytes: number }>(
+                      `/backups/runs/${run.id}/restore`,
+                      { destination },
+                      { confirm: c },
+                    )
+                    notify.success(`Restored ${res.entries} entries (${bytes(res.bytes)})`)
+                    onDone()
+                  },
+                })
+              }}
+            >
+              Continue
+            </Button>
+          </>
+        }
+      >
         <div className="space-y-1.5">
           <Label htmlFor="restore-dest">Destination directory</Label>
           <Input
             id="restore-dest"
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
-            className="font-mono text-[13px]"
+            className="font-mono text-body"
           />
           <p className="text-xs leading-relaxed text-muted-foreground">
             Files are unpacked here, overwriting anything with the same path. Restoring into a
             scratch directory first is usually the safer move.
           </p>
         </div>
-        <DialogFooter>
-          <Button
-            onClick={() => {
-              setOpen(false)
-              confirm({
-                title: "Restore backup",
-                phrase: destination,
-                confirmLabel: "Restore",
-                description: (
-                  <p className="text-destructive">
-                    Unpacks the archive into <b>{destination}</b>, overwriting files that already
-                    exist there.
-                  </p>
-                ),
-                action: async (c) => {
-                  const res = await post<{ entries: number; bytes: number }>(
-                    `/backups/runs/${run.id}/restore`,
-                    { destination },
-                    { confirm: c },
-                  )
-                  notify.success(`Restored ${res.entries} entries (${bytes(res.bytes)})`)
-                  onDone()
-                },
-              })
-            }}
-          >
-            Continue
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }
 
@@ -426,23 +411,30 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {job ? (
-          <Button size="sm" variant="outline">
-            Edit
-          </Button>
-        ) : (
-          <Button size="sm">
-            <Plus className="size-4" />
-            New job
-          </Button>
-        )}
-      </DialogTrigger>
-      <DialogContent className="max-h-[90svh] overflow-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{job ? `Edit ${job.name}` : "New backup job"}</DialogTitle>
-        </DialogHeader>
+    <>
+      {job ? (
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+          Edit
+        </Button>
+      ) : (
+        <Button size="sm" onClick={() => setOpen(true)}>
+          <Plus className="size-4" />
+          New job
+        </Button>
+      )}
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        size="lg"
+        title={job ? `Edit ${job.name}` : "New backup job"}
+        footer={
+          <>
+            <Button onClick={submit} disabled={!name || !sources.trim()}>
+              {job ? "Save" : "Create"}
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="job-name">Name</Label>
@@ -494,7 +486,7 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
                 id="job-path"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                className="font-mono text-[13px]"
+                className="font-mono text-body"
               />
             </div>
           ) : (
@@ -570,7 +562,7 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
                 id="job-schedule"
                 value={schedule}
                 onChange={(e) => setSchedule(e.target.value)}
-                className="font-mono text-[13px]"
+                className="font-mono text-body"
                 placeholder="0 3 * * *"
               />
             </div>
@@ -584,18 +576,13 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
                 onChange={(e) => setRetention(Number(e.target.value))}
               />
             </div>
-            <label className="flex items-center gap-2 pb-2 text-[13px]">
+            <label className="flex items-center gap-2 pb-2 text-body">
               <Switch checked={enabled} onCheckedChange={setEnabled} />
               Enabled
             </label>
           </div>
         </div>
-        <DialogFooter>
-          <Button onClick={submit} disabled={!name || !sources.trim()}>
-            {job ? "Save" : "Create"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

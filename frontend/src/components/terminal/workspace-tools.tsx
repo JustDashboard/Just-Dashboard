@@ -19,13 +19,14 @@ import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
 import { DiffView } from "@/components/files/diff-view"
 import { GitTools } from "@/components/terminal/git-tools"
+import { Tag } from "@/components/tag"
+import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay =
   | { kind: "file"; path: string }
@@ -111,8 +112,8 @@ export function WorkspaceTools({
   }
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-      <div className="flex shrink-0 items-center gap-0.5 border-b border-hairline bg-surface-header px-1.5 py-1">
+    <Pane className="relative flex-1">
+      <PaneHeader className="gap-0.5 px-1.5">
         <TabButton
           active={tab === "files"}
           onClick={() => showTab("files")}
@@ -129,7 +130,7 @@ export function WorkspaceTools({
         >
           Git
           {(status.data?.files.length ?? 0) > 0 && (
-            <span className="ml-1 rounded bg-warning/20 px-1 font-mono text-[10px] text-warning">
+            <span className="numeric ml-1 text-micro font-medium text-warning">
               {status.data?.files.length}
             </span>
           )}
@@ -160,7 +161,7 @@ export function WorkspaceTools({
             <TooltipContent>Hide files &amp; git</TooltipContent>
           </Tooltip>
         )}
-      </div>
+      </PaneHeader>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {!treeRoot ? (
@@ -235,7 +236,7 @@ export function WorkspaceTools({
       </div>
 
       {confirm && <InlineConfirm request={confirm} onClose={() => setConfirm(null)} />}
-    </div>
+    </Pane>
   )
 }
 
@@ -260,8 +261,8 @@ function TabButton({
         <button
           onClick={onClick}
           className={cn(
-            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
-            active ? "bg-primary/12 text-primary" : "text-muted-foreground hover:text-foreground",
+            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+            active ? "bg-plot-primary text-primary" : "text-muted-foreground hover:text-foreground",
           )}
         >
           <Icon className="size-3.5" />
@@ -370,16 +371,12 @@ function InlineFile({
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-card">
-      <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-header px-2 py-1.5">
+      <PaneHeader className="gap-2">
         <Code className="size-3.5 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={path}>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
           {path.split("/").pop()}
         </span>
-        {dirty && (
-          <Badge variant="warning" className="font-normal">
-            unsaved
-          </Badge>
-        )}
+        {dirty && <Tag tone="warning">unsaved</Tag>}
         {change && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -388,7 +385,7 @@ function InlineFile({
                 size="xs"
                 variant={showDiff ? "secondary" : "ghost"}
                 aria-pressed={showDiff}
-                className="shrink-0 gap-1 px-1.5 text-[11px]"
+                className="shrink-0 gap-1 px-1.5 text-hint"
                 onClick={() => setShowDiff((v) => !v)}
               >
                 <GitMerge className="size-3.5" />
@@ -409,12 +406,8 @@ function InlineFile({
         {file && !file.binary && canWrite && !showDiff && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="xs" onClick={save} disabled={!dirty || saving}>
-                {saving ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <FloppyDisk className="size-3.5" />
-                )}
+              <Button size="xs" onClick={save} disabled={!dirty || saving} pending={saving}>
+                <FloppyDisk className="size-3.5" />
                 Save
               </Button>
             </TooltipTrigger>
@@ -435,7 +428,7 @@ function InlineFile({
           </TooltipTrigger>
           <TooltipContent>Close this file (Esc)</TooltipContent>
         </Tooltip>
-      </div>
+      </PaneHeader>
       <div className="min-h-0 flex-1">
         {showDiff ? (
           // An untracked file is not a failed diff, and saying so beats a
@@ -505,12 +498,12 @@ function InlineDiff({
 }) {
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-card">
-      <div className="flex shrink-0 items-start gap-2 border-b border-hairline bg-surface-header px-2 py-1.5">
+      <PaneHeader className="items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[12px]" title={title}>
+          <p className="truncate font-mono text-xs" title={title}>
             {title}
           </p>
-          {subtitle && <p className="truncate text-[10px] text-muted-foreground">{subtitle}</p>}
+          {subtitle && <p className="truncate text-micro text-muted-foreground">{subtitle}</p>}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -526,7 +519,7 @@ function InlineDiff({
           </TooltipTrigger>
           <TooltipContent>Close the diff (Esc)</TooltipContent>
         </Tooltip>
-      </div>
+      </PaneHeader>
       <DiffView body={body} singleFile={singleFile} className="min-h-0 flex-1" />
     </div>
   )
@@ -562,8 +555,8 @@ function InlineConfirm({ request, onClose }: { request: ConfirmRequest; onClose:
   }, [])
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/70 p-3 backdrop-blur-sm">
-      <div className="raised [--raise-drop:var(--shadow-lg)] w-full max-w-sm rounded-xl border bg-card p-4">
-        <p className="text-[13px] font-medium">{request.title}</p>
+      <div className="w-full max-w-sm rounded-xl border bg-card p-4 shadow-lg">
+        <p className="text-body font-medium">{request.title}</p>
         {request.body && (
           <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{request.body}</div>
         )}
@@ -575,9 +568,8 @@ function InlineConfirm({ request, onClose }: { request: ConfirmRequest; onClose:
             size="sm"
             variant={request.danger ? "destructive" : "default"}
             onClick={runIt}
-            disabled={busy}
+            pending={busy}
           >
-            {busy && <Spinner className="size-3.5" />}
             {request.confirmLabel ?? "Confirm"}
           </Button>
         </div>

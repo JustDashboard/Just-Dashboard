@@ -364,11 +364,28 @@ func TestLocalGitImageAndImportSourceAdapters(t *testing.T) {
 	if err != nil || checkoutImport.Kind != "checkout" || len(checkoutImport.WouldChange) != 0 {
 		t.Fatalf("checkout import result = %#v, %v", checkoutImport, err)
 	}
-	blueprint, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+	// A blueprint source resolves against the reviewed catalogue. Its required
+	// acceptance is part of rendering, so an unaccepted EULA never reaches a plan.
+	if _, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
 		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java", BlueprintVersion: "1.0.0",
+	}); err == nil || !strings.Contains(err.Error(), "eula") {
+		t.Fatalf("unaccepted blueprint EULA rendered a plan: %v", err)
+	}
+	blueprintSource, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java",
+		BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"},
 	})
-	if err != nil || blueprint.Unavailable == "" || blueprint.Source.Kind != SourceBlueprint {
-		t.Fatalf("blueprint placeholder result = %#v, %v", blueprint, err)
+	if err != nil || blueprintSource.Source.Kind != SourceBlueprint ||
+		blueprintSource.Source.Repository != "minecraft-java" || blueprintSource.Source.Ref != "1.0.0" ||
+		len(blueprintSource.Candidates) != 1 || blueprintSource.Candidates[0].Profile != ProfileGame ||
+		blueprintSource.Candidates[0].Port != 25565 {
+		t.Fatalf("blueprint source result = %#v, %v", blueprintSource, err)
+	}
+	if _, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java", BlueprintVersion: "9.9.9",
+		BlueprintInputs: map[string]string{"eula": "true"},
+	}); err == nil {
+		t.Fatal("served a blueprint version this dashboard does not ship")
 	}
 	writePlanningFixture(t, filepath.Join(checkout, "safe-compose.yml"), "services:\n  app:\n    image: alpine:3\n")
 	localCompose, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
@@ -699,7 +716,7 @@ func TestPreflightIsPureStableAndSecretFree(t *testing.T) {
 	if first.Preview != second.Preview || first.Digest != second.Digest {
 		t.Fatalf("preflight changed with identical evidence:\n%s\n%s", first.Preview, second.Preview)
 	}
-	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 15 {
+	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 16 {
 		t.Fatalf("exact actions = %d", len(first.Plan.Actions))
 	}
 	if strings.Contains(first.Preview, "never-preview-this") || strings.Contains(first.Preview, "Observed") {
@@ -880,13 +897,14 @@ func TestComposePreflightCoversVariablesPortsStorageAndAdvancedFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{"compose_variable_app_tag", "compose_unsupported_1", "port_conflict", "advanced_authorization_required"} {
+	for _, code := range []string{"compose_variable_app_tag", "compose_unsupported_1", "advanced_authorization_required"} {
 		severity := findingSeverity(result.Findings, code)
 		if severity != PreflightDecision && severity != PreflightBlocked {
 			t.Fatalf("finding %s severity = %q in %#v", code, severity, result.Findings)
 		}
 	}
-	if findingSeverity(result.Findings, "backup_policy_missing") != PreflightWarning ||
+	if findingSeverity(result.Findings, "port_conflict") != PreflightWarning ||
+		findingSeverity(result.Findings, "backup_policy_missing") != PreflightWarning ||
 		findingSeverity(result.Findings, "compose_warning_1") != PreflightWarning {
 		t.Fatalf("Compose storage/health warnings = %#v", result.Findings)
 	}
@@ -1445,5 +1463,67 @@ func TestCanonicalConfigurationOrdering(t *testing.T) {
 	sort.Strings(names)
 	if !reflect.DeepEqual(names, []string{"ALPHA", "ZED"}) {
 		t.Fatal(names)
+	}
+}
+
+// A Node project's detected commands have to name the package manager its
+// lockfile locks to. The recipe picks its base image from that same lockfile,
+// and oven/bun carries no npm: "npm run build" was a build that installed
+// cleanly and then died on `npm: not found`, with the configuration screen
+// showing nothing wrong.
+func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
+	manifest := `{"name":"site","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.2.10"}}`
+	for _, tc := range []struct{ lockfile, build, start string }{
+		{"bun.lock", "bun run build", "bun run start"},
+		{"bun.lockb", "bun run build", "bun run start"},
+		{"pnpm-lock.yaml", "pnpm run build", "pnpm run start"},
+		{"yarn.lock", "yarn run build", "yarn run start"},
+		{"package-lock.json", "npm run build", "npm run start"},
+	} {
+		t.Run(tc.lockfile, func(t *testing.T) {
+			root := t.TempDir()
+			writePlanningFixture(t, filepath.Join(root, "package.json"), manifest)
+			writePlanningFixture(t, filepath.Join(root, tc.lockfile), "{}")
+
+			result, err := (Detector{}).DetectPath(context.Background(), root,
+				SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Candidates) != 1 {
+				t.Fatalf("candidates = %#v, want exactly one", result.Candidates)
+			}
+			candidate := result.Candidates[0]
+			if candidate.BuildCommand != tc.build || candidate.StartCommand != tc.start {
+				t.Fatalf("commands = %q / %q, want %q / %q",
+					candidate.BuildCommand, candidate.StartCommand, tc.build, tc.start)
+			}
+			if candidate.Framework != "nextjs" || candidate.Profile != ProfileWeb || candidate.Port != 3000 {
+				t.Fatalf("next.js candidate = %#v", candidate)
+			}
+		})
+	}
+}
+
+// With no lockfile, or with several, the recipe refuses to build at all — so
+// the detected command only has to be the one that fails legibly rather than
+// the one that happens to match a package manager nobody pinned.
+func TestDetectedJavaScriptCommandsFallBackToNpm(t *testing.T) {
+	root := t.TempDir()
+	writePlanningFixture(t, filepath.Join(root, "package.json"),
+		`{"name":"site","scripts":{"build":"tsc"},"dependencies":{}}`)
+	writePlanningFixture(t, filepath.Join(root, "bun.lock"), "{}")
+	writePlanningFixture(t, filepath.Join(root, "yarn.lock"), "")
+
+	result, err := (Detector{}).DetectPath(context.Background(), root,
+		SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].BuildCommand != "npm run build" {
+		t.Fatalf("ambiguous lockfiles = %#v, want an npm command", result.Candidates)
+	}
+	if !strings.Contains(strings.Join(result.Candidates[0].NeedsDecision, " "), "competing lockfiles") {
+		t.Fatalf("ambiguity is not reported: %#v", result.Candidates[0].NeedsDecision)
 	}
 }

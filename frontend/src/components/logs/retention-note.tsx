@@ -23,9 +23,9 @@ export function RetentionNote({ retention }: { retention: LogRetention }) {
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-hairline px-3 py-1.5 text-[11px]",
+        "flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-hairline px-3 py-1.5 text-hint",
         retention.level === "warn"
-          ? "bg-warning/10 text-warning"
+          ? "bg-wash-warning text-warning"
           : "bg-surface-header text-muted-foreground",
       )}
     >

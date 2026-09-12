@@ -362,6 +362,60 @@ export type DirEntry = {
 
 export type ContainerPort = { ip?: string; privatePort: number; publicPort?: number; type: string }
 
+/**
+ * Where a published port can be reached from, as far as the binding alone can
+ * say. `0.0.0.0:5432` and `127.0.0.1:5432` are one character apart and could
+ * not differ more in consequence; every panel used to draw them identically.
+ *
+ * The vocabulary is about binding, not reachability. Docker publishes a port
+ * with NAT rules the firewall never sees, so "bound to every interface" is a
+ * fact and "reachable from the internet" is a conclusion that needs the
+ * firewall too — see PortRoute, which is where that conclusion is drawn.
+ */
+export type PortScope = "loopback" | "private" | "all" | "internal"
+
+export type PortExposure = {
+  hostIp?: string
+  hostPort?: number
+  containerPort: number
+  protocol: string
+  scope: PortScope
+  ipv6?: boolean
+  /** The badge. */
+  label: string
+  /** The sentence behind it. */
+  summary: string
+}
+
+/** One published port traced from the container out to the firewall. */
+export type PortRoute = {
+  hostIp?: string
+  hostPort: number
+  containerPort: number
+  protocol: string
+  public: boolean
+  scope: PortScope
+  label: string
+  binding: string
+  vhost?: string
+  url?: string
+  tls?: boolean
+  firewall: {
+    known: boolean
+    backend?: string
+    enabled?: boolean
+    verdict: "allowed" | "denied" | "default" | "unknown"
+    rule?: string
+    defaultIncoming?: string
+    /** Docker's NAT rules are consulted before ufw's filter chain. */
+    dockerBypass?: boolean
+  }
+  reach: "server-only" | "proxied" | "external" | "blocked" | "unknown"
+  reasoning: string
+  /** True when the verdict was worked out rather than read. */
+  inferred: boolean
+}
+
 export type Container = {
   id: string
   names: string[]
@@ -382,6 +436,19 @@ export type Container = {
   composeService?: string
   /** Writable-layer size. Present only when the listing was asked for sizes. */
   sizeRw?: number
+  /** The port list with its meaning attached, computed on the server. */
+  exposure: PortExposure[]
+  /**
+   * What the container was told it may use, and whether anything watches it.
+   * Only running containers are inspected for these — `inspected` says whether
+   * a zero here is an answer or an absence.
+   */
+  memoryLimit?: number
+  cpuLimit?: number
+  hasHealthcheck: boolean
+  restartPolicy?: string
+  privileged?: boolean
+  inspected: boolean
 }
 
 export type ContainerDetail = Container & {
@@ -427,6 +494,13 @@ export type ContainerStats = {
   netTx: number
   blockRead: number
   blockWrite: number
+  /** True only when somebody set a limit. Docker reports host RAM otherwise. */
+  memLimited: boolean
+  /** Of the whole machine, and therefore always meaningful. */
+  memHostPercent?: number
+  /** 100% is one core. hostCpus is what the reader needs to know that. */
+  hostCpus?: number
+  cpuLimit?: number
   pids: number
   onlineCpus: number
   /** Cumulative nanosecond totals. Only meaningful as a difference between two samples. */
@@ -489,19 +563,37 @@ export type ComposeService = {
   missing?: boolean
 }
 
+/**
+ * A compose stack is two objects wearing one name: a *configuration* on disk,
+ * which may never have been deployed, and a *deployed project*, a set of
+ * containers Docker labelled. `running/total` used to count containers on both
+ * sides of the slash, so a stack that existed only as a file read "0/0 up".
+ */
+export type StackState = "running" | "partial" | "degraded" | "stopped" | "not-deployed" | "unknown"
+
 export type ComposeStack = {
   name: string
   workingDir: string
   configFiles: string[]
   services: ComposeService[]
   running: number
+  /** Services the compose file declares — not containers that exist. */
   total: number
   managed: boolean
+  declared: string[]
+  /** "compose" resolves includes and profiles; "file" is a direct YAML read. */
+  declaredSource?: "compose" | "file"
+  containers: number
+  deployed: boolean
+  /** Running containers this project labels that the file no longer declares. */
+  orphans: string[]
+  state: StackState
+  /** The sentence: "Running · 4/4 services", "Not deployed · 3 services defined". */
+  summary: string
 }
 
 export type StackDetail = ComposeStack & {
   configPath?: string
-  declared: string[]
   declaredError?: string
   git?: {
     path: string
@@ -527,9 +619,22 @@ export type ComposeValidation = {
  * `action` names a remedy the UI turns into a button; the empty ones are
  * findings whose fix is outside this panel.
  */
+export type Severity = "critical" | "warning" | "recommendation" | "info"
+
+/**
+ * What kind of problem this is, which decides whether it belongs to runtime
+ * health or to attention. Mixing the two is what let the overview say "all
+ * good" above a containers page full of security warnings.
+ */
+export type FindingClass =
+  "runtime" | "security" | "storage" | "configuration" | "exposure" | "lifecycle"
+
 export type DockerFinding = {
   id: string
+  /** Derived from `severity`; kept for older bundles. Prefer `severity`. */
   level: "critical" | "warning" | "notice"
+  severity: Severity
+  class: FindingClass
   title: string
   detail: string
   advice?: string
@@ -540,11 +645,44 @@ export type DockerFinding = {
   actionLabel?: string
 }
 
+/** What Docker itself reports about what is running. Clears itself. */
+export type RuntimeHealth = {
+  total: number
+  running: number
+  exited: number
+  created: number
+  restarting: number
+  paused: number
+  dead: number
+  removing: number
+  /** Of the running containers. `noHealthcheck` is what makes "all healthy" honest. */
+  healthy: number
+  unhealthy: number
+  starting: number
+  noHealthcheck: number
+  status: "ok" | "notice" | "warning" | "critical"
+  summary: string
+}
+
+/** Everything else: posture, storage, configuration, exposure. Never "health". */
+export type AttentionSummary = {
+  critical: number
+  warning: number
+  recommendations: number
+  info: number
+  /** critical + warning — what is wrong now, as opposed to what could be better. */
+  issues: number
+  total: number
+}
+
 export type DockerDiagnosis = {
+  /** The worst of everything. Never render this as "health" — see `runtime`. */
   status: "ok" | "notice" | "warning" | "critical"
   findings: DockerFinding[]
   checkedAt: string
   checked: number
+  runtime: RuntimeHealth
+  attention: AttentionSummary
 }
 
 /** One line of `docker system df`. */
@@ -561,16 +699,66 @@ export type DockerDiskUsageLine = {
   reclaimable: number
 }
 
+/** What one figure on the disk page actually measures. */
+export type DiskDefinition = {
+  key: string
+  label: string
+  measures: string
+  excludes?: string
+  /** Which Docker API it came from — two figures from different ones may not be comparable. */
+  source: string
+}
+
+/** One container's writable layer. */
+export type ContainerDisk = {
+  id: string
+  name: string
+  state: string
+  stack?: string
+  /** Written into the container's own filesystem. Volumes and bind mounts excluded. */
+  sizeRw: number
+  /** Writable layer plus the image beneath it — Docker's "virtual size". */
+  sizeRootFs: number
+}
+
 export type DockerDiskUsage = {
   layersSize: number
+  /** Every image's own size, summed. Larger than what the disk holds. */
   imagesSize: number
   containersSize: number
   volumesSize: number
   buildCacheSize: number
+  /**
+   * The gap between adding up every image's size and what the images occupy.
+   * Both figures are true; naming the difference is what stops the page
+   * reading as arithmetic that does not work.
+   */
+  sharedLayers: number
+  writable: ContainerDisk[]
+  definitions: DiskDefinition[]
   images: DockerDiskUsageLine
   containers: DockerDiskUsageLine
   volumes: DockerDiskUsageLine
   buildCache: DockerDiskUsageLine
+}
+
+/** One category of removable thing, with what removing it costs. */
+export type CleanupCategory = {
+  key: string
+  label: string
+  items: number
+  reclaimable: number
+  cost: string
+  /** Exactly one category destroys data. */
+  destroys: boolean
+  examples: string[]
+  recommended: boolean
+}
+
+export type CleanupPreview = {
+  categories: CleanupCategory[]
+  safeTotal: number
+  summary: string
 }
 
 export type PruneReport = {
@@ -592,6 +780,19 @@ export type DockerEvent = {
   exitCode?: string
   message: string
   level: "info" | "notice" | "error"
+  /**
+   * Who did this, as far as the event can say. "dashboard" is set by the
+   * server after correlating against the audit log — Docker records what
+   * happened and never who asked, so anything else is "external".
+   */
+  source: "dashboard" | "compose" | "daemon" | "docker"
+  trigger?: {
+    auditId: number
+    action: string
+    actor: string
+    /** Always "likely": a time window and a name, not a causal record. */
+    confidence: string
+  }
 }
 
 export type DockerEventFeed = {
@@ -604,7 +805,8 @@ export type DockerEventFeed = {
 /** Whether the tag a container runs still points where it did when pulled. */
 export type ImageUpdateStatus = {
   ref: string
-  state: "current" | "outdated" | "unknown" | "local"
+  /** `pinned` is a digest reference: it cannot change, so there is nothing to check. */
+  state: "current" | "outdated" | "unknown" | "local" | "pinned"
   localDigest?: string
   remoteDigest?: string
   reason?: string
@@ -637,6 +839,14 @@ export type ImageDetail = {
     tags: string[]
   }[]
   usedBy: { id: string; name: string; state: string; stack?: string; service?: string }[]
+  /** What the reference is, and therefore what can be done with it. */
+  kind: "tag" | "digest" | "id" | "dangling" | "unknown"
+  ref: string
+  pullable: boolean
+  checkable: boolean
+  movingTag: boolean
+  dangling: boolean
+  localBuild: boolean
 }
 
 export type VolumeUser = {
@@ -669,6 +879,162 @@ export type NetworkDetail = DockerNetwork & {
   options?: Record<string, string>
   members: NetworkMember[]
   system: boolean
+}
+
+/**
+ * Where a container's writable layer went, with how it was measured attached.
+ * "Writable layer: 38.7 GB" is true and useless; which directory holds it, and
+ * whether that directory survives a recreate, is the answer.
+ */
+export type WritableEntry = {
+  path: string
+  size: number
+  /** The mount covering this path, empty when nothing does. */
+  mounted?: string
+  /** Inferred from the path — labelled as inferred wherever it is shown. */
+  persistent: boolean
+  kind: "data" | "logs" | "cache" | "temporary" | "other"
+}
+
+export type WritableLayerReport = {
+  containerId: string
+  name: string
+  measuredAt: string
+  /** Docker's figure. `accounted` is what the breakdown adds up to. */
+  total: number
+  accounted: number
+  state: "measured" | "unavailable" | "failed"
+  method?: string
+  reason?: string
+  entries: WritableEntry[]
+  /** Directories holding data that no volume covers — the point of the feature. */
+  unbacked: WritableEntry[]
+}
+
+export type MigrationPlan = {
+  container: string
+  service?: string
+  stack?: string
+  path: string
+  size: number
+  volume: string
+  steps: { title: string; detail: string; reversible: boolean }[]
+  commands: string[]
+  composePatch?: string
+  warnings: string[]
+}
+
+/** Why a container is not working, with the reasoning shown. */
+export type FailureDiagnosis = {
+  containerId: string
+  name: string
+  checkedAt: string
+  state: "running" | "stopped" | "looping" | "unhealthy" | "flapping" | "unknown"
+  headline: string
+  /** The inferred cause. Always worded as "likely" when it is one. */
+  likely?: string
+  /** "observed" when the evidence states it outright, "inferred" when worked out. */
+  confidence: "observed" | "inferred"
+  evidence: {
+    label: string
+    value: string
+    source: string
+    weight: "decisive" | "supporting" | "context"
+  }[]
+  restarts: {
+    count: number
+    window?: string
+    recent: number
+    looping: boolean
+    since?: string
+    summary?: string
+  }
+  suggestions: string[]
+  /** The range worth reading logs over — the failure, not the tail. */
+  logWindow?: { since: string; until: string; reason: string }
+}
+
+/** A change in behaviour read out of recorded history. Always inferred. */
+export type Anomaly = {
+  id: string
+  severity: Severity
+  class: FindingClass
+  title: string
+  detail: string
+  advice?: string
+  metric: string
+  window: string
+  inferred: boolean
+}
+
+export type AnomalyReport = {
+  container: string
+  window: string
+  samples: number
+  anomalies: Anomaly[]
+  note?: string
+}
+
+/** What a deploy is expected to change, before it changes it. */
+export type ServiceChange = {
+  name: string
+  change: "recreate" | "start" | "create" | "remove" | "unchanged"
+  reason: string
+  fields: string[]
+  imageBefore?: string
+  imageAfter?: string
+  inferred: boolean
+}
+
+export type DiffLine = {
+  kind: "same" | "added" | "removed" | "gap"
+  text: string
+  section?: string
+}
+
+export type DeployPreview = {
+  project: string
+  action: string
+  services: ServiceChange[]
+  recreate: number
+  start: number
+  unchanged: number
+  create: number
+  remove: number
+  /** The one number that means data is destroyed. Almost always empty. */
+  volumesRemoved: string[]
+  volumesKept: string[]
+  diff: DiffLine[]
+  diffAgainst?: string
+  summary: string
+  /** What this cannot know. Compose makes the final call. */
+  caveats: string[]
+}
+
+/** One recorded state of a compose project, so a change is reversible. */
+export type StackDeployment = {
+  id: number
+  project: string
+  workingDir?: string
+  createdAt: string
+  configHash: string
+  /** Only on the single-record route; the list omits it. */
+  config?: string
+  services: string[]
+  /** What each service was actually running — the digest, not the tag. */
+  imageDigests: Record<string, string>
+  envHash?: string
+  gitCommit?: string
+  gitBranch?: string
+  gitDirty?: boolean
+  actor?: string
+  source?: string
+  action?: string
+  result?: string
+  detail?: string
+  /** Only on the single-record route: whether the images still exist. */
+  restorable?: boolean
+  missing?: string[]
 }
 
 export type FileChange = { path: string; kind: "modified" | "added" | "deleted" }
@@ -751,6 +1117,7 @@ export type ResourceLimits = {
 }
 
 export type CreateResult = {
+  ports: PortMapping[]
   id: string
   name: string
   warnings: string[]
@@ -1772,6 +2139,381 @@ export type DeploymentRuntimeServices = {
   services: DeploymentRuntimeService[]
 }
 
+export type DockerTemplate = {
+  id: string
+  name: string
+  blurb: string
+  category: "http" | "database" | "tool" | "automation" | "game"
+  requires?: string
+  docsUrl: string
+  license: string
+  spec: ContainerSpec
+}
+
+export type BlueprintSummary = {
+  id: string
+  version: string
+  name: string
+  category: "http" | "database" | "tool" | "automation" | "game"
+  profile: "web" | "database" | "tool" | "worker" | "game" | "compose"
+  description: string
+  iconId: string
+  docsUrl: string
+  license: string
+  maintainer: string
+  reviewedAt: string
+  image: string
+  memoryMb: number
+  requiresAcceptance?: boolean
+  privileged?: boolean
+}
+
+export type BlueprintChoice = {
+  value: string
+  label: string
+  description?: string
+  image?: string
+}
+
+export type BlueprintInput = {
+  name: string
+  kind: "text" | "number" | "boolean" | "choice" | "domain" | "memory" | "accept"
+  label: string
+  description?: string
+  default?: string
+  required?: boolean
+  advanced?: boolean
+  minimum?: number
+  maximum?: number
+  pattern?: string
+  choices?: BlueprintChoice[]
+  variable?: string
+  acceptUrl?: string
+}
+
+export type BlueprintProperty = {
+  key: string
+  kind: "text" | "number" | "boolean" | "choice"
+  label: string
+  description?: string
+  default?: string
+  minimum?: number
+  maximum?: number
+  choices?: BlueprintChoice[]
+}
+
+export type BlueprintConfigFile = {
+  path: string
+  label: string
+  format: "properties" | "yaml" | "json" | "toml" | "raw"
+  description?: string
+  restartRequired?: boolean
+  properties?: BlueprintProperty[]
+}
+
+export type BlueprintAutomation = {
+  name: string
+  description: string
+  cron: string
+  timezone?: string
+  actions: string[]
+  default?: boolean
+}
+
+export type BlueprintDetail = BlueprintSummary & {
+  provenance: {
+    maintainer: string
+    license: string
+    upstreamUrl: string
+    reviewedAt: string
+    minimumDashboard: string
+    updateNotes?: string
+  }
+  inputs?: BlueprintInput[]
+  secrets?: {
+    name: string
+    variable: string
+    label: string
+    description?: string
+    length: number
+  }[]
+  ports?: {
+    name: string
+    internal: number
+    protocol: string
+    purpose: string
+    exposure: "proxy" | "direct" | "internal"
+    primary?: boolean
+  }[]
+  volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+  resources: { memoryMb: number; minMemoryMb: number; cpus?: number }
+  files?: BlueprintConfigFile[]
+  automation?: BlueprintAutomation[]
+  update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
+}
+
+export type GameImportPreview = {
+  root: string
+  edition: string
+  software: string
+  version?: string
+  evidence: { path: string; reason: string }[]
+  worldPaths: string[]
+  modPaths: string[]
+  configPaths: string[]
+  logPaths: string[]
+  ignoredPaths: string[]
+  properties?: Record<string, string>
+  port?: number
+  totalBytes: number
+  eulaAccepted: boolean
+  warnings: string[]
+}
+
+export type GameVersionList = {
+  status: "available" | "stale" | "unavailable"
+  reason?: string
+  source: string
+  checkedAt: string
+  versions: {
+    id: string
+    kind: string
+    releasedAt?: string
+    recommended?: boolean
+    latest?: boolean
+  }[]
+  recommended?: string
+}
+
+export type GamePlayers = {
+  supported: boolean
+  status: "available" | "unavailable" | "unsupported"
+  reason?: string
+  online: number
+  maximum: number
+  names: string[]
+  observedAt: string
+}
+
+export type GameOverview = {
+  status: "available" | "unavailable"
+  reason?: string
+  blueprintId?: string
+  edition?: string
+  containerId?: string
+  address?: string
+  players?: GamePlayers
+  console: boolean
+  files: BlueprintConfigFile[]
+}
+
+export type GameConsoleResult = {
+  command: string
+  output: string
+  exitCode: number
+  executedAt: string
+}
+
+export type GameProperties = {
+  status: "available" | "unavailable"
+  reason?: string
+  path?: string
+  raw?: string
+  values?: Record<string, string>
+  known: BlueprintProperty[]
+  restartRequired?: boolean
+}
+
+export type BlueprintRenderedPlan = {
+  detection: { source: { kind: string; repository?: string; ref?: string; digest?: string } }
+  configuration: DeploymentConfiguration
+  rendered: {
+    blueprintId: string
+    blueprintVersion: string
+    profile: string
+    image: string
+    memoryMb: number
+    digest: string
+    variables: {
+      name: string
+      value?: string
+      sensitivity: string
+      generated?: boolean
+      length?: number
+      label?: string
+    }[]
+    ports: {
+      name: string
+      internal: number
+      protocol: string
+      exposure: string
+      purpose: string
+      primary?: boolean
+    }[]
+    volumes: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+    checks: { name: string; kind: string; phase: string; required: boolean }[]
+    domains?: string[]
+    acceptances?: { input: string; label: string; url: string }[]
+    stopCommands?: string[]
+  }
+  summary: BlueprintSummary
+  inputs: BlueprintInput[]
+  automation: BlueprintAutomation[]
+  files: BlueprintConfigFile[]
+}
+
+export type DeploymentDiagnosisFinding = {
+  code: string
+  severity: "critical" | "warning" | "notice"
+  title: string
+  measured: string
+  means: string
+  action: string
+  owner: string
+  deepLink?: string
+  external?: boolean
+}
+
+export type DeploymentDiagnosis = {
+  status: "assessed" | "partial"
+  findings: DeploymentDiagnosisFinding[]
+  silences: { subject: string; reason: string }[]
+}
+
+export type DeploymentDomainRoute = {
+  hostname: string
+  https: boolean
+  ownership: DeploymentOwnership
+  route: "served" | "missing" | "foreign" | "conflict" | "unavailable"
+  servedBy?: string
+  certificate: "valid" | "expiring" | "expired" | "missing" | "not requested" | "unavailable"
+  certificateName?: string
+  certificateDaysLeft?: number
+  deepLink?: string
+  certificateLink?: string
+}
+
+export type DeploymentStorageMount = {
+  source: string
+  target: string
+  kind: "volume" | "bind"
+  readOnly?: boolean
+  ownership: DeploymentOwnership
+  status: "present" | "missing" | "unavailable"
+  detail?: string
+  deepLink?: string
+}
+
+export type DeploymentBackupJob = {
+  resourceId: string
+  required: boolean
+  status: "present" | "missing" | "unavailable"
+  lastStatus?: string
+  fresh: boolean
+  detail?: string
+  deepLink?: string
+}
+
+export type DeploymentDependencyItem = {
+  kind: string
+  resourceKind: string
+  resourceId: string
+  available: boolean
+  fresh?: boolean
+  status?: string
+  detail?: string
+  deepLink?: string
+}
+
+export type DeploymentOperations = {
+  observedAt: string
+  releaseId?: number
+  evidence: "release" | "none"
+  reason?: string
+  runtime: DeploymentRuntimeServices
+  domains: {
+    status: "available" | "unavailable"
+    reason?: string
+    siteName?: string
+    domains: DeploymentDomainRoute[]
+  }
+  storage: {
+    status: "available" | "unavailable"
+    reason?: string
+    mounts: DeploymentStorageMount[]
+  }
+  backups: {
+    status: "available" | "unavailable"
+    reason?: string
+    jobs: DeploymentBackupJob[]
+  }
+  dependencies: {
+    status: "available" | "unavailable"
+    reason?: string
+    items: DeploymentDependencyItem[]
+  }
+  diagnosis: DeploymentDiagnosis
+}
+
+export type ReleaseFieldChange = {
+  field: string
+  from: string
+  to: string
+  changed: boolean
+}
+
+export type ReleaseListChange = {
+  name: string
+  change: "added" | "removed" | "changed" | "unchanged"
+  from?: string
+  to?: string
+  detail?: string
+  secret?: boolean
+}
+
+export type ReleaseArtifactStatus = {
+  kind: string
+  reference: string
+  digest: string
+  sizeBytes: number
+  state: string
+  retained: boolean
+  reason: string
+}
+
+export type ReleaseComparison = {
+  fromReleaseId: number
+  toReleaseId: number
+  changes: Record<string, boolean>
+  detail: {
+    status: "available" | "unavailable"
+    reason?: string
+    fields: ReleaseFieldChange[]
+    variables: ReleaseListChange[]
+    dependencies: ReleaseListChange[]
+    checks: ReleaseListChange[]
+    domains: ReleaseListChange[]
+  }
+  artifacts: ReleaseArtifactStatus[]
+}
+
+export type ReleaseUpdateStatus = {
+  status: "available" | "unavailable"
+  reason?: string
+  reference?: string
+  state?: "current" | "outdated" | "unknown" | "local" | "pinned"
+  localDigest?: string
+  remoteDigest?: string
+  checkedAt?: string
+}
+
+export type ReleaseComparisonResponse = {
+  comparison: ReleaseComparison | null
+  update: ReleaseUpdateStatus
+  artifacts: ReleaseArtifactStatus[]
+  reason?: string
+}
+
 export type DeploymentSummary = {
   id: number
   name: string
@@ -1885,6 +2627,24 @@ export type DeploymentFleet = {
 
 export type DeploymentComposeDocument = { path: string; content: string; order: number }
 
+/**
+ * Where a new deployment's public address comes from when the operator has not
+ * bought a domain: a name that already resolves to this server, plus whether a
+ * certificate can cover it today.
+ */
+export type DeploymentHostnameSuggestion = {
+  hostname: string
+  base?: string
+  /** Whether a certificate on this host already covers it — the only thing activation accepts. */
+  covered: boolean
+  certificateName?: string
+  /** The HTTP-01 challenge this host could issue one with now, if any. */
+  certificateMethod?: "nginx" | "standalone"
+  method: "wildcard" | "sslip" | "custom" | "none"
+  detail: string
+  address?: string
+}
+
 export type DeploymentDraftSource = {
   kind: DeploymentSourceKind
   mode: DeploymentSourceMode
@@ -1905,6 +2665,7 @@ export type DeploymentDraftSource = {
   resourceId?: string
   blueprintId?: string
   blueprintVersion?: string
+  blueprintInputs?: Record<string, string>
 }
 
 export type DeploymentDetectionCandidate = {
@@ -2352,6 +3113,31 @@ export type GitHubRepo = {
   url: string
   private: boolean
   permission?: string
+}
+
+/**
+ * One repository the signed-in account can deploy, as the chooser lists them.
+ * Distinct from GitHubRepo, which describes the checkout a page is already in.
+ */
+export type GitHubRepoSummary = {
+  nameWithOwner: string
+  name: string
+  owner: string
+  description?: string
+  url: string
+  cloneUrl: string
+  defaultBranch?: string
+  language?: string
+  private: boolean
+  fork: boolean
+  archived: boolean
+  pushedAt?: string
+}
+
+export type GitHubBranch = {
+  name: string
+  protected?: boolean
+  default?: boolean
 }
 
 /** The code to type into github.com, and where to type it. */
@@ -2836,6 +3622,8 @@ export type DashboardConfigRun = {
   /** Where to go once this finishes — the address may have moved. */
   endpoint?: string
   container: string
+  /** A caveat about a run that otherwise worked, e.g. a certificate that could not be issued. */
+  note?: string
   actor: string
   startedAt: string
   updatedAt: string
@@ -2865,6 +3653,11 @@ export type TailscaleIdentity = {
   detail?: string
 }
 
+export type DashboardCertificate = {
+  issued: boolean
+  expires?: string
+}
+
 export type DashboardConfigReport = {
   /** False on an install with no compose stack to recreate. */
   supported: boolean
@@ -2876,6 +3669,13 @@ export type DashboardConfigReport = {
   /** The URL this configuration implies. */
   endpoint: string
   tailscale: TailscaleIdentity
+  /**
+   * What is actually on disk for the configured address — not the same
+   * question as which mode is set. A Tailscale install with no certificate yet
+   * answers perfectly well on Caddy's internal CA, and saying "trusted"
+   * because the setting says so would contradict the padlock.
+   */
+  certificate: DashboardCertificate
   /** Settings the file asks for that the running process is not doing. */
   drift?: DashboardConfigChange[]
   run?: DashboardConfigRun
@@ -3146,6 +3946,7 @@ export type SiteLocation = {
 }
 
 export type SiteSpec = {
+  managedAcme?: boolean
   name: string
   domains: string[]
   kind: "proxy" | "static" | "redirect"

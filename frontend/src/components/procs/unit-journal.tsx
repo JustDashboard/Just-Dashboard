@@ -10,7 +10,7 @@ import { bytes, relativeTime } from "@/lib/format"
 import { ListOrdered } from "@/components/icons"
 import { LogViewer } from "@/components/log-viewer"
 import { Detail, DetailList } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { PaneHeader, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -46,12 +46,12 @@ export function UnitJournalSheet({
     >
       {unit && (
         <Tabs defaultValue="overview" className="min-h-0 flex-1 gap-0">
-          <div className="shrink-0 border-b border-hairline bg-surface-header/60 px-4 py-2">
+          <PaneHeader className="px-4">
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="journal">Journal</TabsTrigger>
             </TabsList>
-          </div>
+          </PaneHeader>
           <TabsContent value="overview" className="min-h-0 overflow-y-auto p-4">
             <UnitOverview unit={unit} />
           </TabsContent>
@@ -84,7 +84,6 @@ function UnitOverview({ unit }: { unit: string }) {
       <Panel>
         <PanelHeader
           title="Service"
-          description={service.description}
           actions={
             <Status
               state={service.activeState}
@@ -116,13 +115,12 @@ function UnitOverview({ unit }: { unit: string }) {
       <Panel>
         <PanelHeader
           title="Runtime policy"
-          description="The effective values systemd is enforcing now"
         />
         <PanelBody>
           <DetailList>
             <Detail label="Account">{properties.User || "root"}</Detail>
             <Detail label="Group">{properties.Group || "default"}</Detail>
-            <Detail label="Working directory" className="break-all font-mono">
+            <Detail label="Working directory" className="font-mono break-all">
               {properties.WorkingDirectory || "Not set"}
             </Detail>
             <Detail label="Restart policy">{properties.Restart || "no"}</Detail>

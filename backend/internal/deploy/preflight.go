@@ -661,9 +661,13 @@ func preflightFindings(
 				"Host port belongs to the live deployment", strconv.Itoa(port.Port), port.Detail,
 				"", "docker", "runtime.hostPort"))
 		} else if port.InUse {
-			findings = append(findings, finding("port_conflict", PreflightBlocked,
+			severity, remedy := PreflightBlocked, "Choose another port or import the resource that owns it."
+			if !configuration.Runtime.HostNetwork {
+				severity, remedy = PreflightWarning, "An available host port will be selected automatically; connection details and proxy routes use the actual binding."
+			}
+			findings = append(findings, finding("port_conflict", severity,
 				"Host port is already in use", strconv.Itoa(port.Port), port.Detail,
-				"Choose another port or import the resource that owns it.", "docker", "runtime.hostPort"))
+				remedy, "docker", "runtime.hostPort"))
 		} else {
 			findings = append(findings, finding("port_available", PreflightPass,
 				"Host port is available", strconv.Itoa(port.Port), "No listener currently claims this port.", "", "docker", "runtime.hostPort"))
@@ -736,17 +740,25 @@ func preflightFindings(
 				"The public route and HTTP certificate challenge will not reach this server.",
 				"Update DNS or explicitly accept the delayed cutover.", "proxy", field))
 		}
-		if planned.HTTPS && !observed.CertificateAvailable {
-			severity := PreflightBlocked
-			measured := planned.Hostname
-			means := "HTTPS activation has no valid existing certificate/key pair for this hostname."
-			action := "Issue or import the certificate in Certificates, then retry preflight."
-			if observed.CertificateAutomation {
-				measured += "; certbot available"
-				means = "Certificate automation is installed, but issuance must finish before deployment cutover."
-			}
-			item := finding("certificate_unavailable", severity,
-				"HTTPS certificate is unavailable", measured, means, action, "certificates", field)
+		if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
+			// Not a blocker any more, because the release itself closes it:
+			// `provision_certificate` orders one over HTTP-01 before the
+			// candidate starts. What is measured here is the capability — a
+			// certbot this host actually has — and reporting it as a refusal
+			// would block the ordinary first deployment of a name nobody has
+			// published before, which is the case this path exists for.
+			item := finding("certificate_automatic", PreflightPass,
+				"HTTPS certificate will be issued during the release", planned.Hostname+"; certbot available",
+				"No certificate covers this hostname yet; the release orders one before it starts the candidate.",
+				"", "certificates", field)
+			item.DeepLink = "/certificates"
+			findings = append(findings, item)
+		} else if planned.HTTPS && !observed.CertificateAvailable {
+			item := finding("certificate_unavailable", PreflightBlocked,
+				"HTTPS certificate is unavailable", planned.Hostname,
+				"HTTPS activation has no existing certificate for this hostname and this host cannot issue one.",
+				"Install certbot, or issue and import the certificate in Certificates, then retry preflight.",
+				"certificates", field)
 			item.DeepLink = "/certificates"
 			findings = append(findings, item)
 		} else if planned.HTTPS {
@@ -1130,6 +1142,13 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "run stored release task when configured"
 		case StepBackupGate:
 			action.Action = "verify required backup evidence"
+		case StepProvisionCertificate:
+			action.Action = "resolve or issue the certificate for the planned HTTPS domains"
+			for _, domain := range configuration.Domains {
+				if domain.HTTPS {
+					action.Arguments = append(action.Arguments, domain.Hostname)
+				}
+			}
 		case StepStartCandidate:
 			action.Action = "start candidate release"
 			action.Arguments = append([]string(nil), configuration.Runtime.Command...)
@@ -1184,6 +1203,8 @@ func stepOwner(step StepKey) string {
 		return "docker"
 	case StepActivate:
 		return "proxy/docker"
+	case StepProvisionCertificate:
+		return "certificates"
 	case StepBackupGate:
 		return "backups"
 	default:
@@ -1194,7 +1215,8 @@ func stepOwner(step StepKey) string {
 func stepChangesState(step StepKey) bool {
 	switch step {
 	case StepAcquireSource, StepPrepareContext, StepBuildArtifact, StepReleaseTask,
-		StepStartCandidate, StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify:
+		StepProvisionCertificate, StepStartCandidate, StepActivate, StepRetirePrevious,
+		StepRecordRelease, StepNotify:
 		return true
 	default:
 		return false

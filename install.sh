@@ -377,46 +377,21 @@ who_has() {
 	return 0
 }
 
-# pick_port keeps the default when it is free and otherwise walks upward. The
-# step is 100 rather than 1 so the number it lands on still reads as a
-# deliberate choice — 8543 — instead of looking like the default with a typo.
-# Sets PICKED rather than echoing it: ok() and warn() write to stdout, so a
-# version of this that returned the port through a command substitution would
-# capture its own progress messages into the number.
+# Reserve choices across the three services before any container is started.
 PICKED=""
+ALLOCATED_PORTS=" "
 pick_port() {
-	local want="$1" name="$2" p="$1" tries=0 owner=""
-	while port_taken "$p"; do
-		tries=$((tries + 1))
-		[ "$tries" -gt 20 ] && die "could not find a free port for $name near $want"
-		p=$((p + 100))
-	done
-	if [ "$p" != "$want" ]; then
-		owner="$(who_has "$want")"
-		warn "$name: $want is in use${owner:+ by $owner} — using $p instead"
-	else
-		ok "$name: $p"
-	fi
-	PICKED="$p"
+ local want="$1" name="$2" p="$1" tries=0
+ while port_taken "$p" || [[ "$ALLOCATED_PORTS" == *" $p "* ]]; do
+  tries=$((tries + 1))
+  [ "$tries" -ge 64512 ] && die "no available dashboard port remains for $name"
+  p=$((1024 + (p - 1024 + 1) % 64512))
+ done
+ if [ "$p" != "$want" ]; then warn "$name: $want is in use; using $p instead"; else ok "$name: $p"; fi
+ PICKED="$p"
+ ALLOCATED_PORTS="$ALLOCATED_PORTS$p "
 }
-
-# random_port picks a free port from the high range.
-#
-# 20000-59999 rather than the ephemeral range proper (32768-60999 on Linux):
-# overlapping it entirely would mean competing with outbound connections for
-# the number, and losing that race looks like a dashboard that stopped working
-# for no reason after a reboot.
-random_port() {
-	local name="$1" p tries=0
-	while :; do
-		p=$(( 20000 + RANDOM % 40000 ))
-		port_taken "$p" || break
-		tries=$((tries + 1))
-		[ "$tries" -gt 50 ] && die "could not find a free port for $name"
-	done
-	ok "$name: $p"
-	PICKED="$p"
-}
+random_port() { pick_port "$((20000 + RANDOM % 40000))" "$1"; }
 
 pick_port 8443 "dashboard (the port you connect to)"; JD_PORT="$PICKED"
 random_port "backend API (internal)";                 JD_BACKEND_PORT="$PICKED"
@@ -511,49 +486,8 @@ fi  # KEEP_ENV
 # non-default is left exactly as it is — it was a deliberate choice, and this
 # is not the place to second-guess it.
 if [ "$KEEP_ENV" -eq 1 ]; then
-	step "Ports"
-
-	# set_env_port writes NAME=value into .env, replacing the line if it is
-	# there and appending it if it is not.
-	set_env_port() {
-		if grep -qE "^$1=" .env; then
-			sed -i "s|^$1=.*|$1=$2|" .env
-		else
-			printf '%s=%s\n' "$1" "$2" >> .env
-		fi
-	}
-
-	# Fills a gap; never moves a port that is already recorded.
-	#
-	# The tempting version of this also re-checks an existing value and moves
-	# it when something else has taken the port. It cannot: on a re-run against
-	# a dashboard that is currently up, the thing holding the port *is* this
-	# dashboard, and every way of telling that apart from a squatter is a guess
-	# — one that, when it guesses wrong, moves the ports out from under a
-	# working install. That is a worse failure than the one being fixed.
-	#
-	# A recorded port was chosen deliberately, by a previous run or by the
-	# operator. If something else really has taken it, `docker compose up` now
-	# stops and names it, which is the honest answer and needs no guessing.
-	check_kept_port() {
-		local var="$1" default="$2" name="$3" current
-		# `|| true` for the reason env_port carries one: absent is normal here.
-		current="$(grep -E "^$var=" .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"
-		if [ -n "$current" ]; then
-			ok "$name: $current (already set)"
-			return
-		fi
-		pick_port "$default" "$name"
-		set_env_port "$var" "$PICKED"
-		ok "$var was not set; using $PICKED"
-	}
-
-	check_kept_port JD_PORT 8443 "dashboard (the port you connect to)"
-	# Internal ports on an existing install keep their old defaults rather than
-	# being randomised: moving a port that is working, on a re-run whose whole
-	# promise was to change nothing, is not an improvement.
-	check_kept_port JD_BACKEND_PORT 8080 "backend API"
-	check_kept_port JD_FRONTEND_PORT 3000 "frontend"
+	# The freshly built backend fills missing port values and reconciles
+	# existing owners immediately before startup below.
 
 	# Settings that did not exist when this .env was written.
 	#
@@ -625,7 +559,13 @@ step "Building and starting the stack"
 say "  ${DIM}First build compiles the Go backend and the Next.js frontend; give it a few minutes.${RESET}"
 say ""
 
-$COMPOSE up -d --build
+$COMPOSE build
+# Use the freshly built backend so installs and in-app lifecycle operations
+# share port ownership detection and update every consumer through .env.
+docker run --rm --network host --pid host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD:$PWD" \
+  just-dashboard-backend:latest -prepare-ports "$PWD" -start-stack
 
 step "Waiting for the dashboard to answer"
 

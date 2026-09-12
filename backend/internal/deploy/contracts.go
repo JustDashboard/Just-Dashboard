@@ -167,29 +167,34 @@ func ValidateRunTransition(from, to RunState) error {
 type StepKey string
 
 const (
-	StepResolveSource   StepKey = "resolve_source"
-	StepAcquireSource   StepKey = "acquire_source"
-	StepAnalyzePlan     StepKey = "analyze_plan"
-	StepPrepareContext  StepKey = "prepare_context"
-	StepBuildArtifact   StepKey = "build_artifact"
-	StepRenderRuntime   StepKey = "render_runtime"
-	StepReleaseTask     StepKey = "release_task"
-	StepBackupGate      StepKey = "backup_gate"
-	StepStartCandidate  StepKey = "start_candidate"
-	StepVerifyReadiness StepKey = "verify_readiness"
-	StepVerifySmoke     StepKey = "verify_smoke"
-	StepActivate        StepKey = "activate"
-	StepRetirePrevious  StepKey = "retire_previous"
-	StepRecordRelease   StepKey = "record_release"
-	StepNotify          StepKey = "notify"
-	StepLegacyPipeline  StepKey = "legacy_pipeline"
+	StepResolveSource  StepKey = "resolve_source"
+	StepAcquireSource  StepKey = "acquire_source"
+	StepAnalyzePlan    StepKey = "analyze_plan"
+	StepPrepareContext StepKey = "prepare_context"
+	StepBuildArtifact  StepKey = "build_artifact"
+	StepRenderRuntime  StepKey = "render_runtime"
+	StepReleaseTask    StepKey = "release_task"
+	StepBackupGate     StepKey = "backup_gate"
+	// StepProvisionCertificate runs before anything is started, so a run that
+	// cannot get the certificate its own plan asked for fails with nothing
+	// left behind — and so that activation, which only ever resolves an
+	// existing pair, finds one there.
+	StepProvisionCertificate StepKey = "provision_certificate"
+	StepStartCandidate       StepKey = "start_candidate"
+	StepVerifyReadiness      StepKey = "verify_readiness"
+	StepVerifySmoke          StepKey = "verify_smoke"
+	StepActivate             StepKey = "activate"
+	StepRetirePrevious       StepKey = "retire_previous"
+	StepRecordRelease        StepKey = "record_release"
+	StepNotify               StepKey = "notify"
+	StepLegacyPipeline       StepKey = "legacy_pipeline"
 )
 
 var DefaultStepKeys = []StepKey{
 	StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext,
 	StepBuildArtifact, StepRenderRuntime, StepReleaseTask, StepBackupGate,
-	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepActivate,
-	StepRetirePrevious, StepRecordRelease, StepNotify,
+	StepProvisionCertificate, StepStartCandidate, StepVerifyReadiness, StepVerifySmoke,
+	StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
 }
 
 type StepState string
@@ -209,7 +214,13 @@ const (
 var stepTransitions = map[StepState]map[StepState]struct{}{
 	StepPending: stateSet(StepBlocked, StepRunning, StepSkipped, StepCancelled, StepUnavailable),
 	StepBlocked: stateSet(StepPending, StepRunning, StepFailed, StepCancelled, StepUnavailable),
-	StepRunning: stateSet(StepPassed, StepWarning, StepFailed, StepCancelled, StepUnavailable),
+	// `skipped` is reachable from `running` as well as from `pending`: a step
+	// that has to read the plan before it knows there is nothing to do — no
+	// release task, no backup gate, no predecessor to retire, no channel to
+	// notify — can only discover that after it has started. Without the edge
+	// those executors returned a state the store refused, the worker died
+	// mid-run, and the step stayed `running` with no transcript for ever.
+	StepRunning: stateSet(StepPassed, StepWarning, StepFailed, StepSkipped, StepCancelled, StepUnavailable),
 	// A failed attempt may return to pending only when the store increments
 	// attempt in the same transaction. The transition vocabulary remains one
 	// closed edge; the persistence method enforces the attempt condition.

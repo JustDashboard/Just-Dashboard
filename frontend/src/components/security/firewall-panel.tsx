@@ -1,12 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   LockClosed,
   Pencil,
   RotateCounterClockwise,
   Shield,
-  ShieldOff,
   Trash,
   Warning,
 } from "@/components/icons"
@@ -16,14 +15,14 @@ import { cn } from "@/lib/utils"
 import type { FirewallRule, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Metric } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog } from "@/components/security/rule-form"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
+import { Tag } from "@/components/tag"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -72,7 +71,24 @@ export function FirewallPanel({
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<FirewallRule | null>(null)
+  const [query, setQuery] = useState("")
   const admin = can("system.admin")
+
+  // ufw prints every rule twice on a dual-stack host and distinguishes the
+  // pair only by a "(v6)" suffix. Folding the duplicate away is what keeps
+  // eight rules from reading as sixteen.
+  const rules = useMemo(() => (status?.rules ?? []).filter((r) => !r.ipv6), [status?.rules])
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return rules
+    return rules.filter((r) =>
+      [r.action, r.to, r.from, r.service, r.comment, r.direction, r.raw]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    )
+  }, [rules, query])
 
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
@@ -100,10 +116,6 @@ export function FirewallPanel({
     profiles: false,
   }
   const writable = admin && caps.editable
-  // ufw prints every rule twice on a dual-stack host and distinguishes the
-  // pair only by a "(v6)" suffix. Folding the duplicate away is what keeps
-  // eight rules from reading as sixteen.
-  const rules = status.rules.filter((r) => !r.ipv6)
   const hidden = status.rules.length - rules.length
 
   const setPolicy = (direction: string, policy: string) => {
@@ -125,9 +137,9 @@ export function FirewallPanel({
       confirmLabel: "Apply",
       description: (
         <p className="text-destructive">
-          Everything not covered by an allow rule stops being reachable, including this dashboard
-          if no rule admits the port you are reading it on. The server refuses the change outright
-          when there is no inbound allow rule at all.
+          Everything not covered by an allow rule stops being reachable, including this dashboard if
+          no rule admits the port you are reading it on. The server refuses the change outright when
+          there is no inbound allow rule at all.
         </p>
       ),
       action: async (c) => {
@@ -148,18 +160,11 @@ export function FirewallPanel({
           </Notice>
         )}
 
-        <Notice icon={ShieldOff} title="Lockout protection">
-          A rule that would block the address you are connected from is refused before it is
-          applied, and so is an inbound default of deny on a host with no allow rule at all. A
-          firewall change should never be the thing that costs you access to the box.
-        </Notice>
-
         <Panel>
           <PanelHeader
             icon={Shield}
             eyebrow={status.backend}
             title="Firewall"
-            description={status.zone ? `zone ${status.zone}` : undefined}
             actions={
               <>
                 <Status
@@ -167,36 +172,36 @@ export function FirewallPanel({
                   label={status.enabled ? "Active" : "Inactive"}
                 />
                 {writable && (
-                <>
-                  <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />
-                  {caps.toggle && (
-                  <Switch
-                    aria-label="Firewall enabled"
-                    checked={status.enabled}
-                    onCheckedChange={(enabled) =>
-                      confirm({
-                        title: enabled ? "Enable firewall" : "Disable firewall",
-                        phrase: enabled ? "enable firewall" : "disable firewall",
-                        confirmLabel: enabled ? "Enable" : "Disable",
-                        description: enabled ? (
-                          <p className="text-destructive">
-                            ufw applies its default-deny policy immediately. If the port this
-                            dashboard listens on is not already allowed, you will lose access.
-                          </p>
-                        ) : (
-                          <p className="text-destructive">
-                            Every rule stops being enforced and the host is left unfiltered.
-                          </p>
-                        ),
-                        action: async (c) => {
-                          await post("/firewall/enabled", { enabled }, { confirm: c })
-                          refresh()
-                        },
-                      })
-                    }
-                  />
-                  )}
-                </>
+                  <>
+                    <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />
+                    {caps.toggle && (
+                      <Switch
+                        aria-label="Firewall enabled"
+                        checked={status.enabled}
+                        onCheckedChange={(enabled) =>
+                          confirm({
+                            title: enabled ? "Enable firewall" : "Disable firewall",
+                            phrase: enabled ? "enable firewall" : "disable firewall",
+                            confirmLabel: enabled ? "Enable" : "Disable",
+                            description: enabled ? (
+                              <p className="text-destructive">
+                                ufw applies its default-deny policy immediately. If the port this
+                                dashboard listens on is not already allowed, you will lose access.
+                              </p>
+                            ) : (
+                              <p className="text-destructive">
+                                Every rule stops being enforced and the host is left unfiltered.
+                              </p>
+                            ),
+                            action: async (c) => {
+                              await post("/firewall/enabled", { enabled }, { confirm: c })
+                              refresh()
+                            },
+                          })
+                        }
+                      />
+                    )}
+                  </>
                 )}
               </>
             }
@@ -204,83 +209,66 @@ export function FirewallPanel({
           {/* One strip whether or not this firewall can be changed from here.
               Read-only backends (iptables) used to show none of this — just a
               "·"-joined string in the description — so the same facts now read
-              the same way: the default policy, the logging level and the rule
-              count as figures, and where the backend can take an instruction,
-              the figure becomes the control that sets it. */}
-          <PanelToolbar className="gap-x-6 gap-y-3">
-            {caps.defaultPolicy && writable ? (
-              <PolicySelect
-                label="Inbound"
-                value={status.policy?.incoming}
-                onChange={(v) => setPolicy("incoming", v)}
-                hint="What happens to a connection no rule matched"
-              />
-            ) : (
-              <Metric
-                label="inbound default"
-                value={policyLabel(status.policy?.incoming, status.defaultPolicy)}
-                hint="a connection no rule matched"
-              />
-            )}
-            {status.backend === "ufw" &&
-              (caps.defaultPolicy && writable ? (
-                <PolicySelect
-                  label="Outbound"
-                  value={status.policy?.outgoing}
-                  onChange={(v) => setPolicy("outgoing", v)}
-                  hint="What this host may reach"
-                />
-              ) : (
-                <Metric
-                  label="outbound default"
-                  value={policyLabel(status.policy?.outgoing)}
-                  hint="what this host may reach"
-                />
-              ))}
-            {caps.logging && writable ? (
-              <div className="space-y-1">
-                <Label className="eyebrow">Logging</Label>
-                <Select
-                  value={loggingLevel(status.logging)}
-                  onValueChange={(level) =>
-                    post("/firewall/logging", { level })
-                      .then(() => {
-                        notify.success(`Logging set to ${level}`)
-                        refresh()
-                      })
-                      .catch((err) => notify.error("Not applied", err))
-                  }
-                >
-                  <SelectTrigger size="sm" className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["off", "low", "medium", "high", "full"].map((level) => (
-                      <SelectItem key={level} value={level}>
-                        {level}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : (
-              <Metric
-                label="logging"
-                value={loggingLevel(status.logging)}
-                hint={
-                  !status.logging || status.logging.startsWith("off")
-                    ? "a silent drop leaves no record"
-                    : undefined
-                }
+              the same way: the default policy and the logging level, and where
+              the backend can take an instruction, the word becomes the control
+              that sets it. Every field is one column of the same height, so a
+              writable host and a read-only one have the same strip rather than
+              a row of mismatched boxes. */}
+          <PanelToolbar className="gap-x-5 gap-y-3">
+            <PolicyField
+              label="Inbound default"
+              hint="A connection no rule matched"
+              value={policyLabel(status.policy?.incoming, status.defaultPolicy)}
+              options={POLICIES}
+              fallback="allow"
+              editable={caps.defaultPolicy && writable}
+              onChange={(v) => setPolicy("incoming", v)}
+            />
+            {status.backend === "ufw" && (
+              <PolicyField
+                label="Outbound default"
+                hint="What this host may reach"
+                value={policyLabel(status.policy?.outgoing)}
+                options={POLICIES}
+                fallback="allow"
+                editable={caps.defaultPolicy && writable}
+                onChange={(v) => setPolicy("outgoing", v)}
               />
             )}
-            <Metric label="rules" value={rules.length} />
+            <PolicyField
+              label="Logging"
+              hint={
+                !status.logging || status.logging.startsWith("off")
+                  ? "A silent drop leaves no record"
+                  : "Refused connections are recorded"
+              }
+              value={loggingLevel(status.logging)}
+              options={LOG_LEVELS}
+              fallback="off"
+              editable={caps.logging && writable}
+              onChange={(level) =>
+                post("/firewall/logging", { level })
+                  .then(() => {
+                    notify.success(`Logging set to ${level}`)
+                    refresh()
+                  })
+                  .catch((err) => notify.error("Not applied", err))
+              }
+            />
             <span className="flex-1" />
+            <SearchInput
+              dense
+              aria-label="Filter rules"
+              placeholder="Filter rules"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              containerClassName="self-end sm:w-56"
+            />
             {writable && caps.reset && (
               <Button
                 size="sm"
                 variant="ghost"
-                className="self-center text-destructive"
+                className="self-end text-destructive"
                 onClick={() =>
                   confirm({
                     title: "Reset the firewall",
@@ -288,8 +276,8 @@ export function FirewallPanel({
                     confirmLabel: "Reset",
                     description: (
                       <p className="text-destructive">
-                        Every rule is removed and ufw is disabled. There is no undo, and the host
-                        is left unfiltered until you configure it again.
+                        Every rule is removed and ufw is disabled. There is no undo, and the host is
+                        left unfiltered until you configure it again.
                       </p>
                     ),
                     action: async (c) => {
@@ -305,10 +293,10 @@ export function FirewallPanel({
             )}
           </PanelToolbar>
           <PanelBody flush>
-            <Table containerClassName="max-h-[calc(100svh-30rem)]">
+            <Table containerClassName="max-h-[calc(100svh-28rem)]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
-                  <TableHead className="w-12">#</TableHead>
+                  <TableHead className="w-10">#</TableHead>
                   <TableHead>Action</TableHead>
                   <TableHead>To</TableHead>
                   <TableHead>From</TableHead>
@@ -317,43 +305,45 @@ export function FirewallPanel({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rules.map((rule, i) => (
+                {shown.map((rule, i) => (
                   <TableRow
                     key={`${rule.number}-${i}`}
-                    className={cn("group", rule.danger && "bg-destructive/[0.04]")}
+                    className={cn("group", rule.danger && "bg-wash-danger")}
                   >
-                    <TableCell className="numeric font-mono text-xs">{rule.number}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "font-mono font-normal",
-                          // ALLOW / DENY / LIMIT is a property of the rule, not
-                          // the app's running/stopped status language, so it
-                          // stays a plain tag. Deny-family rules read quieter —
-                          // an allow to the world is the line worth catching,
-                          // and rule.danger already tints that row red.
-                          rule.action !== "ALLOW" && "text-muted-foreground",
-                        )}
-                      >
-                        {rule.action}
-                      </Badge>
-                      {rule.direction && (
-                        <span className="ml-1 text-[11px] text-muted-foreground">
-                          {rule.direction}
-                        </span>
-                      )}
+                    <TableCell className="numeric font-mono text-muted-foreground">
+                      {rule.number}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell>
+                      <span className="flex items-center gap-1.5">
+                        <Tag
+                          mono
+                          tone={rule.danger ? "danger" : "default"}
+                          className={cn(
+                            // ALLOW / DENY / LIMIT is a property of the rule,
+                            // not the app's running/stopped status language, so
+                            // it stays a plain tag. Deny-family rules read
+                            // quieter — an allow to the world is the line worth
+                            // catching, and rule.danger already tints that row.
+                            !rule.danger && rule.action === "ALLOW" && "text-foreground",
+                          )}
+                        >
+                          {rule.action}
+                        </Tag>
+                        {rule.direction && (
+                          <span className="text-hint text-muted-foreground">{rule.direction}</span>
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell>
                       <span className="font-mono">{rule.to || "—"}</span>
                       {rule.service && (
                         <span className="ml-1.5 text-muted-foreground">{rule.service}</span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{rule.from || "anywhere"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="font-mono">{rule.from || "anywhere"}</TableCell>
+                    <TableCell className="text-muted-foreground">
                       {rule.danger ? (
-                        <span className="flex items-start gap-1.5 text-destructive">
+                        <span className="flex items-start gap-1.5 whitespace-normal text-destructive">
                           <Warning className="mt-px size-3 shrink-0" />
                           <span>{rule.danger}</span>
                         </span>
@@ -362,66 +352,80 @@ export function FirewallPanel({
                       )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
-                      {/* A forwarding rule (ufw route, which is what ufw-docker
-                          writes) has no representation in this form: it is
-                          neither inbound nor outbound, and reopening it here
-                          would offer to save it back as an inbound rule. The
-                          server refuses that too; not offering the button is
-                          the half the reader can see. */}
-                      {writable && rule.number !== undefined && rule.direction !== "FWD" && (
-                        <IconAction
-                          label="Edit rule"
-                          className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                          onClick={() => setEditing(rule)}
-                        >
-                          <Pencil />
-                        </IconAction>
-                      )}
-                      {writable && rule.number !== undefined && (
-                        <IconAction
-                          label="Delete rule"
-                          className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                          onClick={() =>
-                            confirm({
-                              // No typed phrase. A rule is one line, visible on
-                              // the row being deleted and re-addable from the
-                              // form beside it — and a phrase in front of
-                              // something done a dozen times a day is a phrase
-                              // that gets typed without being read, which is
-                              // what makes the phrase worthless on the routes
-                              // that keep it.
-                              title: "Delete firewall rule",
-                              confirmLabel: "Delete",
-                              description: <p className="font-mono text-xs">{rule.raw}</p>,
-                              action: async (c) => {
-                                await del(`/firewall/rules/${rule.number}`, { confirm: c })
-                                refresh()
-                              },
-                            })
-                          }
-                        >
-                          <Trash />
-                        </IconAction>
-                      )}
+                      <RowActions className="justify-end">
+                        {/* A forwarding rule (ufw route, which is what
+                            ufw-docker writes) has no representation in this
+                            form: it is neither inbound nor outbound, and
+                            reopening it here would offer to save it back as an
+                            inbound rule. The server refuses that too; not
+                            offering the button is the half the reader can
+                            see. */}
+                        {writable && rule.number !== undefined && rule.direction !== "FWD" && (
+                          <IconAction label="Edit rule" onClick={() => setEditing(rule)}>
+                            <Pencil />
+                          </IconAction>
+                        )}
+                        {writable && rule.number !== undefined && (
+                          <IconAction
+                            label="Delete rule"
+                            className="text-destructive"
+                            onClick={() =>
+                              confirm({
+                                // No typed phrase. A rule is one line, visible
+                                // on the row being deleted and re-addable from
+                                // the form beside it — and a phrase in front of
+                                // something done a dozen times a day is a
+                                // phrase that gets typed without being read,
+                                // which is what makes the phrase worthless on
+                                // the routes that keep it.
+                                title: "Delete firewall rule",
+                                confirmLabel: "Delete",
+                                description: <p className="font-mono text-xs">{rule.raw}</p>,
+                                action: async (c) => {
+                                  await del(`/firewall/rules/${rule.number}`, { confirm: c })
+                                  refresh()
+                                },
+                              })
+                            }
+                          >
+                            <Trash />
+                          </IconAction>
+                        )}
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 ))}
-                {rules.length === 0 && (
+                {shown.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="p-0">
-                      <EmptyState icon={Shield} title="No rules configured" />
+                      <EmptyState
+                        icon={Shield}
+                        title={rules.length === 0 ? "No rules configured" : "No rule matches"}
+                        description={
+                          rules.length === 0
+                            ? undefined
+                            : `Nothing in these ${rules.length} rules contains “${query.trim()}”.`
+                        }
+                        className="border-0"
+                      />
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
           </PanelBody>
-          {hidden > 0 && (
-            <div className="border-t border-hairline px-4 py-2 text-[11px] text-muted-foreground">
-              {hidden} IPv6 {hidden === 1 ? "counterpart" : "counterparts"} folded away — ufw
-              writes each rule into both tables and prints them separately.
-            </div>
-          )}
+          {/* The guard, stated once and where it applies, instead of a
+              permanent three-line banner above the page. It never changes and
+              it is never the reason somebody opened this page, so it reads as
+              a footnote to the rule list it protects. */}
+          <PanelFooter className="text-hint leading-relaxed text-muted-foreground">
+            <span className="min-w-0">
+              A rule that would block the address you are connected from is refused before it is
+              applied, and so is an inbound default of deny on a host with no allow rule at all.
+              {hidden > 0 &&
+                ` ${hidden} IPv6 ${hidden === 1 ? "counterpart is" : "counterparts are"} folded away — ufw writes each rule into both tables and prints them separately.`}
+            </span>
+          </PanelFooter>
         </Panel>
       </div>
       {dialog}
@@ -438,30 +442,54 @@ export function FirewallPanel({
   )
 }
 
-function PolicySelect({
+const POLICIES = ["deny", "reject", "allow"]
+const LOG_LEVELS = ["off", "low", "medium", "high", "full"]
+
+/**
+ * One decision in the firewall's strip: its name, its value and — where this
+ * backend can be told to change it — the control that does.
+ *
+ * Read-only and writable render at the same height and on the same baseline,
+ * which is what stopped the strip reading as three dropdowns and a stray
+ * figure that had wandered in from somewhere else.
+ */
+function PolicyField({
   label,
-  value,
-  onChange,
   hint,
+  value,
+  options,
+  fallback,
+  editable,
+  onChange,
 }: {
   label: string
-  value: string | undefined
-  onChange: (value: string) => void
   hint: string
+  value: string
+  options: string[]
+  /** ufw's verbose line is not one of the words the control offers. */
+  fallback: string
+  editable: boolean
+  onChange: (value: string) => void
 }) {
   return (
-    <div className="space-y-1" title={hint}>
+    <div className="min-w-0 space-y-1" title={hint}>
       <Label className="eyebrow">{label}</Label>
-      <Select value={value ?? "allow"} onValueChange={onChange}>
-        <SelectTrigger size="sm" className="w-28">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="deny">deny</SelectItem>
-          <SelectItem value="reject">reject</SelectItem>
-          <SelectItem value="allow">allow</SelectItem>
-        </SelectContent>
-      </Select>
+      {editable ? (
+        <Select value={options.includes(value) ? value : fallback} onValueChange={onChange}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <p className="numeric flex h-8 items-center text-body font-medium">{value}</p>
+      )}
     </div>
   )
 }

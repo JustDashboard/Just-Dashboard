@@ -8,8 +8,7 @@ import { cn } from "@/lib/utils"
 import type { DomainCheck, SiteLocation, SiteResult, SiteSpec } from "@/lib/types"
 import { CodeEditor } from "@/components/code-editor"
 import { SidePanel } from "@/components/side-panel"
-import { Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -191,8 +190,7 @@ function SiteFormBody({
       name: s.name || (domains[0] ? fileNameFor(domains[0]) : ""),
       certPath:
         s.certPath || (lineage ? `/etc/letsencrypt/live/${lineage}/fullchain.pem` : undefined),
-      keyPath:
-        s.keyPath || (lineage ? `/etc/letsencrypt/live/${lineage}/privkey.pem` : undefined),
+      keyPath: s.keyPath || (lineage ? `/etc/letsencrypt/live/${lineage}/privkey.pem` : undefined),
     }))
   }
 
@@ -236,15 +234,14 @@ function SiteFormBody({
       bodyClassName="flex min-h-0 flex-1 flex-col gap-0 p-0 lg:flex-row"
       footer={
         <>
-          <span className="mr-auto text-[11px] text-muted-foreground">
+          <span className="mr-auto text-hint text-muted-foreground">
             Validated with nginx&rsquo;s own parser before it takes effect, and rolled back if the
             test fails.
           </span>
           <Button size="sm" variant="outline" onClick={() => save(false)} disabled={!ready || busy}>
             Save only
           </Button>
-          <Button size="sm" onClick={() => save(true)} disabled={!ready || busy}>
-            {busy && <Spinner className="size-4" />}
+          <Button size="sm" onClick={() => save(true)} disabled={!ready || busy} pending={busy}>
             Save and reload
           </Button>
         </>
@@ -254,8 +251,8 @@ function SiteFormBody({
         {editing && !managed && (
           <Notice tone="warning" icon={Warning} title="This file was written by hand">
             The form has read what it recognises. Saving replaces the file with what the form
-            produces, so anything it could not represent will be lost — the previous version is
-            kept as <code className="font-mono">.bak</code>.
+            produces, so anything it could not represent will be lost — the previous version is kept
+            as <code className="font-mono">.bak</code>.
           </Notice>
         )}
 
@@ -286,13 +283,13 @@ function SiteFormBody({
               size="sm"
               className="w-full"
             >
-              <ToggleGroupItem value="proxy" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="proxy" className="flex-1 text-hint">
                 An app
               </ToggleGroupItem>
-              <ToggleGroupItem value="static" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="static" className="flex-1 text-hint">
                 Files
               </ToggleGroupItem>
-              <ToggleGroupItem value="redirect" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="redirect" className="flex-1 text-hint">
                 A redirect
               </ToggleGroupItem>
             </ToggleGroup>
@@ -353,14 +350,14 @@ function SiteFormBody({
                 <Input
                   value={spec.certPath ?? ""}
                   onChange={(e) => set("certPath", e.target.value)}
-                  className="font-mono text-[11px]"
+                  className="font-mono text-hint"
                 />
               </Field>
               <Field label="Private key">
                 <Input
                   value={spec.keyPath ?? ""}
                   onChange={(e) => set("keyPath", e.target.value)}
-                  className="font-mono text-[11px]"
+                  className="font-mono text-hint"
                 />
               </Field>
               <Toggle
@@ -425,11 +422,7 @@ function SiteFormBody({
             checked={spec.blockExploits}
             onChange={(v) => set("blockExploits", v)}
           />
-          <Toggle
-            label="Compress responses"
-            checked={spec.gzip}
-            onChange={(v) => set("gzip", v)}
-          />
+          <Toggle label="Compress responses" checked={spec.gzip} onChange={(v) => set("gzip", v)} />
           <Toggle
             label="Access log"
             hint="Off keeps the disk quiet; on is what you want when something goes wrong."
@@ -457,17 +450,14 @@ function SiteFormBody({
               value={spec.basicAuthFile ?? ""}
               onChange={(e) => set("basicAuthFile", e.target.value)}
               placeholder="/etc/nginx/.htpasswd"
-              className="font-mono text-[11px]"
+              className="font-mono text-hint"
             />
           </Field>
 
           {spec.kind === "proxy" && (
             <>
               <Section title="Paths that go somewhere else" />
-              <LocationsField
-                locations={spec.locations}
-                onChange={(v) => set("locations", v)}
-              />
+              <LocationsField locations={spec.locations} onChange={(v) => set("locations", v)} />
             </>
           )}
 
@@ -477,7 +467,7 @@ function SiteFormBody({
               value={spec.custom ?? ""}
               onChange={(e) => set("custom", e.target.value)}
               rows={4}
-              className="font-mono text-[11px]"
+              className="font-mono text-hint"
               placeholder="# valid nginx directives"
             />
           </Field>
@@ -494,9 +484,9 @@ function SiteFormBody({
             <TabsTrigger value="notes">
               Notes
               {warnings.length > 0 && (
-                <Badge variant="warning" className="ml-1 font-normal">
+                <span className="numeric ml-1 text-hint font-medium text-warning">
                   {warnings.length}
-                </Badge>
+                </span>
               )}
             </TabsTrigger>
           </TabsList>
@@ -510,8 +500,8 @@ function SiteFormBody({
                 <CodeEditor className="h-full" language="ini" value={preview} readOnly />
               ) : (
                 <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                  Enter a domain and the config appears here, rendered by the server that will
-                  write it.
+                  Enter a domain and the config appears here, rendered by the server that will write
+                  it.
                 </div>
               )}
             </div>
@@ -563,13 +553,13 @@ function DNSCheck({ domain }: { domain: string }) {
   }, [domain])
 
   if (loading && !check) {
-    return <p className="text-[11px] text-muted-foreground">Checking where {domain} points…</p>
+    return <p className="text-hint text-muted-foreground">Checking where {domain} points…</p>
   }
   if (!check) return null
   return (
     <p
       className={cn(
-        "text-[11px] leading-relaxed",
+        "text-hint leading-relaxed",
         check.pointsHere
           ? "text-success"
           : // A host behind provider NAT has no address of its own to compare
@@ -586,9 +576,7 @@ function DNSCheck({ domain }: { domain: string }) {
 }
 
 function Section({ title }: { title: string }) {
-  return (
-    <p className="eyebrow border-t border-hairline pt-3">{title}</p>
-  )
+  return <p className="eyebrow border-t border-hairline pt-3">{title}</p>
 }
 
 function Field({
@@ -604,7 +592,7 @@ function Field({
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {children}
-      {hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>}
     </div>
   )
 }
@@ -631,7 +619,7 @@ function Toggle({
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0 space-y-0.5">
         <Label className="font-normal">{label}</Label>
-        {hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
+        {hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>}
       </div>
       <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5 shrink-0" />
     </div>
@@ -662,7 +650,7 @@ function ListField({
       <div className="space-y-1.5">
         {values.map((value, i) => (
           <div key={`${value}-${i}`} className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded border border-hairline bg-surface-sunken px-2 py-1 font-mono text-[11px]">
+            <code className="flex-1 truncate rounded-sm border border-hairline bg-surface-sunken px-2 py-1 font-mono text-hint">
               {value}
             </code>
             <Button
@@ -722,7 +710,10 @@ function LocationsField({
   return (
     <div className="space-y-2">
       {locations.map((loc, i) => (
-        <div key={i} className="space-y-1.5 rounded-lg border border-hairline bg-surface-sunken p-2.5">
+        <div
+          key={i}
+          className="space-y-1.5 rounded-lg border border-hairline bg-surface-sunken p-2.5"
+        >
           <div className="flex items-center gap-2">
             <Input
               value={loc.path}
@@ -754,7 +745,7 @@ function LocationsField({
               className="font-mono text-xs"
             />
           )}
-          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <label className="flex items-center gap-2 text-hint text-muted-foreground">
             <Checkbox
               checked={loc.webSockets}
               onCheckedChange={(v) => update(i, { webSockets: Boolean(v) })}
@@ -766,14 +757,12 @@ function LocationsField({
       <Button
         size="sm"
         variant="outline"
-        onClick={() =>
-          onChange([...locations, { path: "", upstream: "", webSockets: false }])
-        }
+        onClick={() => onChange([...locations, { path: "", upstream: "", webSockets: false }])}
       >
         <Plus className="size-3.5" />
         Add a path
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
+      <p className="text-hint leading-relaxed text-muted-foreground">
         Everything not matched by one of these goes to the site&rsquo;s main upstream.
       </p>
     </div>

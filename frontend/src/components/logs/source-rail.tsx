@@ -60,7 +60,6 @@ export function SourceRail({
     }).filter((g) => g.items.length > 0 || (index?.missing[g.kind] && !needle))
   }, [index, filter])
 
-  const total = index?.sources.length ?? 0
 
   return (
     // Below lg the grid stacks, and an uncapped source list would take half the
@@ -69,7 +68,6 @@ export function SourceRail({
       <PanelHeader
         icon={Logs}
         title="Sources"
-        description={total ? `${total} on this host` : "Scanning…"}
       />
       <PanelToolbar>
         <SearchInput
@@ -96,7 +94,7 @@ export function SourceRail({
                 // An absent kind explains itself rather than simply not being
                 // there: "no containers" and "no Docker on this host" call for
                 // completely different next moves.
-                <p className="px-2 pb-1 text-[11px] leading-snug text-muted-foreground">
+                <p className="px-2 pb-1 text-hint leading-snug text-muted-foreground">
                   {index?.missing[group.kind]}
                 </p>
               ) : (
@@ -141,15 +139,15 @@ function SourceRow({
       // one "you are here" language for both.
       className={cn(
         "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
-        selected ? "bg-primary/12 font-medium text-foreground" : "hover:bg-accent",
+        selected ? "bg-plot-primary font-medium text-foreground" : "hover:bg-accent",
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5">
         {source.status && <StatusDot state={source.status} />}
-        <span className="truncate text-[13px]">{source.label}</span>
+        <span className="truncate text-body">{source.label}</span>
         {(source.archives ?? 0) > 0 && (
           <span
-            className="ml-auto flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+            className="ml-auto flex shrink-0 items-center gap-0.5 text-micro text-muted-foreground"
             title={`${source.archives} rotated archives, ${bytes(source.archiveBytes)} — searchable`}
           >
             <Archive className="size-2.5" />
@@ -157,7 +155,7 @@ function SourceRow({
           </span>
         )}
       </span>
-      <span className="truncate text-[11px] text-muted-foreground">
+      <span className="truncate text-hint text-muted-foreground">
         {source.size !== undefined && source.size > 0
           ? `${bytes(source.size)} · ${relativeTime(source.modified)}`
           : (source.detail ?? source.status)}

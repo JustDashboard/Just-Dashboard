@@ -2,11 +2,7 @@
 
 import { useMemo, useSyncExternalStore } from "react"
 import { cn } from "@/lib/utils"
-import {
-  getCrosshair,
-  getServerCrosshair,
-  subscribeCrosshair,
-} from "@/lib/metrics-crosshair"
+import { getCrosshair, getServerCrosshair, subscribeCrosshair } from "@/lib/metrics-crosshair"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
 
 /**
@@ -42,13 +38,16 @@ export function SeriesLegend({
   // The nearest row rather than an exact match: the charts on a page are
   // bucketed independently, so the instant the pointer is over in one of them
   // rarely lands exactly on another's bucket boundary.
-  const cursor = useMemo(() => (hovered === null ? null : nearestRow(rows, hovered)), [rows, hovered])
+  const cursor = useMemo(
+    () => (hovered === null ? null : nearestRow(rows, hovered)),
+    [rows, hovered],
+  )
 
   if (rows.length === 0) return null
 
   return (
     <div className={cn("min-w-0 overflow-x-auto", className)}>
-      <table className="w-full min-w-[22rem] text-[11px]">
+      <table className="w-full min-w-[22rem] text-hint">
         <thead>
           <tr className="text-muted-foreground">
             <th className="pb-1 text-left font-normal">Series</th>
@@ -58,12 +57,7 @@ export function SeriesLegend({
             {/* The header changes with the pointer rather than a column
                 appearing and disappearing, which would shift the other three
                 sideways every time the mouse crossed a chart. */}
-            <th
-              className={cn(
-                "pb-1 pl-3 text-right font-normal",
-                cursor && "text-foreground",
-              )}
-            >
+            <th className={cn("pb-1 pl-3 text-right font-normal", cursor && "text-foreground")}>
               {cursor ? "At cursor" : "Last"}
             </th>
           </tr>
@@ -72,7 +66,8 @@ export function SeriesLegend({
           {series.map((s) => {
             const stat = stats[s.key]
             if (!stat) return null
-            const render = s.format ?? format ?? ((v: number) => (unit === "%" ? `${v}${unit}` : String(v)))
+            const render =
+              s.format ?? format ?? ((v: number) => (unit === "%" ? `${v}${unit}` : String(v)))
             const trailing = cursor ? numberAt(cursor, s.key) : stat.last
             return (
               <tr key={s.key} className="border-t border-hairline/60">

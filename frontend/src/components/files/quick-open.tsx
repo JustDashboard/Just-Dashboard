@@ -6,17 +6,11 @@ import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileFindResult, FileEntry } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/state"
 import { FileIcon } from "@/components/files/file-icon"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { PaletteModal } from "@/components/modal"
+import { PaneFooter } from "@/components/panel"
 
 /**
  * Type three letters, get the file.
@@ -49,29 +43,25 @@ export function QuickOpen({
   onOpenPath: (path: string, isDir: boolean) => void
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="gap-0 overflow-hidden p-0 sm:max-w-2xl"
-        showCloseButton={false}
-      >
-        <DialogHeader className="sr-only">
-          <DialogTitle>Go to a file</DialogTitle>
-          <DialogDescription>Fuzzy search for a file or folder under {root}</DialogDescription>
-        </DialogHeader>
-        {/* Mounted only while open, so every visit starts with an empty box
+    <PaletteModal
+      open={open}
+      onOpenChange={onOpenChange}
+      label="Go to a file"
+      description={`Fuzzy search for a file or folder under ${root}`}
+    >
+      {/* Mounted only while open, so every visit starts with an empty box
             rather than yesterday's query and its stale results. */}
-        {open && (
-          <QuickOpenBody
-            root={root}
-            home={home}
-            onChoose={(path, isDir) => {
-              onOpenChange(false)
-              onOpenPath(path, isDir)
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+      {open && (
+        <QuickOpenBody
+          root={root}
+          home={home}
+          onChoose={(path, isDir) => {
+            onOpenChange(false)
+            onOpenPath(path, isDir)
+          }}
+        />
+      )}
+    </PaletteModal>
   )
 }
 
@@ -153,7 +143,7 @@ function QuickOpenBody({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Part of a name, in order — ngxconf, srcapp, dockcomp"
           spellCheck={false}
-          className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          className="h-12 flex-1 bg-transparent text-sm focus-ring placeholder:text-muted-foreground"
         />
         {busy && <Spinner className="size-4 text-muted-foreground" />}
       </div>
@@ -164,7 +154,7 @@ function QuickOpenBody({
             key={hit.path}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left",
-              i === cursor ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+              i === cursor ? "bg-accent text-accent-foreground" : "hover:bg-menu-hover",
             )}
             onMouseEnter={() => setCursor(i)}
             onClick={() => onChoose(hit.path, hit.isDir)}
@@ -174,40 +164,40 @@ function QuickOpenBody({
               className="size-4"
             />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px]">
+              <span className="block truncate text-body">
                 <Highlighted text={hit.name} matches={hit.matches} />
               </span>
-              <span className="block truncate font-mono text-[11px] text-muted-foreground">
+              <span className="block truncate font-mono text-hint text-muted-foreground">
                 {hit.dir === "." ? "" : `${hit.dir}/`}
               </span>
             </span>
-            <span className="numeric shrink-0 text-[11px] text-muted-foreground">
+            <span className="numeric shrink-0 text-hint text-muted-foreground">
               {hit.isDir ? relativeTime(hit.modified) : bytes(hit.size)}
             </span>
           </button>
         ))}
 
         {!busy && ready && hits.length === 0 && (
-          <p className="py-8 text-center text-[13px] text-muted-foreground">
+          <p className="py-8 text-center text-body text-muted-foreground">
             Nothing under this folder matches those letters, in that order.
           </p>
         )}
         {!ready && (
-          <p className="flex items-center justify-center gap-2 py-8 text-center text-[13px] text-muted-foreground">
+          <p className="flex items-center justify-center gap-2 py-8 text-center text-body text-muted-foreground">
             <TextFormat className="size-4" />
             Type at least two characters. They need only appear in order.
           </p>
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-hairline bg-surface-header px-3 py-2 text-[11px] text-muted-foreground">
+      <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
         <span className="flex min-w-0 items-center gap-1.5">
           <FolderOpen className="size-3 shrink-0" />
           <span className="truncate font-mono">{scope}</span>
           {home && home !== root && (
             <button
               type="button"
-              className="shrink-0 rounded border border-hairline px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
+              className="shrink-0 rounded-sm border border-hairline px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
               onClick={() => setWide((v) => !v)}
             >
               {wide ? "search this folder" : "search from home"}
@@ -220,9 +210,9 @@ function QuickOpenBody({
             Hidden files
           </label>
           {ready && result?.truncated && (
-            <Badge variant="warning" className="font-normal">
+            <span className="numeric text-warning">
               partial — {result.visited.toLocaleString()} looked at
-            </Badge>
+            </span>
           )}
           {ready && result && !result.truncated && <span>{result.elapsedMs} ms</span>}
           <span className="flex items-center gap-1">
@@ -230,7 +220,7 @@ function QuickOpenBody({
             open
           </span>
         </span>
-      </div>
+      </PaneFooter>
     </div>
   )
 }

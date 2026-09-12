@@ -1,0 +1,32 @@
+{
+  "id": "adminer",
+  "version": "1.0.0",
+  "name": "Adminer",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A single-file database client in the browser. It reaches databases over the Docker network, so it needs no database port published to the host.",
+  "iconId": "database",
+  "docsUrl": "https://www.adminer.org/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://hub.docker.com/_/adminer",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "adminer:4.8.1-standalone", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Adminer can reach every database on this host. Put it behind the proxy and restrict it, or leave the domain empty and reach it over the loopback port." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 8080, "protocol": "tcp", "purpose": "The database client interface", "exposure": "proxy", "primary": true }
+  ],
+  "resources": { "memoryMb": 128, "minMemoryMb": 64 },
+  "checks": [
+    { "name": "Login page answers", "kind": "http", "phase": "readiness", "required": true, "path": "/", "timeoutSeconds": 30 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "update": { "detector": "registry", "notes": "Adminer is a single PHP file; upgrades keep no state." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:41c1c71b88988134319a0f3a1270d3accf9541b428cdd67f2578b947ec273695" }]
+}

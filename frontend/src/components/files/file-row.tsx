@@ -5,11 +5,10 @@ import { downloadUrl } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FileIcon } from "@/components/files/file-icon"
@@ -69,7 +68,7 @@ export function FileRow({
       className={cn(
         "group cursor-pointer select-none",
         dimmed && "opacity-50",
-        active && !selected && "bg-primary/[0.06]",
+        active && !selected && "bg-accent",
       )}
       data-state={selected ? "selected" : undefined}
       tabIndex={0}
@@ -87,7 +86,7 @@ export function FileRow({
       <TableCell>
         <div className="max-w-[26rem] min-w-0">
           <button
-            className="flex max-w-full items-center gap-2 text-left text-[13px] hover:underline"
+            className="flex max-w-full items-center gap-2 text-left text-body hover:underline"
             onClick={(e) => {
               e.stopPropagation()
               onOpen()
@@ -98,29 +97,23 @@ export function FileRow({
             <span className="truncate">{entry.name}</span>
           </button>
           {entry.isSymlink && (
-            <p className="ml-6 truncate font-mono text-[11px] text-muted-foreground">
+            <p className="ml-6 truncate font-mono text-hint text-muted-foreground">
               → {entry.linkTarget}
-              {entry.linkBroken && (
-                <Badge variant="destructive" className="ml-1 text-[10px] font-normal">
-                  broken
-                </Badge>
-              )}
+              {entry.linkBroken && <span className="ml-1 text-destructive">broken</span>}
             </p>
           )}
         </div>
       </TableCell>
-      <TableCell className="numeric text-right font-mono text-xs text-muted-foreground">
+      <TableCell className="numeric text-right font-mono text-muted-foreground">
         {entry.isDir ? "—" : bytes(entry.size)}
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {relativeTime(entry.modified)}
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      <TableCell className="text-muted-foreground">{relativeTime(entry.modified)}</TableCell>
+      <TableCell className="text-muted-foreground">
         {entry.owner}:{entry.group}
       </TableCell>
-      <TableCell className="font-mono text-xs text-muted-foreground">{entry.modeOctal}</TableCell>
+      <TableCell className="font-mono text-muted-foreground">{entry.modeOctal}</TableCell>
       <TableCell onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <RowActions className="justify-end">
           {!entry.isDir && (
             <>
               <IconAction label="Edit" onClick={onOpen}>
@@ -150,7 +143,7 @@ export function FileRow({
               <TooltipContent>Rename, move, copy, permissions, delete</TooltipContent>
             </Tooltip>
           </FileActionsMenu>
-        </div>
+        </RowActions>
       </TableCell>
     </TableRow>
   )

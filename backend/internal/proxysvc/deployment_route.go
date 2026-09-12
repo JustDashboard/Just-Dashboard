@@ -209,8 +209,9 @@ func deploymentSiteSpec(route DeploymentRoute) *SiteSpec {
 	return &SiteSpec{
 		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.Upstream,
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
-		HTTP2:      route.TLS,
-		WebSockets: true, Gzip: true, SecurityHeaders: true, AccessLog: true,
+		ManagedACME: true,
+		HTTP2:       route.TLS,
+		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
 		AllowFrom: []string{}, DenyFrom: []string{}, Locations: []SiteLocation{},
 	}
 }

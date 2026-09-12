@@ -4,6 +4,45 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.6.7 — 12 September 2026
+
+**A deployment is a plan, a run, and a release you can go back to**
+
+Deployments were a git pull and a compose up: no record of what was deployed, no way back except another build, and nothing that survived closing the tab. 0.6.7 replaces that with a persistent engine. Every deployment commits its plan before it answers, runs as a queued job with a permanent URL, and produces an immutable release that records its source revision, image digest, configuration and variables — so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. Domains, storage, backups and databases are linked to the pages that own them rather than reimplemented, and a reviewed blueprint catalogue — including Minecraft — deploys through exactly the same machinery as a hand-built container.
+
+### Added
+
+- Deployments are persistent runs that survive closing the tab, restarting the backend, and losing the connection
+  - A run and its full step list commit to the database before the request answers, so a deployment that was accepted is a deployment that exists. Each run has a permanent URL, a sequenced event stream that resumes exactly where a disconnected browser left off, and a bounded transcript that cannot grow without limit. Environments serialise their own work, host capacity is bounded by configurable heavy and light slots, and expiring claim leases mean a worker that dies mid-build cannot leave a run believed to be running. Restart recovery reads the evidence each step recorded plus the owning feature's own state; it never guesses that a non-idempotent side effect is safe to repeat.
+- Every deployment produces an immutable release, and rollback reactivates one rather than rebuilding
+  - A release records the exact source revision, image digest, runtime configuration digest and per-variable value digests it was built from. Rolling back takes ordinary confirmation and runs the retained artifact through the same readiness checks and cutover path as a forward deployment, so the recovery path is the path that is exercised every day. Artifact retention keeps every release you could roll back to and reports why space is being held; a tag that moves under you creates a distinct release rather than silently changing an existing one.
+- Start from a Git repository, a registry image, a Compose file, an existing container or a reviewed blueprint — and see the exact plan before anything runs
+  - Detection is bounded and evidence-based: it says what it found, where it found it, and how confident it is, and re-running it against the same revision gives the same answer. Preflight then reads the host — tools, paths, ports, storage headroom, domains, DNS and certificates — without building, pulling, starting, stopping or writing a single line of proxy configuration. The plan it shows is the plan that runs, with no secret value in it.
+- An HTTP service gets a health-gated cutover; anything holding a volume or a fixed port is told it will stop first
+  - Where a candidate can run beside the live release, it does: the new container starts, its checks run, and the proxy moves only after they pass. Where it cannot — a database, a game server, a Compose stack, a fixed host port — the plan says so before you deploy rather than promising zero downtime it cannot deliver. A failure before cutover leaves the old release and its route untouched. A failure during cutover restores the previous proxy specification and verifies it before reporting recovery.
+- Sixteen reviewed blueprints, including Minecraft Java and Bedrock
+  - Nginx, Caddy, Uptime Kuma, Vaultwarden, PostgreSQL, MariaDB, Redis, MongoDB, Gitea, Adminer, Prometheus, Grafana, MinIO, Dozzle, n8n and Minecraft. A blueprint is data shipped and tested with the release, not a script downloaded when you click: unknown fields are rejected, rendering is a pure function, and the same version and answers always produce the same plan. None of them can ship a default password, publish a database port to the network, declare a stateful workload with nowhere to keep its state, or download anything without https and a checksum — those are refusals in the validator. The Docker page's starting points now come from the same catalogue, so there is one list rather than two that drift apart.
+- Game servers get a console, a player list, safe settings editing and schedules that save before they back up
+  - The console sends one game command at a time through the container's own client and refuses anything carrying a shell character — it is a console, not a shell. Players can be kicked, banned, opped and whitelisted where the server can actually report identities, and where it cannot the controls are hidden rather than shown doing nothing. server.properties is edited through the fields the blueprint declares while every other line keeps its own bytes, comments included. Minecraft versions come from Mojang's own manifest; when it cannot be reached the wizard says so instead of installing an unverified latest. The world lives in a volume named after the deployment rather than the release, so rolling back the server software leaves it untouched.
+- Deploy on push, on a schedule, or for a pull request
+  - GitHub, GitLab, Bitbucket, Gitea and generic webhooks with per-provider raw-body signature verification, repository, branch and event validation. A replayed delivery, a wrong repository, a wrong branch or an oversized payload never enqueues, and a duplicate delivery creates one run rather than two. Watch paths decide whether a change is worth deploying, with a simulator to check a rule before trusting it. Scheduled actions show their next three run times beside the cron expression they mean. Pull request previews open, update and clean themselves up without touching production.
+- The workspace reads the modules that own your domains, storage, backups and databases — and says when it cannot
+  - Domains show which proxy site actually serves them and which certificate actually covers them, not merely what you saved. Storage shows whether the volume the release names is still there. Backups show the last run and whether it is inside its maximum age. Findings state what was measured, what it means, and the action that follows, with a link into the page that owns the remedy. A module that could not be read is recorded as an unanswered question with its reason — never as a healthy result, and never as a problem that may not exist.
+- Release comparison says what changed, without showing a variable value
+  - Source revision, image, command, ports, strategy, storage, dependencies, checks and domains, compared between a release and the one it replaced. Variables are compared by name and value digest only. Beside it, whether the upstream image tag has moved since this release pinned its digest, and which artifacts are still retained so a rollback remains possible.
+
+### Changed
+
+- Existing deployments keep working, and their history, hooks and environment come with them
+  - The schema change is additive and the existing project id remains the deployment identity, so existing URLs, webhook endpoints, encrypted environment values and run history survive the upgrade. Legacy projects continue to deploy through the compatibility path while the new engine runs underneath.
+
+### Fixed
+
+- Opening one deployment no longer loads every deployment on the host
+  - The workspace polls every few seconds and was reading the whole fleet, then filtering it down to one row in Go — with a handful of extra queries per deployment for health and run history. Both reads are now batched into a fixed set of statements whose count does not grow with the number of deployments, and a test fails if a per-deployment query ever returns.
+- A path validator checked a trimmed copy of the string its callers actually used
+  - Found by fuzzing: a relative path with a leading carriage return passed the control-character check, because the check ran against the trimmed string while the caller joined the original onto a root. It now refuses input that is not already trimmed. Three further fuzz findings were fixed alongside it — a typed variable reference accepting a parent segment, the properties editor silently dropping trailing whitespace, and an archive-root helper that was safe only when called through its validator.
+
 ## 0.6.6 — 1 September 2026
 
 **The process table tells you what owns the work**

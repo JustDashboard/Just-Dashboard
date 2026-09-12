@@ -98,6 +98,10 @@ type DraftSourceConfig struct {
 	ResourceID        string            `json:"resourceId,omitempty"`
 	BlueprintID       string            `json:"blueprintId,omitempty"`
 	BlueprintVersion  string            `json:"blueprintVersion,omitempty"`
+	// BlueprintInputs are the operator's answers to the blueprint's declared
+	// fields. They are the only thing that varies between two deployments of
+	// the same reviewed blueprint version.
+	BlueprintInputs map[string]string `json:"blueprintInputs,omitempty"`
 }
 
 type SourceIdentity struct {
@@ -436,10 +440,21 @@ func (c DraftSourceConfig) Validate() error {
 			return fmt.Errorf("%w: import resource id is required", ErrInvalidSource)
 		}
 	case SourceModeBlueprint:
-		allowed = sourceFieldSet("blueprintId", "blueprintVersion")
+		allowed = sourceFieldSet("blueprintId", "blueprintVersion", "blueprintInputs")
 		if c.BlueprintID == "" || c.BlueprintVersion == "" || len(c.BlueprintID) > 128 ||
 			len(c.BlueprintVersion) > 128 || strings.ContainsAny(c.BlueprintID+c.BlueprintVersion, "\x00\r\n") {
 			return fmt.Errorf("%w: blueprint id and version are required", ErrInvalidSource)
+		}
+		if len(c.BlueprintInputs) > 64 {
+			return fmt.Errorf("%w: a blueprint accepts at most 64 inputs", ErrInvalidSource)
+		}
+		// Values are checked against the blueprint's own declarations when it
+		// is rendered. Only the envelope is bounded here.
+		for name, value := range c.BlueprintInputs {
+			if name == "" || len(name) > 64 || len(value) > 4096 ||
+				strings.ContainsAny(name, "\x00\r\n") || strings.ContainsRune(value, '\x00') {
+				return fmt.Errorf("%w: blueprint input %q is invalid", ErrInvalidSource, name)
+			}
 		}
 	}
 	if field := c.firstUnexpectedField(allowed); field != "" {
@@ -467,6 +482,7 @@ func (c DraftSourceConfig) firstUnexpectedField(allowed map[string]bool) string 
 		{"includeSubmodules", c.IncludeSubmodules}, {"includeLfs", c.IncludeLFS}, {"image", c.Image != ""},
 		{"platform", c.Platform != ""}, {"composeFiles", len(c.ComposeFiles) != 0}, {"resourceId", c.ResourceID != ""},
 		{"blueprintId", c.BlueprintID != ""}, {"blueprintVersion", c.BlueprintVersion != ""},
+		{"blueprintInputs", len(c.BlueprintInputs) != 0},
 	}
 	for _, field := range present {
 		if field.set && !allowed[field.name] {
@@ -672,9 +688,16 @@ func validateComposeDocuments(documents []ComposeDocument) error {
 }
 
 func safeRelativePath(path string) bool {
-	clean := filepath.Clean(strings.TrimSpace(path))
+	// The string checked here is the string callers join onto a root. Trimming
+	// first would validate one path and use another: "\r0" trims to "0", passes
+	// the control-character check, and is then written as a file whose name
+	// carries a carriage return.
+	if path == "" || path != strings.TrimSpace(path) || strings.ContainsAny(path, "\x00\r\n") {
+		return false
+	}
+	clean := filepath.Clean(path)
 	return clean != "" && clean != "." && !filepath.IsAbs(clean) && clean != ".." &&
-		!strings.HasPrefix(clean, ".."+string(filepath.Separator)) && !strings.ContainsAny(clean, "\x00\r\n")
+		!strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
 func (c PlanConfiguration) Validate() error {
@@ -944,7 +967,10 @@ func ParseVariableReference(value string) (VariableReference, error) {
 			return VariableReference{}, fmt.Errorf("%w: variable reference target is invalid", ErrInvalidVariable)
 		}
 	case "credential", "domain", "service", "database":
-		if len(target) > 223 || strings.ContainsAny(target, "\x00\r\n") {
+		// A reference target is a name or an id. It is never a path, and a
+		// parent segment in one is only ever an attempt to make it into one.
+		if len(target) > 223 || strings.ContainsAny(target, "\x00\r\n/\\") ||
+			strings.Contains(target, "..") {
 			return VariableReference{}, fmt.Errorf("%w: reference target is invalid", ErrInvalidVariable)
 		}
 	default:

@@ -53,6 +53,17 @@ Redis on pure-Go drivers, so the image still needs no CGO.
 
 ## Proxy
 
+- Public-address discovery excludes CGNAT (`100.64.0.0/10`) as well as private, loopback and link-local
+  addresses, so Tailscale interfaces cannot produce a public deployment hostname or a false public DNS
+  match. Deployment HTTP-01 issuance checks DNS destinations before ordering; existing certificates
+  remain usable for private names. Certbot error summaries prefer ACME validation details and skip the
+  generic community-help footer.
+- Deployment certificate orders use the running nginx listener's webroot instead of trying to bind
+  standalone Certbot over occupied port 80. A temporary, validated challenge-only route and a file probe
+  establish host/container filesystem visibility before ordering, with snapshot restoration on every
+  exit. The fixed `/srv/just-dashboard-acme` root survives deployment route activation and site form
+  round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Non-nginx port
+  owners are reported explicitly. See the deployment implementation reference for the live nginx test.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_apply.go`). `SiteSpec` is our shape, not
   nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the server**
   so a spec has one meaning, and the output is hand-written rather than templated because order carries
@@ -245,8 +256,9 @@ this install" rather than asking Docker the same question twice — `Options.Loc
   a browser, and a setting already present is replaced in place rather than appended. Every write takes a
   backup (`.env.jd-previous`) first — that copy is what the rollback restores.
 - **Validation happens before anything is written**, because the process doing the checking is the process
-  about to be restarted. Ports are range-checked, de-duplicated and probed (only the ones that *move*: the
-  three in use are held by this very stack); durations must parse; the allowlist must still contain
+  about to be restarted. Ports are range-checked and occupied or duplicate preferences are moved to available numbers.
+  The lifecycle runner verifies actual ownership before startup and synchronizes `.env`, Caddy, the
+  health probe and endpoint through `internal/stackports`; durations must parse; the allowlist must still contain
   loopback **and** the caller's own address. That last rule is the most valuable one in the package — the
   allowlist runs before authentication, so an operator who drops their own network out of it does not get
   an error page, they get a dashboard that has silently stopped existing for them.
@@ -254,8 +266,11 @@ this install" rather than asking Docker the same question twice — `Options.Loc
   health probe, the sibling restores the previous `.env`, brings the stack back up on it and records
   `StatusRolledBack` — a failure of the change and a success of the net, which is why it is a fourth
   status rather than "failed".
-- **A change that moves the endpoint takes the typed phrase**, and the phrase is the new `host:port`: what
-  has to be read is *where the dashboard will be*, since the browser that asked cannot follow it there.
+- **No typed phrase on the apply**, deliberately. What has to be read is *where the dashboard will be*,
+  since the browser that asked cannot follow it there — and the dialog says exactly that, listing every
+  before-and-after and stating the URL to open next. Transcribing a forty-character MagicDNS name on top
+  of that tested typing rather than attention, and rollback already covers the change that does not come
+  back.
 - **`Report.Drift`** compares the file with the running process on the fields this backend can observe
   about itself, which is what an operator who edited `.env` over ssh and never restarted is looking at.
 - **`DetectTailscale`** is what stops the settings form rejecting its own suggestion. Choosing a
@@ -264,8 +279,19 @@ this install" rather than asking Docker the same question twice — `Options.Loc
   the tailnet range in the allowlist — and all three are one `tailscale status --json` away. The
   report carries them as `Identity`, cached for 30 s, and the form fills them in when the mode is
   picked. `CertDomains` is Tailscale's own answer to "may this node ask for a certificate", so a
-  tailnet with HTTPS switched off is said *before* an apply fails on it, with the admin-console link
-  and the self-signed fallback at the same address. `parseTailscaleStatus` is split out from the
+  tailnet with HTTPS switched off is said *before* an apply runs into it. It is a caveat and not a
+  refusal, which is the point: **the useful half of the Tailscale mode is the address, not the
+  issuer**. `Apply` tries to issue, and where it cannot it drops any certificate left from the
+  previous address (`DropStaleCertificate` — a stale one would be served under the new name, which
+  browsers reject harder than a self-signed one), records the reason on `Run.Note` and carries on.
+  The proxy entrypoint already falls back to `tls internal` when there is no certificate to serve,
+  so the dashboard answers at the MagicDNS name from every tailnet device with the warning it
+  already had, and `CertKeeper` — retrying every 10 minutes rather than every 12 hours after a
+  failure — swaps the real certificate in and restarts the proxy on its own once HTTPS is turned on.
+  `Report.Certificate` is what is actually on disk for the configured address, so the settings page
+  says "trusted" only when the padlock will agree. `Issue` also rewrites Tailscale's own "your
+  account does not support getting TLS certs" into the admin-console sentence, since the refusal is
+  a switch rather than anything about the account. `parseTailscaleStatus` is split out from the
   subprocess so the part that reads somebody else's JSON is tested against a fixture.
 - **`CertKeeper`** is why a Tailscale install shows an ordinary padlock rather than a warning:
   `tailscale cert` runs on the host through `hostexec` (tailscaled's socket is the host's, and this image
@@ -276,3 +302,6 @@ this install" rather than asking Docker the same question twice — `Options.Loc
   edited a tracked one would make every later `git pull` a merge conflict.
 - Routes: `GET/PUT /api/v1/dashboard/config`, `POST /api/v1/dashboard/restart`,
   `DELETE /api/v1/dashboard/config/run`, all `system.admin`, the two mutations inside `s.destructive`.
+
+Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
+It returns and audits Docker's actual host binding if a competing process claims the initial choice.

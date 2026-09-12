@@ -37,11 +37,22 @@ import type {
   DeploymentSourceMode,
   WorkloadProfile,
 } from "@/lib/types"
-import { Page, PageHeader } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/panel"
-import { ErrorState, LoadingPanel, Notice, Spinner } from "@/components/state"
+import { Detail, DetailList, Page, PageHeader } from "@/components/page"
+import { Group, Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/panel"
+import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { humanize } from "@/components/deploy/deployment-ui"
-import { Badge } from "@/components/ui/badge"
+import { FindingRow, findingVerdict } from "@/components/deploy/deployment-findings"
+import {
+  blueprintAcceptances,
+  defaultConfiguration,
+  sourceForMode,
+  sourceForProfile,
+  sourceModes,
+  validateConfiguration,
+  validateSource,
+  type WizardErrors,
+} from "@/components/deploy/deployment-defaults"
+import { BlueprintPicker } from "@/components/deploy/blueprint-picker"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -53,8 +64,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ExplainIcon } from "@/components/docker/explain"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { choiceCardClasses } from "@/components/choice-card"
 
 const STEPS = [
   ["intent", "What", "Choose the outcome"],
@@ -129,7 +144,6 @@ const OUTCOMES: {
   },
 ]
 
-type WizardErrors = Record<string, string>
 type ImportPreview = {
   name: string
   unsupported: string[]
@@ -411,11 +425,7 @@ export function DeploymentWizard() {
       <Page>
         <PageHeader eyebrow="Deployments" title="Deploy something" />
         <ErrorState error={loadError} />
-        <Button
-          variant="outline"
-          className="h-11 sm:h-9"
-          onClick={() => (draftID ? void load(draftID) : router.refresh())}
-        >
+        <Button variant="outline" onClick={() => (draftID ? void load(draftID) : router.refresh())}>
           Try again
         </Button>
       </Page>
@@ -427,14 +437,8 @@ export function DeploymentWizard() {
       <PageHeader
         eyebrow="Deployments"
         title="Deploy something"
-        description={
-          <>
-            Draft saved for {draft.ownerUsername} · expires{" "}
-            {new Date(draft.expiresAt).toLocaleDateString()}
-          </>
-        }
         actions={
-          <Button variant="outline" size="sm" className="h-11 sm:h-8" asChild>
+          <Button variant="outline" size="sm" asChild>
             <Link href="/deploy">Exit to fleet</Link>
           </Button>
         }
@@ -452,11 +456,10 @@ export function DeploymentWizard() {
           <PanelHeader
             eyebrow={`Step ${step + 1} of ${STEPS.length}`}
             title={
-              <span id="wizard-step-title" tabIndex={-1} className="outline-none">
+              <span id="wizard-step-title" tabIndex={-1} className="focus-ring">
                 {STEPS[step][2]}
               </span>
             }
-            description={stepDescription(step)}
           />
           <PanelBody className="space-y-5">
             <ErrorSummary errors={errors} ref={errorRef} />
@@ -470,6 +473,8 @@ export function DeploymentWizard() {
                 importPreview={importPreview}
                 acknowledged={importAcknowledged}
                 onAcknowledged={setImportAcknowledged}
+                advanced={advanced}
+                onAdvanced={setAdvanced}
               />
             )}
             {step === 2 && (
@@ -484,6 +489,7 @@ export function DeploymentWizard() {
               <ConfigurationStep
                 configuration={configuration}
                 profile={intent.profile}
+                source={source}
                 onChange={setConfiguration}
                 advanced={advanced}
                 onAdvanced={setAdvanced}
@@ -511,7 +517,6 @@ export function DeploymentWizard() {
           <PanelFooter className="justify-between">
             <Button
               variant="outline"
-              className="h-11 sm:h-9"
               onClick={() => navigate(step - 1)}
               disabled={step === 0 || Boolean(busy)}
             >
@@ -550,39 +555,32 @@ export function DeploymentWizard() {
             <PanelHeader
               icon={CloudUpload}
               title={intent.name || "New deployment"}
-              description={humanize(intent.profile)}
             />
             <PanelBody>
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-                <dt className="text-muted-foreground">Source</dt>
-                <dd className="truncate text-right">{humanize(source.mode)}</dd>
-                <dt className="text-muted-foreground">Build</dt>
-                <dd className="text-right">{humanize(configuration.build.method)}</dd>
-                <dt className="text-muted-foreground">Release</dt>
-                <dd className="text-right">
+              <DetailList>
+                <Detail label="Source">{humanize(source.mode)}</Detail>
+                <Detail label="Build">{humanize(configuration.build.method)}</Detail>
+                <Detail label="Release">
                   {configuration.runtime.strategy === "blue_green"
                     ? "Candidate first"
                     : "Stop first"}
-                </dd>
-                <dt className="text-muted-foreground">Downtime</dt>
-                <dd className="text-right">
+                </Detail>
+                <Detail label="Downtime">
                   {(preflight?.expectedDowntime ?? configuration.runtime.strategy === "stop_first")
                     ? "Expected during cutover"
                     : "No planned interruption"}
-                </dd>
-                <dt className="text-muted-foreground">Exposure</dt>
-                <dd className="truncate text-right">
+                </Detail>
+                <Detail label="Exposure" className="truncate">
                   {configuration.domains[0]?.hostname ||
                     (configuration.runtime.hostPort
                       ? `Port ${configuration.runtime.hostPort}`
                       : "Private")}
-                </dd>
-                <dt className="text-muted-foreground">Storage</dt>
-                <dd className="text-right">
+                </Detail>
+                <Detail label="Storage">
                   {configuration.runtime.mounts?.length ?? 0}{" "}
                   {(configuration.runtime.mounts?.length ?? 0) === 1 ? "mount" : "mounts"}
-                </dd>
-              </dl>
+                </Detail>
+              </DetailList>
             </PanelBody>
           </Panel>
           <Notice title="Saving is not deploying" icon={CheckCircle}>
@@ -621,15 +619,15 @@ function WizardProgress({
                 aria-label={`Step ${index + 1} of ${STEPS.length}: ${label}${index < maxStep ? ", completed" : ""}`}
                 onClick={() => onNavigate(index)}
                 className={cn(
-                  "flex min-h-11 w-full min-w-0 items-center justify-center gap-2 rounded-md px-1.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:justify-start sm:px-2.5",
+                  "flex min-h-11 w-full min-w-0 items-center justify-center gap-2 rounded-md px-1.5 text-xs font-medium focus-ring transition-colors sm:justify-start sm:px-2.5",
                   step === index
                     ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-[var(--row-hover)] hover:text-foreground",
+                    : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
                 )}
               >
                 <span
                   className={cn(
-                    "numeric flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]",
+                    "numeric flex size-5 shrink-0 items-center justify-center rounded-full border text-micro",
                     step === index ? "border-primary-foreground/35" : "border-hairline",
                   )}
                 >
@@ -652,14 +650,15 @@ const ErrorSummary = forwardRef<HTMLDivElement, { errors: WizardErrors }>(functi
   const entries = Object.entries(errors)
   if (!entries.length) return null
   return (
-    <div
+    <Group
       ref={ref}
       role="alert"
       tabIndex={-1}
       aria-labelledby="wizard-errors-title"
-      className="rounded-xl border border-destructive/30 bg-destructive/[0.06] p-4 outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+      className="focus-ring"
+      tone="danger"
     >
-      <h2 id="wizard-errors-title" className="text-[13px] font-medium text-destructive">
+      <h2 id="wizard-errors-title" className="text-body font-medium text-destructive">
         There is a problem
       </h2>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
@@ -674,7 +673,7 @@ const ErrorSummary = forwardRef<HTMLDivElement, { errors: WizardErrors }>(functi
           </li>
         ))}
       </ul>
-    </div>
+    </Group>
   )
 })
 
@@ -703,11 +702,10 @@ function IntentStep({
           autoComplete="off"
           aria-invalid={Boolean(errors.name)}
           aria-describedby={errors.name ? "name-error" : "name-hint"}
-          className="h-11 sm:h-9"
         />
       </Field>
       <fieldset>
-        <legend className="text-[13px] font-medium">What are you deploying?</legend>
+        <legend className="text-body font-medium">What are you deploying?</legend>
         <p className="mt-1 text-xs text-muted-foreground">
           This chooses useful defaults. Advanced settings remain available later.
         </p>
@@ -719,8 +717,8 @@ function IntentStep({
               <label
                 key={outcome.profile}
                 className={cn(
-                  "raised flex min-h-24 cursor-pointer items-start gap-3 rounded-xl border bg-control p-3.5 transition-colors hover:bg-control-hover",
-                  checked && "border-ring ring-2 ring-ring/25",
+                  choiceCardClasses(checked),
+                  "min-h-24 cursor-pointer flex-row items-start gap-3 p-3.5",
                 )}
               >
                 <input
@@ -742,11 +740,11 @@ function IntentStep({
                   <Icon className="size-4" />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-[13px] font-medium">{outcome.title}</span>
+                  <span className="block text-body font-medium">{outcome.title}</span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                     {outcome.description}
                   </span>
-                  <span className="mt-1 block text-[10px] text-muted-foreground">
+                  <span className="mt-1 block text-micro text-muted-foreground">
                     {outcome.example}
                   </span>
                 </span>
@@ -767,6 +765,8 @@ function SourceStep({
   importPreview,
   acknowledged,
   onAcknowledged,
+  advanced,
+  onAdvanced,
 }: {
   source: DeploymentDraftSource
   profile: WorkloadProfile
@@ -775,6 +775,8 @@ function SourceStep({
   importPreview?: ImportPreview
   acknowledged: boolean
   onAcknowledged: (value: boolean) => void
+  advanced: boolean
+  onAdvanced: (value: boolean) => void
 }) {
   const modes = sourceModes(profile)
   const setMode = (mode: string) => onChange(sourceForMode(mode as DeploymentSourceMode, profile))
@@ -787,7 +789,7 @@ function SourceStep({
         error={errors.source}
       >
         <Select value={source.mode} onValueChange={setMode}>
-          <SelectTrigger id="source-mode" className="h-11 w-full sm:h-9">
+          <SelectTrigger id="source-mode" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -825,10 +827,45 @@ function SourceStep({
         />
       )}
       {source.mode === "blueprint" && (
-        <Notice tone="warning" icon={Warning} title="Blueprint catalog is not available yet">
-          The source is saved honestly as unavailable until the reviewed catalog ships. Use a Git,
-          image, or Compose source now.
-        </Notice>
+        <BlueprintPicker
+          profile={profile}
+          blueprintId={source.blueprintId ?? ""}
+          inputs={source.blueprintInputs ?? {}}
+          showAdvanced={advanced}
+          errors={errors}
+          onSelect={(id, version) =>
+            onChange({
+              ...source,
+              blueprintId: id,
+              blueprintVersion: version,
+              // Inputs belong to the blueprint that declared them; keeping them
+              // across a change would send one blueprint's answers to another.
+              blueprintInputs: {},
+            })
+          }
+          onInput={(name, value) =>
+            onChange({
+              ...source,
+              blueprintInputs: { ...(source.blueprintInputs ?? {}), [name]: value },
+            })
+          }
+          onInputs={(values) =>
+            onChange({
+              ...source,
+              blueprintInputs: { ...(source.blueprintInputs ?? {}), ...values },
+            })
+          }
+        />
+      )}
+      {source.mode === "blueprint" && (
+        <button
+          type="button"
+          aria-expanded={advanced}
+          onClick={() => onAdvanced(!advanced)}
+          className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
+        >
+          {advanced ? "Hide" : "Show"} advanced blueprint settings
+        </button>
       )}
       {(source.mode === "existing_container" || source.mode === "existing_stack") && (
         <Field
@@ -843,7 +880,7 @@ function SourceStep({
             id="resource-id"
             value={source.resourceId ?? ""}
             onChange={(event) => onChange({ ...source, resourceId: event.target.value })}
-            className="h-11 font-mono sm:h-9"
+            className="font-mono"
             aria-invalid={Boolean(errors.resource)}
           />
         </Field>
@@ -887,7 +924,7 @@ function GitURLFields({ source, onChange, errors }: SourceFieldsProps) {
           value={source.url ?? ""}
           onChange={(event) => onChange({ ...source, url: event.target.value })}
           placeholder="https://github.com/owner/repository.git"
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
           aria-invalid={Boolean(errors.url)}
         />
       </Field>
@@ -896,7 +933,7 @@ function GitURLFields({ source, onChange, errors }: SourceFieldsProps) {
           id="source-ref"
           value={source.ref ?? "main"}
           onChange={(event) => onChange({ ...source, ref: event.target.value })}
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       <CredentialField source={source} onChange={onChange} />
@@ -919,7 +956,7 @@ function ConnectedRepositoryFields({ source, onChange, errors }: SourceFieldsPro
           value={source.provider ?? "github"}
           onValueChange={(provider) => onChange({ ...source, provider })}
         >
-          <SelectTrigger id="provider" className="h-11 w-full sm:h-9">
+          <SelectTrigger id="provider" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -943,7 +980,7 @@ function ConnectedRepositoryFields({ source, onChange, errors }: SourceFieldsPro
           value={source.repository ?? ""}
           onChange={(event) => onChange({ ...source, repository: event.target.value })}
           placeholder="owner/repository"
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       <Field id="source-ref" label="Branch or tag">
@@ -951,7 +988,7 @@ function ConnectedRepositoryFields({ source, onChange, errors }: SourceFieldsPro
           id="source-ref"
           value={source.ref ?? "main"}
           onChange={(event) => onChange({ ...source, ref: event.target.value })}
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       {source.provider === "gitea" && (
@@ -960,7 +997,7 @@ function ConnectedRepositoryFields({ source, onChange, errors }: SourceFieldsPro
             id="provider-base"
             value={source.providerBaseUrl ?? ""}
             onChange={(event) => onChange({ ...source, providerBaseUrl: event.target.value })}
-            className="h-11 font-mono sm:h-9"
+            className="font-mono"
           />
         </Field>
       )}
@@ -981,7 +1018,7 @@ function GitOptions({ source, onChange }: Omit<SourceFieldsProps, "errors">) {
           id="source-subdirectory"
           value={source.subdirectory ?? ""}
           onChange={(event) => onChange({ ...source, subdirectory: event.target.value })}
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       <div className="flex flex-wrap items-end gap-x-4">
@@ -1021,7 +1058,7 @@ function LocalFields({ source, onChange, errors }: SourceFieldsProps) {
           value={source.localPath ?? ""}
           onChange={(event) => onChange({ ...source, localPath: event.target.value })}
           placeholder="/srv/app"
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       <Field id="subdirectory" label="Subdirectory" hint="Optional relative application root.">
@@ -1029,7 +1066,7 @@ function LocalFields({ source, onChange, errors }: SourceFieldsProps) {
           id="subdirectory"
           value={source.subdirectory ?? ""}
           onChange={(event) => onChange({ ...source, subdirectory: event.target.value })}
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       {source.mode === "existing_checkout" && (
@@ -1088,7 +1125,7 @@ function ImageFields({
           id="image-reference"
           value={source.image ?? ""}
           onChange={(event) => onChange({ ...source, image: event.target.value })}
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
           aria-invalid={Boolean(errors.image)}
         />
       </Field>
@@ -1098,7 +1135,7 @@ function ImageFields({
           value={source.platform ?? ""}
           onChange={(event) => onChange({ ...source, platform: event.target.value })}
           placeholder="linux/amd64"
-          className="h-11 font-mono sm:h-9"
+          className="font-mono"
         />
       </Field>
       <CredentialField source={source} onChange={onChange} />
@@ -1117,7 +1154,7 @@ function CredentialField({ source, onChange }: Omit<SourceFieldsProps, "errors">
         onChange={(event) =>
           onChange({ ...source, credentialId: Number(event.target.value) || undefined })
         }
-        className="h-11 font-mono sm:h-9"
+        className="font-mono"
       />
     </Field>
   )
@@ -1143,7 +1180,7 @@ function ComposeSelectorFields({ source, onChange, errors }: SourceFieldsProps) 
     <fieldset className="space-y-3 rounded-xl border border-hairline p-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <legend className="text-[13px] font-medium">Compose file order</legend>
+          <legend className="text-body font-medium">Compose file order</legend>
           <p className="text-xs text-muted-foreground">
             Paths are relative to the selected source. Later files override earlier ones.
           </p>
@@ -1152,7 +1189,6 @@ function ComposeSelectorFields({ source, onChange, errors }: SourceFieldsProps) 
           type="button"
           variant="outline"
           size="sm"
-          className="h-11 sm:h-8"
           onClick={() =>
             setDocuments([
               ...documents,
@@ -1170,7 +1206,7 @@ function ComposeSelectorFields({ source, onChange, errors }: SourceFieldsProps) 
       )}
       {documents.map((document, index) => (
         <div key={`${document.order}-${index}`} className="flex min-w-0 items-center gap-1.5">
-          <span className="numeric w-5 shrink-0 text-center text-[11px] text-muted-foreground">
+          <span className="numeric w-5 shrink-0 text-center text-hint text-muted-foreground">
             {index + 1}
           </span>
           <Input
@@ -1184,7 +1220,7 @@ function ComposeSelectorFields({ source, onChange, errors }: SourceFieldsProps) 
             }
             aria-label={`Compose file ${index + 1} path`}
             aria-invalid={Boolean(errors.compose)}
-            className="h-11 min-w-0 font-mono text-xs sm:h-9"
+            className="min-w-0 font-mono text-xs"
           />
           <Button
             type="button"
@@ -1252,7 +1288,7 @@ function ComposeFields({
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <p className="text-[13px] font-medium">Compose files</p>
+          <p className="text-body font-medium">Compose files</p>
           <p className="text-xs text-muted-foreground">
             Order is preserved when Compose merges the files.
           </p>
@@ -1260,7 +1296,6 @@ function ComposeFields({
         <Button
           size="sm"
           variant="outline"
-          className="h-11 sm:h-8"
           onClick={() =>
             onChange({
               ...source,
@@ -1284,7 +1319,7 @@ function ComposeFields({
           type="file"
           accept=".yml,.yaml,text/yaml"
           multiple
-          className="h-11 pt-2 sm:h-9 sm:pt-1.5"
+          className="pt-2 sm:pt-1.5"
           aria-label="Upload Compose files"
           onChange={async (event) => {
             const files = Array.from(event.target.files ?? [])
@@ -1307,7 +1342,7 @@ function ComposeFields({
         </p>
       )}
       {documents.map((document, index) => (
-        <div key={`${document.order}-${index}`} className="rounded-xl border border-hairline p-3">
+        <Group key={`${document.order}-${index}`}>
           <div className="mb-2 flex gap-2">
             <Input
               value={document.path}
@@ -1334,7 +1369,7 @@ function ComposeFields({
             className="min-h-48 resize-y font-mono text-xs"
             placeholder={"services:\n  web:\n    image: nginx:alpine"}
           />
-        </div>
+        </Group>
       ))}
     </div>
   )
@@ -1364,7 +1399,7 @@ function DetectionStep({
           {detection.unavailable}
         </Notice>
       )}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-hint text-muted-foreground">
         <span>{detection.scannedFiles.toLocaleString()} files scanned</span>
         <span>{formatBytes(detection.scannedBytes)}</span>
         {detection.source.revision && (
@@ -1401,14 +1436,13 @@ function DetectionStep({
           <PanelHeader
             icon={Layers}
             title={`${detection.compose.services.length} Compose services`}
-            description={detection.compose.files.join(" + ")}
           />
           <PanelBody className="space-y-3">
             <div className="flex flex-wrap gap-1.5">
               {detection.compose.services.map((service) => (
-                <Badge key={service.name} variant="outline">
+                <Tag key={service.name} mono>
                   {service.name}
-                </Badge>
+                </Tag>
               ))}
             </div>
             {detection.compose.unsupported.map((item) => (
@@ -1441,8 +1475,8 @@ function CandidateChoice({
   return (
     <label
       className={cn(
-        "raised flex min-h-24 cursor-pointer items-start gap-3 rounded-xl border bg-control p-3.5 hover:bg-control-hover",
-        checked && "border-ring ring-2 ring-ring/25",
+        choiceCardClasses(checked),
+        "min-h-24 cursor-pointer flex-row items-start gap-3 p-3.5",
       )}
     >
       <input
@@ -1463,25 +1497,24 @@ function CandidateChoice({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-medium">{candidate.name}</span>
-          <Badge
-            variant={
+          <span className="text-body font-medium">{candidate.name}</span>
+          <Status
+            verdict={
               candidate.confidence === "high"
-                ? "success"
+                ? "ok"
                 : candidate.confidence === "medium"
                   ? "warning"
                   : "notice"
             }
-          >
-            {candidate.confidence} confidence
-          </Badge>
+            label={`${candidate.confidence} confidence`}
+          />
         </span>
         <span className="mt-1 block text-xs text-muted-foreground">
           {candidate.framework ? `${candidate.framework} · ` : ""}
           {humanize(candidate.buildMethod)}
           {candidate.root ? ` · ${candidate.root}` : ""}
         </span>
-        <span className="mt-2 grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2">
+        <span className="mt-2 grid gap-1 text-hint text-muted-foreground sm:grid-cols-2">
           {candidate.buildCommand && (
             <span>
               <b className="font-medium text-foreground">Build:</b>{" "}
@@ -1507,7 +1540,7 @@ function CandidateChoice({
           ))}
         </span>
         {candidate.needsDecision.length > 0 && (
-          <span className="mt-2 block text-[11px] text-warning">
+          <span className="mt-2 block text-hint text-warning">
             Confirm: {candidate.needsDecision.join(" · ")}
           </span>
         )}
@@ -1524,6 +1557,7 @@ function ConfigurationStep({
   onAdvanced,
   errors,
   onJSONError,
+  source,
 }: {
   configuration: DeploymentConfiguration
   profile: WorkloadProfile
@@ -1532,6 +1566,7 @@ function ConfigurationStep({
   onAdvanced: (value: boolean) => void
   errors: WizardErrors
   onJSONError: (field: string, error?: string) => void
+  source?: DeploymentDraftSource
 }) {
   const updateBuild = (value: Partial<DeploymentConfiguration["build"]>) =>
     onChange({ ...configuration, build: { ...configuration.build, ...value } })
@@ -1542,7 +1577,7 @@ function ConfigurationStep({
     <div className="space-y-6">
       <section className="space-y-4" aria-labelledby="build-title">
         <div>
-          <h3 id="build-title" className="text-[13px] font-medium">
+          <h3 id="build-title" className="text-body font-medium">
             Build and start
           </h3>
           <p className="text-xs text-muted-foreground">
@@ -1555,7 +1590,7 @@ function ConfigurationStep({
               value={configuration.build.method}
               onValueChange={(method) => updateBuild({ method: method as DeploymentBuildMethod })}
             >
-              <SelectTrigger id="build-method" className="h-11 w-full sm:h-9">
+              <SelectTrigger id="build-method" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1578,7 +1613,7 @@ function ConfigurationStep({
               id="root-directory"
               value={configuration.build.rootDirectory ?? ""}
               onChange={(event) => updateBuild({ rootDirectory: event.target.value })}
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           {["recipe", "static", "none"].includes(configuration.build.method) && (
@@ -1588,7 +1623,7 @@ function ConfigurationStep({
                   id="build-command"
                   value={configuration.build.buildCommand ?? ""}
                   onChange={(event) => updateBuild({ buildCommand: event.target.value })}
-                  className="h-11 font-mono sm:h-9"
+                  className="font-mono"
                 />
               </Field>
               <Field id="start-command" label="Start command">
@@ -1596,7 +1631,7 @@ function ConfigurationStep({
                   id="start-command"
                   value={configuration.build.startCommand ?? ""}
                   onChange={(event) => updateBuild({ startCommand: event.target.value })}
-                  className="h-11 font-mono sm:h-9"
+                  className="font-mono"
                 />
               </Field>
             </>
@@ -1607,7 +1642,7 @@ function ConfigurationStep({
                 id="dockerfile"
                 value={configuration.build.dockerfile ?? "Dockerfile"}
                 onChange={(event) => updateBuild({ dockerfile: event.target.value })}
-                className="h-11 font-mono sm:h-9"
+                className="font-mono"
               />
             </Field>
           )}
@@ -1623,7 +1658,7 @@ function ConfigurationStep({
                   updateBuild({ recipe: recipe as "node" | "go" | "python" })
                 }
               >
-                <SelectTrigger id="automatic-recipe" className="h-11 w-full sm:h-9">
+                <SelectTrigger id="automatic-recipe" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1640,7 +1675,7 @@ function ConfigurationStep({
                 id="output-directory"
                 value={configuration.build.outputDirectory ?? "dist"}
                 onChange={(event) => updateBuild({ outputDirectory: event.target.value })}
-                className="h-11 font-mono sm:h-9"
+                className="font-mono"
               />
             </Field>
           )}
@@ -1648,19 +1683,26 @@ function ConfigurationStep({
       </section>
       <section className="space-y-4 border-t border-hairline pt-5" aria-labelledby="runtime-title">
         <div>
-          <h3 id="runtime-title" className="text-[13px] font-medium">
+          <h3 id="runtime-title" className="text-body font-medium">
             Runtime and route
           </h3>
           <p className="text-xs text-muted-foreground">
             Loopback exposure is the default; a public domain is owned by the proxy.
           </p>
         </div>
-        {profile === "game" && (
+        {profile === "game" && source?.mode === "blueprint" && (
+          <Notice title="The licence you accepted is part of this plan" icon={Warning}>
+            {blueprintAcceptances(source).length > 0
+              ? "Your acceptance was recorded with the blueprint in the previous step, and is saved with the plan under your name."
+              : "Go back to the source step and accept the licence this blueprint requires."}
+          </Notice>
+        )}
+        {profile === "game" && source?.mode !== "blueprint" && (
           <Label
             id="minecraft-eula"
             className={cn(
               "flex min-h-11 items-start gap-3 rounded-xl border p-3 text-xs",
-              errors.eula && "border-destructive/50",
+              errors.eula && "border-rule-danger",
             )}
           >
             <Checkbox
@@ -1699,7 +1741,7 @@ function ConfigurationStep({
               id="runtime-image"
               value={configuration.runtime.image ?? ""}
               onChange={(event) => updateRuntime({ image: event.target.value })}
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           <Field id="release-strategy" label="Release strategy">
@@ -1709,7 +1751,7 @@ function ConfigurationStep({
                 updateRuntime({ strategy: strategy as "blue_green" | "stop_first" })
               }
             >
-              <SelectTrigger id="release-strategy" className="h-11 w-full sm:h-9">
+              <SelectTrigger id="release-strategy" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1726,7 +1768,7 @@ function ConfigurationStep({
               max={65535}
               value={configuration.runtime.internalPort ?? 0}
               onChange={(event) => updateRuntime({ internalPort: Number(event.target.value) })}
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           <Field
@@ -1742,7 +1784,7 @@ function ConfigurationStep({
               max={65535}
               value={configuration.runtime.hostPort ?? 0}
               onChange={(event) => updateRuntime({ hostPort: Number(event.target.value) })}
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           <Field id="bind-address" label="Bind address">
@@ -1750,7 +1792,7 @@ function ConfigurationStep({
               value={configuration.runtime.bindAddress || "127.0.0.1"}
               onValueChange={(bindAddress) => updateRuntime({ bindAddress })}
             >
-              <SelectTrigger id="bind-address" className="h-11 w-full font-mono sm:h-9">
+              <SelectTrigger id="bind-address" className="w-full font-mono">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1784,7 +1826,7 @@ function ConfigurationStep({
                 })
               }
               placeholder="app.example.com"
-              className="h-11 font-mono sm:h-9"
+              className="font-mono"
             />
           </Field>
           {domain && (
@@ -1815,7 +1857,7 @@ function ConfigurationStep({
         type="button"
         aria-expanded={advanced}
         onClick={() => onAdvanced(!advanced)}
-        className="flex min-h-11 w-full items-center justify-between rounded-xl border border-hairline bg-surface-header px-3.5 text-[13px] font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="flex min-h-11 w-full items-center justify-between rounded-xl border border-hairline bg-surface-header px-3.5 text-body font-medium focus-ring"
       >
         <span className="flex items-center gap-2">
           <SettingsSliders className="size-4" />
@@ -1848,7 +1890,7 @@ function VariableEditor({
     <section className="space-y-3 border-t border-hairline pt-5" aria-labelledby="variables-title">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h3 id="variables-title" className="text-[13px] font-medium">
+          <h3 id="variables-title" className="text-body font-medium">
             Variables
           </h3>
           <p className="text-xs text-muted-foreground">
@@ -1858,7 +1900,6 @@ function VariableEditor({
         <Button
           size="sm"
           variant="outline"
-          className="h-11 sm:h-8"
           onClick={() =>
             onChange([
               ...variables,
@@ -1877,13 +1918,13 @@ function VariableEditor({
         </Button>
       </div>
       {variables.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No variables configured.</p>
+        <EmptyNote>No variables configured.</EmptyNote>
       ) : (
         <div className="space-y-2">
           {variables.map((variable, index) => (
-            <div
+            <Group
               key={index}
-              className="grid gap-2 rounded-xl border border-hairline p-3 sm:grid-cols-[minmax(0,1fr)_8rem_minmax(0,1.4fr)_auto]"
+              className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem_minmax(0,1.4fr)_auto]"
             >
               <Input
                 aria-label={`Variable ${index + 1} name`}
@@ -1896,7 +1937,7 @@ function VariableEditor({
                   )
                 }
                 placeholder="DATABASE_URL"
-                className="h-11 font-mono sm:h-9"
+                className="font-mono"
               />
               <Select
                 value={variable.sensitivity}
@@ -1912,7 +1953,7 @@ function VariableEditor({
               >
                 <SelectTrigger
                   aria-label={`Variable ${variable.name || index + 1} sensitivity`}
-                  className="h-11 w-full sm:h-9"
+                  className="w-full"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -1932,7 +1973,7 @@ function VariableEditor({
                   )
                 }
                 placeholder="${{credential.name}}"
-                className="h-11 font-mono sm:h-9"
+                className="font-mono"
               />
               <Button
                 size="icon"
@@ -1943,7 +1984,7 @@ function VariableEditor({
               >
                 <Trash className="size-4" />
               </Button>
-              <div className="flex flex-wrap gap-x-4 gap-y-2 sm:col-span-4">
+              <Well plain className="flex flex-wrap gap-x-4 gap-y-2 sm:col-span-4">
                 {["build", "runtime", "release_task"].map((scope) => (
                   <Label
                     key={scope}
@@ -1982,8 +2023,8 @@ function VariableEditor({
                   />
                   Required
                 </Label>
-              </div>
-            </div>
+              </Well>
+            </Group>
           ))}
         </div>
       )}
@@ -2029,13 +2070,9 @@ function AdvancedConfiguration({
     }
   }
   return (
-    <section
-      id="advanced"
-      className="space-y-5 rounded-xl border border-hairline bg-surface-sunken p-4"
-      aria-labelledby="advanced-title"
-    >
+    <section id="advanced" className="space-y-5 p-4" aria-labelledby="advanced-title">
       <div>
-        <h3 id="advanced-title" className="text-[13px] font-medium">
+        <h3 id="advanced-title" className="text-body font-medium">
           Advanced build and runtime plan
         </h3>
         <p className="text-xs text-muted-foreground">
@@ -2059,7 +2096,7 @@ function AdvancedConfiguration({
               })
             }
             placeholder="linux/amd64"
-            className="h-11 font-mono sm:h-9"
+            className="font-mono"
           />
         </Field>
         <Label className="flex min-h-11 items-center gap-2 text-xs">
@@ -2071,24 +2108,33 @@ function AdvancedConfiguration({
           />
           Force a clean build
         </Label>
-        <Label className="flex min-h-11 items-center gap-2 text-xs">
-          <Switch
-            checked={configuration.runtime.privileged ?? false}
-            onCheckedChange={(privileged) =>
-              onChange({ ...configuration, runtime: { ...configuration.runtime, privileged } })
-            }
-          />
-          Privileged container
-        </Label>
-        <Label className="flex min-h-11 items-center gap-2 text-xs">
-          <Switch
-            checked={configuration.runtime.hostNetwork ?? false}
-            onCheckedChange={(hostNetwork) =>
-              onChange({ ...configuration, runtime: { ...configuration.runtime, hostNetwork } })
-            }
-          />
-          Use the host network
-        </Label>
+        {/* The definition sits outside the Label on purpose: a button inside
+            one activates the control it labels, so a hover card asking "what
+            is privileged?" would have turned it on. */}
+        <div className="flex min-h-11 items-center gap-1.5 text-xs">
+          <Label className="flex items-center gap-2 text-xs">
+            <Switch
+              checked={configuration.runtime.privileged ?? false}
+              onCheckedChange={(privileged) =>
+                onChange({ ...configuration, runtime: { ...configuration.runtime, privileged } })
+              }
+            />
+            Privileged container
+          </Label>
+          <ExplainIcon name="privileged" />
+        </div>
+        <div className="flex min-h-11 items-center gap-1.5 text-xs">
+          <Label className="flex items-center gap-2 text-xs">
+            <Switch
+              checked={configuration.runtime.hostNetwork ?? false}
+              onCheckedChange={(hostNetwork) =>
+                onChange({ ...configuration, runtime: { ...configuration.runtime, hostNetwork } })
+              }
+            />
+            Use the host network
+          </Label>
+          <ExplainIcon name="hostNetwork" />
+        </div>
       </div>
       {configuration.build.method === "recipe" && (
         <BuildSecretEditor
@@ -2249,7 +2295,7 @@ function BuildSecretEditor({
           <h4 id="build-secrets-title" className="text-xs font-medium">
             Build secrets
           </h4>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             Reviewed recipes mount these only for the named BuildKit step; values never enter argv.
           </p>
         </div>
@@ -2257,7 +2303,6 @@ function BuildSecretEditor({
           type="button"
           size="sm"
           variant="outline"
-          className="h-11 sm:h-8"
           onClick={() => onChange([...secrets, { variable: "", step: "install" }])}
         >
           <Plus className="size-3.5" />
@@ -2274,10 +2319,7 @@ function BuildSecretEditor({
       ) : (
         <div className="space-y-2">
           {secrets.map((secret, index) => (
-            <div
-              key={index}
-              className="grid gap-2 rounded-xl border border-hairline p-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]"
-            >
+            <Group key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
               <Input
                 aria-label={`Build secret ${index + 1} variable`}
                 value={secret.variable}
@@ -2292,7 +2334,7 @@ function BuildSecretEditor({
                 }
                 list="build-variable-names"
                 placeholder="NPM_TOKEN"
-                className="h-11 font-mono sm:h-9"
+                className="font-mono"
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? "build-secrets-error" : undefined}
               />
@@ -2308,7 +2350,7 @@ function BuildSecretEditor({
               >
                 <SelectTrigger
                   aria-label={`Build secret ${secret.variable || index + 1} step`}
-                  className="h-11 w-full sm:h-9"
+                  className="w-full"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -2327,7 +2369,7 @@ function BuildSecretEditor({
               >
                 <Trash className="size-4" />
               </Button>
-            </div>
+            </Group>
           ))}
         </div>
       )}
@@ -2367,7 +2409,7 @@ function ReleaseTaskEditor({
           <h4 id="release-tasks-title" className="text-xs font-medium">
             Release tasks
           </h4>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             Named, timed gates run after the artifact is recorded and before activation.
           </p>
         </div>
@@ -2375,7 +2417,6 @@ function ReleaseTaskEditor({
           type="button"
           size="sm"
           variant="outline"
-          className="h-11 sm:h-8"
           onClick={() =>
             onChange([
               ...tasks,
@@ -2402,7 +2443,7 @@ function ReleaseTaskEditor({
               className="space-y-3 rounded-xl border border-hairline p-3"
               aria-describedby={error ? "release-tasks-error" : undefined}
             >
-              <legend className="px-1 text-[11px] font-medium text-muted-foreground">
+              <legend className="px-1 text-hint font-medium text-muted-foreground">
                 Task {index + 1}
               </legend>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]">
@@ -2411,7 +2452,6 @@ function ReleaseTaskEditor({
                   value={task.name}
                   onChange={(event) => update(index, { name: event.target.value })}
                   placeholder="Database migration"
-                  className="h-11 sm:h-9"
                 />
                 <Input
                   aria-label={`Release task ${index + 1} timeout seconds`}
@@ -2422,7 +2462,7 @@ function ReleaseTaskEditor({
                   onChange={(event) =>
                     update(index, { timeoutSeconds: Number(event.target.value) })
                   }
-                  className="h-11 font-mono sm:h-9"
+                  className="font-mono"
                 />
                 <Button
                   type="button"
@@ -2440,7 +2480,7 @@ function ReleaseTaskEditor({
                 value={task.workingDirectory ?? ""}
                 onChange={(event) => update(index, { workingDirectory: event.target.value })}
                 placeholder="Working directory (source root by default)"
-                className="h-11 font-mono sm:h-9"
+                className="font-mono"
               />
               <Textarea
                 aria-label={`Release task ${index + 1} command`}
@@ -2451,11 +2491,9 @@ function ReleaseTaskEditor({
                 className="font-mono text-xs"
               />
               <div>
-                <p className="text-[11px] text-muted-foreground">
-                  Explicit Release task environment
-                </p>
+                <p className="text-hint text-muted-foreground">Explicit Release task environment</p>
                 {releaseVariables.length === 0 ? (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-hint text-muted-foreground">
                     Add Release task scope to a variable to make it selectable here.
                   </p>
                 ) : (
@@ -2518,7 +2556,7 @@ function PreflightStep({
       <section aria-labelledby="release-path-title">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <div>
-            <h3 id="release-path-title" className="text-[13px] font-medium">
+            <h3 id="release-path-title" className="text-body font-medium">
               Release path
             </h3>
             <p className="text-xs text-muted-foreground">
@@ -2526,7 +2564,7 @@ function PreflightStep({
             </p>
           </div>
           {preflight && (
-            <code className="text-[10px] text-muted-foreground" title={preflight.digest}>
+            <code className="text-micro text-muted-foreground" title={preflight.digest}>
               {preflight.digest.slice(0, 20)}…
             </code>
           )}
@@ -2538,15 +2576,17 @@ function PreflightStep({
               className="relative rounded-xl border border-hairline bg-surface-header p-3"
             >
               <div className="flex items-center gap-2">
-                <span className="numeric flex size-6 shrink-0 items-center justify-center rounded-full border border-hairline text-[10px]">
+                <span className="numeric flex size-6 shrink-0 items-center justify-center rounded-full border border-hairline text-micro">
                   {index + 1}
                 </span>
                 <span className="text-xs font-medium">{group.label}</span>
-                <Badge variant={findingBadge(group.severity)} className="ml-auto">
-                  {humanize(group.severity)}
-                </Badge>
+                <Status
+                  verdict={findingVerdict(group.severity)}
+                  label={humanize(group.severity)}
+                  className="ml-auto"
+                />
               </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+              <p className="mt-2 text-hint leading-relaxed text-muted-foreground">
                 {group.summary}
               </p>
             </li>
@@ -2560,10 +2600,10 @@ function PreflightStep({
       )}
       <section className="space-y-2" aria-labelledby="findings-title">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="findings-title" className="text-[13px] font-medium">
+          <h3 id="findings-title" className="text-body font-medium">
             Findings
           </h3>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-hint text-muted-foreground">
             {blockers.length} blocking · {warnings.length} warnings
           </span>
         </div>
@@ -2574,9 +2614,9 @@ function PreflightStep({
       {warnings.length > 0 && (
         <fieldset
           id="warnings"
-          className="space-y-2 rounded-xl border border-warning/30 bg-warning/[0.06] p-4"
+          className="space-y-2 rounded-xl border border-rule-warning bg-wash-warning p-4"
         >
-          <legend className="px-1 text-[13px] font-medium">Acknowledge warnings</legend>
+          <legend className="px-1 text-body font-medium">Acknowledge warnings</legend>
           {warnings.map((finding) => (
             <Label key={finding.code} className="flex min-h-11 items-start gap-3 text-xs">
               <Checkbox
@@ -2604,7 +2644,7 @@ function PreflightStep({
         <summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium">
           Show exact, secret-free plan
         </summary>
-        <Well className="max-h-[32rem] whitespace-pre-wrap break-words">
+        <Well className="max-h-[32rem] break-words whitespace-pre-wrap">
           {preflight?.preview || draft.planPreview || "No plan preview is available."}
         </Well>
       </details>
@@ -2613,50 +2653,6 @@ function PreflightStep({
           ? "Resolve the blocking findings, then run preflight again."
           : "Save creates the deployment and production environment atomically. Starting a run is a separate action."}
       </Notice>
-    </div>
-  )
-}
-
-function FindingRow({ finding }: { finding: DeploymentPreflightFinding }) {
-  return (
-    <div
-      id={finding.fieldId ? finding.fieldId.replaceAll(".", "-") : undefined}
-      className={cn(
-        "rounded-xl border p-3",
-        finding.severity === "blocked" || finding.severity === "decision"
-          ? "border-destructive/30 bg-destructive/[0.04]"
-          : finding.severity === "warning"
-            ? "border-warning/30 bg-warning/[0.04]"
-            : "border-hairline",
-      )}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Badge variant={findingBadge(finding.severity)}>{humanize(finding.severity)}</Badge>
-        <p className="min-w-0 flex-1 text-xs font-medium">{finding.title}</p>
-        {finding.owner && (
-          <span className="text-[10px] text-muted-foreground">{finding.owner}</span>
-        )}
-      </div>
-      {finding.measured && (
-        <p className="mt-2 font-mono text-[11px] break-words">{finding.measured}</p>
-      )}
-      {finding.means && (
-        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{finding.means}</p>
-      )}
-      {finding.action && (
-        <p className="mt-1 text-[11px] leading-relaxed">
-          <b className="font-medium">Next:</b> {finding.action}
-          {finding.deepLink && (
-            <>
-              {" "}
-              ·{" "}
-              <Link href={finding.deepLink} className="underline underline-offset-2">
-                Open owning page
-              </Link>
-            </>
-          )}
-        </p>
-      )}
     </div>
   )
 }
@@ -2671,8 +2667,8 @@ function ActionButton({
   children: React.ReactNode
 }) {
   return (
-    <Button className="h-11 sm:h-9" onClick={onClick} disabled={busy}>
-      {busy ? <Spinner /> : <ArrowRight className="size-4" />}
+    <Button className="h-11 sm:h-9" onClick={onClick} pending={busy}>
+      <ArrowRight className="size-4" />
       {busy ? "Working…" : children}
     </Button>
   )
@@ -2698,257 +2694,17 @@ function Field({
       <Label htmlFor={id}>{label}</Label>
       {children}
       {hint && !error && (
-        <p id={`${id}-hint`} className="text-[11px] leading-relaxed text-muted-foreground">
+        <p id={`${id}-hint`} className="text-hint leading-relaxed text-muted-foreground">
           {hint}
         </p>
       )}
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-[11px] leading-relaxed text-destructive">
+        <p id={`${id}-error`} role="alert" className="text-hint leading-relaxed text-destructive">
           {error}
         </p>
       )}
     </div>
   )
-}
-
-function sourceForProfile(profile: WorkloadProfile): DeploymentDraftSource {
-  if (profile === "image") return sourceForMode("image_reference", profile)
-  if (profile === "compose") return sourceForMode("compose_paste", profile)
-  if (profile === "service") return sourceForMode("blueprint", profile)
-  if (profile === "game") return sourceForMode("image_reference", profile)
-  if (profile === "imported") return sourceForMode("existing_container", profile)
-  return sourceForMode("git_url", profile)
-}
-
-function sourceForMode(
-  mode: DeploymentSourceMode,
-  profile: WorkloadProfile,
-): DeploymentDraftSource {
-  if (mode === "image_reference")
-    return {
-      kind: "image",
-      mode,
-      image: profile === "game" ? "itzg/minecraft-server:java21" : "",
-      credentialId: undefined,
-    }
-  if (mode === "compose_paste" || mode === "compose_upload")
-    return { kind: "compose", mode, composeFiles: [{ path: "compose.yml", content: "", order: 0 }] }
-  if (mode === "compose_git")
-    return {
-      kind: "compose",
-      mode,
-      url: "",
-      ref: "main",
-      composeFiles: [{ path: "compose.yml", content: "", order: 0 }],
-    }
-  if (mode === "compose_local")
-    return {
-      kind: "compose",
-      mode,
-      localPath: "",
-      composeFiles: [{ path: "compose.yml", content: "", order: 0 }],
-    }
-  if (mode === "connected_repository")
-    return { kind: "git", mode, provider: "github", repository: "", ref: "main" }
-  if (mode === "local_checkout") return { kind: "git", mode, localPath: "" }
-  if (mode === "git_url") return { kind: "git", mode, url: "", ref: "main" }
-  if (mode === "blueprint")
-    return {
-      kind: "blueprint",
-      mode,
-      blueprintId: profile === "service" ? "uptime-kuma" : "minecraft-java",
-      blueprintVersion: "1",
-    }
-  return {
-    kind: "import",
-    mode,
-    resourceId: "",
-    ...(mode === "existing_checkout" ? { localPath: "" } : {}),
-  }
-}
-
-function sourceModes(profile: WorkloadProfile): [DeploymentSourceMode, string][] {
-  if (profile === "image" || profile === "game")
-    return [["image_reference", profile === "game" ? "Minecraft image" : "Docker registry image"]]
-  if (profile === "compose")
-    return [
-      ["compose_paste", "Paste Compose"],
-      ["compose_upload", "Upload Compose files"],
-      ["compose_git", "Compose files in Git"],
-      ["compose_local", "Compose files on this server"],
-    ]
-  if (profile === "service")
-    return [
-      ["blueprint", "Reviewed blueprint"],
-      ["image_reference", "Docker registry image"],
-      ["compose_paste", "Paste Compose"],
-    ]
-  if (profile === "imported")
-    return [
-      ["existing_container", "Existing container"],
-      ["existing_stack", "Existing Compose stack"],
-      ["existing_checkout", "Existing Git checkout"],
-    ]
-  return [
-    ["git_url", "Public or credentialed Git URL"],
-    ["connected_repository", "Connected repository"],
-    ["local_checkout", "Local checkout"],
-  ]
-}
-
-function validateSource(source: DeploymentDraftSource) {
-  const errors: WizardErrors = {}
-  if ((source.mode === "git_url" || source.mode === "compose_git") && !source.url?.trim())
-    errors.url = "Enter the Git repository URL."
-  if (source.mode === "connected_repository" && !source.repository?.trim())
-    errors.repository = "Enter the provider repository as owner/name."
-  if (
-    ["local_checkout", "compose_local", "existing_checkout"].includes(source.mode) &&
-    !source.localPath?.startsWith("/")
-  )
-    errors.localPath = "Enter an absolute path inside a deployment root."
-  if (source.mode === "image_reference" && !source.image?.trim())
-    errors.image = "Enter a Docker image reference."
-  if (
-    ["compose_paste", "compose_upload"].includes(source.mode) &&
-    (!source.composeFiles?.length ||
-      source.composeFiles.some((file) => !file.path || !file.content))
-  )
-    errors.compose = "Every Compose file needs a relative .yml/.yaml path and content."
-  if (["compose_git", "compose_local"].includes(source.mode)) {
-    const paths = source.composeFiles?.map((file) => file.path) ?? []
-    if (
-      paths.length > 16 ||
-      paths.some(
-        (path) =>
-          !path ||
-          path.startsWith("/") ||
-          path.split("/").includes("..") ||
-          (!path.endsWith(".yml") && !path.endsWith(".yaml")),
-      ) ||
-      new Set(paths).size !== paths.length
-    )
-      errors.compose = "Use at most 16 unique relative .yml/.yaml paths."
-  }
-  if (["existing_container", "existing_stack"].includes(source.mode) && !source.resourceId?.trim())
-    errors.resource = "Name the existing resource to inspect."
-  if (source.mode === "blueprint")
-    errors.source = "The reviewed blueprint catalog is unavailable until checkpoint C9."
-  return errors
-}
-
-function defaultConfiguration(
-  profile: WorkloadProfile,
-  candidate?: DeploymentDetectionCandidate,
-  source?: DeploymentDraftSource,
-  detection?: DeploymentDetection,
-): DeploymentConfiguration {
-  const game = profile === "game"
-  const image = source?.image ?? (game ? "itzg/minecraft-server:java21" : "")
-  const method: DeploymentBuildMethod =
-    candidate?.buildMethod ??
-    (source?.kind === "image" ? "image" : source?.kind === "compose" ? "compose" : "none")
-  const port = candidate?.port ?? (game ? 25565 : profile === "web" ? 3000 : 0)
-  const composeVariables = detection?.compose?.variables ?? []
-  return {
-    build: {
-      method,
-      recipe: method === "recipe" ? candidate?.recipe : undefined,
-      rootDirectory: candidate?.root,
-      buildCommand: candidate?.buildCommand,
-      startCommand: candidate?.startCommand,
-      outputDirectory: candidate?.outputDirectory,
-      dockerfile: method === "dockerfile" ? "Dockerfile" : undefined,
-      noCache: false,
-      secrets: [],
-      releaseTasks: [],
-    },
-    runtime: {
-      image,
-      command: [],
-      internalPort: port,
-      hostPort: game ? 25565 : 0,
-      bindAddress: "127.0.0.1",
-      strategy: profile === "web" || profile === "static" ? "blue_green" : "stop_first",
-      privileged: false,
-      hostNetwork: false,
-      capabilities: [],
-      devices: [],
-      mounts: game ? [{ source: "minecraft-data", target: "/data", ownership: "managed" }] : [],
-    },
-    variables: composeVariables.map((name) => ({
-      name,
-      sensitivity: "secret" as const,
-      scopes: ["runtime"],
-      required: true,
-      reference: "",
-    })),
-    dependencies: [],
-    checks: game
-      ? [
-          {
-            name: "Minecraft handshake",
-            kind: "game_handshake",
-            phase: "readiness",
-            required: true,
-            config: { port: 25565 },
-          },
-        ]
-      : [],
-    domains: [],
-    autoDeploy: false,
-  }
-}
-
-function validateConfiguration(configuration: DeploymentConfiguration, profile: WorkloadProfile) {
-  const errors: WizardErrors = {}
-  if (!configuration.build.method) errors.buildMethod = "Choose a build method."
-  for (const [name, value] of [
-    ["internalPort", configuration.runtime.internalPort ?? 0],
-    ["hostPort", configuration.runtime.hostPort ?? 0],
-  ] as const)
-    if (value < 0 || value > 65535) errors[name] = "Use a port from 1 to 65535, or 0 for none."
-  if (profile === "game" && !configuration.variables.some((variable) => variable.name === "EULA"))
-    errors.eula = "Accept the Minecraft EULA before continuing."
-  const names = new Set<string>()
-  for (const variable of configuration.variables) {
-    if (
-      !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(variable.name) ||
-      names.has(variable.name) ||
-      variable.scopes.length === 0
-    ) {
-      errors.variables = "Variable names must be unique and each variable needs at least one scope."
-      break
-    }
-    names.add(variable.name)
-  }
-  const variableScopes = new Map(
-    configuration.variables.map((variable) => [variable.name, new Set(variable.scopes)]),
-  )
-  const buildSecrets = configuration.build.secrets ?? []
-  if (
-    new Set(buildSecrets.map((secret) => secret.variable)).size !== buildSecrets.length ||
-    buildSecrets.some(
-      (secret) =>
-        !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(secret.variable) ||
-        !variableScopes.get(secret.variable)?.has("build"),
-    )
-  )
-    errors.buildSecrets = "Each build secret must name one unique variable with Build scope."
-  const releaseTasks = configuration.build.releaseTasks ?? []
-  if (
-    releaseTasks.some(
-      (task) =>
-        !task.name.trim() ||
-        !task.command.trim() ||
-        task.timeoutSeconds < 1 ||
-        task.timeoutSeconds > 3600 ||
-        task.env.some((name) => !variableScopes.get(name)?.has("release_task")),
-    )
-  )
-    errors.releaseTasks =
-      "Release tasks need a name, command, 1–3600 second timeout, and Release task-scoped variables."
-  return errors
 }
 
 function preflightGroups(findings: DeploymentPreflightFinding[]) {
@@ -2979,15 +2735,6 @@ function worstSeverity(values: DeploymentPreflightFinding["severity"][]) {
   return "unavailable" as const
 }
 
-function findingBadge(
-  severity: DeploymentPreflightFinding["severity"],
-): "success" | "warning" | "critical" | "notice" {
-  if (severity === "pass") return "success"
-  if (severity === "warning" || severity === "decision") return "warning"
-  if (severity === "blocked") return "critical"
-  return "notice"
-}
-
 function nonemptyLines(value: string) {
   return value
     .split("\n")
@@ -2998,13 +2745,4 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`
-}
-function stepDescription(step: number) {
-  return [
-    "Begin with the thing you want online, not its container settings.",
-    "Access is tested now so credentials fail before configuration work.",
-    "Detection reports evidence. Nothing here executes a build or starts a container.",
-    "Safe defaults stay visible; uncommon controls are under Advanced.",
-    "Only blockers prevent save. Warnings require an explicit acknowledgement.",
-  ][step]
 }

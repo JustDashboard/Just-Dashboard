@@ -7,6 +7,7 @@ import type { FileBookmark, FilePlaces } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileIcon } from "@/components/files/file-icon"
+import { rowReveal } from "@/components/icon-action"
 
 const baseOf = (p: string) => p.replace(/\/+$/, "").split("/").pop() || "/"
 
@@ -107,7 +108,7 @@ export function PlacesRail({
         }
       >
         {bookmarks.length === 0 && (
-          <p className="px-2 py-1 text-[11px] leading-snug text-muted-foreground">
+          <p className="px-2 py-1 text-hint leading-snug text-muted-foreground">
             Star a folder to keep it here — on this server, for every browser.
           </p>
         )}
@@ -123,7 +124,7 @@ export function PlacesRail({
                 <Button
                   size="icon-xs"
                   variant="ghost"
-                  className="opacity-0 group-hover/row:opacity-100"
+                  className={rowReveal("row")}
                   aria-label={`Remove ${bookmark.name ?? bookmark.path}`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -214,7 +215,7 @@ function Row({
         type="button"
         title={title}
         onClick={onClick}
-        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-left text-[12px]"
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-left text-xs"
       >
         <span className="flex size-3.5 shrink-0 items-center justify-center">{icon}</span>
         <span className="min-w-0 flex-1 truncate">{children}</span>

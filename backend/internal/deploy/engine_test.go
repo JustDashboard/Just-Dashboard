@@ -360,3 +360,48 @@ func equalStepKeys(a, b []StepKey) bool {
 	}
 	return true
 }
+
+// A step that only discovers there is nothing to do once it is running — no
+// release task, no backup gate, no predecessor, no notification channel — is
+// the ordinary shape of a first deployment. Returning `skipped` from `running`
+// was refused by the transition table, which killed the worker and left the
+// step running with no transcript and no terminal state.
+func TestEngineCompletesWhenRunningStepsDiscoverNothingToDo(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	run := f.enqueue(t, environmentID)
+	skipped := map[StepKey]StepResult{}
+	for _, key := range []StepKey{
+		StepReleaseTask, StepBackupGate, StepProvisionCertificate,
+		StepVerifySmoke, StepRetirePrevious, StepNotify,
+	} {
+		skipped[key] = StepResult{State: StepSkipped}
+	}
+	executor := &recordingExecutor{results: skipped}
+	engine := NewEngine(f.runs, executor, fixedReconciler{}, EngineConfig{
+		WorkerID: "engine-skips", PollEvery: 5 * time.Millisecond, LeaseTTL: time.Minute,
+	}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitForRunState(t, f.runs, run.ID, RunSucceeded)
+	steps, err := f.runs.Steps(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range steps {
+		want := StepPassed
+		if _, ok := skipped[step.Key]; ok {
+			want = StepSkipped
+		}
+		if step.State != want {
+			t.Fatalf("step %s state = %s, want %s", step.Key, step.State, want)
+		}
+		if step.EndedAt == nil {
+			t.Fatalf("step %s has no terminal timestamp", step.Key)
+		}
+	}
+	shutdownEngine(t, engine)
+}

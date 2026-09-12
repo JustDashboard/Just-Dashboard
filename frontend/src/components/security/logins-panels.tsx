@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { ClockRewind, Logout, Users } from "@/components/icons"
 import { get, post, ApiError } from "@/lib/api"
 import { timestamp } from "@/lib/format"
@@ -8,13 +8,15 @@ import type { LoginRecord, LoginSession } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Tag } from "@/components/tag"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
+  stickyTableHeader,
   Table,
   TableBody,
   TableCell,
@@ -31,7 +33,7 @@ import {
  */
 export function LoginsPanels() {
   return (
-    <div className="space-y-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <CurrentSessions />
       <LoginHistoryPanel />
     </div>
@@ -45,9 +47,11 @@ function CurrentSessions() {
     (signal) => get<LoginSession[]>("/ssh-sessions", undefined, signal),
     10000,
   )
-  if (loading) return <LoadingPanel />
+  if (loading) return <LoadingPanel rows={3} />
   if (error) return <ErrorState error={error} />
-  if (!data?.length) return <EmptyState icon={Users} title="No interactive logins" />
+
+  const sessions = data ?? []
+  const remote = sessions.filter((s) => s.isSsh).length
 
   return (
     <>
@@ -55,72 +59,88 @@ function CurrentSessions() {
         <PanelHeader
           icon={Users}
           title="Interactive logins"
-          description={`${data.length} session${data.length === 1 ? "" : "s"} on this host right now`}
+          actions={
+            <Status
+              verdict={remote > 0 ? "notice" : "ok"}
+              label={
+                sessions.length === 0
+                  ? "nobody logged in"
+                  : `${sessions.length} session${sessions.length === 1 ? "" : "s"}${remote > 0 ? `, ${remote} over ssh` : ""}`
+              }
+            />
+          }
         />
         <PanelBody flush>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Terminal</TableHead>
-                <TableHead className="w-full">From</TableHead>
-                <TableHead>Logged in</TableHead>
-                <TableHead>Idle</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((session, i) => (
-                <TableRow key={`${session.user}-${session.tty}-${i}`} className="group">
-                  <TableCell className="text-[13px] font-medium">{session.user}</TableCell>
-                  <TableCell className="font-mono text-xs">{session.tty}</TableCell>
-                  <TableCell className="font-mono text-xs">{session.from || "local"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {session.loginTime ? timestamp(session.loginTime) : "—"}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {session.idle ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={session.isSsh ? "outline" : "secondary"} className="font-normal">
-                      {session.isSsh ? "ssh" : "local"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {can("system.admin") && session.pid ? (
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                        onClick={() =>
-                          confirm({
-                            title: `Disconnect ${session.user}`,
-                            confirmLabel: "Disconnect",
-                            description: (
-                              <p>
-                                The session on <b>{session.tty}</b> from{" "}
-                                <b>{session.from || "local"}</b> is hung up. Anything it is running
-                                in the foreground stops with it — a long job that was not started
-                                under tmux or nohup will not survive.
-                              </p>
-                            ),
-                            action: async () => {
-                              await post(`/ssh-sessions/${session.pid}/disconnect`, {})
-                              refresh()
-                            },
-                          })
-                        }
-                      >
-                        <Logout className="size-3.5" />
-                        Disconnect
-                      </Button>
-                    ) : null}
-                  </TableCell>
+          {sessions.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No interactive logins"
+              description="Nobody holds a shell on this host right now."
+              className="border-0"
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Terminal</TableHead>
+                  <TableHead>Logged in</TableHead>
+                  <TableHead>Idle</TableHead>
+                  <TableHead className="w-full">From</TableHead>
+                  <TableHead className="w-px" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {sessions.map((session, i) => (
+                  <TableRow key={`${session.user}-${session.tty}-${i}`} className="group">
+                    <TableCell className="text-body font-medium">{session.user}</TableCell>
+                    <TableCell>
+                      <Tag>{session.isSsh ? "ssh" : "local"}</Tag>
+                    </TableCell>
+                    <TableCell className="font-mono">{session.tty}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {session.loginTime ? timestamp(session.loginTime) : "—"}
+                    </TableCell>
+                    <TableCell className="numeric text-muted-foreground">
+                      {session.idle ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-mono">{session.from || "local"}</TableCell>
+                    <TableCell>
+                      {can("system.admin") && session.pid ? (
+                        <RowActions className="justify-end">
+                          <IconAction
+                            label={`Disconnect ${session.user}`}
+                            className="text-destructive"
+                            onClick={() =>
+                              confirm({
+                                title: `Disconnect ${session.user}`,
+                                confirmLabel: "Disconnect",
+                                description: (
+                                  <p>
+                                    The session on <b>{session.tty}</b> from{" "}
+                                    <b>{session.from || "local"}</b> is hung up. Anything it is
+                                    running in the foreground stops with it — a long job that was
+                                    not started under tmux or nohup will not survive.
+                                  </p>
+                                ),
+                                action: async () => {
+                                  await post(`/ssh-sessions/${session.pid}/disconnect`, {})
+                                  refresh()
+                                },
+                              })
+                            }
+                          >
+                            <Logout />
+                          </IconAction>
+                        </RowActions>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </PanelBody>
       </Panel>
       {dialog}
@@ -138,6 +158,7 @@ function CurrentSessions() {
 function LoginHistoryPanel() {
   const { can } = useAuth()
   const [failed, setFailed] = useState(false)
+  const [query, setQuery] = useState("")
   const admin = can("system.admin")
   const showFailed = failed && admin
 
@@ -150,98 +171,124 @@ function LoginHistoryPanel() {
 
   const unavailable = error instanceof ApiError && error.code === "login_history_unavailable"
 
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return data ?? []
+    return (data ?? []).filter((r) => `${r.user} ${r.tty} ${r.from}`.toLowerCase().includes(q))
+  }, [data, query])
+
   return (
     <Panel>
       <PanelHeader
         icon={ClockRewind}
         title={showFailed ? "Failed login attempts" : "Recent logins"}
-        description={
-          showFailed
-            ? "From the host's btmp record — every attempt that did not get in"
-            : "From the host's wtmp record, including restarts"
-        }
         actions={
-          admin && (
+          data && data.length > 0 ? (
+            <span className="numeric text-xs text-muted-foreground">{data.length} records</span>
+          ) : undefined
+        }
+      />
+      {!unavailable && !error && (
+        <PanelToolbar>
+          {admin && (
             <ToggleGroup
               type="single"
               value={showFailed ? "failed" : "ok"}
-              onValueChange={(next) => setFailed(next === "failed")}
+              onValueChange={(next) => next && setFailed(next === "failed")}
               variant="outline"
               size="sm"
               aria-label="Which logins to show"
             >
-              <ToggleGroupItem value="ok" className="px-2.5 text-[11px]">
+              <ToggleGroupItem value="ok" className="px-2.5 text-hint">
                 Successful
               </ToggleGroupItem>
-              <ToggleGroupItem value="failed" className="px-2.5 text-[11px]">
+              <ToggleGroupItem value="failed" className="px-2.5 text-hint">
                 Failed
               </ToggleGroupItem>
             </ToggleGroup>
-          )
-        }
-      />
+          )}
+          <span className="flex-1" />
+          <SearchInput
+            dense
+            aria-label="Filter login records"
+            placeholder="User, terminal or address"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            containerClassName="sm:w-64"
+          />
+        </PanelToolbar>
+      )}
       <PanelBody flush>
         {unavailable ? (
-          <Notice tone="default" title="This host cannot read its login record">
-            <div className="space-y-1.5">
-              <p>
-                <code className="font-mono">last</code> and{" "}
-                <code className="font-mono">lastb</code> are what read wtmp and btmp, and they come
-                from <code className="font-mono">util-linux-extra</code> — which minimal cloud
-                images leave out. Install it and this fills in; the records themselves have been
-                there all along.
-              </p>
-              <p>
-                Until then this page has no answer, which is not the same as a host nobody has
-                tried to log in to.
-              </p>
-            </div>
-          </Notice>
+          <div className="p-4">
+            <Notice tone="default" title="This host cannot read its login record">
+              <div className="space-y-1.5">
+                <p>
+                  <code className="font-mono">last</code> and{" "}
+                  <code className="font-mono">lastb</code> are what read wtmp and btmp, and they
+                  come from <code className="font-mono">util-linux-extra</code> — which minimal
+                  cloud images leave out. Install it and this fills in; the records themselves have
+                  been there all along.
+                </p>
+                <p>
+                  Until then this page has no answer, which is not the same as a host nobody has
+                  tried to log in to.
+                </p>
+              </div>
+            </Notice>
+          </div>
         ) : error ? (
-          <ErrorState error={error} />
+          <div className="p-4">
+            <ErrorState error={error} />
+          </div>
         ) : loading ? (
           <LoadingPanel />
-        ) : !data?.length ? (
+        ) : shown.length === 0 ? (
           <EmptyState
             icon={ClockRewind}
-            title={showFailed ? "No failed attempts recorded" : "No logins recorded"}
+            title={
+              data?.length
+                ? "Nothing matches"
+                : showFailed
+                  ? "No failed attempts recorded"
+                  : "No logins recorded"
+            }
+            className="border-0"
           />
         ) : (
           <Table containerClassName="max-h-[28rem]">
-            <TableHeader>
+            <TableHeader className={stickyTableHeader}>
               <TableRow>
                 <TableHead>User</TableHead>
                 <TableHead>Terminal</TableHead>
-                <TableHead className="w-full">From</TableHead>
                 <TableHead>When</TableHead>
                 <TableHead>Lasted</TableHead>
+                <TableHead className="w-full">From</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((record, i) => (
+              {shown.map((record, i) => (
                 <TableRow key={`${record.user}-${record.loginTime ?? i}-${i}`}>
-                  <TableCell className="text-[13px] font-medium">
+                  <TableCell className="text-body font-medium">
                     <span className="flex items-center gap-2">
                       {record.user}
                       {record.kind !== "login" && (
-                        <Badge variant="secondary" className="font-normal">
-                          {record.kind === "boot" ? "boot" : "shutdown"}
-                        </Badge>
+                        <Tag>{record.kind === "boot" ? "boot" : "shutdown"}</Tag>
                       )}
                     </span>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{record.tty || "—"}</TableCell>
-                  <TableCell className="font-mono text-xs">{record.from || "local"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="font-mono">{record.tty || "—"}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
                     {record.loginTime ? timestamp(record.loginTime) : "—"}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="numeric text-muted-foreground">
                     {record.active ? (
                       <Status state="active" label="still open" />
                     ) : (
                       (record.duration ?? record.ended ?? "—")
                     )}
                   </TableCell>
+                  <TableCell className="font-mono">{record.from || "local"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

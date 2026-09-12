@@ -51,7 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {/* The scroll lives here rather than on the document, which is what
               keeps the top bar pinned and lets a page ask for the remaining
               height (`<Page fill>`) instead of growing past the viewport. */}
-            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
               {children}
             </div>
           </SidebarInset>

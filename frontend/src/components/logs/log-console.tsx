@@ -13,14 +13,14 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { clock, timestamp } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import type { LogLine } from "@/lib/types"
 import { LEVEL_EDGE, LEVEL_TEXT, highlightRanges, segmentLine } from "@/lib/log-filter"
 import { setLogView, useLogView } from "@/lib/log-view"
 import type { LogFilterState } from "@/components/logs/types"
+import { Pane, PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { copyText } from "@/lib/clipboard"
 
 function lineToText(line: LogLine, withTime: boolean) {
   const stamp = withTime && line.timestamp ? `${timestamp(line.timestamp)} ` : ""
@@ -105,10 +105,11 @@ export function LogConsole({
     setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
   }
 
-  const copyAll = async () => {
-    await navigator.clipboard.writeText(lines.map((l) => lineToText(l, showTime)).join("\n"))
-    notify.success(`Copied ${lines.length.toLocaleString()} lines`)
-  }
+  const copyAll = () =>
+    copyText(
+      lines.map((l) => lineToText(l, showTime)).join("\n"),
+      `Copied ${lines.length.toLocaleString()} lines`,
+    )
 
   // Ranges come from the server for a search — it can re-run its own regular
   // expression and the browser cannot — and are worked out here for a live
@@ -120,17 +121,12 @@ export function LogConsole({
   )
 
   return (
-    <div
-      className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-hairline bg-surface-header px-2.5 py-1.5">
+    <Pane className={cn("bg-surface-sunken", className)}>
+      <PaneHeader className="flex-wrap gap-x-2 gap-y-1.5 px-2.5">
         {status}
-        <Badge variant="outline" className="numeric text-[10px] font-normal">
+        <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
           {lines.length.toLocaleString()} lines
-        </Badge>
+        </span>
         <div className="flex-1" />
         {actions}
         {onPausedChange && (
@@ -168,7 +164,7 @@ export function LogConsole({
         {onClear && (
           <ToolbarToggle onClick={onClear} icon={Backspace} label="Clear" hint="Empty the pane" />
         )}
-      </div>
+      </PaneHeader>
 
       <div
         ref={scrollRef}
@@ -190,12 +186,11 @@ export function LogConsole({
                   key={i}
                   onClick={() => setPinned((p) => (p === i ? null : i))}
                   onDoubleClick={() => {
-                    navigator.clipboard.writeText(lineToText(line, showTime))
-                    notify.success("Line copied")
+                    void copyText(lineToText(line, showTime), "Line copied")
                   }}
                   className={cn(
                     "flex cursor-default items-stretch gap-2.5 pr-3 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto] hover:bg-foreground/[0.04]",
-                    pinned === i && "bg-primary/12 hover:bg-primary/12",
+                    pinned === i && "bg-plot-primary hover:bg-plot-primary",
                     line.context && "opacity-60",
                   )}
                 >
@@ -207,20 +202,23 @@ export function LogConsole({
                     )}
                   />
                   {showLineNumbers && (
-                    <span className="numeric w-14 shrink-0 select-none text-right text-muted-foreground/50">
+                    <span className="numeric w-14 shrink-0 text-right text-muted-foreground/50 select-none">
                       {line.no ?? ""}
                     </span>
                   )}
                   {showTime && (
                     <span
                       title={line.timestamp ? timestamp(line.timestamp) : undefined}
-                      className="w-[4.5rem] shrink-0 select-none text-muted-foreground/60"
+                      className="w-[4.5rem] shrink-0 text-muted-foreground/60 select-none"
                     >
                       {line.timestamp ? clock(line.timestamp) : "—"}
                     </span>
                   )}
                   {showFile && line.file && (
-                    <span className="w-28 shrink-0 truncate text-muted-foreground/70" title={line.file}>
+                    <span
+                      className="w-28 shrink-0 truncate text-muted-foreground/70"
+                      title={line.file}
+                    >
                       {line.file}
                     </span>
                   )}
@@ -233,21 +231,18 @@ export function LogConsole({
                     </span>
                   )}
                   {line.stream === "stderr" && (
-                    <span className="shrink-0 select-none text-destructive/70">err</span>
+                    <span className="shrink-0 text-destructive/70 select-none">err</span>
                   )}
                   <span
                     className={cn(
                       "min-w-0",
-                      wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre",
+                      wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
                       line.level && LEVEL_TEXT[line.level],
                     )}
                   >
                     {segmentLine(line.text, ranges).map((part, k) =>
                       part.hit ? (
-                        <mark
-                          key={k}
-                          className="rounded-[2px] bg-warning/35 px-px text-foreground"
-                        >
+                        <mark key={k} className="rounded-[2px] bg-mark px-px text-foreground">
                           {part.text}
                         </mark>
                       ) : (
@@ -277,7 +272,7 @@ export function LogConsole({
           {held > 0 && <span className="numeric">· {held.toLocaleString()} held</span>}
         </button>
       )}
-    </div>
+    </Pane>
   )
 }
 

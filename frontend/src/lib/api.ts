@@ -20,7 +20,22 @@ export function mutationHeaders(): Record<string, string> {
 }
 
 export type ApiErrorBody = {
-  error: { code: string; message: string; phrase?: string }
+  error: {
+    code: string
+    message: string
+    phrase?: string
+    /**
+     * What was being attempted, to what, and why it did not work. All
+     * optional: a route that says nothing beyond a message still works, and a
+     * component that reads only `message` is unaffected.
+     */
+    resource?: string
+    operation?: string
+    reason?: string
+    /** The subsystem's own error, for the expandable details. Never the headline. */
+    raw?: string
+    retryable?: boolean
+  }
 }
 
 /**
@@ -49,12 +64,34 @@ export class ApiError extends Error {
    */
   confirmPhrase?: string
 
-  constructor(status: number, code: string, message: string, phrase?: string) {
+  /**
+   * The structured half of the error.
+   *
+   * "Something went wrong" is what a client shows when the server sent it a
+   * sentence and nothing else. These are what let it show the sentence a
+   * person would have written: which resource, which operation, the likely
+   * reason, and — behind a disclosure rather than in the headline — exactly
+   * what the subsystem underneath said.
+   */
+  resource?: string
+  operation?: string
+  reason?: string
+  raw?: string
+  retryable?: boolean
+
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    phrase?: string,
+    detail?: Partial<Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable">>,
+  ) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.code = code
     this.confirmPhrase = phrase
+    Object.assign(this, detail)
   }
 
   get needsConfirmation() {
@@ -136,6 +173,13 @@ async function readResponse<T>(res: Response): Promise<T> {
       body?.error?.code ?? "unknown",
       body?.error?.message ?? res.statusText,
       body?.error?.phrase,
+      {
+        resource: body?.error?.resource,
+        operation: body?.error?.operation,
+        reason: body?.error?.reason,
+        raw: body?.error?.raw,
+        retryable: body?.error?.retryable,
+      },
     )
   }
   return parsed as T

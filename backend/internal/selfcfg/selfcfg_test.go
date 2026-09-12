@@ -1,12 +1,19 @@
 package selfcfg
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
 	"log/slog"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeEnv(t *testing.T, body string) string {
@@ -152,11 +159,14 @@ func TestValidateRefusesATailscaleCertificateForAnIP(t *testing.T) {
 	}
 }
 
-func TestValidateRefusesCollidingPorts(t *testing.T) {
+func TestValidateSeparatesCollidingPorts(t *testing.T) {
 	old := defaults()
 	next := old
 	next.FrontendPort = next.BackendPort
-	if err := next.Validate(old, "127.0.0.1", nil); err == nil {
+	if err := next.Validate(old, "127.0.0.1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if next.FrontendPort == next.BackendPort || next.FrontendPort == next.Port {
 		t.Fatal("two services were allowed to share one port")
 	}
 }
@@ -191,14 +201,6 @@ func TestDiffNamesOnlyWhatMoved(t *testing.T) {
 	changes := Diff(old, next)
 	if len(changes) != 2 {
 		t.Fatalf("diff = %+v, want two entries", changes)
-	}
-	if !MovesEndpoint(old, next) {
-		t.Fatal("a port change was not recognised as moving the endpoint")
-	}
-	same := old
-	same.Require2FA = true
-	if MovesEndpoint(old, same) {
-		t.Fatal("a policy change was reported as moving the endpoint")
 	}
 }
 
@@ -295,5 +297,74 @@ func TestWithTailnetAddsTheRangeOnceOnly(t *testing.T) {
 	}
 	if covered := WithTailnet("100.64.0.0/10,127.0.0.1/32"); covered != "100.64.0.0/10,127.0.0.1/32" {
 		t.Fatalf("an allowlist that already covers the tailnet was rewritten: %q", covered)
+	}
+}
+
+// writeSelfSignedCert puts a certificate for name where the proxy looks for
+// one, which is all Certificate and DropStaleCertificate read.
+func writeSelfSignedCert(t *testing.T, dataDir, name string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: name},
+		DNSNames:     []string{name},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(90 * 24 * time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(dataDir, "certs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := pem.Encode(mustCreate(t, filepath.Join(dir, CertFile)), &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, KeyFile), []byte("key"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustCreate(t *testing.T, path string) *os.File {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f
+}
+
+// The proxy chooses between a real certificate and its internal CA by whether
+// the files exist, so a certificate left over from the address before this one
+// would be served under the new name — a browser error about the wrong host,
+// which is a worse outcome than the self-signed warning it replaced.
+func TestDropStaleCertificateKeepsTheOneThatFits(t *testing.T) {
+	dir := t.TempDir()
+	writeSelfSignedCert(t, dir, "box.tailnet.ts.net")
+
+	if state := Certificate(dir, "box.tailnet.ts.net"); !state.Issued || state.Expires == nil {
+		t.Fatalf("certificate for the configured name read as %+v, want issued", state)
+	}
+	DropStaleCertificate(dir, "box.tailnet.ts.net")
+	if !Certificate(dir, "box.tailnet.ts.net").Issued {
+		t.Fatal("a certificate covering the address was deleted")
+	}
+
+	if Certificate(dir, "other.tailnet.ts.net").Issued {
+		t.Fatal("a certificate for another name was reported as covering this one")
+	}
+	DropStaleCertificate(dir, "other.tailnet.ts.net")
+	if _, err := os.Stat(filepath.Join(dir, "certs", CertFile)); !os.IsNotExist(err) {
+		t.Fatalf("stale certificate still on disk (%v), so the proxy would serve the wrong name", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "certs", KeyFile)); !os.IsNotExist(err) {
+		t.Fatal("the key outlived the certificate it belongs to")
 	}
 }

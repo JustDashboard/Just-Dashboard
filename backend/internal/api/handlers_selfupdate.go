@@ -54,6 +54,11 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/config", s.handle(s.handleSelfConfigApply))
 				r.Method(http.MethodPost, "/restart", s.handle(s.handleSelfConfigRestart))
 			})
+			// Asking for the certificate now rather than at the next check.
+			// Not in the destructive budget: it fetches a file and restarts
+			// the proxy for a second or two, which is the same interruption a
+			// renewal makes on its own at three in the morning.
+			r.Method(http.MethodPost, "/config/certificate", s.handle(s.handleSelfConfigCertificate))
 		})
 	})
 }

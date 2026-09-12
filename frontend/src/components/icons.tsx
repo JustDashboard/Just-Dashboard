@@ -297,13 +297,15 @@ export const Code: Icon = adapt(CodeBracketSquareIcon, "Code")
  * the square in a ring. Getting these two the wrong way round puts a warning
  * triangle on the button that stops a container.
  *
- * `Status` is the radio/dot indicator, always rendered tiny with a fill — the
- * small dash reads as a dot at that size. `Slash` is prohibition, the
+ * `DotMark` is the radio/dot indicator, always rendered tiny with a fill — the
+ * small dash reads as a dot at that size. It is not `Status` in
+ * `components/status-dot.tsx`, which is the dot *and* its label; the two names
+ * collided in every file that wanted both. `Slash` is prohibition, the
  * circle-with-a-line, for "not available on this host". */
 export const LoaderCircle: Icon = adapt(ArrowPathIcon, "LoaderCircle")
 export const CheckCircle: Icon = adapt(CheckCircleIcon, "CheckCircle")
 export const CrossCircle: Icon = adapt(XCircleIcon, "CrossCircle")
-export const Status: Icon = adapt(MinusSmallIcon, "Status")
+export const DotMark: Icon = adapt(MinusSmallIcon, "DotMark")
 export const Slash: Icon = adapt(NoSymbolIcon, "Slash")
 export const Question: Icon = adapt(QuestionMarkCircleIcon, "Question")
 export const Information: Icon = adapt(InformationCircleIcon, "Information")

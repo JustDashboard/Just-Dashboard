@@ -34,13 +34,14 @@ import { Page, PageHeader } from "@/components/page"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { FilterBar } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
 import { LogConsole } from "@/components/logs/log-console"
 import { RetentionNote } from "@/components/logs/retention-note"
 import { SourceRail } from "@/components/logs/source-rail"
 import { ExportDialog } from "@/components/logs/export-dialog"
+import { Tag } from "@/components/tag"
+import { PaneFooter } from "@/components/panel"
 
 /** How many lines the live pane holds before the oldest fall off the top. */
 const LIVE_BUFFER = 4000
@@ -130,7 +131,6 @@ export default function LogsPage() {
       <PageHeader
         eyebrow="Server"
         title="Logs"
-        description="Files, containers, PM2 and the systemd journal — one filter, live or over history"
         actions={
           <>
             {sourceId && (
@@ -397,7 +397,7 @@ function LogWorkspace(props: WorkspaceProps) {
                     ? "Connecting"
                     : "Disconnected"
               }
-              className="text-[11px]"
+              className="text-hint"
             />
           ) : (
             <SearchSummary result={search.result} loading={search.loading} />
@@ -405,9 +405,7 @@ function LogWorkspace(props: WorkspaceProps) {
         }
         actions={
           mode === "live" && live.meta?.prefill && !live.meta.prefill.complete ? (
-            <Badge variant="outline" className="text-[10px] font-normal" title={live.meta.note}>
-              partial history
-            </Badge>
+            <Tag title={live.meta.note}>partial history</Tag>
           ) : undefined
         }
         footer={
@@ -648,11 +646,11 @@ function useHistorySearch(props: WorkspaceProps) {
 
 function SearchSummary({ result, loading }: { result: LogSearchResult | null; loading: boolean }) {
   if (loading) {
-    return <span className="text-[11px] text-muted-foreground">Searching…</span>
+    return <span className="text-hint text-muted-foreground">Searching…</span>
   }
-  if (!result) return <span className="text-[11px] text-muted-foreground">History</span>
+  if (!result) return <span className="text-hint text-muted-foreground">History</span>
   return (
-    <span className="numeric text-[11px] text-muted-foreground">
+    <span className="numeric text-hint text-muted-foreground">
       {plural(result.matched, "match", "matches")} in {result.scanned.toLocaleString()} lines ·{" "}
       {result.tookMillis}ms
     </span>
@@ -678,7 +676,7 @@ function SearchFooter({ result }: { result: LogSearchResult }) {
   if (notes.length === 0 && files.length <= 1) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-hairline bg-surface-header px-3 py-1.5 text-[11px] text-muted-foreground">
+    <PaneFooter className="gap-x-3 gap-y-1 px-3 text-hint text-muted-foreground">
       {notes.map((note) => (
         <span key={note}>{note}</span>
       ))}
@@ -690,7 +688,7 @@ function SearchFooter({ result }: { result: LogSearchResult }) {
             {file.error ?? `${file.matched.toLocaleString()} matched`}
           </span>
         ))}
-    </div>
+    </PaneFooter>
   )
 }
 

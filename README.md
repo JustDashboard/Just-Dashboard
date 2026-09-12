@@ -6,7 +6,7 @@
 Metrics, Docker, processes, logs, a real shell, files, git, databases, the reverse proxy,
 the firewall, backups and deploys, behind a login that lives on your private network.
 
-**Version 0.6.6** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.6.7** · Go backend · Next.js frontend · one `docker compose` stack
 
 [Install](#install) · [Security](#read-this-before-you-expose-it) · [The tour](#the-tour) · [Version](#version-and-updating) · [Configuration](#configuration-reference) · [Licence](#licence)
 
@@ -74,10 +74,10 @@ Three things worth knowing before you do it:
   that an account *without* one can now sign in on its password. Re-running `install.sh` asks you
   which you want; upgrading any other way takes the new default, so set `JD_REQUIRE_2FA=true` in
   `.env` first if this install is shared.
-- **Your address, ports and certificate stay exactly as they are.** `JD_TLS` defaults to `internal`,
-  which is what every install did before it existed, and no recorded port is ever moved. The random
-  internal ports and the trusted Tailscale certificate are things you opt into afterwards, from
-  Operations → Dashboard → Configuration.
+- **Your address and certificate settings are preserved.** `JD_TLS` defaults to `internal`.
+  Running dashboard ports stay put; ports occupied by another service are moved automatically,
+  with the selected dashboard address printed in the startup log. Certificate settings remain
+  editable under Operations → Dashboard → Configuration.
 - **`docker-compose.yml` and `deploy/Caddyfile` both changed.** If you have edited either by hand,
   the in-app update fast-forwards and will stop with the conflict rather than discarding your edits;
   resolve it in the checkout and run the update again.
@@ -146,7 +146,7 @@ history, so a spike is told apart from a trend, and it is visible from every pag
 
 ![The command palette](docs/command-palette.png)
 
-**⌘K** from anywhere. Every page, and the light/dark switch, because a server dashboard is
+**⌘K** from anywhere. Every page in the nav, because a server dashboard is
 navigated by someone who already knows where they are going. The top bar keeps CPU, memory and
 the health verdict in view while you are elsewhere.
 
@@ -169,25 +169,52 @@ bound to loopback, not an app store to maintain.
 already has. The old container is renamed aside and restored if anything goes wrong, and
 removed only once the replacement is up.
 
-**A verdict on what is wrong, in sentences.** Why a container exited and what the limit was,
-that one has restarted twelve times in a minute, that a health check is failing and what it
-last said, that a port is published in front of the firewall, that an unrotated log has
-reached 800 MB, that the data being written will not survive the next update. Where the
-dashboard can carry out the fix, the finding comes with a button.
+**Two verdicts, not one.** *Runtime health* is what Docker itself reports — running, exited,
+unhealthy, and how many containers have no health check at all, which is the number that
+stops "everything is up" quietly meaning "nothing is being watched". *Attention* is
+everything else: security posture, disk, configuration, exposure. A container can be
+perfectly healthy and still need attention, and the panel says so rather than picking one
+word for both.
 
-**Stacks as the applications they are.** Up, Update, Build, Restart and Down, each streamed
-line by line as it runs rather than hanging on a request for four minutes. The compose file
-is editable in place and validated before saving, and saving is not deploying: the UI says
-so. From a stack you jump straight to its directory in Files, a shell in it, or its git
-repository, with the uncommitted count already on the button.
+**Explanations, not numbers.** Why a container exited and what the limit was. That it has
+restarted seventeen times in twelve minutes — a cadence read from the recorded event stream,
+because Docker's own counter cannot tell that from forty restarts across a year. That a
+health check is failing and what it last said. That PostgreSQL is published on every
+interface, that the firewall has a rule denying the port, and that Docker's NAT rules are
+consulted first so the rule does not apply to it. Where the dashboard can carry out the fix,
+the finding comes with a button; where the conclusion was inferred rather than read, it says
+"likely" and shows the evidence it was drawn from.
 
-**The rest of the surface.** Live stats and a last-hour sparkline per container row. Recorded
-per-container CPU, memory, network and block I/O, keyed by name so it survives a redeploy.
-Images with an update check that asks the registry what the tag points at *now* and compares
-it with the digest you pulled. Volumes with what mounts them and a link to browse inside.
-Networks with who is attached. Streaming logs, a shell in the container, raw inspect, and the
-daemon's own event stream kept in memory so an overnight OOM kill is still there in the
-morning.
+**Where the writable layer went.** Not "38.7 GB" but which directory holds it, whether that
+directory is backed by a volume, and how fast it is growing — measured from recorded history,
+so "up 6.4 GB today" is a measurement rather than a guess. Where data is sitting in a
+container's own filesystem and will vanish on the next image update, the dashboard writes out
+the migration to a named volume as steps and exact commands, and leaves you to run them.
+
+**Stacks as the applications they are.** Deploy, Pull & redeploy, Rebuild, Restart and
+Stop & remove stack — named for what they do to the server, with the compose command they run
+and what they touch in the confirmation. Each is streamed line by line rather than hanging on
+a request for four minutes. Before you press one, the deploy preview says which services are
+expected to be recreated, shows the compose diff against the last deployment, and states
+explicitly that no volume is removed. Afterwards the previous compose file and the image
+digests that were actually running are kept, so "what changed" and "put it back" have
+answers — and a rollback that could not find its images says so before you commit.
+
+**Cleanup as a decision.** Each category of removable object states what it holds, what
+removing it reclaims, and what that costs. Volumes are always listed, never selected by
+default, and need a typed phrase — they are the one category that is the data.
+
+**The rest of the surface.** Live stats and a named last-hour sparkline per container row,
+with CPU that says what its denominator is and memory that says "no limit" rather than
+showing host RAM as a budget nobody set. Recorded per-container CPU, memory, network, block
+I/O and writable-layer size, keyed by name so it survives a redeploy. Images that distinguish
+a moving tag, a pinned digest, a locally built image and a dangling one, with an update check
+that asks the registry what the tag points at *now*. Volumes with what mounts them, whether
+the size is known or simply not measured, and a link to browse inside. Networks with who is
+attached and what they reach each other by. Streaming logs, a shell in the container, raw
+inspect, and the daemon's own event stream kept in memory — correlated against the audit log,
+so a container removed at 03:14 says whether somebody did it from here or from somewhere
+else.
 
 ### Terminal: sessions that are still there tomorrow
 
@@ -259,18 +286,44 @@ opened from the branch you are on without leaving for a browser tab.
 | **Databases** | Eight engines: PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis — all on pure-Go drivers, so the image still needs no CGO. A data grid that edits rows through forms (always scoped to a primary key), server-side sort and filtering, schema editing with the statement shown before it runs, CSV/JSON import inside one transaction, a structure view and an entity diagram, a query runner that classifies a statement as destructive before it runs with schema-aware completion, history and saved snippets, CSV/JSON export, one-click Prisma, Drizzle, TypeScript or Zod generation from the live database, and a value search that finds which table an id lives in without knowing where to look. A Monitor tab lists what the server is running right now — with the blocking session named — and stops a stuck query, next to a per-table size breakdown for when the disk alert fires. Any row copies out as JSON or as a runnable INSERT in that engine's own syntax, or duplicates into a pre-filled form. MongoDB gets document editing, an aggregation runner, and its own export and import; Redis gets a SCAN-based key browser with full collection editing. Plus a dump that downloads to the browser as it is written, restores, and a typed-confirmation delete of the database itself, for every one of the eight — the three with a client-side tool use it, the rest are dumped over the connection the dashboard already has, so no engine's backup depends on a binary that may not be installed. Passwords never appear in argv. Everything but Oracle is covered by tests that run against the real engines. |
 | **Security** | A verdict on the host, not just its settings: exposure, firewall, sshd, intrusion prevention, open ports, certificates and pending security patches, each finding carrying what was measured, what it means, what to do, and where the dashboard can do it, a button. Firewall rules on ufw **or firewalld**, with a named-service catalogue that warns before you open Redis to the world, default policies, logging, ordering, editing (the replacement goes in before the original comes out, so the port is never briefly unprotected) and outbound rules. sshd's own settings — root login, passwords, keys, port, account lists — applied through its parser and rolled back if it objects, refused outright when the change would leave nobody a way in, and streamed step by step so "it said it worked" and "the daemon came back" are not the same claim. fail2ban jails tuned in place and kept across a restart, folded into the one question a ban list cannot answer: who keeps coming back. Live connections by peer, interfaces and routes, the host's login record with the ability to end a session, and ping, DNS, traceroute and port checks on the page the question came from. |
 | **Updates** | Two things that can be behind. The dashboard itself — with the release notes for every version between yours and the newest, and a one-click pull-rebuild-restart that runs in its own container so it survives replacing the dashboard. And the host's packages: what is behind, which of it is security, and whether a reboot is due, on apt, dnf, yum, zypper, pacman or apk. Alpine and Arch publish no advisory data, so they say so rather than reporting zero security updates. Upgrades run as a job with its output streamed, so closing the tab does not abandon a half-finished run. Upgrades only — it never installs or removes packages. |
-| **Deployments** | Git pull plus `compose up -d --build`, by hand or by signed webhook, with history and rollback. Encrypted per-project environment rendered into `.env` at deploy time. |
+| **Deployments** | A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, an existing container, or a reviewed blueprint; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Deploy on push with per-provider signature verification, watch paths, scheduled actions, PR previews and signed outbound webhooks. |
+| **Blueprints** | Sixteen reviewed, versioned workload definitions — Nginx, Caddy, Uptime Kuma, Vaultwarden, PostgreSQL, MariaDB, Redis, MongoDB, Gitea, Adminer, Prometheus, Grafana, MinIO, Dozzle, n8n and Minecraft. Not an app store: a blueprint is data shipped and tested with the release, parsed with unknown fields rejected and rendered by a pure function, so the same version and answers always produce the same plan. None of them can ship a default password, publish a database port, declare a stateful workload with nowhere to keep its state, or download anything without https and a checksum — those are refusals in the validator, not guidelines. The Docker page's starting points come from the same catalogue, so there is one list rather than two that drift. |
+| **Game servers** | Minecraft Java and Bedrock, with the parts a game server needs and a web application does not: a console that is a console and not a shell, the players who are online with kick, ban, op and whitelist where the server can actually report identities, `server.properties` edited through the fields the blueprint declares while every other line keeps its own bytes, and schedules that warn, save, back up and then update, in that order. Versions come from Mojang's own manifest; when it cannot be reached the wizard says so rather than installing an unverified "latest". The world lives in a volume named after the deployment, not the release — which is what makes "roll back the server software, keep the world" true rather than hoped for. |
 | **Backups** | Scheduled archives to local disk, S3 or Backblaze B2, with retention and restore. |
 | **System users** | Host accounts, SSH keys, lock and unlock. |
 | **Audit log** | Every state-changing request, filterable by actor, action and outcome. |
 | **Dashboard → Configuration** | The panel's own settings: the address and port it answers on, which certificate it presents, the network allowlist, whether two-factor is compulsory, session lifetimes, and the internal ports. Applying a change restarts the stack into it from a container that outlives the restart, narrates each phase, and **puts the previous configuration back automatically** if the new one does not come up. Restart and rebuild live here too. |
-| **Appearance** | One palette in light and dark, applied before the page paints so the light mode never flashes black. The choice belongs to the browser you are sitting at, not to the account — as does how you left each page arranged. |
+| **Appearance** | One dark palette, applied before the page paints. There is no light mode and no theme switch — this is a console you keep open beside the thing you are fixing, and a second ground was two of everything to maintain. How you left each page arranged belongs to the browser you are sitting at, not to the account. |
 
 ---
 
+## Deployment certificates
+
+Automatic deployment certificates use Let's Encrypt HTTP-01, which requires the deployment hostname
+to resolve publicly and port 80 to reach the server. Generated `sslip.io` names use public interface
+addresses; private and Tailscale/CGNAT addresses are excluded. Behind provider NAT, enter a domain
+pointing to the provider's public IP yourself.
+
+When nginx already serves port 80, the dashboard issues through a shared webroot while nginx keeps
+serving traffic. It checks the challenge route before ordering and removes temporary configuration
+afterward. Standalone Certbot is used only when port 80 is free. If another server owns that port,
+configure its challenge routing or provision a DNS-01 certificate; the dashboard reports the owner
+instead of stopping it.
+
+If an older deployment has a hostname containing a Tailscale address such as
+`100-110-34-31.sslip.io`, change its domain and create a new release. Retrying the failed run keeps its
+original hostname. For private access, use a domain you control and provision its certificate through
+DNS-01 on the Certificates page before deploying. An `sslip.io` name pointing at a Tailscale address
+cannot pass the public HTTP challenge.
+
+To remove a project from the active deployment list, open it and choose **Delete project** in the
+header. Confirmation archives its history and disables automatic deployments. Running containers,
+routes and data are retained; use **Configuration → Archive & managed resources** to preview and
+remove managed resources separately.
+
 ## Version, and updating
 
-This is **0.6.6**: the panel as a finished single-server product — every page in the tour
+This is **0.6.7**: the panel as a finished single-server product — every page in the tour
 above is built and in use. It is not 1.0 because the API is still moving. 1.0 is when it
 stops. Every release is in [CHANGELOG.md](CHANGELOG.md), and in the dashboard itself.
 
@@ -667,3 +720,10 @@ not restore.
 [AGPL-3.0](LICENSE). Run it, change it, distribute it, but if you run a modified version as a
 network service, publish your changes. Contributions are welcome under the terms in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Dashboard installation, restart, rebuild and self-update automatically move ports occupied by other
+services and save the selected ports in `.env`; the startup log prints the dashboard's current address.
+Container creation and Compose startup also retry published-port conflicts while preserving bind scope
+and internal ports. Actual connection ports appear in runtime details. Compose conflict recovery requires
+Compose 2.24.4 or newer. This does not change ACME's public validation ports or ports configured inside
+host-network applications.

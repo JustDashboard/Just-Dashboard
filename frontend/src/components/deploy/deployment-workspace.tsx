@@ -18,9 +18,9 @@ import {
   RefreshClockwise,
   RotateCounterClockwise,
   SettingsSliders,
-  Warning,
+  Trash,
 } from "@/components/icons"
-import { get, post } from "@/lib/api"
+import { del, get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -30,14 +30,15 @@ import type {
   DeploymentRelease,
   DeploymentRunSnapshot,
   DeploymentSummary,
+  DeploymentOperations,
   DeploymentRuntimeServices,
   DeployCommit,
   DeployProject,
   EnvVar,
 } from "@/lib/types"
 import { Page, PageHeader, Metric, MetricStrip } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import {
   DeploymentStatus,
   HealthStatus,
@@ -45,7 +46,6 @@ import {
   ReleasePath,
   humanize,
   reachableAt,
-  releaseLabel,
 } from "@/components/deploy/deployment-ui"
 import {
   NormalizedConfigurationTab,
@@ -55,9 +55,23 @@ import {
 } from "@/components/deploy/deployment-configuration"
 import { DeploymentAutomation } from "@/components/deploy/deployment-automation"
 import { DeploymentRuntime } from "@/components/deploy/deployment-runtime"
-import { Badge } from "@/components/ui/badge"
+import {
+  DeploymentDependencies,
+  DeploymentDomains,
+  DeploymentFindings,
+  DeploymentStorage,
+} from "@/components/deploy/deployment-operations"
+import { DeploymentReleaseComparison } from "@/components/deploy/deployment-release-comparison"
+import { DeploymentRunMetrics } from "@/components/deploy/deployment-run-metrics"
+import {
+  GameConsoleTab,
+  GamePlayersTab,
+  GameSettingsTab,
+} from "@/components/deploy/deployment-game"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 
 type DeploymentDetail = {
   project: DeployProject
@@ -80,6 +94,7 @@ const VALID_TABS = new Set([
   "metrics",
   "console",
   "players",
+  "settings",
 ])
 
 export function DeploymentWorkspace() {
@@ -87,6 +102,7 @@ export function DeploymentWorkspace() {
   const search = useSearchParams()
   const router = useRouter()
   const { can } = useAuth()
+  const deletion = useConfirm()
   const projectID = Number(route.id)
   const [archived, setArchived] = useState(false)
   const requestedTab = search.get("tab") ?? "overview"
@@ -114,6 +130,14 @@ export function DeploymentWorkspace() {
     5000,
     [projectID, environmentID],
     { enabled: projectID > 0 && environmentID > 0 },
+  )
+  // Operational evidence reads five feature owners, so it polls on its own
+  // slower cadence rather than riding the five-second workspace poll.
+  const operations = usePoll(
+    (signal) => get<DeploymentOperations>(`/deploy/${projectID}/operations`, undefined, signal),
+    20000,
+    [projectID],
+    { enabled: Number.isInteger(projectID) && projectID > 0 && !archived },
   )
   const [starting, setStarting] = useState(false)
 
@@ -185,32 +209,18 @@ export function DeploymentWorkspace() {
             </span>
           </span>
         }
-        description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>{releaseLabel(deployment)}</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              {isArchived
-                ? "Archived"
-                : deployment.pendingChanges
-                  ? "Pending deployment"
-                  : "No pending changes"}
-            </span>
-            {deployment.endpoint && (
-              <>
-                <span aria-hidden="true">·</span>
-                <a className="break-all hover:underline" href={externalURL(deployment.endpoint)}>
-                  {deployment.endpoint}
-                </a>
-              </>
-            )}
-          </span>
-        }
         actions={
           <>
+            {/* That the saved plan is ahead of what is live was the page
+                header's description. It is a state, so it is a `Status` —
+                the nav's per-tab dots say *which* tabs changed, and this says
+                that anything did. */}
+            {!isArchived && deployment.pendingChanges && (
+              <Status tone="warning" label="Pending deployment" />
+            )}
             <HealthStatus health={deployment.health} />
             {isArchived ? (
-              <Badge variant="secondary">Archived</Badge>
+              <Tag>Archived</Tag>
             ) : activeRun ? (
               <Button size="sm" asChild>
                 <Link href={`/deploy/${projectID}/runs/${activeRun.id}`}>
@@ -265,6 +275,42 @@ export function DeploymentWorkspace() {
                 <Box className="size-3.5" /> Force build
               </Button>
             )}
+            {!isArchived && can("destructive") && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={Boolean(activeRun) || starting}
+                title={
+                  activeRun
+                    ? "Wait for the active deployment to finish or cancel it first"
+                    : undefined
+                }
+                onClick={() =>
+                  deletion.confirm({
+                    title: `Delete ${project.name}`,
+                    confirmLabel: "Delete project",
+                    description: (
+                      <>
+                        <p>
+                          Remove this project from active deployments and disable its automatic
+                          deployments? Its archived history is retained.
+                        </p>
+                        <p>
+                          Running containers, routes, and persistent data remain. To remove managed
+                          resources too, use Configuration → Archive &amp; managed resources.
+                        </p>
+                      </>
+                    ),
+                    action: async () => {
+                      await del(`/deploy/${projectID}`)
+                    },
+                    onDone: () => router.push("/deploy"),
+                  })
+                }
+              >
+                <Trash className="size-3.5" /> Delete project
+              </Button>
+            )}
           </>
         }
       />
@@ -293,6 +339,8 @@ export function DeploymentWorkspace() {
           project={project}
           runs={runs.data?.runs ?? []}
           runtime={detail.data.runtime}
+          operations={operations.data}
+          operationsLoading={operations.loading}
         />
       )}
       {activeTab === "deployments" && (
@@ -349,11 +397,22 @@ export function DeploymentWorkspace() {
           normalized={normalized}
         />
       )}
-      {activeTab === "metrics" && <OwnedFeatureTab kind="metrics" deployment={deployment} />}
-      {activeTab === "console" && <OwnedFeatureTab kind="console" deployment={deployment} />}
-      {activeTab === "players" && deployment.profile === "game" && (
-        <OwnedFeatureTab kind="players" deployment={deployment} />
+      {activeTab === "metrics" && (
+        <DeploymentMetricsTab deployment={deployment} runs={runs.data?.runs ?? []} />
       )}
+      {activeTab === "console" &&
+        (deployment.profile === "game" ? (
+          <GameConsoleTab projectID={projectID} />
+        ) : (
+          <OwnedFeatureTab kind="console" deployment={deployment} />
+        ))}
+      {activeTab === "players" && deployment.profile === "game" && (
+        <GamePlayersTab projectID={projectID} />
+      )}
+      {activeTab === "settings" && deployment.profile === "game" && (
+        <GameSettingsTab projectID={projectID} />
+      )}
+      {deletion.dialog}
     </Page>
   )
 }
@@ -363,11 +422,15 @@ function Overview({
   project,
   runs,
   runtime,
+  operations,
+  operationsLoading,
 }: {
   deployment: DeploymentSummary
   project: DeployProject
   runs: DeploymentEngineRun[]
   runtime?: DeploymentRuntimeServices
+  operations?: DeploymentOperations
+  operationsLoading: boolean
 }) {
   const lastRun = runs[0] ?? deployment.lastRun
   return (
@@ -376,9 +439,6 @@ function Overview({
         <PanelHeader
           icon={CloudUpload}
           title="Release path"
-          description={
-            lastRun ? `Last deployment ${relativeTime(lastRun.requestedAt)}` : "Not deployed yet"
-          }
           actions={
             lastRun && (
               <Button variant="outline" size="xs" asChild>
@@ -401,24 +461,7 @@ function Overview({
         </PanelBody>
       </Panel>
 
-      <Panel>
-        <PanelHeader icon={Warning} title="Current findings" />
-        <PanelBody>
-          {deployment.pendingChanges ? (
-            <Notice title="Saved changes are not live" tone="warning" icon={Warning}>
-              Plan revision {deployment.desiredRevision} has not become the live release. Review it
-              before deploying.
-            </Notice>
-          ) : (
-            <EmptyState
-              icon={Warning}
-              title="Diagnosis not available"
-              description="Cross-feature diagnosis has not been assessed. Open the runtime in Docker to review its findings."
-              className="border-0 py-6"
-            />
-          )}
-        </PanelBody>
-      </Panel>
+      <DeploymentFindings diagnosis={operations?.diagnosis} loading={operationsLoading} />
 
       <DeploymentRuntime runtime={runtime} />
       <SummaryPanel
@@ -432,36 +475,23 @@ function Overview({
         ]}
         href={`/deploy/${deployment.id}?tab=automations`}
       />
-      <SummaryPanel
-        icon={Globe}
-        title="Domains & ports"
-        rows={[
-          ["Public route", deployment.endpoint || "None"],
-          ["Host port", deployment.hostPort ? String(deployment.hostPort) : "None"],
-          ["HTTPS", deployment.endpoint?.startsWith("https://") ? "Configured" : "Not observed"],
-        ]}
-        href={`/deploy/${deployment.id}?tab=network`}
-      />
-      <SummaryPanel
-        icon={Database}
-        title="Storage & backups"
-        rows={[
-          ["Persistent storage", "Not observed"],
-          ["Latest backup", "Not observed"],
-          ["Ownership", "Available with managed runtime plans"],
-        ]}
-        href={`/deploy/${deployment.id}?tab=storage`}
-      />
+      <DeploymentDomains operations={operations} />
+      <DeploymentStorage operations={operations} />
+      <DeploymentDependencies operations={operations} />
       <SummaryPanel
         icon={Monitoring}
         title="Metrics since release"
         rows={[
-          ["CPU", "Not attributed"],
-          ["Memory", "Not attributed"],
-          ["Disk / network", "Not attributed"],
+          [
+            "Attribution",
+            lastRun
+              ? "Recorded per container around activation"
+              : "Available after the first deployment",
+          ],
+          ["Host history", "Retained by the Metrics module"],
         ]}
-        href="/"
-        actionLabel="Open server metrics"
+        href={`/deploy/${deployment.id}?tab=metrics`}
+        actionLabel="Open release metrics"
       />
       <SummaryPanel
         icon={Logs}
@@ -479,6 +509,42 @@ function Overview({
       />
     </div>
   )
+}
+
+/**
+ * Release metrics are the run's own comparison around activation. The Metrics
+ * module remains the owner of host history; this tab links into it rather than
+ * charting a second copy.
+ */
+function DeploymentMetricsTab({
+  deployment,
+  runs,
+}: {
+  deployment: DeploymentSummary
+  runs: DeploymentEngineRun[]
+}) {
+  const lastRun = runs[0] ?? deployment.lastRun
+  if (!lastRun) {
+    return (
+      <Panel>
+        <PanelHeader icon={Monitoring} title="Metrics around activation" />
+        <PanelBody>
+          <EmptyState
+            icon={Monitoring}
+            title="No deployment to attribute"
+            description="Release metrics compare the ten minutes before an activation with the ten minutes after it. The first deployment records the first comparison."
+            className="border-0 py-6"
+            action={
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/metrics">Open Metrics</Link>
+              </Button>
+            }
+          />
+        </PanelBody>
+      </Panel>
+    )
+  }
+  return <DeploymentRunMetrics projectID={deployment.id} runID={lastRun.id} />
 }
 
 function LastReleasePath({ projectID, runID }: { projectID: number; runID: number }) {
@@ -523,7 +589,7 @@ function SummaryPanel({
         {rows.map(([label, value]) => (
           <div key={label} className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)] gap-3 text-xs">
             <span className="text-muted-foreground">{label}</span>
-            <span className="min-w-0 break-words text-right font-medium" title={value}>
+            <span className="min-w-0 text-right font-medium break-words" title={value}>
               {value}
             </span>
           </div>
@@ -559,7 +625,6 @@ function DeploymentsTab({
         <PanelHeader
           icon={CloudUpload}
           title="Deployment history"
-          description="Every run has a permanent URL, even after it finishes."
         />
         <PanelBody flush>
           {runs.length === 0 ? (
@@ -575,7 +640,7 @@ function DeploymentsTab({
                 <li key={run.id}>
                   <Link
                     href={`/deploy/${project.id}/runs/${run.id}`}
-                    className="grid min-h-14 min-w-0 gap-1 px-4 py-3 hover:bg-accent/45 sm:grid-cols-[8rem_minmax(0,1fr)_8rem_auto] sm:items-center sm:gap-4"
+                    className="grid min-h-14 min-w-0 gap-1 px-4 py-3 hover:bg-row-hover sm:grid-cols-[8rem_minmax(0,1fr)_8rem_auto] sm:items-center sm:gap-4"
                   >
                     <span className="font-mono text-xs font-medium">Run #{run.id}</span>
                     <span className="min-w-0 truncate text-xs text-muted-foreground">
@@ -593,6 +658,13 @@ function DeploymentsTab({
         </PanelBody>
       </Panel>
       {legacy && <RollbackPanel project={project} active={active} />}
+      {!legacy && deployment.liveReleaseId && deployment.environmentId > 0 && (
+        <DeploymentReleaseComparison
+          projectID={project.id}
+          environmentID={deployment.environmentId}
+          releaseID={deployment.liveReleaseId}
+        />
+      )}
       {!legacy && (
         <ReleaseRecoveryPanel
           project={project}
@@ -628,20 +700,19 @@ function ReleaseRecoveryPanel({
         <PanelHeader
           icon={RotateCounterClockwise}
           title="Immutable releases"
-          description="Roll back by reactivating a retained artifact through the same checks and cutover path."
         />
         <PanelBody className="space-y-2">
           {loading && releases.length === 0 && (
             <p className="text-xs text-muted-foreground">Loading retained releases…</p>
           )}
           {releases.map((release) => (
-            <div
+            <Group
               key={release.id}
-              className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-hairline p-3"
+              className="flex min-w-0 flex-wrap items-center justify-between gap-3"
             >
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium">Release #{release.number}</p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                <p className="text-body font-medium">Release #{release.number}</p>
+                <p className="truncate font-mono text-hint text-muted-foreground">
                   {release.sourceRevision?.slice(0, 12) ||
                     release.imageDigest?.slice(0, 19) ||
                     release.configDigest.slice(0, 19)}{" "}
@@ -649,7 +720,7 @@ function ReleaseRecoveryPanel({
                 </p>
               </div>
               {release.id === deployment.liveReleaseId ? (
-                <Badge variant="success">Live</Badge>
+                <Status verdict="ok" label="Live" />
               ) : release.state === "retained" && can("destructive") ? (
                 <Button
                   size="sm"
@@ -678,9 +749,9 @@ function ReleaseRecoveryPanel({
                   <RotateCounterClockwise className="size-3.5" /> Roll back
                 </Button>
               ) : (
-                <Badge variant="secondary">{humanize(release.state)}</Badge>
+                <span className="text-xs text-muted-foreground">{humanize(release.state)}</span>
               )}
-            </div>
+            </Group>
           ))}
           {!loading && releases.length === 0 && (
             <p className="text-xs text-muted-foreground">
@@ -709,7 +780,6 @@ function RollbackPanel({ project, active }: { project: DeployProject; active: bo
         <PanelHeader
           icon={RotateCounterClockwise}
           title="Recovery"
-          description="Rebuild an older Git commit through the same persistent compatibility pipeline."
         />
         <PanelBody className="space-y-2">
           {commits.loading && !commits.data && (
@@ -717,18 +787,18 @@ function RollbackPanel({ project, active }: { project: DeployProject; active: bo
           )}
           {commits.error && <ErrorState error={commits.error} />}
           {commits.data?.map((commit) => (
-            <div
+            <Group
               key={commit.sha}
-              className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-hairline p-3"
+              className="flex min-w-0 flex-wrap items-center justify-between gap-3"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px]">{commit.subject}</p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                <p className="truncate text-body">{commit.subject}</p>
+                <p className="truncate font-mono text-hint text-muted-foreground">
                   {commit.short} · {commit.author} · {relativeTime(commit.date)}
                 </p>
               </div>
               {commit.sha === project.currentSha ? (
-                <Badge variant="success">Current</Badge>
+                <Status verdict="ok" label="Current" />
               ) : (
                 can("destructive") && (
                   <Button
@@ -768,11 +838,9 @@ function RollbackPanel({ project, active }: { project: DeployProject; active: bo
                   </Button>
                 )
               )}
-            </div>
+            </Group>
           ))}
-          {commits.data?.length === 0 && (
-            <p className="text-xs text-muted-foreground">No recoverable commits were found.</p>
-          )}
+          {commits.data?.length === 0 && <EmptyNote>No recoverable commits were found.</EmptyNote>}
         </PanelBody>
       </Panel>
       {dialog}
@@ -830,7 +898,6 @@ function LegacyVariablesTab({ projectID }: { projectID: number }) {
       <PanelHeader
         icon={Key}
         title="Variables"
-        description="Values stay masked here. Reading plaintext uses the separate audited reveal endpoint."
       />
       <PanelBody flush>
         {variables.loading && !variables.data ? (
@@ -847,22 +914,22 @@ function LegacyVariablesTab({ projectID }: { projectID: number }) {
             className="m-4"
           />
         ) : (
-          <dl className="divide-y divide-hairline">
+          <ul className="divide-y divide-hairline">
             {variables.data?.map((variable) => (
-              <div
+              <li
                 key={variable.key}
                 className="grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-2.5"
               >
                 <div className="min-w-0">
-                  <dt className="truncate font-mono text-xs font-medium">{variable.key}</dt>
-                  <dd className="text-[11px] text-muted-foreground">
+                  <p className="truncate font-mono text-xs font-medium">{variable.key}</p>
+                  <p className="text-hint text-muted-foreground">
                     Updated {relativeTime(variable.updatedAt)}
-                  </dd>
+                  </p>
                 </div>
-                <dd className="font-mono text-xs text-muted-foreground">{variable.masked}</dd>
-              </div>
+                <span className="font-mono text-xs text-muted-foreground">{variable.masked}</span>
+              </li>
             ))}
-          </dl>
+          </ul>
         )}
       </PanelBody>
     </Panel>
@@ -945,6 +1012,3 @@ function OwnedFeatureTab({
   )
 }
 
-function externalURL(endpoint: string) {
-  return /^https?:\/\//i.test(endpoint) ? endpoint : `https://${endpoint}`
-}

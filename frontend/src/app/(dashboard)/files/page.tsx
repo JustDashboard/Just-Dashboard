@@ -44,13 +44,14 @@ import { FileTree } from "@/components/files/file-tree"
 import { GridView } from "@/components/files/grid-view"
 import { ImageEditorSheet } from "@/components/files/image-editor"
 import { PathBar } from "@/components/files/path-bar"
+import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PlacesRail } from "@/components/files/places-rail"
 import { PreviewPanel } from "@/components/files/preview-panel"
 import { QuickOpen } from "@/components/files/quick-open"
 import { isImage, type FileActions } from "@/components/files/file-actions"
 import { usePrompt } from "@/components/files/prompt-dialog"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
@@ -64,13 +65,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -497,7 +491,6 @@ export default function FilesPage() {
       <PageHeader
         eyebrow="Access"
         title="Files"
-        description="Browse, preview, edit, organise and transfer files on the host"
         actions={
           <>
             {/* Edits made here are committed somewhere else, so the account
@@ -508,7 +501,7 @@ export default function FilesPage() {
                 <Button variant="outline" size="sm" onClick={() => setQuickOpen(true)}>
                   <MagnifyingGlass className="size-4" />
                   Find
-                  <kbd className="ml-1 hidden rounded border border-hairline px-1 text-[10px] text-muted-foreground sm:inline">
+                  <kbd className="ml-1 hidden rounded-sm border border-hairline px-1 text-micro text-muted-foreground sm:inline">
                     ⌃P
                   </kbd>
                 </Button>
@@ -531,7 +524,9 @@ export default function FilesPage() {
                   <SidebarLeft className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{showRail ? "Hide the rail" : "Show places and folders"}</TooltipContent>
+              <TooltipContent>
+                {showRail ? "Hide the rail" : "Show places and folders"}
+              </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -612,26 +607,26 @@ export default function FilesPage() {
                 control twice on one screen reads as a rendering bug. */}
             <div className="flex min-h-0 flex-1 flex-col">
               {railTree && (
-              <FileTree
-                root={railTree}
-                statusMap={{}}
-                canWrite={canWrite}
-                canDelete={canDestruct}
-                activeDir={path ?? undefined}
-                onNavigate={navigate}
-                onOpenFile={(p) => setEditing(p)}
-                onConfirm={(req) =>
-                  confirm({
-                    title: req.title,
-                    description: req.body,
-                    confirmLabel: req.confirmLabel,
-                    action: async () => {
-                      await req.run()
-                    },
-                  })
-                }
-                onChanged={refresh}
-              />
+                <FileTree
+                  root={railTree}
+                  statusMap={{}}
+                  canWrite={canWrite}
+                  canDelete={canDestruct}
+                  activeDir={path ?? undefined}
+                  onNavigate={navigate}
+                  onOpenFile={(p) => setEditing(p)}
+                  onConfirm={(req) =>
+                    confirm({
+                      title: req.title,
+                      description: req.body,
+                      confirmLabel: req.confirmLabel,
+                      action: async () => {
+                        await req.run()
+                      },
+                    })
+                  }
+                  onChanged={refresh}
+                />
               )}
             </div>
           </Panel>
@@ -666,7 +661,7 @@ export default function FilesPage() {
             </div>
             <div className="flex shrink-0 items-center gap-3">
               {listing.data && (
-                <span className="numeric text-[11px] text-muted-foreground">
+                <span className="numeric text-hint text-muted-foreground">
                   {selected.length > 0
                     ? `${selected.length} selected`
                     : `${entries.length} item${entries.length === 1 ? "" : "s"}`}
@@ -685,7 +680,7 @@ export default function FilesPage() {
           </PanelToolbar>
 
           {clip && (
-            <div className="flex items-center gap-2 border-b border-hairline bg-primary/[0.06] px-3 py-1.5 text-xs">
+            <div className="flex items-center gap-2 border-b border-hairline bg-wash-primary px-3 py-1.5 text-xs">
               {clip.mode === "cut" ? (
                 <ArrowMove className="size-3.5 text-primary" />
               ) : (
@@ -714,8 +709,8 @@ export default function FilesPage() {
               the body scrolling instead the header rode away with the rows. */}
           <PanelBody flush className="relative min-h-0 flex-1 overflow-hidden">
             {dragOver && (
-              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-primary/[0.08]">
-                <span className="rounded-lg border border-dashed border-primary bg-card px-4 py-2 text-[13px] font-medium text-primary">
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-wash-primary">
+                <span className="rounded-lg border border-dashed border-primary bg-card px-4 py-2 text-body font-medium text-primary">
                   Drop to upload to {truncateMiddle(path ?? "/", 40)}
                 </span>
               </div>
@@ -725,26 +720,26 @@ export default function FilesPage() {
 
             {view === "tree" && path !== null && treeRoot && (
               <div className="h-full overflow-auto">
-              <FileTree
-                root={treeRoot}
-                statusMap={{}}
-                canWrite={canWrite}
-                canDelete={canDestruct}
-                activeDir={path}
-                onNavigate={navigate}
-                onOpenFile={(p) => setEditing(p)}
-                onConfirm={(req) =>
-                  confirm({
-                    title: req.title,
-                    description: req.body,
-                    confirmLabel: req.confirmLabel,
-                    action: async () => {
-                      await req.run()
-                    },
-                  })
-                }
-                onChanged={refresh}
-              />
+                <FileTree
+                  root={treeRoot}
+                  statusMap={{}}
+                  canWrite={canWrite}
+                  canDelete={canDestruct}
+                  activeDir={path}
+                  onNavigate={navigate}
+                  onOpenFile={(p) => setEditing(p)}
+                  onConfirm={(req) =>
+                    confirm({
+                      title: req.title,
+                      description: req.body,
+                      confirmLabel: req.confirmLabel,
+                      action: async () => {
+                        await req.run()
+                      },
+                    })
+                  }
+                  onChanged={refresh}
+                />
               </div>
             )}
 
@@ -836,7 +831,7 @@ export default function FilesPage() {
                     >
                       <TableCell />
                       <TableCell colSpan={6}>
-                        <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                        <span className="flex items-center gap-2 text-body text-muted-foreground">
                           <ArrowUp className="size-3.5" />
                           Parent directory
                         </span>
@@ -938,14 +933,17 @@ export default function FilesPage() {
 
 /** List, grid or tree — one control, because they are one decision. */
 function ViewSwitcher({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode) => void }) {
-  const options: { id: ViewMode; label: string; icon: React.ComponentType<{ className?: string }> }[] =
-    [
-      { id: "list", label: "Details", icon: ListUnordered },
-      { id: "grid", label: "Tiles", icon: GridSquare },
-      { id: "tree", label: "Tree", icon: Monorepo },
-    ]
+  const options: {
+    id: ViewMode
+    label: string
+    icon: React.ComponentType<{ className?: string }>
+  }[] = [
+    { id: "list", label: "Details", icon: ListUnordered },
+    { id: "grid", label: "Tiles", icon: GridSquare },
+    { id: "tree", label: "Tree", icon: Monorepo },
+  ]
   return (
-    <div className="raised flex items-center gap-0.5 rounded-md border bg-control p-0.5">
+    <div className="flex items-center gap-0.5 rounded-md border bg-control p-0.5">
       {options.map((option) => (
         <Tooltip key={option.id}>
           <TooltipTrigger asChild>
@@ -955,7 +953,7 @@ function ViewSwitcher({ view, onChange }: { view: ViewMode; onChange: (v: ViewMo
               aria-pressed={view === option.id}
               onClick={() => onChange(option.id)}
               className={cn(
-                "flex size-7 items-center justify-center rounded transition-colors",
+                "flex size-7 items-center justify-center rounded-sm transition-colors",
                 view === option.id
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -1118,7 +1116,7 @@ function SelectionActions({
 }) {
   return (
     <>
-      <span className="numeric text-[13px] text-muted-foreground">{count} selected</span>
+      <span className="numeric text-body text-muted-foreground">{count} selected</span>
       {canWrite && (
         <>
           <Tooltip>
@@ -1223,20 +1221,26 @@ function SymlinkDialog({
 }) {
   // The body is only mounted while open (Radix unmounts closed content), so its
   // fields start empty every time without a reset effect.
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        {open && <SymlinkBody dir={dir} onClose={() => onOpenChange(false)} onDone={onDone} />}
-      </DialogContent>
-    </Dialog>
-  )
+  return open ? (
+    <SymlinkBody
+      open={open}
+      onOpenChange={onOpenChange}
+      dir={dir}
+      onClose={() => onOpenChange(false)}
+      onDone={onDone}
+    />
+  ) : null
 }
 
 function SymlinkBody({
+  open,
+  onOpenChange,
   dir,
   onClose,
   onDone,
 }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   dir: string
   onClose: () => void
   onDone: () => void
@@ -1261,10 +1265,23 @@ function SymlinkBody({
   }
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>New symlink</DialogTitle>
-      </DialogHeader>
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      icon={Linked}
+      title="New symlink"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={create} disabled={busy || !target.trim() || !name.trim()}>
+            Create link
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-3">
         <div className="space-y-1.5">
           <label className="text-xs text-muted-foreground">Points at</label>
@@ -1285,20 +1302,12 @@ function SymlinkBody({
             placeholder="link-name"
             className="font-mono text-xs"
           />
-          <p className="font-mono text-[11px] break-all text-muted-foreground">
+          <p className="font-mono text-hint break-all text-muted-foreground">
             {join(dir, name || "…")} → {target || "…"}
           </p>
         </div>
       </div>
-      <DialogFooter>
-        <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button onClick={create} disabled={busy || !target.trim() || !name.trim()}>
-          Create link
-        </Button>
-      </DialogFooter>
-    </>
+    </Modal>
   )
 }
 
@@ -1342,65 +1351,68 @@ function SearchDialog({
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="outline" size="icon-sm" aria-label="Search inside files" onClick={() => setOpen(true)}>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Search inside files"
+            onClick={() => setOpen(true)}
+          >
             <PreviewDocument className="size-4" />
           </Button>
         </TooltipTrigger>
         <TooltipContent>Search inside file contents</TooltipContent>
       </Tooltip>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Search under {truncateMiddle(path, 40)}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <Input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && run()}
-                placeholder={content ? "Text to find inside files" : "File or directory name"}
-              />
-              <Button onClick={run} disabled={busy || !query}>
-                Search
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-[13px]">
-                <Checkbox checked={content} onCheckedChange={(v) => setContent(v === true)} />
-                Search inside file contents
-              </label>
-              <label className="flex items-center gap-2 text-[13px]">
-                <Checkbox checked={regex} onCheckedChange={(v) => setRegex(v === true)} />
-                Regular expression
-              </label>
-            </div>
-            <div className="max-h-80 space-y-0.5 overflow-auto">
-              {hits.map((hit) => (
-                <button
-                  key={`${hit.path}:${hit.line ?? 0}`}
-                  className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
-                  onClick={() => {
-                    onOpen(hit.path, hit.isDir)
-                    setOpen(false)
-                  }}
-                >
-                  <span className="block truncate font-mono text-xs">{hit.path}</span>
-                  {hit.snippet && (
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      line {hit.line}: {hit.snippet}
-                    </span>
-                  )}
-                </button>
-              ))}
-              {!busy && hits.length === 0 && query && (
-                <p className="py-4 text-center text-[13px] text-muted-foreground">No matches.</p>
-              )}
-            </div>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        size="lg"
+        title={<>Search under {truncateMiddle(path, 40)}</>}
+      >
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && run()}
+              placeholder={content ? "Text to find inside files" : "File or directory name"}
+            />
+            <Button onClick={run} disabled={busy || !query}>
+              Search
+            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-body">
+              <Checkbox checked={content} onCheckedChange={(v) => setContent(v === true)} />
+              Search inside file contents
+            </label>
+            <label className="flex items-center gap-2 text-body">
+              <Checkbox checked={regex} onCheckedChange={(v) => setRegex(v === true)} />
+              Regular expression
+            </label>
+          </div>
+          <div className="max-h-80 space-y-0.5 overflow-auto">
+            {hits.map((hit) => (
+              <button
+                key={`${hit.path}:${hit.line ?? 0}`}
+                className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
+                onClick={() => {
+                  onOpen(hit.path, hit.isDir)
+                  setOpen(false)
+                }}
+              >
+                <span className="block truncate font-mono text-xs">{hit.path}</span>
+                {hit.snippet && (
+                  <span className="block truncate text-hint text-muted-foreground">
+                    line {hit.line}: {hit.snippet}
+                  </span>
+                )}
+              </button>
+            ))}
+            {!busy && hits.length === 0 && query && <EmptyNote>No matches.</EmptyNote>}
+          </div>
+        </div>
+      </Modal>
     </>
   )
 }

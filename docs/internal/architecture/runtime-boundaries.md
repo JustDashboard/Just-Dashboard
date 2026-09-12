@@ -78,7 +78,9 @@ Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, notifications, and previews; proxy
-watching (`watched_domains`); the general `settings` key/value table; and mount, container, and host metric
+watching (`watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
+running digests and the git commit captured before every state-changing action, with environment values
+hashed rather than stored); the general `settings` key/value table; and mount, container, and host metric
 samples. The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.

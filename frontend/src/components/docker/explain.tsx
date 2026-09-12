@@ -26,7 +26,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 /** One short line under a control: what to type, or what happens if you do not. */
 export function Hint({ className, ...props }: React.ComponentProps<"p">) {
   return (
-    <p className={cn("text-[11px] leading-relaxed text-muted-foreground", className)} {...props} />
+    <p className={cn("text-hint leading-relaxed text-muted-foreground", className)} {...props} />
   )
 }
 
@@ -50,7 +50,7 @@ export function Term({ name, children }: { name: string; children?: React.ReactN
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-[13px] font-medium">{entry?.title ?? name}</p>
+        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
         <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
       </HoverCardContent>
     </HoverCard>
@@ -72,7 +72,7 @@ export function ExplainIcon({ name, className }: { name: string; className?: str
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-[13px] font-medium">{entry?.title ?? name}</p>
+        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
         <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
       </HoverCardContent>
     </HoverCard>
@@ -208,5 +208,21 @@ export const GLOSSARY: Record<string, { title: string; body: string }> = {
   writableLayer: {
     title: "The container's own filesystem",
     body: "Anything a container writes that is not in a volume goes here. It is not backed up, it is invisible to the file manager, and it is destroyed the moment the container is recreated — which includes every image update.",
+  },
+  networkMode: {
+    title: "Network mode",
+    body: '"bridge" is the normal one: the container gets its own address and reaches the outside through the server. A named network means it was put on one deliberately, so it can reach other containers there by name. "host" means it has no network of its own at all — it uses the server\'s, so every port it opens is open on the server directly, with no publishing step and nothing for the firewall\'s Docker rules to filter.',
+  },
+  hostNetwork: {
+    title: "The host network",
+    body: "Gives the container the server's own network instead of one of its own. Every port it listens on is immediately open on the server, published or not, and it can reach anything bound to 127.0.0.1 — including databases that are on loopback precisely so nothing else can reach them. Occasionally necessary, for discovery protocols and VPN software; almost never what you want otherwise.",
+  },
+  movingTag: {
+    title: "Moving tag",
+    body: 'A tag whose meaning changes — `latest`, `stable`, `3`, or no tag at all. It means whatever the publisher last pushed under that name, so two servers running "the same" tag can be running different software, and there is no earlier version to roll back to. Pinning a real version, or a digest, makes an update something you choose.',
+  },
+  containerUser: {
+    title: "User",
+    body: "Which account the program inside the container runs as. `root` is the default and means the process has full rights inside the container — which matters most where the container can reach the server's files, through a folder mount or the host network.",
   },
 }

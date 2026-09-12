@@ -9,7 +9,6 @@ export default function SecurityToolsPage() {
       <PageHeader
         eyebrow="Security"
         title="Tools"
-        description="Twenty probes that run from this server — each card keeps its own input and runs on its own."
       />
       <ToolsPanel />
     </Page>

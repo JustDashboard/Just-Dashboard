@@ -9,19 +9,11 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 /**
  * Passwords for the site form's basic-auth option.
@@ -58,7 +50,6 @@ export function AuthFilesPanel() {
         <PanelHeader
           icon={Key}
           title="Password files"
-          description="For sites put behind a login. Hashed with bcrypt here, so the password never reaches a command line."
           actions={<AuthUserDialog files={data ?? []} onDone={refresh} />}
         />
         <PanelBody className={data?.length ? "space-y-2.5" : undefined}>
@@ -76,19 +67,17 @@ export function AuthFilesPanel() {
               >
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-[13px] font-medium">{file.name}</span>
-                    <code className="font-mono text-[11px] text-muted-foreground">
-                      {file.path}
-                    </code>
+                    <span className="text-body font-medium">{file.name}</span>
+                    <code className="font-mono text-hint text-muted-foreground">{file.path}</code>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {file.users.length === 0 ? (
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-hint text-muted-foreground">
                         Empty — this file admits nobody.
                       </span>
                     ) : (
                       file.users.map((user) => (
-                        <Badge key={user} variant="outline" className="gap-1 font-normal">
+                        <Tag key={user} mono>
                           {user}
                           <button
                             type="button"
@@ -98,7 +87,7 @@ export function AuthFilesPanel() {
                           >
                             <UserMinus className="size-3" />
                           </button>
-                        </Badge>
+                        </Tag>
                       ))
                     )}
                   </div>
@@ -161,21 +150,29 @@ function AuthUserDialog({ files, onDone }: { files: AuthFile[]; onDone: () => vo
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Plus className="size-4" />
-          Add user
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add a login</DialogTitle>
-          <DialogDescription>
-            Creates the password file if it does not exist, and replaces the entry if the user is
-            already in it.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus className="size-4" />
+        Add user
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        size="sm"
+        title="Add a login"
+        description="Creates the password file if it does not exist, and replaces the entry if the user is
+              already in it."
+        footer={
+          <>
+            <Button
+              onClick={submit}
+              disabled={busy || !file.trim() || !user.trim() || password.length < 8}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="auth-file">File</Label>
@@ -206,21 +203,13 @@ function AuthUserDialog({ files, onDone }: { files: AuthFile[]; onDone: () => vo
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"
             />
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
+            <p className="text-hint leading-relaxed text-muted-foreground">
               At least 8 characters, at most 72 — bcrypt truncates anything longer, which would
               quietly make it a different password from the one you typed.
             </p>
           </div>
         </div>
-        <DialogFooter>
-          <Button
-            onClick={submit}
-            disabled={busy || !file.trim() || !user.trim() || password.length < 8}
-          >
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

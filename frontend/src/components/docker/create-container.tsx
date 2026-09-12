@@ -19,10 +19,11 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import { parseDockerRun, suggestName } from "@/lib/docker-run"
-import { TEMPLATES, TEMPLATE_CATEGORIES, type Template } from "@/lib/docker-templates"
+import { parseDockerRun, suggestName, type ParsedRun } from "@/lib/docker-run"
+import { usePoll } from "@/hooks/use-poll"
 import type {
   ContainerSpec,
+  DockerTemplate,
   CreateResult,
   DockerNetwork,
   DockerVolume,
@@ -33,15 +34,15 @@ import type {
 import { useAuth } from "@/hooks/use-auth"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { SidePanel } from "@/components/side-panel"
-import { Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
 import { Field, Hint, Term } from "@/components/docker/explain"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Well } from "@/components/panel"
+import { Tag } from "@/components/tag"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -50,6 +51,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { copyText } from "@/lib/clipboard"
+import { ChoiceCard } from "@/components/choice-card"
 
 /**
  * Running something new — the thing this dashboard could not do at all.
@@ -72,6 +75,13 @@ import {
  */
 
 type Mode = "choose" | "form"
+
+const TEMPLATE_CATEGORY_LABEL: Record<string, string> = {
+  http: "Web servers",
+  database: "Databases",
+  tool: "Tools",
+  automation: "Automation",
+}
 
 export function CreateContainerPanel({
   open,
@@ -130,6 +140,13 @@ function CreateContainerBody({
   const [mode, setMode] = useState<Mode>(initialSpec ? "form" : "choose")
   const [spec, setSpec] = useState<ContainerSpec>(initialSpec ?? blankSpec())
   const [parseWarnings, setParseWarnings] = useState<string[]>([])
+  // Kept apart from the warnings: an unsupported flag is not a parse failure,
+  // it is a statement that the container about to be created is not the one
+  // the pasted command describes. And the command itself is kept so the
+  // operator can go back to it — the form is a reading of it, not a
+  // replacement for it.
+  const [unsupported, setUnsupported] = useState<string[]>([])
+  const [original, setOriginal] = useState("")
   const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState("setup")
 
@@ -138,9 +155,14 @@ function CreateContainerBody({
     [],
   )
 
-  const start = (next: ContainerSpec, warnings: string[] = []) => {
+  const start = (
+    next: ContainerSpec,
+    parsed?: Pick<ParsedRun, "warnings" | "unsupported" | "original">,
+  ) => {
     setSpec(next)
-    setParseWarnings(warnings)
+    setParseWarnings(parsed?.warnings ?? [])
+    setUnsupported(parsed?.unsupported ?? [])
+    setOriginal(parsed?.original ?? "")
     setMode("form")
     setTab("setup")
   }
@@ -202,8 +224,13 @@ function CreateContainerBody({
                 />
                 Start it now
               </label>
-              <Button size="sm" onClick={create} disabled={busy || !spec.image.trim()}>
-                {busy ? <Spinner className="size-4" /> : <CloudUpload className="size-4" />}
+              <Button
+                size="sm"
+                onClick={create}
+                disabled={busy || !spec.image.trim()}
+                pending={busy}
+              >
+                <CloudUpload className="size-4" />
                 {spec.start ? "Create and start" : "Create"}
               </Button>
             </div>
@@ -215,6 +242,25 @@ function CreateContainerBody({
         <ChooseStart onPick={start} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
+          {/*
+            An unsupported flag is the one thing here that must never be
+            silent. `--gpus all` dropped without a word produces a container
+            that starts and then has no GPU, and the operator finds out from
+            the application failing rather than from the form.
+          */}
+          {unsupported.length > 0 && (
+            <Notice title="These flags are not in the visual editor" icon={Warning} tone="warning">
+              <ul className="ml-4 list-disc space-y-1 font-mono text-hint">
+                {unsupported.map((flag, i) => (
+                  <li key={i}>{flag}</li>
+                ))}
+              </ul>
+              <p className="mt-2">
+                They were understood and left out, so the container this form creates is not the one
+                the command describes. Run the original command in a shell if any of them matters.
+              </p>
+            </Notice>
+          )}
           {parseWarnings.length > 0 && (
             <Notice title="Read before creating" icon={Warning} tone="warning">
               <ul className="ml-4 list-disc space-y-1">
@@ -223,6 +269,16 @@ function CreateContainerBody({
                 ))}
               </ul>
             </Notice>
+          )}
+          {original && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                The command you pasted
+              </summary>
+              <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-hint whitespace-pre">
+                {original}
+              </pre>
+            </details>
           )}
           <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
             <TabsList className="w-fit shrink-0">
@@ -248,23 +304,46 @@ function CreateContainerBody({
 
 /* ------------------------------------------------------------------ start -- */
 
-function ChooseStart({ onPick }: { onPick: (spec: ContainerSpec, warnings?: string[]) => void }) {
+function ChooseStart({
+  onPick,
+}: {
+  onPick: (
+    spec: ContainerSpec,
+    parsed?: Pick<ParsedRun, "warnings" | "unsupported" | "original">,
+  ) => void
+}) {
   const [pasted, setPasted] = useState("")
-  const [category, setCategory] = useState<Template["category"]>("web")
+  // The starting points come from the server's reviewed blueprint catalogue,
+  // so the container form and Deployments offer the same images, ports and
+  // storage rather than two lists that drift apart.
+  const templates = usePoll(
+    (signal) => get<DockerTemplate[]>("/docker/templates", undefined, signal),
+    0,
+    [],
+  )
+  const categories = useMemo(() => {
+    const seen: DockerTemplate["category"][] = []
+    for (const template of templates.data ?? []) {
+      if (!seen.includes(template.category)) seen.push(template.category)
+    }
+    return seen
+  }, [templates.data])
+  const [category, setCategory] = useState<DockerTemplate["category"] | null>(null)
+  const active = category ?? categories[0] ?? "http"
 
   const convert = () => {
-    const { spec, warnings } = parseDockerRun(pasted)
-    if (!spec.image) {
+    const parsed = parseDockerRun(pasted)
+    if (!parsed.spec.image) {
       notify.error(
         "That does not look like a docker run command",
-        warnings[0] ?? "It should end with an image name.",
+        parsed.warnings[0] ?? "It should end with an image name.",
       )
       return
     }
     // A pasted command usually has no restart policy because it was written
     // for a one-off run. On a server, defaulting to "no" means the service
     // does not come back after a reboot, which is never what was meant.
-    onPick({ ...spec, restartPolicy: spec.restartPolicy || "unless-stopped" }, warnings)
+    onPick({ ...parsed.spec, restartPolicy: parsed.spec.restartPolicy || "unless-stopped" }, parsed)
   }
 
   return (
@@ -272,7 +351,7 @@ function ChooseStart({ onPick }: { onPick: (spec: ContainerSpec, warnings?: stri
       <section className="space-y-2">
         <div className="flex items-center gap-2">
           <Clipboard className="size-3.5 text-muted-foreground" />
-          <h3 className="text-[13px] font-medium">Paste a command you found</h3>
+          <h3 className="text-body font-medium">Paste a command you found</h3>
         </div>
         <Hint>
           Most projects document themselves as a <code className="font-mono">docker run</code> line.
@@ -298,7 +377,7 @@ function ChooseStart({ onPick }: { onPick: (spec: ContainerSpec, warnings?: stri
       <section className="space-y-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-3.5 text-muted-foreground" />
-          <h3 className="text-[13px] font-medium">Start from something common</h3>
+          <h3 className="text-body font-medium">Start from something common</h3>
         </div>
         <Hint>
           Filled in with the ports, storage and settings each of these actually needs. Every one is
@@ -306,48 +385,47 @@ function ChooseStart({ onPick }: { onPick: (spec: ContainerSpec, warnings?: stri
           reverse proxy rather than publishing it directly.
         </Hint>
         <div className="flex flex-wrap gap-1.5">
-          {TEMPLATE_CATEGORIES.map((c) => (
+          {categories.map((id) => (
             <Button
-              key={c.id}
+              key={id}
               size="xs"
-              variant={category === c.id ? "secondary" : "ghost"}
-              onClick={() => setCategory(c.id)}
+              variant={active === id ? "secondary" : "ghost"}
+              onClick={() => setCategory(id)}
             >
-              {c.label}
+              {TEMPLATE_CATEGORY_LABEL[id] ?? id}
             </Button>
           ))}
         </div>
         <div className="grid gap-2 sm:grid-cols-2 [&>*]:min-w-0">
-          {TEMPLATES.filter((t) => t.category === category).map((template) => (
-            <button
-              key={template.id}
-              onClick={() => onPick(template.spec())}
-              className="raised min-w-0 rounded-lg border border-hairline bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-[var(--row-hover)]"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[13px] font-medium">{template.name}</span>
-                <Badge variant="outline" className="shrink-0 font-mono text-[10px] font-normal">
-                  {template.spec().image}
-                </Badge>
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                {template.blurb}
-              </p>
-              {template.requires && (
-                <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-warning">
-                  <Warning className="mt-px size-3 shrink-0" />
-                  {template.requires}
+          {(templates.data ?? [])
+            .filter((template) => template.category === active)
+            .map((template) => (
+              <ChoiceCard key={template.id} onClick={() => onPick(template.spec)} className="gap-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-body font-medium">{template.name}</span>
+                  <Tag mono>{template.spec.image}</Tag>
+                </div>
+                <p className="mt-1 text-hint leading-relaxed text-muted-foreground">
+                  {template.blurb}
                 </p>
-              )}
-            </button>
-          ))}
+                {template.requires && (
+                  <p className="mt-1.5 flex items-start gap-1.5 text-hint leading-relaxed text-warning">
+                    <Warning className="mt-px size-3 shrink-0" />
+                    {template.requires}
+                  </p>
+                )}
+              </ChoiceCard>
+            ))}
         </div>
+        {templates.data?.length === 0 && (
+          <Hint>The reviewed catalogue is empty on this install.</Hint>
+        )}
       </section>
 
       <section className="space-y-2">
         <div className="flex items-center gap-2">
           <Box className="size-3.5 text-muted-foreground" />
-          <h3 className="text-[13px] font-medium">Start from scratch</h3>
+          <h3 className="text-body font-medium">Start from scratch</h3>
         </div>
         <Button size="sm" variant="outline" onClick={() => onPick(blankSpec())}>
           <Plus className="size-4" />
@@ -462,7 +540,7 @@ function SectionHeading({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon className="size-3.5 text-muted-foreground" />
-          <h3 className="text-[13px] font-medium">
+          <h3 className="text-body font-medium">
             {term ? <Term name={term}>{title}</Term> : title}
           </h3>
         </div>
@@ -473,10 +551,39 @@ function SectionHeading({
   )
 }
 
+/**
+ * Where a published port should be reachable from, offered as a choice rather
+ * than as an address.
+ *
+ * "Bind address" is a question about netmasks; "who should be able to reach
+ * this" is a question about intent, and they have the same answer. The default
+ * is the safe one — a service that needs to be public almost always wants to
+ * be public *through the reverse proxy*, which reaches it on loopback like
+ * anything else on this server.
+ *
+ * The LAN option is populated from the machine's actual addresses rather than
+ * offered as an abstraction: "Local network" with nothing behind it would be
+ * the dashboard guessing which interface somebody meant.
+ */
 function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
   const ports = spec.ports ?? []
   const update = (i: number, next: Partial<PortMapping>) =>
     patch({ ports: ports.map((p, idx) => (idx === i ? { ...p, ...next } : p)) })
+
+  // The host's own addresses, so "one interface" names a real one rather than
+  // an abstraction the dashboard would have to guess at. Read once, like the
+  // form's other pickers; a failure here costs the LAN options and nothing
+  // else.
+  const net = useHostAddresses()
+
+  const bindable = (net?.interfaces ?? [])
+    .filter((iface) => iface.up && !iface.loopback)
+    .flatMap((iface) =>
+      iface.addresses
+        .map((cidr) => cidr.split("/")[0])
+        .filter((address) => address.includes(".") && !address.startsWith("169.254"))
+        .map((address) => ({ address, name: iface.name })),
+    )
 
   return (
     <section className="space-y-2.5">
@@ -514,7 +621,7 @@ function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
       {ports.map((port, i) => (
         <div key={i} className="flex flex-wrap items-end gap-2">
           <div className="min-w-32 flex-1">
-            <Label className="text-[10px] text-muted-foreground">Reachable from</Label>
+            <Label className="text-micro text-muted-foreground">Reachable from</Label>
             <Select
               value={port.hostIp || "any"}
               onValueChange={(v) => update(i, { hostIp: v === "any" ? "" : v })}
@@ -524,12 +631,17 @@ function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="127.0.0.1">This server only</SelectItem>
-                <SelectItem value="any">Anywhere (every interface)</SelectItem>
+                {bindable.map((iface) => (
+                  <SelectItem key={iface.address} value={iface.address}>
+                    {iface.address} ({iface.name}) — whatever can reach that address
+                  </SelectItem>
+                ))}
+                <SelectItem value="any">Every interface</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="w-24">
-            <Label className="text-[10px] text-muted-foreground">Server port</Label>
+            <Label className="text-micro text-muted-foreground">Server port</Label>
             <Input
               type="number"
               className="h-8 text-xs"
@@ -540,7 +652,7 @@ function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
           </div>
           <span className="pb-2 text-xs text-muted-foreground">→</span>
           <div className="w-24">
-            <Label className="text-[10px] text-muted-foreground">Container port</Label>
+            <Label className="text-micro text-muted-foreground">Container port</Label>
             <Input
               type="number"
               className="h-8 text-xs"
@@ -549,7 +661,7 @@ function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
             />
           </div>
           <div className="w-20">
-            <Label className="text-[10px] text-muted-foreground">Protocol</Label>
+            <Label className="text-micro text-muted-foreground">Protocol</Label>
             <Select
               value={port.protocol || "tcp"}
               onValueChange={(v) => update(i, { protocol: v })}
@@ -576,9 +688,17 @@ function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
       ))}
       {ports.some((p) => p.hostPort > 0 && !p.hostIp) && (
         <Notice title="Published on every interface" icon={ShieldOff} tone="warning">
-          Docker publishes ports with NAT rules that are consulted before the firewall&apos;s own,
-          so this will be reachable from anywhere that can route to this server — even if the
-          firewall appears to deny it.
+          <p>
+            Docker publishes ports with NAT rules that are consulted before the firewall&apos;s own,
+            so this will be reachable from anywhere that can route to this server — even if the
+            firewall appears to deny it. Closing it later means changing the binding, not adding a
+            firewall rule.
+          </p>
+          <p className="mt-1">
+            If the internet needs to reach this, the usual answer is still 127.0.0.1 with a reverse
+            proxy site in front: the proxy reaches it like anything else on this server, and its
+            TLS, logging and access rules then apply.
+          </p>
         </Notice>
       )}
     </section>
@@ -632,7 +752,7 @@ function MountEditor({
         <div key={i} className="space-y-1.5 rounded-lg border border-hairline p-2.5">
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-44">
-              <Label className="text-[10px] text-muted-foreground">Kind</Label>
+              <Label className="text-micro text-muted-foreground">Kind</Label>
               <Select
                 value={mount.type}
                 onValueChange={(v) => update(i, { type: v as MountSpec["type"] })}
@@ -651,11 +771,11 @@ function MountEditor({
             </div>
             {mount.type !== "tmpfs" && (
               <div className="min-w-40 flex-1">
-                <Label className="text-[10px] text-muted-foreground">
+                <Label className="text-micro text-muted-foreground">
                   {mount.type === "bind" ? "Folder on the server" : "Volume name"}
                 </Label>
                 <Input
-                  className="h-8 text-xs font-mono"
+                  className="h-8 font-mono text-xs"
                   spellCheck={false}
                   list={mount.type === "volume" ? "docker-volume-names" : undefined}
                   value={mount.source ?? ""}
@@ -665,7 +785,7 @@ function MountEditor({
               </div>
             )}
             <div className="min-w-40 flex-1">
-              <Label className="text-[10px] text-muted-foreground">Path inside the container</Label>
+              <Label className="text-micro text-muted-foreground">Path inside the container</Label>
               <Input
                 className="h-8 font-mono text-xs"
                 spellCheck={false}
@@ -674,7 +794,7 @@ function MountEditor({
                 onChange={(e) => update(i, { target: e.target.value })}
               />
             </div>
-            <label className="flex h-8 cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+            <label className="flex h-8 cursor-pointer items-center gap-1.5 text-hint text-muted-foreground">
               <Switch
                 checked={mount.readOnly ?? false}
                 onCheckedChange={(v) => update(i, { readOnly: v })}
@@ -1050,12 +1170,7 @@ function CommandPreview({ spec }: { spec: ContainerSpec }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature])
 
-  const copy = (text: string, what: string) => {
-    navigator.clipboard.writeText(text).then(
-      () => notify.success(`${what} copied`),
-      () => notify.error("Could not copy"),
-    )
-  }
+  const copy = (text: string, what: string) => void copyText(text, `${what} copied`)
 
   return (
     <div className="space-y-4">
@@ -1115,6 +1230,29 @@ function CommandPreview({ spec }: { spec: ContainerSpec }) {
  * volume appearing under the cursor mid-edit would be worse than a list that
  * is thirty seconds stale.
  */
+type HostNetwork = {
+  interfaces: { name: string; addresses: string[]; loopback: boolean; up: boolean }[]
+}
+
+/**
+ * The machine's own addresses, for the port editor's bind choices.
+ *
+ * Best effort: a principal without the security capability gets nothing, which
+ * costs the named-interface options and leaves loopback and every-interface —
+ * the two that matter — working exactly as before.
+ */
+function useHostAddresses(): HostNetwork | undefined {
+  const [net, setNet] = useState<HostNetwork>()
+  useEffect(() => {
+    const controller = new AbortController()
+    get<HostNetwork>("/security/network", undefined, controller.signal)
+      .then(setNet)
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+  return net
+}
+
 function useDockerList<T>(path: string): T[] {
   const [items, setItems] = useState<T[]>([])
   useEffect(() => {

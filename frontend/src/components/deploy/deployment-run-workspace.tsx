@@ -16,7 +16,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { clock, relativeTime, timestamp } from "@/lib/format"
+import { clock,  timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -41,6 +41,8 @@ import {
 } from "@/components/deploy/deployment-ui"
 import { Button } from "@/components/ui/button"
 import { DeploymentRunLogs } from "@/components/deploy/deployment-run-logs"
+import { DeploymentRunMetrics } from "@/components/deploy/deployment-run-metrics"
+import { copyText } from "@/lib/clipboard"
 
 type TranscriptLine = {
   seq: number
@@ -159,16 +161,11 @@ export function DeploymentRunWorkspace() {
     }
   }
 
-  const copyTranscript = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        visibleLines.map((line) => `[${clock(line.ts)}] ${line.text}`).join(""),
-      )
-      notify.success("Transcript copied")
-    } catch (error) {
-      notify.error("Could not copy transcript", error)
-    }
-  }
+  const copyTranscript = () =>
+    copyText(
+      visibleLines.map((line) => `[${clock(line.ts)}] ${line.text}`).join(""),
+      "Transcript copied",
+    )
 
   if (initial.loading && !snapshot) {
     return (
@@ -197,8 +194,12 @@ export function DeploymentRunWorkspace() {
   const canCancel = can("service.control") && active && !run.cancelRequested
   const canRetry = can("service.control") && TERMINAL_RETRY.has(run.state)
 
+  // Not a `fill` page: the transcript is followed by the runtime-log and metrics
+  // panels, so a viewport-height frame left the steps rail and the transcript
+  // sharing whatever was left over — one visible row each. The reading pane
+  // carries a definite height of its own and the page scrolls.
   return (
-    <Page fill className="overflow-visible xl:overflow-hidden">
+    <Page>
       <PageHeader
         eyebrow={
           <Link
@@ -209,7 +210,6 @@ export function DeploymentRunWorkspace() {
           </Link>
         }
         title={`Deployment #${run.id}`}
-        description={`${humanize(run.operation)} · ${run.trigger} · ${run.actor} · requested ${relativeTime(run.requestedAt)}`}
         actions={
           <>
             <DeploymentStatus state={run.state} />
@@ -262,17 +262,16 @@ export function DeploymentRunWorkspace() {
         <PanelHeader
           icon={CloudUpload}
           title="Release path"
-          description="The active node owns the transcript below."
         />
         <PanelBody>
           <ReleasePath steps={attempts} />
         </PanelBody>
       </Panel>
 
-      <div className="grid min-h-0 min-w-0 flex-1 gap-4 xl:grid-cols-[17rem_minmax(0,1fr)]">
-        <Panel className="xl:min-h-0">
-          <PanelHeader icon={Clock} title="Steps" description={`${attempts.length} in this run`} />
-          <PanelBody flush scroll className="xl:min-h-0">
+      <div className="grid min-w-0 gap-4 xl:h-[34rem] xl:grid-cols-[17rem_minmax(0,1fr)]">
+        <Panel className="max-h-[20rem] min-h-0 xl:max-h-none">
+          <PanelHeader icon={Clock} title="Steps" />
+          <PanelBody flush scroll className="min-h-0">
             <ol className="divide-y divide-hairline">
               {attempts.map((step) => (
                 <li key={step.id}>
@@ -281,8 +280,8 @@ export function DeploymentRunWorkspace() {
                     aria-pressed={selected?.id === step.id}
                     onClick={() => setSelectedStepID(step.id)}
                     className={cn(
-                      "flex min-h-11 w-full min-w-0 items-center gap-3 px-3 py-2 text-left outline-none hover:bg-accent/45 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                      selected?.id === step.id && "bg-accent/60",
+                      "flex min-h-11 w-full min-w-0 items-center gap-3 px-3 py-2 text-left focus-ring-inset hover:bg-row-hover",
+                      selected?.id === step.id && "bg-accent",
                     )}
                   >
                     <StepMarker state={step.state} />
@@ -290,7 +289,7 @@ export function DeploymentRunWorkspace() {
                       <span className="block truncate text-xs font-medium">
                         {humanize(step.key)}
                       </span>
-                      <span className="block text-[11px] text-muted-foreground">
+                      <span className="block text-hint text-muted-foreground">
                         {stepStateLabel(step.state)}
                         {step.attempt > 1 ? ` · attempt ${step.attempt}` : ""}
                       </span>
@@ -307,11 +306,6 @@ export function DeploymentRunWorkspace() {
           <PanelHeader
             icon={Logs}
             title={selected ? humanize(selected.key) : "Transcript"}
-            description={
-              selected
-                ? `${stepStateLabel(selected.state)} · attempt ${selected.attempt}`
-                : "Waiting for the first step"
-            }
             actions={
               <>
                 <Button
@@ -343,10 +337,10 @@ export function DeploymentRunWorkspace() {
               const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 24
               if (!atBottom && follow) setFollow(false)
             }}
-            className="h-[25rem] bg-surface-sunken p-0 xl:h-auto"
+            className="h-[25rem] min-h-0 bg-surface-sunken p-0 xl:h-auto"
           >
             {selected?.errorMessage && (
-              <div className="border-b border-destructive/25 bg-destructive/[0.06] px-4 py-3 text-xs">
+              <div className="border-b border-rule-danger bg-wash-danger px-4 py-3 text-xs">
                 <p className="font-medium text-destructive">
                   {selected.errorCode || "Step failed"}
                 </p>
@@ -372,10 +366,10 @@ export function DeploymentRunWorkspace() {
                       line.stream === "stderr" && "text-destructive",
                     )}
                   >
-                    <time className="select-none text-muted-foreground" dateTime={line.ts}>
+                    <time className="text-muted-foreground select-none" dateTime={line.ts}>
                       {clock(line.ts)}
                     </time>
-                    <span className="whitespace-pre-wrap break-words">{line.text}</span>
+                    <span className="break-words whitespace-pre-wrap">{line.text}</span>
                   </li>
                 ))}
               </ol>
@@ -384,6 +378,7 @@ export function DeploymentRunWorkspace() {
         </Panel>
       </div>
       <DeploymentRunLogs projectID={projectID} runID={runID} />
+      <DeploymentRunMetrics projectID={projectID} runID={runID} />
     </Page>
   )
 }

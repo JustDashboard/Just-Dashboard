@@ -19,6 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { rowReveal } from "@/components/icon-action"
 
 type GitRun = (label: string, fn: () => Promise<GitResult>) => Promise<GitResult>
 
@@ -117,7 +118,7 @@ export function BranchesPanel({
             value={newBranch}
             onChange={(e) => setNewBranch(e.target.value)}
             placeholder="New branch from here"
-            className="h-8 text-[13px]"
+            className="h-8 text-body"
           />
           <Button type="submit" size="sm" variant="outline" disabled={!!busy || !newBranch.trim()}>
             <Plus className="size-3.5" />
@@ -131,26 +132,27 @@ export function BranchesPanel({
           <div
             key={b.name}
             className={cn(
-              "group flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--row-hover)]",
-              b.current && "bg-primary/[0.06]",
+              "group flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-row-hover",
+              b.current && "bg-wash-primary",
             )}
           >
             <GitBranchIcon
-              className={cn("size-3.5 shrink-0", b.current ? "text-success" : "text-muted-foreground")}
+              className={cn(
+                "size-3.5 shrink-0",
+                b.current ? "text-success" : "text-muted-foreground",
+              )}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate font-mono text-[13px]">
+              <p className="truncate font-mono text-body">
                 {b.name}
-                {b.current && <span className="ml-2 text-[10px] text-success">current</span>}
+                {b.current && <span className="ml-2 text-micro text-success">current</span>}
               </p>
               {b.worktree ? (
-                <p className="truncate text-[11px] text-muted-foreground" title={b.worktree}>
+                <p className="truncate text-hint text-muted-foreground" title={b.worktree}>
                   checked out in {b.worktree}
                 </p>
               ) : (
-                b.subject && (
-                  <p className="truncate text-[11px] text-muted-foreground">{b.subject}</p>
-                )
+                b.subject && <p className="truncate text-hint text-muted-foreground">{b.subject}</p>
               )}
             </div>
             <AheadBehind ahead={b.ahead} behind={b.behind} />
@@ -158,7 +160,7 @@ export function BranchesPanel({
                 or deleted — not even with -D — so the actions are withheld and
                 the row says why rather than offering a button that errors. */}
             {b.worktree && (
-              <span className="shrink-0 text-[10px] text-muted-foreground">in use</span>
+              <span className="shrink-0 text-micro text-muted-foreground">in use</span>
             )}
             {canControl && !b.current && !b.worktree && (
               <Tooltip>
@@ -167,7 +169,7 @@ export function BranchesPanel({
                     size="xs"
                     variant="ghost"
                     disabled={!!busy}
-                    className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    className={cn("shrink-0", rowReveal())}
                     onClick={() => switchTo(b.name)}
                   >
                     Switch
@@ -186,7 +188,10 @@ export function BranchesPanel({
                         variant="ghost"
                         disabled={!!busy}
                         aria-label={`More actions for ${b.name}`}
-                        className="size-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                        className={cn(
+                          "size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground",
+                          rowReveal(),
+                        )}
                       >
                         <MoreHorizontal className="size-3.5" />
                       </Button>
@@ -195,7 +200,9 @@ export function BranchesPanel({
                   <TooltipContent>{`Delete ${b.name}`}</TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => remove(b, false)}>Delete branch</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => remove(b, false)}>
+                    Delete branch
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
@@ -211,7 +218,7 @@ export function BranchesPanel({
 
         {remote.length > 0 && (
           <>
-            <p className="px-2 pt-3 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            <p className="px-2 pt-3 pb-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
               Remote branches
             </p>
             {remote.map((b) => (
@@ -220,9 +227,9 @@ export function BranchesPanel({
                 className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground"
               >
                 <GitBranchIcon className="size-3.5 shrink-0" />
-                <p className="min-w-0 flex-1 truncate font-mono text-[12px]">{b.name}</p>
+                <p className="min-w-0 flex-1 truncate font-mono text-xs">{b.name}</p>
                 {b.subject && (
-                  <p className="hidden min-w-0 max-w-[10rem] truncate text-[11px] sm:block">
+                  <p className="hidden max-w-[10rem] min-w-0 truncate text-hint sm:block">
                     {b.subject}
                   </p>
                 )}

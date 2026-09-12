@@ -21,8 +21,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
 import { SidePanel } from "@/components/side-panel"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -41,9 +41,33 @@ import {
  * The server guesses one; this is how you override it.
  */
 const LANGUAGES = [
-  "plaintext", "shell", "ini", "yaml", "json", "markdown", "nginx", "dockerfile",
-  "javascript", "typescript", "go", "python", "sql", "html", "css", "xml", "toml",
-  "rust", "ruby", "php", "java", "c", "cpp", "lua", "perl", "powershell", "diff",
+  "plaintext",
+  "shell",
+  "ini",
+  "yaml",
+  "json",
+  "markdown",
+  "nginx",
+  "dockerfile",
+  "javascript",
+  "typescript",
+  "go",
+  "python",
+  "sql",
+  "html",
+  "css",
+  "xml",
+  "toml",
+  "rust",
+  "ruby",
+  "php",
+  "java",
+  "c",
+  "cpp",
+  "lua",
+  "perl",
+  "powershell",
+  "diff",
 ]
 
 export function FileEditorSheet({
@@ -187,11 +211,7 @@ function FileEditorPanel({
       title={
         <>
           {path?.split("/").pop() ?? "File"}
-          {dirty && (
-            <Badge variant="warning" className="font-normal">
-              unsaved
-            </Badge>
-          )}
+          {dirty && <Tag tone="warning">unsaved</Tag>}
         </>
       }
       description={path ?? undefined}
@@ -221,10 +241,10 @@ function FileEditorPanel({
             {/* Two glyphs that differ only in size read as one button drawn
                 twice, so each says which way it goes. */}
             <Toggle label="Smaller text" onClick={() => setFontSize((v) => Math.max(10, v - 1))}>
-              <span className="text-[11px] leading-none font-semibold">A−</span>
+              <span className="text-hint leading-none font-semibold">A−</span>
             </Toggle>
             <Toggle label="Larger text" onClick={() => setFontSize((v) => Math.min(22, v + 1))}>
-              <span className="text-[13px] leading-none font-semibold">A+</span>
+              <span className="text-body leading-none font-semibold">A+</span>
             </Toggle>
             {canEdit && (
               <Toggle label="Format this document" onClick={() => format?.()}>
@@ -236,7 +256,7 @@ function FileEditorPanel({
                 <RotateCounterClockwise className="size-3.5" />
               </Toggle>
             )}
-            <span className="flex items-center gap-1 pl-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 pl-1 text-hint text-muted-foreground">
               <MagnifyingGlass className="size-3" />
               Ctrl+F find · Ctrl+H replace · Ctrl+G go to line
             </span>
@@ -283,8 +303,13 @@ function FileEditorPanel({
                   disabled={saving}
                   onSave={(target) => void save(target)}
                 />
-                <Button size="sm" onClick={() => void save()} disabled={!dirty || saving}>
-                  {saving ? <Spinner className="size-4" /> : <FloppyDisk className="size-4" />}
+                <Button
+                  size="sm"
+                  onClick={() => void save()}
+                  disabled={!dirty || saving}
+                  pending={saving}
+                >
+                  <FloppyDisk className="size-4" />
                   Save
                 </Button>
               </>
@@ -299,7 +324,7 @@ function FileEditorPanel({
       {/* An image is shown rather than refused: the download endpoint streams
           the bytes, so the panel that says "binary, not shown" can just show it. */}
       {file?.binary && isImage(path) && (
-        <div className="checkerboard flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto checkerboard p-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={downloadUrl("/files/download", { path: path ?? "" })}
@@ -390,10 +415,15 @@ function SaveAsButton({
 
   if (!open) {
     return (
-      <Button size="sm" variant="outline" disabled={disabled} onClick={() => {
-        setName(`${base}.bak`)
-        setOpen(true)
-      }}>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled}
+        onClick={() => {
+          setName(`${base}.bak`)
+          setOpen(true)
+        }}
+      >
         Save as
       </Button>
     )

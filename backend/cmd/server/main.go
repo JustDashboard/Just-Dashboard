@@ -27,8 +27,10 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
@@ -52,7 +54,30 @@ func main() {
 		"carry out the dashboard restart recorded in -state-dir, then exit")
 	stateDir := flag.String("state-dir", "",
 		"directory holding the upgrade record and its transcript (the value of JD_DATA_DIR)")
+	preparePorts := flag.String("prepare-ports", "", "select available dashboard ports in the checkout before starting Compose")
+	startStack := flag.Bool("start-stack", false, "start and verify Compose after preparing ports")
 	flag.Parse()
+	if *preparePorts != "" {
+		dir, err := filepath.Abs(*preparePorts)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if *startStack {
+				err = stackports.Start(ctx, dir, "docker-compose.yml", os.Stdout, func() error {
+					command := hostexec.CommandInDir(ctx, dir, "docker", "compose", "up", "-d", "--wait", "--wait-timeout", "90")
+					command.Stdout, command.Stderr = os.Stdout, os.Stderr
+					return command.Run()
+				}, nil)
+			} else {
+				_, err = stackports.Reconcile(ctx, dir, "docker-compose.yml", os.Stdout)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "port selection failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *healthcheck {
 		if err := probe(); err != nil {
 			fmt.Fprintln(os.Stderr, "unhealthy:", err)

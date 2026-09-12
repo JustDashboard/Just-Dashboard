@@ -96,10 +96,11 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 			Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
 		}, nil
 	case SourceModeBlueprint:
-		return DetectionResult{
-			Source:     SourceIdentity{Kind: SourceBlueprint, Repository: source.BlueprintID, Revision: source.BlueprintVersion},
-			Candidates: []DetectedCandidate{}, Unavailable: "blueprint catalog is delivered in checkpoint C9",
-		}, nil
+		plan, err := RenderBlueprintPlan(source, "")
+		if err != nil {
+			return DetectionResult{}, err
+		}
+		return plan.Detection, nil
 	default:
 		return DetectionResult{}, ErrUnsupportedSource
 	}

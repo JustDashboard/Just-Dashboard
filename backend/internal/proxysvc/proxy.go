@@ -70,19 +70,55 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	if hostexec.Available("nginx") {
 		a.Nginx = true
 		if out, err := hostexec.Command(ctx, "nginx", "-v").CombinedOutput(); err == nil || len(out) > 0 {
-			a.NginxVer = strings.TrimSpace(string(out))
+			a.NginxVer = parseNginxVersion(string(out))
 		}
 	}
 	if hostexec.Available("caddy") {
 		a.Caddy = true
 		if out, err := hostexec.Command(ctx, "caddy", "version").Output(); err == nil {
-			a.CaddyVer = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+			a.CaddyVer = parseCaddyVersion(string(out))
 		}
 	}
 	if hostexec.Available("certbot") {
 		a.Certbot = true
 	}
 	return a
+}
+
+// nginxVersionLine matches what `nginx -v` writes to stderr:
+// "nginx version: nginx/1.26.3 (Ubuntu)". The build name is kept because it is
+// not always "nginx" — openresty and tengine identify themselves here, and an
+// operator debugging a module that only one of them ships needs to see which.
+var nginxVersionLine = regexp.MustCompile(`(?i)version:\s*(\S+)`)
+
+// parseNginxVersion reduces that line to the part a caller can put beside a
+// label. The whole line is what the binary emits, and printing it under a
+// "Reverse proxy" heading reads "nginx nginx version: nginx/1.26.3" — the
+// label, the build and the word "version" three times over.
+//
+// Anything unrecognised is returned trimmed rather than dropped: a version
+// this does not know the shape of is still more useful on screen than nothing.
+func parseNginxVersion(out string) string {
+	out = strings.TrimSpace(out)
+	if m := nginxVersionLine.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	return firstLine(out)
+}
+
+// parseCaddyVersion takes the version from `caddy version`, whose first line is
+// "v2.7.6 h1:w1dLC…" — a version followed by a module hash that means nothing
+// to a reader and pushes the version itself off a narrow tile.
+func parseCaddyVersion(out string) string {
+	line := firstLine(out)
+	if field, _, found := strings.Cut(line, " "); found {
+		return field
+	}
+	return line
+}
+
+func firstLine(s string) string {
+	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
 }
 
 // VHost is one virtual host. For nginx the enabled state is the presence of a

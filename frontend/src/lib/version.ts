@@ -17,4 +17,4 @@
  * a complete single-server panel, 1.0 is when the API stops moving under
  * people. Add features, bump to 0.6.
  */
-export const VERSION = "0.6.6"
+export const VERSION = "0.6.7"

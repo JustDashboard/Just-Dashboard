@@ -22,6 +22,8 @@ import (
 
 func (s *Server) mountDeployRoutes(r chi.Router) {
 	r.Route("/deploy", func(r chi.Router) {
+		s.mountBlueprintRoutes(r)
+		s.mountGameRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
 			r.Method(http.MethodGet, "/drafts/{draft}", s.handle(s.handleDeploymentDraftGet))
@@ -30,14 +32,18 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/drafts/{draft}/preflight", s.handle(s.handleDeploymentDraftPreflight))
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
+		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
 		r.Method(http.MethodGet, "/{id}/runs/{run}", s.handle(s.handleDeploymentRunGet))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
+		r.Method(http.MethodGet, "/{id}/runs/{run}/metrics", s.handle(s.handleDeploymentRunMetrics))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/stream", s.handle(s.handleDeploymentRunStream))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
 		r.Method(http.MethodGet, "/{id}/env", s.handle(s.handleDeployEnvList))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/releases", s.handle(s.handleDeploymentReleases))
+		r.Method(http.MethodGet, "/{id}/operations", s.handle(s.handleDeploymentOperations))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/releases/{release}/comparison", s.handle(s.handleDeploymentReleaseComparison))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
@@ -62,6 +68,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/drafts", s.handle(s.handleDeploymentDraftCreate))
 				r.Method(http.MethodPost, "/drafts/{draft}/commit", s.handle(s.handleDeploymentDraftCommit))
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
+				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
 				r.Method(http.MethodGet, "/{id}/environments/{env}/variables/{name}/reveal", s.handle(s.handleDeploymentVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
@@ -595,9 +602,10 @@ func (s *Server) enqueueNormalizedDeploymentWithMetadata(
 	switch operation {
 	case deploy.OperationRedeploy, deploy.OperationRollback:
 		steps = []deploy.StepKey{
-			deploy.StepRenderRuntime, deploy.StepBackupGate, deploy.StepStartCandidate,
-			deploy.StepVerifyReadiness, deploy.StepVerifySmoke, deploy.StepActivate,
-			deploy.StepRetirePrevious, deploy.StepRecordRelease, deploy.StepNotify,
+			deploy.StepRenderRuntime, deploy.StepBackupGate, deploy.StepProvisionCertificate,
+			deploy.StepStartCandidate, deploy.StepVerifyReadiness, deploy.StepVerifySmoke,
+			deploy.StepActivate, deploy.StepRetirePrevious, deploy.StepRecordRelease,
+			deploy.StepNotify,
 		}
 	case deploy.OperationRestart:
 		steps = []deploy.StepKey{
@@ -646,6 +654,30 @@ func (s *Server) handleDeploymentRunGet(w http.ResponseWriter, r *http.Request) 
 		return mapDeployError(deploy.ErrRunNotFound)
 	}
 	httpx.JSON(w, http.StatusOK, snapshot)
+	return nil
+}
+
+func (s *Server) handleDeploymentRunMetrics(w http.ResponseWriter, r *http.Request) error {
+	projectID, runID, err := deploymentRunIDs(r)
+	if err != nil {
+		return err
+	}
+	snapshot, err := s.modules.deployRuns.Snapshot(r.Context(), runID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	if snapshot.Run.ProjectID != projectID {
+		return mapDeployError(deploy.ErrRunNotFound)
+	}
+	var owner deploy.MetricsObserver
+	if s.modules.metrics != nil {
+		owner = s.modules.metrics
+	}
+	result, err := s.modules.deployRuns.RunMetrics(r.Context(), owner, *snapshot)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	httpx.JSON(w, http.StatusOK, result)
 	return nil
 }
 
