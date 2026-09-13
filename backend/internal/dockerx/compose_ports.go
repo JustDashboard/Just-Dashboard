@@ -19,20 +19,33 @@ import (
 
 const composePortsHeader = "# Just Dashboard automatic published ports\n"
 
+type composePortConfiguration struct {
+	Services map[string]struct {
+		NetworkMode string           `json:"network_mode"`
+		Ports       []map[string]any `json:"ports"`
+	} `json:"services"`
+}
+
+func composePortFingerprint(raw []byte) (string, error) {
+	var config composePortConfiguration
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return "", errors.New("could not read Compose port configuration")
+	}
+	source, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("# source-ports: %x", sha256.Sum256(source)), nil
+}
+
 // composePortOverride contains only port bindings, never interpolated environment
 // values or credentials from `compose config`. Source files remain untouched.
 func composePortOverride(raw []byte) ([]byte, error) {
-	var config struct {
-		Services map[string]struct {
-			NetworkMode string           `json:"network_mode"`
-			Ports       []map[string]any `json:"ports"`
-		} `json:"services"`
-	}
+	var config composePortConfiguration
 	if err := json.Unmarshal(raw, &config); err != nil {
 		return nil, errors.New("could not read Compose port configuration")
 	}
-	source, _ := json.Marshal(config)
-	fingerprint := fmt.Sprintf("# source-ports: %x\n", sha256.Sum256(source))
+	fingerprint, _ := composePortFingerprint(raw)
 	services := map[string]any{}
 	names := make([]string, 0, len(config.Services))
 	for name := range config.Services {
@@ -101,7 +114,7 @@ func composePortOverride(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]byte(composePortsHeader+fingerprint), raw...), nil
+	return append([]byte(composePortsHeader+fingerprint+"\n"), raw...), nil
 }
 
 // runComposePorts retries only failed starts caused by host port allocation.
@@ -128,9 +141,12 @@ func runComposePorts(ctx context.Context, dir string, base, action, environment 
 		if err := command.Run(); err != nil {
 			return -1, fmt.Errorf("read current Compose ports: %w", err)
 		}
-		current, err := composePortOverride(output.Bytes())
-		oldLines, newLines := strings.SplitN(string(raw), "\n", 3), strings.SplitN(string(current), "\n", 3)
-		if err != nil || len(oldLines) < 2 || len(newLines) < 2 || oldLines[1] != newLines[1] {
+		current, err := composePortFingerprint(output.Bytes())
+		if err != nil {
+			return -1, err
+		}
+		oldLines := strings.SplitN(string(raw), "\n", 3)
+		if len(oldLines) < 2 || oldLines[1] != current {
 			if err := os.Remove(override); err != nil {
 				return -1, err
 			}

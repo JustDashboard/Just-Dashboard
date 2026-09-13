@@ -430,20 +430,22 @@ func (e *NormalizedStepExecutor) verifyChecks(
 	target := targetForRuntime(*runtime, snapshot)
 	checks := make([]CheckEvidence, 0, len(selected))
 	for _, check := range selected {
+		_ = stepLog(execution, "status", fmt.Sprintf("Running %s check %q (%s)", phase, check.Name, check.Kind))
 		checks = append(checks, e.checks.Run(ctx, check, target))
 	}
 	outcome := summarizeChecks(checks)
 	evidence := checkStepEvidence{Phase: phase, Outcome: outcome, Checks: checks}
 	if ctx.Err() != nil || requiredCheckFailed(checks) {
+		_ = stepLog(execution, "stderr", checkFailureMessage(phase, outcome, checks...))
 		if execution.Run.Operation == OperationRestart {
-			state, code, message := StepFailed, "health_gate_failed", checkFailureMessage(phase, outcome)
+			state, code, message := StepFailed, "health_gate_failed", checkFailureMessage(phase, outcome, checks...)
 			if ctx.Err() != nil {
 				state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 			}
 			return StepResult{State: state, ErrorCode: code, ErrorMessage: message, Evidence: mustJSON(evidence)}
 		}
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
-		state, code, message := StepFailed, "health_gate_failed", checkFailureMessage(phase, outcome)
+		state, code, message := StepFailed, "health_gate_failed", checkFailureMessage(phase, outcome, checks...)
 		if ctx.Err() != nil {
 			state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 		}
@@ -943,7 +945,7 @@ func (e *NormalizedStepExecutor) restartLiveRuntime(ctx context.Context, executi
 }
 
 func targetForRuntime(runtime ReleaseRuntime, snapshot runtimeReleaseSnapshot) CheckTarget {
-	target := CheckTarget{Host: runtimeCheckHost(runtime.Host), Port: runtime.Port}
+	target := CheckTarget{Host: runtimeCheckHost(runtime.Host), Port: runtime.Port, OriginalPorts: []int{snapshot.Plan.InternalPort, snapshot.Plan.HostPort}}
 	if runtime.Kind == "container" {
 		target.ContainerID = runtime.RuntimeID
 	} else if metadata, err := decodeDockerRuntimeMetadata(runtime.Metadata); err == nil {

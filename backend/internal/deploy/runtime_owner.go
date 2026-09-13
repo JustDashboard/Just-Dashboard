@@ -93,6 +93,24 @@ func (o *DockerRuntimeOwner) StartCandidate(
 	return o.startContainer(ctx, request)
 }
 
+// PORT is derived from the frozen runtime plan, not a host publication that
+// may move. Explicit runtime variables remain authoritative.
+func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]string) ([]dockerx.EnvVar, []string) {
+	names := make([]string, 0, len(variables))
+	for name := range variables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	environment := make([]dockerx.EnvVar, 0, len(names)+1)
+	for _, name := range names {
+		environment = append(environment, dockerx.EnvVar{Name: name, Value: variables[name]})
+	}
+	if _, explicit := variables["PORT"]; !explicit && plan.InternalPort > 0 && !plan.HostNetwork {
+		environment = append(environment, dockerx.EnvVar{Name: "PORT", Value: strconv.Itoa(plan.InternalPort)})
+	}
+	return environment, names
+}
+
 func (o *DockerRuntimeOwner) startContainer(
 	ctx context.Context,
 	request CandidateRuntimeRequest,
@@ -102,15 +120,7 @@ func (o *DockerRuntimeOwner) startContainer(
 		return StartedRuntime{}, fmt.Errorf("%w: candidate has no immutable image", ErrArtifactMissing)
 	}
 	plan := request.Snapshot.Plan
-	environment := make([]dockerx.EnvVar, 0, len(request.RuntimeVariables))
-	variableNames := make([]string, 0, len(request.RuntimeVariables))
-	for name := range request.RuntimeVariables {
-		variableNames = append(variableNames, name)
-	}
-	sort.Strings(variableNames)
-	for _, name := range variableNames {
-		environment = append(environment, dockerx.EnvVar{Name: name, Value: request.RuntimeVariables[name]})
-	}
+	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
 	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
 	for _, planned := range plan.Mounts {
 		kind := "volume"

@@ -47,6 +47,23 @@ func TestArchivePreservesResourcesAndRemovalPlanNamesOnlyManagedTargets(t *testi
 	if archived.ArchivedAt == nil || archived.Enabled {
 		t.Fatalf("archived deployment = %#v", archived)
 	}
+	if _, err := legacy.Archive(ctx, projectID); err != nil {
+		t.Fatal(err)
+	}
+	var reserved string
+	if err := fixture.store.DB.QueryRow(`SELECT name FROM deploy_projects WHERE id = ?`, projectID).Scan(&reserved); err != nil {
+		t.Fatal(err)
+	}
+	if reserved == archived.Name {
+		t.Fatal("archived project still reserves its display name")
+	}
+	if _, err := fixture.store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES(?, '/srv/new', 'sealed', 'new-project-hook', 1)`, archived.Name); err != nil {
+		t.Fatalf("could not reuse deleted project name: %v", err)
+	}
+	again, err := legacy.Get(ctx, projectID)
+	if err != nil || again.Name != archived.Name {
+		t.Fatalf("archive lost historical name: %+v %v", again, err)
+	}
 	var dependencies, enabled int
 	if err := fixture.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id = ?`, environmentID).Scan(&dependencies); err != nil {
 		t.Fatal(err)

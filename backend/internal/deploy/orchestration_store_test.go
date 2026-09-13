@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -691,5 +692,18 @@ func TestTerminalLogCompactionForcesResyncAndBoundsPayloads(t *testing.T) {
 		if events[i].Seq <= events[i-1].Seq {
 			t.Fatalf("events not ascending after resync: %#v", events)
 		}
+	}
+}
+
+func TestSavedReadinessFailureExplainsRetainedAttempt(t *testing.T) {
+	fixture := newOrchestrationFixture(t)
+	evidence := `{"health":{"phase":"readiness","outcome":"failed","checks":[{"name":"HTTP readiness","required":true,"outcome":"failed","attempts":[{"code":"connection_failed","address":"http://127.0.0.1:3123/"}]}]}}`
+	row := fixture.store.DB.QueryRow(`SELECT 1, 13, 'verify_readiness', 1, 'failed', 1, 60, 0, 0, ?, 'health_gate_failed', 'readiness checks failed', '{}', 0`, evidence)
+	step, err := scanRunStep(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(step.ErrorMessage, "could not connect") || !strings.Contains(step.ErrorMessage, "127.0.0.1:3123") {
+		t.Fatalf("historical failure remains opaque: %s", step.ErrorMessage)
 	}
 }

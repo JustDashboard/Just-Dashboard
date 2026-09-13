@@ -485,12 +485,11 @@ function configurationFor(
       outputDirectory: form.outputDirectory.trim() || undefined,
     },
     runtime: { ...defaults.runtime, internalPort: port },
-    // A readiness check that names a port the operator has changed would probe
-    // the wrong one, so the plan's checks follow the field rather than the
-    // value detection happened to find.
+    // Readiness follows the runtime publication, which may differ from the
+    // container port when Docker allocates a free host port.
     checks: defaults.checks.map((check) =>
       check.phase === "readiness" && check.kind === "http"
-        ? { ...check, config: { ...(check.config ?? {}), port: port || undefined } }
+        ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
         : check,
     ),
     domains:

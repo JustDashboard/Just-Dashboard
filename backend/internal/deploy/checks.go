@@ -122,10 +122,11 @@ func validateCheckConfiguration(kind string, raw json.RawMessage) error {
 }
 
 type CheckTarget struct {
-	ContainerID string
-	Host        string
-	Port        int
-	PublicURLs  []string
+	OriginalPorts []int
+	ContainerID   string
+	Host          string
+	Port          int
+	PublicURLs    []string
 }
 
 type CheckAttemptEvidence struct {
@@ -347,6 +348,15 @@ func targetAddress(config CheckConfiguration, target CheckTarget) (string, int) 
 	}
 	if port == 0 {
 		port = target.Port
+	} else if config.Host == "" || config.Host == target.Host {
+		// Saved checks may name the original container/publication port. The
+		// runtime's concrete allocation is authoritative for that same service.
+		for _, original := range target.OriginalPorts {
+			if original > 0 && port == original && target.Port > 0 {
+				port = target.Port
+				break
+			}
+		}
 	}
 	return host, port
 }
@@ -400,6 +410,36 @@ func summarizeChecks(checks []CheckEvidence) HealthOutcome {
 	return outcome
 }
 
-func checkFailureMessage(phase string, outcome HealthOutcome) string {
-	return fmt.Sprintf("%s checks %s", phase, outcome)
+func checkFailureMessage(phase string, outcome HealthOutcome, checks ...CheckEvidence) string {
+	message := fmt.Sprintf("%s checks %s", phase, outcome)
+	for _, check := range checks {
+		if !check.Required || check.Outcome == HealthPassed || len(check.Attempts) == 0 {
+			continue
+		}
+		last := check.Attempts[len(check.Attempts)-1]
+		reason := "the check did not pass"
+		switch last.Code {
+		case "connection_failed":
+			reason = "could not connect to the application"
+		case "timeout":
+			reason = "the application did not respond before the timeout"
+		case "unexpected_status":
+			reason = fmt.Sprintf("the application returned HTTP %d", last.StatusCode)
+		case "target_unavailable":
+			reason = "the application's runtime address is unavailable"
+		case "exit_nonzero":
+			reason = fmt.Sprintf("the check command exited with code %d", last.ExitCode)
+		}
+		address := last.Address
+		if parsed, err := url.Parse(address); err == nil && parsed.Host != "" {
+			address = parsed.Host
+		} else if _, _, err := net.SplitHostPort(address); err != nil {
+			address = ""
+		}
+		if address != "" {
+			reason += " at " + address
+		}
+		return fmt.Sprintf("%s: %s — %s after %d attempt(s)", message, check.Name, reason, len(check.Attempts))
+	}
+	return message
 }

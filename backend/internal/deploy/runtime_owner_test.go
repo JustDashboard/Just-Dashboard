@@ -61,3 +61,19 @@ func TestImmutableRuntimeFileRejectsDifferentRetryBytes(t *testing.T) {
 		t.Fatal("runtime override accepted different retry bytes")
 	}
 }
+
+func TestRuntimePortDefaultPreservesExplicitVariables(t *testing.T) {
+	variables := map[string]string{"USER_SETTING": "kept"}
+	env, names := containerRuntimeEnvironment(RuntimePlanConfig{InternalPort: 3123}, variables)
+	if len(env) != 2 || len(names) != 1 || len(variables) != 1 || env[1].Name != "PORT" || env[1].Value != "3123" {
+		t.Fatalf("runtime environment=%+v names=%v", env, names)
+	}
+	env, _ = containerRuntimeEnvironment(RuntimePlanConfig{InternalPort: 3123}, map[string]string{"PORT": "9090"})
+	if len(env) != 1 || env[0].Value != "9090" {
+		t.Fatal("overrode explicit PORT")
+	}
+	env, _ = containerRuntimeEnvironment(RuntimePlanConfig{InternalPort: 3123, HostNetwork: true}, nil)
+	if len(env) != 0 {
+		t.Fatal("changed host-network application environment")
+	}
+}

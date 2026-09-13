@@ -210,7 +210,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		}
 		work := ActiveWork{Run: *run}
 		if err := s.db.QueryRowContext(ctx, `
-			SELECT p.name, e.name FROM deploy_projects p
+			SELECT CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END, e.name FROM deploy_projects p
 			JOIN deploy_environments e ON e.project_id = p.id
 			WHERE p.id = ? AND e.id = ?`, run.ProjectID, run.EnvironmentID).
 			Scan(&work.ProjectName, &work.Environment); err != nil {

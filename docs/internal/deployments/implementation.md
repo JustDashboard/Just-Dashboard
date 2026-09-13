@@ -136,6 +136,19 @@ only renderer/executor/validation authority for their feature.
   source file list, and a generated `0600` override that pins every service image with `pull_policy:
   never`. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
   file which is deleted on every exit path.
+- Archived projects keep their original display name in additive `archived_name` storage while the
+  unique database name becomes an internal tombstone. Archiving and upgrading previously archived
+  projects release the live name without deleting history or resources. New projects from the same
+  repository receive independent identities. Run IDs remain globally increasing identifiers, labelled
+  "Run #…" in the UI; they are not per-project retry counts.
+- Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
+  explicitly supplies it. Compose and host-network applications keep their own environment conventions.
+  This keeps application startup aligned with Docker publication; the host port may still move.
+- HTTP/TCP readiness checks follow the recorded runtime publication when a saved check refers to the
+  primary service's original internal or requested host port. Explicit unrelated ports, remote hosts
+  and full URLs retain their configured targets. Quick deploy leaves the check port unset to follow
+  allocation. Failed gates log the check name, safe address, attempt count and specific status/reason;
+  saved older failures derive the same explanation from retained check evidence when read.
 - HTTP, TCP, Docker-health, command and public-route checks have closed configuration, per-attempt
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime

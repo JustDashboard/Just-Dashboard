@@ -28,6 +28,19 @@ func scanRunStep(row scanner) (*RunStep, error) {
 	step.EndedAt = unixTimePtr(ended)
 	step.Evidence = validRawJSON(evidence)
 	step.Cleanup = validRawJSON(cleanup)
+	if step.ErrorCode == "health_gate_failed" {
+		var health checkStepEvidence
+		var wrapped struct {
+			Health checkStepEvidence `json:"health"`
+		}
+		_ = json.Unmarshal(step.Evidence, &health)
+		if len(health.Checks) == 0 && json.Unmarshal(step.Evidence, &wrapped) == nil {
+			health = wrapped.Health
+		}
+		if len(health.Checks) > 0 {
+			step.ErrorMessage = checkFailureMessage(health.Phase, health.Outcome, health.Checks...)
+		}
+	}
 	return &step, nil
 }
 

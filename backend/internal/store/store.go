@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS deploy_projects (
   enabled       INTEGER NOT NULL DEFAULT 1,
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL DEFAULT 0,
-  archived_at   INTEGER NOT NULL DEFAULT 0
+  archived_at   INTEGER NOT NULL DEFAULT 0,
+  archived_name TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS deploy_env (
@@ -862,6 +863,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "profile", "TEXT NOT NULL DEFAULT 'compose'"},
 	{"deploy_projects", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_projects", "archived_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "state", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "operation", "TEXT NOT NULL DEFAULT 'deploy'"},
@@ -1013,6 +1015,14 @@ func Open(dataDir string) (*Store, error) {
 	if err := applyAddedColumns(context.Background(), db); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// Retain historical names separately while releasing the unique live name.
+	// This also repairs projects archived before name reuse was supported.
+	if _, err := db.ExecContext(context.Background(), `UPDATE deploy_projects
+		SET archived_name = name, name = '__jd_archived_' || id || '_' || lower(hex(randomblob(16)))
+		WHERE archived_at > 0 AND archived_name = ''`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("release archived deployment names: %w", err)
 	}
 	if _, err := db.ExecContext(context.Background(), postColumnSchema); err != nil {
 		db.Close()

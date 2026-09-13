@@ -109,3 +109,18 @@ func TestLiveComposeRecoversPortConflictAndInvalidatesEditedPreferences(t *testi
 		t.Fatalf("stale automatic mapping: %+v", containers)
 	}
 }
+
+func TestComposePortFingerprintOnlyDependsOnSourceBindings(t *testing.T) {
+	first, err := composePortFingerprint([]byte(`{"services":{"app":{"ports":[{"target":80,"published":"8080","host_ip":"192.0.2.1","protocol":"sctp"}],"environment":{"SECRET":"old"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := composePortFingerprint([]byte(`{"services":{"app":{"ports":[{"target":80,"published":"8080","host_ip":"192.0.2.1","protocol":"sctp"}],"environment":{"SECRET":"new"},"image":"changed"}}}`))
+	if err != nil || first != second {
+		t.Fatalf("unrelated edits changed port fingerprint: %v", err)
+	}
+	third, err := composePortFingerprint([]byte(`{"services":{"app":{"ports":[{"target":80,"published":"9090","host_ip":"192.0.2.1","protocol":"sctp"}]}}}`))
+	if err != nil || first == third {
+		t.Fatalf("edited port did not invalidate fingerprint: %v", err)
+	}
+}

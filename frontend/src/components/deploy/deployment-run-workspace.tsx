@@ -7,16 +7,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  Clock,
-  CloudUpload,
   Copy,
-  Logs,
   RefreshClockwise,
   StopCircle,
   Warning,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { clock,  timestamp } from "@/lib/format"
+import { clock, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -209,7 +206,7 @@ export function DeploymentRunWorkspace() {
             <ArrowLeft className="size-3" /> Deployment {projectID}
           </Link>
         }
-        title={`Deployment #${run.id}`}
+        title={`Run #${run.id}`}
         actions={
           <>
             <DeploymentStatus state={run.state} />
@@ -259,10 +256,7 @@ export function DeploymentRunWorkspace() {
       )}
 
       <Panel>
-        <PanelHeader
-          icon={CloudUpload}
-          title="Release path"
-        />
+        <PanelHeader title="Release path" />
         <PanelBody>
           <ReleasePath steps={attempts} />
         </PanelBody>
@@ -270,7 +264,7 @@ export function DeploymentRunWorkspace() {
 
       <div className="grid min-w-0 gap-4 xl:h-[34rem] xl:grid-cols-[17rem_minmax(0,1fr)]">
         <Panel className="max-h-[20rem] min-h-0 xl:max-h-none">
-          <PanelHeader icon={Clock} title="Steps" />
+          <PanelHeader title="Steps" />
           <PanelBody flush scroll className="min-h-0">
             <ol className="divide-y divide-hairline">
               {attempts.map((step) => (
@@ -304,7 +298,6 @@ export function DeploymentRunWorkspace() {
 
         <Panel className="min-h-[28rem] xl:min-h-0">
           <PanelHeader
-            icon={Logs}
             title={selected ? humanize(selected.key) : "Transcript"}
             actions={
               <>

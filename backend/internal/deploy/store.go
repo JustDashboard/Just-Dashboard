@@ -32,7 +32,7 @@ func NewStore(st *store.Store, sealer *auth.Sealer, roots []string) *Store {
 	return &Store{st: st, sealer: sealer, paths: files.New(roots)}
 }
 
-const projectCols = `id, name, profile, repo_path, branch, compose_file, pre_command, post_command, hook_id, enabled, created_at, updated_at, archived_at`
+const projectCols = `id, CASE WHEN archived_name != '' THEN archived_name ELSE name END, profile, repo_path, branch, compose_file, pre_command, post_command, hook_id, enabled, created_at, updated_at, archived_at`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var (
@@ -183,7 +183,10 @@ func (s *Store) Archive(ctx context.Context, id int64) (*Project, error) {
 	defer tx.Rollback()
 	now := time.Now().UTC().Unix()
 	result, err := tx.ExecContext(ctx, `
-		UPDATE deploy_projects SET archived_at = CASE WHEN archived_at = 0 THEN ? ELSE archived_at END,
+		UPDATE deploy_projects SET
+		       archived_name = CASE WHEN archived_name = '' THEN name ELSE archived_name END,
+		       name = CASE WHEN archived_name = '' THEN '__jd_archived_' || id || '_' || lower(hex(randomblob(16))) ELSE name END,
+		       archived_at = CASE WHEN archived_at = 0 THEN ? ELSE archived_at END,
 		       enabled = 0, updated_at = ? WHERE id = ?`, now, now, id)
 	if err != nil {
 		return nil, err

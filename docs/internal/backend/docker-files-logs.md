@@ -214,3 +214,8 @@ included in the create audit. Compose keeps generated bindings in `.just-dashboa
 releases use `<release override>.ports.yml`), invalidating them when source ports change. This file has
 mode 0600, contains no resolved environment values, and uses Compose 2.24.4+ `!override` semantics.
 Direct host-network applications still require application-specific port configuration.
+
+Compose checks whether saved automatic port mappings still match the source using a pure fingerprint of
+network mode and port fields. This check does not bind sockets, so stopping a stack does not depend on
+its former listening interfaces still being available. Environment and image edits do not invalidate
+saved port choices.

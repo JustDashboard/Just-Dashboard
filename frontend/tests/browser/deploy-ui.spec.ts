@@ -1280,6 +1280,8 @@ test("quick deploy takes a GitHub repository to a running release without the wi
 
   // One press: plan saved, preflight run, environment applied, release started.
   await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  const savedChecks = quick.configuration()?.checks as Array<{ config: Record<string, unknown> }>
+  expect(savedChecks[0].config).not.toHaveProperty("port")
   expect(quick.commits()).toBe(1)
   expect(quick.runs()).toBe(1)
   expect(quick.imported()).toMatchObject({
@@ -1594,7 +1596,7 @@ test("run page renders persisted release evidence and keyboard-selectable transc
   await page.emulateMedia({ reducedMotion: "reduce" })
   await page.goto("/deploy/7/runs/84")
 
-  await expect(page.getByRole("heading", { name: "Deployment #84" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Run #84" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Verify Readiness" })).toBeVisible()
   await expect(page.getByText("Active", { exact: true }).first()).toBeVisible()
   await expect
@@ -1678,6 +1680,7 @@ test("run reload restores closed and active states, then cancel and retry stay k
   ]) {
     dashboard.setRunState(state)
     await page.goto("/deploy/7/runs/84")
+    await expect(page.getByRole("heading", { name: "Run #84", exact: true })).toBeVisible()
     await expect(header.getByText(label, { exact: true })).toBeVisible()
     await page.reload()
     await expect(header.getByText(label, { exact: true })).toBeVisible()

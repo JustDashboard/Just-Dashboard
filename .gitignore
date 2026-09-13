@@ -12,6 +12,7 @@ build/
 # JD_MASTER_KEY, and neither belongs in git.
 .env.backup.*
 .env.jd-previous
+.env.jd-port-previous-*
 .env.jd-tmp
 .DS_Store
 backend/just-dashboard-server

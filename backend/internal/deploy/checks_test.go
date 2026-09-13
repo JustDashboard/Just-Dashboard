@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -149,5 +151,32 @@ func TestCheckRunnerTimeoutIsBoundedAndEvidenceDoesNotExposeTransportError(t *te
 	if evidence.Outcome != HealthFailed || evidence.Attempts[0].Code != "timeout" ||
 		strings.Contains(string(raw), "do-not-store") {
 		t.Fatalf("timeout evidence = %s", raw)
+	}
+}
+
+func TestReadinessFollowsAllocatedRuntimePortAndPreservesExplicitTargets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	defer server.Close()
+	parsed, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(parsed.Port())
+	target := targetForRuntime(ReleaseRuntime{Kind: "container", RuntimeID: "candidate", Host: "127.0.0.1", Port: port}, runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 3123, HostPort: 3124}})
+	evidence := NewCheckRunner(nil).Run(context.Background(), PlannedCheck{Name: "HTTP readiness", Kind: "http", Phase: "readiness", Required: true, Config: json.RawMessage(`{"port":3123,"attempts":1}`)}, target)
+	if evidence.Outcome != HealthPassed || evidence.Attempts[0].Address != server.URL+"/" {
+		t.Fatalf("readiness = %+v", evidence)
+	}
+	host, explicit := targetAddress(CheckConfiguration{Host: "other.example.test", Port: 3123}, target)
+	if host != "other.example.test" || explicit != 3123 {
+		t.Fatal("rewrote explicitly separate host")
+	}
+	_, explicit = targetAddress(CheckConfiguration{Port: 9000}, target)
+	if explicit != 9000 {
+		t.Fatal("rewrote unrelated health port")
+	}
+}
+
+func TestReadinessFailureReportsSafeCause(t *testing.T) {
+	message := checkFailureMessage("readiness", HealthFailed, CheckEvidence{Name: "HTTP readiness", Required: true, Outcome: HealthFailed, Attempts: []CheckAttemptEvidence{{Code: "unexpected_status", StatusCode: 503, Address: "http://user:secret@127.0.0.1:40905/private?token=secret"}}})
+	if !strings.Contains(message, "HTTP 503") || !strings.Contains(message, "127.0.0.1:40905") || strings.Contains(message, "secret") || strings.Contains(message, "/private") {
+		t.Fatalf("unsafe or incomplete message: %s", message)
 	}
 }
