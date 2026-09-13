@@ -305,3 +305,13 @@ this install" rather than asking Docker the same question twice — `Options.Loc
 
 Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.
+
+`install.sh` sources `scripts/install-dependencies.sh` before any operation requiring curl or OpenSSL.
+It installs only missing curl/OpenSSL/Certbot packages using apt, dnf, yum, apk, zypper or pacman, validates
+Certbot's HTTP authenticators and enables an existing packaged renewal timer. Package failures stop setup.
+The backend image still includes Certbot for container execution; host installation supplies host tooling
+and the distribution renewal schedule. `python3 scripts/test_install_dependencies.py` verifies the
+installer with fake package commands, without changing host packages. Hostname readiness returns
+`certificateIssue` alongside `certificateMethod`, preserving listener/plugin errors for Quick Deploy.
+Quick Deploy keeps HTTPS selected when readiness fails, presenting the actual blocker instead of
+silently switching the initial configuration to plain HTTP.

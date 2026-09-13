@@ -72,6 +72,10 @@ say "${DIM}Self-hosted management for a single Linux server.${RESET}"
 [ "$(id -u)" -eq 0 ] || die "run this with sudo — the dashboard manages the host, so setup needs root."
 [ -f docker-compose.yml ] || die "run this from inside the cloned repository (docker-compose.yml is not here)."
 
+step "Installing and checking required host tools"
+source scripts/install-dependencies.sh
+jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
+
 step "Checking what this machine already has"
 
 need_docker=0
@@ -94,8 +98,7 @@ else
 	COMPOSE="docker compose"
 fi
 
-command -v openssl >/dev/null 2>&1 || die "openssl is required to generate the master key. Install it and re-run."
-ok "openssl"
+ok "curl, openssl and certbot are ready"
 
 if [ "$need_docker" -eq 1 ]; then
 	say ""
