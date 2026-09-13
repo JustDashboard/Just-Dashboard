@@ -13,6 +13,7 @@ import {
   type ContainerRow,
 } from "@/lib/metrics-range"
 import type { AnomalyReport, ContainerHistory } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useMetricEvents } from "@/hooks/use-metrics-history"
 import { useMetricsWindow } from "@/hooks/use-metrics-window"
@@ -22,7 +23,7 @@ import { ErrorState, Notice } from "@/components/state"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
 import type { Series } from "@/components/metrics/metric-chart"
-import { ChartActivity, Cpu, GridSquare, Servers, Warning } from "@/components/icons"
+import { Warning } from "@/components/icons"
 
 const cpuSeries: Series[] = [
   { key: "cpu", label: "CPU", color: "var(--chart-1)", kind: "area", peakKey: "cpuPeak" },
@@ -127,12 +128,23 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
 
   const rows = useMemo<ContainerRow[]>(() => (data ? containerRows(data) : []), [data])
   const limit = memoryLimit(data)
-  // Docker omits `networks` entirely for a container sharing the host's
-  // network namespace — there is no per-container interface to measure. That
-  // is an absence of the measurement, not a container doing nothing, and a
-  // flat line at zero says the wrong one of those.
+  /**
+   * Whether there is a per-container network series at all.
+   *
+   * Docker omits `networks` entirely for a container sharing the host's
+   * network namespace — there is no per-container interface to measure. The
+   * panel used to stay and explain itself, which meant a chart-shaped hole
+   * with a paragraph in it sitting beside a real chart: the reader's eye goes
+   * to it first because it is the odd one out, and what it has to say is
+   * "nothing to show here". A container with no network of its own simply has
+   * no network chart, and Block I/O takes the width back.
+   *
+   * `rows.length > 0` is the guard that matters: while the history is loading
+   * there is no data either, and a panel that vanishes and then reappears a
+   * second later is worse than one that was never there.
+   */
   const hasNetwork = useMemo(
-    () => rows.some((r) => (r.netRx ?? 0) > 0 || (r.netTx ?? 0) > 0),
+    () => rows.length === 0 || rows.some((r) => (r.netRx ?? 0) > 0 || (r.netTx ?? 0) > 0),
     [rows],
   )
   const disabled = error instanceof ApiError && error.code === "metrics_history_disabled"
@@ -141,7 +153,7 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
   if (disabled) {
     return (
       <Panel>
-        <PanelHeader icon={Cpu} title="Usage history" />
+        <PanelHeader title="Usage history" />
         <PanelBody>
           <ChartPlaceholder note="History is not being recorded on this server. Set JD_METRICS_RETENTION to keep it." />
         </PanelBody>
@@ -167,7 +179,6 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
       */}
       <ContainerAnomalies containerId={containerId} />
       <ChartPanel
-        icon={Cpu}
         title="Processor"
         actions={<RangePicker controls={controls} ranges={HISTORY_RANGES} />}
         rows={rows}
@@ -190,7 +201,6 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
       />
 
       <ChartPanel
-        icon={GridSquare}
         title="Memory"
         rows={rows}
         series={memSeries}
@@ -217,29 +227,22 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
         series that answer "is this the container saturating the host", which
         the CPU and memory charts on their own cannot.
       */}
-      <div className="grid gap-3 lg:grid-cols-2 [&>*]:min-w-0">
+      <div className={cn("grid gap-3 [&>*]:min-w-0", hasNetwork && "lg:grid-cols-2")}>
+        {hasNetwork && (
+          <ChartPanel
+            title="Network"
+            rows={rows}
+            series={netSeries}
+            format={(v) => rate(v)}
+            axisFormat={(v) => bytes(v, 0)}
+            events={events}
+            onZoom={controls.zoomTo}
+            showPeaks={false}
+            note={note}
+            height={150}
+          />
+        )}
         <ChartPanel
-          icon={ChartActivity}
-          title="Network"
-          // An all-zero series is passed as no series at all, so the panel
-          // renders the explanation rather than a flat line at the bottom of
-          // an axis labelled in single bytes.
-          rows={hasNetwork ? rows : []}
-          series={netSeries}
-          format={(v) => rate(v)}
-          axisFormat={(v) => bytes(v, 0)}
-          events={events}
-          onZoom={controls.zoomTo}
-          showPeaks={false}
-          note={
-            hasNetwork
-              ? note
-              : "Docker reports no per-container interfaces here, which is what a container on the host's network namespace looks like. Its traffic is in the host's own network chart."
-          }
-          height={150}
-        />
-        <ChartPanel
-          icon={Servers}
           title="Block I/O"
           rows={rows}
           series={blockSeries}

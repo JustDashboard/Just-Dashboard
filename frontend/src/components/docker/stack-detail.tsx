@@ -9,7 +9,6 @@ import {
   FloppyDisk,
   FolderOpen,
   GitBranch,
-  Layers,
   Play,
   RefreshClockwise,
   RotateClockwise,
@@ -149,7 +148,6 @@ function StackBody({
       open={name !== null}
       onOpenChange={onOpenChange}
       width="xl"
-      icon={Layers}
       title={
         <>
           {name}

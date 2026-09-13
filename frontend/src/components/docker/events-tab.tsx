@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChartActivity, DotMark, Rss, Stop } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { } from "@/lib/format"
 import type { DockerEvent, DockerEventFeed } from "@/lib/types"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
@@ -101,7 +100,6 @@ export function EventsTab() {
   return (
     <Panel>
       <PanelHeader
-        icon={ChartActivity}
         title="Events"
         actions={
           <Status

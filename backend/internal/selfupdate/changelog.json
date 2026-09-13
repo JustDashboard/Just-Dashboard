@@ -96,6 +96,16 @@
           "kind": "fixed",
           "text": "A path validator checked a trimmed copy of the string its callers actually used",
           "detail": "Found by fuzzing: a relative path with a leading carriage return passed the control-character check, because the check ran against the trimmed string while the caller joined the original onto a root. It now refuses input that is not already trimmed. Three further fuzz findings were fixed alongside it — a typed variable reference accepting a parent segment, the properties editor silently dropping trailing whitespace, and an archive-root helper that was safe only when called through its validator."
+        },
+        {
+          "kind": "changed",
+          "text": "Containers are a list on a phone and a table on a desktop, and a container's actions are words rather than glyphs",
+          "detail": "The nine-column table narrowed by dropping columns, which left a phone reader looking at the remains of a table: a wide name cell, a wedge of space, and two stubs. Below 1280px the same containers are drawn down the row instead of across it, and nothing is left out — image, ports, live CPU and memory, and the issue count are all there. The row's controls changed with it: start, restart and stop stay as icons because they are pressed constantly, and update, pause, shell, copy-id and remove moved into a menu where each one carries a line of plain English saying what it does. A lifecycle button now also says that it is working — a stop reads \"Stopping…\" until Docker honours it, instead of the row sitting still for ten seconds and then jumping."
+        },
+        {
+          "kind": "added",
+          "text": "The Docker pages explain themselves, and the overview names what is not running",
+          "detail": "Docker, runtime health, attention, exit codes and how CPU and memory are counted all have a definition a hover away, written for somebody who has never run a container. A server with nothing on it gets an introduction rather than four zeros. A stopped container used to be visible on the overview only as a digit changing in the Running tile, so it now has a panel that names it with a Start button beside it; disk is a breakdown of where the space went rather than a sentence about how little of it is worth reclaiming; and runtime health is one bar that shows how much of the estate nothing is checking. Filters on the containers page answer \"which of these is down\" without reading a column."
         }
       ]
     },

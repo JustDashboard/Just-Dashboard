@@ -1,15 +1,7 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
-import {
-  CheckCircle,
-  ChevronDown,
-  CrossCircle,
-  Heart,
-  Information,
-  Lifebuoy,
-  Warning,
-} from "@/components/icons"
+import { useMemo, useState } from "react"
+import { CheckCircle, ChevronDown } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type {
   AttentionSummary,
@@ -19,13 +11,12 @@ import type {
   RuntimeHealth,
   Severity,
 } from "@/lib/types"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
-import { EmptyNote } from "@/components/state"
+import { FindingList, type Finding } from "@/components/finding-list"
+import { ExplainIcon } from "@/components/docker/explain"
 import { Button } from "@/components/ui/button"
-import { useViewState } from "@/lib/view-state"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 /**
  * Two questions that were being answered by one word.
@@ -43,16 +34,35 @@ import { useViewState } from "@/lib/view-state"
  *
  * A container can be perfectly healthy and need attention. Saying so is the
  * point.
+ *
+ * The *list* is no longer this file's business. Docker had grown its own
+ * finding row — a two-line title-and-detail block with a severity glyph, a tag
+ * and a chevron — while Metrics and Security shared a one-line accordion for
+ * exactly the same idea. Two components, two densities, one concept: a page
+ * that showed both read as two products. The shared one won on the only test
+ * that matters, which is how much of it you can take in at a glance, and this
+ * maps Docker's findings onto it. See components/finding-list.tsx.
  */
 
-const SEVERITY: Record<
-  Severity,
-  { icon: React.ComponentType<{ className?: string }>; tone: string; label: string; rank: number }
-> = {
-  critical: { icon: CrossCircle, tone: "text-destructive", label: "Critical", rank: 0 },
-  warning: { icon: Warning, tone: "text-warning", label: "Warning", rank: 1 },
-  recommendation: { icon: Information, tone: "text-primary", label: "Recommendation", rank: 2 },
-  info: { icon: Information, tone: "text-muted-foreground", label: "Info", rank: 3 },
+const SEVERITY_RANK: Record<Severity, number> = {
+  critical: 0,
+  warning: 1,
+  recommendation: 2,
+  info: 3,
+}
+
+/**
+ * Four severities onto the three levels a finding row can draw.
+ *
+ * A recommendation is not a notice with a different name — it is a notice, and
+ * giving it a fourth dot colour would mean four alarm states on a panel whose
+ * job is to say which two of them need answering today.
+ */
+const SEVERITY_LEVEL: Record<Severity, Finding["level"]> = {
+  critical: "critical",
+  warning: "warning",
+  recommendation: "notice",
+  info: "notice",
 }
 
 const CLASS_LABEL: Record<FindingClass, string> = {
@@ -71,10 +81,10 @@ export type FindingAction = (finding: DockerFinding) => void
  *
  * A server with twenty containers produces a list longer than the page it sits
  * on, and everything below it — the containers themselves — stops existing.
- * Four is enough to see what kind of thing is being reported; the rest is one
+ * Five is enough to see what kind of thing is being reported; the rest is one
  * click away and stays there.
  */
-const COLLAPSED_ROWS = 4
+const COLLAPSED_ROWS = 5
 
 /**
  * The kind of problem a finding is, independent of which container has it.
@@ -135,7 +145,7 @@ function groupFindings(findings: DockerFinding[]): FindingGroup[] {
     const existing = groups.get(key)
     if (existing) {
       existing.findings.push(finding)
-      if (SEVERITY[finding.severity].rank < SEVERITY[existing.severity].rank) {
+      if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[existing.severity]) {
         existing.severity = finding.severity
       }
       continue
@@ -143,9 +153,89 @@ function groupFindings(findings: DockerFinding[]): FindingGroup[] {
     groups.set(key, { key, findings: [finding], severity: finding.severity })
   }
   return [...groups.values()].sort((a, b) => {
-    const rank = SEVERITY[a.severity].rank - SEVERITY[b.severity].rank
+    const rank = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]
     return rank !== 0 ? rank : b.findings.length - a.findings.length
   })
+}
+
+/**
+ * One group as one row.
+ *
+ * `meta` is the class rather than the target, deliberately: a single finding's
+ * title already opens with the container's name, so repeating it on the right
+ * would print the same word twice on one line. What the right-hand column adds
+ * is the *kind* of problem, which is the thing a reader scans a column of
+ * these for.
+ */
+function toFinding(group: FindingGroup, onAction?: FindingAction): Finding {
+  const first = group.findings[0]
+  const level = SEVERITY_LEVEL[group.severity] ?? "notice"
+  const meta = CLASS_LABEL[first.class] ?? first.class
+
+  if (group.findings.length === 1) {
+    return {
+      id: first.id,
+      level,
+      title: first.title,
+      detail: first.detail,
+      advice: first.advice,
+      meta,
+      action:
+        first.action && onAction
+          ? { label: first.actionLabel ?? "Fix this", onClick: () => onAction(first) }
+          : undefined,
+    }
+  }
+
+  const phrase = groupPhrase(group.findings)
+  return {
+    id: group.key,
+    level,
+    title: phrase
+      ? `${group.findings.length} containers ${phrase}`
+      : `${first.title} (${group.findings.length} containers)`,
+    // Stated once, because it is the same sentence on every member. Repeating
+    // it per container is how a panel of four real problems reads as twenty-six.
+    detail: first.detail,
+    advice: first.advice,
+    meta,
+    extra: <Targets group={group} onAction={onAction} />,
+  }
+}
+
+/**
+ * Which containers, as the thing you press to deal with one of them.
+ *
+ * The group is the summary, never a replacement for knowing which ones — and a
+ * name that is only a name makes the reader go and find it themselves. Each
+ * chip carries that container's own finding, so pressing it runs that
+ * container's remedy where there is one and opens it where there is not.
+ */
+function Targets({ group, onAction }: { group: FindingGroup; onAction?: FindingAction }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {group.findings.map((finding) =>
+        onAction ? (
+          <button
+            key={finding.id}
+            type="button"
+            onClick={() => onAction(finding)}
+            title={finding.actionLabel ?? `Open ${finding.target}`}
+            className="rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro text-muted-foreground focus-ring transition-colors hover:text-foreground"
+          >
+            {finding.target}
+          </button>
+        ) : (
+          <span
+            key={finding.id}
+            className="rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro text-muted-foreground"
+          >
+            {finding.target}
+          </span>
+        ),
+      )}
+    </div>
+  )
 }
 
 /**
@@ -157,10 +247,11 @@ function groupFindings(findings: DockerFinding[]): FindingGroup[] {
  * container detail panel, where the reader has asked about one container and
  * wants everything known about it in one place.
  *
- * It is a summary that opens, not a page section: the header carries the count
- * and the worst severity, and the list under it is capped, because a panel
- * whose height is "however many findings there happen to be" pushes the
- * containers it is describing off the screen.
+ * Three things this panel used to carry and no longer does, all of them chrome
+ * that outweighed the four rows it was framing: a severity filter strip (four
+ * chips to sort a list capped at five), a "N distinct" counter explaining the
+ * grouping, and a Hide button for a panel whose whole point is to be read.
+ * What is left is a header that says how bad it is and a list you can scan.
  */
 export function AttentionPanel({
   diagnosis,
@@ -173,295 +264,138 @@ export function AttentionPanel({
   includeRuntime?: boolean
   className?: string
 }) {
-  const [severity, setSeverity] = useState<Severity | null>(null)
   const [showAll, setShowAll] = useState(false)
-  // Furniture, not a question: whether this list is worth its height is decided
-  // once, and a page that re-expanded it on every visit would be ignoring that.
-  const [open, setOpen] = useViewState("docker.attention.open", true)
-  const bodyId = useId()
 
-  const findings = useMemo(() => {
-    const all = (diagnosis?.findings ?? []).filter((f) => includeRuntime || f.class !== "runtime")
-    return severity ? all.filter((f) => f.severity === severity) : all
-  }, [diagnosis, includeRuntime, severity])
-
-  const counts = useMemo(() => {
-    const out: Partial<Record<Severity, number>> = {}
-    for (const f of diagnosis?.findings ?? []) {
-      if (!includeRuntime && f.class === "runtime") continue
-      out[f.severity] = (out[f.severity] ?? 0) + 1
-    }
-    return out
-  }, [diagnosis, includeRuntime])
-
+  const findings = useMemo(
+    () => (diagnosis?.findings ?? []).filter((f) => includeRuntime || f.class !== "runtime"),
+    [diagnosis, includeRuntime],
+  )
   const groups = useMemo(() => groupFindings(findings), [findings])
-
-  const total = Object.values(counts).reduce<number>((a, b) => a + (b ?? 0), 0)
-  const issues = (counts.critical ?? 0) + (counts.warning ?? 0)
+  const rows = useMemo(
+    () => (showAll ? groups : groups.slice(0, COLLAPSED_ROWS)).map((g) => toFinding(g, onAction)),
+    [groups, showAll, onAction],
+  )
 
   if (!diagnosis) return null
 
+  const issues = findings.filter(
+    (f) => f.severity === "critical" || f.severity === "warning",
+  ).length
+  const critical = findings.some((f) => f.severity === "critical")
+
   // Nothing to act on is a one-line answer, and it used to be a paragraph
   // inside a body — a fifth of the overview page spent saying "no".
-  if (total === 0) {
+  if (findings.length === 0) {
     return (
       <Panel className={className}>
         <PanelHeader
-          icon={Lifebuoy}
-          title="Attention"
+          title={<PanelTitle />}
           actions={<Status verdict="ok" icon={CheckCircle} label="Nothing to act on" />}
         />
       </Panel>
     )
   }
 
-  const shown = showAll ? groups : groups.slice(0, COLLAPSED_ROWS)
-  const rest = groups.length - shown.length
+  const rest = groups.length - rows.length
 
   return (
     <Panel className={className}>
       <PanelHeader
-        icon={Lifebuoy}
-        title="Attention"
+        title={<PanelTitle />}
         actions={
-          <>
-            {issues > 0 && (
-              <Status
-                verdict={counts.critical ? "critical" : "warning"}
-                label={`${issues} ${issues === 1 ? "issue" : "issues"}`}
-              />
-            )}
-            {/* The list is deduplicated: one problem hitting five containers is
-                one row, not five. Without this the reader compares the issue
-                count above with a much shorter list and assumes something was
-                dropped. It was a sentence under the title; it is a number, so
-                it belongs beside the other numbers. */}
-            {groups.length < total && (
-              <span className="numeric text-hint text-muted-foreground">
-                {groups.length} distinct
-              </span>
-            )}
-            <Button
-              size="xs"
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={() => setOpen(!open)}
-              aria-expanded={open}
-              aria-controls={bodyId}
-            >
-              {open ? "Hide" : `Show ${total}`}
-              <ChevronDown className={cn("transition-transform", open && "rotate-180")} />
-            </Button>
-          </>
+          <Status
+            verdict={critical ? "critical" : issues > 0 ? "warning" : "notice"}
+            label={
+              issues > 0
+                ? `${issues} ${issues === 1 ? "issue" : "issues"}`
+                : `${findings.length} ${findings.length === 1 ? "recommendation" : "recommendations"}`
+            }
+          />
         }
       />
-      {open && (
-        <div id={bodyId} className="min-w-0">
-          <PanelToolbar>
-            <div className="flex flex-wrap gap-1">
-              <FilterChip selected={severity === null} onClick={() => setSeverity(null)}>
-                All
-                <ChipCount>{total}</ChipCount>
-              </FilterChip>
-              {(["critical", "warning", "recommendation", "info"] as const).map((level) =>
-                counts[level] ? (
-                  <FilterChip
-                    key={level}
-                    selected={severity === level}
-                    onClick={() => setSeverity(severity === level ? null : level)}
-                  >
-                    {SEVERITY[level].label}
-                    <ChipCount>{counts[level]}</ChipCount>
-                  </FilterChip>
-                ) : null,
-              )}
-            </div>
-          </PanelToolbar>
-          <PanelBody className="space-y-1.5 p-3">
-            {findings.length === 0 ? (
-              <EmptyNote>Nothing at that severity.</EmptyNote>
-            ) : (
-              <>
-                {shown.map((group) =>
-                  group.findings.length === 1 ? (
-                    <FindingRow key={group.key} finding={group.findings[0]} onAction={onAction} />
-                  ) : (
-                    <FindingGroupRow key={group.key} group={group} onAction={onAction} />
-                  ),
-                )}
-                {(rest > 0 || showAll) && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="w-full text-muted-foreground"
-                    onClick={() => setShowAll(!showAll)}
-                  >
-                    {rest > 0
-                      ? `Show ${rest} more ${rest === 1 ? "kind" : "kinds"} of finding`
-                      : "Show less"}
-                    <ChevronDown className={cn("transition-transform", showAll && "rotate-180")} />
-                  </Button>
-                )}
-              </>
-            )}
-          </PanelBody>
-        </div>
-      )}
+      <PanelBody>
+        <FindingList findings={rows} />
+        {(rest > 0 || showAll) && (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="mt-1 w-full text-muted-foreground"
+            onClick={() => setShowAll(!showAll)}
+          >
+            {rest > 0 ? `Show ${rest} more` : "Show less"}
+            <ChevronDown className={cn("transition-transform", showAll && "rotate-180")} />
+          </Button>
+        )}
+      </PanelBody>
     </Panel>
   )
 }
 
-
-/**
- * One habit, and the containers that have it.
- *
- * The shared detail and advice are stated once at the top, because they are
- * the same sentence on every member — repeating them per container is how a
- * panel of four real problems reads as twenty-six. Underneath, each container
- * keeps its own row: the group is the summary, not a replacement for knowing
- * which ones.
- */
-function FindingGroupRow({ group, onAction }: { group: FindingGroup; onAction?: FindingAction }) {
-  const [open, setOpen] = useState(false)
-  const first = group.findings[0]
-  const meta = SEVERITY[group.severity] ?? SEVERITY.info
-  const Icon = meta.icon
-  const phrase = groupPhrase(group.findings)
-  const count = group.findings.length
-  const title = phrase ? `${count} containers ${phrase}` : `${first.title} (${count} containers)`
-
+function PanelTitle() {
   return (
-    <div
-      className={cn(
-        // A row is a row, not a card: no frame at rest, a tint under the
-        // pointer, and the hairline only once it is open and has a body to
-        // fence off. A list of framed rows inside a framed panel is the
-        // stacking this pass exists to remove.
-        "min-w-0 rounded-lg border transition-colors",
-        open ? "border-hairline" : "border-transparent hover:bg-row-hover",
-      )}
-    >
-      <button
-        className="flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left focus-ring-inset"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <Icon className={cn("mt-0.5 size-3.5 shrink-0", meta.tone)} />
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-body leading-snug font-medium">{title}</span>
-            <Tag>{CLASS_LABEL[first.class] ?? first.class}</Tag>
-          </span>
-          <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
-            {open ? group.findings.map((f) => f.target).join(", ") : first.detail}
-          </span>
-        </span>
-        <ChevronDown
-          className={cn(
-            "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      </button>
-      {open && (
-        <div className="space-y-2 border-t border-hairline px-2.5 py-2.5">
-          <div className="space-y-2 pl-4.5">
-            <p className="text-xs leading-relaxed text-muted-foreground">{first.detail}</p>
-            {first.advice && (
-              <p className="text-xs leading-relaxed">
-                <span className="font-medium">What to do: </span>
-                <span className="text-muted-foreground">{first.advice}</span>
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            {group.findings.map((finding) => (
-              <FindingRow key={finding.id} finding={finding} onAction={onAction} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-export function FindingRow({
-  finding,
-  onAction,
-  defaultOpen = false,
-}: {
-  finding: DockerFinding
-  onAction?: FindingAction
-  defaultOpen?: boolean
-}) {
-  // Collapsed by default: the title is the finding, the body is the argument
-  // for it. A list where every entry is three paragraphs is one nobody reads.
-  const [open, setOpen] = useState(defaultOpen)
-  const meta = SEVERITY[finding.severity] ?? SEVERITY.info
-  const Icon = meta.icon
-
-  return (
-    <div
-      className={cn(
-        // A row is a row, not a card: no frame at rest, a tint under the
-        // pointer, and the hairline only once it is open and has a body to
-        // fence off. A list of framed rows inside a framed panel is the
-        // stacking this pass exists to remove.
-        "min-w-0 rounded-lg border transition-colors",
-        open ? "border-hairline" : "border-transparent hover:bg-row-hover",
-      )}
-    >
-      <button
-        className="flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left focus-ring-inset"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <Icon className={cn("mt-0.5 size-3.5 shrink-0", meta.tone)} />
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-body leading-snug font-medium">{finding.title}</span>
-            <Tag>{CLASS_LABEL[finding.class] ?? finding.class}</Tag>
-          </span>
-          {!open && (
-            <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
-              {finding.detail}
-            </span>
-          )}
-        </span>
-        <ChevronDown
-          className={cn(
-            "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      </button>
-      {open && (
-        <div className="space-y-2 border-t border-hairline px-2.5 py-2.5 pl-7">
-          <p className="text-xs leading-relaxed text-muted-foreground">{finding.detail}</p>
-          {finding.advice && (
-            <p className="text-xs leading-relaxed">
-              <span className="font-medium">What to do: </span>
-              <span className="text-muted-foreground">{finding.advice}</span>
-            </p>
-          )}
-          {finding.action && onAction && (
-            <Button size="xs" variant="outline" onClick={() => onAction(finding)}>
-              {finding.actionLabel ?? "Fix this"}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
+    <span className="inline-flex items-center gap-1.5">
+      Attention
+      <ExplainIcon name="attention" />
+    </span>
   )
 }
 
 /**
- * Runtime health, as a sentence and a set of counts.
+ * Runtime health: one bar, and the numbers that make it honest.
  *
- * The counts matter as much as the status: a list of problems cannot say
- * "eight healthy, four with no health check at all", and that last number is
- * what stops "all healthy" meaning "nothing is being watched".
+ * This was four figures in a 2×4 grid — a panel a hundred and forty pixels tall
+ * saying "2 / 2, 1, 0, 1" above the containers it was describing, which on a
+ * phone is most of a screen spent before the list the page is *for* begins.
+ *
+ * The counts matter as much as the status and none of them has been dropped:
+ * a list of problems cannot say "eight healthy, four with no health check at
+ * all", and that last number is what stops "all healthy" meaning "nothing is
+ * being watched". What changed is that they are now read off one bar rather
+ * than out of four boxes — which is also the only form in which the
+ * relationship between them is visible at all. Four numbers in a row do not
+ * show you that half the estate is unwatched; a bar that is half grey does.
+ *
+ * The track is the containers that are not running. That is not a decorative
+ * choice: the bar answers "of everything on this server, how much is up and
+ * actually being checked", and an unfilled track is exactly what "not up"
+ * looks like.
  */
+const RUNTIME_SEGMENTS = [
+  {
+    key: "healthy",
+    label: "passing a health check",
+    fill: "bg-success",
+    swatch: "bg-success",
+    of: (r: RuntimeHealth) => r.healthy,
+    explain: "A check the image ships is running inside the container and answering.",
+  },
+  {
+    key: "starting",
+    label: "still starting",
+    fill: "bg-warning",
+    swatch: "bg-warning",
+    of: (r: RuntimeHealth) => r.starting,
+    explain: "Inside its health check's grace period. Not yet a verdict either way.",
+  },
+  {
+    key: "unhealthy",
+    label: "failing one",
+    fill: "bg-destructive",
+    swatch: "bg-destructive",
+    of: (r: RuntimeHealth) => r.unhealthy,
+    explain: "The container is up and its own health check says it is not working.",
+  },
+  {
+    key: "noHealthcheck",
+    label: "without one",
+    fill: "bg-muted-foreground",
+    swatch: "bg-muted-foreground",
+    of: (r: RuntimeHealth) => r.noHealthcheck,
+    explain:
+      "Docker reports these as up whenever their main process is alive — a wedged application answering nothing still counts.",
+  },
+] as const
+
 export function RuntimeHealthPanel({
   runtime,
   className,
@@ -470,55 +404,127 @@ export function RuntimeHealthPanel({
   className?: string
 }) {
   if (!runtime) return null
+  const total = Math.max(runtime.total, 1)
+  const stopped = runtime.total - runtime.running
+  const segments = RUNTIME_SEGMENTS.map((s) => ({ ...s, count: s.of(runtime) }))
+
   return (
     <Panel className={className}>
-      <PanelHeader icon={Heart} title="Runtime health" />
-      <PanelBody>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <RuntimeStat label="Running" value={runtime.running} of={runtime.total} />
-          <RuntimeStat
-            label="Passing a health check"
-            value={runtime.healthy}
-            tone={runtime.healthy ? "text-success" : undefined}
-          />
-          <RuntimeStat
-            label="Failing one"
-            value={runtime.unhealthy}
-            tone={runtime.unhealthy ? "text-destructive" : undefined}
-          />
-          <RuntimeStat
-            label="Without one"
-            value={runtime.noHealthcheck}
-            hint="Docker reports these as up whenever their main process is alive."
-          />
+      <PanelHeader
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Runtime health
+            <ExplainIcon name="runtimeHealth" />
+          </span>
+        }
+        actions={
+          <>
+            <Status
+              verdict={runtime.status === "ok" ? "ok" : runtime.status}
+              label={runtimeLabel(runtime)}
+            />
+            <span className="numeric text-hint text-muted-foreground">
+              {runtime.running} of {runtime.total} running
+            </span>
+          </>
+        }
+      />
+      <PanelBody className="space-y-2.5">
+        <div
+          className="flex h-2 w-full overflow-hidden rounded-full bg-meter-track"
+          role="img"
+          aria-label={`${runtime.running} of ${runtime.total} containers running; ${segments
+            .filter((s) => s.count > 0)
+            .map((s) => `${s.count} ${s.label}`)
+            .join(", ")}`}
+        >
+          {segments.map((segment) =>
+            segment.count > 0 ? (
+              <span
+                key={segment.key}
+                className={cn(
+                  "h-full transition-[width] first:rounded-l-full last:rounded-r-full",
+                  segment.fill,
+                )}
+                style={{ width: `${(segment.count / total) * 100}%` }}
+              />
+            ) : null,
+          )}
         </div>
+
+        {/*
+          Every segment, including the empty ones. A count of zero failing
+          health checks is a fact worth printing — a legend that only listed
+          what happened to be non-zero would quietly stop mentioning the
+          category the moment it went right, which is the moment it becomes
+          reassuring.
+        */}
+        <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
+          {segments.map((segment) => (
+            <RuntimeLegend
+              key={segment.key}
+              swatch={segment.swatch}
+              count={segment.count}
+              label={segment.label}
+              explain={segment.explain}
+            />
+          ))}
+          {stopped > 0 && (
+            <RuntimeLegend
+              swatch="bg-meter-track"
+              count={stopped}
+              label="not running"
+              explain="Stopped, exited or never started. Nothing is wrong with them — they are simply not up."
+            />
+          )}
+        </ul>
       </PanelBody>
     </Panel>
   )
 }
 
-function RuntimeStat({
+/**
+ * One reading in the legend, with the sentence behind it one hover away.
+ *
+ * "Without one" is the label that most needs explaining and the one with least
+ * room to do it, which is precisely the shape a hover card exists for.
+ */
+function RuntimeLegend({
+  swatch,
+  count,
   label,
-  value,
-  of,
-  tone,
-  hint,
+  explain,
 }: {
+  swatch: string
+  count: number
   label: string
-  value: number
-  of?: number
-  tone?: string
-  hint?: string
+  explain: string
 }) {
   return (
-    <div className="min-w-0">
-      <p className="eyebrow truncate">{label}</p>
-      <p className={cn("numeric mt-0.5 text-lg leading-tight font-medium", tone)}>
-        {value}
-        {of !== undefined && <span className="text-sm text-muted-foreground"> / {of}</span>}
-      </p>
-      {hint && <p className="mt-0.5 text-micro leading-snug text-muted-foreground">{hint}</p>}
-    </div>
+    <li className="min-w-0">
+      <HoverCard openDelay={200}>
+        <HoverCardTrigger asChild>
+          <button
+            type="button"
+            className="flex cursor-help items-center gap-1.5 rounded-sm focus-ring"
+          >
+            <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", swatch)} />
+            <span
+              className={cn(
+                "numeric text-body font-medium",
+                count === 0 && "text-muted-foreground",
+              )}
+            >
+              {count}
+            </span>
+            <span className="truncate text-hint text-muted-foreground">{label}</span>
+          </button>
+        </HoverCardTrigger>
+        <HoverCardContent className="w-72 text-xs leading-relaxed text-muted-foreground">
+          {explain}
+        </HoverCardContent>
+      </HoverCard>
+    </li>
   )
 }
 
@@ -540,12 +546,40 @@ export function ContainerFindings({
 }) {
   const mine = (diagnosis?.findings ?? []).filter((f) => f.targetId === containerId)
   if (mine.length === 0) return null
+
+  const rows = mine
+    .slice()
+    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+    .map((finding) =>
+      toFinding({ key: finding.id, findings: [finding], severity: finding.severity }, onAction),
+    )
+  const issues = mine.filter((f) => f.severity === "critical" || f.severity === "warning").length
+
   return (
-    <div className="space-y-2">
-      {mine.map((finding) => (
-        <FindingRow key={finding.id} finding={finding} onAction={onAction} />
-      ))}
-    </div>
+    <Panel>
+      <PanelHeader
+        title={<PanelTitle />}
+        actions={
+          <Status
+            verdict={
+              mine.some((f) => f.severity === "critical")
+                ? "critical"
+                : issues > 0
+                  ? "warning"
+                  : "notice"
+            }
+            label={
+              issues > 0
+                ? `${issues} ${issues === 1 ? "issue" : "issues"}`
+                : `${mine.length} ${mine.length === 1 ? "recommendation" : "recommendations"}`
+            }
+          />
+        }
+      />
+      <PanelBody>
+        <FindingList findings={rows} />
+      </PanelBody>
+    </Panel>
   )
 }
 

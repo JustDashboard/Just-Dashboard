@@ -23,7 +23,14 @@ const user = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -247,6 +254,40 @@ const volumes = [
   },
 ]
 
+/**
+ * One tab hid the master key; the next one printed it.
+ *
+ * Environment detects credential-shaped values and puts them behind Reveal.
+ * Inspect printed the same `docker inspect` document raw, including those
+ * values in full — so the gesture on the first tab bought nothing against the
+ * thing it defends against, which is somebody reading the screen. The server
+ * already redacts for anyone below system.admin; this is the admin's own view.
+ */
+const detail = {
+  ...containers[0],
+  env: ["PATH=/usr/bin", "JD_MASTER_KEY=s3cr3t-master", "JD_BOOTSTRAP_PASSWORD=hunter2"],
+  mounts: [],
+  networkMode: "bridge",
+  networkDetails: [],
+  restartPolicy: "unless-stopped",
+  privileged: false,
+  capAdd: [],
+  logPath: "/var/log/x.log",
+  exitCode: 0,
+  restartCount: 0,
+  entrypoint: [],
+  workingDir: "/",
+  user: "root",
+}
+
+const rawInspect = {
+  Id: "1111111111111111",
+  Config: {
+    Image: "nginx:alpine",
+    Env: ["PATH=/usr/bin", "JD_MASTER_KEY=s3cr3t-master", "JD_BOOTSTRAP_PASSWORD=hunter2"],
+  },
+}
+
 async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -388,19 +429,23 @@ test("attention lists posture findings and never calls them health", async ({ pa
   // A recommendation is present and is not painted as a problem.
   await expect(page.getByText("db has no health check")).toBeVisible()
 
-  // The severity filter is a real filter, and its selected state is a fill
-  // rather than the outline that keyboard focus also uses — so `aria-pressed`
-  // is the assertion, not a colour.
-  const critical = page.getByRole("button", { name: /^Critical/ })
-  await critical.click()
-  await expect(critical).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByText("db has no health check")).toHaveCount(0)
-  await expect(page.getByText("web can control Docker itself")).toBeVisible()
+  // Docker's findings render through the one list the whole product shares
+  // with Metrics and Security — see components/finding-list.tsx. The shape of
+  // that list is the assertion: a row is a title, and the reasoning behind it
+  // is one press away rather than printed under every entry. Docker used to
+  // have its own parallel component that showed both at once, which is what
+  // made this panel twice as tall and half as scannable as the identical
+  // panel two pages away.
+  const row = page.getByRole("button", { name: /web can control Docker itself/ })
+  await expect(row).toHaveAttribute("aria-expanded", "false")
+  await expect(page.getByText("The Docker socket is mounted into this container.")).toHaveCount(0)
 
-  // "All" is a state of its own rather than every box ticked, and returns the
-  // full list.
-  await page.getByRole("button", { name: /^All/ }).click()
-  await expect(page.getByText("db has no health check")).toBeVisible()
+  await row.click()
+  await expect(page.getByText("The Docker socket is mounted into this container.")).toBeVisible()
+
+  // The kind of problem is the row's right-hand column, so a reader scanning
+  // the panel gets "security, exposure, configuration" in one pass.
+  await expect(row.getByText("Security")).toBeVisible()
 })
 
 /** "0/0 up" is not a state. */
@@ -461,7 +506,6 @@ test("the containers table keeps status runtime-only and counts issues apart", a
   await expect(db.getByText("no health check")).toBeVisible()
   await expect(db.getByText("db publishes PostgreSQL on every interface")).toHaveCount(0)
   await expect(page.getByRole("columnheader", { name: "Issues" })).toBeVisible()
-  await expect(page.getByRole("columnheader", { name: "CPU · 1h" })).toBeVisible()
 })
 
 /**
@@ -524,7 +568,9 @@ const repeated = {
   ],
 }
 
-test("attention collapses one problem repeated across containers into one row", async ({ page }) => {
+test("attention collapses one problem repeated across containers into one row", async ({
+  page,
+}) => {
   await mockDocker(page)
   // Registered after mockDocker, so it wins for this one path.
   await page.route("**/api/v1/docker/health", (route) => json(route, repeated))
@@ -537,11 +583,6 @@ test("attention collapses one problem repeated across containers into one row", 
   // The individual titles are not in the list until the group is opened.
   await expect(page.getByText("api has no health check")).toHaveCount(0)
 
-  // The header says it is fewer problems than findings. It used to say so in a
-  // sentence under the title; the design system has no descriptions there, so
-  // the number sits beside the issue count instead.
-  await expect(page.getByText(/^\d+ distinct$/)).toBeVisible()
-
   // Severity still wins over frequency: the one critical stays on top.
   const rows = await page.getByRole("button", { expanded: false }).allInnerTexts()
   const critical = rows.findIndex((t) => t.includes("web can control Docker itself"))
@@ -549,34 +590,54 @@ test("attention collapses one problem repeated across containers into one row", 
   expect(critical).toBeGreaterThanOrEqual(0)
   expect(critical).toBeLessThan(group)
 
-  // Opening it names the containers, and keeps the shared advice stated once.
+  // Opening it names the containers and states the shared reasoning once. The
+  // group is a summary, never a replacement for knowing which ones — but the
+  // names are names rather than five repetitions of the same sentence, which
+  // is what the grouping exists to stop.
   await page.getByRole("button", { name: /5 containers have no health check/ }).click()
-  await expect(page.getByText("api has no health check")).toBeVisible()
-  await expect(page.getByText("cache has no health check")).toBeVisible()
+  await expect(page.getByText("Docker reports this container as up whenever")).toBeVisible()
+  await expect(page.getByText("api", { exact: true })).toBeVisible()
+  await expect(page.getByText("cache", { exact: true })).toBeVisible()
+  await expect(page.getByText("api has no health check")).toHaveCount(0)
 })
 
 /**
- * The containers table on a phone.
+ * The containers page on a phone.
  *
  * Ten columns with no small-screen treatment forced the page itself to scroll
- * sideways, which takes the navigation with it. The columns that go are the
- * ones a phone reader can do without; what a container is running is not one
- * of them, so the image moves into the name cell rather than disappearing.
+ * sideways, which takes the navigation with it. The first fix dropped the
+ * columns a phone reader could do without — and a nine-column table with five
+ * of them removed is still a table somebody is reading the remains of: a wide
+ * name cell, a wedge of space, and two stubs.
+ *
+ * Below `lg` the same containers are laid out down the row instead of across
+ * it, and the test of that layout is that *nothing was dropped to achieve it*.
+ * The image, the ports, both live readings and the issue count are all what a
+ * phone reader checks after a deploy, and all of them are on screen.
  */
-test("the containers table fits a phone without taking the page sideways", async ({ page }) => {
+test("on a phone the containers are a list rather than a table with columns removed", async ({
+  page,
+}) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/docker/containers")
 
-  await expect(page.getByRole("columnheader", { name: "Container" })).toBeVisible()
-  await expect(page.getByRole("columnheader", { name: "Issues" })).toBeVisible()
-  // Dropped rather than squeezed.
-  await expect(page.getByRole("columnheader", { name: "CPU · 1h" })).toBeHidden()
-  await expect(page.getByRole("columnheader", { name: "Ports" })).toBeHidden()
-  await expect(page.getByRole("columnheader", { name: "Image" })).toBeHidden()
+  // No columns at all: the table is replaced here, not squeezed.
+  await expect(page.getByRole("columnheader")).toHaveCount(0)
 
-  // But the image is still readable, in the name cell.
-  await expect(page.getByText("nginx:alpine").first()).toBeVisible()
+  // And every fact the columns carried is still readable. Scoped to the list,
+  // because the wide table is still in the document with `display: none` and
+  // a bare text query would match its cells too.
+  const list = page.getByRole("list").filter({ hasText: "nginx:alpine" })
+  await expect(list.getByText("nginx:alpine")).toBeVisible()
+  await expect(list.getByText("postgres:16")).toBeVisible()
+  await expect(list.getByText("Running").first()).toBeVisible()
+  await expect(list.getByText("443 → 443")).toBeVisible()
+  // The memory figure is the one that used to be truncated to "100.0…" when
+  // the readings shared the row with the action cluster.
+  await expect(list.getByText("512.0 MB")).toBeVisible()
+  await expect(list.getByText(/no limit/)).toBeVisible()
+  await expect(list.getByText("1 issue").first()).toBeVisible()
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -584,49 +645,205 @@ test("the containers table fits a phone without taking the page sideways", async
   expect(overflow).toBeLessThanOrEqual(1)
 })
 
-test("the containers table keeps every column on a desktop", async ({ page }) => {
+/**
+ * The reveal rule's touch clause, for this page specifically: a card's verbs
+ * are never hidden behind a hover that a phone cannot perform.
+ */
+test("a container's actions are reachable on a touch screen", async ({ page }) => {
+  await mockDocker(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/docker/containers")
+
+  const hidden = await page.evaluate(() => {
+    const bad: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>("li button")) {
+      if (parseFloat(getComputedStyle(el).opacity) < 0.1) {
+        bad.push(el.getAttribute("aria-label") ?? el.outerHTML.slice(0, 120))
+      }
+    }
+    return bad
+  })
+  expect(hidden, "controls hidden behind hover on the containers list").toEqual([])
+})
+
+/**
+ * A glyph is not a word.
+ *
+ * The row used to end in five icon-only buttons, two of which — update and
+ * pause — mean nothing without already knowing what they do, and a control
+ * nobody dares press is a control that is not there. Start, restart and stop
+ * stay as icons because they are pressed constantly; everything else moved into
+ * a menu where each verb carries a line of plain English.
+ */
+test("the destructive verbs are words with a sentence, not glyphs", async ({ page }) => {
+  await mockDocker(page)
+  await page.goto("/docker/containers")
+
+  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  await row.hover()
+
+  // The constantly-pressed ones stay on the row itself, and are asserted first:
+  // an open Radix menu is modal, so it hides the rest of the page from the
+  // accessibility tree while it is up.
+  await expect(row.getByRole("button", { name: "Stop" })).toBeVisible()
+  await expect(row.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
+
+  await row.getByRole("button", { name: "More actions" }).click()
+  const menu = page.getByRole("menu")
+  await expect(menu.getByText("Update to a newer image")).toBeVisible()
+  await expect(menu.getByText(/Pulls a newer nginx:alpine/)).toBeVisible()
+  await expect(menu.getByText("Remove")).toBeVisible()
+  await expect(menu.getByText(/Named volumes and their data are kept/)).toBeVisible()
+})
+
+/**
+ * "Which of these is not running" was a question answered by reading a column.
+ */
+test("the state filters narrow the list and carry their own counts", async ({ page }) => {
+  await mockDocker(page)
+  await page.goto("/docker/containers")
+
+  const running = page.getByRole("button", { name: /^Running/ })
+  await expect(running).toContainText("2")
+  await running.click()
+  await expect(running).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
+
+  // Nothing is stopped on this host, so that chip is not offered at all —
+  // a filter that can only ever return nothing is furniture.
+  await expect(page.getByRole("button", { name: /^Not running/ })).toHaveCount(0)
+
+  await page.getByRole("button", { name: /^Needs attention/ }).click()
+  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
+})
+
+/**
+ * Runtime health states four numbers and the relationship between them.
+ *
+ * It was a 2×4 grid of figures, which cannot show that half the estate is
+ * unwatched. The bar can, and every count — including the zeroes — is still
+ * printed, because a category that stops being mentioned the moment it goes
+ * right is a category nobody learns to check.
+ */
+test("runtime health keeps every count, including the zeroes", async ({ page }) => {
+  await mockDocker(page)
+  await page.goto("/docker/containers")
+
+  await expect(page.getByText("passing a health check")).toBeVisible()
+  await expect(page.getByText("failing one")).toBeVisible()
+  await expect(page.getByText("without one")).toBeVisible()
+  await expect(page.getByText("2 of 2 running")).toBeVisible()
+  await expect(page.getByText("still starting")).toBeVisible()
+})
+
+/**
+ * Opening a container to find out why it is unhappy used to mean closing it
+ * again to do anything about it: the lifecycle verbs lived on the table row and
+ * nowhere else.
+ */
+test("the detail panel can act on the container it is describing", async ({ page }) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
+  await page.goto("/docker/containers")
+  await page.getByRole("button", { name: "web", exact: true }).first().click()
+
+  const panel = page.getByRole("dialog")
+  await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
+  // And the identity is on screen rather than only in the accessible description.
+  await expect(panel.getByText("nginx:alpine").first()).toBeVisible()
+})
+
+/**
+ * A log button that merely selects a row is not a log button. Every route that
+ * asks a particular question about a container now lands on the tab that
+ * answers it.
+ */
+test("asking for a container's logs opens the logs", async ({ page }) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
+  await page.goto("/docker/containers")
+
+  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  await row.hover()
+  await row.getByRole("button", { name: "More actions" }).click()
+  await page.getByRole("menuitem", { name: /^Logs/ }).click()
+
+  await expect(page.getByRole("tab", { name: "Logs" })).toHaveAttribute("data-state", "active")
+})
+
+/**
+ * Neither Docker page takes the shell sideways, at any width anybody has.
+ *
+ * A horizontal scrollbar on a dashboard is never local to the thing that caused
+ * it: the page scrolls, and the navigation goes with it. The widths are the
+ * breakpoint boundaries plus the two extremes — a small phone in portrait and a
+ * wide desktop — because an overflow introduced by a layout swap shows up
+ * within a pixel or two of the breakpoint that swapped it.
+ */
+for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
+  test(`neither Docker page scrolls sideways at ${width}px`, async ({ page }) => {
+    await mockDocker(page)
+    await page.setViewportSize({ width, height: 900 })
+
+    for (const path of ["/docker", "/docker/containers"]) {
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+      expect(overflow, `${path} overflows at ${width}px`).toBeLessThanOrEqual(1)
+    }
+  })
+}
+
+/**
+ * The live dot is a claim about the data, and the claim has to be visible.
+ *
+ * A running container's status dot carries a halo that breathes, because this
+ * table is fed by an open socket rather than a poll. It is asserted as a
+ * running animation rather than as a class name: the whole point of the token is
+ * that it resolves to motion, and the root `prefers-reduced-motion` rule is what
+ * turns it off — which the design-system suite checks from the other side.
+ */
+test("a running container's dot says the reading is live", async ({ page }) => {
+  await mockDocker(page)
+  await page.goto("/docker/containers")
+
+  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  await expect(row.getByText("Running")).toBeVisible()
+
+  const breathing = await row.evaluate((el) =>
+    [...el.querySelectorAll("span")].some((s) => getComputedStyle(s).animationName !== "none"),
+  )
+  expect(breathing, "no live halo on a running container").toBe(true)
+})
+
+/**
+ * Every column, on a screen with room for them.
+ *
+ * `CPU · 1h` waits for `2xl` rather than `xl`: it is the ninth column, and at
+ * 1280 with the sidebar open it is the one that pushes Issues and the row's
+ * actions past the panel's right edge.
+ */
+test("the containers table keeps every column on a wide desktop", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto("/docker/containers")
 
-  for (const name of ["Container", "Image", "Status", "CPU", "Memory", "CPU · 1h", "Ports", "Issues"]) {
+  for (const name of [
+    "Container",
+    "Image",
+    "Status",
+    "CPU",
+    "Memory",
+    "CPU · 1h",
+    "Ports",
+    "Issues",
+  ]) {
     await expect(page.getByRole("columnheader", { name, exact: true })).toBeVisible()
   }
 })
-
-/**
- * One tab hid the master key; the next one printed it.
- *
- * Environment detects credential-shaped values and puts them behind Reveal.
- * Inspect printed the same `docker inspect` document raw, including those
- * values in full — so the gesture on the first tab bought nothing against the
- * thing it defends against, which is somebody reading the screen. The server
- * already redacts for anyone below system.admin; this is the admin's own view.
- */
-const detail = {
-  ...containers[0],
-  env: ["PATH=/usr/bin", "JD_MASTER_KEY=s3cr3t-master", "JD_BOOTSTRAP_PASSWORD=hunter2"],
-  mounts: [],
-  networkMode: "bridge",
-  networkDetails: [],
-  restartPolicy: "unless-stopped",
-  privileged: false,
-  capAdd: [],
-  logPath: "/var/log/x.log",
-  exitCode: 0,
-  restartCount: 0,
-  entrypoint: [],
-  workingDir: "/",
-  user: "root",
-}
-
-const rawInspect = {
-  Id: "1111111111111111",
-  Config: {
-    Image: "nginx:alpine",
-    Env: ["PATH=/usr/bin", "JD_MASTER_KEY=s3cr3t-master", "JD_BOOTSTRAP_PASSWORD=hunter2"],
-  },
-}
 
 test("the inspect tab does not undo the masking the environment tab applies", async ({ page }) => {
   await mockDocker(page)

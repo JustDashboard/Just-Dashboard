@@ -125,6 +125,46 @@ export function Field({
  * enough to be an answer, short enough to be read in a hover card.
  */
 export const GLOSSARY: Record<string, { title: string; body: string }> = {
+  /*
+    The first four are the ones a newcomer needs before any of the others make
+    sense, and they were the four this file did not have. Somebody arriving at
+    /docker for the first time met "Runtime health", "Attention" and "Compose
+    stacks" as three headings with no way to find out what any of them meant —
+    the exact experience this teaching layer exists to prevent, happening on the
+    section's own front page.
+  */
+  docker: {
+    title: "Docker",
+    body: "A way of running applications in their own sealed boxes. Each box — a container — carries the application and everything it needs, so it runs the same way here as it did on the machine it was built on, and it cannot disturb anything else on this server. Almost everything self-hosted is published as a Docker image, which is why this page exists.",
+  },
+  runtimeHealth: {
+    title: "Runtime health",
+    body: "What Docker itself says about what is running right now: how many containers are up, how many are passing their own health check, how many are failing it. It clears itself — start a stopped container and this goes green again with nothing else to do.",
+  },
+  attention: {
+    title: "Attention",
+    body: "Everything that is not a running-or-not fact: a container with no memory limit, a database published to the whole internet, an image pinned to a tag that moves under you. None of it stops a service today and none of it goes away on its own — this is the list that needs a decision rather than a restart.",
+  },
+  containerState: {
+    title: "Running, stopped, paused",
+    body: '"Running" means the program inside is alive — not necessarily that it works, which is what a health check is for. "Exited" means it finished or crashed, and the exit code says which. "Paused" means it is frozen in place, still holding its memory. "Restarting" means it keeps stopping and Docker keeps starting it again, which is usually a crash loop rather than a recovery.',
+  },
+  cpuShare: {
+    title: "How CPU is counted",
+    body: "Docker counts one core as 100%, so a container using two cores fully reads as 200% and that is normal rather than an emergency. What matters is the figure against this server's total — eight cores is 800% — and against the container's own limit, if it was given one.",
+  },
+  memoryUse: {
+    title: "How memory is counted",
+    body: 'The first figure is what the container is using now. A second figure after a slash is the ceiling somebody set for it; without one there is no ceiling, and Docker unhelpfully reports the whole machine\'s RAM in its place — which is why this dashboard says "no limit" instead of dividing by it.',
+  },
+  exitCode: {
+    title: "Exit code",
+    body: "The number the program returned when it stopped. 0 means it finished on purpose. 137 almost always means it was killed for using too much memory; 139 is a crash; 1 and 2 are the program's own way of saying it refused to start, and its logs will say why.",
+  },
+  healthCheck: {
+    title: "Health check",
+    body: 'A command Docker runs inside the container every so often to ask whether it is actually working. Without one, "running" only means the process has not exited — a wedged application answering nothing still counts as up. Most good images ship one; the rest need one adding to the compose file.',
+  },
   image: {
     title: "Image",
     body: "A packaged, read-only copy of an application and everything it needs to run. Containers are made from images. `nginx:alpine` means the image called nginx, the version tagged alpine — the part after the colon is the tag, and it decides which version you get.",
@@ -151,7 +191,7 @@ export const GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   port: {
     title: "Published port",
-    body: "Makes a port inside the container reachable from outside it. Written host:container — `8080:80` means the server's port 8080 reaches the container's port 80. Leave the host side empty to let containers on the same network reach it while nothing outside can.",
+    body: "Makes a port inside the container reachable from outside it. Written host:container — `8080:80` means the server's port 8080 reaches the container's port 80. Leave the host side empty to let containers on the same network reach it while nothing outside can. Keep the address on 127.0.0.1 unless it genuinely has to be reachable from other machines: a published port is wired with NAT rules the firewall never sees.",
   },
   hostIp: {
     title: "Which addresses can reach it",
@@ -223,6 +263,58 @@ export const GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   containerUser: {
     title: "User",
-    body: "Which account the program inside the container runs as. `root` is the default and means the process has full rights inside the container — which matters most where the container can reach the server's files, through a folder mount or the host network.",
+    body: "Which account the program inside the container runs as. Leave it empty to use whatever the image says — `1000:1000` is the common override. `root` is the default for most images and means the process has full rights inside the container, which matters most where the container can reach the server's files through a folder mount or the host network.",
+  },
+
+  /*
+    The entries below replaced prose that used to be printed in the create
+    form itself — a section heading with three lines of explanation under it,
+    six times over, plus a hint under most fields. An expert scrolled past all
+    of it on every visit and a newcomer read it once. Behind a `?` it costs
+    nothing at rest and says more than the line it replaced had room for.
+  */
+  containerName: {
+    title: "Name",
+    body: "How you will refer to it here, and the hostname other containers on the same network use to reach it — `postgres:5432` works between containers precisely because one of them is named postgres. Docker generates a random one if you leave it empty, which is fine for something disposable and a nuisance for anything else.",
+  },
+  command: {
+    title: "Command",
+    body: "Overrides what the image runs when it starts. Every image already has one, so leave this empty unless the documentation told you otherwise — an image given the wrong command usually exits immediately with a message you will only find in its logs.",
+  },
+  workingDir: {
+    title: "Working directory",
+    body: "The directory the program starts in inside the container. Images set their own, and it is almost always the right one. Changing it matters only for an image that expects to be run from somewhere specific and was not told so.",
+  },
+  initProcess: {
+    title: "Init process",
+    body: "Puts a tiny supervisor at PID 1 inside the container to clean up after processes that exit. Most programs were never written to be PID 1, and without this their abandoned child processes accumulate as zombies until the container is restarted. It costs nothing and is almost always right.",
+  },
+  readOnlyRootfs: {
+    title: "Read-only filesystem",
+    body: "The container cannot write anywhere except the storage you attached to it. A good default for anything that does not need to write — it means a compromised process cannot modify the application it is running, and it makes the container's own filesystem stop being somewhere data can be accidentally left.",
+  },
+  pullPolicy: {
+    title: "Pull a fresh image first",
+    body: "Checks the registry for a newer copy of this tag before creating the container. Off, Docker uses whatever copy is already on this server — which for a moving tag like `latest` may be months old. On, creating takes as long as the download.",
+  },
+  templateBinding: {
+    title: "Why these bind to this server only",
+    body: "Every starting point here publishes its ports on 127.0.0.1, so only this server can reach them. That is the right default even for something meant to be public: put it behind the reverse proxy, which reaches it on loopback like anything else here and brings TLS, logging and access rules with it. A port published on every interface bypasses the firewall, which is not a thing to opt into by accident.",
+  },
+  pastedCommand: {
+    title: "Nothing runs yet",
+    body: "The command is read, not executed. It becomes a form you can check and change, and only the Create button at the bottom actually does anything. Flags the visual editor does not understand are listed for you rather than dropped silently — a `--gpus all` quietly ignored produces a container that starts and then has no GPU.",
+  },
+  equivalentCommand: {
+    title: "The equivalent command",
+    body: "Exactly what creating this container will do, rendered by the server from the same spec the Create button sends — so it cannot drift from what actually happens. Copy it if you would rather run it in a shell yourself, or keep it for a ticket.",
+  },
+  composeExport: {
+    title: "The same container, as a file",
+    body: "A container created here exists only in Docker's own memory: there is no file anywhere describing it, so it cannot be committed to git, backed up, or recreated on another machine. The compose version can. Paste it into a new stack to keep it.",
+  },
+  containerStorage: {
+    title: "Storage",
+    body: "Anything a container writes outside the paths you attach storage to lives in the container's own filesystem, and that is destroyed every time the container is replaced — which includes every image update. A volume is the fix: Docker keeps it outside the container, so the data survives.",
   },
 }

@@ -95,20 +95,61 @@ function portURL(port: PortExposure): string | undefined {
   return undefined
 }
 
-/** The port list for a table cell: most exposed first, the rest counted. */
+/** Widest reach first, so a cell that can only show one shows the one that matters. */
+const SCOPE_RANK: Record<PortExposure["scope"], number> = {
+  all: 0,
+  private: 1,
+  loopback: 2,
+  internal: 3,
+}
+
+/**
+ * The port list for a table cell: most exposed first, the rest behind a count.
+ *
+ * `max` is a hard limit on *rows*, not a suggestion. A reverse proxy with six
+ * published ports wrapped its cell onto three lines while every other cell in
+ * the row was one or two, so one container in the list was half again as tall
+ * as its neighbours and the table read as broken — the single most visible
+ * defect on the containers page. The overflow is a count you can hover, which
+ * is both shorter and more informative than three chips and a `+3`.
+ */
 export function PortList({ ports, max = 3 }: { ports: PortExposure[]; max?: number }) {
-  const published = ports.filter((p) => p.hostPort)
+  const published = ports
+    .filter((p) => p.hostPort)
+    .slice()
+    .sort((a, b) => SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope])
   if (published.length === 0) {
     return <span className="text-hint text-muted-foreground">not published</span>
   }
   const shown = published.slice(0, max)
+  const rest = published.slice(max)
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex min-w-0 items-center gap-1 overflow-hidden">
       {shown.map((port, i) => (
         <PortTag key={`${port.hostIp}-${port.hostPort}-${i}`} port={port} />
       ))}
-      {published.length > shown.length && (
-        <span className="text-micro text-muted-foreground">+{published.length - shown.length}</span>
+      {rest.length > 0 && (
+        <HoverCard openDelay={150}>
+          <HoverCardTrigger asChild>
+            <button
+              type="button"
+              onClick={(event) => event.stopPropagation()}
+              className="shrink-0 cursor-help rounded-sm text-micro font-medium text-muted-foreground focus-ring hover:text-foreground"
+            >
+              +{rest.length}
+            </button>
+          </HoverCardTrigger>
+          <HoverCardContent className="w-72 space-y-1.5">
+            <p className="text-hint text-muted-foreground">
+              {rest.length} more published port{rest.length === 1 ? "" : "s"}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {rest.map((port, i) => (
+                <PortTag key={`${port.hostIp}-${port.hostPort}-rest-${i}`} port={port} />
+              ))}
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       )}
     </div>
   )

@@ -12,12 +12,11 @@ import {
   TerminalWindow,
   Warning,
 } from "@/components/icons"
-import { } from "@/lib/format"
 import type { Posture, SecurityFinding } from "@/lib/types"
 import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { FindingList, type Finding } from "@/components/metrics/finding-list"
+import { FindingList, type Finding } from "@/components/finding-list"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
@@ -48,7 +47,7 @@ export function PosturePanel({
   if (loading && !posture) {
     return (
       <Panel className={className}>
-        <PanelHeader icon={ShieldOff} title="Security posture" />
+        <PanelHeader title="Security posture" />
         <PanelBody className="space-y-2">
           <Skeleton className="h-4 w-48" />
           <Skeleton className="h-4 w-72" />
@@ -58,17 +57,12 @@ export function PosturePanel({
   }
   if (!posture) return null
 
-  const ok = posture.findings.length === 0
   const count = (level: SecurityFinding["level"]) =>
     posture.findings.filter((f) => f.level === level).length
 
   return (
     <Panel className={className}>
-      <PanelHeader
-        icon={ok ? ShieldCheck : Bug}
-        title="Security posture"
-        actions={<PostureBadge status={posture.status} />}
-      />
+      <PanelHeader title="Security posture" actions={<PostureBadge status={posture.status} />} />
       {/* The severity split as figures rather than as a sentence in the
           description. Three findings and three critical findings are not the
           same morning, and the header used to read identically either way. */}
@@ -124,7 +118,6 @@ export function AreaFindings({
   return (
     <Panel className={className}>
       <PanelHeader
-        icon={worst === "notice" ? Information : Warning}
         title="Needs attention"
         actions={
           <Status

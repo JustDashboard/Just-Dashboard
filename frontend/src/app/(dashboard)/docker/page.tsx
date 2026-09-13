@@ -1,10 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Heart, Layers, Lifebuoy, Play, Plus, Servers } from "@/components/icons"
+import { useRouter } from "next/navigation"
+import {
+  ArrowRight,
+  Box,
+  Clipboard,
+  Heart,
+  Layers,
+  Lifebuoy,
+  Play,
+  Plus,
+  Sparkles,
+} from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type {
   ComposeStack,
   Container,
@@ -18,12 +30,20 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { StatusDot } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
+import { rowReveal } from "@/components/icon-action"
 import { AttentionPanel, attentionLabel, runtimeLabel } from "@/components/docker/attention"
 import { CleanupPanel } from "@/components/docker/cleanup"
 import { CreateContainerPanel } from "@/components/docker/create-container"
+import { DiskSummary } from "@/components/docker/disk-panel"
+import { ExplainIcon } from "@/components/docker/explain"
 import { StackStateBadge } from "@/components/docker/stack-state"
+import {
+  ContainerRowActions,
+  useContainerControl,
+  useContainerVerbs,
+} from "@/components/docker/container-actions"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -40,6 +60,21 @@ import { Button } from "@/components/ui/button"
  * grouped containers by compose label and the Stacks page listed compose files
  * found on disk, so "3 stacks" and "7 stacks" were both true and neither was
  * checkable. Both now read the same endpoint and say "3 active · 7 detected".
+ *
+ * Two things the 0.6.7 polish pass added, both of them gaps rather than
+ * decoration:
+ *
+ *   **A stopped container was invisible here.** Attention deliberately excludes
+ *   runtime findings, and the runtime tile summarises rather than names — so a
+ *   service that had been down since a reboot showed up as the digit 7 turning
+ *   into a 6. It now has a panel with the containers in it and a Start button
+ *   beside each, because "what is not running" is the single most common reason
+ *   somebody opens this page.
+ *
+ *   **Disk was a sentence.** "Only 412 MB could be reclaimed" is four numbers
+ *   collapsed into an opinion about one of them. The bar says what the space
+ *   actually is, which is the thing a reader needs before deciding whether a
+ *   sweep is the answer or whether it is the volumes holding their data.
  */
 export default function DockerOverviewPage() {
   const { can } = useAuth()
@@ -66,6 +101,15 @@ export default function DockerOverviewPage() {
   const containers = useMemo(() => list.data ?? [], [list.data])
   const detected = useMemo(() => stacks.data ?? [], [stacks.data])
   const active = useMemo(() => detected.filter((s) => s.deployed), [detected])
+  const idle = useMemo(() => containers.filter((c) => c.state !== "running"), [containers])
+
+  const listRefresh = list.refresh
+  const healthRefresh = health.refresh
+  const refreshContainers = useCallback(() => {
+    listRefresh()
+    healthRefresh()
+  }, [listRefresh, healthRefresh])
+  const { pending, act } = useContainerControl(refreshContainers)
 
   if (list.loading && !list.data) {
     return <PageState eyebrow="Server" title="Docker" />
@@ -73,7 +117,7 @@ export default function DockerOverviewPage() {
 
   const runtime = health.data?.runtime
   const attention = health.data?.attention
-  const running = containers.filter((c) => c.state === "running").length
+  const running = containers.length - idle.length
   const reclaimable = disk.data
     ? disk.data.images.reclaimable + disk.data.buildCache.reclaimable
     : 0
@@ -82,7 +126,19 @@ export default function DockerOverviewPage() {
     <Page>
       <PageHeader
         eyebrow="Server"
-        title="Docker"
+        title={
+          <span className="inline-flex items-center gap-2">
+            Docker
+            {/*
+              The one word on this page that has to be understood before any of
+              the others, and the section's front page never said what it was.
+              A hover card rather than a paragraph: an operator who knows Docker
+              never sees it, and somebody who does not is one gesture from an
+              answer written for them.
+            */}
+            <ExplainIcon name="docker" className="translate-y-0.5" />
+          </span>
+        }
         actions={
           can("service.control") && (
             <Button size="sm" onClick={() => setCreating(true)}>
@@ -93,18 +149,29 @@ export default function DockerOverviewPage() {
         }
       />
 
+      {/*
+        Four readings, four destinations. Every one of them is a link now: three
+        were and one was not, which taught the reader that a tile is sometimes a
+        button and sometimes furniture — and the one that was not is "Running",
+        the tile most likely to be pressed.
+      */}
       <StatGrid columns={4}>
-        <StatTile
-          label="Running"
-          icon={Play}
-          value={`${running} / ${containers.length}`}
-          tone={running > 0 ? "success" : "default"}
-          hint={
-            containers.length === running
-              ? "everything on this server is up"
-              : `${containers.length - running} not running`
-          }
-        />
+        <TileLink href="/docker/containers" label="Running containers">
+          <StatTile
+            className="h-full transition-colors group-hover:bg-row-hover"
+            label="Running"
+            icon={Play}
+            value={`${running} / ${containers.length}`}
+            tone={running > 0 ? "success" : "default"}
+            hint={
+              containers.length === 0
+                ? "nothing on this server yet"
+                : containers.length === running
+                  ? "everything on this server is up"
+                  : `${containers.length - running} not running`
+            }
+          />
+        </TileLink>
 
         {/*
           Runtime health, and only runtime health. The hint spells out how many
@@ -112,31 +179,41 @@ export default function DockerOverviewPage() {
           "everything is up" quietly includes every container nothing is
           watching.
         */}
-        <Link href="/docker/containers" className="block min-w-0">
+        <TileLink href="/docker/containers" label="Runtime health">
           <StatTile
-            className="h-full transition-colors hover:border-rule-brand"
+            className="h-full transition-colors group-hover:bg-row-hover"
             label="Runtime health"
             icon={Heart}
             value={runtimeLabel(runtime)}
+            /*
+              "notice" is a stopped container, not a failure and not a success:
+              it used to fall through to `success`, so the tile printed
+              "Something is stopped" in green.
+            */
             tone={
               runtime?.status === "critical"
                 ? "danger"
                 : runtime?.status === "warning"
                   ? "warning"
-                  : "success"
+                  : // An empty server is not a healthy one. "Nothing running"
+                    // in green is the page congratulating somebody for having
+                    // no services yet.
+                    runtime?.status === "ok" && runtime.total > 0
+                    ? "success"
+                    : "default"
             }
             hint={runtime?.summary ?? "checking"}
           />
-        </Link>
+        </TileLink>
 
         {/*
           Attention is never called health. It counts posture, storage,
           configuration and exposure — none of which stops a service, all of
           which costs something later, and none of which clears itself.
         */}
-        <Link href="/docker/containers" className="block min-w-0">
+        <TileLink href="/docker/containers" label="Things needing attention">
           <StatTile
-            className="h-full transition-colors hover:border-rule-brand"
+            className="h-full transition-colors group-hover:bg-row-hover"
             label="Attention"
             icon={Lifebuoy}
             value={attentionLabel(attention)}
@@ -155,100 +232,160 @@ export default function DockerOverviewPage() {
                 : "nothing to act on"
             }
           />
-        </Link>
+        </TileLink>
 
-        <Link href="/docker/stacks" className="block min-w-0">
+        <TileLink href="/docker/stacks" label="Compose stacks">
           <StatTile
-            className="h-full transition-colors hover:border-rule-brand"
+            className="h-full transition-colors group-hover:bg-row-hover"
             label="Compose stacks"
             icon={Layers}
             value={`${active.length} active`}
             hint={`${detected.length} detected on this server`}
           />
-        </Link>
+        </TileLink>
       </StatGrid>
 
-      {/* Problems first. Everything below is context for them. */}
-      <AttentionPanel diagnosis={health.data} />
-
-      <Panel>
-        <PanelHeader
-          icon={Layers}
-          title="Compose projects"
-          actions={
-            <Link
-              href="/docker/stacks"
-              className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-            >
-              Manage <ArrowRight className="size-3" />
-            </Link>
-          }
-        />
-        <PanelBody flush>
-          {detected.length === 0 ? (
-            <EmptyState
-              icon={Layers}
-              title="No compose stacks"
-              description="A stack is a directory with a compose file in it. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
-            />
-          ) : (
-            <ul className="divide-y divide-hairline">
-              {detected.map((stack) => (
-                <li key={stack.name}>
+      {/* A server with nothing on it is not an error state, and it is the one
+          moment where the page should be teaching rather than reporting. */}
+      {containers.length === 0 && detected.length === 0 ? (
+        <FirstRun onStart={() => setCreating(true)} canStart={can("service.control")} />
+      ) : (
+        <>
+          {/*
+            Not running, by name. The runtime tile counts them and the attention
+            list deliberately does not carry them, so until this panel existed
+            the only way to find out *which* service had been down since the
+            reboot was to open another page and read a column.
+          */}
+          {idle.length > 0 && (
+            <Panel>
+              <PanelHeader
+                title={`${idle.length} not running`}
+                actions={
                   <Link
-                    href={`/docker/stacks?stack=${encodeURIComponent(stack.name)}`}
-                    className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 focus-ring-inset hover:bg-row-hover"
+                    href="/docker/containers"
+                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
                   >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <StatusDot tone={stackTone(stack)} />
-                      <span className="truncate text-body font-medium">{stack.name}</span>
-                    </span>
-                    <StackStateBadge stack={stack} />
+                    All containers <ArrowRight className="size-3" />
                   </Link>
-                </li>
-              ))}
-            </ul>
+                }
+              />
+              <PanelBody flush>
+                <ul className="divide-y divide-hairline">
+                  {idle.slice(0, 6).map((container) => (
+                    <IdleRow
+                      key={container.id}
+                      container={container}
+                      confirm={confirm}
+                      act={act}
+                      pending={pending[container.id]}
+                      onChanged={refreshContainers}
+                    />
+                  ))}
+                </ul>
+                {idle.length > 6 && (
+                  <p className="border-t border-hairline px-4 py-2 text-hint text-muted-foreground">
+                    and {idle.length - 6} more.
+                  </p>
+                )}
+              </PanelBody>
+            </Panel>
           )}
-        </PanelBody>
-      </Panel>
 
-      {/*
-        Cleanup appears only when there is something worth reclaiming. A panel
-        offering to free 40 MB is a panel that trains people to ignore it.
-      */}
-      {can("destructive") && reclaimable > 1024 * 1024 * 1024 && (
-        <CleanupPanel
-          confirm={confirm}
-          onDone={() => {
-            disk.refresh()
-            health.refresh()
-            list.refresh()
-          }}
-        />
-      )}
+          {/* Problems first. Everything below is context for them. */}
+          <AttentionPanel diagnosis={health.data} />
 
-      {disk.data && reclaimable <= 1024 * 1024 * 1024 && (
-        <Panel>
-          <PanelHeader
-            icon={Servers}
-            title="Disk"
-            actions={
-              <Link
-                href="/docker/images"
-                className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Images <ArrowRight className="size-3" />
-              </Link>
-            }
-          />
-          <PanelBody>
-            <p className="text-body text-muted-foreground">
-              {reclaimable > 0
-                ? `Only ${bytes(reclaimable)} could be reclaimed — not worth a sweep yet.`
-                : "Effectively all of it is in use by something running."}
-            </p>
-          </PanelBody>
-        </Panel>
+          <Panel>
+            <PanelHeader
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  Compose projects
+                  <ExplainIcon name="compose" />
+                </span>
+              }
+              actions={
+                <Link
+                  href="/docker/stacks"
+                  className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                >
+                  Manage <ArrowRight className="size-3" />
+                </Link>
+              }
+            />
+            <PanelBody flush>
+              {detected.length === 0 ? (
+                <EmptyState
+                  icon={Layers}
+                  title="No compose stacks"
+                  description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
+                />
+              ) : (
+                <ul className="divide-y divide-hairline">
+                  {detected.map((stack) => (
+                    <li key={stack.name}>
+                      <Link
+                        href={`/docker/stacks?stack=${encodeURIComponent(stack.name)}`}
+                        className="group flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 focus-ring-inset transition-colors hover:bg-row-hover"
+                      >
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
+                          <span className="truncate text-body font-medium">{stack.name}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <StackStateBadge stack={stack} />
+                          <ArrowRight
+                            className={cn("size-3 text-muted-foreground", rowReveal())}
+                            aria-hidden
+                          />
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </PanelBody>
+          </Panel>
+
+          {/*
+            Cleanup appears only when there is something worth reclaiming. A
+            panel offering to free 40 MB is a panel that trains people to
+            ignore it.
+          */}
+          {can("destructive") && reclaimable > 1024 * 1024 * 1024 && (
+            <CleanupPanel
+              confirm={confirm}
+              onDone={() => {
+                disk.refresh()
+                health.refresh()
+                list.refresh()
+              }}
+            />
+          )}
+
+          {disk.data && reclaimable <= 1024 * 1024 * 1024 && (
+            <Panel>
+              <PanelHeader
+                title="Disk"
+                actions={
+                  <Link
+                    href="/docker/images"
+                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                  >
+                    Images <ArrowRight className="size-3" />
+                  </Link>
+                }
+              />
+              <PanelBody className="space-y-3">
+                <DiskSummary usage={disk.data} />
+                <p className="text-hint text-muted-foreground">
+                  {reclaimable > 0
+                    ? `Only ${bytes(reclaimable)} of that could be reclaimed — not worth a sweep yet.`
+                    : "Effectively all of it is in use by something running."}
+                </p>
+              </PanelBody>
+            </Panel>
+          )}
+        </>
       )}
 
       <CreateContainerPanel
@@ -263,6 +400,176 @@ export default function DockerOverviewPage() {
       />
       {dialog}
     </Page>
+  )
+}
+
+/**
+ * A stat tile that is also a destination.
+ *
+ * The arrow is the whole point: a tile with a hover wash and nothing else is a
+ * surface that reacts without saying what pressing it does. It appears through
+ * `rowReveal` rather than a hand-written `group-hover`, which is what makes it
+ * permanently visible on a touch screen — where there is no hover to reveal it
+ * with, and where these four tiles are the page's main navigation.
+ */
+function TileLink({
+  href,
+  label,
+  children,
+}: {
+  href: string
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      // The wash lands on the tile rather than on this anchor: a `StatTile`
+      // paints its own opaque `bg-card`, so a background set out here is behind
+      // it and invisible. Three of these tiles were links before and none of
+      // them had a working hover for exactly that reason.
+      // The hint is the tile's last line and the arrow sits on top of its right
+      // end, so it gives the arrow its width back rather than truncating under
+      // it — "6 without a health check" ended as "6 without a health che⋯→".
+      className="group relative block min-w-0 focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
+    >
+      {children}
+      {/* Bottom right, because the figure is top right: an arrow in the corner
+          a `StatTile` right-aligns its number into sits on top of the number. */}
+      <ArrowRight
+        aria-hidden
+        className={cn("absolute right-3 bottom-2.5 size-3 text-muted-foreground", rowReveal())}
+      />
+    </Link>
+  )
+}
+
+/**
+ * One container that is not running, and the one button that changes that.
+ *
+ * Deliberately not the full verb set: this panel exists to answer "what is
+ * down", and a row of five controls would turn it into a second containers
+ * page. Start is inline because it is the answer; everything else is one click
+ * away in the menu beside it.
+ */
+function IdleRow({
+  container,
+  confirm,
+  act,
+  pending,
+  onChanged,
+}: {
+  container: Container
+  confirm: ReturnType<typeof useConfirm>["confirm"]
+  act: (c: Container, action: string, progressive: string, phrase?: string) => Promise<void>
+  pending?: string
+  onChanged: () => void
+}) {
+  const router = useRouter()
+  const verbs = useContainerVerbs({
+    container,
+    confirm,
+    act,
+    // There is no detail panel on this page, so the verbs that open one — logs,
+    // a shell — go to the page that has it rather than quietly doing nothing.
+    onOpenTab: () =>
+      router.push(`/docker/containers?container=${encodeURIComponent(container.id)}`),
+    onChanged,
+  })
+
+  return (
+    <li
+      className={cn(
+        "group flex min-w-0 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-row-hover",
+        pending && "opacity-70",
+      )}
+    >
+      <span className="min-w-0 flex-1">
+        <Link
+          href={`/docker/containers?container=${encodeURIComponent(container.id)}`}
+          className="block truncate rounded-sm text-body font-medium focus-ring hover:text-primary"
+        >
+          {container.name}
+        </Link>
+        <span className="block truncate font-mono text-hint text-muted-foreground">
+          {container.image}
+        </span>
+      </span>
+      <Status
+        state={container.state}
+        label={pending ? `${pending}…` : container.status}
+        className="shrink-0"
+      />
+      <ContainerRowActions verbs={verbs} reveal={false} />
+    </li>
+  )
+}
+
+/**
+ * The first five minutes.
+ *
+ * A fresh server shows four zeros and an empty compose list, which is an
+ * accurate and completely unhelpful description of a machine somebody has just
+ * decided to put something on. The three routes are the same three the create
+ * panel opens with, stated here because this is where the question is actually
+ * asked.
+ */
+function FirstRun({ onStart, canStart }: { onStart: () => void; canStart: boolean }) {
+  return (
+    <Panel className="animate-rise">
+      <PanelHeader title="Nothing is running on this server yet" />
+      <PanelBody className="space-y-4">
+        <p className="max-w-prose text-body leading-relaxed text-muted-foreground">
+          A <b className="font-medium text-foreground">container</b> is one application packaged
+          with everything it needs to run — a database, a web server, a photo library. It cannot
+          disturb anything else on this machine, and removing it leaves nothing behind.
+        </p>
+        <ul className="grid gap-2 sm:grid-cols-3">
+          <Route
+            icon={Sparkles}
+            title="Start from something common"
+            detail="Postgres, Nginx, Uptime Kuma — filled in with the ports and storage each actually needs."
+          />
+          <Route
+            icon={Clipboard}
+            title="Paste a command you found"
+            detail="A docker run line from a README becomes a form you can read before anything runs."
+          />
+          <Route
+            icon={Box}
+            title="Start from scratch"
+            detail="An empty form, with every field explained beside it."
+          />
+        </ul>
+        {canStart && (
+          <Button size="sm" onClick={onStart}>
+            <Plus className="size-4" />
+            Run a container
+          </Button>
+        )}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+function Route({
+  icon: Icon,
+  title,
+  detail,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  detail: string
+}) {
+  return (
+    <li className="min-w-0 rounded-lg border border-hairline p-3">
+      <p className="flex items-center gap-2 text-body font-medium">
+        <Icon className="size-3.5 shrink-0 text-brand" />
+        <span className="min-w-0 truncate">{title}</span>
+      </p>
+      <p className="mt-1 text-hint leading-relaxed text-muted-foreground">{detail}</p>
+    </li>
   )
 }
 

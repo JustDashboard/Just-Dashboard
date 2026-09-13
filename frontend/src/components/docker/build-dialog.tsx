@@ -82,7 +82,6 @@ export function BuildDialog({
         onOpenChange(false)
       }}
       size="lg"
-      icon={Wrench}
       title="Build an image"
       description="Runs a build from a directory on this server, with the same builder the command line
             uses. Nothing is started — you get an image you can then run."

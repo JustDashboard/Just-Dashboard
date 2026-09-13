@@ -18,6 +18,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { get, post } from "@/lib/api"
 import { parseDockerRun, suggestName, type ParsedRun } from "@/lib/docker-run"
 import { usePoll } from "@/hooks/use-poll"
@@ -35,7 +36,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { SidePanel } from "@/components/side-panel"
 import { Notice } from "@/components/state"
-import { Field, Hint, Term } from "@/components/docker/explain"
+import { ExplainIcon, Field, Hint, Term } from "@/components/docker/explain"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -43,6 +44,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Well } from "@/components/panel"
 import { Tag } from "@/components/tag"
+import { FilterChip } from "@/components/tabs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -52,7 +54,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { copyText } from "@/lib/clipboard"
-import { ChoiceCard } from "@/components/choice-card"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 
 /**
  * Running something new — the thing this dashboard could not do at all.
@@ -201,7 +203,6 @@ function CreateContainerBody({
       open={open}
       onOpenChange={onOpenChange}
       width="xl"
-      icon={CloudUpload}
       title={mode === "choose" ? "Run something new" : spec.name || "New container"}
       description={
         mode === "choose"
@@ -304,6 +305,39 @@ function CreateContainerBody({
 
 /* ------------------------------------------------------------------ start -- */
 
+/**
+ * The two routes that have something to show, plus the one that does not.
+ *
+ * This screen used to be all three at once, stacked: three icon headings, three
+ * paragraphs of explanation, a category strip, nine template cards each
+ * carrying a four-line warning, a textarea, and two buttons — about nine
+ * hundred pixels of chrome around one decision. The decision is the first
+ * thing now, as three cards on one line, and only the route you picked spends
+ * any height. "From scratch" has nothing to configure, so it does not select:
+ * it opens the empty form directly.
+ */
+type StartRoute = "template" | "paste"
+
+const START_ROUTES: {
+  key: StartRoute
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  hint: string
+}[] = [
+  {
+    key: "template",
+    icon: Sparkles,
+    title: "Something common",
+    hint: "Postgres, Redis, Nginx — filled in with the ports and storage each needs.",
+  },
+  {
+    key: "paste",
+    icon: Clipboard,
+    title: "A command you found",
+    hint: "Turn a docker run line from a README into a form you can read.",
+  },
+]
+
 function ChooseStart({
   onPick,
 }: {
@@ -312,6 +346,7 @@ function ChooseStart({
     parsed?: Pick<ParsedRun, "warnings" | "unsupported" | "original">,
   ) => void
 }) {
+  const [route, setRoute] = useState<StartRoute>("template")
   const [pasted, setPasted] = useState("")
   // The starting points come from the server's reviewed blueprint catalogue,
   // so the container form and Deployments offer the same images, ports and
@@ -321,15 +356,6 @@ function ChooseStart({
     0,
     [],
   )
-  const categories = useMemo(() => {
-    const seen: DockerTemplate["category"][] = []
-    for (const template of templates.data ?? []) {
-      if (!seen.includes(template.category)) seen.push(template.category)
-    }
-    return seen
-  }, [templates.data])
-  const [category, setCategory] = useState<DockerTemplate["category"] | null>(null)
-  const active = category ?? categories[0] ?? "http"
 
   const convert = () => {
     const parsed = parseDockerRun(pasted)
@@ -347,92 +373,156 @@ function ChooseStart({
   }
 
   return (
-    <div className="space-y-5">
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Clipboard className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body font-medium">Paste a command you found</h3>
-        </div>
-        <Hint>
-          Most projects document themselves as a <code className="font-mono">docker run</code> line.
-          Paste it here and it becomes a form you can read and change before anything runs. Nothing
-          is executed — the text is only translated.
-        </Hint>
-        <Textarea
-          value={pasted}
-          onChange={(e) => setPasted(e.target.value)}
-          spellCheck={false}
-          rows={4}
-          className="font-mono text-xs"
-          placeholder={
-            "docker run -d \\\n  --name uptime-kuma \\\n  -p 3001:3001 \\\n  -v uptime-kuma:/app/data \\\n  louislam/uptime-kuma:1"
-          }
-        />
-        <Button size="sm" onClick={convert} disabled={!pasted.trim()}>
+    <div className="min-w-0 space-y-4">
+      <div className="grid gap-2 sm:grid-cols-3 [&>*]:min-w-0">
+        {START_ROUTES.map((item) => (
+          <ChoiceCard
+            key={item.key}
+            selected={route === item.key}
+            onClick={() => setRoute(item.key)}
+            className="gap-1"
+          >
+            <span className="flex w-full min-w-0 items-center gap-2">
+              <item.icon className="size-3.5 shrink-0 text-brand" />
+              <ChoiceCardTitle className="truncate">{item.title}</ChoiceCardTitle>
+            </span>
+            <ChoiceCardHint>{item.hint}</ChoiceCardHint>
+          </ChoiceCard>
+        ))}
+        <ChoiceCard onClick={() => onPick(blankSpec())} className="gap-1">
+          <span className="flex w-full min-w-0 items-center gap-2">
+            <Box className="size-3.5 shrink-0 text-brand" />
+            <ChoiceCardTitle className="truncate">From scratch</ChoiceCardTitle>
+          </span>
+          <ChoiceCardHint>An empty form, with every field explained beside it.</ChoiceCardHint>
+        </ChoiceCard>
+      </div>
+
+      {route === "template" ? (
+        <TemplatePicker templates={templates.data ?? []} onPick={onPick} />
+      ) : (
+        <PasteRun value={pasted} onChange={setPasted} onConvert={convert} />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The catalogue, as a grid of one-glance cards.
+ *
+ * What a card had to stop carrying is the `requires` paragraph. "Set
+ * MARIADB_PASSWORD, MARIADB_ROOT_PASSWORD before starting it. Deploying this
+ * through Deployments generates the secrets for you." is four lines of
+ * instruction attached to a thing you have not chosen yet, repeated on every
+ * card that has one — three of them side by side turned the row into a wall of
+ * orange text. It is now one word on the card and a full notice at the top of
+ * the form the moment the template is picked, which is both shorter and the
+ * place the instruction can actually be followed.
+ */
+function TemplatePicker({
+  templates,
+  onPick,
+}: {
+  templates: DockerTemplate[]
+  onPick: (
+    spec: ContainerSpec,
+    parsed?: Pick<ParsedRun, "warnings" | "unsupported" | "original">,
+  ) => void
+}) {
+  const categories = useMemo(() => {
+    const seen: DockerTemplate["category"][] = []
+    for (const template of templates) {
+      if (!seen.includes(template.category)) seen.push(template.category)
+    }
+    return seen
+  }, [templates])
+  const [category, setCategory] = useState<DockerTemplate["category"] | null>(null)
+  const active = category ?? categories[0] ?? "http"
+
+  if (templates.length === 0) {
+    return <Hint>The reviewed catalogue is empty on this install.</Hint>
+  }
+
+  return (
+    <section className="min-w-0 space-y-2.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {categories.map((id) => (
+          <FilterChip key={id} selected={active === id} onClick={() => setCategory(id)}>
+            {TEMPLATE_CATEGORY_LABEL[id] ?? id}
+          </FilterChip>
+        ))}
+        <span className="ml-auto flex items-center gap-1.5 text-hint text-muted-foreground">
+          Bound to this server only
+          <ExplainIcon name="templateBinding" />
+        </span>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
+        {templates
+          .filter((template) => template.category === active)
+          .map((template) => (
+            <ChoiceCard
+              key={template.id}
+              className="gap-1"
+              onClick={() =>
+                onPick(template.spec, {
+                  warnings: template.requires ? [template.requires] : [],
+                  unsupported: [],
+                  original: "",
+                })
+              }
+            >
+              <span className="flex w-full min-w-0 items-center gap-2">
+                <ChoiceCardTitle className="truncate">{template.name}</ChoiceCardTitle>
+                {template.requires && (
+                  <Tag tone="warning" icon={Warning} className="shrink-0">
+                    setup
+                  </Tag>
+                )}
+                <Tag mono className="ml-auto max-w-[45%] truncate">
+                  {template.spec.image}
+                </Tag>
+              </span>
+              <ChoiceCardHint className="line-clamp-2">{template.blurb}</ChoiceCardHint>
+            </ChoiceCard>
+          ))}
+      </div>
+    </section>
+  )
+}
+
+function PasteRun({
+  value,
+  onChange,
+  onConvert,
+}: {
+  value: string
+  onChange: (next: string) => void
+  onConvert: () => void
+}) {
+  return (
+    <section className="min-w-0 space-y-2.5">
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        rows={5}
+        className="font-mono text-xs"
+        placeholder={
+          "docker run -d \\\n  --name uptime-kuma \\\n  -p 3001:3001 \\\n  -v uptime-kuma:/app/data \\\n  louislam/uptime-kuma:1"
+        }
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={onConvert} disabled={!value.trim()}>
           <Sparkles className="size-4" />
           Read this command
         </Button>
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body font-medium">Start from something common</h3>
-        </div>
-        <Hint>
-          Filled in with the ports, storage and settings each of these actually needs. Every one is
-          bound to this server only — put anything that should be reachable from outside behind the
-          reverse proxy rather than publishing it directly.
-        </Hint>
-        <div className="flex flex-wrap gap-1.5">
-          {categories.map((id) => (
-            <Button
-              key={id}
-              size="xs"
-              variant={active === id ? "secondary" : "ghost"}
-              onClick={() => setCategory(id)}
-            >
-              {TEMPLATE_CATEGORY_LABEL[id] ?? id}
-            </Button>
-          ))}
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 [&>*]:min-w-0">
-          {(templates.data ?? [])
-            .filter((template) => template.category === active)
-            .map((template) => (
-              <ChoiceCard key={template.id} onClick={() => onPick(template.spec)} className="gap-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-body font-medium">{template.name}</span>
-                  <Tag mono>{template.spec.image}</Tag>
-                </div>
-                <p className="mt-1 text-hint leading-relaxed text-muted-foreground">
-                  {template.blurb}
-                </p>
-                {template.requires && (
-                  <p className="mt-1.5 flex items-start gap-1.5 text-hint leading-relaxed text-warning">
-                    <Warning className="mt-px size-3 shrink-0" />
-                    {template.requires}
-                  </p>
-                )}
-              </ChoiceCard>
-            ))}
-        </div>
-        {templates.data?.length === 0 && (
-          <Hint>The reviewed catalogue is empty on this install.</Hint>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Box className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body font-medium">Start from scratch</h3>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => onPick(blankSpec())}>
-          <Plus className="size-4" />
-          Empty form
-        </Button>
-      </section>
-    </div>
+        <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
+          Nothing runs yet
+          <ExplainIcon name="pastedCommand" />
+        </span>
+      </div>
+    </section>
   )
 }
 
@@ -451,12 +541,17 @@ function SetupFields({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
           term="image"
           required
           htmlFor="spec-image"
+          // The one hint in this form that survives as prose, because it is
+          // about what you are typing *right now* and it changes as you type:
+          // leaving the tag off is the mistake, and saying so after the fact
+          // is saying it too late.
           hint={
-            <>
-              What to run, as <span className="font-mono">name:version</span>. Leaving the version
-              off means <span className="font-mono">latest</span>, which is{" "}
-              <Term name="tag">not a version</Term>.
-            </>
+            spec.image.trim() && !spec.image.includes(":") ? (
+              <span className="text-warning">
+                No version given, so this means <span className="font-mono">latest</span> — whatever
+                the publisher last pushed. <Term name="tag">Why that matters</Term>
+              </span>
+            ) : undefined
           }
         >
           <Input
@@ -473,11 +568,7 @@ function SetupFields({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
             }}
           />
         </Field>
-        <Field
-          label="Name"
-          htmlFor="spec-name"
-          hint="How you will refer to it here, and the hostname other containers on the same network use to reach it."
-        >
+        <Field label="Name" term="containerName" htmlFor="spec-name">
           <Input
             id="spec-name"
             value={spec.name}
@@ -522,31 +613,34 @@ function SetupFields({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
   )
 }
 
+/**
+ * A section's name, and the paragraph behind it.
+ *
+ * It used to carry the paragraph itself. Six sections × three lines of
+ * explanation is eighteen lines of prose in a form with about twelve controls
+ * in it — an expert scrolls past all of it every single time, and a newcomer
+ * reads it once and then scrolls past it too. The `?` is the same gesture the
+ * rest of the product uses for exactly this, and it costs nothing at rest.
+ */
 function SectionHeading({
   icon: Icon,
   title,
   term,
   action,
-  children,
 }: {
   icon: React.ComponentType<{ className?: string }>
   title: string
   term?: string
   action?: React.ReactNode
-  children?: React.ReactNode
 }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Icon className="size-3.5 text-muted-foreground" />
-          <h3 className="text-body font-medium">
-            {term ? <Term name={term}>{title}</Term> : title}
-          </h3>
-        </div>
-        {action}
-      </div>
-      {children && <Hint>{children}</Hint>}
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <h3 className="flex min-w-0 items-center gap-2 text-body font-medium">
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate">{title}</span>
+        {term && <ExplainIcon name={term} />}
+      </h3>
+      {action}
     </div>
   )
 }
@@ -608,15 +702,10 @@ function PortEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
             Add
           </Button>
         }
-      >
-        How to reach the service inside. Leave the address as 127.0.0.1 unless it genuinely needs to
-        be reachable from other machines — a published port bypasses the firewall.
-      </SectionHeading>
+      />
 
       {ports.length === 0 && (
-        <Hint className="italic">
-          No ports published. Other containers on the same network can still reach it by name.
-        </Hint>
+        <Hint>Nothing published. Containers on the same network still reach it by name.</Hint>
       )}
       {ports.map((port, i) => (
         <div key={i} className="flex flex-wrap items-end gap-2">
@@ -725,7 +814,7 @@ function MountEditor({
       <SectionHeading
         icon={Servers}
         title="Storage"
-        term="volume"
+        term="containerStorage"
         action={
           <Button
             size="xs"
@@ -738,21 +827,22 @@ function MountEditor({
             Add
           </Button>
         }
-      >
-        Anything written outside these paths lives inside the container and is destroyed when it is
-        replaced — including on every image update.
-      </SectionHeading>
+      />
 
       {mounts.length === 0 && (
-        <Hint className="italic">
-          No storage attached. Fine for something stateless; not fine for a database.
-        </Hint>
+        <Hint>Nothing attached. Fine for something stateless; not for a database.</Hint>
       )}
       {mounts.map((mount, i) => (
         <div key={i} className="space-y-1.5 rounded-lg border border-hairline p-2.5">
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-44">
-              <Label className="text-micro text-muted-foreground">Kind</Label>
+              {/* The `?` follows the selection: whichever kind is chosen, the
+                  hover card explains that one. It replaces a help paragraph
+                  that was printed under every mount row in the form. */}
+              <Label className="flex items-center gap-1 text-micro text-muted-foreground">
+                Kind
+                <ExplainIcon name={mount.type === "volume" ? "volume" : mount.type} />
+              </Label>
               <Select
                 value={mount.type}
                 onValueChange={(v) => update(i, { type: v as MountSpec["type"] })}
@@ -812,7 +902,6 @@ function MountEditor({
               <Trash className="size-3.5" />
             </Button>
           </div>
-          <Hint>{MOUNT_HELP[mount.type]}</Hint>
           {mount.type === "volume" && !mount.source && (
             <Hint className="text-warning">
               An unnamed volume gets a random hash for a name. It survives, but you will not
@@ -828,13 +917,6 @@ function MountEditor({
       </datalist>
     </section>
   )
-}
-
-const MOUNT_HELP: Record<MountSpec["type"], string> = {
-  volume:
-    "Storage Docker manages, kept outside the container so it survives being recreated. The right choice for a database.",
-  bind: "A folder on this server, shared with the container. Right for configuration you want to edit yourself.",
-  tmpfs: "Lives in memory and disappears when the container stops. For scratch files and caches.",
 }
 
 function EnvEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
@@ -884,10 +966,7 @@ function EnvEditor({ spec, patch }: { spec: ContainerSpec; patch: PatchFn }) {
             )}
           </div>
         }
-      >
-        Environment variables — how most images are configured. The image&apos;s documentation lists
-        the ones it expects.
-      </SectionHeading>
+      />
 
       {bulk ? (
         <Textarea
@@ -959,10 +1038,7 @@ function AdvancedFields({
   return (
     <>
       <section className="space-y-2.5">
-        <SectionHeading icon={Layers} title="Networks" term="network">
-          Containers on the same network reach each other by name. Two containers on different
-          networks cannot see each other at all, which is the cause of most connection failures.
-        </SectionHeading>
+        <SectionHeading icon={Layers} title="Networks" term="network" />
         <div className="flex flex-wrap gap-1.5">
           {attachable.map((net) => {
             const on = (spec.networks ?? []).includes(net.name)
@@ -986,14 +1062,17 @@ function AdvancedFields({
           })}
         </div>
         {admin && (
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <Switch
-              checked={spec.networkMode === "host"}
-              onCheckedChange={(v) => patch({ networkMode: v ? "host" : "", networks: [] })}
-              aria-label="Use the host's network"
-            />
-            Share the server&apos;s network directly (published ports are ignored)
-          </label>
+          <ToggleRow
+            label="Share the server's network directly"
+            term="hostNetwork"
+            hint={
+              spec.networkMode === "host"
+                ? "Published ports are ignored, and it can reach anything bound to 127.0.0.1 on this server."
+                : undefined
+            }
+            checked={spec.networkMode === "host"}
+            onChange={(v) => patch({ networkMode: v ? "host" : "", networks: [] })}
+          />
         )}
       </section>
 
@@ -1001,11 +1080,7 @@ function AdvancedFields({
         <Field
           label="Memory limit"
           term="memoryLimit"
-          hint={
-            spec.limits.memoryMb
-              ? "The kernel stops this container if it exceeds this, rather than picking a victim across the whole server."
-              : "No limit. A leak here takes down the whole server."
-          }
+          hint={spec.limits.memoryMb ? undefined : "No limit — a leak here takes the server down."}
         >
           <div className="flex items-center gap-2">
             <Input
@@ -1019,11 +1094,7 @@ function AdvancedFields({
             <span className="text-xs text-muted-foreground">MB</span>
           </div>
         </Field>
-        <Field
-          label="CPU limit"
-          term="cpuLimit"
-          hint="In cores. 1.5 means one and a half. Empty means all of them."
-        >
+        <Field label="CPU limit" term="cpuLimit">
           <Input
             type="number"
             step="0.5"
@@ -1037,10 +1108,7 @@ function AdvancedFields({
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Run as user"
-          hint="Leave empty to use whatever the image says. `1000:1000` is common."
-        >
+        <Field label="Run as user" term="containerUser">
           <Input
             value={spec.user ?? ""}
             spellCheck={false}
@@ -1048,7 +1116,7 @@ function AdvancedFields({
             onChange={(e) => patch({ user: e.target.value })}
           />
         </Field>
-        <Field label="Working directory" hint="Leave empty to use the image's own.">
+        <Field label="Working directory" term="workingDir">
           <Input
             value={spec.workingDir ?? ""}
             spellCheck={false}
@@ -1058,10 +1126,7 @@ function AdvancedFields({
         </Field>
       </section>
 
-      <Field
-        label="Command"
-        hint="Overrides what the image runs on start. Leave empty unless the documentation told you otherwise."
-      >
+      <Field label="Command" term="command">
         <Input
           value={(spec.command ?? []).join(" ")}
           spellCheck={false}
@@ -1077,19 +1142,19 @@ function AdvancedFields({
         <SectionHeading icon={ShieldOff} title="Behaviour" />
         <ToggleRow
           label="Run an init process"
-          hint="Reaps the leftover processes a program that was never designed to be PID 1 will otherwise accumulate. Cheap, and almost always right."
+          term="initProcess"
           checked={spec.init ?? false}
           onChange={(v) => patch({ init: v })}
         />
         <ToggleRow
           label="Read-only filesystem"
-          hint="The container cannot write anywhere except its mounts. A good default for anything that does not need to."
+          term="readOnlyRootfs"
           checked={spec.readOnlyRootfs ?? false}
           onChange={(v) => patch({ readOnlyRootfs: v })}
         />
         <ToggleRow
           label="Pull a fresh image first"
-          hint="Checks the registry for a newer copy of this tag before creating."
+          term="pullPolicy"
           checked={spec.pull === "always"}
           onChange={(v) => patch({ pull: v ? "always" : "missing" })}
         />
@@ -1107,29 +1172,44 @@ function AdvancedFields({
   )
 }
 
+/**
+ * One switch, one line.
+ *
+ * These were a switch above two lines of justification each, so four of them
+ * filled a screen with text nobody reads twice. The justification is behind the
+ * `?`; what stays on the row is the thing being turned on — except for
+ * `privileged`, which keeps its sentence because it is the one control in this
+ * form that can hand the server away, and a reader should not have to hover to
+ * find that out.
+ */
 function ToggleRow({
   label,
+  term,
   hint,
   checked,
   onChange,
   danger,
 }: {
   label: string
-  hint: string
+  term?: string
+  hint?: string
   checked: boolean
   onChange: (v: boolean) => void
   danger?: boolean
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-hairline p-2.5">
-      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} className="mt-0.5" />
-      <span className="min-w-0">
-        <span
-          className={`block text-xs font-medium ${danger && checked ? "text-destructive" : ""}`}
-        >
-          {label}
+    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-hairline px-2.5 py-2">
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={cn("truncate text-xs font-medium", danger && checked && "text-destructive")}
+          >
+            {label}
+          </span>
+          {term && <ExplainIcon name={term} />}
         </span>
-        <Hint>{hint}</Hint>
+        {hint && <Hint>{hint}</Hint>}
       </span>
     </label>
   )
@@ -1175,10 +1255,7 @@ function CommandPreview({ spec }: { spec: ContainerSpec }) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <SectionHeading icon={Code} title="The equivalent command">
-          This is exactly what creating it will do. Copy it if you would rather run it yourself, or
-          keep it for a ticket.
-        </SectionHeading>
+        <SectionHeading icon={Code} title="The equivalent command" term="equivalentCommand" />
         <div className="relative">
           <Well className="max-h-64 whitespace-pre-wrap">{preview?.run ?? "…"}</Well>
           {preview && (
@@ -1196,11 +1273,7 @@ function CommandPreview({ spec }: { spec: ContainerSpec }) {
       </div>
 
       <div className="space-y-2">
-        <SectionHeading icon={Layers} title="The same thing as compose" term="compose">
-          A container created here exists only in Docker&apos;s memory. The same container as a file
-          can be committed to git, backed up and redeployed — paste this into a new stack to keep
-          it.
-        </SectionHeading>
+        <SectionHeading icon={Layers} title="The same thing as compose" term="composeExport" />
         <div className="relative">
           <Well className="max-h-80 whitespace-pre-wrap">{preview?.compose ?? "…"}</Well>
           {preview && (

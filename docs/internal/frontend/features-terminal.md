@@ -8,27 +8,43 @@
   `Field`, `GLOSSARY` — written for somebody who has never run a container and phrased around the decision
   rather than the mechanism. The rule it enforces is that **explanation is quiet**: a form that shouts
   every caveat is as unusable as one that explains nothing.
-- `create-container.tsx`'s three entry points matter more than the form. **Paste a command** covers the
-  common case: `lib/docker-run.ts` parses leniently and returns three things — the spec, warnings about
-  what it could not read, and `unsupported`, the flags it *understood* and the form has nowhere to put.
-  The last is kept separate on purpose. `--gpus all` dropped without a word produces a container that
-  starts and then has no GPU, and the operator finds out from the application failing; the panel says so
-  and keeps the original command beside the form. **Start from something common** is
-  `lib/docker-templates.ts` — images almost every server runs across five categories, every one bound to
-  127.0.0.1; a set of starting points, not an app store, which is what goes stale and becomes the
-  maintenance burden in Yacht and CasaOS. **From scratch** is for people who know what they want. The
-  Command tab shows the server-rendered `docker run` and compose, live. Port bindings are offered as
-  *who should reach this* rather than as an address, populated from the machine's real interfaces so the
-  LAN option names one rather than gesturing at the idea.
+- `create-container.tsx`'s three entry points matter more than the form, and they are the *first* thing
+  on the panel rather than three stacked sections: three cards on one line, and only the route you picked
+  spends any height. **Paste a command** covers the common case: `lib/docker-run.ts` parses leniently and
+  returns three things — the spec, warnings about what it could not read, and `unsupported`, the flags it
+  *understood* and the form has nowhere to put. The last is kept separate on purpose. `--gpus all`
+  dropped without a word produces a container that starts and then has no GPU, and the operator finds out
+  from the application failing; the panel says so and keeps the original command beside the form.
+  **Start from something common** is `lib/docker-templates.ts` — images almost every server runs across
+  five categories, every one bound to 127.0.0.1; a set of starting points, not an app store, which is
+  what goes stale and becomes the maintenance burden in Yacht and CasaOS. A template's setup
+  requirement is one word on its card and a full notice at the top of the form the moment it is picked,
+  which is the only place the instruction can actually be followed. **From scratch** is for people who
+  know what they want. The Command tab shows the server-rendered `docker run` and compose, live. Port
+  bindings are offered as *who should reach this* rather than as an address, populated from the machine's
+  real interfaces so the LAN option names one rather than gesturing at the idea.
+
+  The form's explanations are `?` hover cards on the section headings, the field labels and the
+  behaviour switches, not paragraphs printed beside them. Six sections of three lines each is eighteen
+  lines of prose around twelve controls: an expert scrolls past all of it every visit and a newcomer
+  reads it once. Prose survives in exactly two places — a warning that depends on what you just typed
+  (a missing image tag, a port on every interface, an unnamed volume) and the `privileged` switch, which
+  can hand the server away and should not need a hover to say so.
 - `run-console.tsx` deliberately **does not** let `useSocket` reconnect: reconnecting re-issues the GET,
   and re-issuing the GET runs the command again — a redeploy fired twice because a VPN blinked is not a
   re-render. A dropped socket ends the run and says so.
-- `attention.tsx` renders the half of the diagnosis that is not runtime — collapsed by default (a list,
-  not a wall of argument), filterable by severity, with the remedy as a button where the server named
-  one; `ContainerFindings` filters the page's single pass. `RuntimeHealthPanel` is the other half and
-  counts what is *fine* as well as what is not, because a list of problems can never say "eight healthy,
-  four with no health check at all" — and that last number is what stops "all healthy" meaning "nothing
-  is being watched".
+- `attention.tsx` renders the half of the diagnosis that is not runtime, through the product's one
+  `FindingList` (`components/finding-list.tsx`) rather than through a parallel component of its own.
+  Docker had grown a second one — a two-line title-and-detail row with a glyph, a tag and a chevron —
+  while Metrics and Security shared a one-line accordion for the identical idea, so a page showing both
+  read as two products. What is left here is the Docker-specific part: repeats of one kind collapse to a
+  single row ("9 containers have no memory limit") whose body states the shared reasoning once and names
+  the containers as chips that run that container's own remedy. The severity filter strip, the "N
+  distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
+  five rows. `ContainerFindings` filters the page's single pass for one container's detail panel.
+  `RuntimeHealthPanel` is the other half and counts what is *fine* as well as what is not, because a
+  list of problems can never say "eight healthy, four with no health check at all" — and that last
+  number is what stops "all healthy" meaning "nothing is being watched".
 - `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
   outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
   which filters were applied and tabbing looked like the selection moving.
@@ -40,15 +56,33 @@
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
 - `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
-  volumes, stated whether or not any are affected.
+  volumes, stated whether or not any are affected. A cleanup category is one line — name, size, count, in
+  fixed columns — with the cost sentence and the example names behind its `?`. It used to be a block
+  whose height depended on how far the cost sentence wrapped and whether that category had examples, so
+  the six rows came out at three different heights and the size and count, top-aligned against the
+  tallest, never lined up with each other; four of the six were "Nothing in this category" at half
+  opacity and were the tallest thing on screen.
+
+Panel headers carry no icon plot. A tinted square in front of every title is chrome repeated once per
+panel, and on a page that is eight stacked panels it reads as a column of orange marks rather than as
+eight headings. It started here and now holds product-wide — the prop is gone from `PanelHeader`,
+`Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
+(`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
+that does something.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
   place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
   tagged by service, links to Files, git and a shell in the stack's directory. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
   URL), the writable-layer investigator, the failure diagnosis, editable limits, raw inspect, and
   Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
-  container, because the next deploy silently undoes them days later. `build-dialog.tsx` is where the git
-  panel and Docker stop being two products: a repository we already pull is a build context.
+  container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
+  *inside* the container — the one the application's own configuration names — states the kind of storage
+  in words rather than as a Docker noun, and puts where it actually lives on the second line; the header
+  answers the question the tab is opened with, which is how much of this survives a rebuild. Its Usage
+  tab drops the network chart entirely for a container on the host's network namespace: Docker reports no
+  per-container interface there, and a chart-shaped hole explaining itself beside a real chart draws the
+  eye first to say "nothing here". `build-dialog.tsx` is where the git panel and Docker stop being two
+  products: a repository we already pull is a build context.
 
 Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
 All but the terminal one are read once as an initial value rather than kept in sync — the URL is where

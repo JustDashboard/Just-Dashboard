@@ -150,7 +150,6 @@ export function ImagesTab({ confirm }: { confirm: ConfirmFn }) {
 
       <Panel>
         <PanelHeader
-          icon={Box}
           title="Images"
           actions={
             <>
@@ -496,7 +495,6 @@ function ImageDetailPanel({
     <SidePanel
       open={imageId !== null}
       onOpenChange={onOpenChange}
-      icon={Box}
       title={data?.repoTags[0] ?? "Image"}
       description={data?.id.replace("sha256:", "").slice(0, 24)}
     >
@@ -676,7 +674,6 @@ function PullDialog({
         onClose()
       }}
       size="lg"
-      icon={Download}
       title="Pull an image"
       description="Downloads it to this server. Containers already running an older copy keep running it
             until they are recreated."

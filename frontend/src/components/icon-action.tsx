@@ -53,6 +53,28 @@ export function rowReveal(group: RevealGroup = "default") {
 /** The unnamed-group form, for the callers that only need the string. */
 export const ROW_REVEAL = rowReveal()
 
+/**
+ * The third answer to "where are this row's controls", for the surface where
+ * revealing them was the wrong one.
+ *
+ * A reveal works where the controls are an *extra* — a copy glyph, an
+ * external-link arrow — and the column they sit in is shared with something
+ * else. It fails where the controls have a column to themselves, because the
+ * column is then reserved, empty, and full width: the containers table drew
+ * thirteen rows of blank space ending in one row that suddenly sprouted
+ * buttons, which reads as a layout bug rather than as an affordance.
+ *
+ * So the controls are always drawn and merely quiet, brightening when the
+ * pointer is on the row. Same four mechanisms as `rowReveal`, one step of
+ * opacity instead of all of it.
+ */
+export const ROW_DIM =
+  "opacity-55 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100"
+
+export function DimActions({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("flex shrink-0 items-center gap-0.5", ROW_DIM, className)} {...props} />
+}
+
 export function RowActions({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div

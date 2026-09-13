@@ -1,11 +1,12 @@
 "use client"
 
 import { Copy, Layers, Warning } from "@/components/icons"
-import { bytes, percent } from "@/lib/format"
+import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Container, ContainerStats, DockerDiagnosis, DockerFinding } from "@/lib/types"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Meter } from "@/components/meter"
+import { Status } from "@/components/status-dot"
 import { copyText } from "@/lib/clipboard"
 
 /**
@@ -67,14 +68,109 @@ export function ContainerName({ container, onOpen }: { container: Container; onO
           </span>
         )}
       </p>
-      {/* The image has its own column from md up, where there is room for it.
-          Below that the column is dropped rather than squeezed, so the name
-          cell carries it — what a container is running is not an optional
-          detail on a phone. */}
-      <p className="truncate font-mono text-hint text-muted-foreground md:hidden">
-        {container.image}
-      </p>
     </div>
+  )
+}
+
+/**
+ * Docker's own status string is a state and a duration welded together — "Up 2
+ * hours", "Exited (137) 3 minutes ago" — and reading it back at somebody means
+ * the Status column carries a sentence whose first word is the only part the
+ * dot beside it is labelling.
+ *
+ * The word is separated from the rest so the column can be *scanned*: a list of
+ * "Running / Running / Stopped" is read down in one pass, and a list of "Up 2
+ * hours / Up 13 days / Exited (0) 4 minutes ago" is not. Nothing Docker said is
+ * thrown away — the remainder, exit code included, becomes the second line in
+ * `statusDetail` below.
+ */
+export function statusWord(container: Container) {
+  switch (container.state) {
+    case "running":
+      return "Running"
+    case "paused":
+      return "Paused"
+    case "restarting":
+      return "Restarting"
+    case "exited":
+      return "Stopped"
+    case "created":
+      return "Never started"
+    case "dead":
+      return "Dead"
+    case "removing":
+      return "Being removed"
+    default:
+      return container.state
+  }
+}
+
+/**
+ * The second line: how long, and whether anything is watching.
+ *
+ * For a running container that is uptime and the health verdict — and "no
+ * health check" is said out loud, because a container Docker calls up that
+ * nothing is checking is a different claim from one that passed a test a
+ * second ago.
+ *
+ * For anything stopped it is the rest of Docker's own sentence, which is where
+ * the exit code lives: "(137) 3 minutes ago" under the word "Stopped" is the
+ * most useful pair of facts on the row when something has fallen over, and 137
+ * is nearly always the kernel killing it for memory. The leading state word is
+ * dropped because the line above it already says that.
+ */
+export function statusDetail(container: Container): string {
+  if (container.state !== "running") {
+    return container.status.replace(/^(Up|Exited|Created|Restarting|Paused|Dead)\s*/i, "").trim()
+  }
+  const parts: string[] = []
+  if (container.uptimeSeconds > 0) parts.push(`for ${duration(container.uptimeSeconds)}`)
+  if (container.health) parts.push(container.health)
+  else if (container.inspected) parts.push("no health check")
+  return parts.join(" · ")
+}
+
+/**
+ * The Status cell: what Docker is doing, and nothing else.
+ *
+ * It used to carry the worst *finding* about the container underneath the
+ * state, so a healthy container read "Running" and "publishes PostgreSQL on
+ * every interface" in one cell. Diagnostics have their own column; what belongs
+ * on the second line here is the rest of the runtime answer — how long it has
+ * been in this state, and whether anything is actually checking that it works.
+ *
+ * `pending` is the action the operator just pressed. A stop takes ten seconds
+ * to honour and the socket reports the old state throughout, so without this
+ * the row answers a press by sitting still and then jumping — which is what a
+ * broken button also looks like.
+ */
+export function ContainerStatus({
+  container,
+  pending,
+}: {
+  container: Container
+  pending?: string
+}) {
+  const running = container.state === "running"
+  const unhealthy = container.health === "unhealthy"
+  // A non-breaking space rather than nothing, so a row whose state has no
+  // second line is exactly as tall as the one above it. A table whose rows are
+  // two different heights for reasons the reader cannot see looks broken.
+  const detail = pending ? "\u00a0" : statusDetail(container) || "\u00a0"
+
+  return (
+    <>
+      <Status
+        state={pending ? "restarting" : container.state}
+        live={running && !pending}
+        label={pending ? `${pending}\u2026` : statusWord(container)}
+      />
+      <p
+        className={cn("mt-0.5 text-hint", unhealthy ? "text-destructive" : "text-muted-foreground")}
+      >
+        {detail}
+      </p>
+    </>
   )
 }
 

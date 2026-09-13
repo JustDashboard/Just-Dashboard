@@ -13,17 +13,24 @@ import { StatusDot, type DotTone } from "@/components/status-dot"
 /**
  * A verdict's findings, as a plain list rather than a stack of tinted boxes.
  *
- * `netsec.Posture` and `metrics.Health` speak the same three-field shape —
- * what was measured (`detail`), what it means (`title`), what to do
- * (`advice`) — so both render through here. The title carries the finding and
- * the severity is one coloured dot; the reasoning is one tap away rather than
- * shouting from a coloured card. A row of red-bordered alert boxes is the
- * thing this deliberately is not.
+ * `netsec.Posture`, `metrics.Health` and `dockerx.Diagnosis` all speak the same
+ * three-field shape — what was measured (`detail`), what it means (`title`),
+ * what to do (`advice`) — so all three render through here. The title carries
+ * the finding and the severity is one coloured dot; the reasoning is one tap
+ * away rather than shouting from a coloured card. A row of red-bordered alert
+ * boxes is the thing this deliberately is not.
  *
- * The security verdict adds two things a health finding does not have — which
- * subsystem it is about (`meta`) and a remedy the dashboard can carry out
- * (`action`) — so the caller maps its own findings onto this shape and this
- * component stays dumb.
+ * Docker had its own parallel implementation of exactly this until 0.6.7 — two
+ * components for one idea, so the same kind of list read as two different
+ * products depending on which page you were on. The Docker one carried two
+ * extras this now has: a short right-hand label (`meta`) and a remedy the
+ * dashboard can carry out (`action`), plus `extra` for the one case that has
+ * more than a paragraph to say — a finding that covers several containers and
+ * has to name them.
+ *
+ * A row is one line. `detail` belongs in the body, not under the title: a list
+ * where every entry is a title *and* a sentence is twice as tall and half as
+ * scannable, which is the whole reason this shape won.
  */
 export type Finding = {
   id: string
@@ -35,6 +42,8 @@ export type Finding = {
   meta?: React.ReactNode
   /** A one-click remedy, shown in the expanded body. */
   action?: { label: string; onClick: () => void }
+  /** Anything the body needs beyond detail and advice — the targets of a grouped finding. */
+  extra?: React.ReactNode
 }
 
 const LEVEL_TONE: Record<Finding["level"], DotTone> = {
@@ -78,6 +87,7 @@ export function FindingList({
           <AccordionContent className="space-y-2 pl-[1.375rem] text-xs leading-relaxed text-muted-foreground">
             <p>{finding.detail}</p>
             {finding.advice && <p className="text-foreground/80">{finding.advice}</p>}
+            {finding.extra}
             {finding.action && (
               <Button
                 size="xs"

@@ -99,16 +99,36 @@ const VERDICT_TONE: Record<Verdict, DotTone> = {
 export function StatusDot({
   state,
   tone,
+  live,
   className,
 }: {
   state?: string
   tone?: DotTone
+  /**
+   * This reading is arriving, not remembered.
+   *
+   * A halo that breathes out of the dot and fades, once every couple of
+   * seconds. It is deliberately not `animate-pulse` — that dims the dot itself,
+   * which on a table of twenty running containers reads as twenty things
+   * blinking for attention. Here the dot is constant and only the air around it
+   * moves, so a glance at the column still reads "all green" and a longer look
+   * reads "and it is live".
+   *
+   * Reserved for a row fed by an open socket. A polled figure is not live, and
+   * saying it is would be the interface lying about how fresh its numbers are.
+   */
+  live?: boolean
   className?: string
 }) {
+  const fill = DOT_TONE[tone ?? toneFor(state)]
+  if (!live) {
+    return <span className={cn("size-1.5 shrink-0 rounded-full", fill, className)} />
+  }
   return (
-    <span
-      className={cn("size-1.5 shrink-0 rounded-full", DOT_TONE[tone ?? toneFor(state)], className)}
-    />
+    <span className={cn("relative flex size-1.5 shrink-0", className)}>
+      <span className={cn("absolute inset-0 animate-breathe rounded-full", fill)} aria-hidden />
+      <span className={cn("relative size-1.5 rounded-full", fill)} />
+    </span>
   )
 }
 
@@ -128,6 +148,7 @@ export function Status({
   verdict,
   tone: given,
   label,
+  live,
   icon: Icon,
   className,
 }: {
@@ -139,6 +160,8 @@ export function Status({
    */
   tone?: DotTone
   label?: React.ReactNode
+  /** Passed to the dot — see `StatusDot`. Ignored when an icon is given. */
+  live?: boolean
   icon?: React.ComponentType<{ className?: string }>
   className?: string
 }) {
@@ -153,7 +176,7 @@ export function Status({
       {Icon ? (
         <Icon className={cn("size-3.5 shrink-0", ICON_TONE[tone])} />
       ) : (
-        <StatusDot tone={tone} />
+        <StatusDot tone={tone} live={live} />
       )}
       <span className={TEXT_TONE[tone]}>{label ?? state ?? "unknown"}</span>
     </span>

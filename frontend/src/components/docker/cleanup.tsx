@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Trash, Warning } from "@/components/icons"
+import { Question, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import type { CleanupCategory, CleanupPreview, PruneReport } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { LoadingRows } from "@/components/state"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Tag } from "@/components/tag"
@@ -126,10 +127,7 @@ export function CleanupPanel({
 
   return (
     <Panel className={className}>
-      <PanelHeader
-        icon={Trash}
-        title="Docker cleanup"
-      />
+      <PanelHeader title="Docker cleanup" />
       <PanelBody flush>
         {loading && !data ? (
           <LoadingRows rows={4} />
@@ -175,6 +173,23 @@ export function CleanupPanel({
   )
 }
 
+/**
+ * One category, on one line.
+ *
+ * It used to be a block: a label, the cost sentence wrapped to however many
+ * lines it happened to need, and — for the two categories that have them — a
+ * line of example names. Three row heights in one list, with the size and the
+ * item count top-aligned against the tallest of them, so the numbers the panel
+ * exists to compare never lined up with each other. Four of the six rows were
+ * "Nothing in this category. — 0 items" at half opacity, and they were the
+ * tallest thing on screen saying the least.
+ *
+ * The row is now the comparison — name, size, count, in fixed columns — and
+ * the reasoning is behind the `?`, which is where the rest of this feature
+ * puts a paragraph. Nothing was dropped: the cost sentence and the examples
+ * are both in the hover card, and the examples are no longer truncated to fit
+ * a line.
+ */
 function CategoryRow({
   category,
   selected,
@@ -188,7 +203,7 @@ function CategoryRow({
   return (
     <li
       className={cn(
-        "flex min-w-0 items-start gap-3 px-4 py-3",
+        "flex min-w-0 items-center gap-3 px-4 py-2.5",
         empty && "opacity-50",
         category.destroys && !empty && "bg-wash-danger",
       )}
@@ -198,39 +213,70 @@ function CategoryRow({
         checked={selected}
         disabled={empty}
         onCheckedChange={onToggle}
-        className="mt-0.5"
       />
-      <div className="min-w-0 flex-1">
+      {/* The `?` sits beside the name rather than out at the numeric columns:
+          it explains the category, and a column of detached question marks
+          reads as a column of its own. Outside the `<label>` on purpose — a
+          click inside one toggles the checkbox it is for. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <label
           htmlFor={`cleanup-${category.key}`}
-          className="flex min-w-0 flex-wrap items-center gap-2 text-body font-medium"
+          className="flex min-w-0 items-center gap-2 text-body font-medium"
         >
-          {category.label}
+          <span className="truncate">{category.label}</span>
           {category.destroys && (
             <Tag tone="danger" icon={Warning}>
               destroys data
             </Tag>
           )}
         </label>
-        <p className="mt-0.5 text-hint leading-relaxed text-muted-foreground">
-          {empty ? "Nothing in this category." : category.cost}
+        <CategoryExplain category={category} empty={empty} />
+      </div>
+      {/* Fixed columns rather than an auto-sized pair, so eight gigabytes and a
+          dash sit on the same right edge and the list can be read down. */}
+      <span className="numeric w-20 shrink-0 text-right text-body font-medium">
+        {category.reclaimable > 0 ? bytes(category.reclaimable) : "—"}
+      </span>
+      <span className="numeric w-16 shrink-0 text-right text-hint text-muted-foreground">
+        {category.items} {category.items === 1 ? "item" : "items"}
+      </span>
+    </li>
+  )
+}
+
+/**
+ * What removing this category costs, and what is in it.
+ *
+ * The cost sentence is the whole decision — "a rollback would have to pull
+ * again" is the reason somebody leaves images alone — so it is one gesture
+ * away rather than gone. The examples come with it because "which images?" is
+ * the immediate next question and the row has no room to answer it.
+ */
+function CategoryExplain({ category, empty }: { category: CleanupCategory; empty: boolean }) {
+  return (
+    <HoverCard openDelay={150}>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
+          aria-label={`What removing ${category.label} costs`}
+          className="shrink-0 cursor-help text-muted-foreground focus-ring transition-colors hover:text-foreground"
+        >
+          <Question className="size-3.5" />
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
+        <p className="text-body font-medium">{category.label}</p>
+        <p className="text-muted-foreground">
+          {empty ? "Nothing on this server is in this category right now." : category.cost}
         </p>
         {category.examples.length > 0 && (
-          <p className="mt-1 truncate font-mono text-micro text-muted-foreground">
+          <p className="font-mono text-hint break-all text-muted-foreground">
             {category.examples.join(", ")}
             {category.items > category.examples.length &&
               ` and ${category.items - category.examples.length} more`}
           </p>
         )}
-      </div>
-      <span className="shrink-0 text-right">
-        <span className="numeric block text-body font-medium">
-          {category.reclaimable > 0 ? bytes(category.reclaimable) : "—"}
-        </span>
-        <span className="text-hint text-muted-foreground">
-          {category.items} {category.items === 1 ? "item" : "items"}
-        </span>
-      </span>
-    </li>
+      </HoverCardContent>
+    </HoverCard>
   )
 }

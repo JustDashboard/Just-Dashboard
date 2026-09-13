@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { FolderPlus, Layers, Play, Plus } from "@/components/icons"
+import { FolderPlus, Layers, Play } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import type { ComposeStack } from "@/lib/types"
@@ -141,7 +141,6 @@ function StackCard({
   return (
     <Panel>
       <PanelHeader
-        icon={Layers}
         title={
           <RowLink className="text-body leading-tight" onClick={onOpen}>
             {stack.name}
@@ -261,7 +260,6 @@ function NewStackDialog({
     <Modal
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
-      icon={Plus}
       title="New stack"
       description="Creates a directory with a starter compose file in it. Nothing runs until you bring it
             up."

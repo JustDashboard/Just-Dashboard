@@ -69,7 +69,6 @@ export function NetworksTab({ confirm }: { confirm: ConfirmFn }) {
     <div className="space-y-4">
       <Panel>
         <PanelHeader
-          icon={NetworkDevice}
           title="Networks"
           actions={
             <>
@@ -295,7 +294,6 @@ function NetworkDetailPanel({
     <SidePanel
       open={id !== null}
       onOpenChange={onOpenChange}
-      icon={NetworkDevice}
       title={data?.name ?? "Network"}
       description={data?.subnets.join(", ")}
       actions={
@@ -465,7 +463,6 @@ function AttachDialog({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       size="sm"
-      icon={Linked}
       title="Attach a container"
       description={
         <>
@@ -556,7 +553,6 @@ function NewNetworkDialog({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       size="sm"
-      icon={Plus}
       title="New network"
       description="A private network for containers that need to reach each other. On it, a
             container's name is its hostname."

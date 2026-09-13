@@ -33,7 +33,7 @@ export function PortLink({ ip, port, target }: { ip?: string; port: number; targ
     return <Tag mono>{label}</Tag>
   }
   return (
-    <Tag mono asChild className="transition-colors hover:border-rule-primary hover:text-primary">
+    <Tag mono asChild className="transition-colors hover:bg-accent hover:text-primary">
       <a href={`http://${host}:${port}`} target="_blank" rel="noreferrer">
         {label}
         <External className="size-2.5" />

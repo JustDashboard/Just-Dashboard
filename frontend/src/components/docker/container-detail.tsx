@@ -4,14 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   ArrowCircleUp,
-  Box,
+  Clock,
   Copy,
   Download,
   Eye,
   EyeOff,
+  FolderClosed,
   Information,
   Layers,
   Pencil,
+  Servers,
   ShieldOff,
   Warning,
 } from "@/components/icons"
@@ -39,13 +41,15 @@ import { XtermPane } from "@/components/xterm-pane"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ContainerUsage } from "@/components/docker/container-usage"
+import { statusWord } from "@/components/docker/container-cells"
+import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ContainerFindings } from "@/components/docker/attention"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
-import { Hint, Term } from "@/components/docker/explain"
+import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList } from "@/components/page"
-import { Group, Well } from "@/components/panel"
+import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -58,6 +62,7 @@ const LOG_LIMIT = 5000
 
 export function ContainerDetailSheet({
   containerId,
+  focusTab,
   onOpenChange,
   diagnosis,
   confirm,
@@ -65,6 +70,14 @@ export function ContainerDetailSheet({
   onDuplicate,
 }: {
   containerId: string | null
+  /**
+   * Which tab to land on, when the thing that opened this panel was asking a
+   * particular question — "show me the logs", "open a shell", a finding whose
+   * evidence is the usage chart. Without it every one of those routes arrived
+   * at Overview and cost a second click, which is the reason a log button that
+   * merely selects a row never feels like a log button.
+   */
+  focusTab?: string
   onOpenChange: (open: boolean) => void
   /** The page's one diagnosis pass, filtered to this container rather than refetched. */
   diagnosis?: DockerDiagnosis
@@ -75,10 +88,11 @@ export function ContainerDetailSheet({
 }) {
   return (
     <ContainerDetailPanel
-      // Keyed on the container so selecting another one starts fresh rather
-      // than briefly showing the previous container's detail.
-      key={containerId ?? "none"}
+      // Keyed on the container *and* the requested tab so asking for the logs
+      // of the container already open still moves to the logs.
+      key={`${containerId ?? "none"}:${focusTab ?? ""}`}
       containerId={containerId}
+      focusTab={focusTab}
       onOpenChange={onOpenChange}
       diagnosis={diagnosis}
       confirm={confirm}
@@ -90,6 +104,7 @@ export function ContainerDetailSheet({
 
 function ContainerDetailPanel({
   containerId,
+  focusTab,
   onOpenChange,
   diagnosis,
   confirm,
@@ -97,6 +112,7 @@ function ContainerDetailPanel({
   onDuplicate,
 }: {
   containerId: string | null
+  focusTab?: string
   onOpenChange: (open: boolean) => void
   diagnosis?: DockerDiagnosis
   confirm?: ConfirmFn
@@ -107,8 +123,22 @@ function ContainerDetailPanel({
   const [detail, setDetail] = useState<ContainerDetail>()
   const [error, setError] = useState<Error>()
   // Which tab a container opens on. Somebody watching a deploy wants Logs
-  // every time, and reopening on Overview is a click paid per container.
-  const [tab, setTab] = useViewState("docker.container.tab", "overview")
+  // every time, and reopening on Overview is a click paid per container. A
+  // caller that asked for a specific tab overrides the remembered one — it is
+  // answering a question rather than arranging furniture.
+  const [remembered, remember] = useViewState("docker.container.tab", "overview")
+  // Seeded once, because this component is keyed on the container and the
+  // requested tab: a caller asking for the logs gets the logs, and the moment
+  // the reader moves to another tab that choice becomes the remembered one
+  // again.
+  const [tab, setTabState] = useState(focusTab ?? remembered)
+  const setTab = useCallback(
+    (next: string) => {
+      setTabState(next)
+      remember(next)
+    },
+    [remember],
+  )
   const [reloads, setReloads] = useState(0)
 
   useEffect(() => {
@@ -130,26 +160,51 @@ function ContainerDetailPanel({
     <SidePanel
       open={containerId !== null}
       onOpenChange={onOpenChange}
-      icon={Box}
       title={
         <>
           {detail?.name ?? "Container"}
-          {detail && <Status state={detail.state} />}
+          {detail && (
+            <Status
+              state={detail.state}
+              live={detail.state === "running"}
+              label={statusWord(detail)}
+            />
+          )}
+          {/* What it is running, on screen rather than only in the accessible
+              description. "Which image is this" is the second question anybody
+              opening this panel has, and it used to need the Overview tab. */}
+          {detail && <Tag mono>{detail.image}</Tag>}
         </>
       }
       description={detail?.image ?? containerId ?? undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col p-4"
       actions={
         detail && (
-          <ContainerActions
-            detail={detail}
-            confirm={confirm}
-            onDuplicate={onDuplicate}
-            onChanged={() => {
-              setReloads((n) => n + 1)
-              onChanged?.()
-            }}
-          />
+          <>
+            {/* Start, stop and restart were reachable from the table and
+                nowhere else, so opening a container to look at why it is
+                unhappy meant closing it again to do anything about it. */}
+            {confirm && (
+              <ContainerLifecycle
+                detail={detail}
+                confirm={confirm}
+                onOpenTab={setTab}
+                onChanged={() => {
+                  setReloads((n) => n + 1)
+                  onChanged?.()
+                }}
+              />
+            )}
+            <ContainerActions
+              detail={detail}
+              confirm={confirm}
+              onDuplicate={onDuplicate}
+              onChanged={() => {
+                setReloads((n) => n + 1)
+                onChanged?.()
+              }}
+            />
+          </>
         )
       }
     >
@@ -198,27 +253,8 @@ function ContainerDetailPanel({
           </TabsContent>
 
           <TabsContent value="mounts" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+            <MountList mounts={detail.mounts} />
             <WritableLayer containerId={detail.id} />
-            {detail.mounts.map((mount, i) => (
-              <Group key={i} className="text-xs">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <Tag>{mount.type}</Tag>
-                  <Tag>{mount.rw ? "read-write" : "read-only"}</Tag>
-                </div>
-                <p className="font-mono break-all">
-                  <span className="text-muted-foreground">{mount.source}</span>
-                  {" → "}
-                  {mount.destination}
-                </p>
-              </Group>
-            ))}
-            {detail.mounts.length === 0 && (
-              <Hint>
-                Nothing is mounted, so everything this container writes lives in{" "}
-                <Term name="writableLayer">its own filesystem</Term> and is destroyed when it is
-                replaced.
-              </Hint>
-            )}
           </TabsContent>
 
           <TabsContent value="inspect" className="min-h-0 flex-1">
@@ -435,65 +471,118 @@ function EnvironmentList({ env }: { env: string[] }) {
   )
 }
 
+/**
+ * What this container is, in three answers rather than thirteen rows.
+ *
+ * It was one flat `<dl>`: container id, image, command, created, started,
+ * restart policy, restarts, exit code, network mode, working dir, user,
+ * privileged — twelve labels in a column, in no order anybody could name, with
+ * the two that decide whether the container can reach the host (`privileged`,
+ * `networkMode`) sitting between "working dir" and nothing. For a reader who
+ * already knows Docker that is a lookup table; for anybody else it is the wall
+ * of unexplained words this whole feature exists not to be.
+ *
+ * Three groups, and each of them is a question somebody actually asks:
+ *
+ *   **What is it running** — the image, the command, the handle to quote.
+ *   **How it behaves** — when it started, whether it comes back, how often it
+ *     has had to, and what it said when it last stopped.
+ *   **What it can reach** — the three fields that decide how much of the server
+ *     is on the other side of the container wall.
+ *
+ * The groups sit two-up from `sm`, which also halves the scroll before the
+ * Networks and Ports blocks that follow.
+ */
 function OverviewFields({ detail }: { detail: ContainerDetail }) {
+  const exposure = detail.exposure ?? []
+
   return (
     <div className="space-y-5">
-      <DetailList>
-        <Detail label="Container ID">
-          <span className="font-mono break-all">{detail.id.slice(0, 20)}</span>
-        </Detail>
-        <Detail label="Image">
-          <span className="font-mono break-all">{detail.image}</span>
-        </Detail>
-        <Detail label="Command">
-          <span className="font-mono break-all">{detail.command || "—"}</span>
-        </Detail>
-        <Detail label="Created">{timestamp(detail.createdAt)}</Detail>
-        <Detail label="Started">
-          {detail.startedAt
-            ? `${timestamp(detail.startedAt)} (${duration(detail.uptimeSeconds)})`
-            : "—"}
-        </Detail>
-        <Detail label={<Term name="restart">Restart policy</Term>}>
-          {detail.restartPolicy || "none"}
-        </Detail>
-        <Detail label="Restarts">{detail.restartCount}</Detail>
-        <Detail label="Exit code">{detail.state === "running" ? "—" : detail.exitCode}</Detail>
-        <Detail label={<Term name="networkMode">Network mode</Term>}>
-          {detail.networkMode === "host" ? (
-            <span className="text-warning">host — the server&rsquo;s own network</span>
-          ) : (
-            detail.networkMode
-          )}
-        </Detail>
-        <Detail label="Working dir">{detail.workingDir || "—"}</Detail>
-        <Detail label={<Term name="containerUser">User</Term>}>{detail.user || "default"}</Detail>
-        <Detail label={<Term name="privileged">Privileged</Term>}>
-          {detail.privileged ? (
-            <span className="text-destructive">yes — full host access</span>
-          ) : (
-            "no"
-          )}
-        </Detail>
-      </DetailList>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <FieldGroup title="What it is running">
+          <DetailList>
+            <Detail label={<Term name="image">Image</Term>}>
+              <span className="font-mono break-all">{detail.image}</span>
+            </Detail>
+            <Detail label="Command">
+              <span className="font-mono break-all">{detail.command || "—"}</span>
+            </Detail>
+            <Detail label="Container ID">
+              <span className="font-mono break-all">{detail.id.slice(0, 20)}</span>
+            </Detail>
+          </DetailList>
+        </FieldGroup>
 
-      {detail.networkDetails.length > 0 && (
-        <div className="space-y-2">
-          <p className="eyebrow">Networks</p>
-          {detail.networkDetails.map((net) => (
-            <Group key={net.networkId} className="text-xs">
-              <div className="font-medium">{net.name}</div>
-              <p className="font-mono text-muted-foreground">
-                {net.ipAddress || "no address"} · gateway {net.gateway || "—"}
-              </p>
-            </Group>
-          ))}
-        </div>
-      )}
+        <FieldGroup title="How it behaves">
+          <DetailList>
+            <Detail label="Started">
+              {detail.startedAt
+                ? `${timestamp(detail.startedAt)} (${duration(detail.uptimeSeconds)})`
+                : "—"}
+            </Detail>
+            <Detail label="Created">{timestamp(detail.createdAt)}</Detail>
+            <Detail label={<Term name="restart">Restart policy</Term>}>
+              {detail.restartPolicy || "none"}
+            </Detail>
+            {/* A restart count is a number until it is a symptom: anything
+                above zero on a container nobody restarted by hand means it has
+                been crashing and coming back. */}
+            <Detail label="Restarts" className={detail.restartCount > 0 ? "text-warning" : ""}>
+              {detail.restartCount}
+            </Detail>
+            <Detail label={<Term name="exitCode">Exit code</Term>}>
+              {detail.state === "running" ? "—" : detail.exitCode}
+            </Detail>
+          </DetailList>
+        </FieldGroup>
 
-      {detail.ports.length > 0 && (
-        <div className="space-y-2">
-          <p className="eyebrow">Ports</p>
+        <FieldGroup title="What it can reach">
+          <DetailList>
+            <Detail label={<Term name="networkMode">Network mode</Term>}>
+              {detail.networkMode === "host" ? (
+                <span className="text-warning">host — the server&rsquo;s own network</span>
+              ) : (
+                detail.networkMode
+              )}
+            </Detail>
+            <Detail label={<Term name="containerUser">User</Term>}>
+              {detail.user || "default"}
+            </Detail>
+            <Detail label={<Term name="privileged">Privileged</Term>}>
+              {detail.privileged ? (
+                <span className="text-destructive">yes — full host access</span>
+              ) : (
+                "no"
+              )}
+            </Detail>
+            <Detail label="Working dir">{detail.workingDir || "—"}</Detail>
+          </DetailList>
+        </FieldGroup>
+
+        {detail.networkDetails.length > 0 && (
+          <FieldGroup title={<Term name="network">Networks</Term>}>
+            <div className="space-y-2">
+              {detail.networkDetails.map((net) => (
+                <Group key={net.networkId} className="text-xs">
+                  <div className="font-medium">{net.name}</div>
+                  <p className="font-mono text-muted-foreground">
+                    {net.ipAddress || "no address"} · gateway {net.gateway || "—"}
+                  </p>
+                </Group>
+              ))}
+            </div>
+          </FieldGroup>
+        )}
+      </div>
+
+      {/*
+        Gated on the exposure list rather than on Docker's raw port list, which
+        is what it actually renders. The two disagree for a container whose
+        ports the server classified but Docker reported empty, and the panel
+        then drew no ports at all for a container that publishes some.
+      */}
+      {exposure.length > 0 && (
+        <FieldGroup title={<Term name="port">Ports</Term>}>
           <div className="flex flex-wrap gap-1.5">
             {/*
               A published port on a known address becomes a link, and every
@@ -502,20 +591,30 @@ function OverviewFields({ detail }: { detail: ContainerDetail }) {
               machine's addresses is the right one depends on where the reader
               is, and guessing produces a link that leads somewhere else.
             */}
-            {(detail.exposure ?? []).map((port, i) => (
+            {exposure.map((port, i) => (
               <PortTag key={`${port.hostIp}-${port.hostPort}-${i}`} port={port} />
             ))}
           </div>
-          {detail.ports.some((p) => p.publicPort && (!p.ip || p.ip === "0.0.0.0")) && (
-            <Hint>
+          {exposure.some((p) => p.scope === "all") && (
+            <Hint className="mt-2">
               A port published on every interface is reachable from anywhere that can route to this
               server. Docker writes it as a NAT rule, which is consulted before the firewall&apos;s
               own.
             </Hint>
           )}
-        </div>
+        </FieldGroup>
       )}
     </div>
+  )
+}
+
+/** One labelled group of fields inside the Overview tab. */
+function FieldGroup({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="min-w-0 space-y-2">
+      <p className="eyebrow">{title}</p>
+      {children}
+    </section>
   )
 }
 
@@ -586,6 +685,61 @@ function ContainerLogs({ containerId, active }: { containerId: string; active: b
         </>
       }
     />
+  )
+}
+
+/**
+ * What the container is *doing*: start it, stop it, restart it, freeze it.
+ *
+ * These lived only in the table row, which meant the panel somebody opens to
+ * find out why a container is unhealthy had no way to act on the answer — the
+ * reader closed it, found the row again, and pressed a glyph. They are words
+ * here rather than icons because the panel has the width for words and because
+ * this is the surface a newcomer opens first.
+ *
+ * The verbs themselves come from `container-actions.tsx`, so the confirmation
+ * this raises for a stop is the same sentence the table raises, and a
+ * capability that hides the button in one place hides it in both.
+ */
+function ContainerLifecycle({
+  detail,
+  confirm,
+  onOpenTab,
+  onChanged,
+}: {
+  detail: ContainerDetail
+  confirm: ConfirmFn
+  onOpenTab: (tab: string) => void
+  onChanged: () => void
+}) {
+  const { pending, act } = useContainerControl(onChanged)
+  const verbs = useContainerVerbs({
+    container: detail,
+    confirm,
+    act,
+    onOpenTab,
+    onChanged,
+  })
+  const lifecycle = verbs.filter((v) => v.inline)
+  const busy = pending[detail.id]
+  if (lifecycle.length === 0) return null
+
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {lifecycle.map((verb) => (
+        <Button
+          key={verb.key}
+          size="sm"
+          variant="outline"
+          disabled={Boolean(busy)}
+          pending={busy === verb.progressive}
+          onClick={verb.run}
+        >
+          <verb.icon className="size-3.5" />
+          {verb.label}
+        </Button>
+      ))}
+    </span>
   )
 }
 
@@ -828,6 +982,121 @@ function RenameButton({ detail, onRenamed }: { detail: ContainerDetail; onRename
 }
 
 /**
+ * What this container's storage actually is, said in the order it is asked
+ * about.
+ *
+ * This tab used to render each mount as a bare fenced block with two small-caps
+ * tags above it — `VOLUME` `READ-WRITE` — and one monospace line reading
+ * `/var/lib/docker/volumes/bet-bot_tracker-data/_data → /data`. Every word in
+ * that is true and none of it answers the question somebody opens this tab
+ * with, which is *where does this container's data live and will it survive*.
+ * The arrow even pointed the wrong way round for how it is read: the host path
+ * is the least interesting half and it was first and widest.
+ *
+ * So the path inside the container leads — that is the one the application's
+ * own configuration refers to — the kind of storage is stated in words rather
+ * than as a Docker noun, and where it actually lives is the second line. The
+ * consequence, which is the whole point, is one sentence per kind and one
+ * hover card away.
+ */
+const MOUNT_KIND: Record<
+  string,
+  {
+    icon: React.ComponentType<{ className?: string }>
+    label: string
+    term: string
+    /** Where the data really is, in the form a person would go looking for it. */
+    where: (mount: ContainerDetail["mounts"][number]) => string
+    /** Whether it outlives the container. The reason anyone reads this tab. */
+    survives: boolean
+  }
+> = {
+  volume: {
+    icon: Servers,
+    label: "Managed volume",
+    term: "volume",
+    // The volume's name, not the directory Docker keeps it in. `_data` under
+    // /var/lib/docker/volumes is an implementation detail of the storage
+    // driver; the name is the handle every other screen and command uses.
+    where: (mount) => mount.name || mount.source,
+    survives: true,
+  },
+  bind: {
+    icon: FolderClosed,
+    label: "Folder on this server",
+    term: "bind",
+    where: (mount) => mount.source,
+    survives: true,
+  },
+  tmpfs: {
+    icon: Clock,
+    label: "Temporary memory",
+    term: "tmpfs",
+    where: () => "in RAM",
+    survives: false,
+  },
+}
+
+function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
+  const kept = mounts.filter((mount) => MOUNT_KIND[mount.type]?.survives).length
+
+  return (
+    <Panel>
+      <PanelHeader
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Storage
+            <ExplainIcon name="containerStorage" />
+          </span>
+        }
+        actions={
+          mounts.length > 0 && (
+            <span className="numeric text-hint text-muted-foreground">
+              {kept} of {mounts.length} survives a rebuild
+            </span>
+          )
+        }
+      />
+      <PanelBody flush>
+        {mounts.length === 0 ? (
+          <EmptyNote>
+            Nothing is attached, so everything this container writes is destroyed when it is
+            replaced.
+          </EmptyNote>
+        ) : (
+          <ul className="divide-y divide-hairline">
+            {mounts.map((mount, i) => {
+              const kind = MOUNT_KIND[mount.type]
+              const Icon = kind?.icon ?? Servers
+              return (
+                <li key={i} className="flex min-w-0 items-start gap-3 px-4 py-2.5">
+                  <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    {/* The path the application inside was configured with. */}
+                    <span className="block font-mono text-body break-all">{mount.destination}</span>
+                    <span className="mt-0.5 block text-hint break-all text-muted-foreground">
+                      {kind ? kind.where(mount) : mount.source}
+                      {" · "}
+                      {mount.rw ? "the container can write to it" : "read-only"}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <Tag tone={kind?.survives === false ? "warning" : "default"}>
+                      {kind?.label ?? mount.type}
+                    </Tag>
+                    {kind && <ExplainIcon name={kind.term} />}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+/**
  * Where the writable layer went, and whether any of it matters.
  *
  * "This container has written 38.7 GB into itself" is a true sentence nobody
@@ -892,17 +1161,25 @@ function WritableLayer({ containerId }: { containerId: string }) {
 
   return (
     <div className="space-y-3">
-      <Notice title="Written inside the container" icon={Warning} tone="warning">
+      <Notice
+        title={`${roots.length} ${roots.length === 1 ? "path is" : "paths are"} written with nothing keeping them`}
+        icon={Warning}
+        tone="warning"
+      >
         <p>
-          These paths are in <Term name="writableLayer">the container&apos;s own filesystem</Term>{" "}
-          rather than a volume. They are not backed up, and they are destroyed the next time this
-          container is recreated — which includes every image update.
+          Nothing above is mounted at these, so they are in{" "}
+          <Term name="writableLayer">the container&apos;s own filesystem</Term>. They are not backed
+          up, and they are destroyed the next time this container is recreated — which includes
+          every image update.
         </p>
-        <div className="mt-2 max-h-32 space-y-0.5 overflow-auto font-mono text-hint">
+        <div className="mt-2 flex max-h-28 flex-wrap gap-1 overflow-auto">
           {roots.map((path) => (
-            <div key={path} className="truncate">
+            <span
+              key={path}
+              className="rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro"
+            >
               {path}
-            </div>
+            </span>
           ))}
         </div>
         <Button
@@ -912,7 +1189,7 @@ function WritableLayer({ containerId }: { containerId: string }) {
           onClick={() => analyze(Boolean(report))}
           pending={analyzing}
         >
-          {report ? "Measure again" : "Analyze writable layer"}
+          {report ? "Measure again" : "Measure how much is there"}
         </Button>
       </Notice>
 

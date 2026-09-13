@@ -62,13 +62,10 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
     <div className="space-y-4">
       <Panel>
         <PanelHeader
-          icon={Servers}
           title="Volumes"
           actions={
             <>
-              {unused.length > 0 && (
-                <Tag tone="warning">{unused.length} unused</Tag>
-              )}
+              {unused.length > 0 && <Tag tone="warning">{unused.length} unused</Tag>}
               {can("service.control") && (
                 <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
                   <Plus className="size-4" />
@@ -301,7 +298,6 @@ function VolumeDetailPanel({
     <SidePanel
       open={name !== null}
       onOpenChange={onOpenChange}
-      icon={Servers}
       title={name ?? "Volume"}
       description={data?.mountpoint}
     >
@@ -421,7 +417,6 @@ function NewVolumeDialog({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       size="sm"
-      icon={Plus}
       title="New volume"
       description="Storage Docker manages, ready to mount into a container. Empty until something writes to
             it."
