@@ -436,7 +436,6 @@ function SignInDialog({
     <Modal
       open={open}
       onOpenChange={change}
-      icon={GitHubMark}
       title="Sign in to GitHub"
       description={
         <>

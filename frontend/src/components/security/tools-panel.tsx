@@ -106,7 +106,7 @@ export function ToolsPanel() {
       )}
 
       {groups.map((g) => (
-        <Section key={g.title} icon={g.icon} title={g.title}>
+        <Section key={g.title} title={g.title}>
           {/* items-start so a card holding two hundred lines of traceroute
               output does not stretch the empty card beside it to match. */}
           <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">

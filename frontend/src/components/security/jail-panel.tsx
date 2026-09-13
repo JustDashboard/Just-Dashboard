@@ -70,7 +70,6 @@ export function JailsPanel({
     <>
       <Panel>
         <PanelHeader
-          icon={Slash}
           title="Jails"
           actions={
             <Status
@@ -164,7 +163,6 @@ export function JailsPanel({
       <SidePanel
         open={Boolean(selected)}
         onOpenChange={(o) => !o && setOpen(null)}
-        icon={Slash}
         width="sm"
         title={selected?.name ?? ""}
         description={
@@ -350,7 +348,6 @@ function JailTuning({
       open={open}
       onOpenChange={onOpenChange}
       size="sm"
-      icon={SettingsSliders}
       title={<>Tune {jail}</>}
       description="This many failures inside this window earns a ban of this length."
       footer={

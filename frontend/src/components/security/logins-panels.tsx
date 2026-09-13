@@ -57,7 +57,6 @@ function CurrentSessions() {
     <>
       <Panel>
         <PanelHeader
-          icon={Users}
           title="Interactive logins"
           actions={
             <Status
@@ -180,7 +179,6 @@ function LoginHistoryPanel() {
   return (
     <Panel>
       <PanelHeader
-        icon={ClockRewind}
         title={showFailed ? "Failed login attempts" : "Recent logins"}
         actions={
           data && data.length > 0 ? (

@@ -4,10 +4,8 @@ import { useState } from "react"
 import {
   CheckCircle,
   CrossCircle,
-  Fingerprint,
   Information,
   Inspect,
-  LockClosed,
   ShieldOff,
   Warning,
 } from "@/components/icons"
@@ -57,10 +55,7 @@ export function TLSReport() {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Panel>
-        <PanelHeader
-          icon={Inspect}
-          title="Live TLS report"
-        />
+        <PanelHeader title="Live TLS report" />
         <PanelToolbar>
           <Input
             value={domain}
@@ -94,7 +89,7 @@ export function TLSReport() {
         <>
           <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
             <Panel>
-              <PanelHeader icon={LockClosed} title="Protocol versions" />
+              <PanelHeader title="Protocol versions" />
               <PanelBody className="space-y-1.5">
                 {scan.protocols.map((protocol) => (
                   <div
@@ -131,7 +126,7 @@ export function TLSReport() {
             </Panel>
 
             <Panel>
-              <PanelHeader icon={Fingerprint} title="Certificate" />
+              <PanelHeader title="Certificate" />
               <PanelBody>
                 <DetailList>
                   <Detail label="Subject">{scan.certificate?.name ?? "—"}</Detail>
@@ -163,10 +158,7 @@ export function TLSReport() {
           </div>
 
           <Panel>
-            <PanelHeader
-              icon={LockClosed}
-              title="Chain as presented"
-            />
+            <PanelHeader title="Chain as presented" />
             <PanelBody className="space-y-1.5">
               {scan.chain.map((link, i) => (
                 <div
@@ -187,10 +179,7 @@ export function TLSReport() {
 
           {scan.http && (
             <Panel>
-              <PanelHeader
-                icon={ShieldOff}
-                title="HTTP behaviour"
-              />
+              <PanelHeader title="HTTP behaviour" />
               <PanelBody className="space-y-2.5">
                 <div className="flex flex-wrap items-center gap-2 text-body">
                   <span>Plain HTTP</span>

@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react"
 import {
-  CheckCircle,
   ChevronDown,
   Globe,
   Information,
@@ -298,10 +297,7 @@ export default function DashboardConfigurationPage() {
 
       {report.run && (
         <Panel>
-          <PanelHeader
-            icon={running ? RefreshClockwise : CheckCircle}
-            title={running ? "Restarting" : "Last restart"}
-          />
+          <PanelHeader title={running ? "Restarting" : "Last restart"} />
           <PanelBody>
             <RestartProgress
               run={report.run}
@@ -342,7 +338,6 @@ export default function DashboardConfigurationPage() {
       <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
         <Panel>
           <PanelHeader
-            icon={Globe}
             title="How it is reached"
             actions={<EditableNote report={report} admin={admin} running={running} />}
           />
@@ -454,7 +449,6 @@ export default function DashboardConfigurationPage() {
 
         <Panel>
           <PanelHeader
-            icon={ShieldCheck}
             title="Who may reach it"
             actions={<EditableNote report={report} admin={admin} running={running} />}
           />

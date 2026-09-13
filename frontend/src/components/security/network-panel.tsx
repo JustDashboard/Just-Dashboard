@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo } from "react"
-import { Connection, Route, Servers } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -68,7 +67,6 @@ export function NetworkPanel() {
     <div className="flex min-w-0 flex-col gap-4">
       <Panel>
         <PanelHeader
-          icon={Connection}
           title="Interfaces"
           actions={
             <Status
@@ -158,10 +156,7 @@ export function NetworkPanel() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr] [&>*]:min-w-0">
         <Panel>
-          <PanelHeader
-            icon={Route}
-            title="Routes"
-          />
+          <PanelHeader title="Routes" />
           <PanelBody flush>
             <Table containerClassName="max-h-[22rem]">
               <TableHeader>
@@ -201,10 +196,7 @@ export function NetworkPanel() {
         </Panel>
 
         <Panel>
-          <PanelHeader
-            icon={Servers}
-            title="Resolvers"
-          />
+          <PanelHeader title="Resolvers" />
           <PanelBody className="space-y-3">
             <DetailList>
               {data.resolvers.map((server, i) => (

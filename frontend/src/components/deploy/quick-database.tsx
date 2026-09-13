@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { CheckCircle, Database, Warning } from "@/components/icons"
+import { Database, Warning } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import type { DbConnection, DbProvisionOption } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
@@ -89,10 +89,7 @@ export function DatabaseQuickDeploy() {
   if (created)
     return (
       <Panel>
-        <PanelHeader
-          icon={CheckCircle}
-          title={`${created.connection.name} is ready`}
-        />
+        <PanelHeader title={`${created.connection.name} is ready`} />
         <PanelBody className="space-y-4">
           <CopyValue value={created.url} label="connection string" />
           <Notice icon={Warning} title="This server listens on loopback only">
@@ -123,10 +120,7 @@ export function DatabaseQuickDeploy() {
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Database}
-        title="Start a database"
-      />
+      <PanelHeader title="Start a database" />
       <PanelBody className="space-y-4">
         {failure && <ErrorState error={failure} />}
         {progress ? (

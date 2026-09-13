@@ -61,10 +61,7 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Crosshair}
-        title="Repeat offenders"
-      />
+      <PanelHeader title="Repeat offenders" />
       {data && data.offenders.length > 0 && (
         <PanelToolbar className="gap-x-6">
           <MetricStrip>

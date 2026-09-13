@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { Calculator } from "@/components/icons"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 
@@ -127,10 +126,7 @@ export function SubnetTool() {
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Calculator}
-        title="Subnet calc"
-      />
+      <PanelHeader title="Subnet calc" />
       <PanelBody className="space-y-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Input

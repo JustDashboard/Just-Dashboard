@@ -35,11 +35,17 @@ import { cn } from "@/lib/utils"
  */
 function tabClasses(selected: boolean | undefined, height: string) {
   return cn(
-    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap transition-colors",
+    // 12px, not 13. A section strip is chrome — it names the pages of a section
+    // and then gets out of the way — and at body size it was competing with the
+    // page title directly above it and with the panel titles directly below,
+    // three ranks of text set within two pixels of each other. Dropping a step
+    // puts the strip where it belongs in the ladder: quieter than the content
+    // it switches between, still comfortably above the 11px hint row.
+    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs font-medium whitespace-nowrap transition-colors",
     height,
     "focus-ring-inset",
-    // The underline is the brand blue: a section tab says where you are, which
-    // is what the hue is for. The label stays ink — the tab is not a command.
+    // The underline is the brand orange: a section tab says where you are,
+    // which is what the hue is for. The label stays ink — it is not a command.
     selected
       ? "border-brand text-foreground"
       : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
@@ -74,7 +80,7 @@ export function SectionNav({ tabs, root }: { tabs: SectionTab[]; root?: string }
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={tabClasses(active, "h-11")}
+              className={tabClasses(active, "h-10")}
             >
               {tab.title}
             </Link>
@@ -134,7 +140,7 @@ export function TabLink({
   return (
     <Link
       aria-current={selected ? "page" : undefined}
-      className={cn(tabClasses(selected, "h-9"), className)}
+      className={cn(tabClasses(selected, "h-8"), className)}
       {...props}
     />
   )

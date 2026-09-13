@@ -41,19 +41,27 @@
 
   /* ---- The two brand hues ------------------------------------------------
    *
-   * Blue says *where you are*: the wordmark, the current nav entry, the plot
-   * behind a panel's icon, the first chart series. Amber says *pay attention
+   * Orange says *where you are*: the wordmark, the current nav entry, the plot
+   * behind a panel's icon, the first chart series. Blue says *pay attention
    * here now*: the focus ring, a search hit, a cursor readout. Neither is ever
    * a fill for a command — that stays ink — so the page still has exactly one
    * thing that looks pressable and now also has somewhere to be from.
    *
-   * The blue is lifted to 0.72 rather than the 0.5731 the old light palette
-   * used: that value was chosen against white, and on a 0.14 ground it reads
-   * as a dark smudge rather than as a colour. */
-  --brand: oklch(0.72 0.152 258);
-  --brand-foreground: oklch(0.16 0.03 258);
-  --signal: oklch(0.7837 0.1587 72.9913);
-  --signal-foreground: oklch(0.19 0.04 73);
+   * The two hues used to be the other way round, and the swap is not a repaint:
+   * orange is the product's own colour, so it is the one that should be on the
+   * wordmark and the current nav entry rather than on a ring the reader sees
+   * once a keystroke. Blue inherits the interaction role for the same reason it
+   * held the location one — it is the hue nothing else on this ground uses, so
+   * a ring drawn in it cannot be mistaken for chrome.
+   *
+   * Orange sits at 57° rather than the 73° the amber status hue uses. Sixteen
+   * degrees is the whole difference between "this is Just Dashboard" and "this
+   * is a warning", so the identity hue is pushed to a true orange and the
+   * warning left where every operator already expects amber. */
+  --brand: oklch(0.7551 0.1721 57);
+  --brand-foreground: oklch(0.19 0.045 57);
+  --signal: oklch(0.72 0.152 258);
+  --signal-foreground: oklch(0.16 0.03 258);
 
   --success: oklch(0.72 0.163 162);
   --success-foreground: oklch(0.18 0.05 162);
@@ -62,21 +70,21 @@
 
   --border: oklch(0.252 0 0);
   --input: oklch(0.252 0 0);
-  /* Focus is amber. It is the one mark that has to be found instantly on a
-     screen otherwise made of blue-grey neutrals, and it never collides with
-     the brand blue that marks location. */
+  /* Focus is blue. It is the one mark that has to be found instantly, and it
+     is the only hue on this ground that neither the brand nor any status tone
+     claims — so it can never be read as "this is warm, therefore a warning". */
   --ring: var(--signal);
 
   --chart-1: var(--brand);
-  --chart-2: oklch(0.7837 0.1587 72.9913);
+  --chart-2: var(--signal);
   --chart-3: oklch(0.673 0.2146 25.0397);
   --chart-4: oklch(0.6056 0.2189 292.7172);
   --chart-5: oklch(0.6959 0.1491 162.4796);
 
   --sidebar: oklch(0.1344 0 0);
   --sidebar-foreground: oklch(0.9461 0 0);
-  /* The "you are here" mark is the brand blue, not the ink. Ink is what you
-     press; blue is where you are. */
+  /* The "you are here" mark is the brand orange, not the ink. Ink is what you
+     press; orange is where you are. */
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: oklch(0.2178 0 0);
@@ -185,6 +193,16 @@
      match in the log console, the flash when a terminal rings its bell. */
   --mark: color-mix(in oklab, var(--signal) 32%, transparent);
 
+  /* The unfilled part of a meter.
+   *
+   * It was `--muted`, which is two hundredths of a step lighter than the card
+   * it is drawn on — so a meter had no track, only a fill floating in the dark,
+   * and eight per-core bars side by side could not be compared because none of
+   * them showed how much bar there was to fill. Expressed against the
+   * foreground rather than as a ground, so it reads the same on a card, in a
+   * sunken well and inside a table row. */
+  --meter-track: color-mix(in oklab, var(--foreground) 14%, transparent);
+
   --rule-brand: color-mix(in oklab, var(--brand) 32%, transparent);
   --rule-primary: color-mix(in oklab, var(--primary) 30%, transparent);
   --rule-success: color-mix(in oklab, var(--success) 32%, transparent);
@@ -206,7 +224,6 @@
   --tag-violet: oklch(0.65 0.18 295);
   --tag-pink: oklch(0.68 0.19 350);
 }
-
 
 @theme inline {
   /* System font stacks rather than a webfont: this dashboard is built and run
@@ -236,7 +253,7 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   /* The two brand hues, so `text-brand` and `border-signal` are real
-     utilities. Blue is location, amber is attention — see the note above. */
+     utilities. Orange is location, blue is attention — see the note above. */
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-signal: var(--signal);
@@ -298,6 +315,7 @@
   --color-plot-success-hover: var(--plot-success-hover);
   --color-plot-danger-hover: var(--plot-danger-hover);
   --color-mark: var(--mark);
+  --color-meter-track: var(--meter-track);
   --color-rule-primary: var(--rule-primary);
   --color-rule-success: var(--rule-success);
   --color-rule-warning: var(--rule-warning);
@@ -348,6 +366,63 @@
   --tracking-wide: calc(var(--tracking-normal) + 0.025em);
   --tracking-wider: calc(var(--tracking-normal) + 0.05em);
   --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+
+  /* Motion, as a named vocabulary rather than a per-component decision.
+   *
+   * The product's own animations were a `transition-colors` here and an
+   * `animate-pulse` there, so the only shared motion in the app was whatever
+   * Radix and `tw-animate-css` happened to ship. Three names, because three is
+   * what the interface actually has to say:
+   *
+   *   breathe — this reading is live. A slow halo on a status dot, at an
+   *             amplitude low enough to be read as "still arriving" from the
+   *             corner of the eye and never as an alarm. `animate-pulse` was
+   *             the alternative and it is twice as loud, which on a page of
+   *             twenty running containers is twenty things flashing.
+   *   rise    — a block that was not there a moment ago. Opacity plus four
+   *             pixels, once, on arrival. It is not a lift: nothing is standing
+   *             off the page when it lands, it simply arrived from somewhere.
+   *   sweep   — an indeterminate bar for work whose progress is unknowable
+   *             (a pull, a prune), where a spinner in the corner of a wide
+   *             panel is too small to be the answer.
+   *
+   * All three are covered by the root `prefers-reduced-motion` rule, which
+   * collapses their duration rather than cancelling them — see the note there. */
+  --animate-breathe: jd-breathe 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-rise: jd-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-sweep: jd-sweep 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes jd-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(2.1);
+  }
+}
+
+@keyframes jd-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes jd-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }
 
 @layer base {
@@ -572,16 +647,28 @@
  * table that simply ends, and the hidden column is often the one that matters
  * most: whether a port is exposed, whether an action succeeded.
  *
- * The gradients pinned with `local` travel with the content while the shadows
- * pinned with `scroll` stay put, so each shadow is only visible while there is
- * actually something past that edge. No JavaScript, no resize observer, and it
- * stays correct as the content or the viewport changes. */
+ * The gradients pinned with `local` travel with the content while the edges
+ * pinned with `scroll` stay put, so each edge is only drawn while there is
+ * actually something past it. No JavaScript, no resize observer, and it stays
+ * correct as the content or the viewport changes.
+ *
+ * What the edge is drawn *with* is the part that had to change. It was a
+ * 22%-foreground gradient, which on this ground is a white smear: the one
+ * bright thing on a page whose whole vocabulary is hairlines and grounds a
+ * step apart, and it landed on the busiest surface in the product. This says
+ * the same thing in the system's own terms: the rows slide *under* the panel's
+ * edge, so the content darkens towards the page ground behind the frame rather
+ * than being lit from it. Twice as wide as the old shadow and a fraction as
+ * loud, which is the right trade for a cue meant to be noticed only when it is
+ * looked for — and it is now the same gesture as every other depth in the
+ * product, where a surface separates by its ground rather than by a glow. */
 .scroll-affordance {
+  --scroll-edge-shade: color-mix(in oklab, var(--background) 88%, transparent);
   background-image:
-    linear-gradient(to right, var(--card) 20%, transparent),
-    linear-gradient(to left, var(--card) 20%, transparent),
-    linear-gradient(to right, color-mix(in oklab, var(--foreground) 22%, transparent), transparent),
-    linear-gradient(to left, color-mix(in oklab, var(--foreground) 22%, transparent), transparent);
+    linear-gradient(to right, var(--card) 30%, transparent),
+    linear-gradient(to left, var(--card) 30%, transparent),
+    linear-gradient(to right, var(--scroll-edge-shade), transparent),
+    linear-gradient(to left, var(--scroll-edge-shade), transparent);
   background-position:
     left center,
     right center,
@@ -589,10 +676,10 @@
     right center;
   background-repeat: no-repeat;
   background-size:
-    32px 100%,
-    32px 100%,
-    12px 100%,
-    12px 100%;
+    28px 100%,
+    28px 100%,
+    24px 100%,
+    24px 100%;
   background-attachment: local, local, scroll, scroll;
 }
 

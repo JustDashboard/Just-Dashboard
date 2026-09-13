@@ -1,13 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import {
-  ArrowCircleUp,
-  ChevronDown,
-  ClockRewind,
-  Puzzle,
-  RefreshClockwise,
-} from "@/components/icons"
+import { ArrowCircleUp, ChevronDown, ClockRewind, RefreshClockwise } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { errorMessage } from "@/lib/api"
@@ -87,7 +81,6 @@ export function ChangesSheet({
         open={open}
         onOpenChange={onOpenChange}
         width="md"
-        icon={Puzzle}
         title={pending.length > 0 ? "What's new" : "Release notes"}
         description={
           pending.length > 0 ? (

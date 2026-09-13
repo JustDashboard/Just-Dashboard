@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Archive, Box, Cpu, FileText, Globe, Logs, Monorepo } from "@/components/icons"
+import { Archive, Box, Cpu, FileText, Globe, Monorepo } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
@@ -60,15 +60,11 @@ export function SourceRail({
     }).filter((g) => g.items.length > 0 || (index?.missing[g.kind] && !needle))
   }, [index, filter])
 
-
   return (
     // Below lg the grid stacks, and an uncapped source list would take half the
     // window from the lines you came to read.
     <Panel className="max-h-64 min-h-0 lg:max-h-full">
-      <PanelHeader
-        icon={Logs}
-        title="Sources"
-      />
+      <PanelHeader title="Sources" />
       <PanelToolbar>
         <SearchInput
           containerClassName="w-full"

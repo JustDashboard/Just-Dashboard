@@ -89,7 +89,6 @@ export function StreamsPanel() {
 
         <Panel>
           <PanelHeader
-            icon={Connection}
             title="Port forwarding"
             actions={
               admin && (
@@ -312,7 +311,6 @@ function StreamForm({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="lg"
-      icon={Connection}
       title={initial ? `Edit ${initial.name}` : "New stream"}
       description="A port on this host, forwarded somewhere else"
       bodyClassName="flex min-h-0 flex-1 flex-col gap-4 p-4"

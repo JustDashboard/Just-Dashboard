@@ -51,15 +51,32 @@ export function StatTile({
         className,
       )}
     >
-      <div className="flex min-w-0 items-baseline justify-between gap-3">
-        <p className="eyebrow flex min-w-0 items-center gap-1.5 truncate">
+      {/*
+        The pair wraps rather than the name being amputated.
+        `Runtime health` beside `Something is stopped` did not fit four-up on a
+        1400px screen, and because the figure was `shrink-0` and the name was
+        `min-w-0 truncate`, the name was the one that lost: the tile read
+        `RUNTIME ⋯`. Every label here is two or three words, so the name keeps
+        its width and a figure too long to share the line drops under it — which
+        is the shape these tiles had before they were put on one line, arrived
+        at only where it is actually needed.
+      */}
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3">
+        <p className="eyebrow flex shrink-0 items-center gap-1.5">
           {Icon && <Icon className="size-3 shrink-0 self-center" />}
-          <span className="truncate">{label}</span>
+          <span>{label}</span>
         </p>
         <span className="flex shrink-0 items-baseline gap-1.5">
+          {/*
+            `leading-none` beside `truncate` clipped its own descenders. The
+            overflow rule that stops a long figure escaping the tile also clips
+            anything outside the line box, and at line-height 1 the line box
+            ends at the baseline — so "Everything is up" lost the tails of its
+            y, g and p, on the one tile most likely to be read as a sentence.
+          */}
           <span
             className={cn(
-              "numeric truncate text-base leading-none font-semibold",
+              "numeric truncate text-base leading-tight font-semibold",
               tone === "warning" && "text-warning",
               tone === "danger" && "text-destructive",
               tone === "success" && "text-success",
@@ -114,13 +131,13 @@ export function StatGrid({
         // A hairline between cells and only between them: the grid's own border
         // is the outside edge, so a cell starting a row draws no left edge and
         // the first row draws no top one.
-        "[&>*]:border-hairline [&>*]:border-t [&>*:first-child]:border-t-0",
+        "[&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0",
         "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
         "grid-cols-1 sm:grid-cols-2",
         columns === 3 &&
-          "lg:grid-cols-3 lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0 lg:[&>*:nth-child(2n+1)]:border-l",
+          "lg:grid-cols-3 lg:[&>*]:border-l lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*:nth-child(2n+1)]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0",
         columns === 4 &&
-          "xl:grid-cols-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0 xl:[&>*:nth-child(2n+1)]:border-l",
+          "xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0",
         className,
       )}
       {...props}

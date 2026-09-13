@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Globe, RefreshClockwise, ShieldCheck, ShieldOff } from "@/components/icons"
+import { RefreshClockwise, ShieldOff } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { timestamp } from "@/lib/format"
@@ -60,10 +60,7 @@ export function CertsPanel() {
       <CertbotPanel onChanged={certs.refresh} />
 
       <Panel>
-        <PanelHeader
-          icon={ShieldCheck}
-          title="Installed certificates"
-        />
+        <PanelHeader title="Installed certificates" />
         <PanelBody flush>
           {certs.loading && <LoadingPanel />}
           {certs.error && <ErrorState error={certs.error} className="m-4" />}
@@ -73,7 +70,6 @@ export function CertsPanel() {
 
       <Panel>
         <PanelHeader
-          icon={Globe}
           title="Watched domains"
           actions={
             <Button variant="outline" size="sm" onClick={() => watched.refresh()}>

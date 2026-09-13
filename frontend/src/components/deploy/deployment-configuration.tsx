@@ -8,13 +8,10 @@ import {
   Database,
   Eye,
   EyeOff,
-  FirewallCheck,
-  FloppyDisk,
   Globe,
   Key,
   Plus,
   RefreshClockwise,
-  ShieldCheck,
   Sparkles,
   Trash,
 } from "@/components/icons"
@@ -131,7 +128,6 @@ function PendingPanel({ pending }: { pending: DeploymentEnvironmentConfiguration
   return (
     <Panel>
       <PanelHeader
-        icon={RefreshClockwise}
         title={pending.pending ? "Pending deployment" : "Desired plan is live"}
         actions={
           <Status
@@ -205,10 +201,7 @@ function RuntimeConfigurationForm({
 
   return (
     <Panel>
-      <PanelHeader
-        icon={FloppyDisk}
-        title="Runtime configuration"
-      />
+      <PanelHeader title="Runtime configuration" />
       <PanelBody>
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
           <Field label="Release strategy" htmlFor="runtime-strategy">
@@ -461,10 +454,7 @@ function VariableWorkspace({
         )}
         {can("system.admin") && (
           <Panel>
-            <PanelHeader
-              icon={Plus}
-              title="Add or update a variable"
-            />
+            <PanelHeader title="Add or update a variable" />
             <PanelBody className="space-y-4">
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <Field label="Variable name" htmlFor="variable-name">
@@ -561,10 +551,7 @@ function VariableWorkspace({
           </Panel>
         )}
         <Panel>
-          <PanelHeader
-            icon={Key}
-            title="Scoped variables"
-          />
+          <PanelHeader title="Scoped variables" />
           <PanelBody flush>
             {configuration.variables.length === 0 ? (
               <EmptyState
@@ -729,7 +716,6 @@ function NetworkForm({
       <PendingPanel pending={configuration.pending} />
       <div className="grid min-w-0 gap-4 lg:grid-cols-3">
         <PostureCard
-          icon={Globe}
           title="Proxy & DNS"
           value={`${domains.length} ${domains.length === 1 ? "domain" : "domains"}`}
           detail="Conflicts and DNS failures are separate preflight findings."
@@ -737,7 +723,6 @@ function NetworkForm({
           label="Open Proxy"
         />
         <PostureCard
-          icon={ShieldCheck}
           title="TLS"
           value={domains.some((domain) => domain.https) ? "Certificate required" : "HTTP only"}
           detail="A configured HTTPS route cannot activate without matching certificate files."
@@ -745,7 +730,6 @@ function NetworkForm({
           label="Open Certificates"
         />
         <PostureCard
-          icon={FirewallCheck}
           title="Port & firewall"
           value={
             runtime.hostPort
@@ -764,7 +748,6 @@ function NetworkForm({
       </div>
       <Panel>
         <PanelHeader
-          icon={Globe}
           title="Domains"
           actions={
             can("system.admin") && (
@@ -971,7 +954,6 @@ function StorageForm({
       <PendingPanel pending={configuration.pending} />
       <Panel>
         <PanelHeader
-          icon={Database}
           title="Persistent mounts"
           actions={
             can("system.admin") && (
@@ -1082,7 +1064,6 @@ function StorageForm({
       </Panel>
       <Panel>
         <PanelHeader
-          icon={ShieldCheck}
           title="Backups & dependencies"
           actions={
             can("system.admin") && (
@@ -1269,10 +1250,7 @@ function BackupEvidence({
 }) {
   return (
     <Panel>
-      <PanelHeader
-        icon={ShieldCheck}
-        title="Latest backup gate evidence"
-      />
+      <PanelHeader title="Latest backup gate evidence" />
       <PanelBody>
         {loading ? (
           <p className="text-xs text-muted-foreground">Loading latest run evidence…</p>
@@ -1362,7 +1340,6 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
     <>
       <Panel className="border-rule-danger">
         <PanelHeader
-          icon={Archive}
           title="Archive & managed resources"
           actions={
             can("system.admin") && (
@@ -1451,7 +1428,6 @@ function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchiv
 }
 
 function PostureCard({
-  icon: Icon,
   title,
   value,
   detail,
@@ -1459,7 +1435,6 @@ function PostureCard({
   label,
   warning = false,
 }: {
-  icon: React.ComponentType<{ className?: string }>
   title: string
   value: string
   detail: string
@@ -1470,7 +1445,6 @@ function PostureCard({
   return (
     <Panel>
       <PanelHeader
-        icon={Icon}
         title={title}
         actions={warning ? <Status verdict="warning" label="Review" /> : undefined}
       />

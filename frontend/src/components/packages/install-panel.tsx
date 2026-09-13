@@ -114,10 +114,7 @@ export function InstallPanel({
 
   return (
     <Panel>
-      <PanelHeader
-        icon={MagnifyingGlass}
-        title="Add software"
-      />
+      <PanelHeader title="Add software" />
       <PanelToolbar>
         <div className="relative w-full sm:w-96">
           <SearchInput

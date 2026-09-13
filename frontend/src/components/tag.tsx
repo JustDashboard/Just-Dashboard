@@ -4,26 +4,41 @@ import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
 
 /**
- * Border and text only. A tone is allowed to colour the word and the rule
- * around it; it is never allowed to fill a shape, because a filled shape is
- * the thing this component exists to replace.
+ * A tone colours the word. It has nothing to fill and nothing to outline,
+ * because the container is what this component stopped drawing.
  */
 const TONE: Record<Tone, string> = {
-  default: "border-hairline text-muted-foreground",
-  success: "border-rule-success text-success",
-  warning: "border-rule-warning text-warning",
-  danger: "border-rule-danger text-destructive",
+  // A step below the muted text it sits beside. Small caps at 10px have the
+  // same cap height as 13px lower-case has x-height, so at equal contrast an
+  // untinted tag reads as loud as the title it is annotating. The tinted three
+  // stay at full strength — a tag that has taken a tone is saying something.
+  default: "text-muted-foreground/80",
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-destructive",
 }
 
 /**
  * The mark for a fixed property of the row it sits in: `ed25519`, `read-only`,
  * `self-signed`, `security`.
  *
- * The product used to spend a `Badge` on this — a filled, fully rounded-sm pill —
- * and a table with one in every row read as a sheet of stickers rather than as
- * data. The shape here is the one the product had already settled on in
- * `PanelHeader`'s `advanced` note: a squared hairline chip, small caps, quiet
- * enough that a column of them recedes and a single tinted one does not.
+ * It is a word, and it is drawn as one. The chip is gone: small caps at 10px
+ * inside a hairline box with its own padding is a container three times the
+ * height of the word it holds, and beside a 13px title — which is where most
+ * of the 117 of these sit — the box read as the louder of the two. Every table
+ * with one in each row was a column of empty rectangles with a syllable in the
+ * middle.
+ *
+ * What is left does the same job with type alone: small caps, tracked out, a
+ * step down in size and a step back in colour. Beside a title it reads as an
+ * aside; in a column it recedes to a texture; and a tinted one still catches
+ * the eye, which is the only thing the border was contributing.
+ *
+ * `mono` is the exception, and the reason it is one is that its contents are
+ * not words. A cipher suite, a port map, a config hash and a dependency name
+ * are literal strings from the host, they run together when several sit in a
+ * row, and small caps would corrupt them. Those keep a quiet recessed ground —
+ * no border, no uppercase — so a run of them is still parseable as a list.
  *
  * Three things it is deliberately not:
  *
@@ -62,8 +77,8 @@ export function Tag({
     <Comp
       data-slot="tag"
       className={cn(
-        "inline-flex w-fit shrink-0 items-center gap-1 rounded-sm border px-1.5 py-px text-micro leading-[1.5] font-medium whitespace-nowrap",
-        mono ? "font-mono" : "tracking-[0.08em] uppercase",
+        "inline-flex w-fit shrink-0 items-center gap-1 text-micro leading-[1.5] font-medium whitespace-nowrap",
+        mono ? "rounded-sm bg-surface-sunken px-1 py-px font-mono" : "tracking-[0.06em] uppercase",
         TONE[tone],
         className,
       )}

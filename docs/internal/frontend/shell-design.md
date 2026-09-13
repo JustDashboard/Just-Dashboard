@@ -37,7 +37,7 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   heights.
 - `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
   input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
-  `Modal` and `SidePanel` share one anatomy: icon plot, title, tinted strip, a body that is the only
+  `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only
   part that scrolls, a footer strip. Their `description` is rendered `sr-only` — Radix wants an
   accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
   components** — a page or a feature panel never opens one itself.
@@ -47,13 +47,19 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   and `StatGrid`, which frames a run of them as a single object with hairlines between cells rather
   than as a row of separate cards.
 - `components/status-dot.tsx` — `Status`, the one live-state indicator: a coloured dot and a word.
-  `components/tag.tsx` — `Tag`, the squared hairline mark for a *fixed property* of a row.
+  `components/tag.tsx` — `Tag`, small-caps text marking a *fixed property* of a row. No chip, no border.
   **There is no badge and no pill in this product**; `ui/badge.tsx` was deleted so the decision cannot
   come back by accident. A count is `.numeric` text, a state is a `Status`, a property is a `Tag`, and
   anything longer than three words is prose.
-- `components/icon-action.tsx` — `IconAction` (an icon-only row control with a real tooltip label) and
+- `components/icon-action.tsx` — `IconAction` (an icon-only row control with a real tooltip label),
   `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
-  and is always visible on touch).
+  and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
+  column to themselves: always drawn, dimmed until the pointer arrives.
+- `components/finding-list.tsx` — `FindingList`, the one list of verdict findings in the product. A row
+  is a severity dot, a title and a short right-hand qualifier; the measurement, the reasoning and any
+  one-click remedy are behind the row rather than printed under it. Metrics' health, Security's posture
+  and Docker's attention all render through it, because they are the same shape of fact —
+  what was measured, what it means, what to do.
 
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
 feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`
@@ -74,7 +80,7 @@ on a control with a face, the accent wash on a ghost — so nothing translates a
 to say it was pressed.
 
 The nav's own treatment did not change with it, because it never used the lift: the current destination
-takes the sidebar accent fill, a brand-blue icon and a `font-medium` label against the `font-normal` of
+takes the sidebar accent fill, a brand-orange icon and a `font-medium` label against the `font-normal` of
 the rest. The rail is the one surface dense enough to need three weights, and the group labels above the
 entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
 
@@ -86,7 +92,7 @@ is the single letter the collapsed rail falls back to.
 **Selection is `bg-accent`, everywhere.** The active session in the terminal rail, a pressed
 `ToggleGroupItem`, an applied `FilterChip`, a highlighted command row, a selected table row, the current
 file in the tree and the current sidebar entry all take the same neutral wash. Neither the primary tint
-nor the brand hue is ever spent on "this one is chosen": ink is a *command*, blue is *where you are*, and
+nor the brand hue is ever spent on "this one is chosen": ink is a *command*, orange is *where you are*, and
 a filter borrowing either reads as the page's main action.
 
 `components/ui/*` is generated shadcn/ui (new-york, zinc) with its icons rewired to

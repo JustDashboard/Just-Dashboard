@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { CheckCircle, Code, Globe, Plus, Trash, Warning } from "@/components/icons"
+import { CheckCircle, Code, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -224,7 +224,6 @@ function SiteFormBody({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="xl"
-      icon={Globe}
       title={editing ? `Edit ${editing}` : "New site"}
       description={
         spec.domains.length > 0

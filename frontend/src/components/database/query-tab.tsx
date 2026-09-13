@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import {
   AcronymJson,
   Clock,
-  Database,
   Download,
   FloppyDisk,
   Layout,
@@ -193,10 +192,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] [&>*]:min-w-0">
         <Panel>
-          <PanelHeader
-            icon={Database}
-            title="SQL"
-          />
+          <PanelHeader title="SQL" />
           <PanelBody flush>
             <CodeEditor
               className="h-56"
@@ -329,10 +325,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
 
       {plan && (
         <Panel>
-          <PanelHeader
-            icon={Monorepo}
-            title="Query plan"
-          />
+          <PanelHeader title="Query plan" />
           <PanelBody flush>
             <ResultGrid result={plan} />
           </PanelBody>
@@ -342,7 +335,6 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
       {result && (
         <Panel>
           <PanelHeader
-            icon={Layout}
             title="Result"
             actions={
               result.columns.length > 0 && (

@@ -6,7 +6,6 @@ import {
   CloudUpload,
   Copy,
   Cross,
-  Database,
   Download,
   Filter,
   Hash,
@@ -418,7 +417,6 @@ export function BrowseTab({
     <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] [&>*]:min-w-0">
       <Panel>
         <PanelHeader
-          icon={Database}
           title="Tables"
           actions={
             canDDL && (
@@ -485,7 +483,6 @@ export function BrowseTab({
 
       <Panel>
         <PanelHeader
-          icon={Layout}
           title={table ?? "Pick a table"}
           actions={
             table && (

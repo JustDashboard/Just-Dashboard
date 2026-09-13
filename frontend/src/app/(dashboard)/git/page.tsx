@@ -58,7 +58,6 @@ export default function GitPage() {
     )
   }, [repos.data, filter])
 
-
   // A selected repository takes the whole page: the working copy is a place to
   // work, not a panel to peek at, and it needs the room for the tree, the
   // changes and a diff side by side. Every hook above runs first so the branch
@@ -116,10 +115,7 @@ export default function GitPage() {
           />
         ) : (
           <Panel>
-            <PanelHeader
-              icon={GitBranch}
-              title="Repositories"
-            />
+            <PanelHeader title="Repositories" />
             <PanelToolbar>
               <SearchInput
                 value={filter}

@@ -4,7 +4,6 @@ import { useCallback, useState } from "react"
 import {
   Clock,
   Copy,
-  Database,
   FloppyDisk,
   Key,
   MagnifyingGlass,
@@ -164,7 +163,6 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
     <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)] [&>*]:min-w-0">
       <Panel>
         <PanelHeader
-          icon={Database}
           title="Keys"
           actions={
             <>
@@ -258,7 +256,6 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
 
       <Panel>
         <PanelHeader
-          icon={Key}
           title={selected ?? "Pick a key"}
           actions={
             selected &&

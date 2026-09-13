@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ArrowUpDown, Check, Plus, Shield, Warning } from "@/components/icons"
+import { ArrowUpDown, Check, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -261,7 +261,6 @@ function RuleForm({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      icon={Shield}
       title={edit ? `Edit rule ${edit.number}` : "New inbound rule"}
       description={
         edit

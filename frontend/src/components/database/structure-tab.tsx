@@ -1,8 +1,7 @@
 "use client"
 
-import { Copy, Key, Layout, Linked, Monorepo, Pencil, Trash } from "@/components/icons"
+import { Copy, Key, Layout, Pencil, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { } from "@/lib/format"
 import { del, get } from "@/lib/api"
 import type { DbConnection, DbDriverInfo, DbTableDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -105,10 +104,7 @@ export function StructureTab({
   return (
     <div className="grid gap-4">
       <Panel>
-        <PanelHeader
-          icon={Monorepo}
-          title="Columns"
-        />
+        <PanelHeader title="Columns" />
         <PanelBody flush>
           <Table>
             <TableHeader>
@@ -164,7 +160,7 @@ export function StructureTab({
 
       <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
         <Panel>
-          <PanelHeader icon={Key} title="Indexes" />
+          <PanelHeader title="Indexes" />
           <PanelBody flush>
             {d.indexes.length === 0 ? (
               <EmptyNote>No indexes.</EmptyNote>
@@ -212,7 +208,7 @@ export function StructureTab({
         </Panel>
 
         <Panel>
-          <PanelHeader icon={Linked} title="Foreign keys" />
+          <PanelHeader title="Foreign keys" />
           <PanelBody flush>
             {d.foreignKeys.length === 0 ? (
               <EmptyNote>No foreign keys.</EmptyNote>
@@ -258,7 +254,6 @@ export function StructureTab({
       {d.createSql && (
         <Panel>
           <PanelHeader
-            icon={Layout}
             title="Definition"
             actions={
               <Button

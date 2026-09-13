@@ -57,10 +57,7 @@ export default function ProcessesPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Server"
-        title="Processes"
-      />
+      <PageHeader eyebrow="Server" title="Processes" />
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
         <TabsList>
           <TabsTrigger value="table">Live</TabsTrigger>
@@ -136,12 +133,10 @@ function PM2Tab() {
     }
   }
 
-
   return (
     <>
       <Panel>
         <PanelHeader
-          icon={ChartActivity}
           title="PM2 applications"
           actions={
             can("service.control") && (
@@ -336,7 +331,6 @@ function SystemdTab() {
     <>
       <Panel>
         <PanelHeader
-          icon={ListOrdered}
           title="systemd units"
           advanced
           actions={failed > 0 && <Status verdict="critical" label={`${failed} failed`} />}
@@ -496,7 +490,6 @@ function CronTab() {
       <div className="flex min-w-0 flex-col gap-4">
         <Panel>
           <PanelHeader
-            icon={Clock}
             title="User crontab"
             advanced
             actions={
@@ -622,10 +615,7 @@ function CronTab() {
         </Panel>
 
         <Panel>
-          <PanelHeader
-            icon={Clock}
-            title="System cron"
-          />
+          <PanelHeader title="System cron" />
           <PanelBody className="space-y-4">
             {system.data?.map((file) => (
               <div key={file.source} className="min-w-0 space-y-1.5">

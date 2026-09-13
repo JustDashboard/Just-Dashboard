@@ -1,15 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import {
-  DesktopDevice,
-  Key,
-  LockClosed,
-  Plus,
-  ShieldCheck,
-  Trash,
-  UserSettings,
-} from "@/components/icons"
+import { DesktopDevice, Key, Plus, Trash, UserSettings } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
@@ -53,10 +45,7 @@ export default function AccountPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="You"
-        title="Account"
-      />
+      <PageHeader eyebrow="You" title="Account" />
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
         <TabsList>
           <TabsTrigger value="security">Security</TabsTrigger>
@@ -112,10 +101,7 @@ function SecurityTab() {
   return (
     <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
       <Panel>
-        <PanelHeader
-          icon={LockClosed}
-          title="Change password"
-        />
+        <PanelHeader title="Change password" />
         <PanelBody className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="cur-pw">Current password</Label>
@@ -239,7 +225,6 @@ function TwoFactorPanel() {
   return (
     <Panel>
       <PanelHeader
-        icon={ShieldCheck}
         title="Two-factor authentication"
         actions={
           <Status
@@ -421,10 +406,7 @@ function SessionsTab() {
 
   return (
     <Panel>
-      <PanelHeader
-        icon={DesktopDevice}
-        title="Active sessions"
-      />
+      <PanelHeader title="Active sessions" />
       <PanelBody flush>
         <Table>
           <TableHeader>
@@ -492,11 +474,7 @@ function TokensTab() {
   return (
     <>
       <Panel>
-        <PanelHeader
-          icon={Key}
-          title="API tokens"
-          actions={<CreateTokenDialog onDone={refresh} />}
-        />
+        <PanelHeader title="API tokens" actions={<CreateTokenDialog onDone={refresh} />} />
         <PanelBody flush>
           {loading && <LoadingPanel rows={3} />}
           {error && <ErrorState error={error} className="m-4" />}
@@ -709,7 +687,6 @@ function UsersTab() {
     <>
       <Panel>
         <PanelHeader
-          icon={UserSettings}
           title="Dashboard users"
           actions={<CreateDashboardUserDialog onDone={refresh} />}
         />

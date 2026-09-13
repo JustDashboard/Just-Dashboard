@@ -116,7 +116,6 @@ export function VHostsPanel({ hasNginx }: { hasNginx: boolean }) {
       <div className="flex min-w-0 flex-col gap-4">
         <Panel>
           <PanelHeader
-            icon={Globe}
             title="Sites"
             actions={
               admin &&
@@ -355,7 +354,6 @@ function ConfigEditorBody({
       open={vhost !== null}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="xl"
-      icon={Code}
       title={vhost?.name ?? "Configuration"}
       description={vhost?.path}
       bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"

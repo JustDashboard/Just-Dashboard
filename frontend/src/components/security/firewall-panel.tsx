@@ -162,7 +162,6 @@ export function FirewallPanel({
 
         <Panel>
           <PanelHeader
-            icon={Shield}
             eyebrow={status.backend}
             title="Firewall"
             actions={

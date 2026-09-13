@@ -157,7 +157,6 @@ export function SSHPanel() {
 
         <Panel>
           <PanelHeader
-            icon={TerminalWindow}
             title="SSH server"
             advanced
             actions={
@@ -240,7 +239,6 @@ export function SSHPanel() {
 
         <Panel>
           <PanelHeader
-            icon={Key}
             title="Accounts with an authorized key"
             actions={
               <Status

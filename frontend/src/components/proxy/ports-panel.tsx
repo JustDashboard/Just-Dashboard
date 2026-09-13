@@ -26,13 +26,9 @@ export function PortsPanel() {
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
 
-
   return (
     <Panel>
-      <PanelHeader
-        icon={Router}
-        title="Listening ports"
-      />
+      <PanelHeader title="Listening ports" />
       <PanelBody flush>
         <Table containerClassName="max-h-[calc(100svh-20rem)]">
           <TableHeader className={stickyTableHeader}>

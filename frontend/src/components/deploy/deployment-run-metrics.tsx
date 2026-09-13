@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { Monitoring } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -55,7 +54,6 @@ export function DeploymentRunMetrics({ projectID, runID }: { projectID: number; 
   return (
     <Panel>
       <PanelHeader
-        icon={Monitoring}
         title="Metrics around activation"
         actions={
           <Button variant="outline" size="sm" asChild>

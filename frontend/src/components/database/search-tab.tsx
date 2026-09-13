@@ -63,10 +63,7 @@ export function SearchTab({
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Inspect}
-        title="Find a value"
-      />
+      <PanelHeader title="Find a value" />
       <PanelToolbar>
         <SearchInput
           placeholder="An id, an email, an order number…"

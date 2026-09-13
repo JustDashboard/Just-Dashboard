@@ -277,7 +277,6 @@ export default function PackagesPage() {
       {canUpgrade && report?.securityFiltering && (report?.securityCount ?? 0) > 0 && (
         <Panel>
           <PanelHeader
-            icon={ShieldOff}
             title={`${report.securityCount} security update${report.securityCount === 1 ? "" : "s"} outstanding`}
             actions={
               <Button size="sm" disabled={applying} onClick={() => upgrade(true)}>
@@ -357,7 +356,6 @@ export default function PackagesPage() {
           <TabsContent value="installed">
             <Panel>
               <PanelHeader
-                icon={Puzzle}
                 title="Installed packages"
                 actions={
                   <Button
@@ -428,7 +426,6 @@ export default function PackagesPage() {
           <TabsContent value="updates">
             <Panel>
               <PanelHeader
-                icon={ArrowCircleUp}
                 title="Waiting to be upgraded"
                 actions={
                   canUpgrade && (

@@ -1,16 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
-import {
-  ChartActivity,
-  Cpu,
-  Gauge,
-  GridSquare,
-  NetworkDevice,
-  Router,
-  Servers,
-  Warning,
-} from "@/components/icons"
+import { Servers } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { bytes, percent, rate } from "@/lib/format"
@@ -37,7 +28,7 @@ import { Page, PageHeader, PageState, Metric, MetricStrip, Section } from "@/com
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Meter, utilisationTone } from "@/components/meter"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { HealthVerdict } from "@/components/metrics/health-panel"
+import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
 import type { Series } from "@/components/metrics/metric-chart"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -189,7 +180,7 @@ export default function MetricsPage() {
   const recorded = useMetricsHistory(win)
   const recordedStorage = useStorageHistory(win)
   const events = useMetricEvents(win)
-  const { health } = useHealth()
+  const { health, loading: healthLoading } = useHealth()
 
   const live = win.key === "live" && win.from === undefined
 
@@ -254,9 +245,16 @@ export default function MetricsPage() {
         }
       />
 
-      <Section
-        title="Utilisation"
-      >
+      {/* The verdict in the header is one word, and on the page made entirely
+          of the numbers it was computed from, "Warning" with no way to ask why
+          is a dead end. Rendered only when there is something to say: a server
+          with nothing wrong loses no height to a panel saying so, because the
+          header already said it. */}
+      {health && health.findings.length > 0 && (
+        <HealthPanel health={health} loading={healthLoading} />
+      )}
+
+      <Section title="Utilisation">
         {recorded.error && <ErrorState error={recorded.error} />}
 
         <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
@@ -271,7 +269,6 @@ export default function MetricsPage() {
           />
 
           <ChartPanel
-            icon={GridSquare}
             title="Memory and swap"
             rows={rows}
             series={memSeries}
@@ -294,7 +291,6 @@ export default function MetricsPage() {
         </div>
 
         <ChartPanel
-          icon={ChartActivity}
           title="Network throughput"
           rows={rows}
           series={netSeries}
@@ -313,7 +309,6 @@ export default function MetricsPage() {
               invites the reader to infer a relationship between two lines that
               have nothing to do with each other. */}
           <ChartPanel
-            icon={Servers}
             title="Capacity"
             rows={storage.rows as { ts: number }[]}
             series={storageSeries}
@@ -328,7 +323,6 @@ export default function MetricsPage() {
             thresholds={DISK_THRESHOLD}
           />
           <ChartPanel
-            icon={Servers}
             title="Disk throughput"
             rows={rows}
             series={ioSeries}
@@ -349,12 +343,9 @@ export default function MetricsPage() {
         "requests are queueing" are both true at once far more often than they
         look like they should be, and only the charts below can say so.
       */}
-      <Section
-        title="Saturation"
-      >
+      <Section title="Saturation">
         <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
           <ChartPanel
-            icon={Warning}
             title="Pressure"
             rows={rows}
             series={pressureSeries}
@@ -372,7 +363,6 @@ export default function MetricsPage() {
             }
           />
           <ChartPanel
-            icon={Gauge}
             title="Load average"
             rows={rows}
             series={loadSeries}
@@ -387,7 +377,6 @@ export default function MetricsPage() {
             }
           />
           <ChartPanel
-            icon={Servers}
             title="Disk operations"
             rows={rows}
             series={iopsSeries}
@@ -399,7 +388,6 @@ export default function MetricsPage() {
             note={note}
           />
           <ChartPanel
-            icon={ChartActivity}
             title="Disk latency and busy time"
             rows={rows}
             series={latencySeries}
@@ -414,7 +402,6 @@ export default function MetricsPage() {
 
         <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
           <ChartPanel
-            icon={Router}
             title="Sockets"
             rows={rows}
             series={socketSeries}
@@ -439,8 +426,12 @@ export default function MetricsPage() {
         {snapshot.cpu.perCore.length > 0 && (
           <Panel>
             <PanelHeader
-              icon={Cpu}
               title="Per-core utilisation"
+              actions={
+                <span className="numeric text-hint text-muted-foreground">
+                  {snapshot.cpu.perCore.length} cores
+                </span>
+              }
             />
             <PanelBody>
               <PerCoreBars cores={snapshot.cpu.perCore} />
@@ -487,7 +478,6 @@ function ProcessorPanel({
 
   return (
     <ChartPanel
-      icon={Cpu}
       title="Processor"
       rows={rows}
       series={breakdown ? cpuModeSeries : cpuSeries}
@@ -545,7 +535,6 @@ function InodePanel({
 }) {
   return (
     <ChartPanel
-      icon={Servers}
       title="Inodes"
       rows={rows}
       series={series}
@@ -579,8 +568,6 @@ function coreThreshold(cores: number) {
   return coreThresholdCache.value
 }
 
-
-
 /**
  * What a chart shows when it has nothing to draw.
  */
@@ -600,24 +587,36 @@ function emptyChartNote(live: boolean, recorded: HistoryState): string {
 function PerCoreBars({ cores }: { cores: number[] }) {
   if (cores.length === 0) return null
   return (
-    // As many columns as fit the panel, not a fixed two: the track count follows
-    // the panel's own width rather than the viewport's.
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-1.5">
-      {cores.map((value, i) => (
-        <div key={i} className="flex min-w-0 items-center gap-2">
-          <span className="w-9 shrink-0 font-mono text-micro text-muted-foreground">cpu{i}</span>
-          <Meter
-            value={value}
-            tone={utilisationTone(value)}
-            size="thin"
-            label={`cpu${i}`}
-            className="flex-1"
-          />
-          <span className="numeric w-8 shrink-0 text-right font-mono text-micro text-muted-foreground">
-            {value.toFixed(0)}%
-          </span>
-        </div>
-      ))}
+    // Four columns at most, not as many as fit. `auto-fit` put all eight cores
+    // of a typical VPS on one line, which left each bar about forty pixels
+    // wide — a track too short to tell 40% from 60% on, which is the only
+    // question this panel answers. Four wide bars over two rows beats eight
+    // slivers over one.
+    <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 md:grid-cols-3 xl:grid-cols-4">
+      {cores.map((value, i) => {
+        const tone = utilisationTone(value)
+        return (
+          <div key={i} className="flex min-w-0 items-center gap-2">
+            <span className="w-8 shrink-0 font-mono text-micro text-muted-foreground">cpu{i}</span>
+            <Meter value={value} tone={tone} size="thin" label={`cpu${i}`} className="flex-1" />
+            <span
+              className={cn(
+                "numeric w-8 shrink-0 text-right font-mono text-micro",
+                // The figure carries the same tone as its bar. A core pinned at
+                // 98% beside one idling at 4% should be findable by colour in a
+                // grid of sixty-four, not by reading every number.
+                tone === "danger"
+                  ? "text-destructive"
+                  : tone === "warning"
+                    ? "text-warning"
+                    : "text-muted-foreground",
+              )}
+            >
+              {value.toFixed(0)}%
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -649,65 +648,58 @@ function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Servers}
-        title="Filesystems"
-      />
-      <PanelBody className="space-y-4">
+      <PanelHeader title="Filesystems" />
+      <PanelBody className="divide-y divide-hairline [&>*]:pb-3 [&>*+*]:pt-3 [&>*:last-child]:pb-0">
         {snapshot.mounts.map((mount) => {
           const tone = utilisationTone(mount.usedPercent)
           const inodes = mount.inodesTotal > 0 ? (mount.inodesUsed / mount.inodesTotal) * 100 : 0
+          const figure = cn(
+            tone === "danger"
+              ? "text-destructive"
+              : tone === "warning"
+                ? "text-warning"
+                : "text-foreground",
+          )
           return (
-            <div key={mount.mountpoint} className="min-w-0 space-y-2">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-body font-medium">{mount.mountpoint}</span>
-                    <Tag>{mount.fstype}</Tag>
-                    {inodes >= 80 && (
-                      <span className="numeric shrink-0 text-hint font-medium text-warning">
-                        {inodes.toFixed(0)}% inodes
-                      </span>
-                    )}
-                  </div>
-                  <p className="truncate font-mono text-hint text-muted-foreground">
-                    {mount.device}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="numeric text-body">
-                    {bytes(mount.used)}{" "}
-                    <span className="text-muted-foreground">/ {bytes(mount.total)}</span>
-                  </div>
-                  <p className="numeric text-hint text-muted-foreground">
-                    {rate(mount.readRate)} read · {rate(mount.writeRate)} write
-                  </p>
-                </div>
+            // Three lines, in the order the question is asked: which volume and
+            // how full, the bar, then the detail. It was a two-column header of
+            // stacked pairs — mountpoint over device on the left, capacity over
+            // throughput on the right — which put the percentage, the one figure
+            // the row exists for, on a third line beside a button.
+            <div key={mount.mountpoint} className="min-w-0 space-y-1.5">
+              <div className="flex min-w-0 items-baseline justify-between gap-3">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate text-body font-medium">{mount.mountpoint}</span>
+                  <Tag>{mount.fstype}</Tag>
+                </span>
+                <span className="numeric shrink-0 text-hint text-muted-foreground">
+                  {bytes(mount.used)} / {bytes(mount.total)}
+                  <span className={cn("ml-2 text-body font-medium", figure)}>
+                    {mount.usedPercent.toFixed(0)}%
+                  </span>
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <Meter
-                  value={mount.usedPercent}
-                  tone={tone}
-                  size="thin"
-                  label={mount.mountpoint}
-                  className="flex-1"
-                />
-                <span
-                  className={cn(
-                    "numeric w-9 text-right font-mono text-hint",
-                    tone === "danger"
-                      ? "text-destructive"
-                      : tone === "warning"
-                        ? "text-warning"
-                        : "text-muted-foreground",
+              <Meter value={mount.usedPercent} tone={tone} size="thin" label={mount.mountpoint} />
+              <div className="flex min-w-0 items-center justify-between gap-3 text-hint text-muted-foreground">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-mono">{mount.device}</span>
+                  <span className="numeric shrink-0">
+                    {rate(mount.readRate)} read · {rate(mount.writeRate)} write
+                  </span>
+                  {/* Inodes fill independently of bytes, so a volume the bar
+                      above calls two-thirds empty can still refuse to create a
+                      file. Said here, next to the bar that is about to be
+                      wrong, rather than only in the Inodes chart. */}
+                  {inodes >= 80 && (
+                    <span className="numeric shrink-0 font-medium text-warning">
+                      {inodes.toFixed(0)}% inodes
+                    </span>
                   )}
-                >
-                  {mount.usedPercent.toFixed(0)}%
                 </span>
                 <Button
                   size="xs"
                   variant="ghost"
-                  className="text-muted-foreground"
+                  className="-my-1 shrink-0 text-muted-foreground"
                   disabled={scanning !== null}
                   onClick={() => scan(mount.mountpoint)}
                 >
@@ -738,13 +730,9 @@ function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
 }
 
 function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
-
   return (
     <Panel>
-      <PanelHeader
-        icon={NetworkDevice}
-        title="Interfaces"
-      />
+      <PanelHeader title="Interfaces" />
       <PanelBody flush>
         <Table>
           <TableHeader>

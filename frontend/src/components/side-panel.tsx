@@ -20,6 +20,9 @@ const WIDTHS = {
  * The detail surface: a container's stats, a repository's history, a vhost's
  * config, a backup's runs.
  *
+ * Its header is the title and the actions, with no icon plot in front of them —
+ * see the note at `PanelHeader`.
+ *
  * Eight places opened a Sheet and each laid its own header out — some padded,
  * some not, some with the title in the body. They are one component now, so a
  * detail view opens the same way whichever page you came from, and the body is
@@ -31,7 +34,6 @@ export function SidePanel({
   onOpenChange,
   title,
   description,
-  icon: Icon,
   actions,
   footer,
   width = "lg",
@@ -44,7 +46,6 @@ export function SidePanel({
   title: React.ReactNode
   /** Read to a screen reader, never drawn. */
   description?: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
   footer?: React.ReactNode
   width?: keyof typeof WIDTHS
@@ -59,12 +60,7 @@ export function SidePanel({
         className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[width], className)}
       >
         <SheetHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12">
-          <div className="flex min-w-0 items-start gap-2.5">
-            {Icon && (
-              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-brand">
-                <Icon className="size-3.5" />
-              </span>
-            )}
+          <div className="flex min-w-0 items-start">
             <div className="min-w-0 flex-1">
               <SheetTitle className="flex min-w-0 flex-wrap items-center gap-2 text-title leading-tight">
                 {title}

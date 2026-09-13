@@ -69,7 +69,6 @@ export function ConnectionsPanel() {
   return (
     <Panel>
       <PanelHeader
-        icon={NetworkDevice}
         title="Live connections"
         actions={
           <Status

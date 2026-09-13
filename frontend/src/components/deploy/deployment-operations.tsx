@@ -36,10 +36,7 @@ export function DeploymentFindings({
 }) {
   return (
     <Panel>
-      <PanelHeader
-        icon={Warning}
-        title="Current findings"
-      />
+      <PanelHeader title="Current findings" />
       <PanelBody className="space-y-3">
         {!diagnosis ? (
           <EmptyNote>{loading ? "Reading dependency owners…" : "Diagnosis unavailable."}</EmptyNote>
@@ -126,7 +123,6 @@ export function DeploymentDomains({ operations }: { operations?: DeploymentOpera
   return (
     <Panel>
       <PanelHeader
-        icon={Globe}
         title="Domains & certificates"
         actions={
           <Button variant="ghost" size="xs" asChild>
@@ -230,7 +226,6 @@ export function DeploymentStorage({ operations }: { operations?: DeploymentOpera
   return (
     <Panel>
       <PanelHeader
-        icon={Database}
         title="Storage & backups"
         actions={
           <Button variant="ghost" size="xs" asChild>
@@ -324,7 +319,7 @@ export function DeploymentDependencies({ operations }: { operations?: Deployment
   if (dependencies?.status === "available" && dependencies.items.length === 0) return null
   return (
     <Panel>
-      <PanelHeader icon={Shield} title="Other dependencies" />
+      <PanelHeader title="Other dependencies" />
       <PanelBody>
         {!dependencies || dependencies.status !== "available" ? (
           <Notice title="Dependency evidence unavailable" icon={Shield}>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowCircleUp, RefreshClockwise, Sparkles, Warning } from "@/components/icons"
+import { ArrowCircleUp, RefreshClockwise, Warning } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -69,7 +69,6 @@ export function DashboardUpdatePanel() {
       {dialog}
       <Panel>
         <PanelHeader
-          icon={Sparkles}
           title="Just Dashboard"
           actions={
             <>

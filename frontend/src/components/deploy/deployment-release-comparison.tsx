@@ -65,7 +65,6 @@ export function DeploymentReleaseComparison({
   return (
     <Panel>
       <PanelHeader
-        icon={Box}
         title="What changed in this release"
         actions={
           <>
@@ -78,9 +77,9 @@ export function DeploymentReleaseComparison({
               </span>
             )}
             <Button variant="ghost" size="xs" asChild>
-            <Link href="/docker/images">
-              Open images <ArrowRight className="size-3" />
-            </Link>
+              <Link href="/docker/images">
+                Open images <ArrowRight className="size-3" />
+              </Link>
             </Button>
           </>
         }

@@ -552,10 +552,7 @@ export function DeploymentWizard() {
         </Panel>
         <aside className="space-y-3" aria-label="Current plan summary">
           <Panel>
-            <PanelHeader
-              icon={CloudUpload}
-              title={intent.name || "New deployment"}
-            />
+            <PanelHeader title={intent.name || "New deployment"} />
             <PanelBody>
               <DetailList>
                 <Detail label="Source">{humanize(source.mode)}</Detail>
@@ -1433,10 +1430,7 @@ function DetectionStep({
       )}
       {detection.compose && (
         <Panel>
-          <PanelHeader
-            icon={Layers}
-            title={`${detection.compose.services.length} Compose services`}
-          />
+          <PanelHeader title={`${detection.compose.services.length} Compose services`} />
           <PanelBody className="space-y-3">
             <div className="flex flex-wrap gap-1.5">
               {detection.compose.services.map((service) => (

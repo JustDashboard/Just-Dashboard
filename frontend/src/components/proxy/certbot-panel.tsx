@@ -129,7 +129,6 @@ export function CertbotPanel({ onChanged }: { onChanged?: () => void }) {
 
         <Panel>
           <PanelHeader
-            icon={ShieldCheck}
             title="certbot"
             actions={
               admin && (

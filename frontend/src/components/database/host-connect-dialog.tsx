@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Key, Servers } from "@/components/icons"
+import { Key } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DbConnection, DbCredentialServer, DbDriver } from "@/lib/types"
@@ -85,7 +85,6 @@ export function HostConnectDialog({
       open
       onOpenChange={(o) => !busy && onOpenChange(o)}
       size="sm"
-      icon={Servers}
       title="Connect {server.driver} on this server"
       description={
         <>

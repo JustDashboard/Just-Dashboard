@@ -1269,7 +1269,6 @@ function SymlinkBody({
       open={open}
       onOpenChange={onOpenChange}
       size="sm"
-      icon={Linked}
       title="New symlink"
       footer={
         <>

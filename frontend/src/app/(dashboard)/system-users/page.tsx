@@ -64,7 +64,7 @@ export default function SystemUsersPage() {
 
       {data && (
         <Panel>
-          <PanelHeader icon={Users} title="Accounts" />
+          <PanelHeader title="Accounts" />
           <PanelToolbar>
             <label className="flex items-center gap-2 text-body text-muted-foreground">
               <Checkbox checked={showSystem} onCheckedChange={(v) => setShowSystem(v === true)} />
@@ -318,7 +318,6 @@ function SSHKeysSheet({
         open={username !== null}
         onOpenChange={onOpenChange}
         width="md"
-        icon={Key}
         title={`SSH keys for ${username ?? ""}`}
         description={data?.path}
       >

@@ -7,7 +7,6 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
-import { ListOrdered } from "@/components/icons"
 import { LogViewer } from "@/components/log-viewer"
 import { Detail, DetailList } from "@/components/page"
 import { PaneHeader, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -39,7 +38,6 @@ export function UnitJournalSheet({
     <SidePanel
       open={unit !== null}
       onOpenChange={onOpenChange}
-      icon={ListOrdered}
       title={unit ?? "Unit"}
       description="Service state, configuration and live journal"
       bodyClassName="flex min-h-0 flex-1 flex-col"
@@ -113,9 +111,7 @@ function UnitOverview({ unit }: { unit: string }) {
         </PanelBody>
       </Panel>
       <Panel>
-        <PanelHeader
-          title="Runtime policy"
-        />
+        <PanelHeader title="Runtime policy" />
         <PanelBody>
           <DetailList>
             <Detail label="Account">{properties.User || "root"}</Detail>

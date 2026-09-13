@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
-  Code,
   CodeWrap,
   FloppyDisk,
   Location,
@@ -207,7 +206,6 @@ function FileEditorPanel({
       open={path !== null}
       onOpenChange={requestClose}
       width="xl"
-      icon={Code}
       title={
         <>
           {path?.split("/").pop() ?? "File"}

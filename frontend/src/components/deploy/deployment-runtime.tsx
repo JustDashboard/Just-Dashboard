@@ -14,7 +14,6 @@ export function DeploymentRuntime({ runtime }: { runtime?: DeploymentRuntimeServ
   return (
     <Panel>
       <PanelHeader
-        icon={Box}
         title="Runtime services"
         actions={
           <Button variant="ghost" size="sm" asChild>

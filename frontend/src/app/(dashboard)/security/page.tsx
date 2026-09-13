@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Connection,
   Crosshair,
-  GridSquare,
   NetworkDevice,
   Shield,
   TerminalWindow,
@@ -94,10 +93,7 @@ export default function SecurityOverviewPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Network"
-        title="Security"
-      />
+      <PageHeader eyebrow="Network" title="Security" />
 
       {/* items-start so the shorter of the two keeps its own height. Stretched
           to a common height, whichever panel had less to say ended in a block
@@ -108,10 +104,7 @@ export default function SecurityOverviewPage() {
       </div>
 
       <Panel>
-        <PanelHeader
-          icon={GridSquare}
-          title="Areas"
-        />
+        <PanelHeader title="Areas" />
         <PanelBody flush>
           <div className="divide-y divide-hairline">
             {AREAS.map(({ areas, href, title, icon: Icon, blurb }) => {

@@ -186,7 +186,6 @@ export function DeploymentAutomation({
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <Panel className="xl:col-span-2">
         <PanelHeader
-          icon={GitBranch}
           title="Source automations"
           actions={
             can("system.admin") && (
@@ -331,7 +330,6 @@ export function DeploymentAutomation({
       </Panel>
       <Panel>
         <PanelHeader
-          icon={Clock}
           title="Scheduled actions"
           actions={
             can("system.admin") && (
@@ -461,10 +459,7 @@ export function DeploymentAutomation({
         </PanelBody>
       </Panel>
       <Panel>
-        <PanelHeader
-          icon={GitPullRequest}
-          title="Preview environments"
-        />
+        <PanelHeader title="Preview environments" />
         <PanelBody>
           {previews.error ? (
             <ErrorState error={previews.error} />
@@ -497,7 +492,6 @@ export function DeploymentAutomation({
       </Panel>
       <Panel className="xl:col-span-2">
         <PanelHeader
-          icon={Bell}
           title="Notifications"
           actions={
             can("system.admin") && (
@@ -583,7 +577,7 @@ export function DeploymentAutomation({
 function LegacyAutomation({ hook, enabled }: { hook?: string; enabled: boolean }) {
   return (
     <Panel>
-      <PanelHeader icon={GitBranch} title="Legacy deployment hook" />
+      <PanelHeader title="Legacy deployment hook" />
       <PanelBody className="space-y-3">
         <Status state={enabled ? "enabled" : "inactive"} label={enabled ? "Enabled" : "Disabled"} />
         {hook ? (

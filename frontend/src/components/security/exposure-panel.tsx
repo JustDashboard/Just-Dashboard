@@ -1,6 +1,5 @@
 "use client"
 
-import { Globe, ShieldCheck, ShieldOff } from "@/components/icons"
 import { get } from "@/lib/api"
 import type { Exposure } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -35,7 +34,7 @@ export function ExposurePanel({ className }: { className?: string }) {
   if (!data) {
     return (
       <Panel className={className}>
-        <PanelHeader icon={Globe} title="Reachable from" />
+        <PanelHeader title="Reachable from" />
         <PanelBody className="space-y-2">
           <Skeleton className="h-4 w-56" />
           <Skeleton className="h-4 w-40" />
@@ -46,12 +45,10 @@ export function ExposurePanel({ className }: { className?: string }) {
   }
 
   const grade = GRADE[data.grade]
-  const ok = grade.verdict === "ok"
 
   return (
     <Panel className={className}>
       <PanelHeader
-        icon={ok ? ShieldCheck : ShieldOff}
         title="Reachable from"
         actions={<Status verdict={grade.verdict} label={grade.label} />}
       />

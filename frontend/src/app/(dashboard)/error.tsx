@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { RotateClockwise, Warning } from "@/components/icons"
+import { RotateClockwise } from "@/components/icons"
 import { Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
@@ -43,7 +43,6 @@ export default function DashboardError({
       <PageHeader eyebrow="Error" title="This page stopped rendering" />
       <Panel>
         <PanelHeader
-          icon={Warning}
           title="Something in this page threw"
           actions={
             <Button size="sm" onClick={reset}>

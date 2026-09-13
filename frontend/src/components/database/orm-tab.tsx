@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Copy, Database, Download, Sparkles } from "@/components/icons"
+import { Copy, Database, Download } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import type { DbConnection, OrmTarget, OrmTargetInfo } from "@/lib/types"
@@ -72,11 +72,9 @@ export function OrmTab({ conn, schema }: { conn: DbConnection; schema: string })
     URL.revokeObjectURL(url)
   }
 
-
   return (
     <Panel>
       <PanelHeader
-        icon={Sparkles}
         title="Generate from this schema"
         actions={
           <div className="flex flex-wrap items-center gap-1.5">

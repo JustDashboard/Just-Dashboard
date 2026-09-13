@@ -83,7 +83,7 @@ export function ErDiagram({
   if (graph.data.tables.length === 0) {
     return (
       <Panel className="min-h-0 flex-1">
-        <PanelHeader icon={NetworkDevice} title="Schema" />
+        <PanelHeader title="Schema" />
         <EmptyState icon={NetworkDevice} title="No tables in this schema" />
       </Panel>
     )
@@ -196,7 +196,6 @@ function Canvas({
   return (
     <Panel className="min-h-0 flex-1">
       <PanelHeader
-        icon={NetworkDevice}
         title="Schema"
         actions={
           <>

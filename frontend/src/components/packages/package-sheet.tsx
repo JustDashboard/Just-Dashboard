@@ -159,7 +159,6 @@ export function PackageSheet({
         open={Boolean(name)}
         onOpenChange={onOpenChange}
         width="md"
-        icon={Puzzle}
         title={
           <>
             <span className="truncate font-mono">{name}</span>

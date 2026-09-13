@@ -9,7 +9,6 @@ import {
   Box,
   CloudUpload,
   Database,
-  GitBranch,
   Globe,
   Key,
   Logs,
@@ -17,7 +16,6 @@ import {
   Play,
   RefreshClockwise,
   RotateCounterClockwise,
-  SettingsSliders,
   Trash,
 } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
@@ -437,7 +435,6 @@ function Overview({
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <Panel className="xl:col-span-2">
         <PanelHeader
-          icon={CloudUpload}
           title="Release path"
           actions={
             lastRun && (
@@ -465,7 +462,6 @@ function Overview({
 
       <DeploymentRuntime runtime={runtime} />
       <SummaryPanel
-        icon={GitBranch}
         title="Source & automation"
         rows={[
           ["Source", deployment.sourceRef || project.repoPath || "Not recorded"],
@@ -479,7 +475,6 @@ function Overview({
       <DeploymentStorage operations={operations} />
       <DeploymentDependencies operations={operations} />
       <SummaryPanel
-        icon={Monitoring}
         title="Metrics since release"
         rows={[
           [
@@ -494,7 +489,6 @@ function Overview({
         actionLabel="Open release metrics"
       />
       <SummaryPanel
-        icon={Logs}
         title="Runtime logs"
         rows={[
           [
@@ -527,7 +521,7 @@ function DeploymentMetricsTab({
   if (!lastRun) {
     return (
       <Panel>
-        <PanelHeader icon={Monitoring} title="Metrics around activation" />
+        <PanelHeader title="Metrics around activation" />
         <PanelBody>
           <EmptyState
             icon={Monitoring}
@@ -560,13 +554,11 @@ function LastReleasePath({ projectID, runID }: { projectID: number; runID: numbe
 }
 
 function SummaryPanel({
-  icon,
   title,
   rows,
   href,
   actionLabel = "Open section",
 }: {
-  icon: React.ComponentType<{ className?: string }>
   title: string
   rows: [string, string][]
   href: string
@@ -575,7 +567,6 @@ function SummaryPanel({
   return (
     <Panel>
       <PanelHeader
-        icon={icon}
         title={title}
         actions={
           <Button variant="ghost" size="xs" asChild>
@@ -622,10 +613,7 @@ function DeploymentsTab({
   return (
     <div className="space-y-4">
       <Panel>
-        <PanelHeader
-          icon={CloudUpload}
-          title="Deployment history"
-        />
+        <PanelHeader title="Deployment history" />
         <PanelBody flush>
           {runs.length === 0 ? (
             <EmptyState
@@ -697,10 +685,7 @@ function ReleaseRecoveryPanel({
   return (
     <>
       <Panel>
-        <PanelHeader
-          icon={RotateCounterClockwise}
-          title="Immutable releases"
-        />
+        <PanelHeader title="Immutable releases" />
         <PanelBody className="space-y-2">
           {loading && releases.length === 0 && (
             <p className="text-xs text-muted-foreground">Loading retained releases…</p>
@@ -777,10 +762,7 @@ function RollbackPanel({ project, active }: { project: DeployProject; active: bo
   return (
     <>
       <Panel>
-        <PanelHeader
-          icon={RotateCounterClockwise}
-          title="Recovery"
-        />
+        <PanelHeader title="Recovery" />
         <PanelBody className="space-y-2">
           {commits.loading && !commits.data && (
             <p className="text-xs text-muted-foreground">Loading recoverable revisions…</p>
@@ -858,7 +840,6 @@ function LegacyConfigurationTab({
   return (
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <SummaryPanel
-        icon={SettingsSliders}
         title="Normalized plan"
         rows={[
           ["Profile", humanize(deployment.profile)],
@@ -871,7 +852,6 @@ function LegacyConfigurationTab({
         actionLabel="View deployments"
       />
       <SummaryPanel
-        icon={GitBranch}
         title="Legacy Compose compatibility"
         rows={[
           ["Checkout", project.repoPath || "Not used"],
@@ -895,10 +875,7 @@ function LegacyVariablesTab({ projectID }: { projectID: number }) {
   )
   return (
     <Panel>
-      <PanelHeader
-        icon={Key}
-        title="Variables"
-      />
+      <PanelHeader title="Variables" />
       <PanelBody flush>
         {variables.loading && !variables.data ? (
           <div className="p-4">
@@ -997,7 +974,7 @@ function OwnedFeatureTab({
   const Icon = content.icon
   return (
     <Panel>
-      <PanelHeader icon={Icon} title={content.title} />
+      <PanelHeader title={content.title} />
       <PanelBody>
         <Notice title="Integration not available" icon={Icon}>
           {content.description}
@@ -1011,4 +988,3 @@ function OwnedFeatureTab({
     </Panel>
   )
 }
-

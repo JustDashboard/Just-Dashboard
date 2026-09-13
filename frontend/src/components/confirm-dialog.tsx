@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -99,8 +98,6 @@ function ConfirmBody({
     <Modal
       open
       onOpenChange={(open) => !busy && onOpenChange(open)}
-      icon={request.phrase ? Warning : undefined}
-      tone={request.phrase ? "danger" : "default"}
       title={request.title}
       footer={
         <>
@@ -114,8 +111,8 @@ function ConfirmBody({
             once most deletions stopped asking for a phrase, keying the red
             button to the phrase meant "Delete row" and "Stop container" came
             up wearing the same blue as a Save. The typed ones stay louder by
-            the warning icon and the input above, which is the difference that
-            should carry.
+            the phrase the reader has to type above, which is the difference
+            that should carry.
           */}
           <Button variant="destructive" onClick={run} disabled={!matches || busy} pending={busy}>
             {request.confirmLabel ?? request.title}

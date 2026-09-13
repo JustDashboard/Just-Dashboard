@@ -33,7 +33,6 @@ import { SeriesLegend } from "@/components/metrics/series-legend"
  */
 export const ChartPanel = memo(function ChartPanel({
   title,
-  icon,
   actions,
   rows,
   series,
@@ -53,7 +52,6 @@ export const ChartPanel = memo(function ChartPanel({
   footer,
 }: {
   title: string
-  icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
   rows: ChartRowLike[]
   series: Series[]
@@ -90,8 +88,13 @@ export const ChartPanel = memo(function ChartPanel({
 
   return (
     <Panel className={className}>
-      <PanelHeader icon={icon} title={title} actions={actions} />
-      <PanelBody className="flex flex-1 flex-col gap-3">
+      <PanelHeader title={title} actions={actions} />
+      {/* Tighter than a panel's default padding, and deliberately so: a chart
+          brings its own margins — recharts reserves a gutter for the axis and
+          a strip under it for the ticks — so the body's `p-4` was drawing a
+          second inset around one that already existed. Ten of these on a page
+          is most of a screen of nothing. */}
+      <PanelBody className="flex flex-1 flex-col gap-2.5 p-3">
         {empty ? (
           <ChartPlaceholder note={note ?? "Nothing recorded in this window."} height={height} />
         ) : (
@@ -111,7 +114,18 @@ export const ChartPanel = memo(function ChartPanel({
               stacked={stacked}
               thresholds={thresholds}
             />
-            {legend && <SeriesLegend rows={rows} series={present} unit={unit} format={format} />}
+            {legend && (
+              <SeriesLegend
+                rows={rows}
+                series={present}
+                unit={unit}
+                format={format}
+                // A hairline, not a gap: the numbers belong to the plot above
+                // them, and a rule says "same object, second part" where more
+                // empty space would only say "two things".
+                className="border-t border-hairline pt-2"
+              />
+            )}
           </>
         )}
         {footer}

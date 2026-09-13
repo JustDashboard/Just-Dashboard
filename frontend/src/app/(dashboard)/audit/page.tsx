@@ -54,20 +54,14 @@ export default function AuditPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Operations"
-        title="Audit log"
-      />
+      <PageHeader eyebrow="Operations" title="Audit log" />
 
       {error && <ErrorState error={error} />}
       {loading && !data && <LoadingPanel rows={8} />}
 
       {data && (
         <Panel>
-          <PanelHeader
-            icon={FileText}
-            title="Recorded requests"
-          />
+          <PanelHeader title="Recorded requests" />
           <PanelToolbar>
             <SearchInput
               containerClassName="w-40"

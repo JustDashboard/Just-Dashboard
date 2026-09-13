@@ -78,7 +78,6 @@ export default function BackupsPage() {
         {data?.map((job) => (
           <Panel key={job.id}>
             <PanelHeader
-              icon={Archive}
               title={job.name}
               actions={
                 <>
@@ -210,7 +209,6 @@ function HistorySheet({
       <SidePanel
         open={job !== null}
         onOpenChange={onOpenChange}
-        icon={Archive}
         title={job?.name ?? "Backup"}
         description={
           data?.running ? "A run is in progress right now." : "Run history, newest first"

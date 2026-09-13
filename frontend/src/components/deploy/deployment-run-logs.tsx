@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { Logs } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -24,10 +23,7 @@ export function DeploymentRunLogs({ projectID, runID }: { projectID: number; run
   )
   return (
     <Panel>
-      <PanelHeader
-        icon={Logs}
-        title="Application runtime logs"
-      />
+      <PanelHeader title="Application runtime logs" />
       <PanelBody className="space-y-3">
         {result.error ? (
           <ErrorState error={result.error} />

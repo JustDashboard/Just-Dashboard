@@ -317,9 +317,15 @@ DNS-01 on the Certificates page before deploying. An `sslip.io` name pointing at
 cannot pass the public HTTP challenge.
 
 To remove a project from the active deployment list, open it and choose **Delete project** in the
-header. Confirmation archives its history and disables automatic deployments. Running containers,
+header. Confirmation archives its history, disables automatic deployments, and frees its name for a
+new project—even from the same repository. Existing deleted projects get this name-reuse fix on upgrade.
+Run numbers such as “Run #13” are server-wide identifiers, not retry counts. Running containers,
 routes and data are retained; use **Configuration → Archive & managed resources** to preview and
 remove managed resources separately.
+
+Container deployments supply `PORT` from the selected application port unless you explicitly configure
+it as a runtime variable. Readiness checks follow the actual allocated host port and report the failed
+check, address, and reason. Compose and host-network workloads retain their own port configuration.
 
 ## Version, and updating
 
@@ -727,3 +733,18 @@ Container creation and Compose startup also retry published-port conflicts while
 and internal ports. Actual connection ports appear in runtime details. Compose conflict recovery requires
 Compose 2.24.4 or newer. This does not change ACME's public validation ports or ports configured inside
 host-network applications.
+
+Setup installs missing host `curl`, `openssl`, and `certbot` through the available native package manager,
+checks Certbot's standalone/webroot authenticators, and enables the distribution's Certbot renewal timer
+where supplied. Rerunning `sudo ./install.sh` also provisions missing tools on existing installations.
+Package failures stop setup with their actual error; setup does not start a competing web server or stop
+an existing port owner. DNS-provider plugins and API credentials remain provider-specific configuration.
+
+
+For public deployments, the dashboard reuses a supported Docker Caddy already serving ports 80 and 443,
+including its automatic HTTPS and renewal. It adds separate deployment routes while preserving existing
+sites. On a fresh host with both ports free, the first deployment starts a persistent public Caddy
+automatically. Applications keep private ports, and managed routes reconnect after proxy recreation.
+Existing host nginx uses shared HTTP challenge routing. Other web-server layouts are reported with the
+specific blocker; they are never stopped to free a port. See the
+[deployment ingress reference](docs/internal/deployments/caddy-ingress.md) for supported layouts.

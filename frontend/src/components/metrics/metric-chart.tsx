@@ -21,7 +21,7 @@ import {
   YAxis,
 } from "recharts"
 import { cn } from "@/lib/utils"
-import { timestamp } from "@/lib/format"
+import { percent, timestamp } from "@/lib/format"
 import {
   clearCrosshair,
   getCrosshair,
@@ -58,6 +58,33 @@ export type Series = {
 export type ChartRowLike = { ts: number } & Record<string, unknown>
 
 /**
+ * How one series' numbers are printed, wherever they are printed.
+ *
+ * The y-axis gutter, the tooltip and the legend each need this, and each had
+ * written its own `unit === "%" ? `${v}${unit}` : format(v)`. That fallback
+ * concatenates the raw double: every percentage chart on /metrics that did not
+ * pass an explicit `format` reported its minimum as "9.061558297024309%" and
+ * its maximum as "91.25299841560013%", in a column headed by a mean that *was*
+ * rounded — so the one number the reader could compare was the one that
+ * disagreed with its neighbours.
+ *
+ * A percentage gets one decimal. Not zero: pressure and steal live between 0
+ * and 5, where rounding to whole numbers reports every interesting value as
+ * "0%". Not variable-by-magnitude either — a column whose precision changes
+ * per row cannot be read down.
+ */
+export function seriesFormat(
+  own: ((value: number) => string) | undefined,
+  format: ((value: number) => string) | undefined,
+  unit: string | undefined,
+): (value: number) => string {
+  if (own) return own
+  if (format) return format
+  if (unit === "%") return (v) => percent(v, 1)
+  return (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2))
+}
+
+/**
  * The chart every metric on this dashboard is drawn with.
  *
  * It exists because the alternative — each panel assembling its own recharts
@@ -86,7 +113,7 @@ export function MetricChart({
   height = 190,
   domain,
   unit,
-  format = (v) => String(v),
+  format,
   axisFormat,
   events,
   onZoom,
@@ -131,6 +158,9 @@ export function MetricChart({
   // reconciled per pointer move. The line is now drawn by SyncedCrosshair, a
   // sibling overlay that is the only thing which re-renders.
   const chartId = useId()
+  // React's ids carry colons, which are legal in an id attribute but a
+  // nuisance the moment anything tries to read one back as a selector.
+  const fillId = chartId.replace(/[^a-zA-Z0-9_-]/g, "")
   const wrapper = useRef<HTMLDivElement>(null)
   const plot = usePlotArea(wrapper, rows.length)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
@@ -195,9 +225,22 @@ export function MetricChart({
   const ticks = useMemo(() => tickFormatterFor(rows), [rows])
 
   return (
-    <div ref={wrapper} className="relative w-full" style={{ height }}>
+    // A floor, not a fixed height. Panels laid out side by side stretch to the
+    // tallest in the row, and with `height` fixed the surplus fell between the
+    // plot and its legend as a band of nothing — widest exactly where one panel
+    // carries a footer strip and its neighbour does not. The surplus goes to
+    // the plot instead, so the space a row is already occupying is spent on the
+    // data rather than on a gap.
+    <div ref={wrapper} className="relative w-full flex-1" style={{ minHeight: height }}>
       <SyncedCrosshair chartId={chartId} bounds={bounds} plot={plot} />
-      <ChartContainer config={config} className={cn("aspect-auto h-full w-full", className)}>
+      {/* Positioned rather than `h-full`, and that is what makes the floor
+          above work. A percentage height resolves against a *definite* parent;
+          a flex item sized by `min-height` alone is not definite, so `h-full`
+          collapsed to zero and recharts drew nothing — visible on exactly the
+          panels that stand alone in their row rather than stretching to a
+          neighbour. Absolute positioning takes its height from the box it is
+          in, whatever produced that box. */}
+      <ChartContainer config={config} className={cn("absolute inset-0 aspect-auto", className)}>
         <ComposedChart
           data={rows}
           margin={{ left: 4, right: 8, top: 6, bottom: 0 }}
@@ -224,8 +267,13 @@ export function MetricChart({
             tickLine={false}
             axisLine={false}
             fontSize={10}
+            // The gutter is the one place a whole number is right: recharts
+            // picks the ticks, and "25.0%" beside "50.0%" spends four
+            // characters saying nothing the scale did not already say.
             tickFormatter={(v: number) =>
-              unit === "%" ? `${v}${unit}` : (axisFormat ?? format)(v)
+              unit === "%"
+                ? `${Math.round(v)}${unit}`
+                : (axisFormat ?? seriesFormat(undefined, format, unit))(v)
             }
           />
 
@@ -270,6 +318,23 @@ export function MetricChart({
             />
           ))}
 
+          {/* A fill that fades to nothing at the baseline rather than a flat
+              wash of the line's colour.
+              At a constant 14% an area chart is a slab: the ink is heaviest
+              along the axis, furthest from the line the reader is actually
+              following, and two overlapping areas mix into a third colour that
+              belongs to neither series. A vertical ramp puts the density under
+              the line and lets the one behind it show through. Stacked series
+              keep a solid fill — there the block *is* the quantity. */}
+          <defs>
+            {series.map((s) => (
+              <linearGradient key={s.key} id={`${fillId}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={s.color} stopOpacity={0.32} />
+                <stop offset="92%" stopColor={s.color} stopOpacity={0.02} />
+              </linearGradient>
+            ))}
+          </defs>
+
           {/* Peaks first, so the mean is drawn on top of the envelope it lives
               inside rather than under it. */}
           {showPeaks &&
@@ -282,8 +347,11 @@ export function MetricChart({
                   stroke={s.color}
                   strokeWidth={1}
                   strokeOpacity={0.4}
-                  fill={s.color}
-                  fillOpacity={0.06}
+                  fill={`url(#${fillId}-${s.key})`}
+                  // The envelope is context for the mean, not a second series.
+                  // It shares the gradient so the two read as one shape, at a
+                  // fraction of the density so the line stays the subject.
+                  fillOpacity={0.4}
                   dot={false}
                   isAnimationActive={false}
                   connectNulls={false}
@@ -300,8 +368,8 @@ export function MetricChart({
                 stackId={s.stack}
                 stroke={s.color}
                 strokeWidth={stacked ? 0 : 1.5}
-                fill={s.color}
-                fillOpacity={stacked ? 0.75 : 0.14}
+                fill={stacked ? s.color : `url(#${fillId}-${s.key})`}
+                fillOpacity={stacked ? 0.78 : 1}
                 dot={false}
                 isAnimationActive={false}
                 connectNulls={false}
@@ -467,7 +535,7 @@ function MetricTooltip({
   payload?: { dataKey?: string | number; value?: number | string }[]
   label?: number | string
   series: Series[]
-  format: (value: number) => string
+  format?: (value: number) => string
   unit?: string
   events: Mark[]
 }) {
@@ -490,7 +558,7 @@ function MetricTooltip({
           const value = at.get(s.key)
           if (value === undefined) return null
           const peak = s.peakKey ? at.get(s.peakKey) : undefined
-          const render = s.format ?? ((v: number) => (unit === "%" ? `${v}${unit}` : format(v)))
+          const render = seriesFormat(s.format, format, unit)
           return (
             <div key={s.key} className="flex items-center gap-2 text-hint">
               <span

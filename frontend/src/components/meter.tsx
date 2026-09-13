@@ -56,7 +56,7 @@ export function Meter({
       aria-valuemax={100}
       aria-label={label}
       className={cn(
-        "w-full overflow-hidden rounded-full bg-muted",
+        "w-full overflow-hidden rounded-full bg-meter-track",
         size === "thin" ? "h-1" : "h-1.5",
         className,
       )}

@@ -48,7 +48,6 @@ export function AuthFilesPanel() {
     <>
       <Panel>
         <PanelHeader
-          icon={Key}
           title="Password files"
           actions={<AuthUserDialog files={data ?? []} onDone={refresh} />}
         />

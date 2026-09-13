@@ -1,7 +1,6 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import type { Tone } from "@/components/tone"
 import {
   Dialog,
   DialogContent,
@@ -21,12 +20,17 @@ const WIDTHS = {
  * The centred task surface: create a container, rename a file, import a
  * certificate, edit a row.
  *
- * Deliberately the same anatomy as `SidePanel` — an icon plot and a title on a
- * tinted strip with a hairline under it, a body that is the only part that
- * scrolls, and a footer strip holding the buttons. The two are
- * the same idea pointed in two directions, and until this existed they looked
- * nothing alike: a sheet had a header strip and a dialog had `p-6` and a gap,
- * so the same task rendered two ways depending on how much room it needed.
+ * Deliberately the same anatomy as `SidePanel` — a title on a tinted strip with
+ * a hairline under it, a body that is the only part that scrolls, and a footer
+ * strip holding the buttons. The two are the same idea pointed in two
+ * directions, and until this existed they looked nothing alike: a sheet had a
+ * header strip and a dialog had `p-6` and a gap, so the same task rendered two
+ * ways depending on how much room it needed.
+ *
+ * No icon plot in front of the title, for the reason written at `PanelHeader`:
+ * a dialog that says "Remove volume" does not need a picture of a disk to say
+ * it, and the red one the typed-confirmation dialog used to wear was never the
+ * thing that stopped anybody — the phrase they have to type is.
  *
  * The footer being a strip rather than a row of buttons floating in the body is
  * what makes a long form usable: the raw `DialogContent` scrolls as one box, so
@@ -38,8 +42,6 @@ export function Modal({
   onOpenChange,
   title,
   description,
-  icon: Icon,
-  tone = "default",
   size = "md",
   footer,
   bodyClassName,
@@ -51,13 +53,6 @@ export function Modal({
   title: React.ReactNode
   /** Read to a screen reader, never drawn. See the note at the call site. */
   description?: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
-  /**
-   * `danger` tints the icon plot red — the one signal the typed-confirmation
-   * dialog has that an ordinary confirmation does not. Only `default` and
-   * `danger` mean anything to a dialog.
-   */
-  tone?: Extract<Tone, "default" | "danger">
   size?: keyof typeof WIDTHS
   footer?: React.ReactNode
   bodyClassName?: string
@@ -74,19 +69,7 @@ export function Modal({
         )}
       >
         <DialogHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12 text-left">
-          <div className="flex min-w-0 items-start gap-2.5">
-            {Icon && (
-              <span
-                className={cn(
-                  "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md",
-                  tone === "danger"
-                    ? "bg-plot-danger text-destructive"
-                    : "bg-plot-brand text-brand",
-                )}
-              >
-                <Icon className="size-3.5" />
-              </span>
-            )}
+          <div className="flex min-w-0 items-start">
             <div className="min-w-0 flex-1">
               <DialogTitle className="flex min-w-0 flex-wrap items-center gap-2 text-title leading-tight font-semibold">
                 {title}

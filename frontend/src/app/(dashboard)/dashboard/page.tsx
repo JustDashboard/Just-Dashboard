@@ -56,10 +56,7 @@ export default function DashboardVersionPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Operations"
-        title="Dashboard"
-      />
+      <PageHeader eyebrow="Operations" title="Dashboard" />
 
       <StatGrid columns={4}>
         <StatTile
@@ -113,14 +110,9 @@ export default function DashboardVersionPage() {
       {report && <DashboardUpdatePanel />}
 
       {report && (
-        <Section
-          title="Version history"
-        >
+        <Section title="Version history">
           <Panel>
-            <PanelHeader
-              icon={ClockRewind}
-              title="Release notes"
-            />
+            <PanelHeader title="Release notes" />
             <PanelToolbar>
               <SearchInput
                 value={filter}

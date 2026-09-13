@@ -7,7 +7,6 @@ import { notify } from "@/lib/toast"
 import { relativeTime } from "@/lib/format"
 import type { GitBranch, GitHubRepo, GitHubStatus, GitPullRequest as PR } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { GitHubMark } from "@/components/git/github-account"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
@@ -263,7 +262,6 @@ function CreatePullDialog({
     <Modal
       open={open}
       onOpenChange={change}
-      icon={GitHubMark}
       title="New pull request"
       description={
         <>

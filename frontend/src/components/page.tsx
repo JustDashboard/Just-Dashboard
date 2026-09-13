@@ -91,14 +91,11 @@ export function PageHeader({
  */
 export function Section({
   title,
-  icon: Icon,
   actions,
   className,
   children,
 }: {
   title: React.ReactNode
-  /** Drawn beside the title, the way `PanelHeader` and `Modal` draw theirs. */
-  icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
   className?: string
   children: React.ReactNode
@@ -107,8 +104,7 @@ export function Section({
     <section className={cn("flex min-w-0 flex-col gap-3", className)}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="min-w-0">
-          <h2 className="flex min-w-0 items-center gap-1.5 text-body font-medium">
-            {Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" />}
+          <h2 className="flex min-w-0 items-center gap-1.5 text-title font-semibold">
             <span className="truncate">{title}</span>
           </h2>
         </div>

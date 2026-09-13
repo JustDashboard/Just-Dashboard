@@ -9,7 +9,6 @@ import {
   Gauge,
   Layout,
   LockClosed,
-  Servers,
   Slash,
   Stopwatch,
 } from "@/components/icons"
@@ -113,7 +112,6 @@ function ActivityPanel({
   return (
     <Panel>
       <PanelHeader
-        icon={ChartActivity}
         title="Running now"
         actions={
           <>
@@ -475,7 +473,6 @@ function StoragePanel({
   return (
     <Panel>
       <PanelHeader
-        icon={Servers}
         title="Storage"
         actions={
           <span

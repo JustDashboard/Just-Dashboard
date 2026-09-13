@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Clock, CloudUpload, Filter, Plus, StopCircle } from "@/components/icons"
+import { ArrowRight, CloudUpload, Filter, Plus, StopCircle } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -121,10 +121,7 @@ export default function DeployPage() {
 
       {fleet.data && (
         <Panel>
-          <PanelHeader
-            icon={CloudUpload}
-            title="Deployment fleet"
-          />
+          <PanelHeader title="Deployment fleet" />
           <PanelToolbar>
             <SearchInput
               value={query}
@@ -263,7 +260,6 @@ function ActiveWorkStrip({
   return (
     <Panel aria-labelledby="active-work-title">
       <PanelHeader
-        icon={Clock}
         title={<span id="active-work-title">Active work</span>}
         actions={
           <span className="numeric text-hint text-muted-foreground">

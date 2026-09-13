@@ -5,7 +5,6 @@ import {
   AcronymJson,
   CloudUpload,
   CodeBracket,
-  Database,
   Download,
   Layout,
   Play,
@@ -214,10 +213,7 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
   return (
     <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] [&>*]:min-w-0">
       <Panel>
-        <PanelHeader
-          icon={Database}
-          title="Collections"
-        />
+        <PanelHeader title="Collections" />
         <PanelBody className="space-y-3">
           {databases.data && databases.data.length > 1 && (
             <Select
@@ -283,7 +279,6 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
           <TabsContent value="documents" className="min-w-0">
             <Panel>
               <PanelHeader
-                icon={Layout}
                 title={collection ?? "Pick a collection"}
                 actions={
                   collection && (
@@ -381,7 +376,7 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
 
           <TabsContent value="indexes" className="min-w-0">
             <Panel>
-              <PanelHeader icon={CodeBracket} title="Indexes" />
+              <PanelHeader title="Indexes" />
               <PanelBody flush>
                 {!collection && <EmptyState icon={CodeBracket} title="Select a collection" />}
                 {info.data && (
@@ -610,7 +605,7 @@ function AggregateTab({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Panel>
-        <PanelHeader icon={AcronymJson} title="Aggregation pipeline" />
+        <PanelHeader title="Aggregation pipeline" />
         <PanelBody flush>
           <CodeEditor className="h-56" language="json" value={pipeline} onChange={setPipeline} />
         </PanelBody>
@@ -624,7 +619,7 @@ function AggregateTab({
       </Panel>
       {result && (
         <Panel>
-          <PanelHeader icon={Layout} title="Result" />
+          <PanelHeader title="Result" />
           <PanelBody flush>
             <ResultGrid
               result={result}

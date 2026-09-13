@@ -7,7 +7,6 @@ import {
   CornerUpLeft,
   Crop,
   FloppyDisk,
-  Image as ImageIcon,
   RotateClockwise,
   RotateCounterClockwise,
   SettingsSliders,
@@ -70,7 +69,6 @@ export function ImageEditorSheet({
       open={path !== null}
       onOpenChange={onOpenChange}
       width="xl"
-      icon={ImageIcon}
       title={path?.split("/").pop() ?? "Image"}
       description={path ?? undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col p-0"

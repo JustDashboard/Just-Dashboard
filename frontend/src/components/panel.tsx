@@ -36,10 +36,23 @@ export function Panel({ className, children, ...props }: React.ComponentProps<"s
   )
 }
 
+/**
+ * A panel's chrome strip: what this block is, and what you can do to it.
+ *
+ * **No icon.** Every header used to open with a brand-tinted plot and a glyph
+ * inside it, which on a page of six panels is six orange marks competing with
+ * the one control the reader is meant to press — and none of them said anything
+ * the title beside them did not already say. A `Servers` box in front of the
+ * word "Filesystems" is decoration with a colour budget. The title is the
+ * panel's name, drawn one step up the ladder now that it stands alone, and the
+ * header's ground and hairline do the separating the plot was crowding.
+ *
+ * Icons still carry meaning elsewhere — a `Status`'s verdict, a `Notice`'s
+ * severity, a verb on a button — because there the glyph *is* the message.
+ */
 export function PanelHeader({
   title,
   eyebrow,
-  icon: Icon,
   actions,
   advanced,
   className,
@@ -47,7 +60,6 @@ export function PanelHeader({
 }: {
   title?: React.ReactNode
   eyebrow?: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
   /**
    * Marks a panel that assumes the reader already knows the thing it operates
@@ -72,28 +84,21 @@ export function PanelHeader({
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-2.5">
-        {Icon && (
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-brand">
-            <Icon className="size-3.5" />
-          </span>
+      <div className="min-w-0">
+        {eyebrow && <p className="eyebrow mb-0.5">{eyebrow}</p>}
+        {title && (
+          <h2 className="flex min-w-0 items-center gap-1.5 text-title leading-tight font-medium">
+            <span className="truncate">{title}</span>
+            {advanced && (
+              <span
+                className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground/80 uppercase"
+                title="Assumes you already administer this directly. Nothing here needs your attention unless you came looking for it."
+              >
+                Advanced
+              </span>
+            )}
+          </h2>
         )}
-        <div className="min-w-0">
-          {eyebrow && <p className="eyebrow mb-0.5">{eyebrow}</p>}
-          {title && (
-            <h2 className="flex min-w-0 items-center gap-1.5 text-body leading-tight font-medium">
-              <span className="truncate">{title}</span>
-              {advanced && (
-                <span
-                  className="shrink-0 rounded-sm border border-hairline px-1 py-px text-micro font-medium tracking-[0.08em] text-muted-foreground uppercase"
-                  title="Assumes you already administer this directly. Nothing here needs your attention unless you came looking for it."
-                >
-                  Advanced
-                </span>
-              )}
-            </h2>
-          )}
-        </div>
       </div>
       {children}
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div>}

@@ -111,7 +111,6 @@ export function ProcessTableTab() {
     <>
       <Panel>
         <PanelHeader
-          icon={Cpu}
           title="Live processes"
           actions={
             snapshot && (
@@ -382,7 +381,6 @@ function ProcessDetailSheet({
     <SidePanel
       open={process !== null}
       onOpenChange={onOpenChange}
-      icon={Cpu}
       title={process?.name ?? "Process"}
       description={
         process ? `PID ${process.pid} · ${process.username || "unknown user"}` : undefined
@@ -535,9 +533,7 @@ function ProcessDetail({
 
       {(can("system.admin") || can("destructive")) && (
         <Panel>
-          <PanelHeader
-            title="Control"
-          />
+          <PanelHeader title="Control" />
           <PanelBody className="space-y-4">
             {can("system.admin") && (
               <div className="flex flex-wrap items-end gap-2">

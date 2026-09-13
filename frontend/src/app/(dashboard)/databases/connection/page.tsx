@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowRight, CloudDownload, Layout, Pencil, Trash, WarningFill } from "@/components/icons"
+import { ArrowRight, CloudDownload, Pencil, Trash, WarningFill } from "@/components/icons"
 import Link from "next/link"
 import { notify } from "@/lib/toast"
 import { del, downloadUrl, get, post } from "@/lib/api"
@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
 import { ConnectionDialog } from "@/components/database/connection-dialog"
 import { useDatabase } from "@/components/database/db-context"
-import { } from "@/components/tag"
 
 export default function ConnectionPage() {
   const { can } = useAuth()
@@ -142,7 +141,6 @@ export default function ConnectionPage() {
 
         <Panel>
           <PanelHeader
-            icon={Layout}
             title={
               objectWord === "collection"
                 ? "Collections"

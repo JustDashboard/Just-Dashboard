@@ -139,7 +139,6 @@ function BanHistoryPanel() {
   return (
     <Panel>
       <PanelHeader
-        icon={ClockRewind}
         title="Ban activity"
         actions={
           data && data.length > 0 ? (

@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Box,
   ChartActivity,
-  CloudUpload,
   Cpu,
   Database,
   Gauge,
@@ -248,7 +247,6 @@ function TrendsPanel({
   return (
     <Panel className={className}>
       <PanelHeader
-        icon={ChartActivity}
         title="Last hour"
         actions={
           <Link
@@ -297,7 +295,7 @@ function ActivityPanel({ events }: { events: MetricEvent[] }) {
 
   return (
     <Panel>
-      <PanelHeader icon={CloudUpload} title="Recent activity" />
+      <PanelHeader title="Recent activity" />
       <PanelBody className={newestFirst.length === 0 ? undefined : "max-h-[15rem] overflow-y-auto"}>
         {newestFirst.length === 0 ? (
           <p className="text-body text-muted-foreground">Nothing in the last hour.</p>

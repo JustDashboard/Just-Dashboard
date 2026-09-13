@@ -100,7 +100,6 @@ export function GameConsoleTab({ projectID }: { projectID: number }) {
   return (
     <Panel>
       <PanelHeader
-        icon={Terminal}
         title="Console"
         actions={
           overview.data?.containerId && (
@@ -241,10 +240,7 @@ export function GamePlayersTab({ projectID }: { projectID: number }) {
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Users}
-        title="Players"
-      />
+      <PanelHeader title="Players" />
       <PanelBody className="space-y-3">
         {players.error ? (
           <ErrorState error={players.error} />
@@ -356,7 +352,6 @@ export function GameSettingsTab({ projectID }: { projectID: number }) {
     <div className="space-y-4">
       <Panel>
         <PanelHeader
-          icon={Box}
           title="Server settings"
           actions={
             can("system.admin") && (
@@ -405,10 +400,7 @@ export function GameSettingsTab({ projectID }: { projectID: number }) {
 
       {properties.data?.raw && (
         <Panel>
-          <PanelHeader
-            icon={Box}
-            title="The file as it is on disk"
-          />
+          <PanelHeader title="The file as it is on disk" />
           <PanelBody flush>
             <pre className="max-h-[24rem] overflow-auto p-4 font-mono text-hint leading-relaxed whitespace-pre">
               {properties.data.raw}
