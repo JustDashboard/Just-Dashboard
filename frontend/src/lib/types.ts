@@ -2639,7 +2639,8 @@ export type DeploymentHostnameSuggestion = {
   covered: boolean
   certificateName?: string
   /** The HTTP-01 challenge this host could issue one with now, if any. */
-  certificateMethod?: "nginx" | "standalone"
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy"
+  certificateIssue?: string
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
   address?: string

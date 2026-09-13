@@ -100,6 +100,11 @@ func (s *Service) EnsureDeploymentCertificate(
 		}, nil
 	}
 
+	if edge, err := s.provisionIngress(ctx); err != nil {
+		return DeploymentCertificate{}, err
+	} else if edge != nil {
+		return s.ensureDockerCaddyCertificate(ctx, edge, names, log)
+	}
 	availability := s.Availability(ctx)
 	if !availability.Certbot {
 		return DeploymentCertificate{}, ErrCertbotUnavailable
@@ -243,6 +248,14 @@ func (s *Service) deploymentChallenge(ctx context.Context) (deploymentHTTPChalle
 
 // DeploymentCertificateMethod reports the same listener-aware choice issuance uses.
 func (s *Service) DeploymentCertificateMethod(ctx context.Context) (string, error) {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return "", err
+	} else if edge != nil {
+		return "caddy", nil
+	}
+	if s.canProvisionIngress(ctx) {
+		return "caddy", nil
+	}
 	challenge, err := s.deploymentChallenge(ctx)
 	return challenge.method, err
 }

@@ -27,16 +27,19 @@ type DeploymentRoute struct {
 }
 
 type DeploymentRouteSnapshot struct {
-	Version       int    `json:"version"`
-	Name          string `json:"name"`
-	Path          string `json:"path"`
-	Existed       bool   `json:"existed"`
-	Mode          uint32 `json:"mode,omitempty"`
-	Content       string `json:"content,omitempty"`
-	ContentDigest string `json:"contentDigest"`
-	LinkPath      string `json:"linkPath,omitempty"`
-	LinkExisted   bool   `json:"linkExisted"`
-	LinkTarget    string `json:"linkTarget,omitempty"`
+	IngressIdentity string `json:"ingressIdentity,omitempty"`
+	Driver          string `json:"driver,omitempty"`
+	ContainerID     string `json:"containerId,omitempty"`
+	Version         int    `json:"version"`
+	Name            string `json:"name"`
+	Path            string `json:"path"`
+	Existed         bool   `json:"existed"`
+	Mode            uint32 `json:"mode,omitempty"`
+	Content         string `json:"content,omitempty"`
+	ContentDigest   string `json:"contentDigest"`
+	LinkPath        string `json:"linkPath,omitempty"`
+	LinkExisted     bool   `json:"linkExisted"`
+	LinkTarget      string `json:"linkTarget,omitempty"`
 }
 
 type DeploymentRouteResult struct {
@@ -50,6 +53,20 @@ type DeploymentRouteResult struct {
 // a deployment-owned nginx route. If apply or reload fails, the exact prior
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return DeploymentRouteResult{}, err
+	} else if edge != nil {
+		return s.applyDockerCaddyRoute(ctx, edge, route)
+	}
+	s.mu.Lock()
+	edge, provisionErr := s.provisionIngress(ctx)
+	s.mu.Unlock()
+	if provisionErr != nil {
+		return DeploymentRouteResult{}, provisionErr
+	}
+	if edge != nil {
+		return s.applyDockerCaddyRoute(ctx, edge, route)
+	}
 	spec := deploymentSiteSpec(route)
 	content, err := RenderNginx(spec)
 	if err != nil {
@@ -90,6 +107,19 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if snapshot.Driver == "docker-caddy" {
+		edge, err := s.dockerCaddy(ctx)
+		if err != nil {
+			return err
+		}
+		if edge == nil {
+			return ErrRouteRecovery
+		}
+		if err := edge.configurationSynced(ctx); err != nil {
+			return err
+		}
+		return edge.restore(ctx, snapshot)
+	}
 	return s.restoreDeploymentRouteLocked(ctx, snapshot)
 }
 
@@ -97,6 +127,35 @@ func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot Deploymen
 // cutover. It is intentionally name-scoped so preview cleanup cannot select
 // or remove a route owned by another feature.
 func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return err
+	} else if edge != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		snapshot, err := edge.snapshot(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !snapshot.Existed {
+			return nil
+		}
+		if !strings.HasPrefix(snapshot.Content, "# Managed by Just Dashboard\n") {
+			return ErrRouteRecovery
+		}
+		if err := edge.configurationSynced(ctx); err != nil {
+			return err
+		}
+		empty := snapshot
+		empty.Existed = false
+		empty.Content = ""
+		empty.ContentDigest = routeDigest("")
+		if err := edge.restore(ctx, empty); err != nil {
+			recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			return errors.Join(err, edge.restore(recovery, snapshot))
+		}
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, err := s.snapshotDeploymentRouteLocked(name)
@@ -123,7 +182,29 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 	return nil
 }
 
-func (s *Service) VerifyDeploymentRoute(_ context.Context, route DeploymentRoute) error {
+func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return err
+	} else if edge != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		target, err := edge.target(ctx, route.Upstream)
+		if err != nil {
+			return err
+		}
+		want, err := renderDockerCaddyRoute(route, target.upstream())
+		if err != nil {
+			return err
+		}
+		snapshot, err := edge.snapshot(ctx, route.Name)
+		if err != nil {
+			return err
+		}
+		if !snapshot.Existed || snapshot.Content != want+target.metadata() {
+			return ErrRouteRecovery
+		}
+		return edge.configurationSynced(ctx)
+	}
 	content, err := RenderNginx(deploymentSiteSpec(route))
 	if err != nil {
 		return err

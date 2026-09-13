@@ -62,8 +62,9 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   standalone Certbot over occupied port 80. A temporary, validated challenge-only route and a file probe
   establish host/container filesystem visibility before ordering, with snapshot restoration on every
   exit. The fixed `/srv/just-dashboard-acme` root survives deployment route activation and site form
-  round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Non-nginx port
-  owners are reported explicitly. See the deployment implementation reference for the live nginx test.
+  round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Docker Caddy
+  ownership uses native automatic HTTPS and shared routes; unsupported owners are reported explicitly.
+  See [the ingress decision](../deployments/caddy-ingress.md) for provisioning, recovery and live tests.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_apply.go`). `SiteSpec` is our shape, not
   nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the server**
   so a spec has one meaning, and the output is hand-written rather than templated because order carries

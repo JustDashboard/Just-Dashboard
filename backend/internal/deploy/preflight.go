@@ -202,7 +202,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			proxyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			availability := o.proxy.Availability(proxyCtx)
 			proxyAvailable = availability.Nginx || availability.Caddy
-			certificateAutomation = availability.Certbot
+			certificateAutomation = availability.Certbot || availability.IngressContainer != ""
 			vhosts, err := o.proxy.ListVHosts(proxyCtx)
 			cancel()
 			if err == nil {

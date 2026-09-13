@@ -2119,3 +2119,51 @@ test("importing an existing Minecraft server previews it before anything is copi
   await expect(page.getByLabel("Maximum players")).toHaveValue("40")
   expect(journey.commits()).toBe(0)
 })
+
+test("quick deploy shows the actual HTTPS blocker instead of assuming Certbot is missing", async ({
+  page,
+}) => {
+  await mockQuickDeploy(page)
+  const reason = "Port 80 is already used by caddy; configure challenge routing in that web server."
+  await page.route("**/api/v1/deploy/hostname**", (route) =>
+    json(route, {
+      hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
+      covered: false,
+      certificateIssue: reason,
+      method: "sslip",
+      detail: reason,
+    }),
+  )
+  await page.goto("/deploy/new")
+  await page.getByText("From GitHub", { exact: true }).click()
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue" }).click()
+  await expect(page.getByText("Automatic HTTPS needs attention")).toBeVisible()
+  await expect(page.getByText(reason, { exact: false }).last()).toBeVisible()
+  await expect(page.getByText("Install certbot", { exact: false })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Certificates page" })).toBeVisible()
+})
+
+test("quick deploy keeps HTTPS automatic when Docker Caddy owns the public ports", async ({
+  page,
+}) => {
+  await mockQuickDeploy(page)
+  await page.route("**/api/v1/deploy/hostname**", (route) =>
+    json(route, {
+      hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
+      covered: false,
+      certificateMethod: "caddy",
+      method: "sslip",
+      detail: "The public Caddy ingress manages HTTPS automatically.",
+    }),
+  )
+  await page.goto("/deploy/new")
+  await page.getByText("From GitHub", { exact: true }).click()
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue" }).click()
+  await expect(
+    page.getByText("Caddy handles renewal automatically.", { exact: false }),
+  ).toBeVisible()
+  await expect(page.getByText("Automatic HTTPS needs attention")).toHaveCount(0)
+  await expect(page.getByText("Install certbot", { exact: false })).toHaveCount(0)
+})

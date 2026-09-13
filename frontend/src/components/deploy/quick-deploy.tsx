@@ -11,7 +11,6 @@ import {
   CloudUpload,
   Database,
   GitBranch,
-  Globe,
   LockClosed,
   RefreshClockwise,
   SettingsSliders,
@@ -144,10 +143,7 @@ export function QuickDeploy() {
   return (
     <QuickPage>
       <Panel>
-        <PanelHeader
-          icon={CloudUpload}
-          title="What are you putting online?"
-        />
+        <PanelHeader title="What are you putting online?" />
         <PanelBody className="grid gap-3 sm:grid-cols-3">
           {LANES.map((option) => (
             <ChoiceCard
@@ -287,7 +283,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
                 // but only pre-selected when it can actually be delivered:
                 // activation refuses a TLS route with no certificate, and a
                 // toggle that guarantees a failed release is not a default.
-                https: hostname.covered || Boolean(hostname.certificateMethod),
+                https: true,
                 publish: hostname.method !== "none",
               }
             : current,
@@ -406,7 +402,6 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
       {preflight && (blockers.length > 0 || warnings.length > 0) && (
         <Panel>
           <PanelHeader
-            icon={Warning}
             title={blockers.length ? "This plan cannot deploy yet" : "Acknowledge before deploying"}
           />
           <PanelBody className="space-y-2">
@@ -563,7 +558,6 @@ function GitHubSource({
   return (
     <Panel>
       <PanelHeader
-        icon={GitBranch}
         title="Choose a repository"
         actions={
           signedIn && (
@@ -771,10 +765,7 @@ function ImageSource({
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Box}
-        title="Choose an image"
-      />
+      <PanelHeader title="Choose an image" />
       <PanelBody className="space-y-4">
         {images.error && <ErrorState error={images.error} />}
         <SearchInput
@@ -881,7 +872,6 @@ function ConfigureStep({
     <div className="space-y-4">
       <Panel>
         <PanelHeader
-          icon={CloudUpload}
           title={form.name || "New deployment"}
           actions={candidate?.framework && <Tag tone="success">{candidate.framework}</Tag>}
         />
@@ -972,10 +962,7 @@ function ConfigureStep({
       </Panel>
 
       <Panel>
-        <PanelHeader
-          icon={LockClosed}
-          title="Environment variables"
-        />
+        <PanelHeader title="Environment variables" />
         <PanelBody>
           <Textarea
             id="dotenv"
@@ -1046,10 +1033,7 @@ function PublicAddress({
 
   return (
     <Panel>
-      <PanelHeader
-        icon={Globe}
-        title="Public address"
-      />
+      <PanelHeader title="Public address" />
       <PanelBody className="space-y-4">
         <Label className="flex min-h-11 items-center gap-3 text-xs">
           <Switch
@@ -1110,22 +1094,27 @@ function PublicAddress({
             title={
               current.certificateMethod
                 ? "A certificate will be issued during the deploy"
-                : "This host cannot issue a certificate"
+                : "Automatic HTTPS needs attention"
             }
           >
             {current.certificateMethod ? (
               <>
                 The run orders one for <code className="font-mono">{form.hostname}</code> over the{" "}
-                {current.certificateMethod} challenge before it starts anything, and certbot renews
-                it from then on. Nothing to do here.
+                {current.certificateMethod === "caddy"
+                  ? "managed Caddy ingress"
+                  : `${current.certificateMethod} challenge`}{" "}
+                before it starts anything.{" "}
+                {current.certificateMethod === "caddy" ? "Caddy" : "Certbot"} handles renewal
+                automatically.
               </>
             ) : (
               <>
-                Install certbot, or issue one elsewhere and import it on the{" "}
+                {current.certificateIssue ?? "Certificate readiness could not be confirmed."} Review
+                certificate options on the{" "}
                 <Link href="/proxy/certificates" className="underline underline-offset-2">
                   Certificates page
                 </Link>
-                . Turning HTTPS off publishes over plain HTTP in the meantime.
+                .
               </>
             )}
           </Notice>
@@ -1140,7 +1129,6 @@ function PublicAddress({
     </Panel>
   )
 }
-
 
 export function QuickField({
   id,

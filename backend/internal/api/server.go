@@ -21,14 +21,16 @@ import (
 // (no Docker socket, no systemd) degrades to a clear error on its own routes
 // instead of preventing the dashboard from starting.
 type Server struct {
-	Cfg    *config.Config
-	Log    *slog.Logger
-	Store  *store.Store
-	Auth   *auth.Service
-	Sealer *auth.Sealer
-	Audit  *audit.Logger
-	Authn  *httpx.Authenticator
-	WS     *wsx.Upgrader
+	Cfg         *config.Config
+	Log         *slog.Logger
+	Store       *store.Store
+	Auth        *auth.Service
+	Sealer      *auth.Sealer
+	Audit       *audit.Logger
+	ingressStop context.CancelFunc
+	ingressDone chan struct{}
+	Authn       *httpx.Authenticator
+	WS          *wsx.Upgrader
 	// Agent is non-nil only in agent mode, where it is both the TLS identity
 	// and the record of which hub this server answers to.
 	Agent    *agent.Identity
@@ -109,6 +111,14 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupSched.Start(ctx); err != nil {
 		return err
 	}
+	ingressCtx, stopIngress := context.WithCancel(ctx)
+	s.ingressStop, s.ingressDone = stopIngress, make(chan struct{})
+	go func() {
+		defer close(s.ingressDone)
+		s.modules.proxy.MaintainDockerIngress(ingressCtx, func(name string, success bool) {
+			s.Audit.Record(context.Background(), audit.Entry{Actor: "system", Action: "proxy.ingress.reconcile", Target: name, Success: success})
+		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
+	}()
 	s.modules.deploySchedule.Start(ctx)
 	return s.modules.deployEngine.Start(ctx)
 }
@@ -124,6 +134,10 @@ func (s *Server) Shutdown() {
 		s.Log.Warn("deployment engine did not finish before shutdown", "err", err)
 	}
 	cancel()
+	if s.ingressStop != nil {
+		s.ingressStop()
+		<-s.ingressDone
+	}
 	s.modules.metrics.Stop()
 	s.modules.backupSched.Stop()
 	s.modules.deploySchedule.Stop()

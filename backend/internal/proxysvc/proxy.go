@@ -38,8 +38,9 @@ const (
 )
 
 type Service struct {
-	nginxDir  string
-	caddyFile string
+	dockerIngress bool
+	nginxDir      string
+	caddyFile     string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -52,14 +53,30 @@ func New(nginxDir, caddyFile string) *Service {
 	return &Service{nginxDir: filepath.Clean(nginxDir), caddyFile: filepath.Clean(caddyFile)}
 }
 
+// NewWithDockerIngress enables discovery of the host's existing public Caddy.
+// Isolated services and tests use New without inspecting unrelated containers.
+func NewWithDockerIngress(nginxDir, caddyFile string) *Service {
+	s := New(nginxDir, caddyFile)
+	s.dockerIngress = true
+	return s
+}
+
+func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
+	if !s.dockerIngress {
+		return nil, nil
+	}
+	return discoverDockerCaddy(ctx)
+}
+
 type Availability struct {
-	Nginx     bool   `json:"nginx"`
-	Caddy     bool   `json:"caddy"`
-	NginxVer  string `json:"nginxVersion,omitempty"`
-	CaddyVer  string `json:"caddyVersion,omitempty"`
-	NginxDir  string `json:"nginxDir"`
-	CaddyFile string `json:"caddyFile"`
-	Certbot   bool   `json:"certbot"`
+	IngressContainer string `json:"ingressContainer,omitempty"`
+	Nginx            bool   `json:"nginx"`
+	Caddy            bool   `json:"caddy"`
+	NginxVer         string `json:"nginxVersion,omitempty"`
+	CaddyVer         string `json:"caddyVersion,omitempty"`
+	NginxDir         string `json:"nginxDir"`
+	CaddyFile        string `json:"caddyFile"`
+	Certbot          bool   `json:"certbot"`
 }
 
 func (s *Service) Availability(ctx context.Context) Availability {
@@ -81,6 +98,13 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	}
 	if hostexec.Available("certbot") {
 		a.Certbot = true
+	}
+	if edge, err := s.dockerCaddy(ctx); err == nil && edge != nil {
+		a.Caddy = true
+		a.IngressContainer = edge.Name
+	} else if err == nil && s.canProvisionIngress(ctx) {
+		a.Caddy = true
+		a.IngressContainer = managedIngressName
 	}
 	return a
 }
@@ -151,6 +175,15 @@ func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
 	out = append(out, s.nginxVHosts()...)
 	if caddy, err := s.caddySites(); err == nil {
 		out = append(out, caddy...)
+	}
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return nil, err
+	} else if edge != nil {
+		sites, err := edge.vhosts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sites...)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

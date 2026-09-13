@@ -264,6 +264,13 @@ only renderer/executor/validation authority for their feature.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
   are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
 
+## Public deployment ingress
+
+Docker Caddy public listeners are reused for automatic HTTPS and deployment routes. On a fresh host
+with unclaimed TCP 80/443, the first deployment provisions a persisted public Caddy automatically.
+The [ingress decision](caddy-ingress.md) specifies ownership, additive snapshot fields, certificate
+evidence, lifecycle repair, supported layouts and verification. The dashboard remains private.
+
 ## Deployment topology
 
 ```

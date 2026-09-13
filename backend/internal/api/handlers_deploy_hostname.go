@@ -46,6 +46,7 @@ type hostnameSuggestion struct {
 	// empty when it has no way to. "webroot" keeps nginx serving while
 	// certbot writes challenge files; "standalone" needs port 80 free.
 	CertificateMethod string `json:"certificateMethod,omitempty"`
+	CertificateIssue  string `json:"certificateIssue,omitempty"`
 	Method            string `json:"method"`
 	Detail            string `json:"detail"`
 	Address           string `json:"address,omitempty"`
@@ -63,7 +64,7 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	if chosen := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("hostname"))); chosen != "" {
 		suggestion := hostnameSuggestion{Hostname: chosen, Method: "custom"}
 		suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, chosen)
-		suggestion.CertificateMethod = s.certificateMethod(ctx)
+		suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
 		suggestion.Detail = certificateDetail(suggestion)
 		httpx.JSON(w, http.StatusOK, suggestion)
 		return nil
@@ -90,8 +91,8 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	base := strings.ReplaceAll(address, ".", "-") + ".sslip.io"
 	suggestion := hostnameSuggestion{
 		Hostname: slug + "." + base, Base: base, Method: "sslip", Address: address,
-		CertificateMethod: s.certificateMethod(ctx),
 	}
+	suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
 	suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, suggestion.Hostname)
 	suggestion.Detail = "Resolves to " + address + " with no DNS record to create. " +
 		certificateDetail(suggestion)
@@ -105,6 +106,8 @@ func certificateDetail(suggestion hostnameSuggestion) string {
 		return "The " + suggestion.CertificateName + " certificate already covers it."
 	case suggestion.CertificateMethod != "":
 		return "No certificate covers it yet; one can be issued for it from here."
+	case suggestion.CertificateIssue != "":
+		return suggestion.CertificateIssue
 	default:
 		return "Automatic HTTP-01 is unavailable; check certbot and the port 80 listener, or provision a certificate before the release."
 	}
@@ -163,12 +166,15 @@ func (s *Server) liveCertificates(ctx context.Context) []proxysvc.Certificate {
 // certificateMethod names the HTTP-01 challenge this host can run today.
 //
 // Use the same plugin and listener evidence as the certificate executor.
-func (s *Server) certificateMethod(ctx context.Context) string {
+func (s *Server) certificateMethod(ctx context.Context) (string, string) {
 	if s.modules.proxy == nil {
-		return ""
+		return "", "The certificate service is unavailable. Check the dashboard service status."
 	}
-	method, _ := s.modules.proxy.DeploymentCertificateMethod(ctx)
-	return method
+	method, err := s.modules.proxy.DeploymentCertificateMethod(ctx)
+	if err != nil {
+		return "", err.Error()
+	}
+	return method, ""
 }
 
 // hostnameSlug turns a deployment name into one DNS label, and appends enough

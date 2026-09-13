@@ -38,6 +38,8 @@ strategy, and feature ownership behind those rules.
 
 ## Deployments and frontend
 
+- [`deployments/caddy-ingress.md`](deployments/caddy-ingress.md) — automatic public Docker Caddy sharing,
+  fresh-host provisioning, certificates, route recovery and ownership boundaries.
 - [`deployments/implementation.md`](deployments/implementation.md) — implemented deployment model through
   C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
 - [`../plans/0.6.7-deployments/README.md`](../plans/0.6.7-deployments/README.md) — frozen contracts, ADRs,

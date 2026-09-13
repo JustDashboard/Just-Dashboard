@@ -60,3 +60,10 @@ func TestCertificateDetailDistinguishesTheThreeStates(t *testing.T) {
 		t.Fatal("certificate states are not distinguishable")
 	}
 }
+
+func TestCertificateDetailPreservesChallengeFailure(t *testing.T) {
+	reason := "port 80 is already used by caddy; configure challenge routing"
+	if got := certificateDetail(hostnameSuggestion{CertificateIssue: reason}); got != reason {
+		t.Fatalf("challenge error hidden by installation advice: %q", got)
+	}
+}
