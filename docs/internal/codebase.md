@@ -9,8 +9,8 @@ The main entry points are:
 - [`architecture/`](architecture/) for request handling, runtime composition, host execution, paths,
   authentication, secrets, and persistent state.
 - [`backend/`](backend/) for every feature backend and cross-feature platform service.
-- [`deployments/`](deployments/) for the implemented deployment architecture; the detailed 0.6.7 design
-  and delivery record remains under [`../plans/0.6.7-deployments/`](../plans/0.6.7-deployments/).
+- [`deployments/`](deployments/) for the checked-in deployment architecture and delivery limits.
+  The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
 - [`frontend/`](frontend/) for the application shell, design system, feature panels, terminal, data, and
   theming.
 - [`security/invariants.md`](security/invariants.md) for the security and compatibility invariants that

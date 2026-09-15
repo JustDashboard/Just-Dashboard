@@ -564,7 +564,7 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
 		copy := canonicalSourceConfig(*request.Source)
-		if err := copy.Validate(); err != nil {
+		if err := copy.ValidateForDeployment(); err != nil {
 			return nil, err
 		}
 		draft.Data.Source = &copy
@@ -983,7 +983,7 @@ func validateDraftComplete(draft *Draft) error {
 	if err := draft.Data.Intent.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := draft.Data.Source.Validate(); err != nil {
+	if err := draft.Data.Source.ValidateForDeployment(); err != nil {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {

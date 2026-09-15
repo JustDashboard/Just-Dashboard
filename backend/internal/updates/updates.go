@@ -88,7 +88,7 @@ func (s *Service) Check(ctx context.Context) (*Report, error) {
 // rather than waited for — apt on a machine two hundred packages behind takes
 // long enough that a request holding the connection open is indistinguishable
 // from a broken dashboard.
-func (s *Service) UpgradeCommand(securityOnly bool) (string, []string, []string, error) {
+func (s *Service) UpgradeCommand(ctx context.Context, securityOnly bool) (string, []string, []string, error) {
 	m := detect()
 	if m == nil {
 		return "", nil, nil, ErrNotSupported
@@ -97,6 +97,18 @@ func (s *Service) UpgradeCommand(securityOnly bool) (string, []string, []string,
 		return "", nil, nil, err
 	}
 	name, args, env := m.UpgradeCommand(securityOnly)
+	if securityOnly && m.Name() == "apt" {
+		packages, err := m.List(ctx)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("plan security updates: %w", err)
+		}
+		args, err = aptSecurityUpgradeArgs(packages, func(args []string) (string, error) {
+			return run(ctx, 60*time.Second, "apt-get", append([]string{"-s"}, args...)...)
+		})
+		if err != nil {
+			return "", nil, nil, err
+		}
+	}
 	return name, args, env, nil
 }
 
@@ -138,15 +150,15 @@ func (aptManager) List(ctx context.Context) ([]Package, error) {
 			packages = append(packages, p)
 		}
 	}
-	return packages, nil
+	return packages, sc.Err()
 }
 
 func (aptManager) UpgradeCommand(securityOnly bool) (string, []string, []string) {
 	args := []string{"-y", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", "upgrade"}
 	if securityOnly {
-		// Restricting to the security pocket keeps a routine patch run from
-		// pulling in every unrelated version bump.
-		args = append([]string{"-t", detectSecuritySuite()}, args...)
+		// The service fills exact security-version targets after simulation.
+		// An empty target list is harmless; a suite preference is not a filter.
+		args = []string{"-y", "--no-install-recommends", "--only-upgrade", "--no-remove", "-o", "Dpkg::Options::=--force-confold", "install"}
 	}
 	// NEEDRESTART_MODE=a stops needrestart opening a full-screen prompt on
 	// Ubuntu, which in a non-interactive run is a command that never returns.
@@ -239,20 +251,4 @@ func (s *Service) rebootState(ctx context.Context) (bool, []string) {
 		}
 	}
 	return false, nil
-}
-
-// detectSecuritySuite guesses the security pocket name from the host's release.
-func detectSecuritySuite() string {
-	for _, base := range []string{"", "/host"} {
-		b, err := os.ReadFile(base + "/etc/os-release")
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(b), "\n") {
-			if v, ok := strings.CutPrefix(line, "VERSION_CODENAME="); ok {
-				return strings.Trim(strings.TrimSpace(v), `"`) + "-security"
-			}
-		}
-	}
-	return "stable-security"
 }

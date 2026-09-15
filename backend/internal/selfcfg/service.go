@@ -216,6 +216,15 @@ func (s *Service) visibleEnv(loc *selfupdate.Location) string {
 // copied before it is replaced, and the process that decides whether the
 // result works is a container that outlives the one running this code.
 func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP string) (*Run, error) {
+	release, err := selfupdate.LockLifecycle(s.dataDir)
+	if err != nil {
+		return nil, lifecycleError(err)
+	}
+	defer release()
+	if err := selfupdate.CheckLifecycleIdle(s.dataDir); err != nil {
+		return nil, lifecycleError(err)
+	}
+
 	loc, err := s.locate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoLocation, err)
@@ -272,7 +281,7 @@ func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP stri
 		return nil, fmt.Errorf("write %s: %w", envPath, err)
 	}
 
-	run, err := s.applier.Start(ctx, loc, StartRequest{
+	run, err := s.applier.start(ctx, loc, StartRequest{
 		Action:  ActionApply,
 		Changes: changes,
 		// Host paths: the sibling mounts the checkout at its real name, so
@@ -286,6 +295,11 @@ func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP stri
 		Actor:          actor,
 	})
 	if err != nil {
+		// Recording the run can fail before the sibling starts. Restore here
+		// as well as in the runner, using the backend's visible checkout paths.
+		if restoreErr := restoreEnvFile(envPath, backup); restoreErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("restore previous settings: %w", restoreErr))
+		}
 		return nil, err
 	}
 	return run, nil
@@ -294,6 +308,15 @@ func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP stri
 // Restart recreates the containers on the configuration already on disk,
 // optionally rebuilding the images first.
 func (s *Service) Restart(ctx context.Context, rebuild bool, actor string) (*Run, error) {
+	release, err := selfupdate.LockLifecycle(s.dataDir)
+	if err != nil {
+		return nil, lifecycleError(err)
+	}
+	defer release()
+	if err := selfupdate.CheckLifecycleIdle(s.dataDir); err != nil {
+		return nil, lifecycleError(err)
+	}
+
 	loc, err := s.locate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoLocation, err)
@@ -310,7 +333,7 @@ func (s *Service) Restart(ctx context.Context, rebuild bool, actor string) (*Run
 	// No EnvPath and no Backup: nothing is written, so there is nothing to put
 	// back. A restart that fails to come up is a broken configuration that was
 	// already on disk, and the transcript is what the operator needs.
-	return s.applier.Start(ctx, loc, StartRequest{
+	return s.applier.start(ctx, loc, StartRequest{
 		Action:   action,
 		Health:   healthURL(current.BackendPort),
 		Endpoint: current.Endpoint(),
@@ -320,6 +343,12 @@ func (s *Service) Restart(ctx context.Context, rebuild bool, actor string) (*Run
 
 // Dismiss forgets a finished run. One still in flight is left alone.
 func (s *Service) Dismiss() error {
+	release, err := selfupdate.LockLifecycle(s.dataDir)
+	if err != nil {
+		return lifecycleError(err)
+	}
+	defer release()
+
 	run, err := s.store.Load()
 	if err != nil {
 		// A corrupt record is exactly the one worth being able to clear.

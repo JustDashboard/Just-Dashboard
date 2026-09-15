@@ -198,6 +198,11 @@ func (clickhouseDialect) BeforeDropColumn(context.Context, *sql.DB, string, stri
 }
 
 func (clickhouseDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := ExplainStatement(query)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	query = checked
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 

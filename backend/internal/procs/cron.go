@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // CronJob is one schedule line. Comment and environment lines are preserved
@@ -40,7 +42,7 @@ type Cron struct{}
 
 func NewCron() *Cron { return &Cron{} }
 
-func (c *Cron) Available() bool { return binaryExists("crontab") }
+func (c *Cron) Available() bool { return hostexec.AvailableOnHost("crontab") }
 
 // UserCrontab reads one user's crontab through the crontab command rather than
 // /var/spool, so the platform's own permission and locking rules apply.
@@ -48,7 +50,7 @@ func (c *Cron) UserCrontab(ctx context.Context, user string) (*Crontab, error) {
 	if err := ValidateName(user); err != nil {
 		return nil, err
 	}
-	res, err := run(ctx, 15*time.Second, "crontab", "-u", user, "-l")
+	res, err := runCron(ctx, user, "", false)
 	if err != nil {
 		// An empty crontab exits non-zero with this message; that is not an
 		// error condition for a viewer.
@@ -70,20 +72,10 @@ func (c *Cron) SetUserCrontab(ctx context.Context, user, content string) error {
 	if err := ValidateCrontab(content); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp("", "vpsd-cron-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		return err
-	}
-	tmp.Close()
-	_, err = run(ctx, 15*time.Second, "crontab", "-u", user, tmp.Name())
+	_, err := runCron(ctx, user, content, true)
 	return err
 }
 
@@ -305,20 +297,38 @@ func (c *Cron) SystemCronFiles(ctx context.Context) ([]Crontab, error) {
 // offer a picker instead of asking the operator to guess.
 func (c *Cron) ListCrontabUsers(ctx context.Context) ([]string, error) {
 	users := []string{}
-	for _, spool := range []string{"/var/spool/cron/crontabs", "/var/spool/cron"} {
-		entries, err := os.ReadDir(spool)
-		if err != nil {
+	raw, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) != 7 {
 			continue
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				users = append(users, e.Name())
-			}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		if len(users) > 0 {
-			break
+		tab, err := c.UserCrontab(ctx, fields[0])
+		if err == nil && tab.Raw != "" {
+			users = append(users, fields[0])
 		}
 	}
 	sort.Strings(users)
 	return users, nil
+}
+
+func runCron(ctx context.Context, user, content string, write bool) (*CommandResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	operation := "-l"
+	if write {
+		operation = "-"
+	}
+	args := []string{"-u", user, operation}
+	command := hostexec.CommandOnHost(ctx, "crontab", args...)
+	if write {
+		command.Stdin = strings.NewReader(content)
+	}
+	return runPrepared(ctx, command, 15*time.Second, "crontab", args...)
 }

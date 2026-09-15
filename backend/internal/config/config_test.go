@@ -16,6 +16,7 @@ import (
 // short of restoring a backup.
 
 func TestEnvFallsBackToLegacyPrefix(t *testing.T) {
+	t.Setenv("JD_TERMINAL_SHELL", "")
 	t.Setenv("VPSD_TERMINAL_SHELL", "/bin/zsh")
 	if got := Env("JD_TERMINAL_SHELL"); got != "/bin/zsh" {
 		t.Fatalf("legacy VPSD_ name ignored: got %q", got)

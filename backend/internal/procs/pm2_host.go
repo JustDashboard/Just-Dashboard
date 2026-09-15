@@ -2,11 +2,16 @@ package procs
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // pm2Home is one account's PM2 installation on the host: where its daemon
@@ -34,14 +39,20 @@ type pm2Home struct {
 // /root is mounted as well (see docker-compose.yml); a missing entry is
 // skipped rather than failing discovery.
 func pm2HomeDirs() []string {
-	dirs := []string{"/root"}
-	entries, err := os.ReadDir("/home")
+	// The account database is authoritative. Arbitrary directories under /home
+	// are not accounts and must never choose an execution identity.
+	raw, err := os.ReadFile("/etc/passwd")
 	if err != nil {
-		return dirs
+		return nil
 	}
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			dirs = append(dirs, filepath.Join("/home", e.Name()))
+	var dirs []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) != 7 || !filepath.IsAbs(fields[5]) {
+			continue
+		}
+		if fields[5] == "/root" || strings.HasPrefix(filepath.Clean(fields[5]), "/home/") {
+			dirs = append(dirs, fields[5])
 		}
 	}
 	return dirs
@@ -54,9 +65,14 @@ func pm2HomeDirs() []string {
 // left behind after an upgrade.
 func findPM2Bin(home string) string {
 	matches, _ := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin", "pm2"))
-	// Glob returns matches in lexical order, which for version directories is
-	// oldest-first; the newest toolchain is the one whose node actually runs.
-	sort.Strings(matches)
+	// Compare numeric versions: lexical order puts v9 after v22 and 22.9 after 22.10.
+	sort.Slice(matches, func(i, j int) bool {
+		a, b := filepath.Base(filepath.Dir(filepath.Dir(matches[i]))), filepath.Base(filepath.Dir(filepath.Dir(matches[j])))
+		if compared := compareNodeVersions(a, b); compared != 0 {
+			return compared < 0
+		}
+		return matches[i] < matches[j]
+	})
 	for i := len(matches) - 1; i >= 0; i-- {
 		if st, err := os.Stat(matches[i]); err == nil && !st.IsDir() {
 			return matches[i]
@@ -107,28 +123,17 @@ func discoverPM2HomesIn(dirs []string) []pm2Home {
 // shebang line resolves to the toolchain that installed it rather than to
 // whatever (if anything) the container carries.
 func pm2Env(home pm2Home) []string {
-	env := os.Environ()
-	// Strip any inherited PM2/HOME/PATH entries; duplicates would leave the
-	// resolution order to whichever the runtime consults first.
-	kept := env[:0]
-	for _, kv := range env {
-		if strings.HasPrefix(kv, "HOME=") ||
-			strings.HasPrefix(kv, "PM2_HOME=") ||
-			strings.HasPrefix(kv, "PATH=") {
-			continue
-		}
-		kept = append(kept, kv)
-	}
 	const hostPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	path := hostPath
 	if dir := filepath.Dir(home.bin); dir != "" && dir != "." {
 		path = dir + ":" + hostPath
 	}
-	return append(kept,
-		"HOME="+home.home,
-		"PM2_HOME="+filepath.Join(home.home, ".pm2"),
-		"PATH="+path,
-	)
+	return []string{
+		"HOME=" + home.home,
+		"PM2_HOME=" + filepath.Join(home.home, ".pm2"),
+		"PATH=" + path,
+		"LANG=C.UTF-8",
+	}
 }
 
 // runPM2Host executes one PM2 CLI against one account's daemon with its own
@@ -137,5 +142,62 @@ func pm2Env(home pm2Home) []string {
 // is not) and runs directly otherwise, so a bare-metal install behaves
 // identically.
 func runPM2Host(ctx context.Context, home pm2Home, timeout time.Duration, args ...string) (*CommandResult, error) {
-	return runWithEnv(ctx, home.bin, pm2Env(home), timeout, args...)
+	account, err := pm2Account(home.home)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	command, err := hostexec.CommandOnHostAsUser(ctx, account, pm2Env(home), home.bin, args...)
+	if err != nil {
+		return nil, err
+	}
+	return runPrepared(ctx, command, timeout, home.bin, args...)
+}
+
+func pm2Account(home string) (*user.User, error) {
+	raw, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) != 7 || filepath.Clean(fields[5]) != filepath.Clean(home) {
+			continue
+		}
+		uid, e1 := strconv.ParseUint(fields[2], 10, 32)
+		_, e2 := strconv.ParseUint(fields[3], 10, 32)
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		info, err := os.Lstat(home)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("PM2 account home is not a directory")
+		}
+		if os.Geteuid() != 0 && uint64(os.Geteuid()) != uid {
+			return nil, fmt.Errorf("cannot run PM2 as another account")
+		}
+		return &user.User{Username: fields[0], Uid: fields[2], Gid: fields[3], HomeDir: fields[5]}, nil
+	}
+	return nil, fmt.Errorf("PM2 home does not belong to a host account")
+}
+
+func compareNodeVersions(a, b string) int {
+	left, right := strings.Split(strings.TrimPrefix(a, "v"), "."), strings.Split(strings.TrimPrefix(b, "v"), ".")
+	for i := 0; i < 3; i++ {
+		var x, y int
+		if i < len(left) {
+			x, _ = strconv.Atoi(left[i])
+		}
+		if i < len(right) {
+			y, _ = strconv.Atoi(right[i])
+		}
+		if x < y {
+			return -1
+		}
+		if x > y {
+			return 1
+		}
+	}
+	return 0
 }

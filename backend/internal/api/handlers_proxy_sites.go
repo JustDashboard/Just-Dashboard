@@ -234,7 +234,11 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 // order reads as a failed job rather than as a job that succeeded while
 // printing a problem.
 func certbotJob(ctx context.Context, out jobs.Emitter, args []string) error {
-	code, err := out.Run(ctx, "certbot", args...)
+	environment, err := proxysvc.CertbotEnvironment()
+	if err != nil {
+		return err
+	}
+	code, err := out.RunEnv(ctx, environment, "certbot", args...)
 	if err != nil {
 		return err
 	}

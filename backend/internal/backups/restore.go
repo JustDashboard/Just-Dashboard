@@ -37,18 +37,23 @@ func (r *Runner) Restore(ctx context.Context, runID int64, destination string) (
 	if err != nil {
 		return nil, err
 	}
-	dest, err := filepath.Abs(filepath.Clean(destination))
+	dest, err := r.store.paths.Resolve(destination)
 	if err != nil {
 		return nil, err
 	}
 	if dest == "/" {
 		return nil, fmt.Errorf("refusing to restore directly over /")
 	}
+	archivePath := run.Artifact
+	if job.TargetKind == TargetLocal {
+		archivePath, err = r.store.paths.Resolve(archivePath)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return nil, err
 	}
-
-	archivePath := run.Artifact
 	if job.TargetKind != TargetLocal {
 		secrets, err := r.store.Secrets(ctx, job.ID)
 		if err != nil {
@@ -57,10 +62,12 @@ func (r *Runner) Restore(ctx context.Context, runID int64, destination string) (
 		if err := os.MkdirAll(r.stage, 0o700); err != nil {
 			return nil, err
 		}
-		archivePath = filepath.Join(r.stage, "restore-"+filepath.Base(run.Artifact))
-		// The staged copy is removed after extraction so a restore does not
-		// leave a second full copy of the backup on disk.
-		defer os.Remove(archivePath)
+		stage, err := os.MkdirTemp(r.stage, "restore-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(stage)
+		archivePath = filepath.Join(stage, "archive.tar.gz")
 		if err := downloadObject(ctx, job, secrets, run.Artifact, archivePath); err != nil {
 			return nil, err
 		}
@@ -150,6 +157,12 @@ func (r *Runner) ListArchive(ctx context.Context, runID int64, limit int) ([]Arc
 		return nil, err
 	}
 	path := run.Artifact
+	if job.TargetKind == TargetLocal {
+		path, err = r.store.paths.Resolve(path)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if job.TargetKind != TargetLocal {
 		secrets, err := r.store.Secrets(ctx, job.ID)
 		if err != nil {
@@ -158,8 +171,12 @@ func (r *Runner) ListArchive(ctx context.Context, runID int64, limit int) ([]Arc
 		if err := os.MkdirAll(r.stage, 0o700); err != nil {
 			return nil, err
 		}
-		path = filepath.Join(r.stage, "list-"+filepath.Base(run.Artifact))
-		defer os.Remove(path)
+		stage, err := os.MkdirTemp(r.stage, "list-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(stage)
+		path = filepath.Join(stage, "archive.tar.gz")
 		if err := downloadObject(ctx, job, secrets, run.Artifact, path); err != nil {
 			return nil, err
 		}

@@ -38,8 +38,18 @@ func (a *Authenticator) ClearSessionCookie(w http.ResponseWriter) {
 // Routes mounted behind it are unreachable without a valid credential — the
 // UI shell is a separate concern and never stands in for this check.
 func (a *Authenticator) Authenticate(next http.Handler) http.Handler {
+	return a.authenticate(next, false)
+}
+
+// AuthenticatePasswordChange still requires every configured factor, but lets
+// an account replace its temporary password before normal feature access.
+func (a *Authenticator) AuthenticatePasswordChange(next http.Handler) http.Handler {
+	return a.authenticate(next, true)
+}
+
+func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, err := a.resolve(r)
+		p, err := a.resolveWithPasswordChange(r, allowPasswordChange)
 		if err != nil {
 			WriteError(w, r, err)
 			return
@@ -49,7 +59,7 @@ func (a *Authenticator) Authenticate(next http.Handler) http.Handler {
 }
 
 // AuthenticatePartial accepts a session whose second factor is still
-// outstanding. Only the 2FA enrollment and verification routes use it.
+// outstanding. Authentication status, logout and the 2FA routes use it.
 func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := sessionToken(r)
@@ -71,10 +81,17 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 }
 
 func (a *Authenticator) resolve(r *http.Request) (*Principal, error) {
+	return a.resolveWithPasswordChange(r, false)
+}
+
+func (a *Authenticator) resolveWithPasswordChange(r *http.Request, allowPasswordChange bool) (*Principal, error) {
 	if bearer := bearerToken(r); bearer != "" {
 		tok, user, role, err := a.Svc.ResolveAPIToken(r.Context(), bearer)
 		if err != nil {
 			return nil, Err(http.StatusUnauthorized, "unauthorized", "api token invalid, revoked or expired")
+		}
+		if user.MustChangePW {
+			return nil, passwordChangeRequired()
 		}
 		return &Principal{
 			User: user, Role: role, TokenID: tok.ID, Kind: "token",
@@ -101,10 +118,17 @@ func (a *Authenticator) resolve(r *http.Request) (*Principal, error) {
 		}
 		return nil, Err(http.StatusUnauthorized, code, "two-factor authentication required")
 	}
+	if user.MustChangePW && !allowPasswordChange {
+		return nil, passwordChangeRequired()
+	}
 	return &Principal{
 		User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
 	}, nil
+}
+
+func passwordChangeRequired() error {
+	return Err(http.StatusForbidden, "password_change_required", "change your temporary password before continuing")
 }
 
 func sessionToken(r *http.Request) string {

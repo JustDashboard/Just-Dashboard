@@ -10,7 +10,8 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
   commands to discard work.
 - Read the relevant sections of [`docs/internal/README.md`](docs/internal/README.md) before changing
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
-  deployment subsystem, also follow [`docs/plans/0.6.7-deployments/`](docs/plans/0.6.7-deployments/README.md).
+  deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
+  The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
 - Use **Bun only** in `frontend/`. Keep `bun.lock`; never create `package-lock.json` or `yarn.lock`.
 - Match project style: Go uses standard formatting; TS/TSX uses Prettier with no semicolons, double
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.
@@ -33,7 +34,7 @@ cd ../frontend && bun run lint && bun run build && bun run test:browser
 ```
 
 Install the browser once with `bun run test:browser:install`. Deployment changes have additional live,
-race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.25.7.
+race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.8.
 
 ## Security requirements
 

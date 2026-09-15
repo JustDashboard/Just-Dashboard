@@ -124,7 +124,7 @@ export function StacksTab({
     })
   }, [stacks, filter, state])
 
-  const newStack = can("file.write") && (
+  const newStack = can("system.admin") && can("file.write") && (
     <Button size="sm" onClick={() => setCreating(true)}>
       <FolderPlus className="size-4" />
       Create stack
@@ -244,7 +244,7 @@ export function StacksTab({
         confirm={confirm}
       />
       <NewStackDialog
-        open={creating}
+        open={creating && can("system.admin") && can("file.write")}
         onOpenChange={setCreating}
         onCreated={(name) => {
           refresh()
@@ -283,7 +283,8 @@ function StackRow({
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const unhealthy = stack.services.filter((s) => s.health === "unhealthy").length
-  const canDeploy = can("service.control") && stack.managed && stack.state !== "running"
+  const canDeploy =
+    can("system.admin") && can("service.control") && stack.managed && stack.state !== "running"
 
   // The one action worth having on the row: an application that is down and
   // should not be. Everything else needs the panel, where the output is — and

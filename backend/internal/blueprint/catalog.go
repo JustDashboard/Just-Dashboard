@@ -108,26 +108,30 @@ func loadCatalog() {
 
 // Summary is the listing shape. It carries enough to choose a blueprint and
 // nothing that would let a client render one without asking the server.
+const DeploymentUnavailableReason = "Blueprint deployment is not available in this release. Runtime materialization, generated credentials and lifecycle integration are incomplete."
+
 type Summary struct {
-	ID                 string   `json:"id"`
-	Version            string   `json:"version"`
-	Name               string   `json:"name"`
-	Category           Category `json:"category"`
-	Profile            Profile  `json:"profile"`
-	Description        string   `json:"description"`
-	IconID             string   `json:"iconId"`
-	DocsURL            string   `json:"docsUrl"`
-	License            string   `json:"license"`
-	Maintainer         string   `json:"maintainer"`
-	ReviewedAt         string   `json:"reviewedAt"`
-	Image              string   `json:"image"`
-	MemoryMB           int      `json:"memoryMb"`
-	RequiresAcceptance bool     `json:"requiresAcceptance,omitempty"`
-	Privileged         bool     `json:"privileged,omitempty"`
+	DeploymentSupported bool     `json:"deploymentSupported"`
+	UnavailableReason   string   `json:"unavailableReason"`
+	ID                  string   `json:"id"`
+	Version             string   `json:"version"`
+	Name                string   `json:"name"`
+	Category            Category `json:"category"`
+	Profile             Profile  `json:"profile"`
+	Description         string   `json:"description"`
+	IconID              string   `json:"iconId"`
+	DocsURL             string   `json:"docsUrl"`
+	License             string   `json:"license"`
+	Maintainer          string   `json:"maintainer"`
+	ReviewedAt          string   `json:"reviewedAt"`
+	Image               string   `json:"image"`
+	MemoryMB            int      `json:"memoryMb"`
+	RequiresAcceptance  bool     `json:"requiresAcceptance,omitempty"`
+	Privileged          bool     `json:"privileged,omitempty"`
 }
 
 func Summarize(blueprint *Blueprint) Summary {
-	summary := Summary{
+	summary := Summary{UnavailableReason: DeploymentUnavailableReason,
 		ID: blueprint.ID, Version: blueprint.Version, Name: blueprint.Name,
 		Category: blueprint.Category, Profile: blueprint.Profile, Description: blueprint.Description,
 		IconID: blueprint.IconID, DocsURL: blueprint.DocsURL, License: blueprint.Provenance.License,

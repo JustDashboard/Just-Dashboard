@@ -46,6 +46,11 @@ func RowInsertSQL(driver Driver, schema, table string, row map[string]any) (stri
 	names := make([]string, 0, len(cols))
 	values := make([]string, 0, len(cols))
 	for _, c := range cols {
+		// JSON numbers are emitted as numeric literals below. Validate their
+		// syntax and reject already-rounded/non-finite floats before rendering.
+		if _, err := SQLValue(row[c]); err != nil {
+			return "", fmt.Errorf("column %s: %w", c, err)
+		}
 		q, err := d.QuoteIdent(c)
 		if err != nil {
 			return "", err

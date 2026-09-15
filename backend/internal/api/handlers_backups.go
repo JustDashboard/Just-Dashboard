@@ -177,6 +177,9 @@ func (s *Server) handleBackupTestTarget(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return mapBackupError(err)
 	}
+	if err := s.modules.backupStore.ValidatePaths(job); err != nil {
+		return mapBackupError(err)
+	}
 	secrets, err := s.modules.backupStore.Secrets(r.Context(), id)
 	if err != nil {
 		return httpx.Internal(err)
@@ -196,6 +199,9 @@ func (s *Server) handleBackupRunNow(w http.ResponseWriter, r *http.Request) erro
 	}
 	job, err := s.modules.backupStore.Get(r.Context(), id)
 	if err != nil {
+		return mapBackupError(err)
+	}
+	if err := s.modules.backupStore.ValidatePaths(job); err != nil {
 		return mapBackupError(err)
 	}
 	if s.modules.backupRunner.IsRunning(id) {

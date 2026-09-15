@@ -266,7 +266,13 @@ export function parseDockerRun(input: string): ParsedRun {
     }
 
     if (BOOLEAN_FLAGS.has(flag)) {
-      applyBoolean(spec, flag, () => (noHealth = true))
+      if (inlineValue !== undefined && !/^(true|false|t|f|1|0)$/i.test(inlineValue)) {
+        warnings.push(`\`${token}\` has an invalid boolean value and has been ignored.`)
+        unsupported.push(token)
+        continue
+      }
+      const enabled = inlineValue === undefined || /^(true|t|1)$/i.test(inlineValue)
+      applyBoolean(spec, flag, enabled, () => (noHealth = enabled))
       continue
     }
 
@@ -423,7 +429,13 @@ export function parseDockerRun(input: string): ParsedRun {
         healthRetries = Number(value) || undefined
         break
       case "--pull":
-        spec.pull = value === "always" ? "always" : "missing"
+        if (value === "always" || value === "missing") spec.pull = value
+        else {
+          unsupported.push(`--pull=${value}`)
+          warnings.push(
+            `The visual form cannot preserve \`--pull=${value}\`. Keep the original command.`,
+          )
+        }
         break
       case "--log-driver":
         spec.logging = { ...spec.logging, driver: value }
@@ -479,37 +491,42 @@ export function parseDockerRun(input: string): ParsedRun {
   return { spec, warnings, unsupported, original: input }
 }
 
-function applyBoolean(spec: ContainerSpec, flag: string, noHealthcheck: () => void) {
+function applyBoolean(
+  spec: ContainerSpec,
+  flag: string,
+  enabled: boolean,
+  noHealthcheck: () => void,
+) {
   switch (flag) {
     case "--rm":
-      spec.autoRemove = true
+      spec.autoRemove = enabled
       break
     case "-t":
     case "--tty":
-      spec.tty = true
+      spec.tty = enabled
       break
     case "-i":
     case "--interactive":
-      spec.openStdin = true
+      spec.openStdin = enabled
       break
     case "-it":
     case "-ti":
-      spec.tty = true
-      spec.openStdin = true
+      spec.tty = enabled
+      spec.openStdin = enabled
       break
     case "-itd":
     case "-dit":
-      spec.tty = true
-      spec.openStdin = true
+      spec.tty = enabled
+      spec.openStdin = enabled
       break
     case "--privileged":
-      spec.privileged = true
+      spec.privileged = enabled
       break
     case "--init":
-      spec.init = true
+      spec.init = enabled
       break
     case "--read-only":
-      spec.readOnlyRootfs = true
+      spec.readOnlyRootfs = enabled
       break
     case "--no-healthcheck":
       noHealthcheck()

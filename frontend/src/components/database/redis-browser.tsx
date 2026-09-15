@@ -66,8 +66,8 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
   const [db, setDb] = useState("0")
   const [pattern, setPattern] = useState("*")
   const [applied, setApplied] = useState("*")
-  const [cursor, setCursor] = useState(0)
-  const [history, setHistory] = useState<number[]>([])
+  const [cursor, setCursor] = useState("0")
+  const [history, setHistory] = useState<string[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -98,7 +98,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
   )
 
   const search = () => {
-    setCursor(0)
+    setCursor("0")
     setHistory([])
     setApplied(pattern.trim() || "*")
   }
@@ -177,7 +177,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                   value={db}
                   onValueChange={(v) => {
                     setDb(v)
-                    setCursor(0)
+                    setCursor("0")
                     setHistory([])
                     setSelected(null)
                   }}

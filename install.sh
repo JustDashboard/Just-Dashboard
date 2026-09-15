@@ -74,6 +74,7 @@ say "${DIM}Self-hosted management for a single Linux server.${RESET}"
 
 step "Installing and checking required host tools"
 source scripts/install-dependencies.sh
+source scripts/dotenv.sh
 jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
 
 step "Checking what this machine already has"
@@ -460,7 +461,7 @@ JD_REQUIRE_2FA=$REQUIRE_2FA
 
 # Used once, to create the first account. Safe to remove afterwards.
 JD_BOOTSTRAP_USER=$ADMIN_USER
-JD_BOOTSTRAP_PASSWORD=$ADMIN_PW
+JD_BOOTSTRAP_PASSWORD=$(jd_dotenv_literal "$ADMIN_PW")
 
 JD_COMPOSE_ROOTS=/opt,/srv,/home
 JD_GIT_ROOTS=/opt,/srv,/home,/root

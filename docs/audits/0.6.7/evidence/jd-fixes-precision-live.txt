@@ -1,0 +1,8 @@
+=== RUN   TestLiveExactNumericMutations
+=== RUN   TestLiveExactNumericMutations/postgres
+=== RUN   TestLiveExactNumericMutations/mysql
+--- PASS: TestLiveExactNumericMutations (0.05s)
+    --- PASS: TestLiveExactNumericMutations/postgres (0.03s)
+    --- PASS: TestLiveExactNumericMutations/mysql (0.02s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dbx	0.064s

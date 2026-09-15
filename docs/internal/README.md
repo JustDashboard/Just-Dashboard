@@ -44,8 +44,8 @@ strategy, and feature ownership behind those rules.
   C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
-- [`../plans/0.6.7-deployments/README.md`](../plans/0.6.7-deployments/README.md) — frozen contracts, ADRs,
-  checkpoint reviews, remaining delivery work, and acceptance evidence.
+- The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout. Use the
+  checked-in deployment guides above; missing checkpoint evidence must not be treated as verified.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
   no lift, the colour roles, the component vocabulary, and which surface to reach for.
 - [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, layout primitives,
@@ -59,6 +59,8 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/0.6.7/remediation-report.md`](../audits/0.6.7/remediation-report.md) — audit fixes,
+  verification evidence and remaining operational/dependency limits on `patch/0.6.7`.
 - [`reference/verification-findings.md`](reference/verification-findings.md) — open discrepancies found by
   source revalidation; these are findings, not exceptions to the security contract.
 - [`contributing/conventions.md`](contributing/conventions.md) — comment, formatting, commit, and licensing

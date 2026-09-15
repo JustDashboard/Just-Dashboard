@@ -16,6 +16,7 @@ import {
 import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
 import { del, get, post } from "@/lib/api"
+import { resultToCSV } from "@/lib/db-export"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
@@ -172,7 +173,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
 
   const exportResult = (format: "csv" | "json") => {
     if (!result) return
-    const text = format === "csv" ? toCSV(result) : toJSON(result)
+    const text = format === "csv" ? resultToCSV(result) : toJSON(result)
     const blob = new Blob([text], { type: format === "csv" ? "text/csv" : "application/json" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -420,17 +421,6 @@ function SaveDialog({
 
 // toCSV / toJSON build a downloadable file from an already-fetched result, so a
 // query result the operator is looking at can be saved without re-running it.
-function toCSV(result: QueryResult): string {
-  const escape = (v: unknown) => {
-    if (v === null || v === undefined) return ""
-    const s = typeof v === "object" ? JSON.stringify(v) : String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const lines = [result.columns.join(",")]
-  for (const row of result.rows) lines.push(row.map(escape).join(","))
-  return lines.join("\n")
-}
-
 function toJSON(result: QueryResult): string {
   const objs = result.rows.map((row) => {
     const o: Record<string, unknown> = {}

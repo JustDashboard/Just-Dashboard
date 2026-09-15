@@ -36,8 +36,9 @@ only renderer/executor/validation authority for their feature.
   the URL means one is already in progress. Quick deploy drives the same draft endpoints in one screen
   for a Git repository, an image, or a database, and hands its own draft to the wizard for extended
   configuration. Connected GitHub repositories and manual HTTPS/SSH import are visible immediately;
-  branch/tag and saved credential choices stay available before inspection. Compose stacks, blueprints,
-  game servers and adoption use the extended wizard. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default one
+  branch/tag and saved credential choices stay available before inspection. Compose stacks and adoption
+  use the extended wizard. Blueprint and game-server creation are unavailable in this release; the
+  catalogue reports the reason, and direct API calls are refused before deployment work is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default one
   flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises `readiness_missing`
   as a *decision* for those profiles, so an empty check list made the most ordinary deployment there is
@@ -251,6 +252,18 @@ only renderer/executor/validation authority for their feature.
   use `IN (…)` and `ROW_NUMBER() OVER (PARTITION BY …)`, and `DeploymentSummary` reads one deployment
   rather than filtering the whole fleet in Go. Both are pinned by statement-counting tests: the cost of
   a fleet read is fixed in the number of deployments, and a regression fails rather than slows.
+- Blueprint deployment is currently unavailable: source materialization, immutable image resolution,
+  generated variable persistence and lifecycle automation are not connected end to end. Catalogue and
+  detail responses expose `deploymentSupported: false` and `unavailableReason`; previews remain pure.
+  Source saves, preflight, commit, materialization and new deployment queue admission reject blueprint
+  sources. Existing workload read, restart and removal controls remain available. Preview volume names
+  include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked and read-only,
+  startup budgets use bounded retries, and Bedrock does not receive Java save commands. UDP remains an
+  explicit unsupported runtime protocol, never silently converted to TCP. Completing this feature still
+  requires durable resource identities and runtime integration; removing the gate alone is unsafe.
+- Legacy compatibility logs redact stored environment values before persistent output, including secrets
+  split across stdout/stderr writes. Error text passes through the same redaction. Generated `.env` files
+  use private, random staging files and atomic replacement; dotenv escaping preserves literal dollars.
 - `internal/blueprint` is the one workload catalogue. A blueprint is data parsed with unknown fields
   rejected, validated at package initialization, and rendered by a pure function with no clock,
   randomness, network or filesystem — so the same version and inputs always produce the same secret-free
@@ -264,8 +277,11 @@ only renderer/executor/validation authority for their feature.
   container's own client as separate argv and refuses anything carrying a shell metacharacter, newline or
   NUL *before* it looks at whether a container is running. Player identities come from the server's own
   reply; a server whose reply cannot be parsed reports "not supported" rather than an empty list. The
-  settings editor writes only keys the blueprint declares and round-trips every other byte, comments and
-  trailing whitespace included. Upstream versions come from a bounded cached adapter that reports
+  settings editor writes only keys the blueprint declares and retains unrelated raw lines and comments.
+  Public reads include only declared editable properties, excluding RCON and plugin credentials. Parsing
+  understands escaped separators, Unicode escapes and continued lines; duplicate declarations use the
+  last value and edits update every duplicate. Changed values escape backslashes and numeric bounds
+  enforce a zero minimum. Upstream versions come from a bounded cached adapter that reports
   unavailable or explicitly stale rather than substituting an unverified `latest`. A game server's data
   volume is named from the deployment, not the release, which is what makes rollback restore the previous
   server build against the same world.

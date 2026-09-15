@@ -3006,3 +3006,37 @@ test("existing database setup uses a private application URL without provisionin
     { kind: "database", resourceId: "42" },
   ])
 })
+
+test("unavailable blueprints explain their status and cannot create a source plan", async ({
+  page,
+}) => {
+  await mockWizardJourney(page)
+  const reason = "Blueprint deployment is unavailable until runtime support is complete."
+  let sourceWrites = 0
+  page.on("request", (request) => {
+    if (
+      request.method() === "PUT" &&
+      request.url().includes("/deploy/drafts/") &&
+      request.postDataJSON()?.step === "source"
+    )
+      sourceWrites++
+  })
+  await page.route("**/api/v1/deploy/blueprints/", (route) =>
+    json(
+      route,
+      blueprintCatalogue.map((entry) => ({
+        ...entry,
+        deploymentSupported: false,
+        unavailableReason: reason,
+      })),
+    ),
+  )
+  await page.goto("/deploy/new?mode=advanced")
+  await page.getByRole("textbox", { name: "Deployment name" }).fill("unavailable-game")
+  await page.getByText("Game server", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByRole("radio", { name: /Minecraft \(Java Edition\)/ })).toBeDisabled()
+  await expect(page.getByText(reason).first()).toBeVisible()
+  await expect(page.getByRole("button", { name: "Inspect source", exact: true })).toBeDisabled()
+  expect(sourceWrites).toBe(0)
+})

@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -9,10 +10,8 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 )
 
-// BlueprintPlan is a rendered blueprint expressed in the deployment engine's
-// own normalized vocabulary. Nothing downstream of this function knows a
-// blueprint was involved: a blueprint deployment runs the same steps, produces
-// the same immutable release and rolls back the same way as a hand-built one.
+// BlueprintPlan is a preview of a reviewed definition. Blueprint deployment is
+// unavailable until the runtime and lifecycle integrations are complete.
 type BlueprintPlan struct {
 	Detection     DetectionResult        `json:"detection"`
 	Configuration PlanConfiguration      `json:"configuration"`
@@ -93,7 +92,7 @@ func blueprintConfiguration(
 			Method: BuildImage, Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{},
 		},
 		Runtime: RuntimePlanConfig{
-			Image: rendered.Image, Command: []string{}, Strategy: StrategyBlueGreen,
+			Image: rendered.Image, Command: append([]string{}, rendered.Command...), Strategy: StrategyBlueGreen,
 			BindAddress: "127.0.0.1", Capabilities: append([]string(nil), rendered.Security.Capabilities...),
 			Devices:    append([]string(nil), rendered.Security.Devices...),
 			Privileged: rendered.Security.Privileged, HostNetwork: rendered.Security.HostNetwork,
@@ -127,17 +126,20 @@ func blueprintConfiguration(
 		case "proxy":
 			if port.Primary || configuration.Runtime.InternalPort == 0 {
 				configuration.Runtime.InternalPort = port.Internal
+				configuration.Runtime.Protocol = port.Protocol
 			}
 		case "direct":
 			direct = true
 			if port.Primary || configuration.Runtime.HostPort == 0 {
 				configuration.Runtime.InternalPort = port.Internal
+				configuration.Runtime.Protocol = port.Protocol
 				configuration.Runtime.HostPort = port.Internal
 				configuration.Runtime.BindAddress = "0.0.0.0"
 			}
 		case "internal":
 			if configuration.Runtime.InternalPort == 0 {
 				configuration.Runtime.InternalPort = port.Internal
+				configuration.Runtime.Protocol = port.Protocol
 			}
 		}
 	}
@@ -147,9 +149,15 @@ func blueprintConfiguration(
 
 	volumePrefix := blueprintVolumePrefix(name, definition.ID)
 	for _, volume := range rendered.Volumes {
+		if volume.Target == "/var/run/docker.sock" && volume.ReadOnly {
+			configuration.Runtime.Mounts = append(configuration.Runtime.Mounts, RuntimeMount{
+				Source: "/var/run/docker.sock", Target: volume.Target, ReadOnly: true, Ownership: OwnershipLinked,
+			})
+			continue
+		}
 		configuration.Runtime.Mounts = append(configuration.Runtime.Mounts, RuntimeMount{
 			Source: volumePrefix + "-" + volume.Name, Target: volume.Target,
-			ReadOnly: false, Ownership: OwnershipManaged,
+			ReadOnly: volume.ReadOnly, Ownership: OwnershipManaged,
 		})
 		configuration.Dependencies = append(configuration.Dependencies, PlannedDependency{
 			Kind: "storage", Ownership: OwnershipManaged, ResourceKind: "docker_volume",
@@ -178,14 +186,22 @@ func blueprintConfiguration(
 		if check.Path != "" {
 			config["path"] = check.Path
 		}
-		if check.Port > 0 {
+		if check.Port > 0 && string(check.Kind) != "game_handshake" {
 			config["port"] = check.Port
 		}
 		if len(check.Command) > 0 {
 			config["command"] = check.Command
 		}
 		if check.TimeoutSeconds > 0 {
-			config["timeoutSeconds"] = check.TimeoutSeconds
+			if check.TimeoutSeconds <= 60 {
+				config["timeoutSeconds"] = check.TimeoutSeconds
+			} else {
+				// A startup budget becomes bounded retries, not one invalid
+				// request timeout. Required unsupported check owners still fail.
+				config["timeoutSeconds"] = 10
+				config["attempts"] = min(60, (check.TimeoutSeconds+9)/10)
+				config["intervalSeconds"] = 10
+			}
 		}
 		planned.Config = mustJSON(config)
 		configuration.Checks = append(configuration.Checks, planned)
@@ -221,7 +237,8 @@ func blueprintVolumePrefix(name, blueprintID string) string {
 	if len(slug) > 40 {
 		slug = strings.Trim(slug[:40], "-")
 	}
-	return slug
+	hash := sha256.Sum256([]byte(name + "\x00" + blueprintID))
+	return fmt.Sprintf("%s-%x", slug, hash[:8])
 }
 
 // BlueprintGeneratedSecrets names the variables the server must generate before
@@ -247,7 +264,7 @@ func BlueprintSchedules(rendered *blueprint.Plan) []ScheduleWrite {
 	}
 	writes := []ScheduleWrite{}
 	for _, preset := range rendered.Automation {
-		if !preset.Default {
+		if !preset.Default || (rendered.BlueprintID == "minecraft-bedrock" && containsString(preset.Actions, "save")) {
 			continue
 		}
 		steps := make([]ScheduleStep, 0, len(preset.Actions))
@@ -299,4 +316,24 @@ func blueprintScheduleStep(action string) (ScheduleStep, bool) {
 	default:
 		return ScheduleStep{}, false
 	}
+}
+
+// ValidateForDeployment keeps schema-valid previews readable while refusing
+// unsupported new work before a draft or run can create persistent resources.
+func (c DraftSourceConfig) ValidateForDeployment() error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if c.Kind == SourceBlueprint {
+		return fmt.Errorf("%w: %s", ErrUnsupportedSource, blueprint.DeploymentUnavailableReason)
+	}
+	return nil
+}
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

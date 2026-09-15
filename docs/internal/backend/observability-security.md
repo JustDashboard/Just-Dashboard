@@ -232,6 +232,12 @@ details were each confirmed by running the tool in a container of its distributi
 - **Alpine and Arch publish no advisory data**: `SupportsSecurityOnly` false, `SecurityFiltering` tells
   the UI "cannot tell", and `guardSecurityOnly` refuses a narrowed upgrade rather than quietly applying
   everything.
+- **APT security-only upgrades pin exact installed package versions from security candidates.** The
+  service simulates that explicit `install --only-upgrade --no-remove` command before returning it.
+  A solver proposal that adds/removes packages, changes an unselected package or selects a different
+  version is refused. `apt-get -t <security-suite> upgrade` is not used: a preferred suite does not
+  restrict the upgrade set to security fixes. With no eligible candidates the request is refused, never
+  broadened to a full upgrade.
 
 Reboot detection: Debian's flag file, then `needs-restarting -r`, then "cannot tell". **Exactly exit 1**
 means yes — every other non-zero is the tool failing, and reading those as yes puts a permanent reboot

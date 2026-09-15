@@ -51,6 +51,10 @@ carries no licensing question at all.
   Chromium build once with `bun run test:browser:install`.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
+- The daemon-wide prune integration tests are separate: set `JD_DOCKER_PRUNE_LIVE=1` and `DOCKER_HOST`
+  to an isolated disposable Docker daemon before running
+  `go test ./internal/dockerx -run 'TestLive(PruneAllActuallyDeletes|BuildCachePruneRoundTrips)' -count=1 -v`. A normal `go test ./...`
+  does not authorize pruning the Docker host it happens to find.
 - Changes to runtime activation, checks, graceful shutdown or Compose release ownership also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC5ActivationAdapters -count=1 -v` on a Docker
   and Buildx release host.
@@ -104,6 +108,7 @@ instance on the standard port:
 | `JD_TEST_POSTGRES_DSN` | `postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable` |
 | `JD_TEST_MYSQL_DSN` | `jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest` |
 | `JD_TEST_MSSQL_DSN` | `sqlserver://sa:…@127.0.0.1:1433?database=master` |
+| `JD_TEST_ORACLE_DSN` | `oracle://jdtest:jdtest@127.0.0.1:1521/FREEPDB1` |
 | `JD_TEST_CLICKHOUSE_DSN` | `clickhouse://default@127.0.0.1:9000/default` |
 | `JD_TEST_MONGO_DSN` | `mongodb://127.0.0.1:27017/jdtest` |
 | `JD_TEST_REDIS_DSN` | `redis://127.0.0.1:6379/0` |
@@ -122,9 +127,7 @@ docker run -d -p 6379:6379 redis:7
 Then `go test ./internal/dbx/ ./internal/api/ -run Live -v` and watch which
 engines report rather than skip. SQLite needs nothing — it is embedded.
 
-Oracle has a dialect but no test coverage. Its server is a 1.4 GB download
-behind a click-through licence whose installer prompts interactively for a
-password and cannot be driven headlessly from a script, so there is nothing a
-CI job can point at. Treat changes to `dialect_oracle.go` as unverified and say
-so in the pull request; if you have an instance, set `JD_TEST_ORACLE_DSN` and
-add a fixture alongside the others.
+Oracle has unit coverage for statement guards, SQL rendering and adapter behavior. Live server
+coverage requires an available Oracle instance: set `JD_TEST_ORACLE_DSN` to run the existing Oracle
+fixture alongside the others. If no server was used, identify that validation limit in the pull request;
+unit results do not establish that the generated statements work against an Oracle server.

@@ -1,36 +1,47 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import type { LogLine } from "@/lib/types"
+import type { LogLine, PM2Process } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { LogViewer } from "@/components/log-viewer"
 import { SidePanel } from "@/components/side-panel"
+import { Status } from "@/components/status-dot"
+import { Notice } from "@/components/state"
 
 const LOG_LIMIT = 5000
 
 export function PM2LogSheet({
-  name,
+  process,
   onOpenChange,
 }: {
-  name: string | null
+  process: PM2Process | null
   onOpenChange: (open: boolean) => void
 }) {
   return (
     <SidePanel
-      open={name !== null}
+      open={process !== null}
       onOpenChange={onOpenChange}
-      title={name ?? "PM2"}
-      description="stdout and stderr, merged live"
+      title={process?.name ?? "PM2"}
+      description={
+        process ? `${process.daemonId} #${process.id} · stdout and stderr, merged live` : ""
+      }
       bodyClassName="flex min-h-0 flex-1 flex-col p-4"
     >
       {/* Keyed on the process, so switching to another one starts with a
           clean buffer instead of appending to the previous process's. */}
-      {name && <PM2LogStream key={name} name={name} />}
+      {process?.logsAvailable === false ? (
+        <Notice title="Logs unavailable">
+          {process.logsUnavailableReason ||
+            "The daemon's log files are outside the configured log roots."}
+        </Notice>
+      ) : process ? (
+        <PM2LogStream key={`${process.daemonId}:${process.id}`} process={process} />
+      ) : null}
     </SidePanel>
   )
 }
 
-function PM2LogStream({ name }: { name: string }) {
+function PM2LogStream({ process }: { process: PM2Process }) {
   const [lines, setLines] = useState<LogLine[]>([])
 
   const onMessage = useCallback((envelope: Envelope) => {
@@ -50,9 +61,9 @@ function PM2LogStream({ name }: { name: string }) {
     })
   }, [])
 
-  useSocket(`/pm2/${encodeURIComponent(name)}/logs/stream`, {
+  const { state } = useSocket(`/pm2/${encodeURIComponent(process.name)}/logs/stream`, {
     onMessage,
-    query: { lines: 300 },
+    query: { lines: 300, user: process.daemonId, id: process.id },
   })
 
   return (
@@ -60,6 +71,18 @@ function PM2LogStream({ name }: { name: string }) {
       className="h-full"
       lines={lines}
       showTimestamps={false}
+      toolbar={
+        <Status
+          state={state}
+          label={
+            state === "open"
+              ? "Live"
+              : state === "connecting"
+                ? "Connecting"
+                : "Disconnected — retrying"
+          }
+        />
+      }
       onClear={() => setLines([])}
     />
   )

@@ -72,6 +72,7 @@ func (s *Server) Routes() http.Handler {
 			// Half-authenticated: password proved, second factor outstanding.
 			r.Group(func(r chi.Router) {
 				r.Use(s.Authn.AuthenticatePartial)
+				r.Use(s.apiLim.ByPrincipal)
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodGet, "/auth/session", s.handle(s.handleSession))
@@ -79,6 +80,14 @@ func (s *Server) Routes() http.Handler {
 				r.Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
 				r.Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
 				r.Method(http.MethodPost, "/auth/logout", s.handle(s.handleLogout))
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(s.Authn.AuthenticatePasswordChange)
+				r.Use(s.apiLim.ByPrincipal)
+				r.Use(httpx.AuditMutations(s.Audit))
+				r.Use(httpx.RequireCSRF)
+				r.Use(httpx.RequireSession)
+				r.Method(http.MethodPost, "/account/password", s.handle(s.handleChangePassword))
 			})
 		}
 
@@ -120,7 +129,6 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) mountAccountRoutes(r chi.Router) {
 	r.Route("/account", func(r chi.Router) {
 		r.Use(httpx.RequireSession)
-		r.Method(http.MethodPost, "/password", s.handle(s.handleChangePassword))
 		r.Method(http.MethodPost, "/recovery-codes", s.handle(s.handleRecoveryCodesRegen))
 		// Enrolling is on the half-authenticated group above, because that is
 		// where an install requiring 2FA sends you. Turning it off is only

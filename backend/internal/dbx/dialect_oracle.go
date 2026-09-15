@@ -248,6 +248,11 @@ func (oracleDialect) BeforeDropColumn(context.Context, *sql.DB, string, string, 
 // is the only way Oracle exposes one. EXPLAIN PLAN FOR does not execute the
 // statement it describes.
 func (oracleDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := ExplainStatement(query)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	query = checked
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, err

@@ -20,6 +20,7 @@ export type AuthStatus = {
   capabilities?: Capability[]
   needsTotp: boolean
   needsEnrollment: boolean
+  needsPasswordChange?: boolean
   require2fa: boolean
 }
 
@@ -1128,6 +1129,9 @@ export type SpecPreview = { run: string; compose: string }
 
 export type PM2Process = {
   id: number
+  daemonId: string
+  logsAvailable?: boolean
+  logsUnavailableReason?: string
   name: string
   namespace: string
   status: string
@@ -1774,7 +1778,7 @@ export type RedisKeyInfo = {
 
 export type RedisPage = {
   keys: RedisKeyInfo[]
-  cursor: number
+  cursor: string
   done: boolean
 }
 
@@ -2151,6 +2155,8 @@ export type DockerTemplate = {
 }
 
 export type BlueprintSummary = {
+  deploymentSupported?: boolean
+  unavailableReason?: string
   id: string
   version: string
   name: string

@@ -24,7 +24,7 @@ import { Logo } from "@/components/logo"
 import { useCopy } from "@/hooks/use-copy"
 import { Well } from "@/components/panel"
 
-type Step = "credentials" | "totp" | "enroll"
+type Step = "credentials" | "totp" | "enroll" | "password"
 
 /**
  * Signing in.
@@ -51,6 +51,8 @@ export default function LoginPage() {
   const [chosenStep, setChosenStep] = useState<Step | "auto">("auto")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [repeatPassword, setRepeatPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [code, setCode] = useState("")
   const [recoveryMode, setRecoveryMode] = useState(false)
@@ -65,7 +67,9 @@ export default function LoginPage() {
         ? "totp"
         : status?.needsEnrollment
           ? "enroll"
-          : "credentials"
+          : status?.needsPasswordChange
+            ? "password"
+            : "credentials"
   const setStep = setChosenStep
 
   useEffect(() => {
@@ -80,6 +84,7 @@ export default function LoginPage() {
       if (next.authenticated) router.replace("/")
       else if (next.needsTotp) setStep("totp")
       else if (next.needsEnrollment) setStep("enroll")
+      else if (next.needsPasswordChange) setStep("password")
     } catch (err) {
       notify.error("Sign in failed", err instanceof ApiError ? err.message : String(err))
     } finally {
@@ -118,6 +123,7 @@ export default function LoginPage() {
     try {
       const next = await verifyTotp(code)
       if (next.authenticated) router.replace("/")
+      else if (next.needsPasswordChange) setStep("password")
     } catch (err) {
       notify.error("Code rejected", err instanceof ApiError ? err.message : String(err))
       setCode("")
@@ -126,17 +132,52 @@ export default function LoginPage() {
     }
   }
 
-  // Enrolment consumes the entered code, so the operator signs in again with
-  // a fresh one — which also proves the authenticator really works.
+  const submitPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword !== repeatPassword) {
+      notify.error("Passwords do not match")
+      return
+    }
+    setBusy(true)
+    try {
+      await post("/account/password", { currentPassword: password, newPassword })
+      setPassword("")
+      setNewPassword("")
+      setRepeatPassword("")
+      setCode("")
+      setStep("credentials")
+      await refresh()
+      notify.success("Password changed", { description: "Sign in with your new password." })
+    } catch (err) {
+      notify.error("Could not change password", err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Enrollment consumes its proof and completes this session atomically.
+  // Only advance after the operator has saved the one-time recovery codes.
   const finishEnrollment = async () => {
-    setRecoveryCodes(null)
-    setEnrollment(null)
-    setStep("credentials")
-    setPassword("")
-    await refresh().catch(() => undefined)
-    notify.success("Two-factor enabled", {
-      description: "Sign in again with a code from your app.",
-    })
+    setBusy(true)
+    try {
+      const next = await refresh()
+      setRecoveryCodes(null)
+      setEnrollment(null)
+      setStep("auto")
+      if (!next?.needsPasswordChange) setPassword("")
+      notify.success("Two-factor enabled", {
+        description: next?.needsPasswordChange
+          ? "Set your new password to continue."
+          : "Your authenticator is ready.",
+      })
+    } catch (err) {
+      notify.error(
+        "Could not refresh your session",
+        err instanceof ApiError ? err.message : String(err),
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -163,12 +204,14 @@ export default function LoginPage() {
                   {step === "credentials" && "Sign in"}
                   {step === "totp" && "Two-factor code"}
                   {step === "enroll" && "Set up two-factor"}
+                  {step === "password" && "Change your password"}
                 </h1>
                 <p className="text-body leading-relaxed text-balance text-muted-foreground">
                   {step === "credentials" && "Administrator access to this server."}
                   {step === "totp" && "Enter the six-digit code from your authenticator app."}
                   {step === "enroll" &&
                     "This dashboard requires an authenticator. Enrol one to continue."}
+                  {step === "password" && "Set a new password before accessing this server."}
                 </p>
               </header>
 
@@ -214,6 +257,47 @@ export default function LoginPage() {
                   <Button type="submit" className="w-full" pending={busy}>
                     Continue
                     {!busy && <ArrowRight className="size-4" />}
+                  </Button>
+                </form>
+              )}
+
+              {step === "password" && (
+                <form onSubmit={submitPassword} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="current-password">Current password</Label>
+                    <Input
+                      id="current-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-password">New password</Label>
+                    <Input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="repeat-password">Repeat new password</Label>
+                    <Input
+                      id="repeat-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={repeatPassword}
+                      onChange={(e) => setRepeatPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" pending={busy}>
+                    Change password
                   </Button>
                 </form>
               )}
@@ -318,6 +402,7 @@ export default function LoginPage() {
  * saying is "one more after this", not "step 2 of 3".
  */
 function Steps({ current, enrolling }: { current: Step; enrolling: boolean }) {
+  if (current === "password") return null
   const steps: { id: Step; label: string }[] = enrolling
     ? [
         { id: "credentials", label: "Identify" },

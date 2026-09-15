@@ -24,6 +24,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { ApiError, errorMessage, get, post, put } from "@/lib/api"
+import { usePoll } from "@/hooks/use-poll"
 import {
   clearDeploymentHandoff,
   getDeploymentHandoff,
@@ -31,6 +32,7 @@ import {
 } from "@/components/deploy/deployment-handoff"
 import { cn } from "@/lib/utils"
 import type {
+  BlueprintSummary,
   DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentDetection,
@@ -183,6 +185,16 @@ export function DeploymentWizard() {
   const [source, setSource] = useState<DeploymentDraftSource>(() =>
     sourceForProfile(initialProfile),
   )
+  const blueprints = usePoll(
+    (signal) => get<BlueprintSummary[]>("/deploy/blueprints/", undefined, signal),
+    0,
+    [],
+    { enabled: source.kind === "blueprint" },
+  )
+  const selectedBlueprint = blueprints.data?.find((entry) => entry.id === source.blueprintId)
+  const blueprintBlocked =
+    source.kind === "blueprint" &&
+    (!selectedBlueprint || selectedBlueprint.deploymentSupported === false)
   const [selectedCandidate, setSelectedCandidate] = useState("")
   const [configuration, setConfiguration] = useState<DeploymentConfiguration>(() =>
     defaultConfiguration(initialProfile),
@@ -315,6 +327,12 @@ export function DeploymentWizard() {
   }
 
   const saveSource = () => {
+    if (blueprintBlocked)
+      return showErrors({
+        blueprint:
+          selectedBlueprint?.unavailableReason ||
+          "Choose an available blueprint or a different source.",
+      })
     const next = validateSource(source)
     if (Object.keys(next).length) return showErrors(next)
     if (!draft) return
@@ -490,6 +508,11 @@ export function DeploymentWizard() {
           />
           <PanelBody className="space-y-5">
             <ErrorSummary errors={errors} ref={errorRef} />
+            {step > 1 && selectedBlueprint?.deploymentSupported === false && (
+              <Notice title="Blueprint deployment unavailable" icon={Warning}>
+                {selectedBlueprint.unavailableReason || "Choose a different source to continue."}
+              </Notice>
+            )}
             {savedProject && (
               <Notice title="Deployment saved" icon={CheckCircle}>
                 <p>
@@ -574,22 +597,34 @@ export function DeploymentWizard() {
               </ActionButton>
             )}
             {step === 1 && (
-              <ActionButton busy={busy === "source"} onClick={saveSource}>
+              <ActionButton
+                busy={busy === "source"}
+                disabled={blueprintBlocked}
+                onClick={saveSource}
+              >
                 Inspect source
               </ActionButton>
             )}
             {step === 2 && (
-              <ActionButton busy={busy === "detection"} onClick={acceptDetection}>
+              <ActionButton
+                busy={busy === "detection"}
+                disabled={blueprintBlocked}
+                onClick={acceptDetection}
+              >
                 Use this detection
               </ActionButton>
             )}
             {step === 3 && (
-              <ActionButton busy={busy === "configuration"} onClick={saveConfiguration}>
+              <ActionButton
+                busy={busy === "configuration"}
+                disabled={blueprintBlocked}
+                onClick={saveConfiguration}
+              >
                 Run preflight
               </ActionButton>
             )}
             {step === 4 && !savedProject && (
-              <ActionButton busy={busy === "commit"} onClick={commit}>
+              <ActionButton busy={busy === "commit"} disabled={blueprintBlocked} onClick={commit}>
                 {source.kind === "import" ? "Adopt workload" : "Save deployment"}
               </ActionButton>
             )}
@@ -2799,15 +2834,17 @@ function PreflightStep({
 
 function ActionButton({
   busy,
+  disabled,
   onClick,
   children,
 }: {
   busy: boolean
+  disabled?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
   return (
-    <Button className="h-11 sm:h-9" onClick={onClick} pending={busy}>
+    <Button className="h-11 sm:h-9" onClick={onClick} pending={busy} disabled={disabled}>
       <ArrowRight className="size-4" />
       {busy ? "Working…" : children}
     </Button>

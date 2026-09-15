@@ -16,8 +16,13 @@ import (
 
 func TestDeploymentBackupGateUsesBackupsOwnerAndReturnsOnlySafeEvidence(t *testing.T) {
 	server := testServer(t)
-	source := t.TempDir()
-	destination := t.TempDir()
+	source := filepath.Join(server.Cfg.FileRoots[0], "backup-source")
+	destination := filepath.Join(server.Cfg.FileRoots[0], "backup-output")
+	for _, path := range []string{source, destination} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(source, "state.db"), []byte("fixture state"), 0o600); err != nil {
 		t.Fatal(err)
 	}

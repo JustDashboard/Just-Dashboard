@@ -28,11 +28,19 @@ a failed detection.
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use.
-- PM2 discovery is per host account. It inspects each mounted home for a daemon directory or a PM2 binary,
-  prefers the newest nvm installation, and invokes the host command with that account home as `HOME` and
-  `PM2_HOME`. Lists combine every discovered daemon, controls return to the daemon that owns the named
-  process, and `pm2 save` persists each account separately. Commands still use explicit argv through
-  `hostexec`; request data never becomes a shell string.
+- PM2 discovery uses host `/etc/passwd` accounts and their mounted homes. Numeric version ordering
+  selects the newest nvm installation. `hostexec.CommandOnHostAsUser` enters the host namespaces,
+  then uses `setpriv` to switch UID/GID and supplementary groups before loading the account's PM2
+  executable. No dashboard environment is inherited, privilege escalation is disabled, and command
+  output is bounded. The host must provide `/usr/bin/setpriv`; failure never falls back to root.
+- Each PM2 row carries trusted `daemonId` (the Linux username) and numeric `id`. Controls and logs pass
+  `?user=<daemonId>&id=<id>`; ambiguous name-only calls are refused. Controls refresh the process list,
+  verify the name/account/id tuple, and invoke PM2 with the numeric id. `pm2 save` visits each account.
+- PM2 log filenames cannot grant access outside `JD_LOG_ROOTS`. An administrator must explicitly
+  configure custom log directories; the source list and stream errors explain this requirement. Unified
+  log source ids carry account, numeric id and name, while unique legacy name-only ids remain accepted.
+- User cron inventory and edits run the host's `crontab` through `hostexec.CommandOnHost`. Writes use
+  stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
 
 ## The terminal
 
@@ -75,6 +83,12 @@ sends only a changed cell size. Reconnect uses `SynchronizeSize` to reapply the 
 fields agree; ordinary resize frames are de-duplicated. The recorded size changes only after `pty.Setsize`
 succeeds. Terminal capability variables replace inherited entries rather than being appended — duplicate
 names are legal in `execve`, and appending could leave an inherited `TERM=dumb` as the value libc returns.
+
+Legacy tmux compatibility tests use a private `TMUX_TMPDIR` and clear inherited `TMUX`. Socket-directory
+setup failures stop the suite before any tmux command or cleanup can reach the operator's server.
+The private server uses an empty config and stays alive until package cleanup, avoiding tmux's
+last-session exit racing the next test's connection.
+Startup-timeout failures include bounded PTY output to distinguish launch failures from slow discovery.
 
 ## GitHub sign-in
 

@@ -16,6 +16,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/docker/docker/errdefs"
 )
 
 // The write half of the Docker surface: creating containers, volumes and
@@ -98,12 +99,53 @@ func (s *Server) authoriseSpec(r *http.Request, spec *dockerx.ContainerSpec) err
 		return httpx.Err(http.StatusForbidden, "requires_admin",
 			"giving a container a device from the server needs an administrator")
 	}
-	if spec.NetworkMode == "host" && !admin {
+	if spec.NetworkMode != "" && spec.NetworkMode != "bridge" && spec.NetworkMode != "default" && spec.NetworkMode != "none" && !admin {
 		return httpx.Err(http.StatusForbidden, "requires_admin",
-			"a container on the host's network shares every port on the server, so it needs an administrator")
+			"sharing a host or another container network namespace needs an administrator")
 	}
 
+	for index, device := range spec.Devices {
+		if !filepath.IsAbs(device.Host) {
+			return httpx.BadRequest("a host device path must be absolute")
+		}
+		resolved, err := s.modules.files.Resolve(device.Host)
+		if err != nil {
+			return httpx.Err(http.StatusForbidden, "outside_roots", "host device is outside the configured file roots")
+		}
+		spec.Devices[index].Host = resolved
+	}
+	for _, name := range spec.Networks {
+		if admin || name == "bridge" || name == "none" {
+			continue
+		}
+		network, err := s.modules.docker.InspectNetwork(r.Context(), name)
+		if err != nil {
+			return httpx.Err(http.StatusForbidden, "network_policy_unavailable", "the network driver could not be verified; retry when Docker is available")
+		}
+		if network.Driver != "bridge" && network.Driver != "overlay" {
+			return httpx.Err(http.StatusForbidden, "requires_admin", "host, device-backed and custom network drivers need an administrator")
+		}
+	}
 	for i, m := range spec.Mounts {
+		if m.Type == "volume" || m.Type == "" {
+			if m.Source != "" {
+				volume, err := s.modules.docker.InspectVolume(r.Context(), m.Source)
+				if err != nil && !errdefs.IsNotFound(err) {
+					return httpx.Err(http.StatusForbidden, "volume_policy_unavailable", "the volume backing configuration could not be verified; retry when Docker is available")
+				}
+				if err == nil {
+					if !admin && (volume.Driver != "local" || len(volume.Options) != 0) {
+						return httpx.Err(http.StatusForbidden, "requires_admin", "using a volume with a custom driver or host mount options needs an administrator")
+					}
+					if admin {
+						if err := s.authoriseVolumeOptions(r, volume.Driver, volume.Options); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			continue
+		}
 		if m.Type != "bind" {
 			continue
 		}
@@ -184,10 +226,15 @@ func (s *Server) handleContainerRecreate(w http.ResponseWriter, r *http.Request)
 			return err
 		}
 	}
-	if opts.Spec != nil {
-		if err := s.authoriseSpec(r, opts.Spec); err != nil {
-			return err
+	edited := opts.Spec != nil
+	if opts.Spec == nil {
+		opts.Spec, err = s.modules.docker.SpecOf(r.Context(), id)
+		if err != nil {
+			return s.dockerErr(err)
 		}
+	}
+	if err := s.authoriseSpec(r, opts.Spec); err != nil {
+		return err
 	}
 	ctx, cancel := timeoutCtx(r, 15*time.Minute)
 	defer cancel()
@@ -202,7 +249,7 @@ func (s *Server) handleContainerRecreate(w http.ResponseWriter, r *http.Request)
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.container.recreate", detail.Name, map[string]any{
-		"id": id, "newId": res.ID, "pulled": opts.PullLatest, "edited": opts.Spec != nil,
+		"id": id, "newId": res.ID, "pulled": opts.PullLatest, "edited": edited,
 	})
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -420,6 +467,9 @@ func (s *Server) handleVolumeCreate(w http.ResponseWriter, r *http.Request) erro
 	if err := httpx.DecodeJSON(r, &spec); err != nil {
 		return err
 	}
+	if err := s.authoriseVolumeOptions(r, spec.Driver, spec.Options); err != nil {
+		return err
+	}
 	vol, err := s.modules.docker.CreateVolume(r.Context(), spec)
 	if err != nil {
 		return s.dockerErr(err)
@@ -545,13 +595,14 @@ func (s *Server) handleStackDetail(w http.ResponseWriter, r *http.Request) error
 	if path, err := dockerx.ComposeFileFor(stack); err == nil {
 		detail.ConfigPath = path
 	}
-	if stack.Managed {
+	if stack.Managed && httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 		ctx, cancel := timeoutCtx(r, 45*time.Second)
 		defer cancel()
 		// The authoritative service list, which resolves includes, profiles,
-		// extends and variable substitution. The stack *list* cannot afford a
-		// subprocess per stack, so it reads the YAML directly and marks the
-		// answer as such; this replaces it with the real one and says so.
+		// extends and environment substitution, has the same administrator
+		// boundary as other Compose evaluation. Other users retain the static
+		// file-derived list from discovery without evaluating their YAML in
+		// the backend's environment or exposing Compose's expanded errors.
 		declared, err := s.modules.docker.DeclaredServices(ctx, stack.WorkingDir)
 		if err != nil {
 			detail.DeclaredError = err.Error()
@@ -566,6 +617,8 @@ func (s *Server) handleStackDetail(w http.ResponseWriter, r *http.Request) error
 			detail.Total = len(declared)
 			detail.ComposeStack = dockerx.RestateStack(detail.ComposeStack)
 		}
+	}
+	if stack.Managed {
 		detail.Git = s.stackGit(r, stack.WorkingDir)
 	}
 	httpx.JSON(w, http.StatusOK, detail)
@@ -631,6 +684,9 @@ func (s *Server) stackGit(r *http.Request, dir string) *StackGit {
 }
 
 func (s *Server) handleStackValidate(w http.ResponseWriter, r *http.Request) error {
+	if err := requireComposeAdmin(r); err != nil {
+		return err
+	}
 	stack, err := s.findStack(r, httpx.URLParam(r, "name"))
 	if err != nil {
 		return err
@@ -659,6 +715,9 @@ func (s *Server) handleStackValidate(w http.ResponseWriter, r *http.Request) err
 // thing, and the second is only discovered after the stack comes back up
 // wrong.
 func (s *Server) handleStackConfigWrite(w http.ResponseWriter, r *http.Request) error {
+	if err := requireComposeAdmin(r); err != nil {
+		return err
+	}
 	stack, err := s.findStack(r, httpx.URLParam(r, "name"))
 	if err != nil {
 		return err
@@ -716,6 +775,9 @@ func (s *Server) handleStackConfigWrite(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleStackCreate(w http.ResponseWriter, r *http.Request) error {
+	if err := requireComposeAdmin(r); err != nil {
+		return err
+	}
 	var req struct {
 		Name    string `json:"name"`
 		Dir     string `json:"dir,omitempty"`
@@ -800,6 +862,9 @@ func underAnyRoot(path string, roots []string) bool {
 // The destructive actions are checked here with the same phrase and the same
 // budget the POST routes use, so the socket is not a way around either.
 func (s *Server) handleStackRun(w http.ResponseWriter, r *http.Request) error {
+	if err := requireComposeAdmin(r); err != nil {
+		return err
+	}
 	name := httpx.URLParam(r, "name")
 	stack, err := s.findStack(r, name)
 	if err != nil {
@@ -1511,6 +1576,52 @@ func matchVHost(vhosts []proxysvc.VHost, port int) *proxysvc.VHost {
 				return &vhosts[i]
 			}
 		}
+	}
+	return nil
+}
+
+// Compose includes, substitutions, plugins and driver options are evaluated by
+// Docker. Until that full model has a shared policy, executing or editing it
+// requires the capability that already authorizes host-level containers.
+func requireComposeAdmin(r *http.Request) error {
+	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		return httpx.Err(http.StatusForbidden, "requires_admin", "creating, editing or executing Compose stacks needs an administrator")
+	}
+	return nil
+}
+func (s *Server) authoriseVolumeOptions(r *http.Request, driver string, options map[string]string) error {
+	if (driver != "" && driver != "local") || len(options) != 0 {
+		if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+			return httpx.Err(http.StatusForbidden, "requires_admin", "custom volume drivers and options can mount host resources and need an administrator")
+		}
+	}
+	if driver != "" && driver != "local" {
+		return nil
+	}
+	device := options["device"]
+	bind := options["type"] == "none"
+	for _, option := range strings.Split(options["o"], ",") {
+		if option = strings.TrimSpace(option); option == "bind" || option == "rbind" {
+			bind = true
+		}
+	}
+	// Remote filesystem names (including //server/share) are not host paths.
+	// Bind flags override the filesystem type, so they must still be confined.
+	if !bind {
+		switch options["type"] {
+		case "nfs", "nfs4", "cifs", "smb3", "tmpfs", "ramfs":
+			return nil
+		}
+	}
+	if bind || device != "" {
+		if !filepath.IsAbs(device) {
+			return httpx.Err(http.StatusBadRequest, "invalid_device", "local volume backing paths must be absolute")
+		}
+		resolved, err := s.modules.files.Resolve(device)
+		if err != nil {
+			return httpx.Err(http.StatusForbidden, "outside_roots", "volume backing path is outside the configured file roots")
+		}
+		options["device"] = resolved
 	}
 	return nil
 }

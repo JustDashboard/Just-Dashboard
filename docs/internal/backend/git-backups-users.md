@@ -28,6 +28,13 @@ authentication and pull requests are detailed in
 
 ## Backups
 
+Backup sources and local targets pass through the configured file resolver on create/update and again
+before test/execution. Local artifacts are independently contained for inspection, restore and
+retention. Existing invalid jobs remain viewable, editable and deletable; a stored path never overrides
+a later root restriction. Each run uses a private staging directory and an artifact name containing
+job/run IDs plus randomness. Artifact creation and publication refuse collisions instead of truncating
+an existing archive.
+
 `internal/backups` stores job definitions and run history in SQLite. A job has source paths, exclusion
 globs, a local/S3/Backblaze-B2 destination, a five-field cron schedule, an enabled flag, and a retention
 count. Displayable target configuration is separate from access keys; credentials are sealed by
@@ -66,9 +73,12 @@ set cannot be deleted or locked. Account deletion is destructive and typed with 
 because it may remove the home directory; key removal is destructive but ordinarily confirmed.
 
 SSH public keys are parsed with `x/crypto/ssh`, reject private/multi-line input, expose SHA-256 fingerprints,
-and de-duplicate by fingerprint. `.ssh` and `authorized_keys` are repaired to owner-only `0700`/`0600`
-permissions and host ownership. Removal matches a fingerprint and atomically replaces the file, so a stale
-line number cannot remove a different key.
+and de-duplicate by fingerprint. Home traversal and `.ssh`/`authorized_keys` opens refuse symlinks.
+Directory descriptors anchor reads and atomic replacements even if the account renames a directory.
+New `.ssh` directories belong to the account at `0700`; existing directories must already belong to it
+before their mode is tightened. Keys are written into exclusive random `0600` files and renamed into
+place, so a preexisting symlink or hard link cannot redirect a privileged write or ownership change.
+Removal matches a fingerprint and retains comments and unrecognised lines. Reads are bounded to 2 MiB.
 
 The current host-execution implementation and its relationship to the documented invariant are recorded in
 [`../reference/verification-findings.md`](../reference/verification-findings.md).

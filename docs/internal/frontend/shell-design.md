@@ -116,9 +116,30 @@ edit. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `f
 `cdn.jsdelivr.net` at runtime — third-party JavaScript in the same origin as a session that drives the
 Docker socket and a root shell, and a permanent spinner for an operator whose workstation has no egress,
 which is the workstation this is meant to be reached from. `scripts/sync-monaco.mjs` copies
-`monaco-editor/min/vs` into `public/monaco/vs` from `predev`/`prebuild` **and** explicitly in the
-Dockerfile, because the image invokes next's entrypoint directly and never sees the npm hooks. The copy is
-gitignored and excluded from eslint.
+`monaco-editor/min/vs` into `public/monaco/vs` from the Bun `dev`/`build` scripts and explicitly in the
+Dockerfile. The copy is gitignored and excluded from eslint.
+
+### Bundled sanitizer advisory review (2026-09-15)
+
+Monaco 0.56.0, the current stable release at review time, includes DOMPurify 3.4.8 inside its prebuilt
+AMD bundle. Updating only the transitive package does not change the JavaScript served to browsers.
+Four advisories remain in `bun audit`; an exploitable path was not established in this integration:
+
+- [Persistent configuration pollution](https://github.com/cure53/DOMPurify/security/advisories/GHSA-cmwh-pvxp-8882)
+  requires `setConfig()` and a hook mutating its allowed-attribute map. Monaco uses per-call configuration
+  and does not write that map.
+- [Custom-element hook bypass](https://github.com/advisories/GHSA-c2j3-45gr-mqc4) requires
+  `CUSTOM_ELEMENT_HANDLING` and an `afterSanitizeElements` enforcement hook. Neither is configured.
+- [Trusted Types policy persistence](https://github.com/advisories/GHSA-vxr8-fq34-vvx9) requires a custom
+  policy followed by `clearConfig()`. Monaco requests trusted output, but supplies no custom policy and
+  does not call `clearConfig()`.
+- [Detached subtree with in-place sanitization](https://github.com/cure53/DOMPurify/security/advisories/GHSA-55q2-fjhq-7xh7)
+  requires `IN_PLACE`. Monaco does not enable it.
+
+The application wrapper exposes no sanitizer configuration to API or editor content. Database result
+cells render as React text, and SQL schema completions supply string labels and insertion text, without
+trusted Markdown or HTML. Preserve these boundaries when extending editor features. Upgrade Monaco when
+its shipped bundle contains the patched sanitizer, then recheck the copied runtime and `bun audit`.
 
 ## Charts
 

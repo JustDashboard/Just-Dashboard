@@ -205,6 +205,7 @@ type ReleaseTaskConfig struct {
 }
 
 type RuntimePlanConfig struct {
+	Protocol           string          `json:"protocol,omitempty"`
 	Image              string          `json:"image,omitempty"`
 	Command            []string        `json:"command,omitempty"`
 	InternalPort       int             `json:"internalPort,omitempty"`
@@ -756,6 +757,9 @@ func (c PlanConfiguration) Validate() error {
 		if commandArgumentContainsSecret(c.Runtime.Command, index) {
 			return fmt.Errorf("runtime command passes credential material through argv; use a scoped variable")
 		}
+	}
+	if c.Runtime.Protocol != "" && c.Runtime.Protocol != "tcp" {
+		return fmt.Errorf("runtime protocol %q is not supported by this release", c.Runtime.Protocol)
 	}
 	if c.Runtime.InternalPort < 0 || c.Runtime.InternalPort > 65535 || c.Runtime.HostPort < 0 || c.Runtime.HostPort > 65535 {
 		return fmt.Errorf("runtime ports must be between 1 and 65535")

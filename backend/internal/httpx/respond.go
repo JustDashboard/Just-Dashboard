@@ -136,12 +136,25 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func DecodeJSON(r *http.Request, dst any) error {
+	return decodeJSON(r, dst, false)
+}
+
+// DecodeJSONNumbers keeps arbitrary database values exact until the database
+// adapter binds them. JSON numbers otherwise round through float64 in any fields.
+func DecodeJSONNumbers(r *http.Request, dst any) error {
+	return decodeJSON(r, dst, true)
+}
+
+func decodeJSON(r *http.Request, dst any, exactNumbers bool) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return Err(http.StatusUnsupportedMediaType, "json_content_type_required",
 			"request body must use application/json")
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
+	if exactNumbers {
+		dec.UseNumber()
+	}
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return BadRequest("malformed request body: %v", err)

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
-	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -17,6 +16,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrAccountLocked      = errors.New("account temporarily locked after repeated failed logins")
 	ErrAccountDisabled    = errors.New("account disabled")
+	ErrTOTPAlreadyEnabled = errors.New("two-factor authentication is already enabled")
 	ErrInvalidTOTP        = errors.New("invalid verification code")
 	ErrTOTPRequired       = errors.New("this dashboard requires two-factor authentication, so it cannot be turned off")
 	ErrNotFound           = errors.New("not found")
@@ -362,25 +362,21 @@ func (s *Service) BeginTOTPEnrollment(ctx context.Context, userID int64) (*Enrol
 	}
 	// Stored but not yet enabled: enrollment only completes once the user
 	// proves they can generate a code from it.
-	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?`, sealed, userID); err != nil {
+	res, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET totp_secret = ?, totp_last_step = -1 WHERE id = ? AND totp_enabled = 0`, sealed, userID)
+	if err != nil {
 		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, ErrTOTPAlreadyEnabled
 	}
 	return &EnrollmentSecret{Secret: key.Secret(), URL: key.URL()}, nil
 }
 
 func (s *Service) ConfirmTOTPEnrollment(ctx context.Context, userID int64, code string) ([]string, error) {
-	secret, err := s.totpSecret(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if !totp.Validate(code, secret) {
-		return nil, ErrInvalidTOTP
-	}
-	if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET totp_enabled = 1 WHERE id = ?`, userID); err != nil {
-		return nil, err
-	}
-	return s.regenerateRecoveryCodes(ctx, userID)
+	return s.ConfirmTOTPEnrollmentForSession(ctx, userID, "", code)
 }
 
 func (s *Service) totpSecret(ctx context.Context, userID int64) (string, error) {
@@ -401,21 +397,7 @@ func (s *Service) totpSecret(ctx context.Context, userID int64) (string, error) 
 // VerifySecondFactor accepts either a live TOTP code or a single-use recovery
 // code, and elevates the session on success.
 func (s *Service) VerifySecondFactor(ctx context.Context, sessionID string, userID int64, code string) error {
-	code = strings.TrimSpace(strings.ReplaceAll(code, " ", ""))
-	if secret, err := s.totpSecret(ctx, userID); err == nil {
-		// Skew of one step tolerates ordinary clock drift between the server
-		// and the authenticator without widening the window meaningfully.
-		ok, err := totp.ValidateCustom(code, secret, time.Now(), totp.ValidateOpts{
-			Period: 30, Skew: 1, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
-		})
-		if err == nil && ok {
-			return s.elevate(ctx, sessionID, userID)
-		}
-	}
-	if s.consumeRecoveryCode(ctx, userID, code) {
-		return s.elevate(ctx, sessionID, userID)
-	}
-	return ErrInvalidTOTP
+	return s.verifySecondFactor(ctx, sessionID, userID, code)
 }
 
 func (s *Service) elevate(ctx context.Context, sessionID string, userID int64) error {
@@ -441,7 +423,7 @@ func (s *Service) DisableTOTP(ctx context.Context, userID int64) error {
 		return ErrTOTPRequired
 	}
 	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '' WHERE id = ?`, userID); err != nil {
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1 WHERE id = ?`, userID); err != nil {
 		return err
 	}
 	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID)
@@ -451,7 +433,7 @@ func (s *Service) DisableTOTP(ctx context.Context, userID int64) error {
 // ResetTOTP clears an enrollment so a locked-out user can re-enroll. Admin only.
 func (s *Service) ResetTOTP(ctx context.Context, userID int64) error {
 	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '' WHERE id = ?`, userID); err != nil {
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1 WHERE id = ?`, userID); err != nil {
 		return err
 	}
 	if _, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
@@ -466,17 +448,9 @@ func (s *Service) regenerateRecoveryCodes(ctx context.Context, userID int64) ([]
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
+	codes, err := regenerateRecoveryCodesTx(ctx, tx, userID)
+	if err != nil {
 		return nil, err
-	}
-	codes := make([]string, 0, 10)
-	for i := 0; i < 10; i++ {
-		c := RandomToken(6)
-		codes = append(codes, c)
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO recovery_codes(user_id, code_hash) VALUES(?, ?)`, userID, HashToken(c)); err != nil {
-			return nil, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -486,15 +460,4 @@ func (s *Service) regenerateRecoveryCodes(ctx context.Context, userID int64) ([]
 
 func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
 	return s.regenerateRecoveryCodes(ctx, userID)
-}
-
-func (s *Service) consumeRecoveryCode(ctx context.Context, userID int64, code string) bool {
-	res, err := s.st.DB.ExecContext(ctx,
-		`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at = 0`,
-		time.Now().Unix(), userID, HashToken(code))
-	if err != nil {
-		return false
-	}
-	n, _ := res.RowsAffected()
-	return n == 1
 }

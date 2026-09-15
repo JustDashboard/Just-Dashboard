@@ -99,7 +99,11 @@ export class ApiError extends Error {
   }
 
   get isAuthProblem() {
-    return this.status === 401 || this.code === "account_disabled"
+    return (
+      this.status === 401 ||
+      this.code === "account_disabled" ||
+      this.code === "password_change_required"
+    )
   }
 
   get needsTotp() {
@@ -140,7 +144,10 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     Object.assign(headers, mutationHeaders())
   }
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
-  if (options.confirm) headers["X-Confirm"] = options.confirm
+  if (options.confirm !== undefined) {
+    headers["X-Confirm"] = encodeURIComponent(options.confirm)
+    headers["X-Confirm-Encoding"] = "uri"
+  }
 
   const res = await fetch(buildUrl(path, options.query), {
     method,
@@ -168,6 +175,9 @@ async function readResponse<T>(res: Response): Promise<T> {
 
   if (!res.ok) {
     const body = parsed as ApiErrorBody | undefined
+    if (body?.error?.code === "password_change_required" && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("jd:password-change-required"))
+    }
     throw new ApiError(
       res.status,
       body?.error?.code ?? "unknown",

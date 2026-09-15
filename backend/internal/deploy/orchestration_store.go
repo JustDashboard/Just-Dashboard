@@ -192,6 +192,20 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 		return nil, false, err
 	}
 
+	// Existing workloads keep restart/removal controls, but unsupported blueprint
+	// deployments cannot enter the queue through stale drafts or direct API calls.
+	switch req.Operation {
+	case OperationDeploy, OperationRedeploy, OperationForceBuild, OperationPreviewCreate, OperationPreviewUpdate:
+		var kind string
+		sourceErr := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_sources WHERE environment_id = ? ORDER BY revision DESC LIMIT 1`, req.EnvironmentID).Scan(&kind)
+		if sourceErr != nil && !errors.Is(sourceErr, sql.ErrNoRows) {
+			return nil, false, sourceErr
+		}
+		if SourceKind(kind) == SourceBlueprint {
+			return nil, false, fmt.Errorf("%w: blueprint deployment is unavailable in this release", ErrUnsupportedSource)
+		}
+	}
+
 	now := s.now().UTC()
 	metadata := string(req.Metadata)
 	result, err := tx.ExecContext(ctx, `

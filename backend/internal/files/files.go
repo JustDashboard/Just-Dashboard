@@ -7,7 +7,6 @@ package files
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -533,16 +532,33 @@ func (s *Service) Move(from, to string) error {
 		return err
 	}
 	if st, err := os.Stat(dst); err == nil && st.IsDir() {
+		dst, err = s.Resolve(dst)
+		if err != nil {
+			return err
+		}
 		dst = filepath.Join(dst, filepath.Base(src))
 	}
-	if err := os.Rename(src, dst); err != nil {
-		// Rename fails across filesystems; fall back to copy-then-remove so
-		// moving between / and a mounted volume works as the user expects.
+	root, source, err := s.openRootEntry(src)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	target, err := filepath.Rel(root.Name(), dst)
+	if err != nil {
+		return err
+	}
+	if target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		if err := s.copyPath(src, dst); err != nil {
+			return err
+		}
+		return root.RemoveAll(source)
+	}
+	if err := root.Rename(source, target); err != nil {
 		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err == syscall.EXDEV {
-			if err := copyPath(src, dst); err != nil {
+			if err := s.copyPath(src, dst); err != nil {
 				return err
 			}
-			return os.RemoveAll(src)
+			return root.RemoveAll(source)
 		}
 		return err
 	}
@@ -550,63 +566,18 @@ func (s *Service) Move(from, to string) error {
 }
 
 func (s *Service) Copy(from, to string) error {
-	// ResolveEntry, so copying a symlink copies the link — which is what
-	// copyPath's os.ModeSymlink branch has always been written to do and could
-	// never reach while its input arrived already dereferenced.
 	src, err := s.ResolveEntry(from)
 	if err != nil {
 		return err
 	}
-	dst, err := s.ResolveEntry(to)
+	dst, err := s.Resolve(to)
 	if err != nil {
 		return err
 	}
 	if st, err := os.Stat(dst); err == nil && st.IsDir() {
 		dst = filepath.Join(dst, filepath.Base(src))
 	}
-	return copyPath(src, dst)
-}
-
-func copyPath(src, dst string) error {
-	st, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	switch {
-	case st.Mode()&os.ModeSymlink != 0:
-		target, err := os.Readlink(src)
-		if err != nil {
-			return err
-		}
-		return os.Symlink(target, dst)
-	case st.IsDir():
-		if err := os.MkdirAll(dst, st.Mode().Perm()); err != nil {
-			return err
-		}
-		entries, err := os.ReadDir(src)
-		if err != nil {
-			return err
-		}
-		for _, e := range entries {
-			if err := copyPath(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
-				return err
-			}
-		}
-		return nil
-	default:
-		in, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, st.Mode().Perm())
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
-	}
+	return s.copyPath(src, dst)
 }
 
 func (s *Service) Chmod(path string, mode string, recursive bool) error {

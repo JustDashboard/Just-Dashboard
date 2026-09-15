@@ -106,6 +106,15 @@ type StartRequest struct {
 // `docker run` that succeeds and is then never recorded is an upgrade nobody
 // can see, and the ordering is what rules that out.
 func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) (*Run, error) {
+	release, err := LockLifecycle(i.dataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := CheckLifecycleIdle(i.dataDir); err != nil {
+		return nil, err
+	}
+
 	if loc == nil {
 		return nil, ErrNoLocation
 	}

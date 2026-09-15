@@ -18,18 +18,16 @@ cite the presence of this page as approval for another direct executor.
 
 The security contract names `files.Resolve`/`ResolveEntry` as the client-path choke point. Current Git
 routes instead use `gitx.Resolve`, which independently cleans, resolves symlinks, and checks
-`JD_GIT_ROOTS`. Backup restore correctly resolves its destination through `files.Resolve` before
-`safepath` extraction, but backup job create/update currently persist source paths and local destination
-paths without passing them through `files.Resolve`; `Runner` later walks or writes those paths directly.
-This is a current-state discrepancy, not a new allowed exception. Changes at either boundary must preserve
-configured roots and existing installs while converging on the invariant.
+`JD_GIT_ROOTS`. The 0.6.7 audit remediation closes the backup discrepancy: save, test and execution
+validate sources/local targets through `files.Resolve`; artifact reads and retention validate their
+stored paths under current roots as well. Git's parallel resolver remains a design-convergence item.
 
 ## Verified inventory drift corrected in this documentation change
 
-- `backend/go.mod` requires Go 1.25.7, not 1.25.0.
-- 26 `backend/internal` packages currently contain tests, not 22.
+- The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes.
+- 33 `backend/internal` packages currently contain tests.
 - `frontend/src/app` contains 48 page entry files, not 18; three deployment wrappers are server components.
 - `api.moduleSet` contains ten deployment components, not two.
-- The 0.6.7 delivery ledger has completed C0 through C7; C8 is next.
+- The historical 0.6.7 delivery ledger is absent from this checkout; C0–C7 completion claims cannot be verified from that ledger. See the deployment guide for current runtime limits.
 - The SQLite inventory now includes saved database queries/history and the expanded normalized deployment
   tables instead of describing only the earlier schema.

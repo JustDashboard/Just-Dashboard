@@ -154,7 +154,7 @@ func (s *Server) initModules() {
 	s.modules.netsec = netsec.New()
 	s.modules.jobs = jobs.New(s.Log)
 
-	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer)
+	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files)
 	s.modules.backupRunner = backups.NewRunner(s.modules.backupStore,
 		filepath.Join(s.Cfg.DataDir, "staging"), s.Log)
 	s.modules.backupSched = backups.NewScheduler(s.modules.backupStore, s.modules.backupRunner, s.Log)

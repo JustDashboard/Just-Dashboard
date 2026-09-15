@@ -18,12 +18,42 @@
 package selfcfg
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+// restoreEnvFile uses paths visible to this process, which may differ from the
+// host paths passed to the sibling. Admission remains held until this finishes.
+func restoreEnvFile(path, backup string) error {
+	if backup == "" {
+		err := os.Remove(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	body, err := os.ReadFile(backup)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".env.jd-restore-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(body); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
 
 // EnvFile is a parsed .env, kept as lines rather than as a map.
 //

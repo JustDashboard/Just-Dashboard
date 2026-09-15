@@ -95,7 +95,10 @@ func (s *Service) List(ctx context.Context) ([]User, error) {
 			u.LastLogin = &ll.at
 			u.LastFrom = ll.from
 		}
-		u.SSHKeys = countKeys(u.Home)
+		keys, _, keyErr := s.ListKeys(u.Username)
+		if keyErr == nil {
+			u.SSHKeys = len(keys)
+		}
 	}
 	sort.Slice(users, func(i, j int) bool {
 		// Real accounts first: system accounts are noise on this page.
@@ -280,14 +283,6 @@ func parseLastlogTail(rest string) (time.Time, string, bool) {
 		}
 	}
 	return time.Time{}, "", false
-}
-
-func countKeys(home string) int {
-	keys, err := readAuthorizedKeys(filepath.Join(home, ".ssh", "authorized_keys"))
-	if err != nil {
-		return 0
-	}
-	return len(keys)
 }
 
 type CreateOptions struct {

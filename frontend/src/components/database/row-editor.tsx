@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { notify } from "@/lib/toast"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import { errorMessage } from "@/lib/api"
+import { coerceDbValue } from "@/lib/db-values"
 import type { DbColumn } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -19,9 +20,9 @@ type FieldState = { value: string; isNull: boolean }
  * The form behind insert-row and edit-row. It is deliberately one dialog for
  * both: the only difference is whether the fields start empty or from an
  * existing row, and whether the submit carries a primary key to scope the
- * update. Values are coerced back to numbers and booleans from their column
- * types before they leave, because a strictly-typed engine (Postgres) rejects
- * the string "3" where an integer is due, and NULL is kept distinct from the
+ * update. Exact integers and decimals travel as strings so the browser never
+ * rounds them; finite ordinary numbers and booleans follow their column type.
+ * NULL is kept distinct from the
  * empty string through an explicit toggle rather than guessed from a blank box.
  */
 export function RowEditor({
@@ -68,7 +69,7 @@ export function RowEditor({
         // On insert, an untouched field is left to the column's default rather
         // than forced to NULL or "" — sending it would override the default.
         if (mode === "insert" && !f.isNull && f.value === "") continue
-        values[c.name] = f.isNull ? null : coerce(f.value, c.type)
+        values[c.name] = f.isNull ? null : coerceDbValue(f.value, c.type)
       }
       let key: Record<string, unknown> | undefined
       if (mode === "edit") {
@@ -156,25 +157,4 @@ export function RowEditor({
 function stringifyCell(v: unknown): string {
   if (typeof v === "object") return JSON.stringify(v)
   return String(v)
-}
-
-// coerce turns a form string back into the JSON type the column expects, so a
-// strictly-typed engine accepts it. It is intentionally conservative: anything
-// it cannot confidently convert is sent as a string and left to the driver.
-function coerce(value: string, sqlType: string): unknown {
-  const t = sqlType.toLowerCase()
-  if (/bool/.test(t)) {
-    if (/^(true|t|1|yes)$/i.test(value)) return true
-    if (/^(false|f|0|no)$/i.test(value)) return false
-    return value
-  }
-  if (/int|serial/.test(t) && !/interval|point/.test(t)) {
-    const n = Number(value)
-    return value.trim() !== "" && Number.isInteger(n) ? n : value
-  }
-  if (/numeric|decimal|real|double|float/.test(t)) {
-    const n = Number(value)
-    return value.trim() !== "" && !Number.isNaN(n) ? n : value
-  }
-  return value
 }

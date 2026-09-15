@@ -2,6 +2,8 @@ package dockerx
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -14,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -828,6 +831,12 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 	if err != nil {
 		return nil, err
 	}
+	// Pin the inspected identity before renaming; a caller may have supplied
+	// the current name, which can refer to a different container afterwards.
+	if insp.ID == "" {
+		return nil, errors.New("Docker returned no container identity")
+	}
+	id = insp.ID
 	if insp.Config != nil && insp.Config.Labels[labelProject] != "" {
 		return nil, fmt.Errorf("%w (%s). Redeploying the stack is what keeps compose and the Engine agreeing about what exists",
 			ErrComposeManaged, insp.Config.Labels[labelProject])
@@ -857,37 +866,55 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 			"%s is set to remove itself when it stops, so it cannot be replaced in place — there would be nothing to put back if the new one failed to start. Create the replacement under a new name instead", name)
 	}
 
-	// Park the old container under a name the operator can recognise if this
-	// goes wrong and the automatic restore below also fails.
-	parked := name + "_jd_replaced"
-	_ = cli.ContainerRemove(ctx, parked, container.RemoveOptions{Force: true})
-
-	// Renamed before it is stopped, not after: the rename is the cheap,
-	// instantly reversible half, and doing it first means a stop that hangs
-	// leaves a container that is merely misnamed rather than one holding the
-	// name the replacement needs.
-	if err := cli.ContainerRename(ctx, id, parked); err != nil {
-		return nil, fmt.Errorf("could not set %s aside: %w", name, err)
+	// Docker's rename atomically reserves a fresh parking name. A collision is
+	// retried; it never grants permission to remove the container owning it.
+	var parked string
+	for attempt := 0; attempt < 3; attempt++ {
+		var suffix [12]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return nil, err
+		}
+		parked = name + "_jd_replaced_" + hex.EncodeToString(suffix[:])
+		err = cli.ContainerRename(ctx, id, parked)
+		if err == nil {
+			break
+		}
+		if !errdefs.IsConflict(err) {
+			return nil, fmt.Errorf("could not set %s aside: %w", name, err)
+		}
 	}
+	if err != nil {
+		return nil, fmt.Errorf("could not reserve a parking name for %s: %w", name, err)
+	}
+
 	wasRunning := insp.State != nil && insp.State.Running
+	restore := func(cause error, candidate *CreateResult) error {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if candidate != nil && candidate.ID != "" && candidate.ID != id {
+			if err := cli.ContainerRemove(cleanupCtx, candidate.ID, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
+				return fmt.Errorf("replacement failed: %v; original is parked as %s and candidate cleanup failed: %w", cause, parked, err)
+			}
+		}
+		if err := cli.ContainerRename(cleanupCtx, id, name); err != nil {
+			return fmt.Errorf("replacement failed: %v; original is parked as %s and its name could not be restored: %w", cause, parked, err)
+		}
+		if wasRunning {
+			if err := cli.ContainerStart(cleanupCtx, id, container.StartOptions{}); err != nil {
+				return fmt.Errorf("replacement failed: %v; original name restored but restarting it failed: %w", cause, err)
+			}
+		}
+		return fmt.Errorf("original container restored after replacement failed: %w", cause)
+	}
 	if wasRunning {
 		timeout := 10
 		if err := cli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout}); err != nil {
-			_ = cli.ContainerRename(ctx, id, name)
-			return nil, fmt.Errorf("could not stop %s, so it was left running and untouched: %w", name, err)
+			return nil, restore(fmt.Errorf("could not stop %s: %w", name, err), nil)
 		}
 	}
-
-	restore := func(cause error) error {
-		if err := cli.ContainerRename(ctx, id, name); err == nil && wasRunning {
-			_ = cli.ContainerStart(ctx, id, container.StartOptions{})
-		}
-		return cause
-	}
-
 	res, err := c.Create(ctx, *spec, progress)
 	if err != nil {
-		return nil, restore(fmt.Errorf("%s was left untouched: %w", name, err))
+		return nil, restore(err, res)
 	}
 
 	// Only now is the original expendable. Its anonymous volumes are kept:

@@ -277,6 +277,12 @@ func (s *Service) Install(ctx context.Context, target, actor string) (*Run, erro
 // Dismiss forgets a finished run, which is what clears the "updated to 0.6"
 // notice once it has been read. A run still in flight is left alone.
 func (s *Service) Dismiss() error {
+	release, err := LockLifecycle(s.installer.dataDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	run, err := s.store.Load()
 	if err != nil {
 		// A corrupt record is exactly the one worth being able to clear.

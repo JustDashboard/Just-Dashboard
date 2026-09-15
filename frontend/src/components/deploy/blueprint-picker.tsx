@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { ArrowUpRight, Warning } from "@/components/icons"
-import { EmptyNote, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -97,8 +97,9 @@ export function BlueprintPicker({
   // Keep the selection inside the offered set when the profile changes.
   const selected = offered.find((entry) => entry.id === blueprintId)
   useEffect(() => {
-    if (offered.length === 0 || selected) return
-    onSelect(offered[0].id, offered[0].version)
+    if (selected) return
+    const available = offered.find((entry) => entry.deploymentSupported !== false)
+    if (available) onSelect(available.id, available.version)
   }, [offered, selected, onSelect])
 
   const definition = detail.data?.id === blueprintId ? detail.data : undefined
@@ -108,6 +109,7 @@ export function BlueprintPicker({
 
   return (
     <div className="min-w-0 space-y-5">
+      {catalogue.error && <ErrorState error={catalogue.error} />}
       <fieldset className="min-w-0 space-y-2">
         <legend className="text-xs font-medium text-muted-foreground">Blueprint</legend>
         {catalogue.loading && !catalogue.data ? (
@@ -136,6 +138,7 @@ export function BlueprintPicker({
                         name="blueprint"
                         className="mt-1 size-4 shrink-0"
                         checked={entry.id === blueprintId}
+                        disabled={entry.deploymentSupported === false}
                         onChange={() => onSelect(entry.id, entry.version)}
                       />
                       <span className="min-w-0 flex-1 space-y-1">
@@ -143,10 +146,19 @@ export function BlueprintPicker({
                           <span className="text-sm font-medium">{entry.name}</span>
                           {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
                           {entry.privileged && <Tag tone="danger">privileged</Tag>}
+                          {entry.deploymentSupported === false && (
+                            <Tag tone="warning">Unavailable</Tag>
+                          )}
                         </span>
                         <span className="block text-xs text-muted-foreground">
                           {entry.description}
                         </span>
+                        {entry.deploymentSupported === false && (
+                          <span className="block text-xs text-warning">
+                            {entry.unavailableReason ||
+                              "Blueprint deployment is unavailable in this release."}
+                          </span>
+                        )}
                         <span className="block font-mono text-hint break-all text-muted-foreground">
                           {entry.image}
                         </span>

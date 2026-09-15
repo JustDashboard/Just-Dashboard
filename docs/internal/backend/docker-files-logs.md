@@ -14,7 +14,7 @@ build argv explicitly.
   what makes duplicate, edit-and-recreate and "save as a stack" possible.
 - **`Recreate` is the verb Docker lacks.** Editing means destroy-and-recreate, which is fine until the
   create fails and the operator has nothing where their service was — so the old container is renamed
-  aside (`<name>_jd_replaced`), restored if anything later fails, and removed only once the replacement
+  aside (`<name>_jd_replaced_<random>`), restored if anything later fails, and removed only once the replacement
   runs. Compose-managed containers are refused with `ErrComposeManaged`. `UpdateResources` is separate
   because limits genuinely can change in place.
 - **`render.go` keeps the form from being a black box**: a spec back into the `docker run` line and the
@@ -75,13 +75,24 @@ build argv explicitly.
   removing it reclaims (Docker's own figure, which counts a shared layer once) and what that costs.
   Volumes are always listed and never recommended, and the route additionally demands a typed phrase when
   they are in the selection.
+- **Authorization uses effective container resources.** Creation and recreation validate the selected
+  spec, including a spec reused from an existing container. Limited accounts may use plain local
+  volumes; references to existing named volumes are inspected first. Custom drivers or driver options
+  require `system.admin`, as do host/shared network namespaces and device-backed network drivers.
+  Inspection failures refuse creation. Local filesystem volume `device` paths must be absolute and
+  remain subject to `JD_FILE_ROOTS` for administrators; NFS/CIFS remote names retain their syntax.
+  Compose create, config-write, validation and every execution endpoint (including
+  the WebSocket runner) require `system.admin` until authorization covers Docker's complete resolved
+  Compose model, including includes, substitution and plugins. Ordinary stack reads remain available;
+  non-administrator detail requests retain static YAML service names and never execute Compose to
+  resolve includes or environment substitutions.
 - **Compose.** `RunComposeStream` forwards output line by line, because a request that hangs for minutes
   is indistinguishable from a broken dashboard. `composeSteps` maps actions to commands; `update` is a
   pull **then** an up, so a registry that is down leaves the running stack alone. `ValidateCompose` feeds
   the candidate to the parser on **stdin** so a syntax error never touches disk; `WriteComposeFile` goes
   through a temp file in the same directory and keeps `<name>.bak`, guarding what validation cannot catch
   — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
-  on demand; it supplies the one fact the container list cannot, a declared service with no container.
+  on demand for administrators; other users receive the static declared-service list from discovery.
 - **`Build` drives the `docker` binary** because BuildKit is a separate builder the classic API path never
   reaches, and silently building with the legacy one produces images differing from the same Dockerfile
   from a shell.
@@ -100,6 +111,14 @@ build argv explicitly.
   sent. Every Docker route uses the decoding wrapper; `urlparam_test.go` pins it.
 
 ## Files
+
+Copy and move pin configured roots with Go's `os.Root` while traversing entries. Copy resolves a
+destination that is intentionally followed, rejects existing symlink children and same-inode or
+descendant copies, and writes regular-file replacements to an exclusive sibling temporary file before
+rename. Existing destination ownership, mode bits and POSIX access ACLs survive replacement;
+ACL read or preservation errors fail before replacing it. Move replaces final file
+symlinks as entries; directory destinations are resolved and contained before appending the source
+basename. A copy error leaves an existing regular destination intact.
 
 `internal/files` used to be a listing, a reader and a writer, with a page that answered every click by
 loading the file into Monaco — right for a config file, wrong for a picture, a tarball, a video and a
@@ -221,3 +240,12 @@ Compose checks whether saved automatic port mappings still match the source usin
 network mode and port fields. This check does not bind sockets, so stopping a stack does not depend on
 its former listening interfaces still being available. Environment and image edits do not invalidate
 saved port choices.
+
+Container recreation parks the inspected container under a random name using Docker's atomic rename.
+A parking-name conflict is retried without deleting its occupant. All subsequent mutations use the
+inspected container ID. If replacement fails, only the returned candidate ID is cleaned up, then the
+original name and running state are restored with a cancellation-independent cleanup timeout. Cleanup
+failures report the retained original's parking name.
+
+PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
+including symlink resolution; custom PM2 log directories require explicit administrator configuration.

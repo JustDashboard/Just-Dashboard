@@ -1,0 +1,20 @@
+=== RUN   TestLivePostgresSizesTolerateConcurrentRelationDrop
+--- PASS: TestLivePostgresSizesTolerateConcurrentRelationDrop (0.06s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dbx	0.071s
+=== RUN   TestLiveAPIDeveloperSurface
+=== RUN   TestLiveAPIDeveloperSurface/activity_lists_this_connection
+=== RUN   TestLiveAPIDeveloperSurface/kill_validates_its_pid_without_a_phrase
+=== RUN   TestLiveAPIDeveloperSurface/search_finds_the_seeded_value
+=== RUN   TestLiveAPIDeveloperSurface/overview_reports_the_table
+=== RUN   TestLiveAPIDeveloperSurface/rows_render_as_a_runnable_insert
+=== RUN   TestLiveAPIDeveloperSurface/generators_all_answer
+--- PASS: TestLiveAPIDeveloperSurface (0.21s)
+    --- PASS: TestLiveAPIDeveloperSurface/activity_lists_this_connection (0.01s)
+    --- PASS: TestLiveAPIDeveloperSurface/kill_validates_its_pid_without_a_phrase (0.00s)
+    --- PASS: TestLiveAPIDeveloperSurface/search_finds_the_seeded_value (0.03s)
+    --- PASS: TestLiveAPIDeveloperSurface/overview_reports_the_table (0.00s)
+    --- PASS: TestLiveAPIDeveloperSurface/rows_render_as_a_runnable_insert (0.00s)
+    --- PASS: TestLiveAPIDeveloperSurface/generators_all_answer (0.09s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.242s

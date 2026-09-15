@@ -44,6 +44,10 @@ func StreamExport(ctx context.Context, db *sql.DB, query string, args []any, for
 	if maxRows <= 0 || maxRows > 1_000_000 {
 		maxRows = 100_000
 	}
+	args, err := sqlArguments(args)
+	if err != nil {
+		return 0, false, err
+	}
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return 0, false, err

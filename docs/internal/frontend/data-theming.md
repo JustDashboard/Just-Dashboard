@@ -1,10 +1,14 @@
 # Frontend data flow and theming
 
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
-  `X-JD-CSRF` on every mutation, `X-Confirm` passthrough, `ApiError` with
+  `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
+  `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
   `needsConfirmation`/`isAuthProblem`/`needsTotp`; `wsUrl()` and
   `downloadUrl()` build the non-JSON URLs.
-- `usePoll` — abort-per-run so a slow endpoint cannot stack requests, paused on a hidden tab.
+- `usePoll` schedules the next request only after the previous one settles and pauses scheduled
+  requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
+  immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
+  retain the same resource's data. Cleanup aborts the request and ignores late responses.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
 - `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
@@ -14,6 +18,25 @@
 - `src/lib/types.ts` mirrors the backend's JSON by hand, including the `Capability` union — it drifts if
   backend types change without it. `useAuth`'s `can("capability")` hides controls a role cannot use:
   **affordance only**, the server re-decides every request.
+- An account that owes a password change remains unauthenticated in the UI after completing any
+  required second factor. `/login` presents the current/new password form, then returns to credentials
+  after the server revokes sessions. `password_change_required` responses also return the shell to this
+  flow; they never grant access to ordinary feature controls.
+- Database selection belongs to a specific query and result snapshot. Sorting, filtering, paging,
+  refreshing, and changing tables require a fresh selection. Row editors are bound to their original
+  connection and table. Exact integer/decimal SQL values and Redis scan cursors travel as strings;
+  `lib/db-values.ts` preserves precision and rejects non-finite ordinary numeric input. CSV exports
+  escape column names and carriage returns with the same rules as cell values.
+- PM2 actions, deletes, and log sockets send both the trusted `daemonId` as `user` and numeric `id`.
+  The application name alone cannot identify a process across multiple account-owned daemons.
+  A false `logsAvailable` shows the server's `logsUnavailableReason` instead of opening a rejected
+  socket. Available log streams show their connection state, including reconnects.
+- Blueprint catalogue entries expose `deploymentSupported` and `unavailableReason`. Unsupported
+  entries remain visible with their reason but cannot be selected or inspected for deployment.
+- Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
+  action's existing capability. Stack pages hide those controls from limited accounts, explain the
+  restriction, and retain stack/config/log read views. Direct container controls retain their separate
+  capability checks.
 - `ConfirmDialog` collects the typed phrase and the server re-checks it. Its `phrase` is optional and the
   absence is meaningful: a request without one is reversible but still deserves a pause (deleting a
   terminal folder loses a grouping and nothing else), and asking somebody to type "delete folder" teaches

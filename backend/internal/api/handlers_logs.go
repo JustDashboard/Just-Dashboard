@@ -91,21 +91,16 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 			if len(list) == 0 {
 				index.Missing["pm2"] = "PM2 has no managed processes"
 			}
+
 			for _, p := range list {
+				detail := "stdout and stderr, merged"
+				if err := s.checkPM2LogPaths(p.OutLogPath, p.ErrLogPath); err != nil {
+					detail = "Logs unavailable: ask an administrator to include this log directory in JD_LOG_ROOTS."
+				}
 				index.Sources = append(index.Sources, logsx.Source{
-					ID:     "pm2:" + p.Name,
-					Label:  p.Name,
-					Kind:   logsx.KindPM2,
-					Path:   p.OutLogPath,
-					Detail: "stdout and stderr, merged",
-					Status: p.Status,
+					ID: "pm2:" + pm2LogIdentity(p), Label: p.Name + " (" + p.DaemonID + ")", Kind: logsx.KindPM2,
+					Path: p.OutLogPath, Detail: detail, Status: p.Status,
 				})
-				// PM2 writes its logs wherever the ecosystem file says, which
-				// is routinely outside /var/log. Trusting the path because
-				// PM2 reported it keeps those readable without widening the
-				// roots for everything else.
-				s.modules.logs.AllowSource(p.OutLogPath)
-				s.modules.logs.AllowSource(p.ErrLogPath)
 			}
 		} else {
 			index.Missing["pm2"] = err.Error()
@@ -305,17 +300,18 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// pm2Targets is the pair of files PM2 writes, registered as readable and
+// pm2Targets is the pair of permitted files PM2 writes,
 // tagged with the stream each one is. Searching only stdout answered "not
 // found" for a crash sitting in the error log, which is the one thing anybody
 // searches a PM2 process for.
 func (s *Server) pm2Targets(ctx context.Context, name string) ([]logsx.SearchTarget, error) {
-	outPath, errPath, err := s.modules.pm2.LogPaths(ctx, name)
+	outPath, errPath, err := s.pm2LogPaths(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	s.modules.logs.AllowSource(outPath)
-	s.modules.logs.AllowSource(errPath)
+	if err := s.checkPM2LogPaths(outPath, errPath); err != nil {
+		return nil, err
+	}
 	return []logsx.SearchTarget{{Path: outPath, Stream: "stdout"}, {Path: errPath, Stream: "stderr"}}, nil
 }
 
@@ -689,12 +685,13 @@ func (s *Server) followFile(ctx context.Context, path string, n int, f *logsx.Fi
 // it came from — which is the one thing `pm2 logs` gets right and a plain tail
 // of one file loses.
 func (s *Server) followPM2(ctx context.Context, name string, n int, f *logsx.Filter, out chan<- logsx.Line) error {
-	outPath, errPath, err := s.modules.pm2.LogPaths(ctx, name)
+	outPath, errPath, err := s.pm2LogPaths(ctx, name)
 	if err != nil {
 		return err
 	}
-	s.modules.logs.AllowSource(outPath)
-	s.modules.logs.AllowSource(errPath)
+	if err := s.checkPM2LogPaths(outPath, errPath); err != nil {
+		return err
+	}
 	started := 0
 	for _, src := range []struct{ path, stream string }{{outPath, "stdout"}, {errPath, "stderr"}} {
 		if src.path == "" || src.path == "/dev/null" {
@@ -883,7 +880,7 @@ func (s *Server) handleLogRetention(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	if target.kind == logsx.KindPM2 {
-		outPath, _, err := s.modules.pm2.LogPaths(r.Context(), target.id)
+		outPath, _, err := s.pm2LogPaths(r.Context(), target.id)
 		if err != nil {
 			return mapProcsError(err)
 		}
@@ -905,4 +902,49 @@ func (s *Server) handleLogRetention(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, logsx.MatchRetention(st, target.path, size))
 	return nil
+}
+
+// PM2 metadata belongs to a host user. It cannot expand the reader's log roots.
+func (s *Server) checkPM2LogPaths(paths ...string) error {
+	for _, path := range paths {
+		if path == "" || path == "/dev/null" {
+			continue
+		}
+		if err := s.modules.logs.Allow(path); err != nil {
+			return httpx.Err(http.StatusForbidden, "pm2_log_roots_required", "PM2 log path is outside JD_LOG_ROOTS; ask an administrator to configure its log directory.")
+		}
+	}
+	return nil
+}
+func pm2LogIdentity(process procs.PM2Process) string {
+	return url.PathEscape(process.DaemonID) + "/" + strconv.Itoa(process.ID) + "/" + url.PathEscape(process.Name)
+}
+func parsePM2LogIdentity(identity string) (name, daemon string, id int, err error) {
+	parts := strings.SplitN(identity, "/", 3)
+	if len(parts) == 1 {
+		return identity, "", -1, nil
+	}
+	if len(parts) != 3 {
+		return "", "", -1, httpx.BadRequest("PM2 source identity is malformed")
+	}
+	daemon, err = url.PathUnescape(parts[0])
+	if err != nil || daemon == "" {
+		return "", "", -1, httpx.BadRequest("PM2 source account is malformed")
+	}
+	id, err = strconv.Atoi(parts[1])
+	if err != nil || id < 0 {
+		return "", "", -1, httpx.BadRequest("PM2 source process id is malformed")
+	}
+	name, err = url.PathUnescape(parts[2])
+	if err != nil || name == "" {
+		return "", "", -1, httpx.BadRequest("PM2 source process name is malformed")
+	}
+	return name, daemon, id, nil
+}
+func (s *Server) pm2LogPaths(ctx context.Context, identity string) (string, string, error) {
+	name, daemon, id, err := parsePM2LogIdentity(identity)
+	if err != nil {
+		return "", "", err
+	}
+	return s.modules.pm2.LogPathsTarget(ctx, name, daemon, id)
 }

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -97,7 +99,7 @@ func (r *Runner) Execute(ctx context.Context, jobID int64, trigger string) (*Run
 	}
 
 	var logBuf bytes.Buffer
-	artifact, size, err := r.perform(ctx, job, &logBuf)
+	artifact, size, err := r.perform(ctx, job, runID, &logBuf)
 	status := StatusSuccess
 	if err != nil {
 		status = StatusFailed
@@ -117,17 +119,24 @@ func (r *Runner) Execute(ctx context.Context, jobID int64, trigger string) (*Run
 	return r.store.Run(ctx, runID)
 }
 
-func (r *Runner) perform(ctx context.Context, job *Job, logBuf *bytes.Buffer) (string, int64, error) {
+func (r *Runner) perform(ctx context.Context, job *Job, runID int64, logBuf *bytes.Buffer) (string, int64, error) {
+	if err := r.store.ValidatePaths(job); err != nil {
+		return "", 0, err
+	}
 	if err := os.MkdirAll(r.stage, 0o700); err != nil {
 		return "", 0, err
 	}
-	name := fmt.Sprintf("%s-%s.tar.gz", sanitise(job.Name), time.Now().UTC().Format("20060102-150405"))
-	local := filepath.Join(r.stage, name)
+	stage, err := os.MkdirTemp(r.stage, fmt.Sprintf("run-%d-", runID))
+	if err != nil {
+		return "", 0, err
+	}
+	defer os.RemoveAll(stage)
+	name := artifactName(job, runID, time.Now())
+	local := filepath.Join(stage, name)
 
 	fmt.Fprintf(logBuf, "archiving %d source(s) into %s\n", len(job.Sources), name)
 	size, count, err := r.archive(ctx, job, local, logBuf)
 	if err != nil {
-		os.Remove(local)
 		return "", 0, err
 	}
 	fmt.Fprintf(logBuf, "archived %d file(s), %d bytes\n", count, size)
@@ -166,7 +175,7 @@ func (r *Runner) perform(ctx context.Context, job *Job, logBuf *bytes.Buffer) (s
 }
 
 func (r *Runner) archive(ctx context.Context, job *Job, dest string, logBuf *bytes.Buffer) (int64, int, error) {
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -246,7 +255,7 @@ func (r *Runner) archive(ctx context.Context, job *Job, dest string, logBuf *byt
 	if err != nil {
 		return 0, count, err
 	}
-	return st.Size(), count, nil
+	return st.Size(), count, f.Close()
 }
 
 // excluded matches a path against glob patterns, testing both the full path
@@ -299,7 +308,13 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 		}
 		switch job.TargetKind {
 		case TargetLocal:
-			os.Remove(old.Artifact)
+			path, err := r.store.paths.ResolveEntry(old.Artifact)
+			if err != nil {
+				return err
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		default:
 			if err := deleteObject(ctx, job, secrets, old.Artifact); err != nil {
 				r.log.Warn("could not delete remote artifact", "key", old.Artifact, "err", err)
@@ -313,29 +328,44 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 	return nil
 }
 
-// moveFile renames when possible and falls back to copy for cross-device
-// destinations, which is the common case when the target is a mounted volume.
+// Publishing must never replace an existing artifact. A hard link is atomic
+// on one filesystem; exclusive creation preserves that guarantee across devices.
 func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
+	if err := os.Link(src, dst); err == nil {
+		return os.Remove(src)
+	} else if errors.Is(err, os.ErrExist) {
+		return err
 	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		os.Remove(dst)
 		return err
 	}
 	if err := out.Close(); err != nil {
+		os.Remove(dst)
 		return err
 	}
 	return os.Remove(src)
+}
+
+func artifactName(job *Job, runID int64, at time.Time) string {
+	name := sanitise(job.Name)
+	if len(name) > 80 {
+		name = name[:80]
+	}
+	// IDs distinguish jobs with the same sanitized name; entropy also separates
+	// restored database copies writing to a shared object-store prefix.
+	return fmt.Sprintf("%s-job%d-run%d-%s-%s.tar.gz", name, job.ID, runID,
+		at.UTC().Format("20060102-150405"), rand.Text())
 }
 
 func sanitise(name string) string {

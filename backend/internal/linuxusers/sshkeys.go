@@ -1,15 +1,19 @@
 package linuxusers
 
 import (
-	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sys/unix"
 )
 
 // SSHKey is one entry of an authorized_keys file, with the fingerprint
@@ -27,33 +31,6 @@ type SSHKey struct {
 
 func authorizedKeysPath(home string) string {
 	return filepath.Join(home, ".ssh", "authorized_keys")
-}
-
-func readAuthorizedKeys(path string) ([]SSHKey, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	keys := []SSHKey{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 8192), 1<<20)
-	lineNo := 0
-	for sc.Scan() {
-		lineNo++
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, err := parseAuthorizedKey(line)
-		if err != nil {
-			continue
-		}
-		key.Line = lineNo
-		keys = append(keys, *key)
-	}
-	return keys, sc.Err()
 }
 
 func parseAuthorizedKey(line string) (*SSHKey, error) {
@@ -90,25 +67,158 @@ func ValidatePublicKey(raw string) (*SSHKey, error) {
 	return parseAuthorizedKey(raw)
 }
 
+// A directory descriptor anchors every operation even if the account renames
+// its home or .ssh while a privileged request is in flight.
+var sshKeysMu sync.Mutex
+
+func openSSHDir(u *user.User, create bool) (*os.File, int, int, error) {
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if !filepath.IsAbs(u.HomeDir) || filepath.Clean(u.HomeDir) == "/" {
+		return nil, 0, 0, fmt.Errorf("invalid account home")
+	}
+	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(filepath.Clean(u.HomeDir), "/"), "/") {
+		next, openErr := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		unix.Close(fd)
+		if openErr != nil {
+			return nil, 0, 0, fmt.Errorf("open account home: %w", openErr)
+		}
+		fd = next
+	}
+	defer unix.Close(fd)
+	created := false
+	if create {
+		err = unix.Mkdirat(fd, ".ssh", 0700)
+		if err == nil {
+			created = true
+		} else if err != unix.EEXIST {
+			return nil, 0, 0, err
+		}
+	}
+	sshFD, err := unix.Openat(fd, ".ssh", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	dir := os.NewFile(uintptr(sshFD), ".ssh")
+	if created {
+		if err := dir.Chown(uid, gid); err != nil {
+			dir.Close()
+			return nil, 0, 0, err
+		}
+	}
+	if create {
+		var info unix.Stat_t
+		if err := unix.Fstat(sshFD, &info); err != nil {
+			dir.Close()
+			return nil, 0, 0, err
+		}
+		if int(info.Uid) != uid {
+			dir.Close()
+			return nil, 0, 0, fmt.Errorf(".ssh must already belong to the account")
+		}
+		if err := dir.Chmod(0700); err != nil {
+			dir.Close()
+			return nil, 0, 0, err
+		}
+	}
+	return dir, uid, gid, nil
+}
+
+func readKeysAt(dir *os.File) ([]byte, error) {
+	fd, err := unix.Openat(int(dir.Fd()), "authorized_keys", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), "authorized_keys")
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("authorized_keys must be a regular file")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, (2<<20)+1))
+	if len(b) > 2<<20 {
+		return nil, fmt.Errorf("authorized_keys exceeds 2 MiB")
+	}
+	return b, err
+}
+
+func writeKeysAt(dir *os.File, content []byte, uid, gid int) error {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return err
+	}
+	name := ".authorized_keys-" + hex.EncodeToString(token[:])
+	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	if err != nil {
+		return err
+	}
+	defer unix.Unlinkat(int(dir.Fd()), name, 0)
+	f := os.NewFile(uintptr(fd), name)
+	defer f.Close()
+	if err := f.Chown(uid, gid); err != nil {
+		return err
+	}
+	if _, err := f.Write(content); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	// Rename replaces the entry itself: a concurrent symlink or hard link can
+	// never redirect a write or chown into an unrelated file.
+	return unix.Renameat(int(dir.Fd()), name, int(dir.Fd()), "authorized_keys")
+}
+
+func keysFromBytes(content []byte) []SSHKey {
+	keys := []SSHKey{}
+	for n, raw := range strings.Split(string(content), "\n") {
+		key, err := parseAuthorizedKey(strings.TrimSpace(raw))
+		if err != nil {
+			continue
+		}
+		key.Line = n + 1
+		keys = append(keys, *key)
+	}
+	return keys
+}
+
 func (s *Service) ListKeys(username string) ([]SSHKey, string, error) {
 	u, err := user.Lookup(username)
 	if err != nil {
 		return nil, "", ErrNotFound
 	}
 	path := authorizedKeysPath(u.HomeDir)
-	keys, err := readAuthorizedKeys(path)
+	dir, _, _, err := openSSHDir(u, false)
+	if os.IsNotExist(err) {
+		return []SSHKey{}, path, nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []SSHKey{}, path, nil
-		}
 		return nil, path, err
 	}
-	return keys, path, nil
+	defer dir.Close()
+	content, err := readKeysAt(dir)
+	if os.IsNotExist(err) {
+		return []SSHKey{}, path, nil
+	}
+	if err != nil {
+		return nil, path, err
+	}
+	return keysFromBytes(content), path, nil
 }
 
-// AddKey appends a key, creating ~/.ssh with the permissions sshd insists on.
-// sshd refuses to read an authorized_keys file that is group- or
-// world-writable, so getting these modes right is functional, not cosmetic.
 func (s *Service) AddKey(username, raw string) (*SSHKey, error) {
 	if err := ValidateUsername(username); err != nil {
 		return nil, err
@@ -121,39 +231,35 @@ func (s *Service) AddKey(username, raw string) (*SSHKey, error) {
 	if err != nil {
 		return nil, ErrNotFound
 	}
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
-
-	sshDir := filepath.Join(u.HomeDir, ".ssh")
-	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		return nil, err
-	}
-	os.Chown(sshDir, uid, gid)
-	os.Chmod(sshDir, 0o700)
-
-	path := authorizedKeysPath(u.HomeDir)
-	existing, _ := readAuthorizedKeys(path)
-	for _, e := range existing {
-		if e.Fingerprint == key.Fingerprint {
-			return nil, fmt.Errorf("this key is already authorised for %s", username)
-		}
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	sshKeysMu.Lock()
+	defer sshKeysMu.Unlock()
+	dir, uid, gid, err := openSSHDir(u, true)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	if _, err := f.WriteString(strings.TrimSpace(raw) + "\n"); err != nil {
+	defer dir.Close()
+	content, err := readKeysAt(dir)
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	os.Chown(path, uid, gid)
-	os.Chmod(path, 0o600)
-	key.Line = len(existing) + 1
+	for _, existing := range keysFromBytes(content) {
+		if existing.Fingerprint == key.Fingerprint {
+			return nil, fmt.Errorf("this key is already authorised for %s", username)
+		}
+	}
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		content = append(content, '\n')
+	}
+	key.Line = strings.Count(string(content), "\n") + 1
+	content = append(content, []byte(strings.TrimSpace(raw)+"\n")...)
+	if err := writeKeysAt(dir, content, uid, gid); err != nil {
+		return nil, err
+	}
 	return key, nil
 }
 
-// RemoveKey deletes by fingerprint rather than by line number, so a concurrent
-// edit cannot cause the wrong key to be removed.
+// RemoveKey retains comments and unrecognised lines; another tool may depend
+// on them even though the dashboard only displays recognised public keys.
 func (s *Service) RemoveKey(username, fingerprint string) error {
 	if err := ValidateUsername(username); err != nil {
 		return err
@@ -162,44 +268,29 @@ func (s *Service) RemoveKey(username, fingerprint string) error {
 	if err != nil {
 		return ErrNotFound
 	}
-	path := authorizedKeysPath(u.HomeDir)
-	keys, err := readAuthorizedKeys(path)
+	sshKeysMu.Lock()
+	defer sshKeysMu.Unlock()
+	dir, uid, gid, err := openSSHDir(u, false)
 	if err != nil {
 		return err
 	}
-	kept := make([]string, 0, len(keys))
+	defer dir.Close()
+	content, err := readKeysAt(dir)
+	if err != nil {
+		return err
+	}
+	kept := []string{}
 	found := false
-	for _, k := range keys {
-		if k.Fingerprint == fingerprint {
+	for _, raw := range strings.SplitAfter(string(content), "\n") {
+		key, err := parseAuthorizedKey(strings.TrimSpace(raw))
+		if err == nil && key.Fingerprint == fingerprint {
 			found = true
 			continue
 		}
-		kept = append(kept, k.Raw)
+		kept = append(kept, raw)
 	}
 	if !found {
 		return fmt.Errorf("no key with fingerprint %s is authorised for %s", fingerprint, username)
 	}
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".authorized_keys-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	content := ""
-	if len(kept) > 0 {
-		content = strings.Join(kept, "\n") + "\n"
-	}
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	os.Chown(tmp.Name(), uid, gid)
-	return os.Rename(tmp.Name(), path)
+	return writeKeysAt(dir, []byte(strings.Join(kept, "")), uid, gid)
 }

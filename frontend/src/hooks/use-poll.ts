@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError } from "@/lib/api"
 
 type PollState<T> = {
@@ -27,8 +27,8 @@ type PollOptions = {
 }
 
 /**
- * Fetches on mount and then on an interval. Each run aborts the previous one,
- * so a slow endpoint cannot stack requests, and the interval is paused while
+ * Fetches on mount and schedules the next poll after each request settles,
+ * so a slow endpoint cannot stack requests. The interval is paused while
  * the tab is hidden — a dashboard left open in a background tab should not
  * keep hammering the server it is monitoring.
  */
@@ -38,9 +38,16 @@ export function usePoll<T>(
   deps: unknown[] = [],
   { enabled = true }: PollOptions = {},
 ): PollState<T> {
-  const [data, setData] = useState<T>()
-  const [error, setError] = useState<Error>()
-  const [loading, setLoading] = useState(true)
+  // A different resource must never borrow the previous resource's rows or
+  // permissions while it loads. Refreshes of the same resource retain data.
+  // Callers supply a fixed-length list of resource identity dependencies.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const resource = useMemo(() => ({}), deps)
+  const [result, setResult] = useState<{
+    resource: object
+    data?: T
+    error?: Error
+  }>()
   const [tick, setTick] = useState(0)
   // The fetcher is closed over by the interval, so it is kept in a ref that
   // is synced after render rather than assigned during it — writing a ref
@@ -56,48 +63,46 @@ export function usePoll<T>(
     if (!enabled) return
     let cancelled = false
     const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const schedule = () => {
+      if (cancelled || intervalMs <= 0) return
+      timer = setTimeout(() => {
+        if (document.visibilityState === "visible") void run()
+        else schedule()
+      }, intervalMs)
+    }
 
     const run = async () => {
       try {
         const next = await fetcherRef.current(controller.signal)
         if (cancelled) return
-        setData(next)
-        setError(undefined)
+        setResult({ resource, data: next })
       } catch (err) {
         if (cancelled || controller.signal.aborted) return
         if (err instanceof DOMException && err.name === "AbortError") return
-        setError(err instanceof Error ? err : new Error(String(err)))
+        setResult((previous) => ({
+          resource,
+          data: previous?.resource === resource ? previous.data : undefined,
+          error: err instanceof Error ? err : new Error(String(err)),
+        }))
       } finally {
-        if (!cancelled) setLoading(false)
+        schedule()
       }
     }
 
-    run()
-    if (intervalMs <= 0) {
-      return () => {
-        cancelled = true
-        controller.abort()
-      }
-    }
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") run()
-    }, intervalMs)
+    void run()
     return () => {
       cancelled = true
       controller.abort()
-      clearInterval(timer)
+      clearTimeout(timer)
     }
-    // The spread is what the disable is for: the caller's deps cannot be
-    // named here, and React throws if a deps array changes length between
-    // renders. Every call site passes a fixed-length literal, which is the
-    // condition this relies on — a caller building `deps` conditionally would
-    // crash the page rather than poll wrongly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, tick, enabled, ...deps])
+  }, [intervalMs, tick, enabled, resource])
 
   // A disabled poll is not loading: nothing is in flight, and reporting
   // otherwise would leave a caller showing a skeleton forever.
-  return { data, error, loading: enabled && loading, refresh }
+  const current = result?.resource === resource ? result : undefined
+  return { data: current?.data, error: current?.error, loading: enabled && !current, refresh }
 }
 
 export function isAuthError(error: Error | undefined) {

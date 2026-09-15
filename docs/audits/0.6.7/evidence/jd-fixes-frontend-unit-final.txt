@@ -1,0 +1,33 @@
+bun test v1.4.0 (34cbb9a40)
+
+src/lib/database-integrity.test.js:
+(pass) lossless database values > exact SQL types retain all entered digits through JSON [0.83ms]
+(pass) lossless database values > non-finite and unsafe ordinary numbers never turn into null or rounded JSON [0.26ms]
+(pass) lossless database values > CSV escapes headers and carriage returns as well as data [0.57ms]
+(pass) docker command parsing > explicit false cannot enable privileges or removal [1.27ms]
+(pass) docker command parsing > unrepresentable pull policy and invalid booleans are disclosed [0.16ms]
+(pass) confirmations preserve Unicode, whitespace, and literal percent signs in valid headers [1.27ms]
+
+src/lib/log-format.test.js:
+(pass) structured log lines > a Go slog line becomes a message, a level and its remaining fields [0.64ms]
+(pass) structured log lines > the other common field names are recognised [0.26ms]
+(pass) structured log lines > a level is optional [0.08ms]
+(pass) structured log lines > plain container output is left completely alone [0.17ms]
+(pass) structured log lines > a JSON object with no message field is not rearranged [0.03ms]
+(pass) structured log lines > a message that is not a string does not count as one [0.02ms]
+(pass) structured log lines > field values survive being something other than a string [0.11ms]
+
+src/lib/terminal-upload.test.js:
+(pass) terminal clipboard images > normal text paste is left completely unchanged [0.46ms]
+(pass) terminal clipboard images > accepts image/png clipboard data [0.60ms]
+(pass) terminal clipboard images > accepts image/jpeg clipboard data [0.02ms]
+(pass) terminal clipboard images > accepts image/webp clipboard data
+(pass) terminal clipboard images > intercepts an unsupported clipboard image without treating it as text [0.09ms]
+(pass) terminal clipboard images > inserts the uploaded path through terminal input without Enter [0.21ms]
+(pass) terminal clipboard images > refuses a returned path containing terminal control characters [0.07ms]
+(pass) terminal clipboard images > sends CSRF proof with the multipart upload [0.57ms]
+
+ 21 pass
+ 0 fail
+ 53 expect() calls
+Ran 21 tests across 3 files. [38.00ms]

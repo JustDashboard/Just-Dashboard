@@ -653,6 +653,11 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	if req.Query == "" {
 		return httpx.BadRequest("query is required")
 	}
+	statement, err := dbx.SingleStatement(req.Query)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	req.Query = statement
 	risk := dbx.Classify(req.Query)
 	p := httpx.MustPrincipal(r)
 	if risk.Destructive {
@@ -1042,7 +1047,7 @@ func (s *Server) handleDBRowInsert(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	var req rowRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
@@ -1070,7 +1075,7 @@ func (s *Server) handleDBRowUpdate(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	var req rowRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
@@ -1101,7 +1106,7 @@ func (s *Server) handleDBRowDelete(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	var req rowRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
@@ -1670,7 +1675,7 @@ func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var req rowSQLRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {

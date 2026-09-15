@@ -18,6 +18,7 @@ export default function DockerStacksPage() {
         eyebrow="Docker"
         title="Stacks"
         actions={
+          can("system.admin") &&
           can("file.write") && (
             <Button size="sm" onClick={() => setCreating(true)}>
               <FolderPlus className="size-4" />

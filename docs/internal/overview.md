@@ -39,13 +39,16 @@ scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#c
 CONTRIBUTING requires backend build/vet/tests and frontend lint/build/browser journeys to pass before a
 PR.
 
-**Backend testing.** 26 internal packages carry tests, all fast and hermetic — `go test ./...` is reasonable on
-every change. Two families skip rather than fail when the thing they drive is absent:
+**Backend testing.** 33 internal packages carry unit and integration tests. Unit fixtures are isolated;
+live database and Docker tests can contact reachable services, so configure disposable test targets.
+Integration families skip rather than fail when their dependencies are absent:
 
 - **Live database tests** (`dbx/live*_test.go`, `api/handlers_db_live_test.go`) read each engine's DSN
   from an env var defaulting to a local instance. Re-run with `-count=1` or the cache serves yesterday's
   skips. These are the tests that matter for dbx: a catalogue query naming a column the server does not
   have is string-matched identically by a unit test, and only a real engine rejects it.
+- **Docker tests** use a reachable daemon for supported live checks. Deployment artifact/activation
+  suites and daemon-wide prune tests require the separate opt-ins documented in `CONTRIBUTING.md`.
 - **`term` and the terminal half of `api`** drive real PTYs. Direct-session tests isolate clipboard
   storage and never touch an operator shell; the remaining legacy tmux tests inside `term` take a private
   server in that package's `TestMain` (`TMUX_TMPDIR`).
@@ -79,7 +82,7 @@ rewrite proxies HTTP but **not** WebSocket upgrades, so socket-backed pages in d
 backend. The default WebSocket origin check matches scheme, hostname, and effective port (`https` in
 production, `http` under `JD_DEV`); each cross-origin exception must be a complete origin in that
 allowlist. `bun dev`/`bun run build` run `scripts/sync-monaco.mjs` first; invoking `next` directly skips
-it and leaves every editor spinning. `go.mod` declares `go 1.25.7` — check `go version` before blaming
+it and leaves every editor spinning. `go.mod` declares `go 1.26.8` — check `go version` before blaming
 the code on a network-restricted machine.
 
 **Browser testing.** Playwright tests live in `frontend/tests/browser`; `playwright.config.ts` starts a

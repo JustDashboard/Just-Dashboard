@@ -34,10 +34,13 @@ only bound.
   `CommandInDir` and `CommandOnHostInDir` pass `--wd` to nsenter because crossing namespaces silently
   discards `cmd.Dir`.
 - `AsOwner(cmd)` drops to the UID/GID owning `cmd.Dir`, so a `git pull` does not leave root-owned files.
+- `CommandOnHostAsUser` enters the host namespace before using `setpriv` to select the trusted account's
+  UID/GID and groups, clear capabilities and set no-new-privileges. PM2 uses this path with a minimal
+  environment; a user-owned executable is never run as the dashboard's root identity.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
 `files.Resolve` is the single choke point for client-supplied paths: it checks the cleaned path *and*
-the symlink-resolved path (the parent, for files not yet existing) against `JD_FILE_ROOTS`. Every new
+the symlink-resolved path (the nearest existing ancestor for new paths) against `JD_FILE_ROOTS`. Every new
 filesystem entry point goes through it, including the ones that do not look like file operations —
 backup restore destinations, database dump paths, bind-mount sources, build contexts. `ResolveEntry`
 applies the same containment but returns the entry rather than its target: use it for delete, move, stat
@@ -65,6 +68,14 @@ and `JD_REQUIRE_2FA` (default false, reported as the `require2fa` status field) 
 policy that changed under it, so turning the setting off cannot strand a session that can never be
 elevated. `Service.DisableTOTP` is the account holder's own off switch, costs their password, and is
 refused where the policy demands an authenticator.
+Enrollment is available only while `totp_enabled` is false. Consuming its proof, enabling TOTP,
+generating recovery codes and elevating the owning session are one transaction. `users.totp_last_step`
+records the greatest consumed 30-second counter; verification conditionally advances it and elevates
+the session in one transaction, so simultaneous requests cannot reuse a code. Recovery codes are also
+consumed transactionally. An additive schema migration introduces the counter column; resetting TOTP
+clears the counter with the account update.
+An account marked `must_change_pw` must finish its required factors before the password-change
+route becomes available, and cannot use feature routes or API tokens until the password is changed.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
 `auth.Sealer` (from the 64-hex `JD_MASTER_KEY`) encrypts every stored secret — TOTP seeds, connection
 strings, deploy env, backup credentials.

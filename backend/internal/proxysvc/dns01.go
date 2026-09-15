@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,7 +52,7 @@ var dnsProviders = []DNSProvider{
 	},
 	{
 		Key: "route53", Name: "AWS Route 53", Plugin: "dns-route53", DefaultWait: 30,
-		Credentials: "aws_access_key_id = AKIA...\naws_secret_access_key = ...\n\nThe plugin also reads the machine's IAM role, in which case leave this empty.",
+		Credentials: "[default]\naws_access_key_id = AKIA...\naws_secret_access_key = ...\n\nSaved credentials are used for dashboard issuance and renewal. Host certbot timers must set AWS_SHARED_CREDENTIALS_FILE=/etc/letsencrypt/jd-dns/route53.ini and AWS_PROFILE=default. Leave empty to use the machine IAM role.",
 	},
 	{
 		Key: "digitalocean", Name: "DigitalOcean", Plugin: "dns-digitalocean", DefaultWait: 30,
@@ -118,18 +119,21 @@ func WriteDNSCredentials(key, content string) (string, error) {
 	if len(content) > 64*1024 {
 		return "", fmt.Errorf("credentials are unexpectedly large")
 	}
+	if key == "route53" {
+		var err error
+		content, err = normalizeRoute53Credentials(content)
+		if err != nil {
+			return "", err
+		}
+	}
 	if err := os.MkdirAll(dnsCredentialsDir, 0o700); err != nil {
 		return "", err
 	}
 	path := credentialsPath(key)
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o600); err != nil {
+	if err := persistDNSCredentials(path, content); err != nil {
 		return "", err
 	}
-	// Written and then tightened, in case the file already existed with a
-	// wider mode — WriteFile does not chmod an existing file.
-	if err := os.Chmod(path, 0o600); err != nil {
-		return "", err
-	}
+
 	return path, nil
 }
 
@@ -213,4 +217,91 @@ func dnsIssueArgs(provider DNSProvider, wait int) []string {
 		args = append(args, "--"+provider.Plugin+"-propagation-seconds", fmt.Sprint(wait))
 	}
 	return args
+}
+
+func normalizeRoute53Credentials(content string) (string, error) {
+	values := map[string]string{}
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || line == "[default]" {
+			continue
+		}
+		name, value, ok := strings.Cut(line, "=")
+		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+		if !ok || (name != "aws_access_key_id" && name != "aws_secret_access_key" && name != "aws_session_token") || value == "" || strings.ContainsAny(value, "\x00\r\n") {
+			return "", fmt.Errorf("Route 53 credentials must contain only [default], aws_access_key_id, aws_secret_access_key and optional aws_session_token")
+		}
+		if _, exists := values[name]; exists {
+			return "", fmt.Errorf("duplicate Route 53 credential field %s", name)
+		}
+		values[name] = value
+	}
+	if values["aws_access_key_id"] == "" || values["aws_secret_access_key"] == "" {
+		return "", fmt.Errorf("Route 53 requires an access key and secret access key")
+	}
+	normalized := "[default]\n"
+	for _, name := range []string{"aws_access_key_id", "aws_secret_access_key", "aws_session_token"} {
+		if value := values[name]; value != "" {
+			normalized += name + " = " + value + "\n"
+		}
+	}
+	return normalized, nil
+}
+
+// CertbotEnvironment supplies the same AWS profile for issuance and every
+// dashboard renewal. Credential values never appear in argv or job events.
+func CertbotEnvironment() ([]string, error) {
+	return route53EnvironmentAt(credentialsPath("route53"))
+}
+func route53EnvironmentAt(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read saved Route 53 credentials: %w", err)
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, 64*1024+1))
+	if err != nil {
+		return nil, fmt.Errorf("read saved Route 53 credentials: %w", err)
+	}
+	if len(raw) > 64*1024 {
+		return nil, fmt.Errorf("saved Route 53 credentials are unexpectedly large")
+	}
+	normalized, err := normalizeRoute53Credentials(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("saved Route 53 credentials need correction: %w", err)
+	}
+	// Older releases saved bare key/value lines. Normalize on use so an
+	// upgrade repairs already-saved credentials without requiring re-entry.
+	if normalized != string(raw) {
+		if err := persistDNSCredentials(path, normalized); err != nil {
+			return nil, err
+		}
+	}
+	return route53Environment(path), nil
+}
+func persistDNSCredentials(path, content string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(strings.TrimSpace(content) + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+func route53Environment(path string) []string {
+	return []string{
+		"AWS_SHARED_CREDENTIALS_FILE=" + path, "AWS_PROFILE=default", "AWS_DEFAULT_PROFILE=default",
+		"AWS_ACCESS_KEY_ID=", "AWS_SECRET_ACCESS_KEY=", "AWS_SESSION_TOKEN=", "AWS_SECURITY_TOKEN=",
+		"AWS_CONFIG_FILE=/dev/null", "AWS_WEB_IDENTITY_TOKEN_FILE=", "AWS_ROLE_ARN=", "AWS_EC2_METADATA_DISABLED=true",
+	}
 }

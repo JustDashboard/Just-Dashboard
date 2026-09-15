@@ -1,0 +1,127 @@
+$ playwright test tests/browser/security-regressions.spec.ts tests/browser/docker-ui.spec.ts
+
+Running 36 tests using 1 worker
+
+(node:1702242) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/docker-ui.spec.ts:465:5 › the overview separates runtime health from attention (1.1s)
+  ✓   2 [chromium] › tests/browser/docker-ui.spec.ts:481:5 › attention lists posture findings and never calls them health (921ms)
+  ✓   3 [chromium] › tests/browser/docker-ui.spec.ts:510:5 › a stack that was never deployed says so (622ms)
+  ✓   4 [chromium] › tests/browser/docker-ui.spec.ts:519:5 › a volume in use offers no delete button (746ms)
+  ✓   5 [chromium] › tests/browser/docker-ui.spec.ts:538:5 › published ports say what their binding means (1.0s)
+  ✓   6 [chromium] › tests/browser/docker-ui.spec.ts:553:5 › the containers table keeps status runtime-only and counts issues apart (919ms)
+  ✓   7 [chromium] › tests/browser/docker-ui.spec.ts:570:5 › memory says no limit rather than inventing one (728ms)
+  ✓   8 [chromium] › tests/browser/docker-ui.spec.ts:625:5 › attention collapses one problem repeated across containers into one row (846ms)
+  ✓   9 [chromium] › tests/browser/docker-ui.spec.ts:672:5 › on a phone the containers are a list rather than a table with columns removed (744ms)
+  ✓  10 [chromium] › tests/browser/docker-ui.spec.ts:709:5 › the image, volume and network lists read down the row on a phone (1.4s)
+  ✓  11 [chromium] › tests/browser/docker-ui.spec.ts:743:5 › a container's actions are reachable on a touch screen (518ms)
+  ✓  12 [chromium] › tests/browser/docker-ui.spec.ts:769:5 › the destructive verbs are words with a sentence, not glyphs (1.0s)
+  ✓  13 [chromium] › tests/browser/docker-ui.spec.ts:793:5 › the state filters narrow the list and carry their own counts (1.1s)
+  ✓  14 [chromium] › tests/browser/docker-ui.spec.ts:819:5 › runtime health keeps every count, including the zeroes (872ms)
+  ✓  15 [chromium] › tests/browser/docker-ui.spec.ts:835:5 › the detail panel can act on the container it is describing (1.1s)
+  ✓  16 [chromium] › tests/browser/docker-ui.spec.ts:853:5 › asking for a container's logs opens the logs (1.4s)
+  ✓  17 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 320px (6.4s)
+  ✓  18 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 390px (6.6s)
+  ✓  19 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 640px (6.9s)
+  ✓  20 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 768px (8.1s)
+  ✓  21 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 1024px (7.4s)
+  ✓  22 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 1280px (7.3s)
+  ✓  23 [chromium] › tests/browser/docker-ui.spec.ts:876:7 › no Docker page scrolls sideways at 1600px (7.5s)
+  ✓  24 [chromium] › tests/browser/docker-ui.spec.ts:908:5 › a running container's dot says the reading is live (771ms)
+  ✓  25 [chromium] › tests/browser/docker-ui.spec.ts:928:5 › the containers table keeps every column on a wide desktop (935ms)
+  ✓  26 [chromium] › tests/browser/docker-ui.spec.ts:947:5 › the inspect tab does not undo the masking the environment tab applies (1.9s)
+  ✘  27 [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls require administrator access (5.4s)
+(node:1704469) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  28 [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls remain available to administrators (5.5s)
+(node:1704693) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  29 [chromium] › tests/browser/security-regressions.spec.ts:155:5 › database selections cannot follow a different sort or a loading table (1.4s)
+  ✓  30 [chromium] › tests/browser/security-regressions.spec.ts:171:5 › the row editor submits exact BIGINT digits (1.1s)
+  ✓  31 [chromium] › tests/browser/security-regressions.spec.ts:181:5 › slow polling has only one request in flight (661ms)
+  ✓  32 [chromium] › tests/browser/security-regressions.spec.ts:233:5 › a reset password is changed only after the account's second factor (834ms)
+  ✓  33 [chromium] › tests/browser/security-regressions.spec.ts:269:5 › same-name PM2 applications use trusted daemon and process identities (1.9s)
+  ✓  34 [chromium] › tests/browser/security-regressions.spec.ts:349:5 › Redis scan cursors retain all unsigned 64-bit digits in requests (844ms)
+  ✓  35 [chromium] › tests/browser/security-regressions.spec.ts:390:5 › resource filters keep focus while stale responses are discarded (905ms)
+  ✓  36 [chromium] › tests/browser/security-regressions.spec.ts:433:5 › saving enrollment recovery codes advances to the required password change (767ms)
+
+
+  1) [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls require administrator access
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: 'permission-test', exact: true })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByRole('button', { name: 'permission-test', exact: true })
+
+
+      62 |     })
+      63 |     await page.goto("/docker/stacks")
+    > 64 |     await expect(page.getByRole("button", { name: "permission-test", exact: true })).toBeVisible()
+         |                                                                                      ^
+      65 |     await expect(page.getByRole("button", { name: "Create stack", exact: true })).toHaveCount(
+      66 |       admin ? 1 : 0,
+      67 |     )
+        at /home/ubuntu/Just-Dashboard/frontend/tests/browser/security-regressions.spec.ts:64:86
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/security-regressions-Compo-0b032-equire-administrator-access-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/security-regressions-Compo-0b032-equire-administrator-access-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/security-regressions-Compo-0b032-equire-administrator-access-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/security-regressions-Compo-0b032-equire-administrator-access-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls remain available to administrators
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: 'permission-test', exact: true })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByRole('button', { name: 'permission-test', exact: true })
+
+
+      62 |     })
+      63 |     await page.goto("/docker/stacks")
+    > 64 |     await expect(page.getByRole("button", { name: "permission-test", exact: true })).toBeVisible()
+         |                                                                                      ^
+      65 |     await expect(page.getByRole("button", { name: "Create stack", exact: true })).toHaveCount(
+      66 |       admin ? 1 : 0,
+      67 |     )
+        at /home/ubuntu/Just-Dashboard/frontend/tests/browser/security-regressions.spec.ts:64:86
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/security-regressions-Compo-a323f-available-to-administrators-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/security-regressions-Compo-a323f-available-to-administrators-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/security-regressions-Compo-a323f-available-to-administrators-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/security-regressions-Compo-a323f-available-to-administrators-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2 failed
+    [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls require administrator access
+    [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls remain available to administrators
+  34 passed (1.5m)
+error: script "test:browser" exited with code 1

@@ -64,6 +64,12 @@ What did **not** change, and must not:
   reaches nothing but enrolment — the old behaviour, unchanged.
 - Turning an authenticator off is the account holder's own action, requires their password, and is
   refused outright by `Service.DisableTOTP` where the policy demands one.
+- Setup, enrollment confirmation and code verification share one account-scoped attempt budget.
+  Enrollment cannot be used again after TOTP is enabled. An accepted TOTP counter or recovery code is
+  consumed atomically with session elevation; another session cannot reuse it.
+- A temporary password does not grant feature access. After required factors, only authentication
+  status/logout and the session-only password change are available until `must_change_pw` is
+  cleared. API tokens cannot bypass this restriction.
 
 The one deliberate loosening: with the policy off, an account that has never enrolled signs in on a
 password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession` completes a
@@ -127,6 +133,12 @@ the server re-decides regardless.
 One relaxation: `httpx.RequireTypedConfirmationWS` also accepts the phrase as a query parameter, used only
 by WebSocket routes where a browser cannot set a header at all and `wsx`'s origin check supplies what the
 header guarded. **Do not reach for it from an ordinary handler.**
+
+The browser sends `X-Confirm-Encoding: uri` and an `encodeURIComponent`-encoded `X-Confirm` value.
+The backend percent-decodes it once, requires valid UTF-8 and compares the exact phrase, including
+leading/trailing whitespace. This supports Unicode database and file names without relying on HTTP
+header normalization. Legacy unencoded headers remain supported for ordinary phrases; the WebSocket
+query parameter is compared exactly after normal URL decoding.
 
 `api/handlers_db_test.go` pins both directions for the database surface
 (`TestIrreversibleDatabaseRoutesDemandAPhrase`, `TestRoutineDatabaseRoutesDoNotAskForAPhrase`), because the

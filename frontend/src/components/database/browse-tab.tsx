@@ -112,8 +112,14 @@ export function BrowseTab({
   const [filters, setFilters] = useState<DbFilter[]>([])
   const [showFilters, setShowFilters] = useState(false)
   const [counting, setCounting] = useState(false)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [rowSelection, setRowSelection] = useState<{
+    query: string
+    result?: QueryResult
+    indices: Set<number>
+  }>()
+  const tableIdentity = JSON.stringify([conn.id, selection?.schema, selection?.table])
   const [editor, setEditor] = useState<{
+    tableIdentity: string
     mode: "insert" | "edit"
     initial?: Record<string, unknown>
   } | null>(null)
@@ -149,7 +155,14 @@ export function BrowseTab({
     [filters],
   )
   const filterParam = activeFilters.length ? JSON.stringify(activeFilters) : undefined
-
+  const selectionQuery = JSON.stringify([
+    conn.id,
+    selection?.schema,
+    selection?.table,
+    offset,
+    sort,
+    filterParam,
+  ])
   const rows = usePoll(
     (signal) =>
       selection
@@ -170,6 +183,14 @@ export function BrowseTab({
     0,
     [conn.id, selection?.schema, selection?.table, offset, sort?.column, sort?.desc, filterParam],
   )
+  // Indices belong to one result snapshot. Sorting, filtering, navigating,
+  // or refreshing must require a fresh selection before a mutation.
+  const selected =
+    rowSelection?.query === selectionQuery && rowSelection.result === rows.data
+      ? rowSelection.indices
+      : new Set<number>()
+  const setSelected = (indices: Set<number>) =>
+    setRowSelection({ query: selectionQuery, result: rows.data, indices })
 
   const schemaNames = useMemo(() => {
     const set = new Set<string>()
@@ -226,7 +247,8 @@ export function BrowseTab({
   // Asking somebody to type the table name eight times is how you teach them to
   // type it without reading, which is the habit the phrase exists to prevent.
   const deleteSelected = () => {
-    if (!rows.data || selected.size === 0) return
+    if (!rows.data || selected.size === 0 || !detail.data) return
+    if ([...selected].some((index) => !rows.data?.rows[index])) return
     const keys = [...selected].map((i) => {
       const key: Record<string, unknown> = {}
       for (const c of pk) key[c] = rows.data!.rows[i][rows.data!.columns.indexOf(c)]
@@ -307,7 +329,7 @@ export function BrowseTab({
   const duplicateRow = (row: Record<string, unknown>) => {
     const copy = { ...row }
     for (const c of pk) delete copy[c]
-    setEditor({ mode: "insert", initial: copy })
+    setEditor({ mode: "insert", initial: copy, tableIdentity })
   }
 
   const toggleSort = (column: string) => {
@@ -488,7 +510,11 @@ export function BrowseTab({
             table && (
               <>
                 {canWrite && (
-                  <Button size="sm" variant="outline" onClick={() => setEditor({ mode: "insert" })}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditor({ mode: "insert", tableIdentity })}
+                  >
                     <Plus className="size-3.5" />
                     Insert
                   </Button>
@@ -626,7 +652,9 @@ export function BrowseTab({
                 selection={canEditRows ? selected : undefined}
                 onSelectionChange={canEditRows ? setSelected : undefined}
                 onEdit={
-                  canEditRows ? (row) => setEditor({ mode: "edit", initial: row }) : undefined
+                  canEditRows
+                    ? (row) => setEditor({ mode: "edit", initial: row, tableIdentity })
+                    : undefined
                 }
                 onDelete={canEditRows ? deleteRow : undefined}
                 onDuplicate={canWrite ? duplicateRow : undefined}
@@ -647,7 +675,7 @@ export function BrowseTab({
         </PanelBody>
       </Panel>
 
-      {editor && detail.data && (
+      {editor && editor.tableIdentity === tableIdentity && detail.data && (
         <RowEditor
           open
           onOpenChange={(o) => !o && setEditor(null)}

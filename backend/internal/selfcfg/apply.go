@@ -87,6 +87,27 @@ type StartRequest struct {
 // is written first, because a `docker run` that succeeds and is then never
 // recorded is a restart nobody can watch.
 func (a *Applier) Start(ctx context.Context, loc *selfupdate.Location, req StartRequest) (*Run, error) {
+	release, err := selfupdate.LockLifecycle(a.dataDir)
+	if err != nil {
+		return nil, lifecycleError(err)
+	}
+	defer release()
+	if err := selfupdate.CheckLifecycleIdle(a.dataDir); err != nil {
+		return nil, lifecycleError(err)
+	}
+	return a.start(ctx, loc, req)
+}
+
+func lifecycleError(err error) error {
+	if errors.Is(err, selfupdate.ErrInProgress) {
+		return ErrInProgress
+	}
+	return err
+}
+
+// start is called only with lifecycle admission held, including across the
+// preceding .env write when settings are being changed.
+func (a *Applier) start(ctx context.Context, loc *selfupdate.Location, req StartRequest) (*Run, error) {
 	if loc == nil {
 		return nil, ErrNoLocation
 	}

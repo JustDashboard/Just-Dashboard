@@ -172,6 +172,11 @@ func (mysqlDialect) BeforeDropColumn(context.Context, *sql.DB, string, string, s
 }
 
 func (mysqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := ExplainStatement(query)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	query = checked
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 

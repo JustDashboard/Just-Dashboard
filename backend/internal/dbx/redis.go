@@ -38,7 +38,7 @@ type RedisKey struct {
 type RedisPage struct {
 	Keys []RedisKey `json:"keys"`
 	// Cursor is what to send back for the next page; 0 means the scan finished.
-	Cursor uint64 `json:"cursor"`
+	Cursor uint64 `json:"cursor,string"`
 	Done   bool   `json:"done"`
 }
 

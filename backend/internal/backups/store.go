@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
@@ -16,10 +19,41 @@ var ErrNotFound = errors.New("backup job not found")
 type Store struct {
 	st     *store.Store
 	sealer *auth.Sealer
+	paths  *files.Service
 }
 
-func NewStore(st *store.Store, sealer *auth.Sealer) *Store {
-	return &Store{st: st, sealer: sealer}
+func NewStore(st *store.Store, sealer *auth.Sealer, pathServices ...*files.Service) *Store {
+	paths := files.New([]string{"/"})
+	if len(pathServices) > 0 && pathServices[0] != nil {
+		paths = pathServices[0]
+	}
+	return &Store{st: st, sealer: sealer, paths: paths}
+}
+
+// ValidatePaths runs both when saving and when executing a job. Metadata stays
+// readable after roots change so an administrator can repair or delete the job.
+func (s *Store) ValidatePaths(j *Job) error {
+	if err := j.Validate(); err != nil {
+		return err
+	}
+	for i, path := range j.Sources {
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("backup source path is required")
+		}
+		resolved, err := s.paths.Resolve(path)
+		if err != nil {
+			return err
+		}
+		j.Sources[i] = resolved
+	}
+	if j.TargetKind == TargetLocal {
+		resolved, err := s.paths.Resolve(j.Target.Path)
+		if err != nil {
+			return err
+		}
+		j.Target.Path = resolved
+	}
+	return nil
 }
 
 const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at`
@@ -107,7 +141,7 @@ func (s *Store) Secrets(ctx context.Context, id int64) (*TargetSecrets, error) {
 }
 
 func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Job, error) {
-	if err := j.Validate(); err != nil {
+	if err := s.ValidatePaths(j); err != nil {
 		return nil, err
 	}
 	sealed := ""
@@ -137,7 +171,7 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 // Update rewrites a job. Credentials are only replaced when new ones are
 // supplied, so editing a schedule does not silently wipe stored keys.
 func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSecrets) (*Job, error) {
-	if err := j.Validate(); err != nil {
+	if err := s.ValidatePaths(j); err != nil {
 		return nil, err
 	}
 	if _, err := s.Get(ctx, id); err != nil {

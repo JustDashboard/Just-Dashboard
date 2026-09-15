@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/go-chi/chi/v5"
 )
 
 // Creating a container is the strongest thing the Docker socket can do, and
@@ -70,6 +73,7 @@ func TestAuthoriseSpecRefusesCapabilitiesAndDevicesBelowAdmin(t *testing.T) {
 // them to a bind mount instead, which is the opposite of the point.
 func TestAuthoriseSpecAllowsNamedVolumeForLimited(t *testing.T) {
 	s := testServer(t)
+	setVolumePolicyEngine(t, s, "local", nil, http.StatusOK)
 	spec := dockerx.ContainerSpec{
 		Image:  "postgres:16",
 		Mounts: []dockerx.MountSpec{{Type: "volume", Source: "pgdata", Target: "/var/lib/postgresql/data"}},
@@ -286,5 +290,179 @@ func TestReclaimRoutesRequireTheDestructiveCapability(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%s as readonly got %d, want 403: %s", path, w.Code, strings.TrimSpace(w.Body.String()))
 		}
+	}
+}
+
+// The fake engine exposes only read-only volume inspection. Any Docker mutation
+// during authorization fails the test.
+func setVolumePolicyEngine(t *testing.T, s *Server, driver string, options map[string]string, status int) {
+	t.Helper()
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/_ping" {
+			w.Header().Set("API-Version", "1.47")
+			return
+		}
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/volumes/") {
+			t.Errorf("unexpected Docker request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+			return
+		}
+		w.WriteHeader(status)
+		if status != http.StatusOK {
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "fixture inspection error"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Name": "fixture", "Driver": driver, "Options": options})
+	}))
+	t.Cleanup(engine.Close)
+	s.modules.docker = dockerx.New(engine.URL)
+	t.Cleanup(func() { _ = s.modules.docker.Close() })
+}
+func TestAuthoriseSpecInspectsNamedVolumeBackingForLimited(t *testing.T) {
+	for _, test := range []struct {
+		name, driver string
+		options      map[string]string
+		status       int
+		allowed      bool
+	}{
+		{name: "plain", driver: "local", status: 200, allowed: true},
+		{name: "new", status: 404, allowed: true},
+		{name: "bind", driver: "local", options: map[string]string{"type": "none", "o": "bind", "device": "/"}, status: 200},
+		{name: "plugin", driver: "rclone", status: 200},
+		{name: "unavailable", status: 500},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := testServer(t)
+			setVolumePolicyEngine(t, s, test.driver, test.options, test.status)
+			spec := dockerx.ContainerSpec{Image: "alpine", Mounts: []dockerx.MountSpec{{Type: "volume", Source: "fixture", Target: "/data"}}}
+			err := s.authoriseSpec(specRequest(t, auth.RoleLimited), &spec)
+			if (err == nil) != test.allowed {
+				t.Fatalf("authorization: %v, allowed %v", err, test.allowed)
+			}
+		})
+	}
+}
+func TestVolumeCustomDriversAndOptionsRequireAdmin(t *testing.T) {
+	s := testServer(t)
+	for _, spec := range []dockerx.VolumeSpec{{Driver: "plugin"}, {Driver: "local", Options: map[string]string{"device": "/", "type": "none", "o": "bind"}}} {
+		if err := s.authoriseVolumeOptions(specRequest(t, auth.RoleLimited), spec.Driver, spec.Options); err == nil {
+			t.Fatal("custom volume options bypassed admin boundary")
+		}
+	}
+	if err := s.authoriseVolumeOptions(specRequest(t, auth.RoleLimited), "local", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.authoriseVolumeOptions(specRequest(t, auth.RoleAdmin), "local", map[string]string{"device": "/etc"}); err == nil {
+		t.Fatal("admin volume backing path bypassed file roots")
+	}
+	for _, spec := range []dockerx.ContainerSpec{{NetworkMode: "container:privileged"}, {Networks: []string{"host"}}} {
+		if err := s.authoriseSpec(specRequest(t, auth.RoleLimited), &spec); err == nil {
+			t.Fatal("network namespace bypassed admin boundary")
+		}
+	}
+}
+func TestVolumeBackingPathsAndRemoteDevices(t *testing.T) {
+	s := testServer(t)
+	for _, test := range []struct {
+		name    string
+		options map[string]string
+		allowed bool
+	}{
+		{name: "relative bind", options: map[string]string{"type": "none", "o": "bind", "device": "../../etc"}},
+		{name: "relative recursive bind", options: map[string]string{"o": "ro,rbind", "device": "etc"}},
+		{name: "none without bind flag", options: map[string]string{"type": "none", "device": "etc"}},
+		{name: "empty bind", options: map[string]string{"type": "none", "o": "bind"}},
+		{name: "relative block device", options: map[string]string{"type": "ext4", "device": "dev/sda"}},
+		{name: "outside root", options: map[string]string{"type": "none", "o": "bind", "device": "/etc"}},
+		{name: "inside root", options: map[string]string{"type": "none", "o": "bind", "device": s.Cfg.FileRoots[0]}, allowed: true},
+		{name: "nfs", options: map[string]string{"type": "nfs", "o": "addr=192.0.2.1", "device": ":/export"}, allowed: true},
+		{name: "nfs4", options: map[string]string{"type": "nfs4", "device": "server:/export"}, allowed: true},
+		{name: "cifs", options: map[string]string{"type": "cifs", "device": "//server/share"}, allowed: true},
+		{name: "smb3", options: map[string]string{"type": "smb3", "device": "//server/share"}, allowed: true},
+		{name: "tmpfs", options: map[string]string{"type": "tmpfs", "device": "tmpfs"}, allowed: true},
+		{name: "bind overrides nfs", options: map[string]string{"type": "nfs", "o": "bind", "device": "etc"}},
+		{name: "recursive bind overrides cifs", options: map[string]string{"type": "cifs", "o": "ro,rbind", "device": "/etc"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := s.authoriseVolumeOptions(specRequest(t, auth.RoleAdmin), "local", test.options)
+			if (err == nil) != test.allowed {
+				t.Fatalf("authorization: %v, allowed %v", err, test.allowed)
+			}
+		})
+	}
+}
+
+func TestComposeAndCustomVolumeRoutesRefuseLimitedBeforeExecution(t *testing.T) {
+	s := testServer(t)
+	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "limited-docker-policy", auth.RoleLimited)}
+	for _, route := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/docker/stacks/", "{}"},
+		{http.MethodPut, "/api/v1/docker/stacks/example/config", "{}"},
+		{http.MethodPost, "/api/v1/docker/stacks/example/validate", "{}"},
+		{http.MethodPost, "/api/v1/docker/stacks/example/up", ""},
+		{http.MethodPost, "/api/v1/docker/stacks/example/start", ""},
+		{http.MethodPost, "/api/v1/docker/stacks/example/pull", ""},
+		{http.MethodPost, "/api/v1/docker/stacks/example/build", ""},
+		{http.MethodGet, "/api/v1/docker/stacks/example/run?action=up", ""},
+		{http.MethodPost, "/api/v1/docker/volumes/", `{"name":"host-root","driver":"local","options":{"type":"none","o":"bind","device":"/"}}`},
+	} {
+		result := c.do(route.method, route.path, route.body, nil)
+		if result.Code != http.StatusForbidden {
+			t.Errorf("%s %s = %d %s", route.method, route.path, result.Code, result.Body.String())
+		}
+	}
+}
+
+func TestAuthoriseSpecInspectsNetworkIDs(t *testing.T) {
+	s := testServer(t)
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/_ping" {
+			w.Header().Set("API-Version", "1.47")
+			return
+		}
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/networks/") {
+			t.Errorf("unexpected mutation %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+			return
+		}
+		_, _ = w.Write([]byte(`{"Id":"host-network-id","Name":"host","Driver":"host"}`))
+	}))
+	defer engine.Close()
+	s.modules.docker = dockerx.New(engine.URL)
+	defer s.modules.docker.Close()
+	spec := dockerx.ContainerSpec{Image: "alpine", Networks: []string{"host-network-id"}}
+	if err := s.authoriseSpec(specRequest(t, auth.RoleLimited), &spec); err == nil || !strings.Contains(err.Error(), "administrator") {
+		t.Fatalf("host network id bypassed policy: %v", err)
+	}
+}
+func TestRecreateAuthorisesAnOmittedSpec(t *testing.T) {
+	s := testServer(t)
+	inspections := 0
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/_ping" {
+			w.Header().Set("API-Version", "1.47")
+			return
+		}
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/containers/original/json") {
+			t.Errorf("unexpected mutation %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+			return
+		}
+		inspections++
+		_, _ = w.Write([]byte(`{"Id":"original","Name":"/app","Config":{"Image":"alpine"},"HostConfig":{"Privileged":true},"State":{"Running":true}}`))
+	}))
+	defer engine.Close()
+	s.modules.docker = dockerx.New(engine.URL)
+	defer s.modules.docker.Close()
+	request := specRequest(t, auth.RoleLimited)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", "original")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, route))
+	err := s.handleContainerRecreate(httptest.NewRecorder(), request)
+	if err == nil || !strings.Contains(err.Error(), "administrator") || inspections != 2 {
+		t.Fatalf("omitted spec bypassed policy: %v inspections %d", err, inspections)
 	}
 }

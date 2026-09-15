@@ -109,10 +109,7 @@ export function SelfUpdateProvider({ children }: { children: React.ReactNode }) 
     return next
   }, [])
 
-  const poll = usePoll(fetchReport, live ? LIVE_POLL : settling ? SETTLE_POLL : IDLE_POLL, [
-    live,
-    settling,
-  ])
+  const poll = usePoll(fetchReport, live ? LIVE_POLL : settling ? SETTLE_POLL : IDLE_POLL)
   const { data: report, error, refresh } = poll
 
   const run = report?.run

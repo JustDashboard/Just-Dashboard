@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,25 +13,28 @@ import (
 )
 
 type PM2Process struct {
-	ID          int     `json:"id"`
-	Name        string  `json:"name"`
-	Namespace   string  `json:"namespace"`
-	Status      string  `json:"status"`
-	PID         int     `json:"pid"`
-	CPU         float64 `json:"cpu"`
-	Memory      int64   `json:"memory"`
-	Restarts    int     `json:"restarts"`
-	Unstable    int     `json:"unstableRestarts"`
-	UptimeMS    int64   `json:"uptimeMs"`
-	ExecMode    string  `json:"execMode"`
-	Instances   int     `json:"instances"`
-	ScriptPath  string  `json:"scriptPath"`
-	CWD         string  `json:"cwd"`
-	NodeVersion string  `json:"nodeVersion"`
-	OutLogPath  string  `json:"outLogPath"`
-	ErrLogPath  string  `json:"errLogPath"`
-	User        string  `json:"user"`
-	Watching    bool    `json:"watching"`
+	LogsAvailable         bool    `json:"logsAvailable"`
+	LogsUnavailableReason string  `json:"logsUnavailableReason,omitempty"`
+	ID                    int     `json:"id"`
+	DaemonID              string  `json:"daemonId"`
+	Name                  string  `json:"name"`
+	Namespace             string  `json:"namespace"`
+	Status                string  `json:"status"`
+	PID                   int     `json:"pid"`
+	CPU                   float64 `json:"cpu"`
+	Memory                int64   `json:"memory"`
+	Restarts              int     `json:"restarts"`
+	Unstable              int     `json:"unstableRestarts"`
+	UptimeMS              int64   `json:"uptimeMs"`
+	ExecMode              string  `json:"execMode"`
+	Instances             int     `json:"instances"`
+	ScriptPath            string  `json:"scriptPath"`
+	CWD                   string  `json:"cwd"`
+	NodeVersion           string  `json:"nodeVersion"`
+	OutLogPath            string  `json:"outLogPath"`
+	ErrLogPath            string  `json:"errLogPath"`
+	User                  string  `json:"user"`
+	Watching              bool    `json:"watching"`
 }
 
 // pm2Raw mirrors the subset of `pm2 jlist` output we consume. PM2's schema is
@@ -110,7 +112,11 @@ func (p *PM2) List(ctx context.Context) ([]PM2Process, error) {
 				}
 				continue
 			}
-			procs, err := parsePM2List([]byte(res.Stdout), now, filepath.Base(home.home))
+			account, accountErr := pm2Account(home.home)
+			if accountErr != nil {
+				return nil, accountErr
+			}
+			procs, err := parsePM2List([]byte(res.Stdout), now, account.Username)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -123,19 +129,9 @@ func (p *PM2) List(ctx context.Context) ([]PM2Process, error) {
 			return nil, firstErr
 		}
 	} else {
-		if !binaryExists("pm2") && !hostexec.Available("pm2") {
-			return nil, fmt.Errorf("pm2 %w", ErrNotInstalled)
-		}
-		res, err := runWithEnv(ctx, "pm2", hostPM2Env(), 20*time.Second, "jlist")
-		if err != nil {
-			return nil, err
-		}
-		procs, err := parsePM2List([]byte(res.Stdout), now, "")
-		if err != nil {
-			return nil, err
-		}
-		out = procs
+		return out, nil
 	}
+
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
@@ -147,14 +143,9 @@ func (p *PM2) List(ctx context.Context) ([]PM2Process, error) {
 	return append([]PM2Process(nil), out...), nil
 }
 
-// hostPM2Env is the environment for a host-wide PM2 invocation: this
-// process's own environment, so a bare-metal install with PM2 on its PATH
-// keeps working exactly as before.
-func hostPM2Env() []string { return nil }
-
 // parsePM2List converts one `pm2 jlist` document into processes. fallbackUser
-// names the account whose daemon answered, for records that carry no username
-// themselves.
+// names the trusted account whose daemon answered. Daemon-supplied usernames
+// never select execution credentials.
 func parsePM2List(data []byte, nowMilli int64, fallbackUser string) ([]PM2Process, error) {
 	var raw []pm2Raw
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -170,10 +161,7 @@ func parsePM2List(data []byte, nowMilli int64, fallbackUser string) ([]PM2Proces
 			ExecMode: r.PM2Env.ExecMode, ScriptPath: r.PM2Env.PMExecPath,
 			CWD: r.PM2Env.PMCwd, NodeVersion: r.PM2Env.NodeVersion,
 			OutLogPath: r.PM2Env.PMOutLogPath, ErrLogPath: r.PM2Env.PMErrLogPath,
-			User: r.PM2Env.Username,
-		}
-		if proc.User == "" {
-			proc.User = fallbackUser
+			User: fallbackUser, DaemonID: fallbackUser,
 		}
 		if r.PM2Env.Status == "online" && r.PM2Env.PMUptime > 0 {
 			proc.UptimeMS = nowMilli - r.PM2Env.PMUptime
@@ -220,6 +208,10 @@ const (
 )
 
 func (p *PM2) Control(ctx context.Context, name string, action PM2Action) (*CommandResult, error) {
+	return p.ControlTarget(ctx, name, "", -1, action)
+}
+
+func (p *PM2) ControlTarget(ctx context.Context, name, daemon string, id int, action PM2Action) (*CommandResult, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
@@ -228,10 +220,21 @@ func (p *PM2) Control(ctx context.Context, name string, action PM2Action) (*Comm
 	default:
 		return nil, fmt.Errorf("unknown pm2 action %q", action)
 	}
-	// Act on the daemon that owns the process: signalling root's daemon about
-	// another account's application addresses nobody.
-	if home, ok := p.ownerOf(ctx, name); ok {
-		result, err := runPM2Host(ctx, home, 60*time.Second, string(action), name)
+	// Resolve mutations against a fresh daemon listing; a poll cache may refer
+	// to an id the user has removed and reassigned in the meantime.
+	p.mu.Lock()
+	p.cachedAt = time.Time{}
+	p.mu.Unlock()
+	proc, err := p.target(ctx, name, daemon, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, home := range discoverPM2Homes() {
+		account, err := pm2Account(home.home)
+		if err != nil || account.Username != proc.DaemonID {
+			continue
+		}
+		result, err := runPM2Host(ctx, home, 60*time.Second, string(action), strconv.Itoa(proc.ID))
 		if err == nil {
 			p.mu.Lock()
 			p.cachedAt = time.Time{}
@@ -239,51 +242,31 @@ func (p *PM2) Control(ctx context.Context, name string, action PM2Action) (*Comm
 		}
 		return result, err
 	}
-	result, err := runWithEnv(ctx, "pm2", hostPM2Env(), 60*time.Second, string(action), name)
-	if err == nil {
-		p.mu.Lock()
-		p.cachedAt = time.Time{}
-		p.mu.Unlock()
-	}
-	return result, err
+	return nil, fmt.Errorf("PM2 daemon is no longer available")
 }
 
-// ownerOf finds the account whose daemon manages name. It reads the cache
-// when fresh and otherwise lists directly, without touching the cache timers
-// the poll loop owns.
-func (p *PM2) ownerOf(ctx context.Context, name string) (pm2Home, bool) {
-	p.mu.Lock()
-	cached := append([]PM2Process(nil), p.cached...)
-	fresh := time.Since(p.cachedAt) < 3*time.Second
-	p.mu.Unlock()
-	var list []PM2Process
-	if fresh {
-		list = cached
-	} else {
-		var err error
-		list, err = p.List(ctx)
-		if err != nil {
-			return pm2Home{}, false
-		}
-	}
-	homes := discoverPM2Homes()
-	byUser := map[string]pm2Home{}
-	for _, h := range homes {
-		byUser[filepath.Base(h.home)] = h
-		byUser[h.home] = h
-	}
+func selectPM2Target(list []PM2Process, name, daemon string, id int) (PM2Process, error) {
+	var matched []PM2Process
 	for _, proc := range list {
-		if proc.Name != name {
-			continue
-		}
-		if home, ok := byUser[proc.User]; ok {
-			return home, true
-		}
-		if len(homes) == 1 {
-			return homes[0], true
+		if proc.Name == name && (daemon == "" || proc.DaemonID == daemon) && (id < 0 || proc.ID == id) {
+			matched = append(matched, proc)
 		}
 	}
-	return pm2Home{}, false
+	if len(matched) == 0 {
+		return PM2Process{}, fmt.Errorf("PM2 process is no longer available")
+	}
+	if len(matched) != 1 {
+		return PM2Process{}, fmt.Errorf("PM2 process name is ambiguous; select its account and process id")
+	}
+	return matched[0], nil
+}
+
+func (p *PM2) target(ctx context.Context, name, daemon string, id int) (PM2Process, error) {
+	list, err := p.List(ctx)
+	if err != nil {
+		return PM2Process{}, err
+	}
+	return selectPM2Target(list, name, daemon, id)
 }
 
 // Save persists PM2's current inventory for its startup hook to resurrect on
@@ -307,33 +290,20 @@ func (p *PM2) Save(ctx context.Context) (*CommandResult, error) {
 	if !p.Available() {
 		return nil, fmt.Errorf("pm2 %w", ErrNotInstalled)
 	}
-	return runWithEnv(ctx, "pm2", hostPM2Env(), 60*time.Second, "save")
+	return nil, fmt.Errorf("no PM2 account daemon is available")
 }
 
 // LogPaths returns the on-disk log files for a process so the log tailer can
 // follow them directly, which survives `pm2 logs` being killed and gives the
 // same view after a restart.
-func (p *PM2) LogPaths(ctx context.Context, name string) (outPath, errPath string, err error) {
-	list, err := p.List(ctx)
+func (p *PM2) LogPaths(ctx context.Context, name string) (string, string, error) {
+	return p.LogPathsTarget(ctx, name, "", -1)
+}
+
+func (p *PM2) LogPathsTarget(ctx context.Context, name, daemon string, id int) (string, string, error) {
+	proc, err := p.target(ctx, name, daemon, id)
 	if err != nil {
 		return "", "", err
 	}
-	for _, proc := range list {
-		if proc.Name == name {
-			return proc.OutLogPath, proc.ErrLogPath, nil
-		}
-	}
-	return "", "", fmt.Errorf("pm2 process %q not found", name)
-}
-
-// StreamLogs follows PM2's own combined output. It is used when the on-disk
-// paths are unavailable (for instance a process configured with /dev/null logs).
-func (p *PM2) StreamLogs(ctx context.Context, name string, lines int) (*exec.Cmd, error) {
-	if err := ValidateName(name); err != nil {
-		return nil, err
-	}
-	if lines <= 0 || lines > 5000 {
-		lines = 200
-	}
-	return exec.CommandContext(ctx, "pm2", "logs", name, "--raw", "--lines", fmt.Sprint(lines)), nil
+	return proc.OutLogPath, proc.ErrLogPath, nil
 }

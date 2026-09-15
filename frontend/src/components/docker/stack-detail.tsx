@@ -107,7 +107,7 @@ function StackBody({
     // Slower while a command is running: the poll would otherwise fight the
     // console for attention, and the interesting output is in the console.
     runner.running ? 0 : 10000,
-    [name, runner.running],
+    [name],
     // Not while closed: with no name the path is the stack *list*, and this
     // panel would render an array's missing fields.
     { enabled: name !== null },
@@ -174,6 +174,12 @@ function StackBody({
               points at anything.
             </Notice>
           )}
+          {data.managed && !can("system.admin") && (
+            <Notice title="Administrator access required">
+              An administrator must create, edit, validate, or run Compose stacks. You can inspect
+              this stack here.
+            </Notice>
+          )}
           {data.declaredError && (
             <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
               {data.declaredError}
@@ -221,7 +227,12 @@ function StackBody({
               {tab === "preview" && <DeployPreviewPanel stack={data.name} />}
             </TabsContent>
             <TabsContent value="compose" className="min-h-0 flex-1">
-              <ComposeEditor stack={data} onSaved={reload} canWrite={can("file.write")} />
+              <ComposeEditor
+                stack={data}
+                onSaved={reload}
+                canWrite={can("system.admin") && can("file.write")}
+                canValidate={can("system.admin")}
+              />
             </TabsContent>
             <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
               {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
@@ -248,7 +259,7 @@ function StackActions({
   runner: ReturnType<typeof useRunConsole>
 }) {
   const { can } = useAuth()
-  if (!data.managed) return null
+  if (!data.managed || !can("system.admin")) return null
   const busy = runner.running
   const quiet = (fn: () => Promise<void>) => () => {
     fn().catch((err) => notify.error(String(err)))
@@ -435,7 +446,7 @@ function ServiceRow({
         </div>
       )}
 
-      {managed && can("service.control") && !service.missing && (
+      {managed && can("system.admin") && can("service.control") && !service.missing && (
         <Button
           size="xs"
           variant="ghost"
@@ -448,7 +459,7 @@ function ServiceRow({
           Recreate service
         </Button>
       )}
-      {managed && can("service.control") && service.missing && (
+      {managed && can("system.admin") && can("service.control") && service.missing && (
         <Button
           size="xs"
           variant="outline"
@@ -470,10 +481,12 @@ function ComposeEditor({
   stack,
   onSaved,
   canWrite,
+  canValidate,
 }: {
   stack: StackDetail
   onSaved: () => void
   canWrite: boolean
+  canValidate: boolean
 }) {
   const [content, setContent] = useState<string>()
   const [original, setOriginal] = useState("")
@@ -559,9 +572,11 @@ function ComposeEditor({
           {stack.configPath}
         </span>
         {dirty && <Tag tone="warning">unsaved</Tag>}
-        <Button size="xs" variant="outline" onClick={check} disabled={busy}>
-          Check
-        </Button>
+        {canValidate && (
+          <Button size="xs" variant="outline" onClick={check} disabled={busy}>
+            Check
+          </Button>
+        )}
         {canWrite && (
           <Button size="xs" onClick={() => save()} disabled={busy || !dirty} pending={busy}>
             <FloppyDisk className="size-3" />

@@ -3,10 +3,12 @@ package term
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -27,21 +29,42 @@ import (
 // package runs is a child of this process, so setting it here is enough.
 func TestMain(m *testing.M) {
 	// A parent tmux session overrides TMUX_TMPDIR unless cleared first.
-	os.Unsetenv("TMUX")
+	if err := os.Unsetenv("TMUX"); err != nil {
+		fmt.Fprintln(os.Stderr, "clear inherited tmux server:", err)
+		os.Exit(1)
+	}
 	dir, err := os.MkdirTemp("", "jdtmux")
-	if err == nil {
-		// Short, because a unix socket path has about a hundred characters to
-		// play with and a nested temp directory can spend them all.
-		os.Setenv("TMUX_TMPDIR", dir)
-		defer os.RemoveAll(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "create private tmux directory:", err)
+		os.Exit(1)
+	}
+	// Short, because a unix socket path has about a hundred characters to
+	// play with and a nested temp directory can spend them all. Fail closed:
+	// tests and cleanup must never fall back to the operator's default server.
+	if err := os.Setenv("TMUX_TMPDIR", dir); err != nil {
+		os.RemoveAll(dir)
+		fmt.Fprintln(os.Stderr, "select private tmux directory:", err)
+		os.Exit(1)
+	}
+	if _, err := exec.LookPath("tmux"); err == nil {
+		// Keep the private server alive between tests. Killing the last test
+		// session otherwise races the next tmux client's connection against
+		// automatic server exit, producing "server exited unexpectedly".
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		out, err := exec.CommandContext(ctx, "tmux", "-f", "/dev/null", "start-server", ";", "set-option", "-s", "exit-empty", "off").CombinedOutput()
+		cancel()
+		if err != nil {
+			exec.Command("tmux", "kill-server").Run()
+			os.RemoveAll(dir)
+			fmt.Fprintf(os.Stderr, "start private tmux server: %v: %s\n", err, out)
+			os.Exit(1)
+		}
 	}
 	code := m.Run()
 	// The server outlives the tests otherwise: that is the property under
 	// test, and a stray tmux server per run is not a legacy worth keeping.
 	exec.Command("tmux", "kill-server").Run()
-	if err == nil {
-		os.RemoveAll(dir)
-	}
+	os.RemoveAll(dir)
 	os.Exit(code)
 }
 

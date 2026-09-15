@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/nxadm/tail"
@@ -22,19 +21,6 @@ import (
 // up as a feature.
 type Service struct {
 	roots []string
-
-	// extra holds individual files that a trusted discovery step reported — a
-	// PM2 ecosystem file's log path, say — which routinely live outside
-	// /var/log.
-	//
-	// These are exact paths, not roots. The previous version appended the
-	// discovered directory to s.roots, which widened the permitted set
-	// permanently and process-wide for every principal and every later
-	// request, from a plain GET /logs/sources that any authenticated role can
-	// make. It also grew without bound, because nothing deduplicated, and it
-	// mutated a slice other request goroutines were ranging over at the time.
-	mu    sync.RWMutex
-	extra map[string]struct{}
 }
 
 func New(roots []string) *Service {
@@ -44,7 +30,7 @@ func New(roots []string) *Service {
 			cleaned = append(cleaned, filepath.Clean(abs))
 		}
 	}
-	return &Service{roots: cleaned, extra: map[string]struct{}{}}
+	return &Service{roots: cleaned}
 }
 
 // Roots reports the configured log roots, which the UI names when it has to
@@ -69,36 +55,7 @@ func (s *Service) Allow(path string) error {
 			return nil
 		}
 	}
-	s.mu.RLock()
-	_, literal := s.extra[filepath.Clean(abs)]
-	_, dereferenced := s.extra[resolved]
-	s.mu.RUnlock()
-	if literal || dereferenced {
-		return nil
-	}
 	return fmt.Errorf("path %q is outside the configured log roots", path)
-}
-
-// AllowSource permits one file that a trusted source named — a PM2 process
-// definition, an nginx config — and which lies outside the log roots. It
-// permits that file and nothing else: not its directory, and not its siblings.
-func (s *Service) AllowSource(path string) {
-	if path == "" || path == "/dev/null" {
-		return
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return
-	}
-	abs = filepath.Clean(abs)
-	resolved := abs
-	if r, err := filepath.EvalSymlinks(abs); err == nil {
-		resolved = r
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.extra[abs] = struct{}{}
-	s.extra[resolved] = struct{}{}
 }
 
 // Tail follows a file, emitting the last n lines first and then new ones as

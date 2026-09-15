@@ -408,7 +408,7 @@ func PreflightDraft(
 	if err := draft.Data.Intent.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := draft.Data.Source.Validate(); err != nil {
+	if err := draft.Data.Source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
 	if err := validateDetectionResult(draft.Data.Source, *draft.Data.Detection); err != nil {

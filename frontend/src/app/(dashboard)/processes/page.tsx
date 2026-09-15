@@ -85,7 +85,7 @@ export default function ProcessesPage() {
 function PM2Tab() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [logsFor, setLogsFor] = useState<string | null>(null)
+  const [logsFor, setLogsFor] = useState<PM2Process | null>(null)
   const [saving, setSaving] = useState(false)
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<{ available: boolean; processes: PM2Process[] }>("/pm2/", undefined, signal),
@@ -114,6 +114,7 @@ function PM2Tab() {
   const act = async (proc: PM2Process, action: string, confirmText?: string) => {
     await post(`/pm2/${encodeURIComponent(proc.name)}/${action}`, undefined, {
       confirm: confirmText,
+      query: { user: proc.daemonId, id: proc.id },
     })
     const past =
       action === "stop"
@@ -174,16 +175,16 @@ function PM2Tab() {
                 <TableRow
                   // Names and numeric ids are per-daemon, and one host can run
                   // a daemon per account — either alone collides across users.
-                  key={`${proc.user || ""}:${proc.name}:${proc.id}`}
+                  key={`${proc.daemonId}:${proc.id}`}
                   className="group"
-                  onActivate={() => setLogsFor(proc.name)}
+                  onActivate={() => setLogsFor(proc)}
                 >
                   <TableCell>
                     <div className="max-w-[22rem] min-w-0">
-                      <RowLink onClick={() => setLogsFor(proc.name)}>{proc.name}</RowLink>
+                      <RowLink onClick={() => setLogsFor(proc)}>{proc.name}</RowLink>
                       <p className="truncate font-mono text-hint text-muted-foreground">
                         {proc.scriptPath}
-                        {proc.user && ` · ${proc.user}`}
+                        {proc.daemonId && ` · ${proc.daemonId} #${proc.id}`}
                       </p>
                     </div>
                   </TableCell>
@@ -275,7 +276,10 @@ function PM2Tab() {
                                   </p>
                                 ),
                                 action: async (c) => {
-                                  await del(`/pm2/${encodeURIComponent(proc.name)}`, { confirm: c })
+                                  await del(`/pm2/${encodeURIComponent(proc.name)}`, {
+                                    confirm: c,
+                                    query: { user: proc.daemonId, id: proc.id },
+                                  })
                                   refresh()
                                 },
                               })
@@ -293,7 +297,7 @@ function PM2Tab() {
           </Table>
         </PanelBody>
       </Panel>
-      <PM2LogSheet name={logsFor} onOpenChange={(o) => !o && setLogsFor(null)} />
+      <PM2LogSheet process={logsFor} onOpenChange={(o) => !o && setLogsFor(null)} />
       {dialog}
     </>
   )

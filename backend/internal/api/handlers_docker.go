@@ -157,7 +157,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/{name}/deployments", s.handle(s.handleStackDeployments))
 			r.Method(http.MethodGet, "/{name}/deployments/{id}", s.handle(s.handleStackDeployment))
 			r.Group(func(r chi.Router) {
-				r.Use(httpx.RequireCapability(auth.CapServiceControl))
+				r.Use(httpx.RequireCapability(auth.CapServiceControl), httpx.RequireCapability(auth.CapSystemAdmin))
 				r.Method(http.MethodPost, "/{name}/up", s.handle(s.stackAction(dockerx.ComposeUp)))
 				r.Method(http.MethodPost, "/{name}/start", s.handle(s.stackAction(dockerx.ComposeStart)))
 				r.Method(http.MethodPost, "/{name}/pull", s.handle(s.stackAction(dockerx.ComposePull)))
@@ -174,7 +174,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				// Editing a compose file is editing a file on the server, and
 				// is gated as one. Creating a stack writes a new one.
-				r.Use(httpx.RequireCapability(auth.CapFileWrite))
+				r.Use(httpx.RequireCapability(auth.CapFileWrite), httpx.RequireCapability(auth.CapSystemAdmin))
 				r.Method(http.MethodPut, "/{name}/config", s.handle(s.handleStackConfigWrite))
 				r.Method(http.MethodPost, "/", s.handle(s.handleStackCreate))
 			})
@@ -963,6 +963,9 @@ func (s *Server) findStack(r *http.Request, name string) (*dockerx.ComposeStack,
 
 func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
+		if err := requireComposeAdmin(r); err != nil {
+			return err
+		}
 		name := httpx.URLParam(r, "name")
 		stack, err := s.findStack(r, name)
 		if err != nil {

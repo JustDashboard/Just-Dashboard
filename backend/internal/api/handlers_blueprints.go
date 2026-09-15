@@ -63,7 +63,11 @@ func (s *Server) handleBlueprintGet(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return mapBlueprintError(err)
 	}
-	httpx.JSON(w, http.StatusOK, found)
+	httpx.JSON(w, http.StatusOK, struct {
+		*blueprint.Blueprint
+		DeploymentSupported bool   `json:"deploymentSupported"`
+		UnavailableReason   string `json:"unavailableReason"`
+	}{Blueprint: found, UnavailableReason: blueprint.DeploymentUnavailableReason})
 	return nil
 }
 

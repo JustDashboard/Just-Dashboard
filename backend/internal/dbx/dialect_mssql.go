@@ -3,6 +3,9 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"time"
 )
 
 type mssqlDialect struct{}
@@ -232,26 +235,38 @@ func (d mssqlDialect) BeforeDropColumn(ctx context.Context, db *sql.DB, schema, 
 // connection out of the pool, turns the mode on and off around the one
 // statement, and closes it, which guarantees no pooled connection can be
 // handed back still in plan-only mode.
-func (mssqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+func (mssqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (result *QueryResult, err error) {
+	checked, checkErr := ExplainStatement(query)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	query = checked
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "SET SHOWPLAN_ALL ON"); err != nil {
+		// A transport error can arrive after the server changed its mode.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		return nil, err
 	}
+	defer func() {
+		// Cancellation must not return a plan-only connection to the pool.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if _, resetErr := conn.ExecContext(cleanup, "SET SHOWPLAN_ALL OFF"); resetErr != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			result = nil
+			err = errors.Join(err, resetErr)
+		}
+	}()
 	rows, err := conn.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	res, err := collectRows(rows, 500, query)
 	rows.Close()
-	// Restore the connection before returning either way; a failure to plan is
-	// not a reason to hand a crippled connection back.
-	if _, offErr := conn.ExecContext(ctx, "SET SHOWPLAN_ALL OFF"); offErr != nil && err == nil {
-		return nil, offErr
-	}
 	return res, err
 }
 

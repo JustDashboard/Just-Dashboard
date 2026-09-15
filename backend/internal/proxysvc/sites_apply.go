@@ -374,10 +374,18 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 // regardless, so a read-only or missing sites-enabled produced a site that had
 // been "enabled" and was serving nothing.
 func linkEnabled(link, target string) (func(), error) {
+	previous := ""
+	restore := func() {
+		_ = os.Remove(link)
+		if previous != "" {
+			_ = os.Symlink(previous, link)
+		}
+	}
 	if existing, err := os.Readlink(link); err == nil {
 		if existing == target {
 			return func() {}, nil
 		}
+		previous = existing
 		if err := os.Remove(link); err != nil {
 			return nil, err
 		}
@@ -387,12 +395,14 @@ func linkEnabled(link, target string) (func(), error) {
 		return nil, fmt.Errorf("%s already exists and is not a symlink — move it aside first", link)
 	}
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		restore()
 		return nil, err
 	}
 	if err := os.Symlink(target, link); err != nil {
+		restore()
 		return nil, err
 	}
-	return func() { os.Remove(link) }, nil
+	return restore, nil
 }
 
 func readIfPresent(path string) (string, bool) {

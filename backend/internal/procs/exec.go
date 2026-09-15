@@ -18,8 +18,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 var (
@@ -64,30 +62,7 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 	// systemd is genuinely reachable over the mounted D-Bus socket, so the
 	// check is telling us about the mount layout, not about reachability.
 	cmd.Env = append(os.Environ(), "SYSTEMD_IGNORE_CHROOT=1")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-
-	res := &CommandResult{
-		Stdout:  stdout.String(),
-		Stderr:  stderr.String(),
-		Command: name + " " + strings.Join(args, " "),
-	}
-	if cmd.ProcessState != nil {
-		res.ExitCode = cmd.ProcessState.ExitCode()
-	}
-	var execErr *exec.Error
-	if errors.As(err, &execErr) {
-		return res, fmt.Errorf("%s %w", name, ErrNotInstalled)
-	}
-	if ctx.Err() == context.DeadlineExceeded {
-		return res, fmt.Errorf("%s timed out after %s", name, timeout)
-	}
-	if err != nil {
-		return res, fmt.Errorf("%s exited %d: %s", name, res.ExitCode, strings.TrimSpace(res.Stderr))
-	}
-	return res, nil
+	return runPrepared(ctx, cmd, timeout, name, args...)
 }
 
 func binaryExists(name string) bool {
@@ -95,17 +70,8 @@ func binaryExists(name string) bool {
 	return err == nil
 }
 
-// runWithEnv executes one host command with an explicit environment. The
-// command crosses into the host's namespaces when this process runs
-// containerised and runs directly otherwise, so a bare-metal install behaves
-// identically. argv is passed through unchanged and never through a shell.
-func runWithEnv(ctx context.Context, name string, env []string, timeout time.Duration, args ...string) (*CommandResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	cmd := hostexec.CommandOnHost(ctx, name, args...)
-	cmd.Env = env
-	var stdout, stderr bytes.Buffer
+func runPrepared(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, name string, args ...string) (*CommandResult, error) {
+	var stdout, stderr commandBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -125,8 +91,30 @@ func runWithEnv(ctx context.Context, name string, env []string, timeout time.Dur
 	if ctx.Err() == context.DeadlineExceeded {
 		return res, fmt.Errorf("%s timed out after %s", name, timeout)
 	}
+	if stdout.truncated || stderr.truncated {
+		return res, fmt.Errorf("%s output exceeded 4 MiB", name)
+	}
 	if err != nil {
 		return res, fmt.Errorf("%s exited %d: %s", name, res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	return res, nil
 }
+
+// User-owned PM2 executables must not be able to exhaust dashboard memory by
+// writing an unbounded listing. Excess output is drained until the timeout.
+type commandBuffer struct {
+	buffer    bytes.Buffer
+	truncated bool
+}
+
+func (b *commandBuffer) Write(p []byte) (int, error) {
+	const limit = 4 << 20
+	remaining := limit - b.buffer.Len()
+	if len(p) > remaining {
+		b.truncated = true
+	}
+	_, _ = b.buffer.Write(p[:min(len(p), remaining)])
+	return len(p), nil
+}
+
+func (b *commandBuffer) String() string { return b.buffer.String() }

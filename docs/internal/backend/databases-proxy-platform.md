@@ -2,6 +2,32 @@
 
 ## Databases: eight engines, one shape
 
+The query runner accepts one statement per request. A trailing semicolon and quoted semicolons are
+supported; executable/nested comments, ambiguous backslash escapes, hash comments, dollar quoting and
+ambiguous double-dash syntax are refused at this authorization boundary. Classification computes the
+strongest risk independently for each statement, so a recognized CREATE/INSERT cannot suppress an
+unknown operation's risk. Every dialect validates explain input as exactly one supported statement
+before adding its fixed plan syntax; user-supplied EXPLAIN/ANALYZE options and additional statements
+never reach the connection.
+
+SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
+failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
+the pool. PostgreSQL catalog size queries treat a concurrently dropped relation's NULL size as zero;
+the live regression holds an old catalog snapshot to exercise that case deterministically.
+
+SQL integer values using a 64-bit driver representation and exact decimal values travel as decimal
+strings. SQL mutation JSON uses `DecodeJSONNumbers` (`UseNumber`) and binds exact numeric strings
+without an intermediate JavaScript/Go float. Query results and streamed exports also normalize nested
+ClickHouse integer arrays/maps and wide integer/decimal driver wrappers. Numeric JSON syntax is
+validated without parsing through float64, and clipboard SQL rejects invalid numeric literals.
+`TestSQLiteExactNumericMutationBrowseAndExport` and `TestLiveExactNumericMutations` exercise adjacent
+BIGINT keys beyond JavaScript's safe range through mutation, browsing and export; the latter verifies
+real PostgreSQL/MariaDB DECIMAL columns when their test DSNs are available. SQLite exact decimals
+require suitable storage (for example TEXT); values already rounded by SQLite's NUMERIC/REAL affinity
+cannot be recovered by the API. The Redis SCAN cursor is a decimal JSON string; requests
+parse it with `ParseUint` at 64 bits, preserving the full unsigned range and rejecting negative or
+overflowing cursors.
+
 `internal/dbx` drives PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and
 Redis on pure-Go drivers, so the image still needs no CGO.
 
@@ -48,8 +74,8 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
   the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
   reporting four times the real size, Postgres's `now()` being the *transaction* timestamp and so
-  reporting a negative session age. Oracle has no live coverage (its installer cannot run headlessly),
-  which CONTRIBUTING says plainly.
+  reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
+  without a configured server, its unit coverage does not establish live-engine compatibility.
 
 ### Database provisioning for deployments
 
@@ -126,6 +152,16 @@ application containers, verifies loopback-only host bindings, and removes its ow
   propagation after itself; route53 has neither), credentials 0600 inside certbot's tree. A wildcard over
   HTTP is refused here with what to do instead, rather than relaying certbot's accurate and useless
   "wildcard domains are not supported by the HTTP-01 challenge".
+  Route 53 credentials are normalized to an AWS `[default]` profile and atomically saved at
+  `/etc/letsencrypt/jd-dns/route53.ini`. Previously saved bare key/value files are validated and
+  atomically normalized on the next dashboard certbot operation; invalid files fail without falling back
+  to a different AWS identity. Dashboard issuance and renewal set
+  `AWS_SHARED_CREDENTIALS_FILE` to this path and `AWS_PROFILE=default`, clearing competing inherited
+  AWS credentials; values never appear in command arguments or job logs. If host certbot timers or
+  cron jobs renew these certificates, their environment must set the same two variables. Saving a
+  dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
+  the credential form empty.
+  Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
 - **Two layouts, and files that are not sites.** `nginxVHosts` reads sites-available where it exists and
   conf.d where it does not (every RPM distro, Alpine, Arch — most of the servers this runs on); the
   difference reaches the UI as an empty `EnabledPath`, because conf.d has no symlink and a switch that can
@@ -272,6 +308,12 @@ work runs in a sibling container (`just-dashboard-reconfigure`, this image, `-se
 `self-config.json` and `self-config.log` into `JD_DATA_DIR`. It shares `selfupdate`'s answer to "where is
 this install" rather than asking Docker the same question twice — `Options.Locate` is
 `selfupdate.Service.Location`.
+
+Update, apply, restart and rebuild admission share `JD_DATA_DIR/lifecycle.lock`, held before either
+run record, transcript or `.env` backup can be replaced. Both durable run records are checked under
+that lock: a pending/running operation blocks the other path even after the launching process exits.
+Unreadable or corrupt records fail closed and must be dismissed explicitly. This prevents concurrent
+requests from overwriting the configuration needed for rollback.
 
 - **One source of truth**: the `.env` beside the compose file, edited the way a person would. `EnvFile`
   keeps the file as lines, so the paragraph of explanation above each setting survives a change made from

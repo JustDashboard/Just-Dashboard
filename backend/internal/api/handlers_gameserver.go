@@ -310,8 +310,12 @@ func (s *Server) handleGamePropertiesGet(w http.ResponseWriter, r *http.Request)
 		httpx.JSON(w, http.StatusOK, result)
 		return nil
 	}
-	result.Status, result.Raw = "available", string(content)
-	result.Values = gameserver.ParseProperties(string(content)).Values()
+	result.Status = "available"
+	allowed := make([]string, 0, len(file.Properties))
+	for _, property := range file.Properties {
+		allowed = append(allowed, property.Key)
+	}
+	result.Values, result.Raw = gameserver.PublicProperties(string(content), allowed)
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
 }

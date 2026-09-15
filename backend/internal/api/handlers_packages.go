@@ -162,7 +162,7 @@ func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) er
 	if err := httpx.RequireTypedConfirmation(w, r, phrase); err != nil {
 		return err
 	}
-	name, args, env, err := s.modules.updates.UpgradeCommand(securityOnly)
+	name, args, env, err := s.modules.updates.UpgradeCommand(r.Context(), securityOnly)
 	if err != nil {
 		if e := notSupported(err); e != nil {
 			return e
@@ -278,8 +278,8 @@ func (s *Server) handlePackageInstall(w http.ResponseWriter, r *http.Request) er
 			if err != nil || len(usage.Commands) == 0 {
 				continue
 			}
-			out.Status(fmt.Sprintf("%s installed the command%s %s.",
-				pkg, plural(len(usage.Commands)), strings.Join(usage.Commands, ", ")))
+			out.Status("%s installed the command%s %s.",
+				pkg, plural(len(usage.Commands)), strings.Join(usage.Commands, ", "))
 		}
 		return nil
 	})

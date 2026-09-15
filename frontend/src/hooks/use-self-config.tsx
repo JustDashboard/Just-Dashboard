@@ -36,7 +36,7 @@ export function useSelfConfig() {
     return next
   }, [])
 
-  const poll = usePoll(fetchReport, live ? LIVE_POLL : IDLE_POLL, [live])
+  const poll = usePoll(fetchReport, live ? LIVE_POLL : IDLE_POLL)
   const { data: report, error, refresh } = poll
 
   const run = report?.run

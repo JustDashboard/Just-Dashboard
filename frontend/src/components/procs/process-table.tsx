@@ -99,9 +99,6 @@ export function ProcessTableTab() {
     [appliedQuery, effectiveSort, user, state, manager, limit],
   )
 
-  if (processList.loading && !processList.data) return <LoadingPanel />
-  if (processList.error && !processList.data) return <ErrorState error={processList.error} />
-
   const data = processList.data
   const memTotal = snapshot?.memory.total ?? 0
 
@@ -168,6 +165,8 @@ export function ProcessTableTab() {
           />
         </PanelToolbar>
         <PanelBody flush>
+          {processList.loading && <LoadingPanel />}
+          {processList.error && <ErrorState error={processList.error} />}
           <Table containerClassName="max-h-[calc(100svh-23rem)]">
             <TableHeader className={stickyTableHeader}>
               <TableRow>

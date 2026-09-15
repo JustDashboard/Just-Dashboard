@@ -44,7 +44,7 @@ func (a *HostSourceAnalyzer) Materialize(
 		return nil, fmt.Errorf("%w: materialization workspace is invalid", ErrInvalidSource)
 	}
 	source = canonicalSourceConfig(source)
-	if err := source.Validate(); err != nil {
+	if err := source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
 	if err := makePrivateDirectory(workspaceRoot); err != nil {
@@ -121,7 +121,7 @@ func (a *HostSourceAnalyzer) Materialize(
 		return nil, fmt.Errorf("%w: observed imports must be adopted before materialization", ErrUnsupportedSource)
 	case SourceModeBlueprint:
 		_ = os.RemoveAll(workspace)
-		return nil, fmt.Errorf("%w: blueprint materialization is owned by checkpoint C9", ErrUnsupportedSource)
+		return nil, fmt.Errorf("%w: blueprint deployment is unavailable in this release", ErrUnsupportedSource)
 	default:
 		_ = os.RemoveAll(workspace)
 		return nil, ErrUnsupportedSource

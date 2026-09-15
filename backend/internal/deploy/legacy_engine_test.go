@@ -49,7 +49,7 @@ func TestLegacyCompatibilityPipelineRunsThroughPersistentEngine(t *testing.T) {
 	legacyStore := NewStore(st, sealer, []string{root})
 	project, _, err := legacyStore.Create(t.Context(), &Project{
 		Name: "persistent-legacy", RepoPath: checkout, Branch: "main",
-		ComposeFile: "compose.yml", PreCommand: "printf hook-ran > hook.txt", Enabled: true,
+		ComposeFile: "compose.yml", PreCommand: `printf hook-ran > hook.txt; printf '%s\n' "$FIXTURE_SECRET"`, Enabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)

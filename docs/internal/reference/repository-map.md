@@ -12,7 +12,7 @@ fields.
 | `install.sh`, `.env.example` | Installation: two reachability routes (Tailscale, SSH tunnel), certificate issuance, randomised internal ports, secrets, and operator configuration | [`../overview.md`](../overview.md), public [`../../../README.md`](../../../README.md) |
 | `scripts/release.sh`, `backend/scripts/` | Version update, generated changelog, build verification, and release commit preparation | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#cutting-a-release) |
 | `AGENTS.md`, `CONTRIBUTING.md` | Mandatory contributor workflow, security baseline, licensing, and full validation gate | [`../contributing/conventions.md`](../contributing/conventions.md) |
-| `docs/plans/0.6.7-deployments/` | Frozen deployment contracts, ADRs, checkpoint evidence, and unfinished release scope | [`../deployments/implementation.md`](../deployments/implementation.md) |
+| `docs/plans/0.6.7-deployments/` (absent) | Historical references only; no frozen-contract or checkpoint evidence available in this checkout | [`../deployments/implementation.md`](../deployments/implementation.md) |
 
 ## Backend entry point and packages
 

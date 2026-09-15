@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
   role           TEXT NOT NULL,
   totp_secret    TEXT NOT NULL DEFAULT '',
   totp_enabled   INTEGER NOT NULL DEFAULT 0,
+  totp_last_step INTEGER NOT NULL DEFAULT -1,
   disabled       INTEGER NOT NULL DEFAULT 0,
   must_change_pw INTEGER NOT NULL DEFAULT 0,
   failed_count   INTEGER NOT NULL DEFAULT 0,
@@ -856,6 +857,7 @@ END;
 // list of steps between every shipped schema and the current one, and dropping
 // one strands whichever installs stopped at that version.
 var addedColumns = []struct{ table, column, spec string }{
+	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
 	// 0.6.7 keeps the shipped project/run rows as stable compatibility
 	// identities while normalized environments, releases, steps and events
 	// grow beside them. Every legacy row receives a usable zero/default before

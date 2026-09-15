@@ -191,9 +191,10 @@ func stackRank(st ComposeStack) int {
 //
 // Reading the compose file directly rather than asking compose: this runs for
 // every stack on a list that polls every fifteen seconds, and `docker compose
-// config` is a subprocess each time. The stack detail asks compose properly
-// and overwrites this with the better answer — see StackDetail — which is why
-// DeclaredSource exists rather than the two silently disagreeing.
+// config` is a subprocess each time. Administrator stack detail requests may
+// replace this with Compose's resolved answer; other accounts keep the static
+// list without evaluating includes or the backend environment. DeclaredSource
+// records that distinction.
 func resolveStackShape(st *ComposeStack) {
 	if len(st.ConfigFiles) > 0 {
 		if declared := declaredServicesFromFile(st.ConfigFiles); len(declared) > 0 {

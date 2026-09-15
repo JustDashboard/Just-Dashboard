@@ -85,9 +85,6 @@ export function EventsTab() {
     return out
   }, [all])
 
-  if (loading && !data) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
-
   const wanted = new Set(kinds)
   const needle = search.trim().toLowerCase()
   const merged = all.filter(
@@ -137,7 +134,11 @@ export function EventsTab() {
         </div>
       </PanelToolbar>
       <PanelBody flush>
-        {merged.length === 0 ? (
+        {loading && !data ? (
+          <LoadingPanel />
+        ) : error ? (
+          <ErrorState error={error} />
+        ) : merged.length === 0 ? (
           <EmptyState
             icon={ChartActivity}
             title={kinds.length || needle ? "Nothing matches that filter" : "Nothing yet"}
@@ -263,7 +264,7 @@ function EventRow({ event }: { event: DockerEvent }) {
             type="button"
             title="Where this event came from"
             className={cn(
-              "shrink-0 cursor-help rounded-sm whitespace-nowrap text-micro focus-ring",
+              "shrink-0 cursor-help rounded-sm text-micro whitespace-nowrap focus-ring",
               source.tone,
             )}
           >

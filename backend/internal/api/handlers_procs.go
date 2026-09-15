@@ -110,6 +110,13 @@ func (s *Server) handlePM2List(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapProcsError(err)
 	}
+	for index := range list {
+		if err := s.checkPM2LogPaths(list[index].OutLogPath, list[index].ErrLogPath); err != nil {
+			list[index].LogsUnavailableReason = "Ask an administrator to include this process's log directory in JD_LOG_ROOTS."
+		} else {
+			list[index].LogsAvailable = true
+		}
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"available": true, "processes": list})
 	return nil
 }
@@ -120,11 +127,15 @@ func (s *Server) pm2Action(action procs.PM2Action) httpx.Handler {
 		// No typed phrase: starting, stopping and restarting a process is what
 		// a process manager is for, and pm2 delete removes it from pm2's list
 		// rather than from disk. The dialog names the process.
-		res, err := s.modules.pm2.Control(r.Context(), name, action)
+		daemon, id, err := pm2TargetQuery(r)
+		if err != nil {
+			return err
+		}
+		res, err := s.modules.pm2.ControlTarget(r.Context(), name, daemon, id, action)
 		if err != nil {
 			return mapProcsError(err)
 		}
-		httpx.SetAudit(r, "pm2."+string(action), name, map[string]any{"exitCode": res.ExitCode})
+		httpx.SetAudit(r, "pm2."+string(action), name, map[string]any{"exitCode": res.ExitCode, "daemonId": daemon, "id": id})
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}
@@ -135,16 +146,18 @@ func (s *Server) pm2Action(action procs.PM2Action) httpx.Handler {
 // process and reports which stream each line came from.
 func (s *Server) handlePM2LogStream(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
-	outPath, errPath, err := s.modules.pm2.LogPaths(r.Context(), name)
+	daemon, id, err := pm2TargetQuery(r)
+	if err != nil {
+		return err
+	}
+	outPath, errPath, err := s.modules.pm2.LogPathsTarget(r.Context(), name, daemon, id)
 	if err != nil {
 		return mapProcsError(err)
 	}
-	// PM2 puts its logs where the ecosystem file says, routinely outside
-	// JD_LOG_ROOTS. Registering the two files PM2 itself just named is what
-	// makes them tailable; doing it here rather than relying on someone having
-	// loaded /logs/sources first is why opening this page directly works.
-	s.modules.logs.AllowSource(outPath)
-	s.modules.logs.AllowSource(errPath)
+	if err := s.checkPM2LogPaths(outPath, errPath); err != nil {
+		return err
+	}
+
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
 		return nil
@@ -585,4 +598,16 @@ func (s *Server) handleCronUserPut(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "cron.update", user, map[string]any{"jobs": len(ct.Jobs)})
 	httpx.JSON(w, http.StatusOK, ct)
 	return nil
+}
+
+func pm2TargetQuery(r *http.Request) (string, int, error) {
+	daemon, raw := r.URL.Query().Get("user"), r.URL.Query().Get("id")
+	if daemon == "" && raw == "" {
+		return "", -1, nil
+	}
+	id, err := strconv.Atoi(raw)
+	if daemon == "" || err != nil || id < 0 {
+		return "", -1, httpx.BadRequest("PM2 account and non-negative process id are required together")
+	}
+	return daemon, id, nil
 }

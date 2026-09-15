@@ -58,10 +58,7 @@ func signInAs(t *testing.T, s *Server, username string, role auth.Role) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Auth.ConfirmTOTPEnrollment(ctx, user.ID, code); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Auth.VerifySecondFactor(ctx, login.SessionID, user.ID, code); err != nil {
+	if _, err := s.Auth.ConfirmTOTPEnrollmentForSession(ctx, user.ID, login.SessionID, code); err != nil {
 		t.Fatal(err)
 	}
 	return httpx.SessionCookie + "=" + login.Token
