@@ -220,29 +220,25 @@ inspect, and the daemon's own event stream kept in memory — correlated against
 so a container removed at 03:14 says whether somebody did it from here or from somewhere
 else.
 
-### Terminal: sessions that are still there tomorrow
+### Terminal: host shells in one workspace
 
 ![The terminal](docs/terminal.png)
 
 A real PTY over a WebSocket, running `su -l` into a host account, not a shell inside the
 container. Your dotfiles, your PATH, your installed tools.
 
-Backed by tmux, so closing the tab, leaving the page and restarting the dashboard all leave
-the session running. Only closing one stops it, and that asks first. The
-title, the folder and the favourite flag live on the tmux session itself, which is why a
-session picked up after a restart is still called what you called it.
+Each session groups independent shell windows. Name a session, file it in a folder, drag it
+somewhere else, filter the list, and pin the sessions you use most. Windows appear along the
+top, with rename, reorder and close controls. Closing one window stops that shell; closing a
+session stops all its windows, with confirmation first.
 
-Name a session, file it in a colour-coded folder, drag it somewhere else, filter the list,
-pin the two or three you actually live in. A session created in a folder inherits its colour,
-because colouring eight sessions by hand is work nobody does twice.
+Visited windows keep their terminal screen and connection while you switch windows or
+sessions, so full-screen tools retain their state and background output keeps arriving.
+Leaving the page disconnects the browser; returning uses bounded, best-effort output replay.
+Shells and session organization live in the dashboard process and end when it restarts.
 
-tmux windows along the top, with splits, zoom, `synchronize-panes` and the bell and activity
-flags tmux has always tracked and nothing else surfaces, which is the only answer to "which
-of these five tabs did something while I was looking at another one". Clicking inside a pane
-focuses it.
-
-Moving between sessions, windows and panes has a key for each, and every binding is yours to
-change: the shortcut sheet is the editor, not a read-only list. Per pane there is scrollback
+Moving between sessions and windows has a key for each, and every binding is yours to
+change: the shortcut sheet is the editor, not a read-only list. Each window has scrollback
 search, copy, font size, clear, fullscreen and a row of the keys a browser normally eats
 (`Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+L`, `Esc`, `Ctrl+\`). Middle-click pastes, the way it
 does in X11.
@@ -290,7 +286,7 @@ opened from the branch you are on without leaving for a browser tab.
 | **Databases** | Eight engines: PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis — all on pure-Go drivers, so the image still needs no CGO. A data grid that edits rows through forms (always scoped to a primary key), server-side sort and filtering, schema editing with the statement shown before it runs, CSV/JSON import inside one transaction, a structure view and an entity diagram, a query runner that classifies a statement as destructive before it runs with schema-aware completion, history and saved snippets, CSV/JSON export, one-click Prisma, Drizzle, TypeScript or Zod generation from the live database, and a value search that finds which table an id lives in without knowing where to look. A Monitor tab lists what the server is running right now — with the blocking session named — and stops a stuck query, next to a per-table size breakdown for when the disk alert fires. Any row copies out as JSON or as a runnable INSERT in that engine's own syntax, or duplicates into a pre-filled form. MongoDB gets document editing, an aggregation runner, and its own export and import; Redis gets a SCAN-based key browser with full collection editing. Plus a dump that downloads to the browser as it is written, restores, and a typed-confirmation delete of the database itself, for every one of the eight — the three with a client-side tool use it, the rest are dumped over the connection the dashboard already has, so no engine's backup depends on a binary that may not be installed. Passwords never appear in argv. Everything but Oracle is covered by tests that run against the real engines. |
 | **Security** | A verdict on the host, not just its settings: exposure, firewall, sshd, intrusion prevention, open ports, certificates and pending security patches, each finding carrying what was measured, what it means, what to do, and where the dashboard can do it, a button. Firewall rules on ufw **or firewalld**, with a named-service catalogue that warns before you open Redis to the world, default policies, logging, ordering, editing (the replacement goes in before the original comes out, so the port is never briefly unprotected) and outbound rules. sshd's own settings — root login, passwords, keys, port, account lists — applied through its parser and rolled back if it objects, refused outright when the change would leave nobody a way in, and streamed step by step so "it said it worked" and "the daemon came back" are not the same claim. fail2ban jails tuned in place and kept across a restart, folded into the one question a ban list cannot answer: who keeps coming back. Live connections by peer, interfaces and routes, the host's login record with the ability to end a session, and ping, DNS, traceroute and port checks on the page the question came from. |
 | **Updates** | Two things that can be behind. The dashboard itself — with the release notes for every version between yours and the newest, and a one-click pull-rebuild-restart that runs in its own container so it survives replacing the dashboard. And the host's packages: what is behind, which of it is security, and whether a reboot is due, on apt, dnf, yum, zypper, pacman or apk. Alpine and Arch publish no advisory data, so they say so rather than reporting zero security updates. Upgrades run as a job with its output streamed, so closing the tab does not abandon a half-finished run. Upgrades only — it never installs or removes packages. |
-| **Deployments** | A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, an existing container, or a reviewed blueprint; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Deploy on push with per-provider signature verification, watch paths, scheduled actions, PR previews and signed outbound webhooks. |
+| **Deployments** | Browse projects in a searchable grid or list. Import a connected GitHub repository or any HTTPS/SSH Git URL, configure environment variables, and create or connect a database before deploying. Follow numbered, searchable build logs and open the finished URL; each project opens on a website preview, release details, recent deployments and measured usage, with separate settings for configuration. A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, an existing container, or a reviewed blueprint; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Deploy on push with per-provider signature verification, watch paths, scheduled actions, PR previews and signed outbound webhooks. |
 | **Blueprints** | Sixteen reviewed, versioned workload definitions — Nginx, Caddy, Uptime Kuma, Vaultwarden, PostgreSQL, MariaDB, Redis, MongoDB, Gitea, Adminer, Prometheus, Grafana, MinIO, Dozzle, n8n and Minecraft. Not an app store: a blueprint is data shipped and tested with the release, parsed with unknown fields rejected and rendered by a pure function, so the same version and answers always produce the same plan. None of them can ship a default password, publish a database port, declare a stateful workload with nowhere to keep its state, or download anything without https and a checksum — those are refusals in the validator, not guidelines. The Docker page's starting points come from the same catalogue, so there is one list rather than two that drift. |
 | **Game servers** | Minecraft Java and Bedrock, with the parts a game server needs and a web application does not: a console that is a console and not a shell, the players who are online with kick, ban, op and whitelist where the server can actually report identities, `server.properties` edited through the fields the blueprint declares while every other line keeps its own bytes, and schedules that warn, save, back up and then update, in that order. Versions come from Mojang's own manifest; when it cannot be reached the wizard says so rather than installing an unverified "latest". The world lives in a volume named after the deployment, not the release — which is what makes "roll back the server software, keep the world" true rather than hoped for. |
 | **Backups** | Scheduled archives to local disk, S3 or Backblaze B2, with retention and restore. |
@@ -324,7 +320,7 @@ To remove a project from the active deployment list, open it and choose **Archiv
 header’s actions menu. Confirmation archives its history, disables automatic deployments, and frees its name for a
 new project—even from the same repository. Existing deleted projects get this name-reuse fix on upgrade.
 Run numbers such as “Run #13” are server-wide identifiers, not retry counts. Running containers,
-routes and data are retained; use **Configuration → Archive & managed resources** to preview and
+routes and data are retained; use **Settings → Lifecycle** to preview and
 remove managed resources separately.
 
 Open **Archived** on the deployments page to search retained projects. **Delete permanently** removes
@@ -332,9 +328,9 @@ an archived project’s saved configuration, variables, and history after confir
 resources in place and forgets their deployment ownership; use managed-resource removal first if you
 also want those resources removed. Unfinished runs must complete before permanent deletion.
 
-Deployment overviews include an on-demand website preview with mobile and desktop widths. Runtime
+Deployment overviews automatically preview a live website with mobile and desktop widths. Runtime
 logs and live/recorded service metrics are available inside the deployment's own tabs. If a website
-blocks embedded previews or requires a separate sign-in, use **Open website** to visit it directly.
+blocks embedded previews or requires a separate sign-in, use **Visit** to open it directly.
 
 Container deployments supply `PORT` from the selected application port unless you explicitly configure
 it as a runtime variable. Readiness checks follow the actual allocated host port and report the failed

@@ -56,9 +56,14 @@ carries no licensing question at all.
   and Buildx release host.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
-  the browser gate covers the normalized Configuration, Variables, Network and Storage tabs.
+  the browser gate covers the project overview, build transcript and focused settings, including
+  variables, domains, storage, dependencies, automation and lifecycle.
+- Changes to database provisioning or deployment connection URLs also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
+  on a Docker host. It exercises all five quick-setup engines from separate application containers
+  and cleans up its own containers and volumes.
 - Keep the security posture intact. The network allowlist runs before
-  authentication, two-factor is mandatory, every destructive route sits behind
+  authentication, enrolled accounts always require their second factor, every destructive route sits behind
   the destructive capability with an audit entry, and the rare irreversible ones
   require a typed confirmation phrase enforced server-side. A change that
   weakens any of those needs to say so explicitly in the PR description.

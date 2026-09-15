@@ -23,7 +23,7 @@ export default async function NewDeploymentPage({
     <Suspense
       fallback={
         <Page>
-          <PageHeader eyebrow="Deployments" title="Deploy something" />
+          <PageHeader eyebrow="Deployments" title="New project" />
           <LoadingPanel rows={5} />
         </Page>
       }

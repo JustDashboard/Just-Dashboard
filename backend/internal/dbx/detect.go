@@ -30,13 +30,14 @@ import (
 // it never crosses the wire. That is the same rule the rest of this package
 // follows for a stored DSN.
 type Candidate struct {
-	Driver    Driver `json:"driver"`
-	Container string `json:"container"`
-	Image     string `json:"image"`
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	User      string `json:"user,omitempty"`
-	Database  string `json:"database,omitempty"`
+	AuthSource string `json:"-"`
+	Driver     Driver `json:"driver"`
+	Container  string `json:"container"`
+	Image      string `json:"image"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	User       string `json:"user,omitempty"`
+	Database   string `json:"database,omitempty"`
 	// Reason explains a container that was recognised as a database but cannot
 	// be connected to, so the UI can say why rather than silently omitting it.
 	Reason string `json:"reason,omitempty"`
@@ -177,6 +178,11 @@ func Detect(container, image string, env map[string]string, ports []PublishedPor
 		Driver: rule.driver, Container: container, Image: image,
 		User: user, Database: database, Source: SourceDocker,
 	}
+	// The official Mongo image creates its initial root user in admin,
+	// even when MONGO_INITDB_DATABASE names another application database.
+	if rule.driver == DriverMongo && env["MONGO_INITDB_ROOT_USERNAME"] != "" {
+		c.AuthSource = "admin"
+	}
 	for _, p := range ports {
 		if p.ContainerPort != rule.port || p.HostPort == 0 {
 			continue
@@ -287,6 +293,9 @@ func BuildDSN(c Candidate, password string) string {
 	case DriverMongo:
 		u := url.URL{Scheme: "mongodb", Host: host, Path: "/" + c.Database}
 		u.User = userInfo(c.User, password)
+		if c.AuthSource != "" {
+			u.RawQuery = url.Values{"authSource": {c.AuthSource}}.Encode()
+		}
 		return u.String()
 	case DriverRedis:
 		u := url.URL{Scheme: "redis", Host: host, Path: "/" + firstNonEmpty(c.Database, "0")}

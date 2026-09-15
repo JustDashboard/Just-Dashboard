@@ -7,6 +7,8 @@ import { ArchivedDeployments } from "@/components/deploy/deployment-archive"
 import {
   ArrowRight,
   CloudUpload,
+  GitBranch,
+  MoreHorizontal,
   Filter,
   GridSquare,
   ListUnordered,
@@ -20,8 +22,8 @@ import { notify } from "@/lib/toast"
 import type { DeploymentActiveWork, DeploymentFleet, DeploymentSummary } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Detail, DetailList, Page, PageHeader, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Page, PageHeader, SearchInput, Section, Toolbar } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import {
@@ -30,8 +32,17 @@ import {
   humanize,
   reachableAt,
   releaseLabel,
+  deploymentURL,
+  WorkloadMark,
 } from "@/components/deploy/deployment-ui"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import {
@@ -114,7 +125,7 @@ export default function DeployPage() {
               <Button size="sm" asChild>
                 <Link href="/deploy/new">
                   <Plus className="size-4" />
-                  Deploy something
+                  New project
                 </Link>
               </Button>
             )}
@@ -142,16 +153,16 @@ export default function DeployPage() {
       )}
 
       {fleet.data && (
-        <Panel>
-          <PanelHeader
-            title="Deployment fleet"
+        <div className="space-y-5">
+          <Section
+            title="Projects"
             actions={
               <div className="flex flex-wrap items-center gap-3">
                 <span className="numeric text-xs text-muted-foreground">
                   {deployments.length} of {fleet.data.deployments.length}
                 </span>
                 <div
-                  className="hidden items-center gap-1 xl:flex"
+                  className="flex items-center gap-1"
                   role="group"
                   aria-label="Deployment layout"
                 >
@@ -176,68 +187,91 @@ export default function DeployPage() {
                 </div>
               </div>
             }
-          />
-          <PanelToolbar>
+          >
+            {null}
+          </Section>
+          <Toolbar className="gap-3">
             <SearchInput
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search deployments"
               aria-label="Search deployments"
-              containerClassName="sm:w-64"
+              containerClassName="min-w-0 flex-1 sm:w-auto"
             />
-            <Select value={state} onValueChange={setState}>
-              <SelectTrigger size="sm" className="w-[9.5rem]" aria-label="Filter by status">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="active">Active work</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="not-observed">Not observed</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={profile} onValueChange={setProfile}>
-              <SelectTrigger size="sm" className="w-[9.5rem]" aria-label="Filter by type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                {(
-                  [
-                    "web",
-                    "static",
-                    "worker",
-                    "image",
-                    "compose",
-                    "service",
-                    "game",
-                    "imported",
-                  ] as const
-                ).map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {humanize(value)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={environment} onValueChange={setEnvironment}>
-              <SelectTrigger size="sm" className="w-[9.5rem]" aria-label="Filter by environment">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All environments</SelectItem>
-                <SelectItem value="production">Production</SelectItem>
-                <SelectItem value="staging">Staging</SelectItem>
-                <SelectItem value="preview">Preview</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label className="flex min-h-8 items-center gap-2 rounded-md px-1.5 text-xs">
-              <Checkbox
-                checked={pendingOnly}
-                onCheckedChange={(checked) => setPendingOnly(checked === true)}
-              />
-              Pending only
-            </Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Filter className="size-3.5" /> Filters
+                  {(profile !== "all" ||
+                    state !== "all" ||
+                    environment !== "all" ||
+                    pendingOnly) && (
+                    <span className="numeric">
+                      {Number(profile !== "all") +
+                        Number(state !== "all") +
+                        Number(environment !== "all") +
+                        Number(pendingOnly)}
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 space-y-3">
+                <p className="text-sm font-medium">Filter projects</p>
+                <Select value={state} onValueChange={setState}>
+                  <SelectTrigger size="sm" className="w-full" aria-label="Filter by status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="active">Active work</SelectItem>
+                    <SelectItem value="failed">Failed</SelectItem>
+                    <SelectItem value="not-observed">Not observed</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={profile} onValueChange={setProfile}>
+                  <SelectTrigger size="sm" className="w-full" aria-label="Filter by type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    {(
+                      [
+                        "web",
+                        "static",
+                        "worker",
+                        "image",
+                        "compose",
+                        "service",
+                        "game",
+                        "imported",
+                      ] as const
+                    ).map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {humanize(value)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={environment} onValueChange={setEnvironment}>
+                  <SelectTrigger size="sm" className="w-full" aria-label="Filter by environment">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All environments</SelectItem>
+                    <SelectItem value="production">Production</SelectItem>
+                    <SelectItem value="staging">Staging</SelectItem>
+                    <SelectItem value="preview">Preview</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Label className="flex min-h-8 items-center gap-2 rounded-md px-1.5 text-xs">
+                  <Checkbox
+                    checked={pendingOnly}
+                    onCheckedChange={(checked) => setPendingOnly(checked === true)}
+                  />
+                  Pending only
+                </Label>
+              </PopoverContent>
+            </Popover>
             {(query ||
               profile !== "all" ||
               state !== "all" ||
@@ -258,19 +292,19 @@ export default function DeployPage() {
                 Clear
               </Button>
             )}
-          </PanelToolbar>
-          <PanelBody flush>
+          </Toolbar>
+          <div>
             {deployments.length === 0 ? (
               <EmptyState
                 icon={CloudUpload}
                 title={
                   fleet.data.deployments.length === 0
-                    ? "Nothing has been deployed through this dashboard yet"
+                    ? "Your next project starts here"
                     : "No deployments match"
                 }
                 description={
                   fleet.data.deployments.length === 0
-                    ? "This page covers workloads the deploy engine created and tracks. Containers and Compose stacks already running on the host are not listed here until you adopt one — start from a repository, image, Compose stack, game server, or an existing workload."
+                    ? "Import a repository, launch a database, or start from an application template. Everything you deploy has a home here."
                     : "Change or clear the filters to see the rest of the fleet."
                 }
                 action={
@@ -278,7 +312,7 @@ export default function DeployPage() {
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       {can("system.admin") && (
                         <Button size="sm" asChild>
-                          <Link href="/deploy/new">Deploy something</Link>
+                          <Link href="/deploy/new">New project</Link>
                         </Button>
                       )}
                       <Button size="sm" variant="outline" asChild>
@@ -294,8 +328,8 @@ export default function DeployPage() {
                 <FleetCards deployments={deployments} list={layout === "list"} />
               </>
             )}
-          </PanelBody>
-        </Panel>
+          </div>
+        </div>
       )}
     </Page>
   )
@@ -372,7 +406,7 @@ function ActiveWorkStrip({
 
 function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
   return (
-    <div className="hidden xl:block">
+    <Panel className="hidden md:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -434,7 +468,7 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
           ))}
         </TableBody>
       </Table>
-    </div>
+    </Panel>
   )
 }
 
@@ -442,51 +476,111 @@ function FleetCards({ deployments, list }: { deployments: DeploymentSummary[]; l
   return (
     <ul
       aria-label="Deployment projects"
-      className={cn(
-        "grid gap-px bg-hairline",
-        list ? "xl:hidden" : "lg:grid-cols-2 2xl:grid-cols-3",
-      )}
+      className={cn("grid gap-4", list ? "md:hidden" : "md:grid-cols-2 2xl:grid-cols-3")}
     >
-      {deployments.map((deployment) => (
-        <li key={deployment.id} className="min-w-0 bg-card">
-          <Link
-            href={`/deploy/${deployment.id}`}
-            className="flex min-h-40 min-w-0 flex-col gap-3 p-4 focus-ring-inset hover:bg-row-hover"
-          >
-            <div className="flex min-w-0 items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-title font-medium">{deployment.name}</p>
-                <p className="text-hint text-muted-foreground">
-                  {humanize(deployment.profile)} · {deployment.environmentName}
-                </p>
+      {deployments.map((deployment) => {
+        const url = deploymentURL(deployment.endpoint)
+        return (
+          <li key={deployment.id} className="min-w-0">
+            <Panel className="group h-full transition-colors hover:border-muted-foreground/50">
+              <div className="flex items-start gap-3 p-5 pb-3">
+                <WorkloadMark profile={deployment.profile} />
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/deploy/${deployment.id}`}
+                    className="block truncate rounded-sm text-title font-medium focus-ring hover:underline"
+                  >
+                    {deployment.name}
+                  </Link>
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 block truncate rounded-sm text-xs text-muted-foreground focus-ring hover:text-foreground"
+                    >
+                      {new URL(url).host}
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {deployment.liveReleaseId ? "Private service" : "No production deployment"}
+                    </p>
+                  )}
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Actions for ${deployment.name}`}
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem asChild>
+                      <Link href={`/deploy/${deployment.id}`}>Open project</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href={`/deploy/${deployment.id}?tab=logs`}>View runtime logs</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href={`/deploy/${deployment.id}?tab=configuration`}>
+                        Project settings
+                      </Link>
+                    </DropdownMenuItem>
+                    {url && (
+                      <DropdownMenuItem asChild>
+                        <a href={url} target="_blank" rel="noopener noreferrer">
+                          Visit website
+                        </a>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              {deployment.pendingChanges && <Status verdict="warning" label="Pending" />}
-            </div>
-            <DetailList>
-              <Detail label="Release">
-                <span className="block truncate font-mono" title={deployment.sourceRevision}>
-                  {releaseLabel(deployment)}
-                </span>
-              </Detail>
-              <Detail label="Reachable at">
-                <span className="block truncate font-mono" title={deployment.endpoint}>
-                  {reachableAt(deployment)}
-                </span>
-              </Detail>
-              <Detail label="Health">
-                <HealthStatus health={deployment.health} />
-              </Detail>
-              <Detail label="Last deploy">
-                {deployment.lastRun ? (
+              <Link
+                href={`/deploy/${deployment.id}`}
+                className="flex min-h-20 flex-1 flex-col justify-end gap-2 px-5 pb-5 focus-ring-inset hover:bg-row-hover"
+              >
+                <div className="flex items-center gap-2 text-xs">
+                  <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate" title={deployment.sourceRef}>
+                    {deployment.sourceRef || humanize(deployment.profile)}
+                  </span>
+                  {deployment.sourceRevision && (
+                    <span className="ml-auto font-mono text-hint text-muted-foreground">
+                      {releaseLabel(deployment)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{deployment.environmentName}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {relativeTime(deployment.lastRun?.requestedAt ?? deployment.updatedAt)}
+                  </span>
+                </div>
+              </Link>
+              <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-t border-hairline px-5 py-3">
+                {deployment.activeRun ? (
+                  <DeploymentStatus state={deployment.activeRun.state} />
+                ) : deployment.lastRun ? (
                   <DeploymentStatus state={deployment.lastRun.state} />
                 ) : (
-                  "Never"
+                  <span className="text-xs text-muted-foreground">Ready for first deploy</span>
                 )}
-              </Detail>
-            </DetailList>
-          </Link>
-        </li>
-      ))}
+                <div className="flex flex-wrap items-center gap-3">
+                  <HealthStatus health={deployment.health} />
+                  {deployment.pendingChanges && (
+                    <Status verdict="warning" label="Pending changes" />
+                  )}
+                </div>
+              </div>
+            </Panel>
+          </li>
+        )
+      })}
     </ul>
   )
 }

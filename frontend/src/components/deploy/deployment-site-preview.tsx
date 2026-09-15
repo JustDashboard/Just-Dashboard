@@ -2,86 +2,104 @@
 
 import { useState } from "react"
 import { Globe, RefreshClockwise } from "@/components/icons"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
+import { deploymentURL, WorkloadMark } from "@/components/deploy/deployment-ui"
 import type { DeploymentSummary } from "@/lib/types"
 
 export function DeploymentSitePreview({ deployment }: { deployment: DeploymentSummary }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(
+    Boolean(deployment.liveReleaseId && deploymentURL(deployment.endpoint)),
+  )
   const [revision, setRevision] = useState(0)
   const [mobile, setMobile] = useState(false)
-  let url: URL
-  try {
-    if (!deployment.endpoint) return null
-    url = new URL(
-      deployment.endpoint.includes("://") ? deployment.endpoint : `https://${deployment.endpoint}`,
-    )
-    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return null
-  } catch {
-    return null
-  }
+  const url = deploymentURL(deployment.endpoint)
   return (
-    <Panel className="xl:col-span-2">
-      <PanelHeader
-        title="Website preview"
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <a href={url.href} target="_blank" rel="noopener noreferrer">
+    <section
+      aria-label="Website preview"
+      className="min-w-0 overflow-hidden rounded-lg border border-hairline bg-background"
+    >
+      <div className="flex min-h-10 items-center gap-3 border-b border-hairline bg-surface-header px-3">
+        <span aria-hidden="true" className="flex shrink-0 gap-1">
+          <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+          <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+          <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-center font-mono text-hint text-muted-foreground">
+          {url ? new URL(url).host : deployment.name}
+        </span>
+        {open && (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Reload website preview"
+            onClick={() => setRevision(revision + 1)}
+          >
+            <RefreshClockwise className="size-3" />
+          </Button>
+        )}
+      </div>
+      {open && url ? (
+        <div className="flex justify-center">
+          <iframe
+            key={`${deployment.id}:${revision}`}
+            src={`/api/v1/deploy/${deployment.id}/preview-frame`}
+            title={`Website preview for ${deployment.name}`}
+            className={`h-72 ${mobile ? "w-80 max-w-full" : "w-full"}`}
+            referrerPolicy="no-referrer"
+            loading="lazy"
+          />
+        </div>
+      ) : (
+        <div className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-8 text-center">
+          <WorkloadMark profile={deployment.profile} />
+          <p className="text-sm font-medium">
+            {url
+              ? "Your application, at a glance"
+              : deployment.liveReleaseId
+                ? "Running on your server"
+                : "Ready when you are"}
+          </p>
+          {url ? (
+            <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+              <Globe className="size-3.5" /> Load preview
+            </Button>
+          ) : (
+            <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+              {deployment.liveReleaseId
+                ? "This workload has no public website. Open Runtime to view its services."
+                : "Deploy your project to bring it to life here."}
+            </p>
+          )}
+        </div>
+      )}
+      {open && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-3 py-2">
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-pressed={mobile}
+            onClick={() => setMobile(!mobile)}
+          >
+            {mobile ? "Desktop width" : "Mobile width"}
+          </Button>
+          <Button size="xs" variant="ghost" onClick={() => setOpen(false)}>
+            Close preview
+          </Button>
+          {url && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-muted-foreground underline focus-ring"
+            >
               Open website
             </a>
-          </Button>
-        }
-      />
-      <PanelBody className="space-y-3">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-          <span className="min-w-0 font-mono text-xs break-all text-muted-foreground">
-            {url.host}
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {open && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-pressed={mobile}
-                  onClick={() => setMobile(!mobile)}
-                >
-                  {mobile ? "Desktop width" : "Mobile width"}
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="outline"
-                  aria-label="Reload website preview"
-                  onClick={() => setRevision(revision + 1)}
-                >
-                  <RefreshClockwise className="size-4" />
-                </Button>
-              </>
-            )}
-            <Button size="sm" variant="outline" onClick={() => setOpen(!open)}>
-              <Globe className="size-4" />
-              {open ? "Close preview" : "Load preview"}
-            </Button>
-          </div>
+          )}
+          <p className="w-full text-hint text-muted-foreground">
+            If your site blocks embedding, open it directly.
+          </p>
         </div>
-        {open && (
-          <>
-            <div className="flex justify-center overflow-hidden rounded-lg border border-hairline bg-background">
-              <iframe
-                key={`${deployment.id}:${revision}`}
-                src={`/api/v1/deploy/${deployment.id}/preview-frame`}
-                title={`Website preview for ${deployment.name}`}
-                className={`h-[32rem] ${mobile ? "w-96 max-w-full" : "w-full"}`}
-                referrerPolicy="no-referrer"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              The preview connects from your browser. If the site blocks embedding, requires
-              sign-in, or uses HTTP while this dashboard uses HTTPS, open the website directly.
-            </p>
-          </>
-        )}
-      </PanelBody>
-    </Panel>
+      )}
+    </section>
   )
 }

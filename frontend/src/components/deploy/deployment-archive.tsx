@@ -42,7 +42,7 @@ export function DeleteArchivedDeployment({
                 <p>
                   Running containers, routes, images, files, and persistent data remain on the
                   server. The dashboard will forget their deployment ownership. Remove managed
-                  resources from Configuration first if you want them removed too.
+                  resources from Settings → Lifecycle first if you want them removed too.
                 </p>
               </div>
             ),

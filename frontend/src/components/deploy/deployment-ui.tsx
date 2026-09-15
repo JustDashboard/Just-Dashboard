@@ -11,6 +11,11 @@ import {
   Question,
   Slash,
   Warning,
+  Box,
+  CloudUpload,
+  Code,
+  Layers,
+  Servers,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type {
@@ -276,33 +281,66 @@ export function reachableAt(deployment: DeploymentSummary) {
   return "Private"
 }
 
+export function deploymentURL(endpoint?: string): string | undefined {
+  if (!endpoint) return undefined
+  try {
+    const url = new URL(endpoint.includes("://") ? endpoint : `https://${endpoint}`)
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password)
+      return undefined
+    return url.href
+  } catch {
+    return undefined
+  }
+}
+
+export function WorkloadMark({ profile }: { profile: DeploymentSummary["profile"] }) {
+  const Icon =
+    profile === "compose"
+      ? Layers
+      : profile === "game"
+        ? Servers
+        : profile === "worker"
+          ? Code
+          : profile === "image" || profile === "service"
+            ? Box
+            : CloudUpload
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-control text-muted-foreground">
+      <Icon className="size-5" />
+    </span>
+  )
+}
+
 export const PROJECT_TABS = [
   ["overview", "Overview"],
   ["deployments", "Deployments"],
+  ["runtime", "Runtime"],
   ["logs", "Runtime logs"],
-  ["configuration", "Configuration"],
-  ["variables", "Variables"],
-  ["network", "Domains & ports"],
-  ["storage", "Storage & backups"],
-  ["automations", "Automations"],
   ["metrics", "Metrics"],
+  ["diagnostics", "Diagnostics"],
+  ["configuration", "Settings"],
   ["console", "Console"],
   ["players", "Players"],
   ["settings", "Server settings"],
 ] as const
 
-export function ProjectTabs({
-  projectId,
-  active,
-  pending,
-  profile,
-}: {
-  projectId: number
-  active: string
-  pending: boolean
-  profile: DeploymentSummary["profile"]
-}) {
-  const rail = useRef<HTMLElement>(null)
+const SETTINGS_TABS = [
+  ["configuration", "Build settings"],
+  ["runtime-settings", "Runtime settings"],
+  ["variables", "Environment variables"],
+  ["network", "Domains & ports"],
+  ["storage", "Storage"],
+  ["dependencies", "Databases & backups"],
+  ["automations", "Automations"],
+  ["lifecycle", "Lifecycle"],
+] as const
+
+export function isProjectSettingsTab(tab: string) {
+  return SETTINGS_TABS.some(([key]) => key === tab)
+}
+
+function useActiveTabRail<T extends HTMLElement>(active: string, variant?: string) {
+  const rail = useRef<T>(null)
   useEffect(() => {
     const element = rail.current
     if (!element) return
@@ -320,7 +358,50 @@ export function ProjectTabs({
     const resize = new ResizeObserver(reveal)
     resize.observe(element)
     return () => resize.disconnect()
-  }, [active, profile])
+  }, [active, variant])
+  return rail
+}
+
+export function ProjectSettingsNav({ projectId, active }: { projectId: number; active: string }) {
+  const rail = useActiveTabRail<HTMLUListElement>(active)
+  return (
+    <nav aria-label="Project settings" className="min-w-0">
+      <ul
+        ref={rail}
+        className="flex gap-1 overflow-x-auto pb-2 lg:sticky lg:top-4 lg:flex-col lg:overflow-visible"
+      >
+        {SETTINGS_TABS.map(([key, label]) => (
+          <li key={key} className="shrink-0">
+            <Link
+              href={`/deploy/${projectId}?tab=${key}`}
+              aria-label={label}
+              aria-current={active === key ? "page" : undefined}
+              className={cn(
+                "flex min-h-11 items-center rounded-md px-3 text-xs whitespace-nowrap focus-ring-inset transition-colors hover:bg-row-hover",
+                active === key ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+
+export function ProjectTabs({
+  projectId,
+  active,
+  pending,
+  profile,
+}: {
+  projectId: number
+  active: string
+  pending: boolean
+  profile: DeploymentSummary["profile"]
+}) {
+  const rail = useActiveTabRail<HTMLElement>(active, profile)
   return (
     <nav
       ref={rail}
@@ -336,8 +417,16 @@ export function ProjectTabs({
           <li key={key}>
             <Link
               href={`/deploy/${projectId}?tab=${key}`}
-              aria-current={active === key ? "page" : undefined}
-              className={tabClasses(active === key, "min-h-11")}
+              aria-label={label}
+              aria-current={
+                active === key || (key === "configuration" && isProjectSettingsTab(active))
+                  ? "page"
+                  : undefined
+              }
+              className={tabClasses(
+                active === key || (key === "configuration" && isProjectSettingsTab(active)),
+                "min-h-11",
+              )}
             >
               {label}
               {pending &&

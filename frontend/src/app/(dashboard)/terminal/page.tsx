@@ -45,6 +45,8 @@ export default function TerminalPage() {
   const router = useRouter()
   const [picked, setPicked] = useState<string | null>(null)
   const [pickedWindow, setPickedWindow] = useState<string | null>(null)
+  const [windowLists, setWindowLists] = useState<Record<string, Window[]>>({})
+  const [visitedWindows, setVisitedWindows] = useState<{ id: string; sessionId: string }[]>([])
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
   const [showTools, setShowTools] = useViewState("terminal.tools", true)
   const [immersive, setImmersive] = useState(false)
@@ -121,14 +123,49 @@ export default function TerminalPage() {
     : (sessions[0]?.id ?? null)
   const activeSession = sessions.find((session) => session.id === active)
   const windows = usePoll<Window[]>(
-    (signal) =>
-      get<Window[]>(`/terminal/${encodeURIComponent(active ?? "")}/windows`, undefined, signal),
+    async (signal) => {
+      const list = await get<Window[]>(
+        `/terminal/${encodeURIComponent(active ?? "")}/windows`,
+        undefined,
+        signal,
+      )
+      if (!signal.aborted) {
+        // Keep each result with its session. usePoll retains its previous data
+        // during a fetch, which otherwise shows the old session's windows.
+        setWindowLists((previous) =>
+          Object.fromEntries(
+            sessions.map((session) => [
+              session.id,
+              session.id === active ? list : (previous[session.id] ?? []),
+            ]),
+          ),
+        )
+      }
+      return list
+    },
     5000,
     [active],
     { enabled: Boolean(active) },
   )
-  const windowList = windows.data ?? []
+  const windowList = windowLists[active ?? ""] ?? []
   const activeWindow = windowList.find((window) => window.id === pickedWindow) ?? windowList[0]
+
+  // A PTY's bounded byte history cannot reconstruct a TUI screen. Keep every
+  // visited emulator consuming its stream until its window or session closes.
+  const openWindows = visitedWindows.filter(
+    (window) =>
+      sessions.some((session) => session.id === window.sessionId) &&
+      windowLists[window.sessionId]?.some((item) => item.id === window.id),
+  )
+  if (active && activeWindow && !openWindows.some((window) => window.id === activeWindow.id)) {
+    openWindows.push({ id: activeWindow.id, sessionId: active })
+  }
+  if (
+    openWindows.length !== visitedWindows.length ||
+    openWindows.some((window, index) => window !== visitedWindows[index])
+  ) {
+    setVisitedWindows(openWindows)
+  }
 
   const fitPanel = (want: number, self: { min: number; max: number }, other: number) => {
     if (!rowWidth) return want
@@ -436,13 +473,14 @@ export default function TerminalPage() {
         )}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {activeWindow ? (
+          {openWindows.map((window) => (
             <XtermPane
-              key={activeWindow.id}
-              path={`/terminal/${activeWindow.id}/attach`}
-              terminalSessionId={activeWindow.id}
-              headerContent={terminalHeader}
-              cwd={currentDir}
+              key={window.id}
+              path={`/terminal/${window.id}/attach`}
+              terminalSessionId={window.id}
+              active={window.id === activeWindow?.id}
+              headerContent={window.id === activeWindow?.id ? terminalHeader : undefined}
+              cwd={window.id === activeWindow?.id ? currentDir : undefined}
               onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
               focusRef={focusPaneRef}
               className="min-h-0 flex-1"
@@ -453,7 +491,9 @@ export default function TerminalPage() {
               onToggleFullscreen={toggleImmersive}
               fullscreenActive={immersive}
             />
-          ) : (
+          ))}
+          {!activeWindow && active && <LoadingPanel rows={4} />}
+          {!activeWindow && !active && (
             <Pane className="flex-1">
               <PaneHeader className="gap-1">{terminalHeader}</PaneHeader>
               <EmptyState

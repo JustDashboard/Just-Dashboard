@@ -70,7 +70,13 @@ export function DeploymentMetrics({ runtime }: { runtime?: DeploymentRuntimeServ
   )
 }
 
-function LiveUsage({ containerId }: { containerId: string }) {
+export function LiveUsage({
+  containerId,
+  compact = false,
+}: {
+  containerId: string
+  compact?: boolean
+}) {
   const [stats, setStats] = useState<ContainerStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const onMessage = useCallback((message: Envelope) => {
@@ -112,9 +118,19 @@ function LiveUsage({ containerId }: { containerId: string }) {
           value={stats ? bytes(stats.memUsage) : "—"}
           hint={stats?.memLimited ? `of ${bytes(stats.memLimit)}` : "No container limit"}
         />
-        <Metric label="Processes" value={stats ? String(stats.pids) : "—"} />
-        <Metric label="Last sample" value={stats ? new Date(stats.ts).toLocaleTimeString() : "—"} />
+        {!compact && <Metric label="Processes" value={stats ? String(stats.pids) : "—"} />}
+        {!compact && (
+          <Metric
+            label="Last sample"
+            value={stats ? new Date(stats.ts).toLocaleTimeString() : "—"}
+          />
+        )}
       </MetricStrip>
+      {compact && stats && (
+        <p className="text-hint text-muted-foreground">
+          Sampled {new Date(stats.ts).toLocaleTimeString()}
+        </p>
+      )}
     </div>
   )
 }

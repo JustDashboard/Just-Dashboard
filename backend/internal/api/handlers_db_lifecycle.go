@@ -202,8 +202,21 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	target := r.URL.Query().Get("target")
+	if target != "" && target != "host" && target != "container" {
+		return httpx.BadRequest("target must be host or container")
+	}
+	if target == "container" {
+		ctx, cancel := timeoutCtx(r, 15*time.Second)
+		defer cancel()
+		dsn, err = s.databaseApplicationURL(ctx, conn, dsn)
+		if err != nil {
+			return err
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	httpx.SetAudit(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver)})
+		map[string]any{"driver": string(conn.Driver), "target": target})
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"id": conn.ID, "name": conn.Name, "driver": conn.Driver, "url": dsn,
 	})

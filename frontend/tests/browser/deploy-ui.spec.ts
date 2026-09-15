@@ -28,14 +28,15 @@ for (const failImport of [false, true]) {
     await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
     await page.getByRole("button", { name: "Continue", exact: true }).click()
     await page.getByRole("textbox", { name: "Name", exact: true }).fill("edited-site")
+    await page.getByText("Import .env", { exact: true }).click()
     await page
       .getByRole("textbox", { name: "Environment variables", exact: true })
       .fill("API_TOKEN=handoff-secret")
     await page.getByRole("button", { name: "Open in full wizard" }).click()
     await expect(page).toHaveURL(/draft=journey-draft.*step=configuration/)
-    await expect(
-      page.getByRole("textbox", { name: "Environment values from quick setup" }),
-    ).toHaveValue("API_TOKEN=handoff-secret")
+    await expect(page.getByRole("textbox", { name: "Environment variables" })).toHaveValue(
+      "API_TOKEN=handoff-secret",
+    )
     await expect(page.getByRole("heading", { name: "edited-site", exact: true })).toBeVisible()
     expect(page.url()).not.toContain("handoff-secret")
     expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
@@ -52,9 +53,9 @@ for (const failImport of [false, true]) {
       await expect(page.getByRole("button", { name: "Save deployment", exact: true })).toHaveCount(
         0,
       )
-      await expect(
-        page.getByRole("textbox", { name: "Environment values from quick setup" }),
-      ).toHaveValue("API_TOKEN=handoff-secret")
+      await expect(page.getByRole("textbox", { name: "Environment variables" })).toHaveValue(
+        "API_TOKEN=handoff-secret",
+      )
     } else {
       await expect(page).toHaveURL(/\/deploy\/77$/)
       expect(quick.imported()).toMatchObject({
@@ -83,6 +84,7 @@ for (const stage of ["variables/import", "runs"]) {
     await page.getByText("From GitHub", { exact: true }).click()
     await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
     await page.getByRole("button", { name: "Continue", exact: true }).click()
+    await page.getByText("Import .env", { exact: true }).click()
     await page
       .getByRole("textbox", { name: "Environment variables", exact: true })
       .fill("API_TOKEN=keep-this-value")
@@ -136,7 +138,7 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/deploy")
   const projects = page.getByRole("list", { name: "Deployment projects" })
-  await expect(projects.getByRole("link")).toHaveCount(6)
+  await expect(projects.locator(":scope > li")).toHaveCount(6)
   await expect(page.getByRole("button", { name: "Grid view" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -146,7 +148,7 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
     contentType: "image/png",
   })
   await page.getByRole("textbox", { name: "Search deployments" }).fill("payments")
-  await expect(projects.getByRole("link")).toHaveCount(1)
+  await expect(projects.locator(":scope > li")).toHaveCount(1)
   await page.getByRole("button", { name: "List view" }).click()
   await expect(page.getByRole("table")).toBeVisible()
   await expect(page.getByRole("table").getByText("payments-api", { exact: true })).toBeVisible()
@@ -155,13 +157,13 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
   await expect(page.getByRole("table").getByRole("row")).toHaveCount(7)
   await page.setViewportSize({ width: 390, height: 900 })
   await expect(projects).toBeVisible()
-  await expect(projects.getByRole("link")).toHaveCount(6)
+  await expect(projects.locator(":scope > li")).toHaveCount(6)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
 })
 
-test("website preview loads on demand inside a constrained frame", async ({ page }) => {
+test("website preview loads inside a constrained frame", async ({ page }) => {
   await mockDashboard(page)
   let requests = 0
   await page.route("**/api/v1/deploy/7/preview-frame", (route) => {
@@ -171,7 +173,7 @@ test("website preview loads on demand inside a constrained frame", async ({ page
       headers: {
         "Content-Security-Policy":
           "default-src 'none'; frame-src https://preview.example.test; frame-ancestors 'self'",
-        "X-Frame-Options": "DENY",
+        "X-Frame-Options": "SAMEORIGIN",
       },
       body: '<iframe title="Deployed website" src="https://preview.example.test" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer"></iframe>',
     })
@@ -183,8 +185,7 @@ test("website preview loads on demand inside a constrained frame", async ({ page
     }),
   )
   await page.goto("/deploy/7")
-  expect(requests).toBe(0)
-  await page.getByRole("button", { name: "Load preview", exact: true }).click()
+  await expect.poll(() => requests).toBe(1)
   const preview = page.frameLocator('iframe[title="Website preview for api-production"]')
   await expect(
     preview
@@ -912,7 +913,7 @@ test("runtime services hand off to exact Docker panels and survive history and r
   })
   for (const width of [375, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 })
-    await page.goto("/deploy/7")
+    await page.goto("/deploy/7?tab=runtime")
     const list = page.getByRole("list", { name: "Runtime services" })
     await expect(list.getByText("Live release", { exact: true })).toBeVisible()
     await expect(list.getByText("Other release", { exact: true })).toBeVisible()
@@ -948,7 +949,7 @@ test("runtime services hand off to exact Docker panels and survive history and r
   await page.goForward()
   await expect(page.getByRole("dialog")).toHaveCount(0)
 
-  await page.goto("/deploy/7")
+  await page.goto("/deploy/7?tab=runtime")
   await page.getByRole("link", { name: "Open stack jd-e12 · web" }).click()
   await expect(page).toHaveURL(/\/docker\/stacks\?stack=jd-e12$/)
   await expect(page.getByRole("dialog")).toContainText(
@@ -972,7 +973,7 @@ test("runtime evidence distinguishes unavailable Docker from an empty managed in
     services: [],
   }
   await mockDashboard(page, { normalized: true, runtime })
-  await page.goto("/deploy/7")
+  await page.goto("/deploy/7?tab=runtime")
   await expect(page.getByText("Runtime unavailable", { exact: true })).toBeVisible()
   await expect(page.getByText(runtime.reason!)).toBeVisible()
   await expect(page.getByText("No managed runtime services", { exact: true })).toHaveCount(0)
@@ -1109,6 +1110,10 @@ test("run runtime logs open the server-provided activation window and withhold u
     return json(route, {})
   })
   await page.goto("/deploy/7/runs/84")
+  await page
+    .getByRole("group", { name: "Run views" })
+    .getByRole("button", { name: "Runtime logs", exact: true })
+    .click()
   await expect(page.getByText("GET /api/health 200", { exact: true })).toBeVisible()
   expect(streams).toContain("docker:preview")
   const link = page.getByRole("button", { name: "Around activation", exact: true })
@@ -1122,6 +1127,10 @@ test("run runtime logs open the server-provided activation window and withhold u
   expect(searches[0].searchParams.get("until")).toBe(until)
   activated = false
   await page.goto("/deploy/7/runs/84")
+  await page
+    .getByRole("group", { name: "Run views" })
+    .getByRole("button", { name: "Runtime logs", exact: true })
+    .click()
   await expect(
     page.getByText("This run has no completed activation evidence.", { exact: true }),
   ).toBeVisible()
@@ -1462,12 +1471,12 @@ test("quick deploy takes a GitHub repository to a running release without the wi
   await page.goto("/deploy/new")
 
   // Three outcomes, not eight: the lane is the only classification asked for.
-  await expect(page.getByRole("heading", { name: "What are you putting online?" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
   await page.getByText("From GitHub", { exact: true }).click()
 
   // The repository is picked from what the signed-in credential can reach,
   // rather than typed as a clone URL from memory.
-  await expect(page.getByText("Signed in as Wayy01")).toBeVisible()
+  await expect(page.getByRole("button", { name: /Wayy01/ }).first()).toBeVisible()
   await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
   await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main")
   await page.getByRole("button", { name: "Continue" }).click()
@@ -1485,6 +1494,7 @@ test("quick deploy takes a GitHub repository to a running release without the wi
   await expect(page.getByText("A certificate will be issued during the deploy")).toBeVisible()
   await expect(page.getByRole("button", { name: /certificate/i })).toHaveCount(0)
 
+  await page.getByText("Import .env", { exact: true }).click()
   await page
     .getByRole("textbox", { name: "Environment variables" })
     .fill("NEXT_PUBLIC_SITE_URL=https://example.test")
@@ -1541,7 +1551,7 @@ test("wizard exposes outcome choices and focuses a linked validation summary", a
   await page.setViewportSize({ width: 375, height: 850 })
   await page.goto("/deploy/new?mode=advanced")
 
-  await expect(page.getByRole("heading", { name: "Deploy something" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "New project" })).toBeVisible()
   await expect(page.getByRole("radio", { name: /Web app or API/ })).toBeChecked()
   await page.getByRole("button", { name: "Continue" }).click()
   const alert = page.getByRole("alert", { name: "There is a problem" })
@@ -1569,8 +1579,10 @@ test("public Git and expert settings reach a reviewed plan without leaving the w
   await expect(page.getByRole("heading", { name: "Review evidence" })).toBeVisible()
   await page.getByRole("button", { name: "Use this detection" }).click()
   await expect(page.getByRole("heading", { name: "Set runtime decisions" })).toBeVisible()
+  await page.locator("summary").filter({ hasText: "Runtime and route" }).click()
   await page.getByRole("textbox", { name: "Public domain" }).fill("web.example.test")
   await expect(page.getByRole("combobox", { name: "Automatic recipe" })).toContainText("Node.js")
+  await page.getByText("Variable references & scopes", { exact: true }).click()
   await page.getByRole("button", { name: "Add variable" }).click()
   await page.getByRole("textbox", { name: "Variable 1 name" }).fill("NPM_TOKEN")
   await page.getByRole("checkbox", { name: "Build", exact: true }).check()
@@ -1730,15 +1742,18 @@ test("normalized configuration joins keep secrets masked and saved changes pendi
   await page.setViewportSize({ width: 375, height: 900 })
   await page.goto("/deploy/7?tab=variables")
 
-  await expect(page.getByRole("heading", { name: "Scoped variables" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Environment variables" })).toBeVisible()
   await expect(page.getByText("••••••••")).toBeVisible()
   await expect(page.getByText("revealed-browser-secret")).toHaveCount(0)
+  await page.getByRole("button", { name: "Add variable", exact: true }).click()
   await page.getByRole("textbox", { name: "Variable name" }).fill("DATABASE_TOKEN")
   await page.getByLabel("Value").fill("browser-only-input-secret")
   await page.getByRole("button", { name: "Save variable" }).click()
   await expect(page.getByText("DATABASE_TOKEN", { exact: true })).toBeVisible()
   await expect(page.getByText("browser-only-input-secret")).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "Pending deployment" }).first()).toBeVisible()
+  await expect(
+    page.getByText("Saved changes will apply on your next deployment", { exact: true }).first(),
+  ).toBeVisible()
 
   const apiTokenRow = page.getByRole("listitem").filter({ hasText: "API_TOKEN" })
   await apiTokenRow.getByRole("button", { name: "Rotate" }).click()
@@ -1750,7 +1765,7 @@ test("normalized configuration joins keep secrets masked and saved changes pendi
   await page.getByRole("button", { name: "Save network plan" }).click()
   await expect(page.getByText("Certificate required")).toBeVisible()
 
-  await page.getByRole("link", { name: /Configuration/ }).click()
+  await page.getByRole("link", { name: /Lifecycle/ }).click()
   // The save toast overlaps the bottom-right of the page while it is showing.
   // Waiting it out is the honest fix: forcing the click would test a button an
   // operator could not have pressed either.
@@ -1762,18 +1777,27 @@ test("normalized configuration joins keep secrets masked and saved changes pendi
   await page.getByRole("button", { name: "Deploy changes" }).click()
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/88$/)
   await page.goBack()
-  await expect(page.getByRole("heading", { name: "Desired plan is live" })).toBeVisible()
+  await page.getByRole("link", { name: "Runtime settings", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible()
+  await expect(
+    page.getByText("Saved changes will apply on your next deployment", { exact: true }),
+  ).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
 
   await page.setViewportSize({ width: 667, height: 375 })
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
-  await expect(page.getByRole("heading", { name: "Desired plan is live" })).toBeVisible()
+  await page.getByRole("link", { name: "Runtime settings", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible()
+  await expect(
+    page.getByText("Saved changes will apply on your next deployment", { exact: true }),
+  ).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" })
+  await page.getByRole("link", { name: "Runtime settings", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible()
 })
 
@@ -1784,7 +1808,9 @@ test("automation workspace creates provider, schedule, preview and signed notifi
   await page.setViewportSize({ width: 375, height: 900 })
   await page.goto("/deploy/7?tab=automations")
   await expect(page.getByRole("heading", { name: "Source automations" })).toBeVisible()
+  await page.getByRole("button", { name: "Preview environments", exact: true }).click()
   await expect(page.getByText("pr-42", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Git & webhooks", exact: true }).click()
 
   await page.getByRole("button", { name: "Add automation" }).click()
   await page.getByLabel("Repository").fill("acme/api")
@@ -1793,12 +1819,14 @@ test("automation workspace creates provider, schedule, preview and signed notifi
   await expect(page.getByText("one-time-provider-secret", { exact: true })).toBeVisible()
   await expect(page.getByText(/acme\/api/)).toBeVisible()
 
+  await page.getByRole("button", { name: "Schedules", exact: true }).click()
   await page.getByRole("button", { name: "Add", exact: true }).click()
   await page.getByLabel("Cron expression").fill("30 2 * * *")
   await page.getByLabel("IANA timezone").fill("America/New_York")
   await page.getByRole("button", { name: "Create schedule" }).click()
   await expect(page.getByText(/America\/New_York/)).toBeVisible()
 
+  await page.getByRole("button", { name: "Notifications", exact: true }).click()
   await page.getByRole("button", { name: "Add channel" }).click()
   await page.getByLabel("HTTPS endpoint").fill("https://hooks.example.test/deploy")
   await page.getByRole("button", { name: "Create channel" }).click()
@@ -1817,8 +1845,8 @@ test("run page renders persisted release evidence and keyboard-selectable transc
   await page.goto("/deploy/7/runs/84")
 
   await expect(page.getByRole("heading", { name: "Run #84" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Verify Readiness" })).toBeVisible()
-  await expect(page.getByText("Active", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("Verify Readiness…", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Build logs", exact: true })).toBeVisible()
   await expect
     .poll(() =>
       page
@@ -1826,11 +1854,13 @@ test("run page renders persisted release evidence and keyboard-selectable transc
         .evaluate((icon) => getComputedStyle(icon).animationName),
     )
     .toBe("none")
+  await page.getByRole("button", { name: "Execution details", exact: true }).click()
   const smoke = page.getByRole("button", { name: /Verify Smoke/ })
   await smoke.focus()
   await page.keyboard.press("Enter")
-  await expect(smoke).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByRole("heading", { name: "Verify Smoke" })).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "Build log stage" })).toHaveText("Verify Smoke")
+  await expect(page.getByRole("combobox", { name: "Build log stage" })).toBeFocused()
+  await expect(page.getByRole("heading", { name: "Build logs", exact: true })).toBeVisible()
 })
 
 test("run transcript resumes from the last WebSocket sequence after a disconnect", async ({
@@ -2011,7 +2041,7 @@ test("operational findings name what was measured and hand off to the owning mod
   const dashboard = await mockDashboard(page, { normalized: true, operations })
   for (const width of [375, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 })
-    await page.goto("/deploy/7")
+    await page.goto("/deploy/7?tab=diagnostics")
     await expect(page.getByText("Persistent storage for /data is not present")).toBeVisible()
     await expect(page.getByText("The storage owner could not find api-data.")).toBeVisible()
     await expect(page.getByText("api.example.test is served by another site")).toBeVisible()
@@ -2031,7 +2061,7 @@ test("operational findings name what was measured and hand off to the owning mod
   }
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto("/deploy/7")
+  await page.goto("/deploy/7?tab=diagnostics")
   const domains = page.getByRole("list", { name: "Deployment domains" })
   await expect(domains.getByText("Another site", { exact: true })).toBeVisible()
   await expect(domains.getByText("Certificate expired", { exact: true })).toBeVisible()
@@ -2047,7 +2077,7 @@ test("operational findings name what was measured and hand off to the owning mod
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/docker\/volumes\?volume=api-data$/)
 
-  await page.goto("/deploy/7")
+  await page.goto("/deploy/7?tab=diagnostics")
   await page.getByRole("link", { name: "Open the serving site" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\?site=legacy\.conf$/)
   expect(dashboard.mutationCount()).toBe(0)
@@ -2057,7 +2087,7 @@ test("a healthy deployment reports nothing and an absent module never reads as s
   page,
 }) => {
   const dashboard = await mockDashboard(page, { normalized: true })
-  await page.goto("/deploy/7")
+  await page.goto("/deploy/7?tab=diagnostics")
   await expect(page.getByText("Nothing to report")).toBeVisible()
   await expect(
     page.getByText("Runtime, domains, storage, backups and dependencies were all read"),
@@ -2095,7 +2125,7 @@ test("a healthy deployment reports nothing and an absent module never reads as s
   }
   await page.unrouteAll({ behavior: "ignoreErrors" })
   await mockDashboard(page, { normalized: true, operations: degraded })
-  await page.goto("/deploy/7")
+  await page.goto("/deploy/7?tab=diagnostics")
   await expect(page.getByText("Domain evidence unavailable")).toBeVisible()
   await expect(page.getByText("Storage evidence unavailable")).toBeVisible()
   await expect(page.getByText("Backup evidence unavailable")).toBeVisible()
@@ -2252,6 +2282,7 @@ test("the game workspace sends commands, moderates players and edits only declar
   await expect(page.getByLabel("Server list description")).toHaveValue("Old name")
   // A key the blueprint does not declare stays in the raw preview and gets no
   // control of its own.
+  await page.getByText("View the file on disk", { exact: true }).click()
   await expect(page.getByText("experimental=keep-me")).toBeVisible()
   await expect(page.getByLabel("experimental")).toHaveCount(0)
   await page.getByLabel("Server list description").fill("New name")
@@ -2491,7 +2522,9 @@ test("creation choices fit mobile and desktop and name errors appear beside the 
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
     await page.goto("/deploy/new")
-    await expect(page.getByText("More ways to deploy", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "Start with something ready", exact: true }),
+    ).toBeVisible()
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
@@ -2548,4 +2581,428 @@ test("archived deployments can be permanently deleted with confirmation and erro
   await dialog.getByRole("button", { name: "Delete permanently" }).click()
   await expect(page.getByText("No archived deployments", { exact: true })).toBeVisible()
   expect(calls).toBe(2)
+})
+
+test("redesign connects a new database before deploying without leaving setup", async ({
+  page,
+}, testInfo) => {
+  const quick = await mockQuickDeploy(page)
+  let provisioned = 0
+  const connection = {
+    id: 42,
+    name: "project-postgres",
+    driver: "postgres",
+    host: "127.0.0.1",
+    port: "5432",
+    user: "jd",
+    database: "app",
+    createdAt: now,
+  }
+  const connectionURL = "postgres://jd:setup-secret@172.17.0.4:5432/app?sslmode=disable"
+  await page.route("**/api/v1/databases/**", async (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace("/api/v1", "")
+    if (path === "/databases/provision/options")
+      return json(route, [
+        {
+          engine: "postgres",
+          label: "PostgreSQL 16",
+          image: "postgres:16-alpine",
+          driver: "postgres",
+        },
+      ])
+    if (path === "/databases/provision") {
+      provisioned += 1
+      return json(route, { container: "project-postgres" })
+    }
+    if (path === "/databases/adopt") return json(route, connection)
+    if (path.endsWith("/ping")) return json(route, { ok: true })
+    if (path.endsWith("/url")) {
+      expect(url.searchParams.get("target")).toBe("container")
+      return json(route, { url: connectionURL })
+    }
+    return json(route, [connection])
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/deploy/new")
+  await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
+  await expect(page.getByText("Wayy01/wesmokefish", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: /Compose stack/ })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("create-desktop.png"), fullPage: true })
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await page.getByRole("textbox", { name: "Key", exact: true }).fill("API_KEY")
+  await page.locator("#env-value-0").fill("another-secret")
+  await page.getByRole("button", { name: "Add database", exact: true }).click()
+  await page.getByText("PostgreSQL 16", { exact: true }).click()
+  await page.getByRole("button", { name: "Create database", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "project-postgres is ready" })).toBeVisible()
+  await expect(page.locator("#database-connection-string")).toHaveAttribute("type", "password")
+  await page.getByRole("button", { name: "Use this database" }).click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(page.locator("#env-key-1")).toHaveValue("DATABASE_URL")
+  await expect(page.locator("#env-value-1")).toHaveValue(connectionURL)
+  await page.screenshot({ path: testInfo.outputPath("configure-desktop.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("configure-mobile.png"), fullPage: true })
+  expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
+    "setup-secret",
+  )
+  await page.getByRole("button", { name: "Deploy", exact: true }).click()
+  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  expect(quick.configuration()).toMatchObject({
+    dependencies: [
+      {
+        kind: "database",
+        ownership: "linked",
+        resourceKind: "database_connection",
+        resourceId: "42",
+      },
+    ],
+  })
+  expect(quick.imported()?.dotenv).toContain(connectionURL)
+  expect(quick.imported()?.dotenv).toContain('API_KEY="another-secret"')
+  expect(provisioned).toBe(1)
+  expect(quick.commits()).toBe(1)
+})
+
+test("redesign overview and build logs stay focused across screen sizes", async ({
+  page,
+}, testInfo) => {
+  await mockDashboard(page, { normalized: true })
+  await page.route("**/api/v1/deploy/7/preview-frame", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><html><body style="margin:0;background:#f8fafc;color:#16283e;font:16px system-ui;padding:36px"><p style="font-size:12px;letter-spacing:2px">API EXAMPLE · PREVIEW FIXTURE</p><h1 style="font-size:34px;font-weight:600">Build something useful.</h1><p>Your application preview appears here.</p><hr style="border:0;border-top:1px solid #ccd7e4;margin:28px 0"><p style="font-size:13px">Documentation &nbsp; / &nbsp; API reference &nbsp; / &nbsp; Status</p></body></html>',
+    }),
+  )
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/deploy/7")
+  await expect(
+    page.getByRole("heading", { name: "Production deployment", exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Recent deployments" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Runtime configuration" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Release path" })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("overview-desktop.png"), fullPage: true })
+  await page
+    .getByRole("navigation", { name: "Deployment sections" })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click()
+  await page.getByRole("link", { name: "Environment variables", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Variable name" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Add variable", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Add or update a variable" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/deploy/7")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("overview-mobile.png"), fullPage: true })
+  await page.goto("/deploy/7/runs/84")
+  await expect(page.getByRole("heading", { name: "Build logs", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Steps", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Application runtime logs" })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("build-mobile.png"), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.screenshot({ path: testInfo.outputPath("build-desktop.png"), fullPage: true })
+  await page.getByRole("button", { name: "Execution details", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Execution details", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: /Verify Smoke/ }).click()
+  await expect(page.getByRole("combobox", { name: "Build log stage" })).toHaveText("Verify Smoke")
+})
+
+test("build transcript formats chunks, filters lines and shows only its live release URL", async ({
+  page,
+}, testInfo) => {
+  await mockDashboard(page, { normalized: true })
+  let completed = false
+  let superseded = false
+  let finish: (() => void) | undefined
+  const snapshot = () => ({
+    run: {
+      ...run,
+      state: completed ? "succeeded" : "verifying",
+      releaseId: completed ? 21 : undefined,
+    },
+    steps,
+  })
+  await page.route("**/api/v1/deploy/7/runs/84", (route) => json(route, snapshot()))
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      deployment: { ...deployment, liveReleaseId: superseded ? 22 : completed ? 21 : 20 },
+    }),
+  )
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    const event = {
+      seq: 20,
+      type: "step.log",
+      runId: 84,
+      stepId: 105,
+      ts: now,
+      data: {
+        stream: "stdout",
+        text: "Installing dependencies\r\n\u001b[33mWarning: optional cache unavailable\u001b[0m\nCache restore failed; continuing\nBuild complete\n",
+        truncated: false,
+      },
+    }
+    socket.send(
+      JSON.stringify({
+        type: "events",
+        data: [
+          event,
+          event,
+          { ...event, seq: 21, stepId: 110, data: { ...event.data, text: "GET /health 200\n" } },
+        ],
+        ts: Date.now(),
+      }),
+    )
+    finish = () => {
+      completed = true
+      socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    }
+  })
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  await page.goto("/deploy/7/runs/84")
+  const transcript = page.getByRole("list", { name: "Deployment transcript" })
+  await expect(transcript.getByRole("listitem")).toHaveCount(5)
+  await expect(transcript).not.toContainText("\u001b")
+  await expect(page.getByRole("combobox", { name: "Build log stage" })).toHaveText("All stages")
+  await page.getByRole("textbox", { name: "Search build logs" }).fill("warning")
+  await expect(transcript.getByRole("listitem")).toHaveCount(1)
+  await page.getByRole("textbox", { name: "Search build logs" }).fill("")
+  await page.getByRole("button", { name: "Errors", exact: true }).click()
+  await expect(transcript.getByRole("listitem")).toHaveCount(1)
+  await expect(transcript).toContainText("Cache restore failed; continuing")
+  await page.getByRole("button", { name: "Errors", exact: true }).click()
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+  await page.getByRole("button", { name: "Copy build logs" }).click()
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(copied.split("\n")).toHaveLength(5)
+  finish!()
+  await expect(page.getByText("Your release is ready", { exact: true })).toBeVisible({
+    timeout: 10000,
+  })
+  await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveAttribute(
+    "href",
+    "https://api.example.test/",
+  )
+  await page.screenshot({
+    path: testInfo.outputPath("completed-build-desktop.png"),
+    fullPage: true,
+  })
+  await page.setViewportSize({ width: 390, height: 1000 })
+  await expect(transcript).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("completed-build-mobile.png"), fullPage: true })
+  superseded = true
+  await page.reload()
+  await expect(page.getByText("This run finished successfully", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
+})
+
+test("database setup retries the created container and reports connection errors immediately", async ({
+  page,
+}) => {
+  await mockQuickDeploy(page)
+  let provisioned = 0
+  let failAddress = true
+  await page.route("**/api/v1/databases/**", (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith("/provision/options"))
+      return json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
+    if (path.endsWith("/provision")) {
+      provisioned++
+      return json(route, { container: "started-db" })
+    }
+    if (path.endsWith("/adopt"))
+      return json(route, { id: 42, name: "started-db", driver: "postgres" })
+    if (path.endsWith("/ping")) return json(route, { ok: true })
+    if (path.endsWith("/url"))
+      return failAddress
+        ? route.fulfill({
+            status: 400,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: { code: "bad_request", message: "Database needs a shared network" },
+            }),
+          })
+        : json(route, { url: "postgres://app:secret@172.17.0.4:5432/app" })
+    return json(route, [])
+  })
+  await page.goto("/deploy/new")
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await page.getByRole("button", { name: "Add database" }).click()
+  await page.getByRole("button", { name: /PostgreSQL/ }).click()
+  await page.getByRole("button", { name: "Create database", exact: true }).click()
+  await expect(page.getByText("Database needs a shared network", { exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByText(/Database started-db has started/)).toBeVisible()
+  failAddress = false
+  await page.getByRole("button", { name: "Add database" }).click()
+  await page.getByRole("button", { name: "Retry connection setup", exact: true }).click()
+  await page.getByRole("button", { name: "Use this database", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Key", exact: true }).last()).toHaveValue(
+    "DATABASE_URL",
+  )
+  expect(provisioned).toBe(1)
+})
+
+test("manual Git import keeps branch and credentials and supports a Dockerfile worker", async ({
+  page,
+}) => {
+  const quick = await mockQuickDeploy(page)
+  let selectedSource: unknown
+  page.on("request", (request) => {
+    if (request.method() !== "PUT" || !request.url().endsWith("/deploy/drafts/journey-draft"))
+      return
+    const body = request.postDataJSON()
+    if (body.step === "source") selectedSource = body.source
+  })
+  await page.goto("/deploy/new")
+  await page
+    .getByRole("textbox", { name: "Clone URL", exact: true })
+    .fill("https://git.example.test/team/service.git")
+  await page.getByText("Branch & authentication", { exact: true }).click()
+  await page.getByRole("textbox", { name: "Branch or tag", exact: true }).fill("release/next")
+  await page.getByRole("spinbutton", { name: "Saved credential ID", exact: true }).fill("12")
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  await page.getByRole("combobox", { name: "Project type", exact: true }).click()
+  await page.getByRole("option", { name: "Worker or bot", exact: true }).click()
+  await page.getByText(/Build settings ·/).click()
+  await page.getByRole("combobox", { name: "Build method", exact: true }).click()
+  await page.getByRole("option", { name: "Dockerfile", exact: true }).click()
+  await page
+    .getByRole("textbox", { name: "Dockerfile path", exact: true })
+    .fill("deploy/worker.Dockerfile")
+  await page.getByRole("button", { name: "Deploy", exact: true }).click()
+  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  expect(selectedSource).toMatchObject({
+    kind: "git",
+    mode: "git_url",
+    url: "https://git.example.test/team/service.git",
+    ref: "release/next",
+    credentialId: 12,
+  })
+  expect(quick.configuration()).toMatchObject({
+    build: { method: "dockerfile", dockerfile: "deploy/worker.Dockerfile" },
+    runtime: { internalPort: 0 },
+    domains: [],
+  })
+})
+
+test("focused settings keep build configuration and named dependencies in separate destinations", async ({
+  page,
+}, testInfo) => {
+  await mockDashboard(page, { normalized: true })
+  await page.route("**/api/v1/databases/", (route) =>
+    json(route, [{ id: 42, name: "Production Postgres", driver: "postgres" }]),
+  )
+  await page.route("**/api/v1/backups/", (route) =>
+    json(route, [{ id: 4, name: "Nightly snapshot" }]),
+  )
+  const changes: Record<string, unknown>[] = []
+  page.on("request", (request) => {
+    if (request.method() === "PUT" && request.url().endsWith("/configuration"))
+      changes.push(request.postDataJSON())
+  })
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await page.goto("/deploy/7?tab=configuration")
+  await expect(page.getByRole("heading", { name: "Build settings", exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Runtime configuration", exact: true }),
+  ).toHaveCount(0)
+  await page.getByRole("textbox", { name: "Build command", exact: true }).fill("bun run build")
+  await page.getByRole("button", { name: "Save build settings", exact: true }).click()
+  await expect.poll(() => changes.length).toBe(1)
+  expect(changes[0].build).toMatchObject({ buildCommand: "bun run build" })
+  expect(changes[0].dependencies).toMatchObject([{ kind: "backup", resourceId: "4" }])
+  await page.screenshot({ path: testInfo.outputPath("build-settings-desktop.png"), fullPage: true })
+  await page.getByRole("link", { name: "Databases & backups", exact: true }).click()
+  await expect(page.getByRole("combobox", { name: "Backup job", exact: true })).toHaveText(
+    "Nightly snapshot",
+  )
+  await page.getByRole("button", { name: "Link database", exact: true }).click()
+  await page.getByRole("combobox", { name: "Database", exact: true }).click()
+  await page.getByRole("option", { name: "Production Postgres", exact: true }).click()
+  await page.getByRole("button", { name: "Save dependencies", exact: true }).click()
+  await expect.poll(() => changes.length).toBe(2)
+  expect(changes[1].dependencies).toMatchObject([
+    { kind: "backup", resourceId: "4" },
+    {
+      kind: "database",
+      resourceKind: "database_connection",
+      resourceId: "42",
+      ownership: "linked",
+    },
+  ])
+  await expect(page.getByRole("heading", { name: "Persistent mounts", exact: true })).toHaveCount(0)
+  await page.setViewportSize({ width: 390, height: 950 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("dependencies-mobile.png"), fullPage: true })
+})
+
+test("switching a Git project to a static website retains its build recipe", async ({ page }) => {
+  const quick = await mockQuickDeploy(page)
+  await page.goto("/deploy/new")
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await page.getByRole("combobox", { name: "Project type", exact: true }).click()
+  await page.getByRole("option", { name: "Static website", exact: true }).click()
+  await expect(page.getByRole("combobox", { name: "Build method", exact: true })).toHaveText(
+    "Automatic recipe",
+  )
+  await page.getByRole("textbox", { name: "Static output directory", exact: true }).fill("out")
+  await page.getByRole("button", { name: "Deploy", exact: true }).click()
+  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  expect(quick.configuration()).toMatchObject({
+    build: { method: "recipe", recipe: "node", outputDirectory: "out" },
+    runtime: { internalPort: 80 },
+  })
+  expect((quick.configuration()?.build as Record<string, unknown>).startCommand).toBeUndefined()
+})
+
+test("existing database setup uses a private application URL without provisioning another server", async ({
+  page,
+}) => {
+  const quick = await mockQuickDeploy(page)
+  let provisions = 0
+  const connection = { id: 42, name: "Production Postgres", driver: "postgres" }
+  await page.route("**/api/v1/databases/**", (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith("/provision")) provisions++
+    if (url.pathname.endsWith("/url")) {
+      expect(url.searchParams.get("target")).toBe("container")
+      return json(route, { url: "postgres://app:existing-secret@172.17.0.4:5432/app" })
+    }
+    return json(
+      route,
+      url.pathname.endsWith("/provision/options")
+        ? []
+        : [connection, { id: 43, name: "Local SQLite", driver: "sqlite" }],
+    )
+  })
+  await page.goto("/deploy/new")
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await page.getByRole("button", { name: "Add database" }).click()
+  await page.getByRole("button", { name: "Use existing", exact: true }).click()
+  await page.getByRole("combobox", { name: "Existing database" }).click()
+  await expect(page.getByRole("option", { name: /Local SQLite/ })).toHaveCount(0)
+  await page.getByRole("option", { name: /Production Postgres/ }).click()
+  await page.getByRole("button", { name: "Connect database", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Key", exact: true }).last()).toHaveValue(
+    "DATABASE_URL",
+  )
+  await expect(page.getByLabel("Value", { exact: true }).last()).toHaveAttribute("type", "password")
+  await page.getByRole("button", { name: "Deploy", exact: true }).click()
+  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  expect(provisions).toBe(0)
+  expect(quick.imported()?.dotenv).toContain("existing-secret@172.17.0.4")
+  expect(quick.configuration()?.dependencies).toMatchObject([
+    { kind: "database", resourceId: "42" },
+  ])
 })

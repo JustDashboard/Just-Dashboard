@@ -63,8 +63,9 @@ validated, a stale directory can only send the new window home, never kill it.
 Folders remain the dashboard's ordered record (`handlers_terminal_folders.go`, settings key
 `terminal.folders`), while membership stays on each workspace. There is no session/window colour model.
 Renaming a folder moves every matching workspace in one request. Window routes use opaque PTY ids and
-support create, rename, reorder and close; selecting a window is client state and reconnects the emulator
-to that window's socket.
+support create, rename, reorder and close. Selecting a window is client state: the page keeps each visited
+window's emulator and socket alive while hidden, preserving the complete terminal stream. A new browser
+attachment still receives only the bounded best-effort history, not an independent screen snapshot.
 
 The create request carries a provisional size because the emulator does not exist yet. The
 attach WebSocket carries xterm's measured `rows`/`cols` in its query. The handler subscribes first, then

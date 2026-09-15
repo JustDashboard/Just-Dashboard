@@ -1,7 +1,6 @@
 # Deployment implementation
 
-The 0.6.7 deployment contract is frozen in `docs/plans/0.6.7-deployments/09-frozen-contracts.md` and its
-ADRs. `internal/deploy` owns desired deployment configuration, immutable releases, persistent runs,
+`internal/deploy` owns desired deployment configuration, immutable releases, persistent runs,
 steps, queue leases, sequenced events, triggers and cross-feature relationships. It orchestrates narrow
 interfaces from Docker, Git, Proxy, Backups, Metrics, Logs, Files and Terminal; those packages remain the
 only renderer/executor/validation authority for their feature.
@@ -35,9 +34,10 @@ only renderer/executor/validation authority for their feature.
   `.env` cannot influence the result.
 - `/deploy/new` answers with quick deploy; the five-step wizard is `?mode=advanced`, and a `draft` in
   the URL means one is already in progress. Quick deploy drives the same draft endpoints in one screen
-  for the three cases that dominate — a GitHub repository, an image, a database — and hands its own draft
-  to the wizard for anything it does not show. Compose stacks, blueprints, game servers and adoption stay
-  wizard-only. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default one
+  for a Git repository, an image, or a database, and hands its own draft to the wizard for extended
+  configuration. Connected GitHub repositories and manual HTTPS/SSH import are visible immediately;
+  branch/tag and saved credential choices stay available before inspection. Compose stacks, blueprints,
+  game servers and adoption use the extended wizard. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default one
   flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises `readiness_missing`
   as a *decision* for those profiles, so an empty check list made the most ordinary deployment there is
@@ -98,14 +98,20 @@ only renderer/executor/validation authority for their feature.
   normalized projects, disabled during an active run. It uses the existing `DELETE /deploy/{id}` archive
   contract with ordinary confirmation, returns to the fleet after success, and keeps the dialog open
   on error. The confirmation explicitly states that history, runtime, routes and data are retained;
-  Configuration's separately previewed managed-resource removal remains the path for removing them.
+  Settings → Lifecycle provides the separately previewed path for removing managed resources.
 - Activation is unchanged and still the last word: it resolves an already-issued certificate/key pair
   through Proxy and fails closed if none exists. `provision_certificate` only makes that resolution
   succeed for a name the operator has just asked to publish.
-- `GET /databases/{id}/url` returns the connection string the dashboard holds for a saved connection,
-  as a session-only admin read with its own audit entry. Every other database route exists so nobody has
-  to see a DSN; this one exists because the next thing that happens to it is a paste into another
-  deployment's `DATABASE_URL`.
+- `GET /databases/{id}/url` is an admin read with its own audit entry and `Cache-Control: no-store`.
+  Its default (or `?target=host`) returns the saved connection unchanged. `?target=container` prepares
+  an application URL: a known database's loopback binding is matched to its observed Docker default
+  bridge address and internal port. The observed binding must match the saved loopback IP; ambiguous
+  localhost bindings are refused. It never publishes a new port, attaches networks, or changes the
+  saved connection. An unreachable loopback service and SQLite fail with an actionable error.
+  Remote URLs retain their credentials, options, SRV discovery and seed lists. Plain TCP MySQL driver
+  strings become `mysql://` URLs; driver-specific query/socket options require manual configuration
+  instead of being silently discarded. Bridge addresses must be reconnected if a database container
+  is replaced or its address changes.
 - Detected JavaScript commands name the package manager the checkout's single lockfile locks to
   (`bun`/`pnpm`/`yarn`/`npm run …`). The recipe picks its base image from that same lockfile, and
   `oven/bun` carries no npm, so a hardcoded `npm run build` was a build that installed cleanly and then
@@ -331,12 +337,16 @@ names** — remove a mount and the file manager silently browses the container's
 ## Deployment observability workspace
 
 The active fleet opens as a responsive project grid with release, address, health, latest-run, and
-pending-change evidence. Wide screens offer a compact table view without resetting filters. Narrow
-screens use the project layout even when list view was selected. The header count reflects the
-filtered result and total; resource usage belongs to each deployment's Metrics tab.
+pending-change evidence. Search remains visible; a filter popover holds state, type, environment and
+pending-change filters. Cards expose project, logs, settings and Visit actions. Wide screens offer a
+compact table view without resetting filters; narrow screens retain cards. The header count reflects
+the filtered result and total.
 
-The overview offers an on-demand website preview for a recorded HTTP(S) endpoint, with narrow/mobile
-and full-width modes, reload, and a direct website link. `GET /deploy/{id}/preview-frame` is an
+Overview centers on the live deployment: a website preview, Visit, release/source and health,
+recent runs, branch context and compact measured CPU/memory usage. Runtime, Diagnostics and Settings
+own the detailed evidence and forms. The preview loads automatically for a live release with a
+recorded HTTP(S) endpoint, with mobile/full-width modes, reload, close and a direct website link.
+`GET /deploy/{id}/preview-frame` is an
 authenticated, non-cacheable static HTML wrapper with no scripts. Its CSP permits a child frame only
 from the recorded endpoint's origin and allows the wrapper itself to be framed only by this dashboard.
 This is a deliberate exception to the API's default frame denial; the dashboard document's CSP stays
@@ -359,22 +369,44 @@ The primary deploy action remains in the workspace header. Restart, redeploy-liv
 and archive are in the deployment actions menu, with capability checks and active-run restrictions.
 Archive uses an ordinary confirmation and retains runtime resources and recorded history.
 
-The creation landing page exposes repository, image, database, Compose, template, game, worker,
-static-site, and existing-workload entry points. The latter options preselect their workload profile
-in the full wizard, while existing drafts keep their saved intent. Quick application setup shows the
-selected source and branch before configuration. Detected build settings are a disclosure; missing
-detection keeps the settings open. Deployment names are validated on blur and again before submission.
+The creation landing page pairs repository import with database, image, Compose, template, game,
+worker, static-site and existing-workload entry points. GitHub includes account controls, owner and
+repository filters, refresh and branch selection. Manual import accepts HTTPS/SSH Git URLs. Compose,
+template, game, worker, static-site and adoption entries preselect their workload profile in the full
+wizard; existing drafts keep their saved intent. Quick application setup shows the
+selected source and branch before configuration. Project type and detected build settings are
+editable; a Dockerfile supports other languages and custom builds. Missing detection keeps the build
+settings open. Environment values have masked key/value rows and a separate dotenv import disclosure.
+The database sheet creates or links a connection, explicitly reads its container URL, adds the chosen
+environment key and records a linked database dependency before deployment. Created databases remain
+independent resources if project creation is abandoned. Retrying setup reuses the created container,
+including after closing and reopening the sheet. Compose projects declare database services in their
+Compose file to share its network. Deployment names are validated on blur and again before submission.
 Opening the full wizard first saves edited quick-form settings. Environment values travel separately
 in memory within the current browser tab and are imported after the wizard commits the project; they
 never enter draft configuration, URLs, or browser storage. The wizard explains that refreshing clears
 these unsaved values and preserves them for copying if the post-commit import fails.
 
 Quick creation records the committed project before importing variables or requesting its first run.
-Failures after commit show the saved deployment and a link to Variables or run history instead of
-offering to recommit the draft. Unimported environment text stays available in the current tab for
+Failures after commit show the saved deployment and a link to Environment variables or run history.
+They do not offer to recommit the draft. Unimported environment text stays available in the current tab for
 copying; it is never placed in the URL or browser storage. A successful configuration save also
 advances the local draft revision before preflight, so a preflight failure does not leave retry using
 an outdated revision.
+
+Run pages default to a compact progress summary and one build transcript across all execution stages.
+The transcript splits streamed chunks into numbered lines, removes terminal color escapes, shows time,
+highlights warning/error text, and supports search, stage/error filtering, wrapping, follow-tail and
+copying visible lines. Replay remains sequence-based and retains at most 5,000 log events. Execution
+details, application runtime logs and metrics are separate views. A successful run shows Visit only
+when its recorded release is the project's current live release; older runs link back to the project.
+
+Settings has dedicated Build settings, Runtime settings, Environment variables, Domains & ports,
+Storage, Databases & backups, Automations and Lifecycle destinations. Variable edits and automation
+creation use sheets. Automation separates Git/webhooks, schedules, previews and notifications;
+one-time signing secrets remain visible after either provider or notification creation. Dependency
+pickers show resource names, while the owner modules retain execution authority. Game console output
+uses numbered lines, and the raw server settings file is available through a disclosure.
 
 Archived deployments are searchable at `/deploy?view=archived`. They offer a separate permanent
 record deletion with explicit confirmation, preserving host resources and the audit log. See the

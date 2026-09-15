@@ -189,8 +189,16 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
 - **New session always opens a direct PTY.** A session is still nameable, pinnable and fileable because
   those properties belong to its in-memory workspace. New window creates a sibling direct PTY and the
-  browser switches windows by connecting the emulator to that window's opaque id. There is no persistent
+  browser connects each visited window's emulator to that window's opaque id. There is no persistent
   option, detach/reattach path or pane model in the terminal API.
+- **Visited windows keep their emulator and socket while hidden.** A TUI updates the screen incrementally;
+  remounting xterm on each window/session switch loses its parser, alternate buffer and unchanged cells.
+  The server's last 128 KiB of raw output is not a screen snapshot and may start inside an escape sequence.
+  The page retains visited windows until their window/session is removed from the live lists or the page
+  is left. Window lists are cached per session so switching sessions never borrows the previous session's
+  windows while its request is pending. Hidden panes keep parsing bytes and answering live terminal
+  queries, but remain inert and retain their last visible grid size. Selection fits, refreshes and focuses
+  the visible pane; browser visibility/focus changes refresh it even if the dimensions have not changed.
 - **`clipboardKey`**: Ctrl+C copies **only when something is selected** and clears the selection as it
   goes, so the interrupt is never more than one keypress away. Ctrl+V returns false *without*
   `preventDefault`, so xterm leaves the key alone instead of sending ^V and the browser's own paste runs —
@@ -245,7 +253,12 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   fresh load, which is the difference between "new session" having a shortcut and not). Any open dialog
   vetoes the lot, because focus sits on the body while one closes. The other half: **every switch hands the
   keyboard back** — window tabs are buttons and keep the focus they were given, so `XtermPane` takes a
-  `focusRef` and the page calls it as the active socket changes.
+  `focusRef` owned only by the active pane, which fits and focuses itself when selected. Background
+  socket connections and pending image uploads must not steal that focus.
+
+`tests/browser/terminal-ui.spec.ts` exercises both DOM and WebGL renderers with output exceeding the
+server's replay limit, ANSI/UTF-8 split across messages, background terminal replies, resize while hidden,
+window/session switching, screen preservation, input routing and cleanup when windows/sessions close.
 
 **Open-shell links are consumed once.** The page removes `cwd` and `folder` from the current history
 entry before creating the session, preserving other query parameters and the hash. A refresh cannot

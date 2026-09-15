@@ -51,6 +51,27 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   reporting a negative session age. Oracle has no live coverage (its installer cannot run headlessly),
   which CONTRIBUTING says plainly.
 
+### Database provisioning for deployments
+
+Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
+Provisioning publishes database ports to host loopback only. The URL endpoint's `target=container`
+option resolves a matching default-bridge address without changing networking or the saved DSN;
+`target=host` and the default retain the original DSN. Replies are non-cacheable and audits contain
+the connection identity and target, never credentials. See the [deployment contract](../deployments/implementation.md).
+
+Redis provisioning writes its generated password to a mode-0600 configuration inside the container
+before the official entrypoint drops privileges. Redis requires explicit password configuration;
+setting `REDIS_PASSWORD` alone does not enable authentication. The bootstrap is constant shell text,
+with the generated secret read from the environment rather than placed in argv.
+See [Redis configuration](https://redis.io/docs/latest/operate/oss_and_stack/management/config/).
+MongoDB detection records `authSource=admin` when credentials come from `MONGO_INITDB_ROOT_USERNAME`,
+so selecting an application database does not change where the root account authenticates.
+See the [official MongoDB image](https://hub.docker.com/_/mongo/).
+
+`JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
+provisions all five supported quick-setup engines, adopts and pings them, authenticates from separate
+application containers, verifies loopback-only host bindings, and removes its own containers/volumes.
+
 ## Proxy
 
 - Public-address discovery excludes CGNAT (`100.64.0.0/10`) as well as private, loopback and link-local

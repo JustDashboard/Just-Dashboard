@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Box } from "@/components/icons"
+import { Box, Layers, Logs } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -52,21 +52,26 @@ export function DeploymentRuntime({ runtime }: { runtime?: DeploymentRuntimeServ
                   Health: {service.health === "unavailable" ? "Not observed" : service.health}
                   {service.startedAt && <> · Started {relativeTime(service.startedAt)}</>}
                 </p>
-                <Link
-                  href={`?${new URLSearchParams({ tab: "logs", service: service.containerId })}`}
-                  className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
-                >
-                  Open runtime logs for {service.name || service.containerId}
-                </Link>
-                {service.stack && (
-                  <Link
-                    href={`/docker/stacks?${new URLSearchParams({ stack: service.stack })}`}
-                    className="inline-flex min-h-9 items-center text-xs break-all underline underline-offset-4 focus-ring"
-                  >
-                    Open stack {service.stack}
-                    {service.service && ` · ${service.service}`}
-                  </Link>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link
+                      href={`?${new URLSearchParams({ tab: "logs", service: service.containerId })}`}
+                      aria-label={`Open runtime logs for ${service.name || service.containerId}`}
+                    >
+                      <Logs className="size-3.5" /> Runtime logs
+                    </Link>
+                  </Button>
+                  {service.stack && (
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link
+                        href={`/docker/stacks?${new URLSearchParams({ stack: service.stack })}`}
+                        aria-label={`Open stack ${service.stack}${service.service ? ` · ${service.service}` : ""}`}
+                      >
+                        <Layers className="size-3.5" /> Open stack
+                      </Link>
+                    </Button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

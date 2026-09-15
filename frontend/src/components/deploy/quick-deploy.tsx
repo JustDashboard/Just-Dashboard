@@ -1,10 +1,13 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
+  ArrowLeft,
   ArrowRight,
+  Plus,
+  Trash,
   Box,
   CheckCircle,
   Clipboard,
@@ -23,6 +26,7 @@ import { get, post, put } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   DeploymentConfiguration,
+  DeploymentBuildMethod,
   DeploymentDetectionCandidate,
   DeploymentDraft,
   DeploymentDraftSource,
@@ -34,6 +38,8 @@ import type {
   WorkloadProfile,
 } from "@/lib/types"
 import { useCopy } from "@/hooks/use-copy"
+import { GitHubAccountControl } from "@/components/git/github-account"
+import { ProjectDatabase } from "@/components/deploy/project-database"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageHeader, SearchInput } from "@/components/page"
@@ -62,27 +68,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tag } from "@/components/tag"
 import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
 import { setDeploymentHandoff } from "@/components/deploy/deployment-handoff"
-
-/**
- * The short way to put something online.
- *
- * The wizard this sits beside asks five screens of questions because it can
- * describe every workload this dashboard supports. That generality is the
- * problem for the case that matters most: a repository that serves HTTP. An
- * operator who has one of those was being asked to pick an outcome from eight
- * cards, then a source mode from a list, then to type a clone URL, a branch, a
- * credential id and a build method — before reaching a preflight that could
- * still refuse the plan over a control they were never shown.
- *
- * So this screen asks the three questions that actually vary — what to deploy,
- * what to call it, and what the environment needs — and derives the rest:
- * detection fills in the framework's commands, the public hostname is
- * generated from a name that already resolves here, and preflight's findings
- * are rendered where the decision is made rather than on a screen after it.
- *
- * Everything else — Compose stacks, blueprints, game servers, adopting an
- * existing container — stays in the wizard, one link away.
- */
 
 type Lane = "github" | "image" | "database"
 
@@ -129,130 +114,154 @@ const LANES: { lane: Lane; title: string; description: string; icon: typeof Clou
 ]
 
 export function QuickDeploy() {
-  const router = useRouter()
-  const [lane, setLane] = useState<Lane>()
-
-  if (lane === "database")
-    return (
-      <QuickPage onBack={() => setLane(undefined)}>
-        <DatabaseQuickDeploy />
-      </QuickPage>
-    )
-  if (lane === "github" || lane === "image")
-    return (
-      <QuickPage onBack={() => setLane(undefined)}>
-        <ApplicationFlow lane={lane} />
-      </QuickPage>
-    )
-
+  const search = useSearchParams()
+  const initial = search.get("source")
+  const [lane, setLane] = useState<Lane>(
+    initial === "database" || initial === "image" ? initial : "github",
+  )
   return (
-    <QuickPage>
-      <Panel>
-        <PanelHeader title="What are you putting online?" />
-        <PanelBody className="grid gap-3 sm:grid-cols-3">
-          {LANES.map((option) => (
-            <ChoiceCard
-              key={option.lane}
-              onClick={() => setLane(option.lane)}
-              className="min-h-32 justify-start"
-            >
-              <span className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                <option.icon className="size-4" />
-              </span>
-              <ChoiceCardTitle>{option.title}</ChoiceCardTitle>
-              <ChoiceCardHint>{option.description}</ChoiceCardHint>
-            </ChoiceCard>
-          ))}
-        </PanelBody>
-      </Panel>
-      <Panel>
-        <PanelHeader title="More ways to deploy" />
-        <PanelBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            {
-              profile: "compose",
-              title: "Compose stack",
-              hint: "Deploy several services together from a Compose file.",
-              icon: Layers,
-            },
-            {
-              profile: "service",
-              title: "Application template",
-              hint: "Start with a reviewed recipe and ready-to-use defaults.",
-              icon: CloudUpload,
-            },
-            {
-              profile: "game",
-              title: "Game server",
-              hint: "Set up a game with persistent worlds and a built-in console.",
-              icon: Servers,
-            },
-            {
-              profile: "worker",
-              title: "Worker or bot",
-              hint: "Run a background process without a public website.",
-              icon: Code,
-            },
-            {
-              profile: "static",
-              title: "Static website",
-              hint: "Build and serve a site with no application process.",
-              icon: CloudUpload,
-            },
-            {
-              profile: "imported",
-              title: "Existing workload",
-              hint: "Bring a running container, stack, or checkout into deployments.",
-              icon: Box,
-            },
-          ].map((option) => (
-            <ChoiceCard
-              key={option.profile}
-              onClick={() => router.push(`/deploy/new?mode=advanced&profile=${option.profile}`)}
-            >
-              <option.icon className="mb-2 size-5 text-muted-foreground" />
-              <ChoiceCardTitle>{option.title}</ChoiceCardTitle>
-              <ChoiceCardHint>{option.hint}</ChoiceCardHint>
-            </ChoiceCard>
-          ))}
-        </PanelBody>
-        <PanelFooter>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/deploy/new?mode=advanced">
-              All configuration options <ArrowRight className="size-3.5" />
-            </Link>
+    <Page className="max-w-[1320px]">
+      <PageHeader
+        eyebrow={
+          <Link href="/deploy" className="inline-flex items-center gap-1 hover:underline">
+            <ArrowLeft className="size-3" /> Projects
+          </Link>
+        }
+        title="Let's deploy something new"
+        actions={
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/deploy">Back to projects</Link>
           </Button>
-        </PanelFooter>
-      </Panel>
-    </QuickPage>
+        }
+      />
+      <div role="group" aria-label="Project source" className="flex flex-wrap gap-2">
+        {LANES.map((option) => (
+          <Button
+            key={option.lane}
+            variant={lane === option.lane ? "secondary" : "ghost"}
+            size="sm"
+            aria-pressed={lane === option.lane}
+            onClick={() => setLane(option.lane)}
+          >
+            <option.icon className="size-4" />
+            {option.title}
+          </Button>
+        ))}
+      </div>
+      {lane === "database" ? (
+        <div className="mx-auto w-full max-w-3xl">
+          <DatabaseQuickDeploy />
+        </div>
+      ) : (
+        <ApplicationFlow key={lane} lane={lane} onLane={setLane} />
+      )}
+    </Page>
   )
 }
 
-function QuickPage({ children, onBack }: { children: React.ReactNode; onBack?: () => void }) {
+function SourceCatalog({ onLane }: { onLane: (lane: Lane) => void }) {
   return (
-    <Page className="max-w-[1100px]">
-      <PageHeader
-        eyebrow="Deployments"
-        title="New deployment"
-        actions={
-          onBack ? (
-            <Button variant="outline" size="sm" onClick={onBack}>
-              Change source type
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/deploy">Exit to fleet</Link>
-            </Button>
-          )
-        }
-      />
-      {children}
-    </Page>
+    <Panel>
+      <PanelHeader title="Start with something ready" />
+      <PanelBody className="space-y-1 p-2">
+        {[
+          {
+            title: "Database",
+            hint: "Postgres, MySQL, Redis, MongoDB & more",
+            icon: Database,
+            lane: "database" as const,
+          },
+          {
+            title: "Docker image",
+            hint: "Run an image from any registry",
+            icon: Box,
+            lane: "image" as const,
+          },
+        ].map((option) => (
+          <button
+            key={option.title}
+            onClick={() => onLane(option.lane)}
+            className="flex min-h-20 w-full items-center gap-3 rounded-md p-3 text-left focus-ring-inset hover:bg-row-hover"
+          >
+            <option.icon className="size-5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">{option.title}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">{option.hint}</span>
+            </span>
+            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
+          </button>
+        ))}
+        {[
+          {
+            profile: "compose",
+            title: "Compose stack",
+            hint: "An application and its services, together",
+            icon: Layers,
+          },
+          {
+            profile: "service",
+            title: "Application template",
+            hint: "Reviewed apps with ready-to-use defaults",
+            icon: CloudUpload,
+          },
+          {
+            profile: "game",
+            title: "Game server",
+            hint: "Persistent worlds, players and a console",
+            icon: Servers,
+          },
+          {
+            profile: "worker",
+            title: "Worker or bot",
+            hint: "Background jobs without a public website",
+            icon: Code,
+          },
+          {
+            profile: "static",
+            title: "Static website",
+            hint: "Build and publish your site's files",
+            icon: CloudUpload,
+          },
+          {
+            profile: "imported",
+            title: "Existing workload",
+            hint: "Bring a running service into your projects",
+            icon: Box,
+          },
+        ].map((option) => (
+          <Link
+            key={option.profile}
+            href={`/deploy/new?mode=advanced&profile=${option.profile}`}
+            className="flex min-h-20 items-center gap-3 rounded-md p-3 focus-ring-inset hover:bg-row-hover"
+          >
+            <option.icon className="size-5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">{option.title}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">{option.hint}</span>
+            </span>
+            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
+          </Link>
+        ))}
+      </PanelBody>
+      <PanelFooter>
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/deploy/new?mode=advanced">
+            All configuration options <ArrowRight className="size-3.5" />
+          </Link>
+        </Button>
+      </PanelFooter>
+    </Panel>
   )
 }
 
 type ApplicationForm = {
   name: string
+  variables: { name: string; value: string }[]
+  databaseIds: number[]
+  profile: WorkloadProfile
+  buildMethod: DeploymentBuildMethod
+  recipe: "node" | "go" | "python"
+  dockerfile: string
   rootDirectory: string
   buildCommand: string
   startCommand: string
@@ -264,7 +273,13 @@ type ApplicationForm = {
   publish: boolean
 }
 
-function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
+function ApplicationFlow({
+  lane,
+  onLane,
+}: {
+  lane: "github" | "image"
+  onLane: (lane: Lane) => void
+}) {
   const router = useRouter()
   const [source, setSource] = useState<DeploymentDraftSource>()
   const [draft, setDraft] = useState<DeploymentDraft>()
@@ -281,7 +296,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
     ready: boolean
   }>()
 
-  const profile: WorkloadProfile = lane === "image" ? "image" : "web"
+  const profile: WorkloadProfile = form?.profile ?? (lane === "image" ? "image" : "web")
 
   // The whole point of this screen is that choosing a source is the last
   // decision before the configuration is already filled in, so detection runs
@@ -309,12 +324,23 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         const selected =
           detection?.candidates.find((item) => item.id === detection.selectedId) ??
           detection?.candidates[0]
-        const defaults = defaultConfiguration(profile, selected, chosen, detection)
+        const defaults = defaultConfiguration(
+          selected?.profile ?? profile,
+          selected,
+          chosen,
+          detection,
+        )
         setSource(chosen)
         setDraft(detected)
         setCandidate(selected)
         setForm({
           name,
+          profile: selected?.profile ?? profile,
+          variables: [{ name: "", value: "" }],
+          databaseIds: [],
+          buildMethod: defaults.build.method,
+          recipe: defaults.build.recipe ?? "node",
+          dockerfile: defaults.build.dockerfile ?? "Dockerfile",
           rootDirectory: defaults.build.rootDirectory ?? "",
           buildCommand: defaults.build.buildCommand ?? "",
           startCommand: defaults.build.startCommand ?? "",
@@ -341,7 +367,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
                 // activation refuses a TLS route with no certificate, and a
                 // toggle that guarantees a failed release is not a default.
                 https: true,
-                publish: hostname.method !== "none",
+                publish: current.profile !== "worker" && hostname.method !== "none",
               }
             : current,
         )
@@ -364,7 +390,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
     setFailure(undefined)
     try {
       let current = draft
-      if (form.name !== current.data.intent?.name) {
+      if (form.name !== current.data.intent?.name || profile !== current.data.intent?.profile) {
         current = await put<DeploymentDraft>(`/deploy/drafts/${current.id}`, {
           revision: current.revision,
           step: "intent",
@@ -378,7 +404,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         configuration: configurationFor(profile, candidate, source, current, form),
       })
       setDraft(current)
-      setDeploymentHandoff(current.id, form.dotenv)
+      setDeploymentHandoff(current.id, environmentText(form))
       router.push(`/deploy/new?draft=${encodeURIComponent(current.id)}&step=configuration`)
     } catch (error) {
       setFailure(error instanceof Error ? error : new Error(String(error)))
@@ -393,6 +419,33 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
       setFailure(new Error("Use 1–64 letters, numbers, dots, dashes, or underscores for the name."))
       return
     }
+    if (
+      form.variables.some(
+        (entry) => (entry.name || entry.value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name),
+      )
+    ) {
+      setFailure(
+        new Error(
+          "Give each environment variable a valid key, using letters, numbers and underscores.",
+        ),
+      )
+      return
+    }
+    if (
+      form.profile === "static" &&
+      form.buildMethod === "recipe" &&
+      !form.outputDirectory.trim()
+    ) {
+      setFailure(
+        new Error("Set the output directory for your static website, such as dist or out."),
+      )
+      return
+    }
+    const names = form.variables.map((entry) => entry.name).filter(Boolean)
+    if (new Set(names).size !== names.length) {
+      setFailure(new Error("Each environment variable needs a unique key."))
+      return
+    }
     setBusy("deploy")
     setFailure(undefined)
     try {
@@ -400,7 +453,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
       // The name is editable on the configure screen, so it can differ from the
       // one the draft was opened with. Saving the intent again only replaces
       // that field — the source and detection it already holds are untouched.
-      if (form.name !== current.data.intent?.name) {
+      if (form.name !== current.data.intent?.name || profile !== current.data.intent?.profile) {
         current = await put<DeploymentDraft>(`/deploy/drafts/${current.id}`, {
           revision: current.revision,
           step: "intent",
@@ -436,15 +489,15 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         revision: checked.draft.revision,
         acknowledgedWarnings: acknowledged,
       })
-      setCreatedProject({ ...committed, ready: !form.dotenv.trim() })
+      setCreatedProject({ ...committed, ready: !environmentText(form).trim() })
 
       let revision = committed.planRevision
-      if (form.dotenv.trim()) {
+      if (environmentText(form).trim()) {
         const imported = await post<{ desiredRevision: number }>(
           `/deploy/${committed.projectId}/environments/${committed.environmentId}/variables/import`,
           {
             revision,
-            dotenv: form.dotenv,
+            dotenv: environmentText(form),
             sensitivity: "secret",
             scopes: ["runtime", "build"],
           },
@@ -481,7 +534,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
               ? "Open the deployment to check its run history and continue."
               : "Environment setup did not finish. Review the Variables tab before starting the first release."}
           </p>
-          {!createdProject.ready && form?.dotenv && (
+          {!createdProject.ready && form && environmentText(form) && (
             <details>
               <summary className="cursor-pointer text-sm focus-ring">
                 Keep a copy of your environment variables
@@ -490,7 +543,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
                 className="mt-3 font-mono text-xs"
                 aria-label="Unsaved environment variables"
                 readOnly
-                value={form.dotenv}
+                value={environmentText(form)}
               />
             </details>
           )}
@@ -508,13 +561,16 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
 
   if (!form || !draft)
     return (
-      <div className="space-y-4">
-        {failure && <ErrorState error={failure} />}
-        {lane === "github" ? (
-          <GitHubSource busy={busy === "inspect"} onChoose={inspect} />
-        ) : (
-          <ImageSource busy={busy === "inspect"} onChoose={inspect} />
-        )}
+      <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-4">
+          {failure && <ErrorState error={failure} />}
+          {lane === "github" ? (
+            <GitHubSource busy={busy === "inspect"} onChoose={inspect} />
+          ) : (
+            <ImageSource busy={busy === "inspect"} onChoose={inspect} />
+          )}
+        </div>
+        <SourceCatalog onLane={onLane} />
       </div>
     )
 
@@ -523,7 +579,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
   const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-4">
       {failure && <ErrorState error={failure} />}
       <nav aria-label="Deployment setup" className="flex flex-wrap items-center gap-3 text-xs">
         <span className="text-muted-foreground">1. Source selected</span>
@@ -534,8 +590,20 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
       </nav>
       <Panel>
         <PanelHeader
-          title="Source"
-          actions={<Tag>{lane === "github" ? "GitHub" : "Docker image"}</Tag>}
+          title="Selected source"
+          actions={
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={Boolean(busy)}
+              onClick={() => {
+                setForm(undefined)
+                setDraft(undefined)
+              }}
+            >
+              Change source
+            </Button>
+          }
         />
         <PanelBody className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm">
           <span className="min-w-0 font-medium break-all">
@@ -623,6 +691,17 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
   )
 }
 
+function environmentText(form: ApplicationForm) {
+  return [
+    form.dotenv.trim(),
+    ...form.variables
+      .filter((entry) => entry.name.trim())
+      .map((entry) => `${entry.name.trim()}=${JSON.stringify(entry.value)}`),
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
 /** The plan the form means, with detection filling in everything not asked about. */
 function configurationFor(
   profile: WorkloadProfile,
@@ -635,8 +714,21 @@ function configurationFor(
   const port = Number(form.internalPort) || 0
   return {
     ...defaults,
+    dependencies: [
+      ...defaults.dependencies,
+      ...form.databaseIds.map((id) => ({
+        kind: "database",
+        ownership: "linked" as const,
+        resourceKind: "database_connection",
+        resourceId: String(id),
+        config: {},
+      })),
+    ],
     build: {
       ...defaults.build,
+      method: form.buildMethod,
+      recipe: form.buildMethod === "recipe" ? form.recipe : undefined,
+      dockerfile: form.buildMethod === "dockerfile" ? form.dockerfile : undefined,
       rootDirectory: form.rootDirectory.trim() || undefined,
       buildCommand: form.buildCommand.trim() || undefined,
       startCommand: form.startCommand.trim() || undefined,
@@ -692,54 +784,105 @@ function GitHubSource({
   const [branches, setBranches] = useState<GitHubBranch[]>()
   const [ref, setRef] = useState("")
   const [manualUrl, setManualUrl] = useState("")
+  const [manualRef, setManualRef] = useState("main")
+  const [credentialId, setCredentialId] = useState(0)
+  const [owner, setOwner] = useState("all")
 
+  const branchRequest = useRef(0)
   const choose = async (repo: GitHubRepoSummary) => {
+    const request = ++branchRequest.current
     setSelected(repo)
     setRef(repo.defaultBranch ?? "main")
     setBranches(undefined)
     try {
-      setBranches(
-        await get<GitHubBranch[]>(
-          `/git/github/branches?repo=${encodeURIComponent(repo.nameWithOwner)}`,
-        ),
+      const result = await get<GitHubBranch[]>(
+        `/git/github/branches?repo=${encodeURIComponent(repo.nameWithOwner)}`,
       )
+      if (request === branchRequest.current) setBranches(result)
     } catch {
       // A repository whose branches cannot be listed is still deployable: the
       // default branch is already known and the field stays typeable.
-      setBranches([])
+      if (request === branchRequest.current) setBranches([])
     }
   }
 
   const needle = filter.trim().toLowerCase()
   const visible = (repos.data ?? []).filter(
     (repo) =>
-      !needle ||
-      repo.nameWithOwner.toLowerCase().includes(needle) ||
-      (repo.description ?? "").toLowerCase().includes(needle),
+      (owner === "all" || repo.nameWithOwner.split("/")[0] === owner) &&
+      (!needle ||
+        repo.nameWithOwner.toLowerCase().includes(needle) ||
+        (repo.description ?? "").toLowerCase().includes(needle)),
   )
 
   return (
     <Panel>
       <PanelHeader
-        title="Choose a repository"
-        actions={
-          signedIn && (
-            <>
-              {/* Which account these repositories came from. It was the panel's
-                  description, and it is the one fact a reader actually needs
-                  here — you cannot tell a private repo list apart from the
-                  wrong account's private repo list without it. */}
-              <span className="text-hint text-muted-foreground">
-                Signed in as {status.data?.account?.login ?? "your account"}
-              </span>
-              <Button variant="ghost" size="icon-sm" onClick={repos.refresh} title="Refresh">
-                <RefreshClockwise className="size-3.5" />
-              </Button>
-            </>
-          )
-        }
+        title="Import Git repository"
+        actions={<GitHubAccountControl status={status} compact />}
       />
       <PanelBody className="space-y-4">
+        <div className="space-y-3 border-b border-hairline pb-5">
+          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <QuickField id="manual-url" label="Clone URL" hint="Any HTTPS or SSH Git URL.">
+              <Input
+                id="manual-url"
+                value={manualUrl}
+                onChange={(event) => setManualUrl(event.target.value)}
+                placeholder="https://github.com/owner/repository.git"
+                className="font-mono"
+              />
+            </QuickField>
+            <div className="flex items-start sm:pt-6">
+              <Button
+                variant="outline"
+                pending={busy}
+                disabled={!manualUrl.trim()}
+                onClick={() =>
+                  void onChoose(
+                    {
+                      kind: "git",
+                      mode: "git_url",
+                      url: manualUrl.trim(),
+                      ref: manualRef.trim() || "main",
+                      credentialId: credentialId || undefined,
+                    },
+                    deploymentName(repositoryName(manualUrl)),
+                  )
+                }
+              >
+                Import
+              </Button>
+            </div>
+          </div>
+          <details>
+            <summary className="cursor-pointer rounded-sm py-2 text-xs text-muted-foreground focus-ring">
+              Branch & authentication
+            </summary>
+            <div className="grid gap-3 pt-2 sm:grid-cols-2">
+              <QuickField id="manual-ref" label="Branch or tag">
+                <Input
+                  id="manual-ref"
+                  value={manualRef}
+                  onChange={(event) => setManualRef(event.target.value)}
+                />
+              </QuickField>
+              <QuickField
+                id="manual-credential"
+                label="Saved credential ID"
+                hint="Optional. Uses the server's Git credentials by default."
+              >
+                <Input
+                  id="manual-credential"
+                  type="number"
+                  min={0}
+                  value={credentialId || ""}
+                  onChange={(event) => setCredentialId(Number(event.target.value))}
+                />
+              </QuickField>
+            </div>
+          </details>
+        </div>
         {status.error && <ErrorState error={status.error} />}
         {repos.error && <ErrorState error={repos.error} />}
         {!signedIn && status.data && (
@@ -767,6 +910,31 @@ function GitHubSource({
         )}
         {signedIn && (
           <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={owner} onValueChange={setOwner}>
+                <SelectTrigger aria-label="Repository owner" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All repositories</SelectItem>
+                  {[
+                    ...new Set((repos.data ?? []).map((repo) => repo.nameWithOwner.split("/")[0])),
+                  ].map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Refresh repositories"
+                onClick={repos.refresh}
+              >
+                <RefreshClockwise className="size-3.5" />
+              </Button>
+            </div>
             <SearchInput
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
@@ -782,13 +950,13 @@ function GitHubSource({
                   : "No repository matches that filter."}
               </EmptyNote>
             )}
-            <ul className="max-h-96 space-y-2 overflow-y-auto">
+            <ul className="max-h-[32rem] divide-y divide-hairline overflow-y-auto">
               {visible.map((repo) => (
                 <li key={repo.nameWithOwner}>
                   <ChoiceCard
                     selected={selected?.nameWithOwner === repo.nameWithOwner}
                     onClick={() => void choose(repo)}
-                    className="min-h-0 w-full flex-row items-center gap-3"
+                    className="min-h-20 w-full flex-row items-center gap-3 rounded-none border-0"
                   >
                     <span className="min-w-0 flex-1">
                       <ChoiceCardTitle className="block truncate">
@@ -801,7 +969,13 @@ function GitHubSource({
                       )}
                     </span>
                     {repo.language && <Tag>{repo.language}</Tag>}
-                    {repo.private && <Tag>private</Tag>}
+                    {repo.private && (
+                      <LockClosed
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-label="Private repository"
+                      />
+                    )}
+                    <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
                   </ChoiceCard>
                 </li>
               ))}
@@ -851,37 +1025,6 @@ function GitHubSource({
             </div>
           </div>
         )}
-        <details className="border-t border-hairline pt-3">
-          <summary className="flex min-h-9 cursor-pointer items-center text-xs font-medium">
-            Deploy a repository that is not in this list
-          </summary>
-          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <QuickField id="manual-url" label="Clone URL" hint="Any HTTPS or SSH Git URL.">
-              <Input
-                id="manual-url"
-                value={manualUrl}
-                onChange={(event) => setManualUrl(event.target.value)}
-                placeholder="https://github.com/owner/repository.git"
-                className="font-mono"
-              />
-            </QuickField>
-            <div className="flex items-end">
-              <Button
-                variant="outline"
-                pending={busy}
-                disabled={!manualUrl.trim()}
-                onClick={() =>
-                  void onChoose(
-                    { kind: "git", mode: "git_url", url: manualUrl.trim(), ref: "main" },
-                    repositoryName(manualUrl),
-                  )
-                }
-              >
-                Continue
-              </Button>
-            </div>
-          </div>
-        </details>
       </PanelBody>
     </Panel>
   )
@@ -1081,40 +1224,136 @@ function ConfigureStep({
             />
           </QuickField>
           {lane === "github" && (
+            <QuickField id="workload-type" label="Project type">
+              <Select
+                value={form.profile}
+                onValueChange={(value) =>
+                  onChange({
+                    ...form,
+                    profile: value as WorkloadProfile,
+                    publish: value !== "worker" && form.publish,
+                    startCommand:
+                      value === "static" && form.buildMethod === "recipe"
+                        ? ""
+                        : form.startCommand || candidate?.startCommand || "",
+                    internalPort:
+                      value === "worker"
+                        ? 0
+                        : value === "static" && form.buildMethod !== "dockerfile"
+                          ? 80
+                          : form.internalPort || 3000,
+                  })
+                }
+              >
+                <SelectTrigger id="workload-type" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="web">Web application</SelectItem>
+                  <SelectItem value="static">Static website</SelectItem>
+                  <SelectItem value="worker">Worker or bot</SelectItem>
+                  {!["web", "static", "worker"].includes(form.profile) && (
+                    <SelectItem value={form.profile}>{form.profile}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </QuickField>
+          )}
+          {lane === "github" && (
             <details
               className="min-w-0 sm:col-span-2"
-              open={!candidate || Boolean(detectionUnavailable)}
+              open={
+                !candidate ||
+                Boolean(detectionUnavailable) ||
+                (form.profile === "static" &&
+                  form.buildMethod === "recipe" &&
+                  !form.outputDirectory)
+              }
             >
               <summary className="cursor-pointer rounded-md py-2 text-body font-medium focus-ring">
                 Build settings{candidate?.framework ? ` · ${candidate.framework}` : ""}
               </summary>
               <div className="grid gap-4 pt-3 sm:grid-cols-2">
-                <QuickField
-                  id="build-command"
-                  label="Build command"
-                  hint="Detected from the package manager this repository locks to."
-                >
-                  <Input
-                    id="build-command"
-                    value={form.buildCommand}
-                    onChange={(event) => set("buildCommand", event.target.value)}
-                    placeholder="npm run build"
-                    className="font-mono"
-                  />
+                <QuickField id="quick-build-method" label="Build method">
+                  <Select
+                    value={form.buildMethod}
+                    onValueChange={(value) => set("buildMethod", value as DeploymentBuildMethod)}
+                  >
+                    <SelectTrigger id="quick-build-method" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="recipe">Automatic recipe</SelectItem>
+                      <SelectItem value="dockerfile">Dockerfile</SelectItem>
+                      <SelectItem value="static">Static files</SelectItem>
+                      {!["recipe", "dockerfile", "static"].includes(form.buildMethod) && (
+                        <SelectItem value={form.buildMethod}>{form.buildMethod}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </QuickField>
-                <QuickField
-                  id="start-command"
-                  label="Start command"
-                  hint="Leave empty and set an output directory to serve static files instead."
-                >
-                  <Input
-                    id="start-command"
-                    value={form.startCommand}
-                    onChange={(event) => set("startCommand", event.target.value)}
-                    placeholder="npm run start"
-                    className="font-mono"
-                  />
-                </QuickField>
+                {form.buildMethod === "recipe" && (
+                  <QuickField id="quick-recipe" label="Language">
+                    <Select
+                      value={form.recipe}
+                      onValueChange={(value) => set("recipe", value as ApplicationForm["recipe"])}
+                    >
+                      <SelectTrigger id="quick-recipe" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="node">JavaScript / TypeScript</SelectItem>
+                        <SelectItem value="go">Go</SelectItem>
+                        <SelectItem value="python">Python</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </QuickField>
+                )}
+                {form.buildMethod === "dockerfile" && (
+                  <QuickField
+                    id="quick-dockerfile"
+                    label="Dockerfile path"
+                    hint="Use a Dockerfile for any language or custom build."
+                  >
+                    <Input
+                      id="quick-dockerfile"
+                      className="font-mono"
+                      value={form.dockerfile}
+                      onChange={(event) => set("dockerfile", event.target.value)}
+                    />
+                  </QuickField>
+                )}
+
+                {form.buildMethod !== "dockerfile" && (
+                  <>
+                    <QuickField
+                      id="build-command"
+                      label="Build command"
+                      hint="Detected from the package manager this repository locks to."
+                    >
+                      <Input
+                        id="build-command"
+                        value={form.buildCommand}
+                        onChange={(event) => set("buildCommand", event.target.value)}
+                        placeholder="npm run build"
+                        className="font-mono"
+                      />
+                    </QuickField>
+                    <QuickField
+                      id="start-command"
+                      label="Start command"
+                      hint="Leave empty and set an output directory to serve static files instead."
+                    >
+                      <Input
+                        id="start-command"
+                        value={form.startCommand}
+                        onChange={(event) => set("startCommand", event.target.value)}
+                        placeholder="npm run start"
+                        className="font-mono"
+                      />
+                    </QuickField>
+                  </>
+                )}
                 <QuickField
                   id="root-directory"
                   label="Root directory"
@@ -1148,25 +1387,106 @@ function ConfigureStep({
       </Panel>
 
       <Panel>
-        <PanelHeader title="Environment variables" />
-        <PanelBody>
-          <Textarea
-            id="dotenv"
-            aria-label="Environment variables"
-            value={form.dotenv}
-            onChange={(event) => set("dotenv", event.target.value)}
-            rows={form.dotenv ? Math.min(14, form.dotenv.split("\n").length + 2) : 4}
-            placeholder={"DATABASE_URL=postgres://…\nNEXT_PUBLIC_SITE_URL=https://…"}
-            className="font-mono text-xs"
-          />
-          <p className="mt-2 text-hint leading-relaxed text-muted-foreground">
-            Each variable is available to the build and to the running container, which is what a
-            framework that inlines values at build time needs.
+        <PanelHeader title="Environment variables" actions={<Tag>Optional</Tag>} />
+        <PanelBody className="space-y-3">
+          {form.variables.map((entry, index) => (
+            <div
+              key={index}
+              className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] items-end gap-2"
+            >
+              <QuickField id={`env-key-${index}`} label="Key">
+                <Input
+                  id={`env-key-${index}`}
+                  value={entry.name}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="DATABASE_URL"
+                  className="font-mono"
+                  onChange={(event) =>
+                    set(
+                      "variables",
+                      form.variables.map((item, i) =>
+                        i === index ? { ...item, name: event.target.value } : item,
+                      ),
+                    )
+                  }
+                />
+              </QuickField>
+              <QuickField id={`env-value-${index}`} label="Value">
+                <Input
+                  id={`env-value-${index}`}
+                  type="password"
+                  autoComplete="new-password"
+                  value={entry.value}
+                  placeholder="Enter a value"
+                  className="font-mono"
+                  onChange={(event) =>
+                    set(
+                      "variables",
+                      form.variables.map((item, i) =>
+                        i === index ? { ...item, value: event.target.value } : item,
+                      ),
+                    )
+                  }
+                />
+              </QuickField>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove variable ${entry.name || index + 1}`}
+                onClick={() =>
+                  set(
+                    "variables",
+                    form.variables.filter((_, i) => i !== index),
+                  )
+                }
+              >
+                <Trash className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => set("variables", [...form.variables, { name: "", value: "" }])}
+          >
+            <Plus className="size-3.5" /> Add variable
+          </Button>
+          <details>
+            <summary className="cursor-pointer rounded-sm py-2 text-xs focus-ring">
+              Import .env
+            </summary>
+            <Textarea
+              id="dotenv"
+              aria-label="Environment variables"
+              value={form.dotenv}
+              onChange={(event) => set("dotenv", event.target.value)}
+              rows={4}
+              placeholder={"API_KEY=…\nNEXT_PUBLIC_SITE_URL=https://…"}
+              className="mt-2 font-mono text-xs"
+            />
+          </details>
+          <p className="text-xs text-muted-foreground">
+            Encrypted when saved. Available during build and at runtime.
           </p>
         </PanelBody>
       </Panel>
+      <ProjectDatabase
+        onConnect={(connection, url, variable) =>
+          onChange({
+            ...form,
+            variables: [
+              ...form.variables.filter((entry) => entry.name && entry.name !== variable),
+              { name: variable, value: url },
+            ],
+            databaseIds: [...new Set([...form.databaseIds, connection.id])],
+          })
+        }
+      />
 
-      <PublicAddress form={form} onChange={onChange} suggestion={suggestion} />
+      {form.profile !== "worker" && (
+        <PublicAddress form={form} onChange={onChange} suggestion={suggestion} />
+      )}
     </div>
   )
 }
@@ -1222,11 +1542,7 @@ function PublicAddress({
       <PanelHeader title="Public address" />
       <PanelBody className="space-y-4">
         <Label className="flex min-h-11 items-center gap-3 text-xs">
-          <Switch
-            checked={form.publish}
-            onCheckedChange={(publish) => set("publish", publish)}
-            disabled={current?.method === "none"}
-          />
+          <Switch checked={form.publish} onCheckedChange={(publish) => set("publish", publish)} />
           Publish this deployment on a public hostname
         </Label>
         {form.publish && (

@@ -27,7 +27,6 @@ import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentEngineRun,
   DeploymentRelease,
-  DeploymentRunSnapshot,
   DeploymentSummary,
   DeploymentOperations,
   DeploymentRuntimeServices,
@@ -35,19 +34,21 @@ import type {
   DeployProject,
   EnvVar,
 } from "@/lib/types"
-import { Page, PageHeader, Metric, MetricStrip } from "@/components/page"
+import { Page, PageHeader } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import {
   DeploymentStatus,
-  HealthStatus,
   ProjectTabs,
-  ReleasePath,
+  ProjectSettingsNav,
+  isProjectSettingsTab,
+  deploymentURL,
   humanize,
-  reachableAt,
 } from "@/components/deploy/deployment-ui"
 import {
   NormalizedConfigurationTab,
+  NormalizedBuildTab,
+  DeploymentLifecycle,
   NormalizedNetworkTab,
   NormalizedStorageTab,
   NormalizedVariablesTab,
@@ -56,7 +57,7 @@ import { DeploymentAutomation } from "@/components/deploy/deployment-automation"
 import { DeleteArchivedDeployment } from "@/components/deploy/deployment-archive"
 import { DeploymentLogs } from "@/components/deploy/deployment-logs"
 import { DeploymentRuntime } from "@/components/deploy/deployment-runtime"
-import { DeploymentSitePreview } from "@/components/deploy/deployment-site-preview"
+import { DeploymentOverview } from "@/components/deploy/deployment-overview"
 import {
   DeploymentDependencies,
   DeploymentDomains,
@@ -97,14 +98,19 @@ const VALID_TABS = new Set([
   "deployments",
   "logs",
   "configuration",
+  "runtime-settings",
   "variables",
   "network",
   "storage",
+  "dependencies",
   "automations",
   "metrics",
   "console",
   "players",
   "settings",
+  "runtime",
+  "diagnostics",
+  "lifecycle",
 ])
 
 export function DeploymentWorkspace() {
@@ -228,7 +234,17 @@ export function DeploymentWorkspace() {
             {!isArchived && deployment.pendingChanges && (
               <Status tone="warning" label="Pending deployment" />
             )}
-            <HealthStatus health={deployment.health} />
+            {deploymentURL(deployment.endpoint) && (
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href={deploymentURL(deployment.endpoint)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Globe className="size-3.5" /> Visit
+                </a>
+              </Button>
+            )}
             {isArchived ? (
               <>
                 <Tag>Archived</Tag>
@@ -327,8 +343,8 @@ export function DeploymentWorkspace() {
                                 </p>
                                 <p>
                                   Running containers, routes, and persistent data remain. To remove
-                                  managed resources too, use Configuration → Archive &amp; managed
-                                  resources.
+                                  managed resources too, use Settings → Lifecycle → Archive &amp;
+                                  managed resources.
                                 </p>
                               </>
                             ),
@@ -356,17 +372,6 @@ export function DeploymentWorkspace() {
         }
       />
 
-      <MetricStrip className="rounded-lg border border-hairline bg-card px-4 py-3">
-        <Metric label="Environment" value={humanize(deployment.environmentKind)} />
-        <Metric label="Reachable at" value={reachableAt(deployment)} />
-        <Metric label="Release strategy" value={humanize(deployment.strategy)} />
-        <Metric
-          label="Plan"
-          value={`Revision ${deployment.desiredRevision}`}
-          hint={deployment.pendingChanges ? "Not live yet" : "Live"}
-        />
-      </MetricStrip>
-
       <ProjectTabs
         projectId={projectID}
         active={activeTab}
@@ -374,181 +379,120 @@ export function DeploymentWorkspace() {
         profile={deployment.profile}
       />
 
-      {activeTab === "overview" && (
-        <Overview
-          deployment={deployment}
-          project={project}
-          runs={runs.data?.runs ?? []}
-          runtime={detail.data.runtime}
-          operations={operations.data}
-          operationsLoading={operations.loading}
-        />
-      )}
-      {activeTab === "deployments" && (
-        <DeploymentsTab
-          project={project}
-          runs={runs.data?.runs ?? []}
-          loading={runs.loading}
-          legacy={deployment.buildMethod === "legacy_compose"}
-          active={Boolean(deployment.activeRun)}
-          deployment={deployment}
-          releases={releases.data ?? []}
-          releasesLoading={releases.loading}
-        />
-      )}
-      {activeTab === "logs" && <DeploymentLogs runtime={detail.data.runtime} />}
-      {activeTab === "configuration" &&
-        (normalized ? (
-          <NormalizedConfigurationTab
-            projectID={projectID}
-            environmentID={environmentID}
-            onArchived={() => setArchived(true)}
-          />
-        ) : (
-          <LegacyConfigurationTab deployment={deployment} project={project} />
-        ))}
-      {activeTab === "variables" &&
-        (normalized ? (
-          <NormalizedVariablesTab projectID={projectID} environmentID={environmentID} />
-        ) : (
-          <LegacyVariablesTab projectID={projectID} />
-        ))}
-      {activeTab === "network" &&
-        (normalized ? (
-          <NormalizedNetworkTab projectID={projectID} environmentID={environmentID} />
-        ) : (
-          <OwnedFeatureTab kind="network" deployment={deployment} />
-        ))}
-      {activeTab === "storage" &&
-        (normalized ? (
-          <NormalizedStorageTab
-            projectID={projectID}
-            environmentID={environmentID}
-            latestRunID={(runs.data?.runs[0] ?? deployment.lastRun)?.id}
-          />
-        ) : (
-          <OwnedFeatureTab kind="storage" deployment={deployment} />
-        ))}
-      {activeTab === "automations" && (
-        <DeploymentAutomation
-          projectID={project.id}
-          environmentID={environmentID}
-          legacyHook={project.hookUrl}
-          legacyEnabled={project.enabled}
-          normalized={normalized}
-        />
-      )}
-      {activeTab === "metrics" && (
-        <div className="space-y-4">
-          <DeploymentMetrics runtime={detail.data.runtime} />
-          <DeploymentMetricsTab deployment={deployment} runs={runs.data?.runs ?? []} />
+      <div
+        className={
+          isProjectSettingsTab(activeTab)
+            ? "grid min-w-0 gap-5 lg:grid-cols-[12rem_minmax(0,1fr)]"
+            : "min-w-0"
+        }
+      >
+        {isProjectSettingsTab(activeTab) && (
+          <ProjectSettingsNav projectId={projectID} active={activeTab} />
+        )}
+        <div className="min-w-0 space-y-5">
+          {activeTab === "overview" && (
+            <DeploymentOverview
+              deployment={deployment}
+              project={project}
+              runs={runs.data?.runs ?? []}
+              runtime={detail.data.runtime}
+              operations={operations.data}
+            />
+          )}
+          {activeTab === "deployments" && (
+            <DeploymentsTab
+              project={project}
+              runs={runs.data?.runs ?? []}
+              loading={runs.loading}
+              legacy={deployment.buildMethod === "legacy_compose"}
+              active={Boolean(deployment.activeRun)}
+              deployment={deployment}
+              releases={releases.data ?? []}
+              releasesLoading={releases.loading}
+            />
+          )}
+          {activeTab === "runtime" && <DeploymentRuntime runtime={detail.data.runtime} />}
+          {activeTab === "diagnostics" && (
+            <div className="space-y-4">
+              <DeploymentFindings
+                diagnosis={operations.data?.diagnosis}
+                loading={operations.loading}
+              />
+              <DeploymentDomains operations={operations.data} />
+              <DeploymentStorage operations={operations.data} />
+              <DeploymentDependencies operations={operations.data} />
+            </div>
+          )}
+          {activeTab === "lifecycle" && (
+            <DeploymentLifecycle projectID={projectID} onArchived={() => setArchived(true)} />
+          )}
+          {activeTab === "logs" && <DeploymentLogs runtime={detail.data.runtime} />}
+          {activeTab === "runtime-settings" &&
+            (normalized ? (
+              <NormalizedConfigurationTab projectID={projectID} environmentID={environmentID} />
+            ) : (
+              <LegacyConfigurationTab deployment={deployment} project={project} />
+            ))}
+          {activeTab === "configuration" &&
+            (normalized ? (
+              <NormalizedBuildTab projectID={projectID} environmentID={environmentID} />
+            ) : (
+              <LegacyConfigurationTab deployment={deployment} project={project} />
+            ))}
+          {activeTab === "variables" &&
+            (normalized ? (
+              <NormalizedVariablesTab projectID={projectID} environmentID={environmentID} />
+            ) : (
+              <LegacyVariablesTab projectID={projectID} />
+            ))}
+          {activeTab === "network" &&
+            (normalized ? (
+              <NormalizedNetworkTab projectID={projectID} environmentID={environmentID} />
+            ) : (
+              <OwnedFeatureTab kind="network" deployment={deployment} />
+            ))}
+          {(activeTab === "storage" || activeTab === "dependencies") &&
+            (normalized ? (
+              <NormalizedStorageTab
+                projectID={projectID}
+                environmentID={environmentID}
+                latestRunID={(runs.data?.runs[0] ?? deployment.lastRun)?.id}
+                section={activeTab === "dependencies" ? "dependencies" : "storage"}
+              />
+            ) : (
+              <OwnedFeatureTab kind="storage" deployment={deployment} />
+            ))}
+          {activeTab === "automations" && (
+            <DeploymentAutomation
+              projectID={project.id}
+              environmentID={environmentID}
+              legacyHook={project.hookUrl}
+              legacyEnabled={project.enabled}
+              normalized={normalized}
+            />
+          )}
+          {activeTab === "metrics" && (
+            <div className="space-y-4">
+              <DeploymentMetrics runtime={detail.data.runtime} />
+              <DeploymentMetricsTab deployment={deployment} runs={runs.data?.runs ?? []} />
+            </div>
+          )}
+          {activeTab === "console" &&
+            (deployment.profile === "game" ? (
+              <GameConsoleTab projectID={projectID} />
+            ) : (
+              <OwnedFeatureTab kind="console" deployment={deployment} />
+            ))}
+          {activeTab === "players" && deployment.profile === "game" && (
+            <GamePlayersTab projectID={projectID} />
+          )}
+          {activeTab === "settings" && deployment.profile === "game" && (
+            <GameSettingsTab projectID={projectID} />
+          )}
         </div>
-      )}
-      {activeTab === "console" &&
-        (deployment.profile === "game" ? (
-          <GameConsoleTab projectID={projectID} />
-        ) : (
-          <OwnedFeatureTab kind="console" deployment={deployment} />
-        ))}
-      {activeTab === "players" && deployment.profile === "game" && (
-        <GamePlayersTab projectID={projectID} />
-      )}
-      {activeTab === "settings" && deployment.profile === "game" && (
-        <GameSettingsTab projectID={projectID} />
-      )}
+      </div>
       {deletion.dialog}
     </Page>
-  )
-}
-
-function Overview({
-  deployment,
-  project,
-  runs,
-  runtime,
-  operations,
-  operationsLoading,
-}: {
-  deployment: DeploymentSummary
-  project: DeployProject
-  runs: DeploymentEngineRun[]
-  runtime?: DeploymentRuntimeServices
-  operations?: DeploymentOperations
-  operationsLoading: boolean
-}) {
-  const lastRun = runs[0] ?? deployment.lastRun
-  return (
-    <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-      <DeploymentSitePreview key={deployment.endpoint} deployment={deployment} />
-      <Panel className="xl:col-span-2">
-        <PanelHeader
-          title="Release path"
-          actions={
-            lastRun && (
-              <Button variant="outline" size="xs" asChild>
-                <Link href={`/deploy/${deployment.id}/runs/${lastRun.id}`}>Open run</Link>
-              </Button>
-            )
-          }
-        />
-        <PanelBody>
-          {lastRun ? (
-            <LastReleasePath projectID={deployment.id} runID={lastRun.id} />
-          ) : (
-            <ReleasePath steps={[]} />
-          )}
-          {!lastRun && (
-            <p className="mt-4 text-xs text-muted-foreground">
-              The persisted release path will fill as the first deployment runs.
-            </p>
-          )}
-        </PanelBody>
-      </Panel>
-
-      <DeploymentFindings diagnosis={operations?.diagnosis} loading={operationsLoading} />
-
-      <DeploymentRuntime runtime={runtime} />
-      <SummaryPanel
-        title="Source & automation"
-        rows={[
-          ["Source", deployment.sourceRef || project.repoPath || "Not recorded"],
-          ["Revision", deployment.sourceRevision || project.branch || "Not recorded"],
-          ["Build", humanize(deployment.buildMethod)],
-          ["Deploy on push", project.enabled ? "Enabled" : "Disabled"],
-        ]}
-        href={`/deploy/${deployment.id}?tab=automations`}
-      />
-      <DeploymentDomains operations={operations} />
-      <DeploymentStorage operations={operations} />
-      <DeploymentDependencies operations={operations} />
-      <SummaryPanel
-        title="Metrics since release"
-        rows={[
-          [
-            "Attribution",
-            lastRun
-              ? "Recorded per container around activation"
-              : "Available after the first deployment",
-          ],
-          ["Host history", "Retained by the Metrics module"],
-        ]}
-        href={`/deploy/${deployment.id}?tab=metrics`}
-        actionLabel="Open release metrics"
-      />
-      <SummaryPanel
-        title="Runtime logs"
-        rows={[
-          [
-            "Sources",
-            runtime?.status === "available"
-              ? `${runtime.services.length} managed runtime services`
-              : "Docker evidence unavailable",
-          ],
-        ]}
-        href={`/deploy/${deployment.id}?tab=logs`}
-        actionLabel="Choose runtime logs"
-      />
-    </div>
   )
 }
 
@@ -586,18 +530,6 @@ function DeploymentMetricsTab({
     )
   }
   return <DeploymentRunMetrics projectID={deployment.id} runID={lastRun.id} />
-}
-
-function LastReleasePath({ projectID, runID }: { projectID: number; runID: number }) {
-  const snapshot = usePoll(
-    (signal) => get<DeploymentRunSnapshot>(`/deploy/${projectID}/runs/${runID}`, undefined, signal),
-    0,
-    [projectID, runID],
-  )
-  if (snapshot.error) {
-    return <p className="text-xs text-muted-foreground">Release evidence could not be loaded.</p>
-  }
-  return <ReleasePath steps={snapshot.data?.steps ?? []} />
 }
 
 function SummaryPanel({

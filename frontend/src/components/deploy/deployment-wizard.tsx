@@ -58,6 +58,7 @@ import {
   type WizardErrors,
 } from "@/components/deploy/deployment-defaults"
 import { BlueprintPicker } from "@/components/deploy/blueprint-picker"
+import { ProjectDatabase } from "@/components/deploy/project-database"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -442,14 +443,14 @@ export function DeploymentWizard() {
   if (loading && !draft)
     return (
       <Page>
-        <PageHeader eyebrow="Deployments" title="Deploy something" />
+        <PageHeader eyebrow="Deployments" title="New project" />
         <LoadingPanel rows={5} />
       </Page>
     )
   if (loadError && !draft)
     return (
       <Page>
-        <PageHeader eyebrow="Deployments" title="Deploy something" />
+        <PageHeader eyebrow="Deployments" title="New project" />
         <ErrorState error={loadError} />
         <Button variant="outline" onClick={() => (draftID ? void load(draftID) : router.refresh())}>
           Try again
@@ -462,10 +463,10 @@ export function DeploymentWizard() {
     <Page className="max-w-[1320px]">
       <PageHeader
         eyebrow="Deployments"
-        title="Deploy something"
+        title="New project"
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/deploy">Exit to fleet</Link>
+            <Link href="/deploy">Back to projects</Link>
           </Button>
         }
       />
@@ -480,7 +481,7 @@ export function DeploymentWizard() {
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_16rem] [&>*]:min-w-0">
         <Panel>
           <PanelHeader
-            eyebrow={`Step ${step + 1} of ${STEPS.length}`}
+            eyebrow="Project setup"
             title={
               <span id="wizard-step-title" tabIndex={-1} className="focus-ring">
                 {STEPS[step][2]}
@@ -503,10 +504,9 @@ export function DeploymentWizard() {
                 </Link>
               </Notice>
             )}
-            {(step === 3 || step === 4 || savedProject) &&
-              getDeploymentHandoff(draft.id) !== undefined && (
-                <HandoffEnvironment key={draft.id} draftId={draft.id} />
-              )}
+            {(step === 4 || savedProject) && getDeploymentHandoff(draft.id) !== undefined && (
+              <HandoffEnvironment key={draft.id} draftId={draft.id} />
+            )}
             {step === 0 && <IntentStep intent={intent} onChange={setIntent} errors={errors} />}
             {step === 1 && (
               <SourceStep
@@ -532,6 +532,7 @@ export function DeploymentWizard() {
             {step === 3 && (
               <ConfigurationStep
                 configuration={configuration}
+                draftId={draft.id}
                 profile={intent.profile}
                 source={source}
                 onChange={setConfiguration}
@@ -624,13 +625,79 @@ export function DeploymentWizard() {
               </DetailList>
             </PanelBody>
           </Panel>
-          <Notice title="Saving is not deploying" icon={CheckCircle}>
-            Preflight and Save create a reviewed plan. No build, pull, container, port, or proxy
-            route changes during this flow.
-          </Notice>
+          <p className="px-1 text-xs leading-relaxed text-muted-foreground">
+            Save reviews the project plan. Deploy it from the project when you’re ready. Databases
+            you explicitly create are started immediately.
+          </p>
         </aside>
       </div>
     </Page>
+  )
+}
+
+function WizardEnvironment({
+  draftId,
+  configuration,
+  onChange,
+}: {
+  draftId: string
+  configuration: DeploymentConfiguration
+  onChange: (configuration: DeploymentConfiguration) => void
+}) {
+  const [dotenv, setDotenv] = useState(() => getDeploymentHandoff(draftId) ?? "")
+  const update = (text: string) => {
+    setDotenv(text)
+    setDeploymentHandoff(draftId, text)
+  }
+  return (
+    <div className="space-y-4 border-t border-hairline pt-4">
+      <div className="space-y-2">
+        <Label htmlFor="handoff-environment">Environment variables</Label>
+        <Textarea
+          id="handoff-environment"
+          className="font-mono text-xs"
+          rows={4}
+          placeholder="DATABASE_URL=…"
+          value={dotenv}
+          onChange={(event) => update(event.target.value)}
+        />
+        <p className="text-xs text-muted-foreground">
+          Paste .env values for build and runtime. Keep this tab open until saving; unsaved values
+          stay only in memory.
+        </p>
+      </div>
+      {configuration.build.method !== "compose" && (
+        <ProjectDatabase
+          target={configuration.runtime.hostNetwork ? "host" : "container"}
+          onConnect={(connection, url, variable) => {
+            update([dotenv.trim(), `${variable}=${JSON.stringify(url)}`].filter(Boolean).join("\n"))
+            onChange({
+              ...configuration,
+              dependencies: [
+                ...configuration.dependencies.filter(
+                  (item) =>
+                    item.resourceKind !== "database_connection" ||
+                    item.resourceId !== String(connection.id),
+                ),
+                {
+                  kind: "database",
+                  ownership: "linked",
+                  resourceKind: "database_connection",
+                  resourceId: String(connection.id),
+                  config: {},
+                },
+              ],
+            })
+          }}
+        />
+      )}
+      {configuration.build.method === "compose" && (
+        <p className="text-xs text-muted-foreground">
+          For Compose projects, declare database services in your Compose file so the application
+          and database share a network.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -638,7 +705,7 @@ function HandoffEnvironment({ draftId }: { draftId: string }) {
   const [dotenv, setDotenv] = useState(() => getDeploymentHandoff(draftId) ?? "")
   return (
     <section className="space-y-2">
-      <Label htmlFor="handoff-environment">Environment values from quick setup</Label>
+      <Label htmlFor="handoff-environment">Environment variables</Label>
       <Textarea
         id="handoff-environment"
         className="font-mono text-xs"
@@ -729,6 +796,15 @@ const ErrorSummary = forwardRef<HTMLDivElement, { errors: WizardErrors }>(functi
           <li key={field}>
             <a
               href={field === "form" ? "#wizard-step-title" : `#${field}`}
+              onClick={() => {
+                const target = document.getElementById(field)
+                let parent = target?.parentElement
+                while (parent) {
+                  if (parent instanceof HTMLDetailsElement) parent.open = true
+                  parent = parent.parentElement
+                }
+                target?.focus()
+              }}
               className="underline underline-offset-2"
             >
               {message}
@@ -1609,6 +1685,7 @@ function CandidateChoice({
 
 function ConfigurationStep({
   configuration,
+  draftId,
   profile,
   onChange,
   advanced,
@@ -1618,6 +1695,7 @@ function ConfigurationStep({
   source,
 }: {
   configuration: DeploymentConfiguration
+  draftId: string
   profile: WorkloadProfile
   onChange: (configuration: DeploymentConfiguration) => void
   advanced: boolean
@@ -1633,15 +1711,13 @@ function ConfigurationStep({
   const domain = configuration.domains[0]
   return (
     <div className="space-y-6">
-      <section className="space-y-4" aria-labelledby="build-title">
-        <div>
-          <h3 id="build-title" className="text-body font-medium">
-            Build and start
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            Detected values remain editable; the review will call out overrides.
-          </p>
-        </div>
+      <details open className="space-y-4">
+        <summary
+          id="build-title"
+          className="cursor-pointer rounded-sm py-2 text-sm font-medium focus-ring"
+        >
+          Build and start
+        </summary>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field id="build-method" label="Build method" error={errors.buildMethod}>
             <Select
@@ -1738,16 +1814,14 @@ function ConfigurationStep({
             </Field>
           )}
         </div>
-      </section>
-      <section className="space-y-4 border-t border-hairline pt-5" aria-labelledby="runtime-title">
-        <div>
-          <h3 id="runtime-title" className="text-body font-medium">
-            Runtime and route
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            Loopback exposure is the default; a public domain is owned by the proxy.
-          </p>
-        </div>
+      </details>
+      <details open={profile === "game"} className="space-y-4 border-t border-hairline pt-3">
+        <summary
+          id="runtime-title"
+          className="cursor-pointer rounded-sm py-2 text-sm font-medium focus-ring"
+        >
+          Runtime and route
+        </summary>
         {profile === "game" && source?.mode === "blueprint" && (
           <Notice title="The licence you accepted is part of this plan" icon={Warning}>
             {blueprintAcceptances(source).length > 0
@@ -1906,11 +1980,19 @@ function ConfigurationStep({
             Deploy when the selected source changes
           </Label>
         </div>
-      </section>
-      <VariableEditor
-        variables={configuration.variables}
-        onChange={(variables) => onChange({ ...configuration, variables })}
-      />
+      </details>
+      <WizardEnvironment draftId={draftId} configuration={configuration} onChange={onChange} />
+      <details className="border-t border-hairline pt-3">
+        <summary className="cursor-pointer rounded-sm py-2 text-sm font-medium focus-ring">
+          Variable references & scopes
+        </summary>
+        <div className="pt-3">
+          <VariableEditor
+            variables={configuration.variables}
+            onChange={(variables) => onChange({ ...configuration, variables })}
+          />
+        </div>
+      </details>
       <button
         type="button"
         aria-expanded={advanced}

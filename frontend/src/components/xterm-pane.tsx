@@ -217,6 +217,7 @@ export function XtermPane({
   onToggleFullscreen,
   fullscreenActive,
   terminalSessionId,
+  active = true,
 }: {
   path: string
   query?: Query
@@ -269,6 +270,8 @@ export function XtermPane({
   fullscreenActive?: boolean
   /** Enables session-scoped image paste/drop on the real terminal page only. */
   terminalSessionId?: string
+  /** Hidden windows keep parsing output at their last visible grid size. */
+  active?: boolean
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -349,6 +352,10 @@ export function XtermPane({
   // finishes. It is assigned by the live socket effect so a returned path
   // travels through the same transport and copy-mode handling as typing.
   const inputRef = useRef<((data: string) => boolean) | null>(null)
+  const activeRef = useRef(active)
+  useEffect(() => {
+    activeRef.current = active
+  }, [active])
   // Settings are read inside the connect effect, which must not re-run when
   // one changes: rebuilding the terminal would drop the scrollback and, on a
   // non-tmux host, the session with it. The effects below apply them to the
@@ -467,7 +474,6 @@ export function XtermPane({
       termRef.current = term
       const fit = new FitAddon()
       const search = new SearchAddon()
-      fitRef.current = fit
       searchRef.current = search
       term.loadAddon(fit)
       term.loadAddon(search)
@@ -529,7 +535,7 @@ export function XtermPane({
       }
 
       const fitTerminal = () => {
-        if (host.clientWidth <= 0 || host.clientHeight <= 0) return false
+        if (!activeRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
         fit.fit()
         return term.rows > 0 && term.cols > 0
       }
@@ -636,13 +642,22 @@ export function XtermPane({
         if (!fitTerminal()) return
         syncPtySize(socket)
       }
+      const refreshTerminal = () => {
+        if (disposed || !activeRef.current || document.visibilityState !== "visible") return
+        sendResize()
+        // Returning to a hidden window may not change its dimensions. Repaint
+        // its retained screen even when the PTY needs no resize notification.
+        if (term.rows > 0) term.refresh(0, term.rows - 1)
+      }
+      fitRef.current = { fit: refreshTerminal }
 
       socket.onopen = () => {
+        if (disposed) return
         setState("open")
         setError(undefined)
         sendResize()
         if (terminalDebug) console.debug("terminal WebSocket connected")
-        term.focus()
+        if (activeRef.current) term.focus()
         // The session may have been left scrolled back by whoever was here
         // before — copy mode outlives the socket the way everything else in a
         // tmux session does — and a pane that is in a mode reads as a pane
@@ -651,6 +666,7 @@ export function XtermPane({
         if (copyModeRef.current) socket.send(JSON.stringify({ type: "sync-copy" }))
       }
       socket.onmessage = (event) => {
+        if (disposed) return
         if (typeof event.data === "string") {
           // Only control frames arrive as text; an error is the one that
           // matters to the reader, and the scrollback marker says that the
@@ -697,12 +713,15 @@ export function XtermPane({
         })
       }
       socket.onclose = () => {
+        if (disposed) return
         setState("closed")
         if (terminalDebug) console.debug("terminal WebSocket disconnected")
         term.writeln("\r\n\x1b[90m— disconnected —\x1b[0m")
         onExit?.()
       }
-      socket.onerror = () => setState("closed")
+      socket.onerror = () => {
+        if (!disposed) setState("closed")
+      }
 
       /**
        * Puts the pane back at the prompt before a keystroke is delivered.
@@ -726,7 +745,7 @@ export function XtermPane({
         if (socket.readyState !== WebSocket.OPEN || replaying) return false
         leaveCopyMode()
         sendTerminalInput(socket, data)
-        term.focus()
+        if (activeRef.current) term.focus()
         return true
       }
       inputRef.current = insertInput
@@ -772,6 +791,7 @@ export function XtermPane({
       // confirmation and let Chromium paste into xterm's textarea at the same
       // time — the guarded route and the unguarded one, at once.
       term.attachCustomKeyEventHandler((event) => {
+        if (!activeRef.current) return false
         if (event.type !== "keydown") return true
         const action = actionFor(event, "terminal", keymapRef.current)
         if (!action) return clipboardKey(event, term)
@@ -864,7 +884,7 @@ export function XtermPane({
         if (resizeFrame) return
         resizeFrame = requestAnimationFrame(() => {
           resizeFrame = 0
-          sendResize()
+          refreshTerminal()
         })
       }
       const observer = new ResizeObserver(scheduleResize)
@@ -873,12 +893,14 @@ export function XtermPane({
         if (document.visibilityState === "visible") scheduleResize()
       }
       document.addEventListener("visibilitychange", onVisibility)
+      window.addEventListener("focus", scheduleResize)
       void document.fonts?.ready.then(scheduleResize)
 
       cleanup = () => {
         observer.disconnect()
         cancelAnimationFrame(resizeFrame)
         document.removeEventListener("visibilitychange", onVisibility)
+        window.removeEventListener("focus", scheduleResize)
         clearTimeout(syncTimer)
         host.removeEventListener("wheel", onWheel, { capture: true })
         host.removeEventListener("mousedown", onMouseDownCapture, { capture: true })
@@ -908,12 +930,20 @@ export function XtermPane({
   // time, so it keeps working across a reconnect rather than capturing the
   // terminal that existed when the pane mounted.
   useEffect(() => {
-    if (!focusRef) return
-    focusRef.current = () => termRef.current?.focus()
-    return () => {
-      focusRef.current = null
+    if (!active) {
+      termRef.current?.blur()
+      return
     }
-  }, [focusRef])
+    const focus = () => {
+      if (activeRef.current) termRef.current?.focus()
+    }
+    if (focusRef) focusRef.current = focus
+    fitRef.current?.fit()
+    focus()
+    return () => {
+      if (focusRef?.current === focus) focusRef.current = null
+    }
+  }, [active, focusRef])
 
   // Clipboard images and dragged images take an authenticated HTTP path to
   // the server, then only the returned filename goes through the PTY socket.
@@ -1024,11 +1054,6 @@ export function XtermPane({
     if (!term) return
     term.options.scrollback = settings.scrollback
     fitRef.current?.fit()
-    if (term.rows > 0) term.refresh(0, term.rows - 1)
-    const socket = socketRef.current
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "resize", rows: term.rows, cols: term.cols }))
-    }
   }, [settings])
 
   // Fullscreen is the browser's, not a CSS class: only the real thing escapes
@@ -1104,6 +1129,7 @@ export function XtermPane({
   return (
     <Pane
       ref={frameRef}
+      inert={!active}
       className={cn(
         "relative bg-surface-sunken",
         // In fullscreen the pane is the whole screen, so the rounded-sm corners
@@ -1111,6 +1137,7 @@ export function XtermPane({
         fullscreen && "rounded-none border-0",
         copyMode && "terminal-tmux",
         className,
+        !active && "hidden",
       )}
     >
       <div className="flex shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-1.5">
@@ -1401,7 +1428,7 @@ export function XtermPane({
       </div>
 
       <PasteConfirmation
-        paste={pendingPaste}
+        paste={active ? pendingPaste : null}
         onCancel={() => setPendingPaste(null)}
         onConfirm={() => {
           if (pendingPaste) send(pendingPaste.raw)
@@ -1409,7 +1436,7 @@ export function XtermPane({
         }}
       />
 
-      <ShortcutsDialog open={shortcuts} onOpenChange={setShortcuts} />
+      <ShortcutsDialog open={active && shortcuts} onOpenChange={setShortcuts} />
     </Pane>
   )
 }

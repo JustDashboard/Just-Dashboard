@@ -35,6 +35,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -97,11 +98,7 @@ function ConfigurationLoad({
   return children(state.data)
 }
 
-export function NormalizedConfigurationTab({
-  projectID,
-  environmentID,
-  onArchived,
-}: ConfigurationProps & { onArchived: () => void }) {
+export function NormalizedConfigurationTab({ projectID, environmentID }: ConfigurationProps) {
   const state = useConfiguration({ projectID, environmentID })
   return (
     <div className="space-y-4">
@@ -119,41 +116,178 @@ export function NormalizedConfigurationTab({
           </>
         )}
       </ConfigurationLoad>
-      <LifecyclePanel projectID={projectID} onArchived={onArchived} />
+    </div>
+  )
+}
+
+export function NormalizedBuildTab({ projectID, environmentID }: ConfigurationProps) {
+  const state = useConfiguration({ projectID, environmentID })
+  return (
+    <ConfigurationLoad state={state}>
+      {(configuration) => (
+        <BuildSettingsForm
+          key={configuration.revision}
+          projectID={projectID}
+          environmentID={environmentID}
+          configuration={configuration}
+          onSaved={state.refresh}
+        />
+      )}
+    </ConfigurationLoad>
+  )
+}
+
+function BuildSettingsForm({
+  projectID,
+  environmentID,
+  configuration,
+  onSaved,
+}: ConfigurationProps & {
+  configuration: DeploymentEnvironmentConfiguration
+  onSaved: () => void
+}) {
+  const { can } = useAuth()
+  const [build, setBuild] = useState(configuration.build)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<Error>()
+  const save = async () => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await put(
+        `/deploy/${projectID}/environments/${environmentID}/configuration`,
+        configurationBody(configuration, { build }),
+      )
+      onSaved()
+      notify.success("Build settings saved", {
+        description: "They will apply on your next deployment.",
+      })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught : new Error(String(caught)))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="space-y-4">
+      <PendingPanel pending={configuration.pending} />
+      <Panel>
+        <PanelHeader title="Build settings" />
+        <PanelBody className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field htmlFor="saved-build-method" label="Build method">
+              <Select
+                value={build.method}
+                disabled={!can("system.admin")}
+                onValueChange={(method) =>
+                  setBuild({
+                    ...build,
+                    method: method as DeploymentConfiguration["build"]["method"],
+                  })
+                }
+              >
+                <SelectTrigger id="saved-build-method" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["recipe", "dockerfile", "static", "image", "compose", "none"].map((method) => (
+                    <SelectItem key={method} value={method}>
+                      {humanize(method)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {build.method === "recipe" && (
+              <Field htmlFor="saved-recipe" label="Language recipe">
+                <Select
+                  value={build.recipe ?? "node"}
+                  disabled={!can("system.admin")}
+                  onValueChange={(recipe) =>
+                    setBuild({ ...build, recipe: recipe as "node" | "go" | "python" })
+                  }
+                >
+                  <SelectTrigger id="saved-recipe" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="node">JavaScript / TypeScript</SelectItem>
+                    <SelectItem value="go">Go</SelectItem>
+                    <SelectItem value="python">Python</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            {(
+              [
+                ["rootDirectory", "Root directory"],
+                ...(build.method === "dockerfile" ? [["dockerfile", "Dockerfile path"]] : []),
+                ...(["recipe", "static"].includes(build.method)
+                  ? [
+                      ["buildCommand", "Build command"],
+                      ["startCommand", "Start command"],
+                      ["outputDirectory", "Output directory"],
+                    ]
+                  : []),
+              ] as [
+                (
+                  | "rootDirectory"
+                  | "dockerfile"
+                  | "buildCommand"
+                  | "startCommand"
+                  | "outputDirectory"
+                ),
+                string,
+              ][]
+            ).map(([key, label]) => (
+              <Field key={key} htmlFor={`build-${key}`} label={label}>
+                <Input
+                  id={`build-${key}`}
+                  value={build[key] ?? ""}
+                  readOnly={!can("system.admin")}
+                  className="font-mono"
+                  onChange={(event) => setBuild({ ...build, [key]: event.target.value })}
+                />
+              </Field>
+            ))}
+          </div>
+          {error && <ErrorState error={error} />}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">Saving prepares the next release.</p>
+            {can("system.admin") && (
+              <Button pending={busy} onClick={save}>
+                Save build settings
+              </Button>
+            )}
+          </div>
+        </PanelBody>
+      </Panel>
     </div>
   )
 }
 
 function PendingPanel({ pending }: { pending: DeploymentEnvironmentConfiguration["pending"] }) {
+  if (!pending.pending) return null
   return (
-    <Panel>
-      <PanelHeader
-        title={pending.pending ? "Pending deployment" : "Desired plan is live"}
-        actions={
-          <Status
-            verdict={pending.pending ? "warning" : "ok"}
-            label={pending.pending ? `${pending.changes.length} changes` : "Live"}
-          />
-        }
-      />
-      {pending.changes.length > 0 && (
-        <PanelBody flush>
-          <ul className="divide-y divide-hairline">
-            {pending.changes.map((change, index) => (
-              <li
-                key={`${change.kind}-${change.name}-${index}`}
-                className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs"
-              >
-                <span className="min-w-0 font-medium break-words">{change.name}</span>
-                <span className="text-muted-foreground">
-                  {humanize(change.kind)} · {humanize(change.change)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </PanelBody>
-      )}
-    </Panel>
+    <details className="rounded-lg border border-rule-warning bg-wash-warning px-4 py-3">
+      <summary className="flex min-h-8 cursor-pointer items-center justify-between gap-3 rounded-sm text-xs focus-ring">
+        <span>Saved changes will apply on your next deployment</span>
+        <Status verdict="warning" label={`${pending.changes.length} changes`} />
+      </summary>
+      <ul className="mt-3 space-y-2 border-t border-rule-warning pt-3">
+        {pending.changes.map((change, index) => (
+          <li
+            key={`${change.kind}-${index}`}
+            className="flex flex-wrap items-center justify-between gap-2 text-xs"
+          >
+            <span>{change.name}</span>
+            <span className="text-muted-foreground">
+              {humanize(change.kind)} · {humanize(change.change)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   )
 }
 
@@ -330,6 +464,7 @@ function VariableWorkspace({
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const [editing, setEditing] = useState(false)
   const [name, setName] = useState("")
   const [value, setValue] = useState("")
   const [reference, setReference] = useState(false)
@@ -377,6 +512,7 @@ function VariableWorkspace({
       )
       setName("")
       setValue("")
+      setEditing(false)
       notify.success("Variable saved", { description: "It is pending until the next deployment." })
     })
   }
@@ -392,6 +528,7 @@ function VariableWorkspace({
         { revision: configuration.revision, scopes },
       )
       setGenerated({ name: name.trim(), value: result.generatedValue })
+      setEditing(false)
       setName("")
       setValue("")
     })
@@ -411,6 +548,7 @@ function VariableWorkspace({
       })
       setDotenv("")
       setShowImport(false)
+      setEditing(false)
       notify.success("Dotenv imported", {
         description: "Values remain masked in the variable list.",
       })
@@ -438,6 +576,11 @@ function VariableWorkspace({
     <>
       <div className="space-y-4">
         <PendingPanel pending={configuration.pending} />
+        {error && !editing && (
+          <Notice tone="danger" title="Variable action failed">
+            {error}
+          </Notice>
+        )}
         {generated && (
           <Notice icon={Sparkles} tone="warning" title={`${generated.name} was generated`}>
             <p>This value is shown once. Store it now; the list will keep only a fixed mask.</p>
@@ -453,9 +596,14 @@ function VariableWorkspace({
           </Notice>
         )}
         {can("system.admin") && (
-          <Panel>
-            <PanelHeader title="Add or update a variable" />
-            <PanelBody className="space-y-4">
+          <SidePanel
+            open={editing}
+            onOpenChange={setEditing}
+            title="Add or update a variable"
+            description="Set a variable and choose where it is available."
+            width="md"
+          >
+            <div className="space-y-4">
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <Field label="Variable name" htmlFor="variable-name">
                   <Input
@@ -547,17 +695,38 @@ function VariableWorkspace({
                   </Button>
                 </Field>
               )}
-            </PanelBody>
-          </Panel>
+            </div>
+          </SidePanel>
         )}
         <Panel>
-          <PanelHeader title="Scoped variables" />
+          <PanelHeader
+            title="Environment variables"
+            actions={
+              can("system.admin") && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setName("")
+                    setValue("")
+                    setError("")
+                    setReference(false)
+                    setShowImport(false)
+                    setScopes(["runtime"])
+                    setSensitivity("secret")
+                    setEditing(true)
+                  }}
+                >
+                  <Plus className="size-3.5" /> Add variable
+                </Button>
+              )
+            }
+          />
           <PanelBody flush>
             {configuration.variables.length === 0 ? (
               <EmptyState
                 icon={Key}
                 title="No scoped variables"
-                description="Add a runtime, build, or release-task value above."
+                description="Add a value and choose whether your build, application, or release tasks can use it."
                 className="m-4"
               />
             ) : (
@@ -586,6 +755,23 @@ function VariableWorkspace({
                       </div>
                       {can("system.admin") && (
                         <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={Boolean(busy)}
+                            onClick={() => {
+                              setName(variable.name)
+                              setValue("")
+                              setReference(false)
+                              setSensitivity(variable.sensitivity)
+                              setScopes(variable.scopes)
+                              setShowImport(false)
+                              setError("")
+                              setEditing(true)
+                            }}
+                          >
+                            Edit
+                          </Button>
                           {revealed[variable.name] ? (
                             <Button
                               size="sm"
@@ -714,38 +900,6 @@ function NetworkForm({
   return (
     <div className="space-y-4">
       <PendingPanel pending={configuration.pending} />
-      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
-        <PostureCard
-          title="Proxy & DNS"
-          value={`${domains.length} ${domains.length === 1 ? "domain" : "domains"}`}
-          detail="Conflicts and DNS failures are separate preflight findings."
-          href="/proxy/sites"
-          label="Open Proxy"
-        />
-        <PostureCard
-          title="TLS"
-          value={domains.some((domain) => domain.https) ? "Certificate required" : "HTTP only"}
-          detail="A configured HTTPS route cannot activate without matching certificate files."
-          href="/proxy/certificates"
-          label="Open Certificates"
-        />
-        <PostureCard
-          title="Port & firewall"
-          value={
-            runtime.hostPort
-              ? `${runtime.bindAddress || "127.0.0.1"}:${runtime.hostPort}`
-              : "Dynamic candidate port"
-          }
-          detail={
-            publicBind
-              ? "Public bind: matching firewall policy is required."
-              : "Loopback bind is not exposed directly."
-          }
-          href="/security"
-          label="Open Security"
-          warning={publicBind}
-        />
-      </div>
       <Panel>
         <PanelHeader
           title="Domains"
@@ -854,6 +1008,38 @@ function NetworkForm({
           )}
         </PanelBody>
       </Panel>
+      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+        <PostureCard
+          title="Proxy & DNS"
+          value={`${domains.length} ${domains.length === 1 ? "domain" : "domains"}`}
+          detail="Conflicts and DNS failures are separate preflight findings."
+          href="/proxy/sites"
+          label="Open Proxy"
+        />
+        <PostureCard
+          title="TLS"
+          value={domains.some((domain) => domain.https) ? "Certificate required" : "HTTP only"}
+          detail="A configured HTTPS route cannot activate without matching certificate files."
+          href="/proxy/certificates"
+          label="Open Certificates"
+        />
+        <PostureCard
+          title="Port & firewall"
+          value={
+            runtime.hostPort
+              ? `${runtime.bindAddress || "127.0.0.1"}:${runtime.hostPort}`
+              : "Dynamic candidate port"
+          }
+          detail={
+            publicBind
+              ? "Public bind: matching firewall policy is required."
+              : "Loopback bind is not exposed directly."
+          }
+          href="/security"
+          label="Open Security"
+          warning={publicBind}
+        />
+      </div>
     </div>
   )
 }
@@ -862,7 +1048,8 @@ export function NormalizedStorageTab({
   projectID,
   environmentID,
   latestRunID,
-}: ConfigurationProps & { latestRunID?: number }) {
+  section = "storage",
+}: ConfigurationProps & { latestRunID?: number; section?: "storage" | "dependencies" }) {
   const state = useConfiguration({ projectID, environmentID })
   return (
     <ConfigurationLoad state={state}>
@@ -872,6 +1059,7 @@ export function NormalizedStorageTab({
           projectID={projectID}
           environmentID={environmentID}
           latestRunID={latestRunID}
+          section={section}
           configuration={configuration}
           onSaved={state.refresh}
         />
@@ -884,10 +1072,12 @@ function StorageForm({
   projectID,
   environmentID,
   latestRunID,
+  section,
   configuration,
   onSaved,
 }: ConfigurationProps & {
   latestRunID?: number
+  section: "storage" | "dependencies"
   configuration: DeploymentEnvironmentConfiguration
   onSaved: () => void
 }) {
@@ -952,177 +1142,256 @@ function StorageForm({
   return (
     <div className="space-y-4">
       <PendingPanel pending={configuration.pending} />
-      <Panel>
-        <PanelHeader
-          title="Persistent mounts"
-          actions={
-            can("system.admin") && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setMounts([...mounts, { source: "", target: "", ownership: "linked" }])
-                }
-              >
-                <Plus className="size-3.5" /> Add mount
-              </Button>
-            )
-          }
-        />
-        <PanelBody className="space-y-3">
-          {mounts.length === 0 && (
-            <EmptyState
-              icon={Database}
-              title="No persistent mounts"
-              description="The runtime is currently stateless."
-              className="border-0 py-5"
-            />
-          )}
-          {mounts.map((mount, index) => (
-            <Group
-              key={index}
-              className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem_auto_auto] lg:items-end"
-            >
-              <Field label={`Source ${index + 1}`} htmlFor={`mount-source-${index}`}>
-                <Input
-                  id={`mount-source-${index}`}
-                  value={mount.source}
-                  readOnly={!can("system.admin")}
-                  onChange={(event) =>
-                    setMounts(
-                      mounts.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, source: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  className="font-mono"
-                />
-              </Field>
-              <Field label="Container path" htmlFor={`mount-target-${index}`}>
-                <Input
-                  id={`mount-target-${index}`}
-                  value={mount.target}
-                  readOnly={!can("system.admin")}
-                  onChange={(event) =>
-                    setMounts(
-                      mounts.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, target: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  className="font-mono"
-                />
-              </Field>
-              <Field label="Ownership" htmlFor={`mount-ownership-${index}`}>
-                <Select
-                  value={mount.ownership}
-                  onValueChange={(ownership: "managed" | "linked" | "observed") =>
-                    setMounts(
-                      mounts.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, ownership } : item,
-                      ),
-                    )
-                  }
-                  disabled={!can("system.admin")}
-                >
-                  <SelectTrigger id={`mount-ownership-${index}`} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="managed">Managed</SelectItem>
-                    <SelectItem value="linked">Linked</SelectItem>
-                    <SelectItem value="observed">Observed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <CheckField
-                id={`mount-readonly-${index}`}
-                checked={Boolean(mount.readOnly)}
-                onChange={(readOnly) =>
-                  setMounts(
-                    mounts.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, readOnly } : item,
-                    ),
-                  )
-                }
-                label="Read only"
-                disabled={!can("system.admin")}
-              />
-              {can("system.admin") && (
+      {section === "storage" && (
+        <Panel>
+          <PanelHeader
+            title="Persistent mounts"
+            actions={
+              can("system.admin") && (
                 <Button
                   size="sm"
-                  variant="ghost"
-                  className="text-destructive"
-                  onClick={() => setMounts(mounts.filter((_, itemIndex) => itemIndex !== index))}
+                  variant="outline"
+                  onClick={() =>
+                    setMounts([...mounts, { source: "", target: "", ownership: "linked" }])
+                  }
                 >
-                  <Trash className="size-3.5" /> Remove
+                  <Plus className="size-3.5" /> Add mount
                 </Button>
-              )}
-            </Group>
-          ))}
-        </PanelBody>
-      </Panel>
-      <Panel>
-        <PanelHeader
-          title="Backups & dependencies"
-          actions={
-            can("system.admin") && (
-              <div className="flex flex-wrap gap-1">
-                <Button size="sm" variant="outline" onClick={() => addDependency("backup")}>
-                  Link backup
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => addDependency("database")}>
-                  Link database
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => addDependency("storage")}>
-                  Link volume
-                </Button>
-              </div>
-            )
-          }
+              )
+            }
+          />
+          <PanelBody className="space-y-3">
+            {mounts.length === 0 && (
+              <EmptyState
+                icon={Database}
+                title="No persistent mounts"
+                description="The runtime is currently stateless."
+                className="border-0 py-5"
+              />
+            )}
+            {mounts.map((mount, index) => (
+              <Group
+                key={index}
+                className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem_auto_auto] lg:items-end"
+              >
+                <Field label={`Source ${index + 1}`} htmlFor={`mount-source-${index}`}>
+                  <Input
+                    id={`mount-source-${index}`}
+                    value={mount.source}
+                    readOnly={!can("system.admin")}
+                    onChange={(event) =>
+                      setMounts(
+                        mounts.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, source: event.target.value } : item,
+                        ),
+                      )
+                    }
+                    className="font-mono"
+                  />
+                </Field>
+                <Field label="Container path" htmlFor={`mount-target-${index}`}>
+                  <Input
+                    id={`mount-target-${index}`}
+                    value={mount.target}
+                    readOnly={!can("system.admin")}
+                    onChange={(event) =>
+                      setMounts(
+                        mounts.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, target: event.target.value } : item,
+                        ),
+                      )
+                    }
+                    className="font-mono"
+                  />
+                </Field>
+                <Field label="Ownership" htmlFor={`mount-ownership-${index}`}>
+                  <Select
+                    value={mount.ownership}
+                    onValueChange={(ownership: "managed" | "linked" | "observed") =>
+                      setMounts(
+                        mounts.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, ownership } : item,
+                        ),
+                      )
+                    }
+                    disabled={!can("system.admin")}
+                  >
+                    <SelectTrigger id={`mount-ownership-${index}`} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="managed">Managed</SelectItem>
+                      <SelectItem value="linked">Linked</SelectItem>
+                      <SelectItem value="observed">Observed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <CheckField
+                  id={`mount-readonly-${index}`}
+                  checked={Boolean(mount.readOnly)}
+                  onChange={(readOnly) =>
+                    setMounts(
+                      mounts.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, readOnly } : item,
+                      ),
+                    )
+                  }
+                  label="Read only"
+                  disabled={!can("system.admin")}
+                />
+                {can("system.admin") && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive"
+                    onClick={() => setMounts(mounts.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    <Trash className="size-3.5" /> Remove
+                  </Button>
+                )}
+              </Group>
+            ))}
+          </PanelBody>
+        </Panel>
+      )}
+      {section === "dependencies" && (
+        <Panel>
+          <PanelHeader
+            title="Backups & dependencies"
+            actions={
+              can("system.admin") && (
+                <div className="flex flex-wrap gap-1">
+                  <Button size="sm" variant="outline" onClick={() => addDependency("backup")}>
+                    Link backup
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addDependency("database")}>
+                    Link database
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => addDependency("storage")}>
+                    Link volume
+                  </Button>
+                </div>
+              )
+            }
+          />
+          <PanelBody className="space-y-3">
+            {dependencies.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No backup, storage, or database dependency is linked.
+              </p>
+            )}
+            {dependencies.map((dependency, index) => (
+              <DependencyRow
+                key={`${dependency.kind}-${index}`}
+                dependency={dependency}
+                index={index}
+                readOnly={!can("system.admin")}
+                onChange={(next) =>
+                  setDependencies(
+                    dependencies.map((item, itemIndex) => (itemIndex === index ? next : item)),
+                  )
+                }
+                onRemove={() =>
+                  setDependencies(dependencies.filter((_, itemIndex) => itemIndex !== index))
+                }
+              />
+            ))}
+          </PanelBody>
+        </Panel>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {can("system.admin") && (
+        <div className="flex justify-end">
+          <Button onClick={save} pending={busy}>
+            {section === "dependencies" ? "Save dependencies" : "Save storage plan"}
+          </Button>
+        </div>
+      )}
+
+      {section === "dependencies" && (
+        <BackupEvidence
+          evidence={backupEvidence}
+          loading={evidence.loading}
+          unavailable={!latestRunID}
         />
-        <PanelBody className="space-y-3">
-          {dependencies.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              No backup, storage, or database dependency is linked.
-            </p>
-          )}
-          {dependencies.map((dependency, index) => (
-            <DependencyRow
-              key={`${dependency.kind}-${index}`}
-              dependency={dependency}
-              index={index}
-              readOnly={!can("system.admin")}
-              onChange={(next) =>
-                setDependencies(
-                  dependencies.map((item, itemIndex) => (itemIndex === index ? next : item)),
-                )
-              }
-              onRemove={() =>
-                setDependencies(dependencies.filter((_, itemIndex) => itemIndex !== index))
-              }
-            />
-          ))}
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-          {can("system.admin") && (
-            <div className="flex justify-end">
-              <Button onClick={save} pending={busy}>
-                Save storage plan
-              </Button>
-            </div>
-          )}
-        </PanelBody>
-      </Panel>
-      <BackupEvidence
-        evidence={backupEvidence}
-        loading={evidence.loading}
-        unavailable={!latestRunID}
-      />
+      )}
     </div>
+  )
+}
+
+function DependencyResource({
+  dependency,
+  index,
+  readOnly,
+  onChange,
+}: {
+  dependency: DeploymentConfiguration["dependencies"][number]
+  index: number
+  readOnly: boolean
+  onChange: (id: string) => void
+}) {
+  const path =
+    dependency.kind === "database"
+      ? "/databases/"
+      : dependency.kind === "backup"
+        ? "/backups/"
+        : "/docker/volumes/"
+  const resources = usePoll(
+    (signal) => get<{ id?: number; name: string }[]>(path, undefined, signal),
+    0,
+    [path],
+  )
+  const choices = (resources.data ?? []).map((resource) => ({
+    id: String(resource.id ?? resource.name),
+    name: resource.name,
+  }))
+  const value = dependency.resourceId ?? ""
+  return (
+    <Field
+      label={
+        dependency.kind === "database"
+          ? "Database"
+          : dependency.kind === "backup"
+            ? "Backup job"
+            : "Volume"
+      }
+      htmlFor={`dependency-resource-${index}`}
+    >
+      <Select value={value} onValueChange={onChange} disabled={readOnly || resources.loading}>
+        <SelectTrigger id={`dependency-resource-${index}`} className="w-full">
+          <SelectValue
+            placeholder={resources.loading ? "Loading resources…" : "Choose a resource"}
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {value && !choices.some((item) => item.id === value) && (
+            <SelectItem value={value}>Saved resource {value}</SelectItem>
+          )}
+          {choices.map((item) => (
+            <SelectItem key={item.id} value={item.id}>
+              {item.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {resources.error && (
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          Could not load resources.{" "}
+          <button type="button" className="underline focus-ring" onClick={resources.refresh}>
+            Retry
+          </button>
+        </p>
+      )}
+      {!resources.loading && !resources.error && choices.length === 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Create this resource in its owning module first.
+        </p>
+      )}
+    </Field>
   )
 }
 
@@ -1153,15 +1422,12 @@ function DependencyRow({
         <Field label="Kind" htmlFor={`dependency-kind-${index}`}>
           <Input id={`dependency-kind-${index}`} value={humanize(dependency.kind)} readOnly />
         </Field>
-        <Field label="Resource id" htmlFor={`dependency-resource-${index}`}>
-          <Input
-            id={`dependency-resource-${index}`}
-            value={dependency.resourceId ?? ""}
-            readOnly={readOnly}
-            onChange={(event) => onChange({ ...dependency, resourceId: event.target.value })}
-            className="font-mono"
-          />
-        </Field>
+        <DependencyResource
+          dependency={dependency}
+          index={index}
+          readOnly={readOnly}
+          onChange={(resourceId) => onChange({ ...dependency, resourceId })}
+        />
         <Field label="Ownership" htmlFor={`dependency-ownership-${index}`}>
           <Select
             value={dependency.ownership}
@@ -1291,7 +1557,13 @@ function BackupEvidence({
   )
 }
 
-function LifecyclePanel({ projectID, onArchived }: { projectID: number; onArchived: () => void }) {
+export function DeploymentLifecycle({
+  projectID,
+  onArchived,
+}: {
+  projectID: number
+  onArchived: () => void
+}) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [plan, setPlan] = useState<DeploymentRemovalPlan>()

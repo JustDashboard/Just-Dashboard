@@ -42,6 +42,8 @@ strategy, and feature ownership behind those rules.
   fresh-host provisioning, certificates, route recovery and ownership boundaries.
 - [`deployments/implementation.md`](deployments/implementation.md) — implemented deployment model through
   C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
+- [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
+  delivered workflows, and validation evidence.
 - [`../plans/0.6.7-deployments/README.md`](../plans/0.6.7-deployments/README.md) — frozen contracts, ADRs,
   checkpoint reviews, remaining delivery work, and acceptance evidence.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,

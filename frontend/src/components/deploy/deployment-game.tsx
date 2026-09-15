@@ -148,9 +148,27 @@ export function GameConsoleTab({ projectID }: { projectID: number }) {
                         {relativeTime(line.at)}
                       </span>
                     </p>
-                    <pre className="min-w-0 font-mono text-hint leading-relaxed whitespace-pre-wrap text-muted-foreground">
-                      {line.output}
-                    </pre>
+                    <ol className="font-mono text-xs leading-6">
+                      {line.output
+                        .replace(/\r\n?/g, "\n")
+                        .split("\n")
+                        .map((text, index) => (
+                          <li
+                            key={index}
+                            className="flex min-w-0 gap-3 rounded-sm px-2 hover:bg-row-hover"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="w-7 shrink-0 text-right text-muted-foreground/60 select-none"
+                            >
+                              {index + 1}
+                            </span>
+                            <span className="min-w-0 break-words whitespace-pre-wrap text-muted-foreground">
+                              {text || " "}
+                            </span>
+                          </li>
+                        ))}
+                    </ol>
                   </div>
                 ))
               )}
@@ -399,14 +417,16 @@ export function GameSettingsTab({ projectID }: { projectID: number }) {
       </Panel>
 
       {properties.data?.raw && (
-        <Panel>
-          <PanelHeader title="The file as it is on disk" />
-          <PanelBody flush>
+        <details className="min-w-0 rounded-lg border border-hairline">
+          <summary className="cursor-pointer rounded-lg p-4 text-sm font-medium focus-ring">
+            View the file on disk
+          </summary>
+          <div className="min-w-0 border-t border-hairline">
             <pre className="max-h-[24rem] overflow-auto p-4 font-mono text-hint leading-relaxed whitespace-pre">
               {properties.data.raw}
             </pre>
-          </PanelBody>
-        </Panel>
+          </div>
+        </details>
       )}
     </div>
   )

@@ -765,6 +765,10 @@ type provisionRequest struct {
 	Database string `json:"database"`
 }
 
+// Redis does not read REDIS_PASSWORD itself. A private configuration keeps the
+// generated password out of command arguments; the script contains no request text.
+const redisProvisionBootstrap = `set -eu; umask 077; printf 'requirepass %s\n' "$REDIS_PASSWORD" > /tmp/jd-redis.conf; chown redis:redis /tmp/jd-redis.conf; exec docker-entrypoint.sh redis-server /tmp/jd-redis.conf`
+
 // handleDBProvision starts a database server and saves the connection to it.
 //
 // The password is generated here and never leaves this process except into the
@@ -833,6 +837,11 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		Mounts: []dockerx.MountSpec{
 			{Type: "volume", Source: name + "-data", Target: tmpl.dataPath},
 		},
+	}
+	if req.Engine == "redis" {
+		// Redis does not consume REDIS_PASSWORD. A constant bootstrap writes a
+		// private config so the generated secret never becomes process argv.
+		spec.Command = []string{"sh", "-c", redisProvisionBootstrap}
 	}
 	created, err := s.modules.docker.Create(ctx, spec, nil)
 	if err != nil {
