@@ -1,11 +1,12 @@
 "use client"
 
-import { Box } from "@/components/icons"
+import { Box, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageHeader } from "@/components/page"
 import { SectionNav } from "@/components/tabs"
 import { EmptyState, LoadingPanel } from "@/components/state"
+import { Button } from "@/components/ui/button"
 
 /**
  * Docker is six pages, not one screen of tabs. The sidebar entry expands to
@@ -56,6 +57,15 @@ export default function DockerLayout({ children }: { children: React.ReactNode }
           description={
             ping.data?.error ??
             "The dashboard could not connect to the Docker socket. Check that the daemon is running and that this process can read /var/run/docker.sock."
+          }
+          // The poll retries on its own half-minute timer; the button is for
+          // the moment *after* fixing the daemon, when thirty seconds is a
+          // long time to keep staring at a page that says no.
+          action={
+            <Button size="sm" variant="outline" onClick={ping.refresh}>
+              <RefreshClockwise className="size-4" />
+              Check again
+            </Button>
           }
         />
       </Page>

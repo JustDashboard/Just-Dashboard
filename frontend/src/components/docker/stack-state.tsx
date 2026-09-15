@@ -24,6 +24,11 @@ const STATE: Record<StackState, { label: string; tone: DotTone }> = {
   unknown: { label: "Unknown", tone: "unknown" },
 }
 
+/** A stack's state as the one tone its dot and word are drawn in. */
+export function stackTone(state: StackState): DotTone {
+  return (STATE[state] ?? STATE.unknown).tone
+}
+
 export function StackStateBadge({
   stack,
   className,

@@ -24,6 +24,11 @@ import {
   Warning,
 } from "@/components/icons"
 import { ApiError, errorMessage, get, post, put } from "@/lib/api"
+import {
+  clearDeploymentHandoff,
+  getDeploymentHandoff,
+  setDeploymentHandoff,
+} from "@/components/deploy/deployment-handoff"
 import { cn } from "@/lib/utils"
 import type {
   DeploymentBuildMethod,
@@ -161,20 +166,25 @@ export function DeploymentWizard() {
   const router = useRouter()
   const search = useSearchParams()
   const draftID = search.get("draft") ?? ""
+  const initialProfile =
+    OUTCOMES.find((option) => option.profile === search.get("profile"))?.profile ?? "web"
   const requestedStep = search.get("step")
   const [draft, setDraft] = useState<DeploymentDraft>()
+  const [savedProject, setSavedProject] = useState<CommitResult>()
   const [loadError, setLoadError] = useState<Error>()
   const [loading, setLoading] = useState(true)
   const creating = useRef(false)
   const [step, setStep] = useState(0)
   const [intent, setIntent] = useState<{ name: string; profile: WorkloadProfile }>({
     name: "",
-    profile: "web",
+    profile: initialProfile,
   })
-  const [source, setSource] = useState<DeploymentDraftSource>(() => sourceForProfile("web"))
+  const [source, setSource] = useState<DeploymentDraftSource>(() =>
+    sourceForProfile(initialProfile),
+  )
   const [selectedCandidate, setSelectedCandidate] = useState("")
   const [configuration, setConfiguration] = useState<DeploymentConfiguration>(() =>
-    defaultConfiguration("web"),
+    defaultConfiguration(initialProfile),
   )
   const [preflight, setPreflight] = useState<DeploymentPreflight>()
   const [errors, setErrors] = useState<WizardErrors>({})
@@ -239,11 +249,13 @@ export function DeploymentWizard() {
     post<DeploymentDraft>("/deploy/drafts", {})
       .then((next) => {
         hydrateDraft(next)
-        router.replace(`/deploy/new?draft=${encodeURIComponent(next.id)}&step=intent`)
+        router.replace(
+          `/deploy/new?draft=${encodeURIComponent(next.id)}&step=intent&profile=${initialProfile}`,
+        )
       })
       .catch((error) => setLoadError(error instanceof Error ? error : new Error(String(error))))
       .finally(() => setLoading(false))
-  }, [draftID, hydrateDraft, load, router])
+  }, [draftID, hydrateDraft, load, router, initialProfile])
 
   const navigate = (next: number) => {
     setErrors({})
@@ -381,7 +393,7 @@ export function DeploymentWizard() {
   }
 
   const commit = () => {
-    if (!draft || !preflight) return
+    if (!draft || !preflight || savedProject) return
     const blocking = preflight.findings.filter(
       (finding) => finding.severity === "blocked" || finding.severity === "decision",
     )
@@ -409,6 +421,20 @@ export function DeploymentWizard() {
               revision: draft.revision,
               acknowledgedWarnings,
             })
+      setSavedProject(result)
+      const dotenv = getDeploymentHandoff(draft.id)
+      if (dotenv?.trim()) {
+        await post(
+          `/deploy/${result.projectId}/environments/${result.environmentId}/variables/import`,
+          {
+            revision: result.planRevision,
+            dotenv,
+            sensitivity: "secret",
+            scopes: ["runtime", "build"],
+          },
+        )
+      }
+      clearDeploymentHandoff(draft.id)
       router.push(`/deploy/${result.projectId}`)
     })
   }
@@ -463,6 +489,24 @@ export function DeploymentWizard() {
           />
           <PanelBody className="space-y-5">
             <ErrorSummary errors={errors} ref={errorRef} />
+            {savedProject && (
+              <Notice title="Deployment saved" icon={CheckCircle}>
+                <p>
+                  Your deployment exists. If environment setup failed, finish it from Variables
+                  before deploying.
+                </p>
+                <Link
+                  className="underline focus-ring"
+                  href={`/deploy/${savedProject.projectId}?tab=variables`}
+                >
+                  Open saved deployment
+                </Link>
+              </Notice>
+            )}
+            {(step === 3 || step === 4 || savedProject) &&
+              getDeploymentHandoff(draft.id) !== undefined && (
+                <HandoffEnvironment key={draft.id} draftId={draft.id} />
+              )}
             {step === 0 && <IntentStep intent={intent} onChange={setIntent} errors={errors} />}
             {step === 1 && (
               <SourceStep
@@ -543,7 +587,7 @@ export function DeploymentWizard() {
                 Run preflight
               </ActionButton>
             )}
-            {step === 4 && (
+            {step === 4 && !savedProject && (
               <ActionButton busy={busy === "commit"} onClick={commit}>
                 {source.kind === "import" ? "Adopt workload" : "Save deployment"}
               </ActionButton>
@@ -590,6 +634,28 @@ export function DeploymentWizard() {
   )
 }
 
+function HandoffEnvironment({ draftId }: { draftId: string }) {
+  const [dotenv, setDotenv] = useState(() => getDeploymentHandoff(draftId) ?? "")
+  return (
+    <section className="space-y-2">
+      <Label htmlFor="handoff-environment">Environment values from quick setup</Label>
+      <Textarea
+        id="handoff-environment"
+        className="font-mono text-xs"
+        value={dotenv}
+        onChange={(event) => {
+          setDotenv(event.target.value)
+          setDeploymentHandoff(draftId, event.target.value)
+        }}
+      />
+      <p className="text-xs text-muted-foreground">
+        These values will be saved with the deployment. Keep this tab open until saving; refreshing
+        clears unsaved values.
+      </p>
+    </section>
+  )
+}
+
 function WizardProgress({
   step,
   maxStep,
@@ -618,7 +684,7 @@ function WizardProgress({
                 className={cn(
                   "flex min-h-11 w-full min-w-0 items-center justify-center gap-2 rounded-md px-1.5 text-xs font-medium focus-ring transition-colors sm:justify-start sm:px-2.5",
                   step === index
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
                 )}
               >
@@ -729,9 +795,7 @@ function IntentStep({
                 <span
                   className={cn(
                     "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg",
-                    checked
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground",
+                    checked ? "bg-accent text-foreground" : "bg-muted text-muted-foreground",
                   )}
                 >
                   <Icon className="size-4" />

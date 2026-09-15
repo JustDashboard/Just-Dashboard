@@ -37,30 +37,47 @@ What separates a surface now:
 - `shadow-*` **only** for the three things that genuinely float above the page: popover, dropdown,
   dialog.
 
-Press feedback is colour. A control with a face takes `active:bg-control-active`; a ghost or link
-button has no face to move and borrows the accent wash. Nothing translates, and nothing casts a
-shadow to say it was pressed.
+Press feedback is colour. A control with a face takes its own `active:` step — `active:bg-control-active`
+for the neutral faces, `active:bg-brand-active` for the orange command; a ghost or link button has no
+face to move and borrows the accent wash. Nothing translates, and nothing casts a shadow to say it was
+pressed.
 
-## 3. Ink commands, orange locates, blue interrupts
+## 3. One orange, three jobs
 
-Three roles, and a colour belongs to exactly one of them.
+The product has one colour, and it is asked to do three things. The brand orange is the face of a
+command *and* the mark of where you are; the lit step is attention. What keeps the first two from
+reading as each other is form rather than hue — a command is a filled face you press, a location is a
+tint, a glyph or a fill behind a word — and what keeps all three apart is that only the lit step is
+never at rest.
 
 | Role | Token | Spent on |
 | --- | --- | --- |
-| Command | `--primary` (white) | The one action on a surface that you press. Never a state, never a selection. |
-| Location | `--brand` (orange, 57°) | The wordmark, the current nav entry, a module tile's mark on the overview, the active section tab, `--chart-1`. |
-| Attention | `--signal` (blue, 258°) | The focus ring, a search hit in the log console, the terminal bell, `--chart-2`. |
+| Command | `--brand` (`#E05623`) | The face of the one action on a surface: `bg-brand` at rest, `bg-brand-hover` under the pointer, `bg-brand-active` on press. Never a state, never a selection. |
+| Location | `--brand` (`#E05623`, oklch 0.629/0.183/39°) | The mark, the current nav entry, a module tile's mark on the overview, the active section tab, `--chart-1`. |
+| Attention | `--signal` (the same orange lit, L 0.72) | The focus ring, a search hit in the log console, the terminal bell. |
 
-The two hues were the other way round until 0.6.7, and the swap is not a repaint. Orange is the
-product's own colour, so it belongs on the wordmark and the current nav entry rather than on a ring
-the reader sees once a keystroke; blue takes the interaction role for the same reason it held the
-location one, being the only hue on this ground that no status tone claims.
+White is still a fill, but it is no longer the command face. `--primary` is the neutral ink a
+*reading* draws as a solid mark — the checked state of a checkbox or a switch, a meter's bar — so a
+filled state can never be mistaken for the one thing you press.
 
-Orange sits at 57°, not at the 73–78° the amber status hue occupies. Sixteen degrees is the whole
-difference between "this is Just Dashboard" and "this is a warning", so the identity hue is a true
-orange and `--warning` stays where every operator already expects amber. **Nothing reads a hue by
-its old name**: the terminal's ANSI blue is `--chart-2`, not `--chart-1`, or `ls` paints directories
-orange.
+The two orange tokens are one hue, because the product has a mark and the mark is one colour:
+`#E05623`, the orange the J in `components/logo.tsx` is drawn in. The palette carried a blue in the
+attention role until 0.6.7 — a second identity nobody chose, reading as chrome borrowed from
+elsewhere next to a logo that is emphatically not blue. **What separates the two is lightness, not
+hue**: `--brand` is the logo's own value, the colour at rest; `--signal` is that orange a step
+brighter, and the brightest thing on this ground, so what is happening *now* is found before what is
+always there.
+
+Orange sits at 39°, not at the 78° the amber status hue occupies, so the identity hue cannot be read
+as a warning and `--warning` stays where every operator already expects amber. The cost of the move
+is at the other end: 39° is close enough to `--destructive` (25°) that the two are no longer the
+arm's-length pair they were, which is why the brand hue is never spent on a *state* — a red that
+means failure always arrives attached to a status word, a dot or a toast, and orange never does.
+
+**Nothing reads a hue by its old name.** The terminal's ANSI blue is `--chart-2`, which is a literal
+blue rather than a reference to any role token, or `ls` paints directories orange. `--chart-3` is a
+magenta, not the red it was: with `--chart-1` now at the warm-red end of the ramp, a red slot three
+put two indistinguishable lines on the same load chart.
 
 Status keeps its own three hues (`--success`, `--warning`, `--destructive`) and they are never
 borrowed for anything that is not a reading of state.

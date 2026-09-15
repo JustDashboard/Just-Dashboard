@@ -28,7 +28,7 @@ import { UnitJournalSheet } from "@/components/procs/unit-journal"
 import { PM2LogSheet } from "@/components/procs/pm2-logs"
 import { ProcessTableTab } from "@/components/procs/process-table"
 import { Button } from "@/components/ui/button"
-import { IconAction, RowActions } from "@/components/icon-action"
+import { DimActions, IconAction, RowActions } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -103,7 +103,11 @@ function PM2Tab() {
       />
     )
   }
-  if (data.processes.length === 0) {
+  // A null list is a server shape, not an empty one: an older or failing
+  // backend can answer `processes: null`, and reading `.length` off that is
+  // the crash this page showed instead of its empty state.
+  const processes = data.processes ?? []
+  if (processes.length === 0) {
     return <EmptyState icon={ChartActivity} title="PM2 is running but manages no processes" />
   }
 
@@ -166,13 +170,20 @@ function PM2Tab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.processes.map((proc) => (
-                <TableRow key={proc.id} className="group" onActivate={() => setLogsFor(proc.name)}>
+              {processes.map((proc) => (
+                <TableRow
+                  // Names and numeric ids are per-daemon, and one host can run
+                  // a daemon per account — either alone collides across users.
+                  key={`${proc.user || ""}:${proc.name}:${proc.id}`}
+                  className="group"
+                  onActivate={() => setLogsFor(proc.name)}
+                >
                   <TableCell>
                     <div className="max-w-[22rem] min-w-0">
                       <RowLink onClick={() => setLogsFor(proc.name)}>{proc.name}</RowLink>
                       <p className="truncate font-mono text-hint text-muted-foreground">
                         {proc.scriptPath}
+                        {proc.user && ` · ${proc.user}`}
                       </p>
                     </div>
                   </TableCell>
@@ -325,7 +336,7 @@ function SystemdTab() {
     refresh()
   }
 
-  const failed = data.units.filter((u) => u.activeState === "failed").length
+  const failed = (data.units ?? []).filter((u) => u.activeState === "failed").length
 
   return (
     <>
@@ -386,7 +397,13 @@ function SystemdTab() {
                     <Tag>{unit.unitFileState || "unknown"}</Tag>
                   </TableCell>
                   <TableCell>
-                    <RowActions>
+                    {/*
+                      Always drawn, merely quiet until the row is hovered. These
+                      actions own their column, so a reveal rule would draw an
+                      empty column that sprouts buttons on hover — which reads
+                      as a layout bug rather than an affordance.
+                    */}
+                    <DimActions>
                       {unit.activeState !== "active" && can("service.control") && (
                         <IconAction
                           label="Start"
@@ -450,7 +467,7 @@ function SystemdTab() {
                             {unit.enabled ? "Disable" : "Enable"}
                           </Button>
                         )}
-                    </RowActions>
+                    </DimActions>
                   </TableCell>
                 </TableRow>
               ))}

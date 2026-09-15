@@ -1,8 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CheckCircle, ChevronDown } from "@/components/icons"
+import { CheckCircle, ChevronDown, Cross, RefreshClockwise } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { useViewState } from "@/lib/view-state"
 import type {
   AttentionSummary,
   DockerDiagnosis,
@@ -257,20 +258,31 @@ export function AttentionPanel({
   diagnosis,
   onAction,
   includeRuntime = false,
+  onRescan,
   className,
 }: {
   diagnosis: DockerDiagnosis | undefined
   onAction?: FindingAction
   includeRuntime?: boolean
+  /** Re-runs the diagnosis pass (the page's refresh) — also restores dismissed rows. */
+  onRescan?: () => void
   className?: string
 }) {
   const [showAll, setShowAll] = useState(false)
+  // Dismissed finding kinds, kept in the browser. A dismissal hides the row
+  // until the next rescan — the finding itself is untouched on the server, so
+  // "bring them back" is clearing this list and polling again. No API change:
+  // the diagnosis is already recomputed live on every poll.
+  const [dismissed, setDismissed] = useViewState<string[]>("docker.attention.dismissed", [])
 
   const findings = useMemo(
     () => (diagnosis?.findings ?? []).filter((f) => includeRuntime || f.class !== "runtime"),
     [diagnosis, includeRuntime],
   )
-  const groups = useMemo(() => groupFindings(findings), [findings])
+  const groups = useMemo(
+    () => groupFindings(findings).filter((g) => !dismissed.includes(g.key)),
+    [findings, dismissed],
+  )
   const rows = useMemo(
     () => (showAll ? groups : groups.slice(0, COLLAPSED_ROWS)).map((g) => toFinding(g, onAction)),
     [groups, showAll, onAction],
@@ -281,6 +293,7 @@ export function AttentionPanel({
   const issues = findings.filter(
     (f) => f.severity === "critical" || f.severity === "warning",
   ).length
+  const recommendations = findings.length - issues
   const critical = findings.some((f) => f.severity === "critical")
 
   // Nothing to act on is a one-line answer, and it used to be a paragraph
@@ -296,30 +309,92 @@ export function AttentionPanel({
     )
   }
 
+  // Everything currently visible is dismissed. The findings are still there —
+  // rescan brings them straight back.
+  if (groups.length === 0) {
+    const rescan = () => {
+      setDismissed([])
+      onRescan?.()
+    }
+    return (
+      <Panel className={className}>
+        <PanelHeader
+          title={<PanelTitle />}
+          actions={
+            <Button size="xs" variant="ghost" onClick={rescan} className="text-muted-foreground">
+              <RefreshClockwise className="size-3" />
+              Rescan
+            </Button>
+          }
+        />
+        <PanelBody>
+          <p className="text-hint text-muted-foreground">
+            {findings.length} {findings.length === 1 ? "finding" : "findings"} dismissed. They come
+            back on the next rescan.
+          </p>
+        </PanelBody>
+      </Panel>
+    )
+  }
+
+  const dismissOne = (key: string) => setDismissed((prev) => (prev.includes(key) ? prev : [...prev, key]))
+  const dismissAll = () =>
+    setDismissed((prev) => [...new Set([...prev, ...groups.map((g) => g.key)])])
+  const rescan = () => {
+    setDismissed([])
+    onRescan?.()
+  }
+
   const rest = groups.length - rows.length
+  const headerLabel =
+    issues > 0 && recommendations > 0
+      ? `${issues} ${issues === 1 ? "issue" : "issues"} · ${recommendations} ${recommendations === 1 ? "recommendation" : "recommendations"}`
+      : issues > 0
+        ? `${issues} ${issues === 1 ? "issue" : "issues"}`
+        : `${findings.length} ${findings.length === 1 ? "recommendation" : "recommendations"}`
 
   return (
     <Panel className={className}>
       <PanelHeader
         title={<PanelTitle />}
         actions={
-          <Status
-            verdict={critical ? "critical" : issues > 0 ? "warning" : "notice"}
-            label={
-              issues > 0
-                ? `${issues} ${issues === 1 ? "issue" : "issues"}`
-                : `${findings.length} ${findings.length === 1 ? "recommendation" : "recommendations"}`
-            }
-          />
+          <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+            <Status
+              verdict={critical ? "critical" : issues > 0 ? "warning" : "notice"}
+              label={headerLabel}
+            />
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={rescan}
+              aria-label="Rescan for attention items"
+              title="Clear dismissals and check again"
+              className="text-muted-foreground"
+            >
+              <RefreshClockwise className="size-3" />
+              Rescan
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={dismissAll}
+              aria-label="Dismiss all attention items"
+              title="Hide every item until the next rescan"
+              className="text-muted-foreground"
+            >
+              <Cross className="size-3" />
+              Dismiss all
+            </Button>
+          </span>
         }
       />
       <PanelBody>
-        <FindingList findings={rows} />
+        <FindingList findings={rows} onDismiss={dismissOne} />
         {(rest > 0 || showAll) && (
           <Button
             size="xs"
             variant="ghost"
-            className="mt-1 w-full text-muted-foreground"
+            className="mt-2 w-full py-1.5 text-muted-foreground"
             onClick={() => setShowAll(!showAll)}
           >
             {rest > 0 ? `Show ${rest} more` : "Show less"}
@@ -554,6 +629,7 @@ export function ContainerFindings({
       toFinding({ key: finding.id, findings: [finding], severity: finding.severity }, onAction),
     )
   const issues = mine.filter((f) => f.severity === "critical" || f.severity === "warning").length
+  const recommendations = mine.length - issues
 
   return (
     <Panel>
@@ -569,9 +645,11 @@ export function ContainerFindings({
                   : "notice"
             }
             label={
-              issues > 0
-                ? `${issues} ${issues === 1 ? "issue" : "issues"}`
-                : `${mine.length} ${mine.length === 1 ? "recommendation" : "recommendations"}`
+              issues > 0 && recommendations > 0
+                ? `${issues} ${issues === 1 ? "issue" : "issues"} · ${recommendations} ${recommendations === 1 ? "recommendation" : "recommendations"}`
+                : issues > 0
+                  ? `${issues} ${issues === 1 ? "issue" : "issues"}`
+                  : `${mine.length} ${mine.length === 1 ? "recommendation" : "recommendations"}`
             }
           />
         }
@@ -598,7 +676,7 @@ export function runtimeLabel(runtime: RuntimeHealth | undefined): string {
     case "notice":
       return "Something is stopped"
     default:
-      return "Everything is up"
+      return `${runtime.running} / ${runtime.total} running`
   }
 }
 

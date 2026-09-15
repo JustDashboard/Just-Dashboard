@@ -1,6 +1,8 @@
 "use client"
 
 import Link from "next/link"
+import { useEffect, useRef } from "react"
+import { tabClasses } from "@/components/tabs"
 import {
   CheckCircle,
   Clock,
@@ -300,8 +302,28 @@ export function ProjectTabs({
   pending: boolean
   profile: DeploymentSummary["profile"]
 }) {
+  const rail = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const element = rail.current
+    if (!element) return
+    const reveal = () => {
+      const selected = element.querySelector<HTMLElement>('[aria-current="page"]')
+      if (!selected) return
+      const bounds = element.getBoundingClientRect()
+      const item = selected.getBoundingClientRect()
+      // Scroll only the strip: scrollIntoView can also move the page away
+      // from the content someone opened through a shared deployment link.
+      if (item.left < bounds.left) element.scrollLeft += item.left - bounds.left
+      else if (item.right > bounds.right) element.scrollLeft += item.right - bounds.right
+    }
+    reveal()
+    const resize = new ResizeObserver(reveal)
+    resize.observe(element)
+    return () => resize.disconnect()
+  }, [active, profile])
   return (
     <nav
+      ref={rail}
       aria-label="Deployment sections"
       className="max-w-full [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden"
     >
@@ -315,11 +337,7 @@ export function ProjectTabs({
             <Link
               href={`/deploy/${projectId}?tab=${key}`}
               aria-current={active === key ? "page" : undefined}
-              className={cn(
-                "relative flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap text-muted-foreground focus-ring transition-colors hover:text-foreground",
-                active === key &&
-                  "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-foreground",
-              )}
+              className={tabClasses(active === key, "min-h-11")}
             >
               {label}
               {pending &&

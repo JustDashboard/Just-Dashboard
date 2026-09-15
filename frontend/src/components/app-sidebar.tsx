@@ -5,32 +5,31 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   Archive,
+  ArrowLeftRight,
   ArrowUpDown,
   Box,
-  Bug,
+  ChartActivity,
   ChevronRight,
   CloudUpload,
-  Code,
-  Connection,
-  Crosshair,
+  CodeBracket,
   Database,
   FirewallCheck,
   FolderOpen,
-  Gauge,
   GitBranch,
   Globe,
   GridMasonry,
   GridSquare,
+  Home,
   Inspect,
   Layers,
   Layout,
   LineChart,
+  Linked,
   ListOrdered,
+  LockClosed,
   Logout,
   Logs,
   MagnifyingGlass,
-  Monitoring,
-  Monorepo,
   NetworkDevice,
   Notes,
   Puzzle,
@@ -38,15 +37,17 @@ import {
   Router,
   Rss,
   SecureConnection,
-  Servers,
-  Shield,
-  ShieldCheck,
-  SignIn,
+  SettingsGear,
   SettingsSliders,
+  Shield,
+  ShieldOff,
+  SignIn,
   Sparkles,
+  Table,
   Terminal,
-  TerminalWindow,
+  UserSettings,
   Users,
+  Wrench,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -69,6 +70,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   SidebarRail,
+  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -103,7 +105,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
   {
     label: "Server",
     items: [
-      { title: "Overview", href: "/", icon: Gauge },
+      { title: "Overview", href: "/", icon: Home },
       { title: "Metrics", href: "/metrics", icon: LineChart },
       {
         title: "Docker",
@@ -113,7 +115,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
           { title: "Containers", href: "/docker/containers", icon: Box },
           { title: "Stacks", href: "/docker/stacks", icon: GridMasonry },
           { title: "Images", href: "/docker/images", icon: Layers },
-          { title: "Volumes", href: "/docker/volumes", icon: Servers },
+          { title: "Volumes", href: "/docker/volumes", icon: Database },
           { title: "Networks", href: "/docker/networks", icon: NetworkDevice },
           { title: "Events", href: "/docker/events", icon: Rss },
         ],
@@ -125,7 +127,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
   {
     label: "Access",
     items: [
-      { title: "Terminal", href: "/terminal", icon: TerminalWindow, capability: "terminal" },
+      { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
       { title: "Git", href: "/git", icon: GitBranch },
       {
@@ -133,13 +135,13 @@ export const NAV: { label: string; items: NavItem[] }[] = [
         href: "/databases",
         icon: Database,
         children: [
-          { title: "Structure", href: "/databases/structure", icon: Layout },
-          { title: "Diagram", href: "/databases/diagram", icon: Monorepo },
-          { title: "Query", href: "/databases/query", icon: Terminal },
+          { title: "Structure", href: "/databases/structure", icon: Table },
+          { title: "Diagram", href: "/databases/diagram", icon: Layout },
+          { title: "Query", href: "/databases/query", icon: CodeBracket },
           { title: "Find", href: "/databases/find", icon: MagnifyingGlass },
-          { title: "Monitor", href: "/databases/monitor", icon: Monitoring },
-          { title: "Generate", href: "/databases/generate", icon: Code },
-          { title: "Connection", href: "/databases/connection", icon: Connection },
+          { title: "Monitor", href: "/databases/monitor", icon: ChartActivity },
+          { title: "Generate", href: "/databases/generate", icon: Sparkles },
+          { title: "Connection", href: "/databases/connection", icon: Linked },
         ],
       },
     ],
@@ -153,9 +155,9 @@ export const NAV: { label: string; items: NavItem[] }[] = [
         icon: Globe,
         children: [
           { title: "Sites", href: "/proxy/sites", icon: Globe },
-          { title: "Certificates", href: "/proxy/certificates", icon: ShieldCheck },
+          { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
           { title: "TLS report", href: "/proxy/tls", icon: Inspect },
-          { title: "Streams", href: "/proxy/streams", icon: Connection },
+          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
           { title: "Ports", href: "/proxy/ports", icon: Router },
         ],
       },
@@ -166,11 +168,11 @@ export const NAV: { label: string; items: NavItem[] }[] = [
         children: [
           { title: "Firewall", href: "/security/firewall", icon: FirewallCheck },
           { title: "SSH", href: "/security/ssh", icon: SecureConnection },
-          { title: "Intrusion", href: "/security/intrusion", icon: Bug },
+          { title: "Intrusion", href: "/security/intrusion", icon: ShieldOff },
           { title: "Connections", href: "/security/connections", icon: NetworkDevice },
           { title: "Logins", href: "/security/logins", icon: SignIn },
           { title: "Network", href: "/security/network", icon: Route },
-          { title: "Tools", href: "/security/tools", icon: Crosshair },
+          { title: "Tools", href: "/security/tools", icon: Wrench },
         ],
       },
     ],
@@ -181,7 +183,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
       {
         title: "Dashboard",
         href: "/dashboard",
-        icon: Sparkles,
+        icon: SettingsGear,
         children: [
           {
             title: "Configuration",
@@ -201,7 +203,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
 ]
 
 /** Entries that live in the footer menu rather than a nav group. */
-export const PERSONAL_NAV: NavItem[] = [{ title: "Account", href: "/account", icon: ShieldCheck }]
+export const PERSONAL_NAV: NavItem[] = [{ title: "Account", href: "/account", icon: UserSettings }]
 
 /** Whether a nav entry owns the given path. */
 export function navMatches(href: string, pathname: string) {
@@ -249,14 +251,23 @@ export function AppSidebar() {
         {/* The wordmark alone: no tile, and no "Control panel" strapline under
             it. The strapline named the product category to somebody already
             inside the product, and the tile spent a third of the header's
-            width saying nothing the name did not. */}
-        <Link
-          href="/"
-          className="flex h-8 min-w-0 items-center rounded-lg focus-ring group-data-[collapsible=icon]:justify-center"
-        >
-          <Logo className="group-data-[collapsible=icon]:hidden" />
-          <LogoMark className="hidden group-data-[collapsible=icon]:block" />
-        </Link>
+            width saying nothing the name did not.
+
+            The collapse control sits on this line rather than in a bar across
+            every page: it is the rail's own switch, and the rail is the only
+            thing it affects. Collapsed there is no room beside the mark, so
+            the two stack — the trigger stays reachable in the icon rail, which
+            is the state you most need it in. */}
+        <div className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:flex-col">
+          <Link
+            href="/"
+            className="flex h-8 min-w-0 flex-1 items-center rounded-lg focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center"
+          >
+            <Logo className="group-data-[collapsible=icon]:hidden" />
+            <LogoMark className="hidden group-data-[collapsible=icon]:block" />
+          </Link>
+          <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+        </div>
 
         {/* The palette is the fastest route to any of fifteen pages, so it gets
             a permanent affordance rather than only a shortcut nobody

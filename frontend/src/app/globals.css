@@ -25,10 +25,11 @@
   --popover: oklch(0.1776 0 0);
   --popover-foreground: oklch(1 0 0);
 
-  /* Primary is ink, not a hue: a press-worthy action reads as the strongest
-     mark on the page rather than as "the blue one" among several. The brand
-     hues below are what carry identity and attention instead — which is the
-     division this palette always described and only half enforced. */
+  /* Primary is the neutral ink mark: a *reading* drawn as a fill rather than
+     a command — the checked state of a checkbox or switch, a meter's bar. The
+     pressable face belongs to the brand orange below, so white stays the one
+     value on this ground that carries no hue and can never be read as the
+     mark or as a warning. */
   --primary: oklch(1 0 0);
   --primary-foreground: oklch(0 0 0);
 
@@ -39,29 +40,47 @@
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1 0 0);
 
-  /* ---- The two brand hues ------------------------------------------------
+  /* ---- The brand orange, at rest and lit ---------------------------------
    *
-   * Orange says *where you are*: the wordmark, the current nav entry, the plot
-   * behind a panel's icon, the first chart series. Blue says *pay attention
-   * here now*: the focus ring, a search hit, a cursor readout. Neither is ever
-   * a fill for a command — that stays ink — so the page still has exactly one
-   * thing that looks pressable and now also has somewhere to be from.
+   * `--brand` says *where you are*: the mark, the current nav entry, the plot
+   * behind a panel's icon, the first chart series. It is also the face of a
+   * command — every default button is this orange — because the product has
+   * one mark and that mark is one colour. `--signal` says *pay attention here
+   * now*: the focus ring, a search hit, a cursor readout. Brand carrying both
+   * identity and the pressable action is the deliberate trade: a button and a
+   * place are told apart by form — a filled face you press versus a tint or a
+   * glyph — not by hue, and the lit step stays reserved for what is happening
+   * *now*, so a command at rest and a transient highlight are never the same
+   * value.
    *
-   * The two hues used to be the other way round, and the swap is not a repaint:
-   * orange is the product's own colour, so it is the one that should be on the
-   * wordmark and the current nav entry rather than on a ring the reader sees
-   * once a keystroke. Blue inherits the interaction role for the same reason it
-   * held the location one — it is the hue nothing else on this ground uses, so
-   * a ring drawn in it cannot be mistaken for chrome.
+   * Both are the same hue, because the product has a mark and the mark is
+   * one colour: #E05623, the orange the J is drawn in. A focus ring in some
+   * other hue was a second identity nobody chose — it only ever meant "the
+   * blue one", and next to a logo that is emphatically not blue that reads as
+   * chrome borrowed from somewhere else.
    *
-   * Orange sits at 57° rather than the 73° the amber status hue uses. Sixteen
-   * degrees is the whole difference between "this is Just Dashboard" and "this
-   * is a warning", so the identity hue is pushed to a true orange and the
-   * warning left where every operator already expects amber. */
-  --brand: oklch(0.7551 0.1721 57);
-  --brand-foreground: oklch(0.19 0.045 57);
-  --signal: oklch(0.72 0.152 258);
-  --signal-foreground: oklch(0.16 0.03 258);
+   * What separates the two roles is lightness, not hue. `--brand` is the
+   * logo's own value, the colour at rest: the mark, the current nav entry, the
+   * plot behind a panel's icon. `--signal` is the same orange lit — a step
+   * brighter, and the brightest thing on the ground — so the mark of what is
+   * happening *now* is found before the marks that are always there.
+   *
+   * Orange sits at 39° rather than the 78° the amber status hue uses. That
+   * distance is the whole difference between "this is Just Dashboard" and
+   * "this is a warning", so the identity hue stays where the logo put it and
+   * the warning stays where every operator already expects amber. */
+  --brand: oklch(0.6289 0.1829 38.78); /* #E05623 — the mark's own orange */
+  --brand-foreground: oklch(0.16 0.04 38.78);
+  --signal: oklch(0.72 0.172 38.78);
+  --signal-foreground: oklch(0.16 0.04 38.78);
+
+  /* The command face's three steps, named once rather than re-mixed at every
+     call site the way a `/90`, `/80` opacity pair leaves them. At rest it is
+     the brand itself; hover lifts it a fifth of the way towards the lit
+     `--signal`, and press settles it a touch darker, so the gesture has a
+     direction. The dark `--brand-foreground` clears 4.5:1 against all three. */
+  --brand-hover: color-mix(in oklab, var(--brand) 78%, var(--signal) 22%);
+  --brand-active: color-mix(in oklab, var(--brand) 94%, #000 6%);
 
   --success: oklch(0.72 0.163 162);
   --success-foreground: oklch(0.18 0.05 162);
@@ -70,14 +89,24 @@
 
   --border: oklch(0.252 0 0);
   --input: oklch(0.252 0 0);
-  /* Focus is blue. It is the one mark that has to be found instantly, and it
-     is the only hue on this ground that neither the brand nor any status tone
-     claims — so it can never be read as "this is warm, therefore a warning". */
+  /* Focus is the lit orange. It is the one mark that has to be found
+     instantly, and at this lightness nothing else on the ground competes with
+     it — amber is fifteen points of chroma away and sits behind a status dot,
+     never around a control. */
   --ring: var(--signal);
 
   --chart-1: var(--brand);
-  --chart-2: var(--signal);
-  --chart-3: oklch(0.673 0.2146 25.0397);
+  /* Blue stays in the chart ramp even though it left the palette's roles.
+     A series needs neighbours it cannot be confused with, and slot two is
+     also the terminal's ANSI blue — `ls` painting directories orange is a
+     terminal nobody can read. */
+  --chart-2: oklch(0.72 0.152 258);
+  /* Slot three was a red fourteen degrees off the new brand orange, which on a
+     three-line load chart is two series a reader has to check the legend for.
+     Moved to the magenta the ramp lost when orange walked into the warm-red
+     end of it — no status tone claims that hue, and the slot carries no
+     meaning of its own to break. */
+  --chart-3: oklch(0.68 0.2 345);
   --chart-4: oklch(0.6056 0.2189 292.7172);
   --chart-5: oklch(0.6959 0.1491 162.4796);
 
@@ -169,7 +198,7 @@
    *
    * Mixed against `transparent` rather than against a surface, because these
    * sit on the card, on the header strip and in a sunken well alike. */
-  --plot-brand: color-mix(in oklab, var(--brand) 16%, transparent);
+  --plot-brand: color-mix(in oklab, var(--brand) 20%, transparent);
   --plot-signal: color-mix(in oklab, var(--signal) 16%, transparent);
   --plot-primary: color-mix(in oklab, var(--primary) 12%, transparent);
   --plot-success: color-mix(in oklab, var(--success) 12%, transparent);
@@ -177,14 +206,14 @@
   --plot-danger: color-mix(in oklab, var(--destructive) 12%, transparent);
   --plot-neutral: color-mix(in oklab, var(--foreground) 8%, transparent);
 
-  --wash-brand: color-mix(in oklab, var(--brand) 8%, transparent);
+  --wash-brand: color-mix(in oklab, var(--brand) 10%, transparent);
   --wash-primary: color-mix(in oklab, var(--primary) 6%, transparent);
   --wash-success: color-mix(in oklab, var(--success) 7%, transparent);
   --wash-warning: color-mix(in oklab, var(--warning) 7%, transparent);
   --wash-danger: color-mix(in oklab, var(--destructive) 6%, transparent);
 
   /* A plot that is also a button steps up one tint under the pointer. */
-  --plot-brand-hover: color-mix(in oklab, var(--brand) 26%, transparent);
+  --plot-brand-hover: color-mix(in oklab, var(--brand) 30%, transparent);
   --plot-primary-hover: color-mix(in oklab, var(--primary) 20%, transparent);
   --plot-success-hover: color-mix(in oklab, var(--success) 20%, transparent);
   --plot-danger-hover: color-mix(in oklab, var(--destructive) 20%, transparent);
@@ -203,7 +232,7 @@
    * sunken well and inside a table row. */
   --meter-track: color-mix(in oklab, var(--foreground) 14%, transparent);
 
-  --rule-brand: color-mix(in oklab, var(--brand) 32%, transparent);
+  --rule-brand: color-mix(in oklab, var(--brand) 38%, transparent);
   --rule-primary: color-mix(in oklab, var(--primary) 30%, transparent);
   --rule-success: color-mix(in oklab, var(--success) 32%, transparent);
   --rule-warning: color-mix(in oklab, var(--warning) 35%, transparent);
@@ -252,10 +281,13 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  /* The two brand hues, so `text-brand` and `border-signal` are real
-     utilities. Orange is location, blue is attention — see the note above. */
+  /* The brand orange and its two interaction steps, so `bg-brand`,
+     `bg-brand-hover` and `border-signal` are real utilities. Brand is the
+     command face at rest, signal is it lit — see the note above. */
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-active: var(--brand-active);
   --color-signal: var(--signal);
   --color-signal-foreground: var(--signal-foreground);
   --color-success: var(--success);
@@ -587,8 +619,9 @@
  * that genuinely float — popover, dropdown, dialog — where the page really is
  * behind them.
  *
- * Press feedback moved to colour: `--control-active` on the controls that have
- * a face, nothing at all on the ones that do not. */
+ * Press feedback moved to colour: `--brand-active` on the orange command face,
+ * `--control-active` on the neutral ones, nothing at all on the controls that
+ * have no face. */
 
 /* The sign-in screen is the only full-bleed surface in the app, and a flat
  * rectangle of one colour is a poor first impression. Two washes of whatever

@@ -15,11 +15,11 @@
   *understood* and the form has nowhere to put. The last is kept separate on purpose. `--gpus all`
   dropped without a word produces a container that starts and then has no GPU, and the operator finds out
   from the application failing; the panel says so and keeps the original command beside the form.
-  **Start from something common** is `lib/docker-templates.ts` — images almost every server runs across
+  **Start from a template** is `lib/docker-templates.ts` — images almost every server runs across
   five categories, every one bound to 127.0.0.1; a set of starting points, not an app store, which is
   what goes stale and becomes the maintenance burden in Yacht and CasaOS. A template's setup
   requirement is one word on its card and a full notice at the top of the form the moment it is picked,
-  which is the only place the instruction can actually be followed. **From scratch** is for people who
+  which is the only place the instruction can actually be followed. **Custom** is for people who
   know what they want. The Command tab shows the server-rendered `docker run` and compose, live. Port
   bindings are offered as *who should reach this* rather than as an address, populated from the machine's
   real interfaces so the LAN option names one rather than gesturing at the idea.
@@ -56,7 +56,12 @@
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
 - `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
-  volumes, stated whether or not any are affected. A cleanup category is one line — name, size, count, in
+  volumes, stated whether or not any are affected. The preview's services are a flat list, not
+  collapsibles: a service that changes gets a row with the server's reason and the images before and
+  after, while the unchanged rest collapses to one line naming it — the same rule the attention panel
+  follows when one finding repeats across several containers, and the reason the section is not five
+  copies of "its configuration is identical". The "compose makes the final call" caveat is stated once
+  underneath. A cleanup category is one line — name, size, count, in
   fixed columns — with the cost sentence and the example names behind its `?`. It used to be a block
   whose height depended on how far the cost sentence wrapped and whether that category had examples, so
   the six rows came out at three different heights and the size and count, top-aligned against the
@@ -69,6 +74,13 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
+- `stacks-tab.tsx` is the stack list, as rows in one panel rather than a grid of bordered cards: each row
+  carries the stack's state, its services (dot, name, ports, health) and the one action that belongs
+  there — deploy when the application is down. It opens with the same search box and state chips as the
+  containers page, because "which of these is down" is the same question asked of the same server. The
+  detail panel follows the same rule as a container: the compose verbs that are pressed daily (deploy,
+  restart) sit inline, and the rest are behind one overflow menu where each gets its word and its
+  sentence. Its services tab is a single fenced list the eye reads down, not a stack of bordered rows.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
   place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
   tagged by service, links to Files, git and a shell in the stack's directory. `container-detail.tsx` adds
@@ -235,9 +247,9 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   keyboard back** — window tabs are buttons and keep the focus they were given, so `XtermPane` takes a
   `focusRef` and the page calls it as the active socket changes.
 
-**Shell-here links are consumed once.** The page removes `cwd` and `folder` from the current history
+**Open-shell links are consumed once.** The page removes `cwd` and `folder` from the current history
 entry before creating the session, preserving other query parameters and the hash. A refresh cannot
-replay a launch or recreate a closed session; a later explicit Shell here link can still launch anew.
+replay a launch or recreate a closed session; a later explicit Open shell link can still launch anew.
 
 **The page has no separate header or workspace bar.** A terminal is the one screen whose content *is* the
 viewport. "New session" sits in the rail beside "New folder"; the emulator title bar contains the two

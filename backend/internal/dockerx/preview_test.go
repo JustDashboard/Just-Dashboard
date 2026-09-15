@@ -81,7 +81,7 @@ func TestPreviewSaysNoVolumeIsRemoved(t *testing.T) {
 	if len(p.VolumesKept) != 1 || p.VolumesKept[0] != "pgdata" {
 		t.Errorf("named volumes should be listed as kept: %v", p.VolumesKept)
 	}
-	if !strings.Contains(p.Summary, "No volume is removed") {
+	if !strings.Contains(p.Summary, "No volumes will be removed") {
 		t.Errorf("summary = %q", p.Summary)
 	}
 }

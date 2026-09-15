@@ -23,7 +23,6 @@ import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import type {
   ContainerDetail,
-  ContainerSpec,
   DockerDiagnosis,
   FailureDiagnosis,
   FileChange,
@@ -67,7 +66,6 @@ export function ContainerDetailSheet({
   diagnosis,
   confirm,
   onChanged,
-  onDuplicate,
 }: {
   containerId: string | null
   /**
@@ -83,8 +81,6 @@ export function ContainerDetailSheet({
   diagnosis?: DockerDiagnosis
   confirm?: ConfirmFn
   onChanged?: () => void
-  /** Opens the create form pre-filled from this container. */
-  onDuplicate?: (spec: ContainerSpec) => void
 }) {
   return (
     <ContainerDetailPanel
@@ -97,7 +93,6 @@ export function ContainerDetailSheet({
       diagnosis={diagnosis}
       confirm={confirm}
       onChanged={onChanged}
-      onDuplicate={onDuplicate}
     />
   )
 }
@@ -109,7 +104,6 @@ function ContainerDetailPanel({
   diagnosis,
   confirm,
   onChanged,
-  onDuplicate,
 }: {
   containerId: string | null
   focusTab?: string
@@ -117,7 +111,6 @@ function ContainerDetailPanel({
   diagnosis?: DockerDiagnosis
   confirm?: ConfirmFn
   onChanged?: () => void
-  onDuplicate?: (spec: ContainerSpec) => void
 }) {
   const { can } = useAuth()
   const [detail, setDetail] = useState<ContainerDetail>()
@@ -174,6 +167,7 @@ function ContainerDetailPanel({
               description. "Which image is this" is the second question anybody
               opening this panel has, and it used to need the Overview tab. */}
           {detail && <Tag mono>{detail.image}</Tag>}
+          {detail?.composeStack && <Tag>managed by compose</Tag>}
         </>
       }
       description={detail?.image ?? containerId ?? undefined}
@@ -198,7 +192,6 @@ function ContainerDetailPanel({
             <ContainerActions
               detail={detail}
               confirm={confirm}
-              onDuplicate={onDuplicate}
               onChanged={() => {
                 setReloads((n) => n + 1)
                 onChanged?.()
@@ -626,13 +619,10 @@ function ContainerLogs({ containerId, active }: { containerId: string; active: b
     if (envelope.type !== "logs") return
     const batch = envelope.data as { stream: string; text: string }[]
     setLines((prev) => {
-      const next = [
-        ...prev,
-        ...batch.map((l) => ({
-          text: l.text,
-          level: l.stream === "stderr" ? "error" : undefined,
-        })),
-      ]
+      // No stream-to-level mapping here: plenty of programs log everything to
+      // stderr, and painting all of it red is what made this pane unreadable.
+      // The viewer colours lines by their own words instead.
+      const next = [...prev, ...batch.map((l) => ({ text: l.text }))]
       return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
     })
   }, [])
@@ -747,42 +737,21 @@ function ContainerLifecycle({
  * The actions that change what a container *is*, rather than what it is doing.
  *
  * Docker has no notion of editing a container: every field but a handful of
- * resource limits is fixed at creation, and the universal workaround is to
- * destroy and recreate. Every UI in this class therefore either omits these
- * entirely or hides them behind a "duplicate" button that quietly leaves the
- * original running. Here they are named for what they do, and the server does
- * the destroy-and-recreate with the original parked aside until the
- * replacement is up.
+ * resource limits is fixed at creation, and the way to change one is through
+ * the Deploy pages, which own the compose file. There is no standalone
+ * duplicate flow here anymore.
  */
 function ContainerActions({
   detail,
   confirm,
   onChanged,
-  onDuplicate,
 }: {
   detail: ContainerDetail
   confirm?: ConfirmFn
   onChanged: () => void
-  onDuplicate?: (spec: ContainerSpec) => void
 }) {
   const { can } = useAuth()
-  const [busy, setBusy] = useState(false)
   const composeManaged = Boolean(detail.composeStack)
-
-  const duplicate = async () => {
-    setBusy(true)
-    try {
-      const spec = await get<ContainerSpec>(`/docker/containers/${detail.id}/spec`)
-      // A copy under the same name would collide, and Docker's error for that
-      // is a 409 the operator has to decode. Naming it here is friendlier and
-      // is what they were going to type anyway.
-      onDuplicate?.({ ...spec, name: `${spec.name}-copy`, start: true })
-    } catch (err) {
-      notify.error("Could not read this container's settings", err)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const update = () =>
     confirm?.({
@@ -813,33 +782,24 @@ function ContainerActions({
   /*
     Compose owns this container, so anything that changes its configuration is
     undone by the next deploy — silently, and days later, which is the worst
-    way to find out. Rename and Duplicate used to sit here for a compose
-    container exactly as they do for a standalone one: renaming one breaks
-    compose's own lookup, and duplicating one produces a container compose does
-    not know about and will remove as an orphan.
+    way to find out. Rename used to sit here for a compose container exactly as
+    it does for a standalone one: renaming one breaks compose's own lookup.
 
-    They are not hidden — an operator who means it should be able to do it —
-    but they move behind a statement of what will happen, and the actions that
+    It is not hidden — an operator who means it should be able to do it —
+    but it moves behind a statement of what will happen, and the actions that
     are safe on a compose container come first.
   */
   if (composeManaged) {
     return (
       <>
-        <Tag>managed by compose</Tag>
         <Button size="sm" variant="outline" asChild>
           <Link href={`/docker/stacks?stack=${encodeURIComponent(detail.composeStack ?? "")}`}>
             <Layers className="size-3.5" />
-            Open {detail.composeStack}
+            Open stack
           </Link>
         </Button>
         {can("service.control") && (
-          <ComposeDriftMenu
-            detail={detail}
-            confirm={confirm}
-            busy={busy}
-            onDuplicate={onDuplicate ? duplicate : undefined}
-            onChanged={onChanged}
-          />
+          <ComposeDriftMenu detail={detail} onChanged={onChanged} />
         )}
       </>
     )
@@ -848,15 +808,9 @@ function ContainerActions({
   return (
     <>
       {can("destructive") && confirm && (
-        <Button size="sm" variant="outline" onClick={update} disabled={busy}>
+        <Button size="sm" variant="outline" onClick={update}>
           <ArrowCircleUp className="size-3.5" />
           Update
-        </Button>
-      )}
-      {can("service.control") && onDuplicate && (
-        <Button size="sm" variant="outline" onClick={duplicate} pending={busy}>
-          <Copy className="size-3.5" />
-          Duplicate
         </Button>
       )}
       {can("service.control") && <RenameButton detail={detail} onRenamed={onChanged} />}
@@ -876,21 +830,15 @@ function ContainerActions({
  */
 function ComposeDriftMenu({
   detail,
-  confirm,
-  busy,
-  onDuplicate,
   onChanged,
 }: {
   detail: ContainerDetail
-  confirm?: ConfirmFn
-  busy: boolean
-  onDuplicate?: () => void
   onChanged: () => void
 }) {
   const [open, setOpen] = useState(false)
   if (!open) {
     return (
-      <Button size="sm" variant="ghost" disabled={busy} onClick={() => setOpen(true)}>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         Advanced
       </Button>
     )
@@ -902,33 +850,6 @@ function ComposeDriftMenu({
         the next time the stack is deployed — edit the compose file instead if you want them to
         last.
       </Hint>
-      {onDuplicate && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() =>
-            confirm?.({
-              title: "Duplicate a compose-managed container",
-              confirmLabel: "Duplicate",
-              description: (
-                <>
-                  <p>
-                    The copy is created outside <b>{detail.composeStack}</b> and compose will not
-                    know about it. It carries the project labels, so the next deploy with{" "}
-                    <code>--remove-orphans</code> — which is what Deploy runs — removes it again.
-                  </p>
-                  <p>Adding a service to the compose file is the version of this that survives.</p>
-                </>
-              ),
-              action: async () => onDuplicate(),
-            })
-          }
-        >
-          <Copy className="size-3.5" />
-          Duplicate anyway
-        </Button>
-      )}
       <RenameButton detail={detail} onRenamed={onChanged} />
     </span>
   )
@@ -1052,7 +973,7 @@ function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
         actions={
           mounts.length > 0 && (
             <span className="numeric text-hint text-muted-foreground">
-              {kept} of {mounts.length} survives a rebuild
+              Persistent mounts {kept} / {mounts.length}
             </span>
           )
         }
@@ -1189,7 +1110,7 @@ function WritableLayer({ containerId }: { containerId: string }) {
           onClick={() => analyze(Boolean(report))}
           pending={analyzing}
         >
-          {report ? "Measure again" : "Measure how much is there"}
+          {report ? "Measure again" : "Measure disk usage"}
         </Button>
       </Notice>
 

@@ -375,9 +375,12 @@ function PlainActions({ className, ...props }: React.ComponentProps<"div">) {
 export function ContainerMenu({
   verbs,
   align,
+  disabled,
 }: {
   verbs: ContainerVerb[]
   align?: "start" | "end"
+  /** A command is already in flight; every verb here would collide with it. */
+  disabled?: boolean
 }) {
   return (
     <DropdownMenu>
@@ -398,6 +401,7 @@ export function ContainerMenu({
             {verb.danger && i > 0 && <DropdownMenuSeparator />}
             <DropdownMenuItem
               variant={verb.danger ? "destructive" : "default"}
+              disabled={disabled}
               className="items-start gap-2.5 py-1.5"
               onSelect={(event) => {
                 event.preventDefault()

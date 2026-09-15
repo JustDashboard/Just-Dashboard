@@ -94,7 +94,7 @@ only renderer/executor/validation authority for their feature.
   produce an actionable error instead of an attempted bind or a stopped server. Hostname suggestions
   use this same selector. `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWebroot
   -count=1 -v` verifies real nginx routing, continued service and cleanup on an isolated loopback port.
-- The workspace header exposes **Delete project** for the destructive capability on both legacy and
+- The workspace header actions menu exposes **Archive deployment** for the destructive capability on both legacy and
   normalized projects, disabled during an active run. It uses the existing `DELETE /deploy/{id}` archive
   contract with ordinary confirmation, returns to the fleet after success, and keeps the dialog open
   on error. The confirmation explicitly states that history, runtime, routes and data are retained;
@@ -227,9 +227,11 @@ only renderer/executor/validation authority for their feature.
   and a ten-minute history window around the latest successful activation step's completion only when
   its persisted evidence identifies that release and contains no recovery. It never uses the current
   live release's activation timestamp to describe an older run. Missing/failed activation has no history
-  link; removed runtimes point the operator to the transcript or an external log archive. The run page
-  renders these application log links separately from the orchestrator transcript, and the project Logs
-  tab offers the observed runtime sources.
+  link; removed runtimes point the operator to the transcript or an external log archive. The run page embeds application runtime logs separately from the orchestrator transcript, and the
+  project Logs tab embeds the observed runtime sources. Both reuse the Logs workspace for live
+  streaming, pause/resume, filters, and historical search without leaving the deployment. The run
+  viewer uses the server-provided activation window when available. A removed selected service
+  is reported as unavailable rather than silently replaced by another service.
 - `GET /deploy/{id}/operations` is the one operational read. It resolves the live release's own runtime
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
@@ -325,3 +327,55 @@ non-document responses, plus Permissions-Policy. Caddy rewrites
 and zero read/write timeouts keep the long-lived streams alive. The backend container runs `privileged`,
 `pid: host`, `network_mode: host` with the Docker socket and real host paths mounted **at their real
 names** — remove a mount and the file manager silently browses the container's own empty filesystem.
+
+## Deployment observability workspace
+
+The active fleet opens as a responsive project grid with release, address, health, latest-run, and
+pending-change evidence. Wide screens offer a compact table view without resetting filters. Narrow
+screens use the project layout even when list view was selected. The header count reflects the
+filtered result and total; resource usage belongs to each deployment's Metrics tab.
+
+The overview offers an on-demand website preview for a recorded HTTP(S) endpoint, with narrow/mobile
+and full-width modes, reload, and a direct website link. `GET /deploy/{id}/preview-frame` is an
+authenticated, non-cacheable static HTML wrapper with no scripts. Its CSP permits a child frame only
+from the recorded endpoint's origin and allows the wrapper itself to be framed only by this dashboard.
+This is a deliberate exception to the API's default frame denial; the dashboard document's CSP stays
+unchanged. The embedded website is sandboxed without top navigation, popups, or downloads. No website
+request is made by the backend and dashboard request headers are never forwarded to it. The browser
+applies its normal cookie and mixed-content policies. Sites that disallow embedding, require login,
+or use an insecure URL under an HTTPS dashboard may require the direct website link. A preview is
+not a deployment health check and does not bypass the site's own framing policy.
+
+Deployment section links use the shared tab appearance. Opening a section directly or resizing the
+workspace reveals the selected tab within its horizontal strip without scrolling the page content.
+
+The deployment Metrics tab selects from the observed runtime services and embeds the Docker owner's
+per-container stats WebSocket and recorded CPU, memory, network, and block I/O charts. Live readings
+are separate from retained history and release activation comparisons; disconnected readings retain
+an explicit last-sample label. Selecting another service remounts its stream and charts so samples
+cannot carry across container identities. Missing runtime evidence renders an unavailable state.
+
+The primary deploy action remains in the workspace header. Restart, redeploy-live, uncached build,
+and archive are in the deployment actions menu, with capability checks and active-run restrictions.
+Archive uses an ordinary confirmation and retains runtime resources and recorded history.
+
+The creation landing page exposes repository, image, database, Compose, template, game, worker,
+static-site, and existing-workload entry points. The latter options preselect their workload profile
+in the full wizard, while existing drafts keep their saved intent. Quick application setup shows the
+selected source and branch before configuration. Detected build settings are a disclosure; missing
+detection keeps the settings open. Deployment names are validated on blur and again before submission.
+Opening the full wizard first saves edited quick-form settings. Environment values travel separately
+in memory within the current browser tab and are imported after the wizard commits the project; they
+never enter draft configuration, URLs, or browser storage. The wizard explains that refreshing clears
+these unsaved values and preserves them for copying if the post-commit import fails.
+
+Quick creation records the committed project before importing variables or requesting its first run.
+Failures after commit show the saved deployment and a link to Variables or run history instead of
+offering to recommit the draft. Unimported environment text stays available in the current tab for
+copying; it is never placed in the URL or browser storage. A successful configuration save also
+advances the local draft revision before preflight, so a preflight failure does not leave retry using
+an outdated revision.
+
+Archived deployments are searchable at `/deploy?view=archived`. They offer a separate permanent
+record deletion with explicit confirmation, preserving host resources and the audit log. See the
+[permanent-deletion decision](permanent-deletion.md) for the API and transaction contract.

@@ -149,7 +149,10 @@ export function RunConsole({
   if (state === "idle") return null
 
   return (
-    <Pane className={cn("bg-surface-sunken", className)}>
+    // `animate-rise`: the console is not here a moment ago — it mounts when a
+    // command starts or its output arrives, and four pixels plus opacity is
+    // what says "this is new" without pretending anything is still moving.
+    <Pane className={cn("animate-rise bg-surface-sunken", className)}>
       <PaneHeader className="gap-2 px-3">
         {state === "running" && <Spinner className="size-3.5 text-muted-foreground" />}
         {state === "ok" && <CheckCircle className="size-3.5 text-success" />}

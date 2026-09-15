@@ -1,19 +1,17 @@
 "use client"
 
-import Link from "next/link"
 import { useCallback, useState } from "react"
 import type { JournalEntry, LogLine, SystemdUnitDetail } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { LogViewer } from "@/components/log-viewer"
 import { Detail, DetailList } from "@/components/page"
 import { PaneHeader, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 const LOG_LIMIT = 5000
@@ -89,37 +87,61 @@ function UnitOverview({ unit }: { unit: string }) {
             />
           }
         />
-        <PanelBody>
-          <DetailList>
-            <Detail label="Startup">{service.unitFileState || "unknown"}</Detail>
-            <Detail label="Main PID" className="font-mono">
-              {service.mainPid || "—"}
-            </Detail>
-            <Detail label="Active since">{relativeTime(started)}</Detail>
-            <Detail label="Memory">{bytes(service.memoryBytes)}</Detail>
-            <Detail label="Tasks">{service.tasks ?? "—"}</Detail>
-            <Detail label="Restarts">{service.restarts ?? 0}</Detail>
-            <Detail label="Last result">{service.result || "—"}</Detail>
-          </DetailList>
-          {service.fragmentPath && (
-            <Button asChild variant="outline" size="xs" className="mt-4">
-              <Link href={`/files?path=${encodeURIComponent(service.fragmentPath)}`}>
-                Open unit file
-              </Link>
-            </Button>
-          )}
+        <PanelBody className="space-y-5">
+          <section className="min-w-0 space-y-2">
+            <p className="eyebrow">State</p>
+            <DetailList>
+              <Detail label="Startup">
+                {startupSummary(service.unitFileState).label}
+                <span className="block text-hint text-muted-foreground">
+                  {startupSummary(service.unitFileState).hint}
+                </span>
+              </Detail>
+              <Detail label="Active since">
+                {started ? (
+                  <>
+                    {relativeTime(started)}
+                    <span className="block text-hint text-muted-foreground">
+                      {timestamp(started)}
+                    </span>
+                  </>
+                ) : (
+                  "—"
+                )}
+              </Detail>
+              <Detail label="Last result">{service.result || "—"}</Detail>
+              <Detail label="Restarts">{service.restarts ?? 0}</Detail>
+            </DetailList>
+          </section>
+          <section className="min-w-0 space-y-2">
+            <p className="eyebrow">Footprint</p>
+            <DetailList>
+              <Detail label="Main PID" className="font-mono">
+                {service.mainPid || "—"}
+              </Detail>
+              <Detail label="Memory">{bytes(service.memoryBytes)}</Detail>
+              <Detail label="Tasks">{service.tasks ?? "—"}</Detail>
+            </DetailList>
+          </section>
         </PanelBody>
       </Panel>
       <Panel>
-        <PanelHeader title="Runtime policy" />
-        <PanelBody>
+        <PanelHeader title="How it runs" />
+        <PanelBody className="space-y-2">
           <DetailList>
-            <Detail label="Account">{properties.User || "root"}</Detail>
-            <Detail label="Group">{properties.Group || "default"}</Detail>
+            <Detail label="Runs as">
+              <span className="font-mono">{properties.User || "root"}</span>
+              <span className="text-muted-foreground"> : {properties.Group || "default"}</span>
+            </Detail>
             <Detail label="Working directory" className="font-mono break-all">
               {properties.WorkingDirectory || "Not set"}
             </Detail>
-            <Detail label="Restart policy">{properties.Restart || "no"}</Detail>
+            <Detail label="Restart policy">
+              {restartSummary(properties.Restart).label}
+              <span className="block text-hint text-muted-foreground">
+                {restartSummary(properties.Restart).hint}
+              </span>
+            </Detail>
             <Detail label="Memory limit">
               {properties.MemoryMax && properties.MemoryMax !== "infinity"
                 ? bytes(Number(properties.MemoryMax))
@@ -128,7 +150,12 @@ function UnitOverview({ unit }: { unit: string }) {
             <Detail label="Task limit">{properties.TasksMax || "No limit"}</Detail>
           </DetailList>
           {properties.ExecStart && (
-            <Well className="mt-4 max-h-36 whitespace-pre-wrap">{properties.ExecStart}</Well>
+            <div className="space-y-1">
+              <p className="eyebrow">Command</p>
+              <Well className="max-h-36 font-mono text-xs whitespace-pre-wrap">
+                {properties.ExecStart}
+              </Well>
+            </div>
           )}
         </PanelBody>
       </Panel>
@@ -136,10 +163,52 @@ function UnitOverview({ unit }: { unit: string }) {
   )
 }
 
+/** What the startup state means for the next boot, in words. */
+function startupSummary(state: string | undefined): { label: string; hint: string } {
+  switch (state) {
+    case "enabled":
+    case "enabled-runtime":
+      return { label: state, hint: "Starts automatically on boot" }
+    case "disabled":
+      return { label: state, hint: "Only runs when started by hand" }
+    case "static":
+      return { label: state, hint: "Started by another unit, not on its own" }
+    case "masked":
+      return { label: state, hint: "Blocked from starting at all" }
+    default:
+      return { label: state || "unknown", hint: "Startup state was not reported" }
+  }
+}
+
+/** What the restart policy does the next time the process exits. */
+function restartSummary(policy: string | undefined): { label: string; hint: string } {
+  switch ((policy || "no").toLowerCase()) {
+    case "always":
+      return { label: policy!, hint: "Restarts after every exit" }
+    case "on-failure":
+      return { label: policy!, hint: "Restarts after crashes, not clean exits" }
+    case "on-abnormal":
+    case "on-abort":
+    case "on-watchdog":
+      return { label: policy!, hint: "Restarts after abnormal exits only" }
+    default:
+      return { label: policy || "no", hint: "Stays stopped until started again" }
+  }
+}
+
 function JournalStream({ unit }: { unit: string }) {
   const [lines, setLines] = useState<LogLine[]>([])
+  const [failed, setFailed] = useState<string | null>(null)
 
   const onMessage = useCallback((envelope: Envelope) => {
+    // The stream was empty on every unit because the server read the journal
+    // from inside its own container, where only the previous boot's flushed
+    // entries are visible. It now reads the host's live journal, so anything
+    // still empty here is genuinely quiet — the message below says which.
+    if (envelope.type === "error" || envelope.error) {
+      setFailed(envelope.error || "The journal stream closed with an error.")
+      return
+    }
     if (envelope.type !== "journal") return
     const batch = envelope.data as JournalEntry[]
     setLines((prev) => {
@@ -156,10 +225,22 @@ function JournalStream({ unit }: { unit: string }) {
     })
   }, [])
 
-  useSocket(`/systemd/${encodeURIComponent(unit)}/journal/stream`, {
+  const { state } = useSocket(`/systemd/${encodeURIComponent(unit)}/journal/stream`, {
     onMessage,
     query: { lines: 300 },
   })
 
-  return <LogViewer className="h-full min-h-80" lines={lines} onClear={() => setLines([])} />
+  if (failed) return <ErrorState error={new Error(failed)} />
+  return (
+    <LogViewer
+      className="h-full min-h-80"
+      lines={lines}
+      onClear={() => setLines([])}
+      emptyMessage={
+        state === "open"
+          ? `No journal entries for ${unit} yet — a quiet unit logs nothing.`
+          : "Connecting to the journal…"
+      }
+    />
+  )
 }

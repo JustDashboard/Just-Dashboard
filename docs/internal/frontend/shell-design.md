@@ -84,16 +84,25 @@ takes the sidebar accent fill, a brand-orange icon and a `font-medium` label aga
 the rest. The rail is the one surface dense enough to need three weights, and the group labels above the
 entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
 
-`components/logo.tsx` is the wordmark and nothing else — "Just" in `text-brand`, "Dashboard" in the text
-colour, the version as small muted text beside it. No mark, no tile, no strapline. It is the only
-rendering of the product's name, so sidebar, sign-in and splash agree and a rename is one file. `LogoMark`
-is the single letter the collapsed rail falls back to.
+`components/logo.tsx` is the logo and nothing else — `LogoGlyph`, the J mark in `text-brand`, then
+"Dashboard" in the text colour and the version as small muted text beside it. No tile, no strapline.
+The mark *is* the "Just", so the word is not also set in type next to it; it carries that word in
+`aria-label` instead, and the sidebar's home link still announces "Just Dashboard". The glyph is an
+inline `<svg>` on `currentColor` — two straight-edged subpaths, no raster, no second colour — so it
+tints with the palette and stays crisp in the 3rem rail and on a retina sign-in alike. This is the
+only rendering of the product's name, so sidebar, sign-in and splash agree and a rename is one file.
+`LogoMark` is the glyph alone, which is what the collapsed rail falls back to.
+
+The same two paths are the browser icons: `app/icon.svg` (and `favicon.ico` / `apple-icon.png`
+rasterised from them at 16–256px) put the mark in the tab. `public/logo-mark.svg` is the standalone
+file for anything outside the app that needs it; `public/MainLogo.svg` is the original export the
+mark was traced from and is not referenced by the build.
 
 **Selection is `bg-accent`, everywhere.** The active session in the terminal rail, a pressed
 `ToggleGroupItem`, an applied `FilterChip`, a highlighted command row, a selected table row, the current
 file in the tree and the current sidebar entry all take the same neutral wash. Neither the primary tint
-nor the brand hue is ever spent on "this one is chosen": ink is a *command*, orange is *where you are*, and
-a filter borrowing either reads as the page's main action.
+nor the brand hue is ever the mark for "this one is chosen": the brand is the *command* face and *where
+you are*, and a filter borrowing either reads as the page's main action.
 
 `components/ui/*` is generated shadcn/ui (new-york, zinc) with its icons rewired to
 the Heroicons vocabulary in `components/icons.tsx` — compose rather than

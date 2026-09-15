@@ -177,7 +177,9 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   and `-p` takes a range; the exact test is still done here. A text filter is deliberately **not** pushed
   down — `journalctl -g` needs a PCRE2 build nobody can assume — so the window is widened instead.
 - **Nothing is offered that cannot be opened**: `Discover` runs `Allow` over the well-known paths, or an
-  install that narrowed `JD_LOG_ROOTS` gets a rail of files that refuse to open.
+  install that narrowed `JD_LOG_ROOTS` gets a rail of files that refuse to open. Source kinds that cannot
+  be queried return an explanation in `missing`; an installed PM2 with no managed processes reports that
+  empty state explicitly rather than disappearing from the rail.
 - **Retention is a verdict, not a rule list.** `MatchRetention` finds the file no rule governs — precisely
   the entry a rule list cannot show. Two parser details, both found against a real host: a stanza's paths
   may be listed **one per line before the brace** (exactly how Debian ships rsyslog's, so reading only the

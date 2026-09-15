@@ -290,7 +290,7 @@ func TestDeploymentSummaryReadsOnlyTheRequestedDeployment(t *testing.T) {
 	driver.texts.Lock()
 	defer driver.texts.Unlock()
 	for _, statement := range driver.texts.seen {
-		if strings.Contains(statement, "from deploy_projects p") && !strings.Contains(statement, "and p.id = ?") {
+		if strings.Contains(statement, "from deploy_projects p") && !strings.Contains(statement, "where p.id = ?") {
 			t.Fatalf("workspace read loaded the whole fleet: %s", statement)
 		}
 	}

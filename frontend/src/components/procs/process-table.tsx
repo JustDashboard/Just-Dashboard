@@ -1,12 +1,10 @@
 "use client"
 
-import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { Cpu, Inspect, SettingsSliders } from "@/components/icons"
+import { Cpu, Inspect, Minus, Plus, SettingsSliders } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
-import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { Detail, DetailList, Metric, MetricStrip, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
@@ -40,7 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { get, post, put } from "@/lib/api"
+import { get, put } from "@/lib/api"
 import { bytes, duration, percent, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ProcessList, ProcessRow, Snapshot } from "@/lib/types"
@@ -285,6 +283,7 @@ export function ProcessTableTab() {
       </Panel>
       <ProcessDetailSheet
         process={selected}
+        memTotal={memTotal}
         onOpenChange={(open) => !open && setSelected(null)}
         onChanged={processList.refresh}
       />
@@ -370,10 +369,12 @@ function ProcessTableSettings({
 
 function ProcessDetailSheet({
   process,
+  memTotal,
   onOpenChange,
   onChanged,
 }: {
   process: ProcessRow | null
+  memTotal: number
   onOpenChange: (open: boolean) => void
   onChanged: () => void
 }) {
@@ -392,7 +393,7 @@ function ProcessDetailSheet({
         <ProcessDetail
           key={`${process.pid}-${process.createTime}`}
           process={process}
-          onClosed={() => onOpenChange(false)}
+          memTotal={memTotal}
           onChanged={onChanged}
         />
       )}
@@ -402,16 +403,14 @@ function ProcessDetailSheet({
 
 function ProcessDetail({
   process,
-  onClosed,
+  memTotal,
   onChanged,
 }: {
   process: ProcessRow
-  onClosed: () => void
+  memTotal: number
   onChanged: () => void
 }) {
   const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
-  const [signal, setSignal] = useState("SIGTERM")
   const [nice, setNice] = useState(process.nice)
   const [openedAt] = useState(() => Date.now())
   const detail = usePoll(
@@ -424,34 +423,6 @@ function ProcessDetail({
     const started = new Date(row.createTime).getTime()
     return Number.isFinite(started) ? duration(Math.max(0, (openedAt - started) / 1000)) : "—"
   }, [openedAt, row.createTime])
-
-  const sendSignal = () => {
-    const label = signalLabel(signal)
-    confirm({
-      title: `${label} process`,
-      confirmLabel: `Send ${signal}`,
-      description: (
-        <div className="space-y-2">
-          <p>
-            Sends {signal} to <b>{row.name}</b> (PID {row.pid}). The process may stop or be
-            restarted by {managerName(row.manager)}.
-          </p>
-          <Well className="max-h-24 break-all whitespace-pre-wrap">{row.cmdline || row.name}</Well>
-        </div>
-      ),
-      action: async (confirmation) => {
-        await post(
-          `/processes/${row.pid}/signal`,
-          { signal, startedAt: row.createTime },
-          { confirm: confirmation },
-        )
-        notify.success(`${signal} sent to ${row.name}`)
-        onChanged()
-        if (["SIGTERM", "SIGKILL", "SIGINT"].includes(signal)) onClosed()
-        else detail.refresh()
-      },
-    })
-  }
 
   const savePriority = async () => {
     await put(`/processes/${row.pid}/priority`, { nice, startedAt: row.createTime })
@@ -497,32 +468,50 @@ function ProcessDetail({
             <Detail label="Uptime">{uptime}</Detail>
           </DetailList>
           <Well className="mt-4 max-h-36 whitespace-pre-wrap">{row.cmdline || row.name}</Well>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {row.cwd && (
-              <Button asChild size="xs" variant="outline">
-                <Link href={`/files?path=${encodeURIComponent(row.cwd)}`}>
-                  Open working directory
-                </Link>
-              </Button>
-            )}
-            {row.exe && (
-              <Button asChild size="xs" variant="outline">
-                <Link href={`/files?path=${encodeURIComponent(row.exe)}`}>Open executable</Link>
-              </Button>
-            )}
-          </div>
         </PanelBody>
       </Panel>
 
       <Panel>
         <PanelHeader title="Resources" />
-        <PanelBody>
+        <PanelBody className="space-y-4">
+          {/*
+            Bars rather than history charts: per-process usage is a point in
+            time — nothing records this process's series, so a chart would draw
+            an empty grid that fills in while the panel is open. The host-level
+            history on the overview page is where trends live.
+          */}
+          <div className="space-y-3">
+            <UsageBar
+              label="CPU"
+              display={percent(row.cpuPercent)}
+              pct={row.cpuPercent}
+              tone={row.cpuPercent >= 50 ? "danger" : row.cpuPercent >= 10 ? "warn" : "default"}
+            />
+            <UsageBar
+              label="Memory"
+              display={
+                memTotal > 0
+                  ? `${bytes(row.rss)} · ${((row.rss / memTotal) * 100).toFixed(1)}% of host`
+                  : bytes(row.rss)
+              }
+              pct={memTotal > 0 ? (row.rss / memTotal) * 100 : (row.memPercent ?? 0)}
+              tone={memTotal > 0 && (row.rss / memTotal) * 100 >= 25 ? "warn" : "default"}
+            />
+          </div>
           <DetailList>
-            <Detail label="CPU">{percent(row.cpuPercent)}</Detail>
-            <Detail label="Resident memory">{bytes(row.rss)}</Detail>
             <Detail label="Virtual memory">{bytes(row.vms)}</Detail>
-            <Detail label="Disk read">{bytes(row.ioReadBytes ?? 0)}</Detail>
-            <Detail label="Disk written">{bytes(row.ioWriteBytes ?? 0)}</Detail>
+            <Detail label="Disk read">
+              {bytes(row.ioReadBytes ?? 0)}
+              {(row.ioReadRate ?? 0) > 0 && (
+                <span className="ml-1 text-muted-foreground">{bytes(row.ioReadRate)}/s</span>
+              )}
+            </Detail>
+            <Detail label="Disk written">
+              {bytes(row.ioWriteBytes ?? 0)}
+              {(row.ioWriteRate ?? 0) > 0 && (
+                <span className="ml-1 text-muted-foreground">{bytes(row.ioWriteRate)}/s</span>
+              )}
+            </Detail>
             <Detail label="Threads">{row.threads}</Detail>
             <Detail label="Child processes">{row.children ?? 0}</Detail>
             <Detail label="File descriptors">{row.fileDescriptors ?? "Not reported"}</Detail>
@@ -531,83 +520,106 @@ function ProcessDetail({
         </PanelBody>
       </Panel>
 
-      {(can("system.admin") || can("destructive")) && (
+      {can("system.admin") && (
         <Panel>
-          <PanelHeader title="Control" />
-          <PanelBody className="space-y-4">
-            {can("system.admin") && (
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="min-w-44 flex-1 space-y-1 text-xs">
-                  <span className="font-medium">Scheduling priority</span>
-                  <Select value={String(nice)} onValueChange={(value) => setNice(Number(value))}>
-                    <SelectTrigger size="sm" aria-label="Scheduling priority">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 40 }, (_, index) => index - 20).map((value) => (
-                        <SelectItem key={value} value={String(value)}>
-                          {value}{" "}
-                          {value < 0
-                            ? "· higher priority"
-                            : value > 0
-                              ? "· lower priority"
-                              : "· normal"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={nice === row.nice}
-                  onClick={() => savePriority().catch((error) => notify.error(String(error)))}
-                >
-                  Save priority
-                </Button>
+          <PanelHeader title="Priority" />
+          <PanelBody className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              How eagerly the scheduler runs this process. Lower is sooner: −20 runs first, 19 runs
+              last, 0 is ordinary.
+            </p>
+            {/*
+              A stepper, not the forty-option dropdown it replaces. The dropdown
+              rendered blank whenever the kernel reported a value outside its
+              −20…19 list, with no way to tell an unset control from a broken
+              one; a number that is always drawn cannot fail that way.
+            */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label="Lower nice value (higher priority)"
+                disabled={nice <= -20}
+                onClick={() => setNice((n) => clampNice(n - 1))}
+              >
+                <Minus className="size-3.5" />
+              </Button>
+              <div className="min-w-24 flex-1 text-center">
+                <p className="numeric font-mono text-lg leading-none font-medium">{nice}</p>
+                <p className="mt-1 text-hint text-muted-foreground">{niceMeaning(nice)}</p>
               </div>
-            )}
-            {can("destructive") && (
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="min-w-44 flex-1 space-y-1 text-xs">
-                  <span className="font-medium">Signal</span>
-                  <Select value={signal} onValueChange={setSignal}>
-                    <SelectTrigger size="sm" aria-label="Signal process">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[
-                        "SIGTERM",
-                        "SIGHUP",
-                        "SIGINT",
-                        "SIGUSR1",
-                        "SIGUSR2",
-                        "SIGSTOP",
-                        "SIGCONT",
-                        "SIGKILL",
-                      ].map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {signalLabel(value)} · {value}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <Button
-                  size="sm"
-                  variant={signal === "SIGKILL" ? "destructive" : "outline"}
-                  onClick={sendSignal}
-                >
-                  Send signal
-                </Button>
-              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label="Raise nice value (lower priority)"
+                disabled={nice >= 19}
+                onClick={() => setNice((n) => clampNice(n + 1))}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={nice === row.nice}
+                onClick={() => savePriority().catch((error) => notify.error(String(error)))}
+              >
+                Save priority
+              </Button>
+            </div>
+            {(row.nice < -20 || row.nice > 19) && (
+              <p className="text-hint text-warning">
+                Reported as {row.nice}, outside the −20…19 range this control can set. Saving
+                applies the shown value clamped into range.
+              </p>
             )}
           </PanelBody>
         </Panel>
       )}
-      {dialog}
     </div>
   )
+}
+
+/** One point-in-time share with its scale, for values that have no history. */
+function UsageBar({
+  label,
+  display,
+  pct,
+  tone,
+}: {
+  label: string
+  display: React.ReactNode
+  pct: number
+  tone: "default" | "warn" | "danger"
+}) {
+  const width = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="numeric font-mono font-medium">{display}</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-sunken">
+        <div
+          className={cn(
+            "h-full rounded-full",
+            tone === "danger" ? "bg-destructive" : tone === "warn" ? "bg-warning" : "bg-primary",
+          )}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function clampNice(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(-20, Math.min(19, Math.round(value)))
+}
+
+function niceMeaning(value: number): string {
+  if (value < 0) return "Higher priority than normal"
+  if (value > 0) return "Lower priority than normal"
+  return "Normal priority"
 }
 
 function managerName(manager: ProcessRow["manager"]): string {
@@ -631,29 +643,6 @@ function processStateTone(state: ProcessRow["state"]): string {
   if (state === "blocked" || state === "zombie") return "failed"
   if (state === "sleeping") return "inactive"
   return state
-}
-
-function signalLabel(signal: string): string {
-  switch (signal) {
-    case "SIGTERM":
-      return "Terminate"
-    case "SIGKILL":
-      return "Force kill"
-    case "SIGINT":
-      return "Interrupt"
-    case "SIGHUP":
-      return "Reload"
-    case "SIGSTOP":
-      return "Pause"
-    case "SIGCONT":
-      return "Resume"
-    case "SIGUSR1":
-      return "User signal 1"
-    case "SIGUSR2":
-      return "User signal 2"
-    default:
-      return signal
-  }
 }
 
 function useDebounced<T>(value: T, delay: number): T {

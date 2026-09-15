@@ -28,6 +28,11 @@ a failed detection.
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use.
+- PM2 discovery is per host account. It inspects each mounted home for a daemon directory or a PM2 binary,
+  prefers the newest nvm installation, and invokes the host command with that account home as `HOME` and
+  `PM2_HOME`. Lists combine every discovered daemon, controls return to the daemon that owns the named
+  process, and `pm2 save` persists each account separately. Commands still use explicit argv through
+  `hostexec`; request data never becomes a shell string.
 
 ## The terminal
 

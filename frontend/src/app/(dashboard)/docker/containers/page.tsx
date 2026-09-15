@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Box, Plus, Warning } from "@/components/icons"
+import { Box, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { prune, pruneSummary, RECLAIM_SAFE } from "@/lib/docker-prune"
@@ -26,7 +27,6 @@ import { ChipCount, FilterChip } from "@/components/tabs"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { EmptyState, ErrorState } from "@/components/state"
 import { ContainerDetailSheet } from "@/components/docker/container-detail"
-import { CreateContainerPanel } from "@/components/docker/create-container"
 import { AttentionPanel, RuntimeHealthPanel } from "@/components/docker/attention"
 import { ExplainIcon } from "@/components/docker/explain"
 import { PortList } from "@/components/docker/exposure"
@@ -47,7 +47,6 @@ import {
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Button } from "@/components/ui/button"
 import {
-  stickyTableHeader,
   Table,
   TableBody,
   TableCell,
@@ -98,7 +97,6 @@ export default function ContainersPage() {
   const [socketError, setSocketError] = useState<string>()
   const [selected, setSelected] = useQuerySelection("container")
   const [focusTab, setFocusTab] = useState<string>()
-  const [creating, setCreating] = useState<ContainerSpec | true | null>(null)
   const [filter, setFilter] = useState("")
   const [state, setState] = useState<StateFilter>("all")
 
@@ -346,18 +344,9 @@ export default function ContainersPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Docker"
-        title="Containers"
-        actions={
-          can("service.control") && (
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <Plus className="size-4" />
-              Run a container
-            </Button>
-          )
-        }
-      />
+      {/* Containers are deployed from the Deploy pages — there is no standalone
+          create flow here anymore. */}
+      <PageHeader eyebrow="Docker" title="Containers" />
 
       {/*
         Runtime first, then everything else. They are separate panels because
@@ -365,7 +354,9 @@ export default function ContainersPage() {
         describes recovers, the other does not.
       */}
       <RuntimeHealthPanel runtime={health.data?.runtime} />
-      {attention > 0 && <AttentionPanel diagnosis={health.data} onAction={runFix} />}
+      {attention > 0 && (
+        <AttentionPanel diagnosis={health.data} onAction={runFix} onRescan={health.refresh} />
+      )}
 
       {socketError && <ErrorState error={new Error(socketError)} />}
 
@@ -417,7 +408,7 @@ export default function ContainersPage() {
               description={
                 narrowed
                   ? "Clear the filter, or look under a different state."
-                  : "A container is one application, packaged with everything it needs. Start from a common image, paste a docker run command you found in a README, or fill in the form yourself."
+                  : "A container is one application, packaged with everything it needs. Everything here is deployed from the Deploy pages."
               }
               action={
                 narrowed ? (
@@ -433,9 +424,8 @@ export default function ContainersPage() {
                   </Button>
                 ) : (
                   can("service.control") && (
-                    <Button size="sm" onClick={() => setCreating(true)}>
-                      <Plus className="size-4" />
-                      Run a container
+                    <Button size="sm" asChild>
+                      <Link href="/deploy">Open Deploy</Link>
                     </Button>
                   )
                 )
@@ -459,8 +449,8 @@ export default function ContainersPage() {
               </ul>
 
               <div className="hidden xl:block">
-                <Table containerClassName="max-h-[calc(100svh-21rem)]">
-                  <TableHeader className={stickyTableHeader}>
+                <Table>
+                  <TableHeader>
                     <TableRow>
                       <TableHead className="w-full">Container</TableHead>
                       <TableHead>Image</TableHead>
@@ -479,7 +469,7 @@ export default function ContainersPage() {
                       <TableHead className="hidden text-right 2xl:table-cell">CPU · 1h</TableHead>
                       <TableHead>Ports</TableHead>
                       <TableHead className="text-center">Issues</TableHead>
-                      <TableHead className="w-px" />
+                      <TableHead className="w-px text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -501,19 +491,6 @@ export default function ContainersPage() {
         diagnosis={health.data}
         confirm={confirm}
         onChanged={() => health.refresh()}
-        onDuplicate={(spec) => {
-          setSelected(null)
-          setCreating(spec)
-        }}
-      />
-      <CreateContainerPanel
-        open={creating !== null}
-        initialSpec={creating === true ? undefined : (creating ?? undefined)}
-        onOpenChange={(isOpen) => !isOpen && setCreating(null)}
-        onCreated={() => {
-          trends.refresh()
-          health.refresh()
-        }}
       />
       {dialog}
     </Page>
@@ -595,7 +572,7 @@ function ContainerTableRow({
         <IssuesCell
           diagnosis={diagnosis}
           containerId={container.id}
-          onOpen={() => open(container.id)}
+          onOpen={() => open(container.id, "overview")}
         />
       </TableCell>
       {/*

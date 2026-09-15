@@ -19,6 +19,22 @@ const LEVEL_CLASS: Record<string, string> = {
 }
 
 /**
+ * A plain-text line's severity, guessed from its own words.
+ *
+ * The stream is deliberately not consulted: plenty of programs log everything
+ * to stderr (Postgres included), and painting every one of those lines red
+ * makes the pane unreadable — the colour stops meaning "error" and starts
+ * meaning "log". Real failures still name themselves (`FATAL`, `ERROR`,
+ * `Traceback`), so matching those keeps the signal without the wash.
+ */
+function textLevel(text: string): string | undefined {
+  if (/\b(fatal|critical|emerg|alert|panic|exception|traceback|segfault|oom|error|failed|failure|denied|refused)\b/i.test(text))
+    return "error"
+  if (/\b(warn|warning|deprecated|retry|timeout|slow)\b/i.test(text)) return "warn"
+  return undefined
+}
+
+/**
  * Terminal-style log pane. It follows the tail automatically but stops the
  * moment the reader scrolls up — nothing is more frustrating than losing the
  * line you were reading to an autoscroll.
@@ -119,16 +135,22 @@ export function LogViewer({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed"
+        className="min-h-0 flex-1 overflow-auto p-2 font-mono text-xs leading-relaxed"
       >
         {visible.length === 0 ? (
-          <p className="text-muted-foreground">{emptyMessage}</p>
+          <p className="px-2 py-1 text-muted-foreground">{emptyMessage}</p>
         ) : (
           visible.map((line, i) => {
             const structured = raw ? null : structuredOf(line)
-            const level = line.level ?? structured?.level
+            const level = line.level ?? structured?.level ?? textLevel(line.text)
             return (
-              <div key={i} className="flex gap-3 break-all whitespace-pre-wrap">
+              // One line, one row: a hairline between neighbours and a hover
+              // wash, so a dense feed scans line by line instead of blurring
+              // into a block.
+              <div
+                key={i}
+                className="flex gap-3 rounded-sm border-b border-hairline/60 px-2 py-[3px] break-all whitespace-pre-wrap last:border-b-0 hover:bg-surface-header/60"
+              >
                 {showTimestamps && (
                   <span className="shrink-0 text-muted-foreground/60 select-none">
                     {line.timestamp ? clock(line.timestamp) : ""}

@@ -19,8 +19,11 @@ const buttonVariants = cva(
       // gesture still has a beginning and an end without anything moving.
       // Ghost and link have no face to move, so they borrow the accent wash.
       variant: {
+        // The command face is the brand orange, not ink: the product's one
+        // pressable action wears its one colour, and the token carries the
+        // hover and press steps so no call site re-mixes an opacity pair.
         default:
-          "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80",
+          "bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active",
         destructive:
           "bg-destructive/85 text-white hover:bg-destructive active:bg-destructive/70",
         outline:

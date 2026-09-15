@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
-import { ChartActivity, DotMark, Rss, Stop } from "@/components/icons"
+import { ChartActivity, DotMark, Stop } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DockerEvent, DockerEventFeed } from "@/lib/types"
 import { get } from "@/lib/api"
@@ -104,8 +104,8 @@ export function EventsTab() {
         actions={
           <Status
             state={data?.listening ? "connected" : "disconnected"}
-            icon={Rss}
-            label={data?.listening ? "live" : "offline"}
+            live={Boolean(data?.listening)}
+            label={data?.listening ? "Live" : "Offline"}
           />
         }
       />
@@ -248,7 +248,7 @@ function EventRow({ event }: { event: DockerEvent }) {
   return (
     <div className="flex min-w-0 items-baseline gap-3 border-b border-hairline px-4 py-1.5 text-xs last:border-0 hover:bg-row-hover">
       <Icon className={cn("size-2.5 shrink-0 translate-y-0.5", meta.tone)} />
-      <span className="numeric w-16 shrink-0 font-mono text-hint text-muted-foreground">
+      <span className="numeric w-20 shrink-0 font-mono text-hint whitespace-nowrap text-muted-foreground">
         {new Date(event.time).toLocaleTimeString(undefined, {
           hour: "2-digit",
           minute: "2-digit",
@@ -261,7 +261,11 @@ function EventRow({ event }: { event: DockerEvent }) {
         <HoverCardTrigger asChild>
           <button
             type="button"
-            className={cn("shrink-0 cursor-help rounded-sm text-micro focus-ring", source.tone)}
+            title="Where this event came from"
+            className={cn(
+              "shrink-0 cursor-help rounded-sm whitespace-nowrap text-micro focus-ring",
+              source.tone,
+            )}
           >
             {source.label}
           </button>

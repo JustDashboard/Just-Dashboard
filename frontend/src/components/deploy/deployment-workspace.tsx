@@ -13,6 +13,7 @@ import {
   Key,
   Logs,
   Monitoring,
+  MoreHorizontal,
   Play,
   RefreshClockwise,
   RotateCounterClockwise,
@@ -52,7 +53,10 @@ import {
   NormalizedVariablesTab,
 } from "@/components/deploy/deployment-configuration"
 import { DeploymentAutomation } from "@/components/deploy/deployment-automation"
+import { DeleteArchivedDeployment } from "@/components/deploy/deployment-archive"
+import { DeploymentLogs } from "@/components/deploy/deployment-logs"
 import { DeploymentRuntime } from "@/components/deploy/deployment-runtime"
+import { DeploymentSitePreview } from "@/components/deploy/deployment-site-preview"
 import {
   DeploymentDependencies,
   DeploymentDomains,
@@ -60,12 +64,20 @@ import {
   DeploymentStorage,
 } from "@/components/deploy/deployment-operations"
 import { DeploymentReleaseComparison } from "@/components/deploy/deployment-release-comparison"
+import { DeploymentMetrics } from "@/components/deploy/deployment-metrics"
 import { DeploymentRunMetrics } from "@/components/deploy/deployment-run-metrics"
 import {
   GameConsoleTab,
   GamePlayersTab,
   GameSettingsTab,
 } from "@/components/deploy/deployment-game"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Status } from "@/components/status-dot"
@@ -218,7 +230,13 @@ export function DeploymentWorkspace() {
             )}
             <HealthStatus health={deployment.health} />
             {isArchived ? (
-              <Tag>Archived</Tag>
+              <>
+                <Tag>Archived</Tag>
+                <DeleteArchivedDeployment
+                  project={project}
+                  onDeleted={() => router.push("/deploy?view=archived")}
+                />
+              </>
             ) : activeRun ? (
               <Button size="sm" asChild>
                 <Link href={`/deploy/${projectID}/runs/${activeRun.id}`}>
@@ -239,75 +257,100 @@ export function DeploymentWorkspace() {
                 {starting ? "Starting…" : primaryLabel}
               </Button>
             )}
-            {!isArchived &&
-              !activeRun &&
-              normalized &&
-              deployment.liveReleaseId &&
-              deployment.pendingChanges && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canStart || starting}
-                  onClick={() => start("redeploy")}
-                >
-                  <RefreshClockwise className="size-3.5" /> Redeploy live
-                </Button>
-              )}
-            {!isArchived && !activeRun && normalized && deployment.liveReleaseId && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!canStart || starting}
-                onClick={() => start("restart")}
-              >
-                <RefreshClockwise className="size-3.5" /> Restart
-              </Button>
-            )}
-            {!isArchived && !activeRun && normalized && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!canStart || starting}
-                onClick={() => start("force_build")}
-              >
-                <Box className="size-3.5" /> Force build
-              </Button>
-            )}
-            {!isArchived && can("destructive") && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={Boolean(activeRun) || starting}
-                title={
-                  activeRun
-                    ? "Wait for the active deployment to finish or cancel it first"
-                    : undefined
-                }
-                onClick={() =>
-                  deletion.confirm({
-                    title: `Delete ${project.name}`,
-                    confirmLabel: "Delete project",
-                    description: (
-                      <>
-                        <p>
-                          Remove this project from active deployments and disable its automatic
-                          deployments? Its archived history is retained.
-                        </p>
-                        <p>
-                          Running containers, routes, and persistent data remain. To remove managed
-                          resources too, use Configuration → Archive &amp; managed resources.
-                        </p>
-                      </>
-                    ),
-                    action: async () => {
-                      await del(`/deploy/${projectID}`)
-                    },
-                    onDone: () => router.push("/deploy"),
-                  })
-                }
-              >
-                <Trash className="size-3.5" /> Delete project
-              </Button>
+            {!isArchived && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon-sm" aria-label="Deployment actions">
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72">
+                  {normalized && canStart && (
+                    <>
+                      {deployment.liveReleaseId && (
+                        <DropdownMenuItem
+                          disabled={Boolean(activeRun) || starting}
+                          onSelect={() => start("restart")}
+                        >
+                          <RefreshClockwise className="size-4" />
+                          <span>
+                            <span className="block">Restart</span>
+                            <span className="block text-hint text-muted-foreground">
+                              Restart the current release.
+                            </span>
+                          </span>
+                        </DropdownMenuItem>
+                      )}
+                      {deployment.liveReleaseId && deployment.pendingChanges && (
+                        <DropdownMenuItem
+                          disabled={Boolean(activeRun) || starting}
+                          onSelect={() => start("redeploy")}
+                        >
+                          <RotateCounterClockwise className="size-4" />
+                          <span>
+                            <span className="block">Redeploy live</span>
+                            <span className="block text-hint text-muted-foreground">
+                              Use the live release without pending changes.
+                            </span>
+                          </span>
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        disabled={Boolean(activeRun) || starting}
+                        onSelect={() => start("force_build")}
+                      >
+                        <Box className="size-4" />
+                        <span>
+                          <span className="block">Rebuild without cache</span>
+                          <span className="block text-hint text-muted-foreground">
+                            Create a fresh build from the saved plan.
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {can("destructive") && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={Boolean(activeRun) || starting}
+                        onSelect={() =>
+                          deletion.confirm({
+                            title: `Archive ${project.name}`,
+                            confirmLabel: "Archive deployment",
+                            description: (
+                              <>
+                                <p>
+                                  Remove this project from active deployments and disable its
+                                  automatic deployments? Its archived history is retained.
+                                </p>
+                                <p>
+                                  Running containers, routes, and persistent data remain. To remove
+                                  managed resources too, use Configuration → Archive &amp; managed
+                                  resources.
+                                </p>
+                              </>
+                            ),
+                            action: async () => {
+                              await del(`/deploy/${projectID}`)
+                            },
+                            onDone: () => router.push("/deploy"),
+                          })
+                        }
+                      >
+                        <Trash className="size-4" />
+                        <span>
+                          <span className="block">Archive deployment</span>
+                          <span className="block text-hint text-muted-foreground">
+                            Disable automation and keep runtime and history.
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </>
         }
@@ -353,7 +396,7 @@ export function DeploymentWorkspace() {
           releasesLoading={releases.loading}
         />
       )}
-      {activeTab === "logs" && <DeploymentRuntime runtime={detail.data.runtime} />}
+      {activeTab === "logs" && <DeploymentLogs runtime={detail.data.runtime} />}
       {activeTab === "configuration" &&
         (normalized ? (
           <NormalizedConfigurationTab
@@ -396,7 +439,10 @@ export function DeploymentWorkspace() {
         />
       )}
       {activeTab === "metrics" && (
-        <DeploymentMetricsTab deployment={deployment} runs={runs.data?.runs ?? []} />
+        <div className="space-y-4">
+          <DeploymentMetrics runtime={detail.data.runtime} />
+          <DeploymentMetricsTab deployment={deployment} runs={runs.data?.runs ?? []} />
+        </div>
       )}
       {activeTab === "console" &&
         (deployment.profile === "game" ? (
@@ -433,6 +479,7 @@ function Overview({
   const lastRun = runs[0] ?? deployment.lastRun
   return (
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+      <DeploymentSitePreview key={deployment.endpoint} deployment={deployment} />
       <Panel className="xl:col-span-2">
         <PanelHeader
           title="Release path"

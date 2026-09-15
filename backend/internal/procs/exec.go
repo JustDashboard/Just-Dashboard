@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 var (
@@ -91,4 +93,40 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 func binaryExists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// runWithEnv executes one host command with an explicit environment. The
+// command crosses into the host's namespaces when this process runs
+// containerised and runs directly otherwise, so a bare-metal install behaves
+// identically. argv is passed through unchanged and never through a shell.
+func runWithEnv(ctx context.Context, name string, env []string, timeout time.Duration, args ...string) (*CommandResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := hostexec.CommandOnHost(ctx, name, args...)
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	res := &CommandResult{
+		Stdout:  stdout.String(),
+		Stderr:  stderr.String(),
+		Command: name + " " + strings.Join(args, " "),
+	}
+	if cmd.ProcessState != nil {
+		res.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		return res, fmt.Errorf("%s %w", name, ErrNotInstalled)
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return res, fmt.Errorf("%s timed out after %s", name, timeout)
+	}
+	if err != nil {
+		return res, fmt.Errorf("%s exited %d: %s", name, res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return res, nil
 }

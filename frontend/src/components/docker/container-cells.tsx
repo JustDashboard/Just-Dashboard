@@ -1,6 +1,6 @@
 "use client"
 
-import { Copy, Layers, Warning } from "@/components/icons"
+import { Copy, Information, Layers, Warning } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Container, ContainerStats, DockerDiagnosis, DockerFinding } from "@/lib/types"
@@ -287,18 +287,27 @@ export function IssuesCell({
 }) {
   const mine = (diagnosis?.findings ?? []).filter((f) => f.targetId === containerId)
   const issues = mine.filter((f) => f.severity === "critical" || f.severity === "warning")
-  const recommendations = mine.filter((f) => f.severity === "recommendation")
+  // Everything that is not an issue is a note (recommendations and info).
+  // Counting only `recommendation` left info-only containers rendering "0·".
+  const notes = mine.filter((f) => f.severity !== "critical" && f.severity !== "warning")
 
   if (mine.length === 0) {
     return <span className="block text-center text-hint text-muted-foreground">—</span>
   }
 
-  const worst = issues[0] ?? recommendations[0]
+  const worst = issues[0] ?? notes[0]
+  const hasIssues = issues.length > 0
   const tone = issues.some((f) => f.severity === "critical")
     ? "text-destructive"
-    : issues.length
+    : hasIssues
       ? "text-warning"
       : "text-muted-foreground"
+
+  // Every state carries an icon now. Recommendation-only rows used to render a
+  // bare "3·" with no glyph beside rows that had a warning triangle, which is
+  // what made the column look broken.
+  const Icon = hasIssues ? Warning : Information
+  const count = hasIssues ? issues.length : notes.length
 
   return (
     <HoverCard openDelay={150}>
@@ -314,8 +323,8 @@ export function IssuesCell({
             tone,
           )}
         >
-          {issues.length > 0 && <Warning className="size-3" />}
-          {issues.length > 0 ? issues.length : `${recommendations.length}·`}
+          <Icon className="size-3 shrink-0" />
+          {count}
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
@@ -323,9 +332,9 @@ export function IssuesCell({
         <p className="text-muted-foreground">{worst?.detail}</p>
         {mine.length > 1 && (
           <p className="text-hint text-muted-foreground">
-            {issues.length} issue{issues.length === 1 ? "" : "s"} and {recommendations.length}{" "}
+            {issues.length} issue{issues.length === 1 ? "" : "s"} and {notes.length}{" "}
             recommendation
-            {recommendations.length === 1 ? "" : "s"} — open the container for all of them.
+            {notes.length === 1 ? "" : "s"} — open the container for all of them.
           </p>
         )}
       </HoverCardContent>

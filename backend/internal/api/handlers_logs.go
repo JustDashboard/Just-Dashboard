@@ -88,6 +88,9 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 
 	if s.modules.pm2.Available() {
 		if list, err := s.modules.pm2.List(r.Context()); err == nil {
+			if len(list) == 0 {
+				index.Missing["pm2"] = "PM2 has no managed processes"
+			}
 			for _, p := range list {
 				index.Sources = append(index.Sources, logsx.Source{
 					ID:     "pm2:" + p.Name,
@@ -104,6 +107,8 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 				s.modules.logs.AllowSource(p.OutLogPath)
 				s.modules.logs.AllowSource(p.ErrLogPath)
 			}
+		} else {
+			index.Missing["pm2"] = err.Error()
 		}
 	} else {
 		index.Missing["pm2"] = "PM2 is not installed on this host"

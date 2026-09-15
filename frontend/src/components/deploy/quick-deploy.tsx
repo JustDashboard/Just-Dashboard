@@ -10,6 +10,9 @@ import {
   Clipboard,
   CloudUpload,
   Database,
+  Layers,
+  Servers,
+  Code,
   GitBranch,
   LockClosed,
   RefreshClockwise,
@@ -58,6 +61,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Tag } from "@/components/tag"
 import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
+import { setDeploymentHandoff } from "@/components/deploy/deployment-handoff"
 
 /**
  * The short way to put something online.
@@ -125,6 +129,7 @@ const LANES: { lane: Lane; title: string; description: string; icon: typeof Clou
 ]
 
 export function QuickDeploy() {
+  const router = useRouter()
   const [lane, setLane] = useState<Lane>()
 
   if (lane === "database")
@@ -159,15 +164,62 @@ export function QuickDeploy() {
             </ChoiceCard>
           ))}
         </PanelBody>
-        <PanelFooter className="justify-between">
-          <p className="text-hint text-muted-foreground">
-            Compose stacks, blueprints, game servers and adopting an existing container live in the
-            full wizard.
-          </p>
-          <Button variant="outline" size="sm" asChild>
+      </Panel>
+      <Panel>
+        <PanelHeader title="More ways to deploy" />
+        <PanelBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            {
+              profile: "compose",
+              title: "Compose stack",
+              hint: "Deploy several services together from a Compose file.",
+              icon: Layers,
+            },
+            {
+              profile: "service",
+              title: "Application template",
+              hint: "Start with a reviewed recipe and ready-to-use defaults.",
+              icon: CloudUpload,
+            },
+            {
+              profile: "game",
+              title: "Game server",
+              hint: "Set up a game with persistent worlds and a built-in console.",
+              icon: Servers,
+            },
+            {
+              profile: "worker",
+              title: "Worker or bot",
+              hint: "Run a background process without a public website.",
+              icon: Code,
+            },
+            {
+              profile: "static",
+              title: "Static website",
+              hint: "Build and serve a site with no application process.",
+              icon: CloudUpload,
+            },
+            {
+              profile: "imported",
+              title: "Existing workload",
+              hint: "Bring a running container, stack, or checkout into deployments.",
+              icon: Box,
+            },
+          ].map((option) => (
+            <ChoiceCard
+              key={option.profile}
+              onClick={() => router.push(`/deploy/new?mode=advanced&profile=${option.profile}`)}
+            >
+              <option.icon className="mb-2 size-5 text-muted-foreground" />
+              <ChoiceCardTitle>{option.title}</ChoiceCardTitle>
+              <ChoiceCardHint>{option.hint}</ChoiceCardHint>
+            </ChoiceCard>
+          ))}
+        </PanelBody>
+        <PanelFooter>
+          <Button variant="ghost" size="sm" asChild>
             <Link href="/deploy/new?mode=advanced">
-              <SettingsSliders className="size-3.5" />
-              Advanced wizard
+              All configuration options <ArrowRight className="size-3.5" />
             </Link>
           </Button>
         </PanelFooter>
@@ -181,11 +233,11 @@ function QuickPage({ children, onBack }: { children: React.ReactNode; onBack?: (
     <Page className="max-w-[1100px]">
       <PageHeader
         eyebrow="Deployments"
-        title="Deploy something"
+        title="New deployment"
         actions={
           onBack ? (
             <Button variant="outline" size="sm" onClick={onBack}>
-              Start over
+              Change source type
             </Button>
           ) : (
             <Button variant="outline" size="sm" asChild>
@@ -223,6 +275,11 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
   const [acknowledged, setAcknowledged] = useState<string[]>([])
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
+  const [createdProject, setCreatedProject] = useState<{
+    projectId: number
+    environmentId: number
+    ready: boolean
+  }>()
 
   const profile: WorkloadProfile = lane === "image" ? "image" : "web"
 
@@ -297,6 +354,39 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
     [lane, profile],
   )
 
+  const openWizard = async () => {
+    if (!draft || !form || !source || busy) return
+    if (!DEPLOYMENT_NAME.test(form.name)) {
+      setFailure(new Error("Use 1–64 letters, numbers, dots, dashes, or underscores for the name."))
+      return
+    }
+    setBusy("handoff")
+    setFailure(undefined)
+    try {
+      let current = draft
+      if (form.name !== current.data.intent?.name) {
+        current = await put<DeploymentDraft>(`/deploy/drafts/${current.id}`, {
+          revision: current.revision,
+          step: "intent",
+          intent: { name: form.name, profile },
+        })
+        setDraft(current)
+      }
+      current = await put<DeploymentDraft>(`/deploy/drafts/${current.id}`, {
+        revision: current.revision,
+        step: "configuration",
+        configuration: configurationFor(profile, candidate, source, current, form),
+      })
+      setDraft(current)
+      setDeploymentHandoff(current.id, form.dotenv)
+      router.push(`/deploy/new?draft=${encodeURIComponent(current.id)}&step=configuration`)
+    } catch (error) {
+      setFailure(error instanceof Error ? error : new Error(String(error)))
+    } finally {
+      setBusy("")
+    }
+  }
+
   const deploy = async () => {
     if (!draft || !form || !source) return
     if (!DEPLOYMENT_NAME.test(form.name)) {
@@ -324,6 +414,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         step: "configuration",
         configuration,
       })
+      setDraft(saved)
       const checked = await post<{ draft: DeploymentDraft; preflight: DeploymentPreflight }>(
         `/deploy/drafts/${current.id}/preflight`,
         { revision: saved.revision },
@@ -345,6 +436,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         revision: checked.draft.revision,
         acknowledgedWarnings: acknowledged,
       })
+      setCreatedProject({ ...committed, ready: !form.dotenv.trim() })
 
       let revision = committed.planRevision
       if (form.dotenv.trim()) {
@@ -359,6 +451,7 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         )
         revision = imported.desiredRevision
       }
+      setCreatedProject({ ...committed, ready: true })
 
       const run = await post<{ id: number }>(
         `/deploy/${committed.projectId}/environments/${committed.environmentId}/runs`,
@@ -371,6 +464,47 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
       setBusy("")
     }
   }
+
+  if (createdProject)
+    return (
+      <Panel>
+        <PanelHeader title="Deployment created" />
+        <PanelBody className="space-y-4">
+          {failure ? (
+            <ErrorState error={failure} />
+          ) : (
+            <p className="text-sm">Starting the first release…</p>
+          )}
+          <p className="text-sm text-muted-foreground">
+            Your project and configuration are saved.{" "}
+            {createdProject.ready
+              ? "Open the deployment to check its run history and continue."
+              : "Environment setup did not finish. Review the Variables tab before starting the first release."}
+          </p>
+          {!createdProject.ready && form?.dotenv && (
+            <details>
+              <summary className="cursor-pointer text-sm focus-ring">
+                Keep a copy of your environment variables
+              </summary>
+              <Textarea
+                className="mt-3 font-mono text-xs"
+                aria-label="Unsaved environment variables"
+                readOnly
+                value={form.dotenv}
+              />
+            </details>
+          )}
+          <Button asChild>
+            <Link
+              href={`/deploy/${createdProject.projectId}?tab=${createdProject.ready ? "deployments" : "variables"}`}
+            >
+              {createdProject.ready ? "Open deployment" : "Finish environment setup"}
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        </PanelBody>
+      </Panel>
+    )
 
   if (!form || !draft)
     return (
@@ -391,6 +525,27 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
   return (
     <div className="space-y-4">
       {failure && <ErrorState error={failure} />}
+      <nav aria-label="Deployment setup" className="flex flex-wrap items-center gap-3 text-xs">
+        <span className="text-muted-foreground">1. Source selected</span>
+        <ArrowRight className="size-3 text-muted-foreground" />
+        <span aria-current="step" className="font-medium">
+          2. Configure & deploy
+        </span>
+      </nav>
+      <Panel>
+        <PanelHeader
+          title="Source"
+          actions={<Tag>{lane === "github" ? "GitHub" : "Docker image"}</Tag>}
+        />
+        <PanelBody className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm">
+          <span className="min-w-0 font-medium break-all">
+            {source?.repository || source?.image || source?.url}
+          </span>
+          {source?.ref && (
+            <span className="font-mono text-xs text-muted-foreground">{source.ref}</span>
+          )}
+        </PanelBody>
+      </Panel>
       <ConfigureStep
         lane={lane}
         form={form}
@@ -439,14 +594,22 @@ function ApplicationFlow({ lane }: { lane: "github" | "image" }) {
         <p className="text-hint text-muted-foreground">
           Deploy saves the plan, applies the environment, and starts the release.
         </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link href={`/deploy/new?mode=advanced&draft=${encodeURIComponent(draft.id)}`}>
-              <SettingsSliders className="size-4" />
-              Open in full wizard
-            </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void openWizard()}
+            pending={busy === "handoff"}
+            disabled={Boolean(busy)}
+          >
+            <SettingsSliders className="size-4" />
+            Open in full wizard
           </Button>
-          <Button className="h-11 sm:h-9" onClick={() => void deploy()} pending={busy === "deploy"}>
+          <Button
+            className="h-11 sm:h-9"
+            onClick={() => void deploy()}
+            pending={busy === "deploy"}
+            disabled={Boolean(busy)}
+          >
             <ArrowRight className="size-4" />
             {blockers.length
               ? "Re-check and deploy"
@@ -857,6 +1020,7 @@ function ConfigureStep({
   onChange,
   candidate,
   suggestion,
+  detectionUnavailable,
 }: {
   lane: "github" | "image"
   form: ApplicationForm
@@ -865,6 +1029,8 @@ function ConfigureStep({
   detectionUnavailable?: string
   suggestion?: DeploymentHostnameSuggestion
 }) {
+  const [nameTouched, setNameTouched] = useState(false)
+  const nameInvalid = nameTouched && !DEPLOYMENT_NAME.test(form.name)
   const set = <K extends keyof ApplicationForm>(key: K, value: ApplicationForm[K]) =>
     onChange({ ...form, [key]: value })
 
@@ -883,9 +1049,21 @@ function ConfigureStep({
           >
             <Input
               id="deployment-name"
+              required
+              maxLength={64}
+              autoComplete="off"
+              aria-invalid={nameInvalid}
+              aria-describedby={nameInvalid ? "deployment-name-error" : undefined}
+              onBlur={() => setNameTouched(true)}
               value={form.name}
               onChange={(event) => set("name", event.target.value)}
             />
+            {nameInvalid && (
+              <p id="deployment-name-error" className="text-xs text-destructive">
+                Start with a letter or number. Use up to 64 letters, numbers, dots, dashes, or
+                underscores.
+              </p>
+            )}
           </QuickField>
           <QuickField
             id="internal-port"
@@ -903,60 +1081,68 @@ function ConfigureStep({
             />
           </QuickField>
           {lane === "github" && (
-            <>
-              <QuickField
-                id="build-command"
-                label="Build command"
-                hint="Detected from the package manager this repository locks to."
-              >
-                <Input
+            <details
+              className="min-w-0 sm:col-span-2"
+              open={!candidate || Boolean(detectionUnavailable)}
+            >
+              <summary className="cursor-pointer rounded-md py-2 text-body font-medium focus-ring">
+                Build settings{candidate?.framework ? ` · ${candidate.framework}` : ""}
+              </summary>
+              <div className="grid gap-4 pt-3 sm:grid-cols-2">
+                <QuickField
                   id="build-command"
-                  value={form.buildCommand}
-                  onChange={(event) => set("buildCommand", event.target.value)}
-                  placeholder="npm run build"
-                  className="font-mono"
-                />
-              </QuickField>
-              <QuickField
-                id="start-command"
-                label="Start command"
-                hint="Leave empty and set an output directory to serve static files instead."
-              >
-                <Input
+                  label="Build command"
+                  hint="Detected from the package manager this repository locks to."
+                >
+                  <Input
+                    id="build-command"
+                    value={form.buildCommand}
+                    onChange={(event) => set("buildCommand", event.target.value)}
+                    placeholder="npm run build"
+                    className="font-mono"
+                  />
+                </QuickField>
+                <QuickField
                   id="start-command"
-                  value={form.startCommand}
-                  onChange={(event) => set("startCommand", event.target.value)}
-                  placeholder="npm run start"
-                  className="font-mono"
-                />
-              </QuickField>
-              <QuickField
-                id="root-directory"
-                label="Root directory"
-                hint="For a monorepo. Relative to the repository root."
-              >
-                <Input
+                  label="Start command"
+                  hint="Leave empty and set an output directory to serve static files instead."
+                >
+                  <Input
+                    id="start-command"
+                    value={form.startCommand}
+                    onChange={(event) => set("startCommand", event.target.value)}
+                    placeholder="npm run start"
+                    className="font-mono"
+                  />
+                </QuickField>
+                <QuickField
                   id="root-directory"
-                  value={form.rootDirectory}
-                  onChange={(event) => set("rootDirectory", event.target.value)}
-                  placeholder="apps/web"
-                  className="font-mono"
-                />
-              </QuickField>
-              <QuickField
-                id="output-directory"
-                label="Static output directory"
-                hint="Set only for a site with no server process."
-              >
-                <Input
+                  label="Root directory"
+                  hint="For a monorepo. Relative to the repository root."
+                >
+                  <Input
+                    id="root-directory"
+                    value={form.rootDirectory}
+                    onChange={(event) => set("rootDirectory", event.target.value)}
+                    placeholder="apps/web"
+                    className="font-mono"
+                  />
+                </QuickField>
+                <QuickField
                   id="output-directory"
-                  value={form.outputDirectory}
-                  onChange={(event) => set("outputDirectory", event.target.value)}
-                  placeholder="dist"
-                  className="font-mono"
-                />
-              </QuickField>
-            </>
+                  label="Static output directory"
+                  hint="Set only for a site with no server process."
+                >
+                  <Input
+                    id="output-directory"
+                    value={form.outputDirectory}
+                    onChange={(event) => set("outputDirectory", event.target.value)}
+                    placeholder="dist"
+                    className="font-mono"
+                  />
+                </QuickField>
+              </div>
+            </details>
           )}
         </PanelBody>
       </Panel>

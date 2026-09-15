@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -11,7 +11,6 @@ import {
   Layers,
   Lifebuoy,
   Play,
-  Plus,
   Sparkles,
 } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -20,7 +19,6 @@ import { cn } from "@/lib/utils"
 import type {
   ComposeStack,
   Container,
-  ContainerSpec,
   DockerDiagnosis,
   DockerDiskUsage,
 } from "@/lib/types"
@@ -35,7 +33,6 @@ import { EmptyState } from "@/components/state"
 import { rowReveal } from "@/components/icon-action"
 import { AttentionPanel, attentionLabel, runtimeLabel } from "@/components/docker/attention"
 import { CleanupPanel } from "@/components/docker/cleanup"
-import { CreateContainerPanel } from "@/components/docker/create-container"
 import { DiskSummary } from "@/components/docker/disk-panel"
 import { ExplainIcon } from "@/components/docker/explain"
 import { StackStateBadge } from "@/components/docker/stack-state"
@@ -79,7 +76,6 @@ import { Button } from "@/components/ui/button"
 export default function DockerOverviewPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [creating, setCreating] = useState<ContainerSpec | true | null>(null)
 
   const list = usePoll<Container[]>(
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
@@ -124,6 +120,7 @@ export default function DockerOverviewPage() {
 
   return (
     <Page>
+      {/* New containers come from the Deploy pages — no standalone create flow. */}
       <PageHeader
         eyebrow="Server"
         title={
@@ -138,14 +135,6 @@ export default function DockerOverviewPage() {
             */}
             <ExplainIcon name="docker" className="translate-y-0.5" />
           </span>
-        }
-        actions={
-          can("service.control") && (
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <Plus className="size-4" />
-              Run a container
-            </Button>
-          )
         }
       />
 
@@ -248,7 +237,7 @@ export default function DockerOverviewPage() {
       {/* A server with nothing on it is not an error state, and it is the one
           moment where the page should be teaching rather than reporting. */}
       {containers.length === 0 && detected.length === 0 ? (
-        <FirstRun onStart={() => setCreating(true)} canStart={can("service.control")} />
+        <FirstRun canStart={can("service.control")} />
       ) : (
         <>
           {/*
@@ -293,7 +282,7 @@ export default function DockerOverviewPage() {
           )}
 
           {/* Problems first. Everything below is context for them. */}
-          <AttentionPanel diagnosis={health.data} />
+          <AttentionPanel diagnosis={health.data} onRescan={health.refresh} />
 
           <Panel>
             <PanelHeader
@@ -388,16 +377,6 @@ export default function DockerOverviewPage() {
         </>
       )}
 
-      <CreateContainerPanel
-        open={creating !== null}
-        initialSpec={creating === true ? undefined : (creating ?? undefined)}
-        onOpenChange={(open) => !open && setCreating(null)}
-        onCreated={() => {
-          list.refresh()
-          health.refresh()
-          stacks.refresh()
-        }}
-      />
       {dialog}
     </Page>
   )
@@ -515,7 +494,7 @@ function IdleRow({
  * panel opens with, stated here because this is where the question is actually
  * asked.
  */
-function FirstRun({ onStart, canStart }: { onStart: () => void; canStart: boolean }) {
+function FirstRun({ canStart }: { canStart: boolean }) {
   return (
     <Panel className="animate-rise">
       <PanelHeader title="Nothing is running on this server yet" />
@@ -528,24 +507,23 @@ function FirstRun({ onStart, canStart }: { onStart: () => void; canStart: boolea
         <ul className="grid gap-2 sm:grid-cols-3">
           <Route
             icon={Sparkles}
-            title="Start from something common"
+            title="Start from a template"
             detail="Postgres, Nginx, Uptime Kuma — filled in with the ports and storage each actually needs."
           />
           <Route
             icon={Clipboard}
-            title="Paste a command you found"
+            title="Paste a Docker command"
             detail="A docker run line from a README becomes a form you can read before anything runs."
           />
           <Route
             icon={Box}
-            title="Start from scratch"
+            title="Start custom"
             detail="An empty form, with every field explained beside it."
           />
         </ul>
         {canStart && (
-          <Button size="sm" onClick={onStart}>
-            <Plus className="size-4" />
-            Run a container
+          <Button size="sm" asChild>
+            <Link href="/deploy">Open Deploy</Link>
           </Button>
         )}
       </PanelBody>

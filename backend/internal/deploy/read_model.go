@@ -82,12 +82,12 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		Deployments: []DeploymentSummary{}, ActiveWork: []ActiveWork{},
 		Slots: FleetSlots{HeavyCapacity: budget.Heavy, LightCapacity: budget.Light},
 	}
-	projectFilter, projectArgs := "", []any{}
+	projectFilter, projectArgs := "p.archived_at = 0", []any{}
 	if projectID > 0 {
-		projectFilter, projectArgs = " AND p.id = ?", []any{projectID}
+		projectFilter, projectArgs = "p.id = ?", []any{projectID}
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.name, p.profile, p.updated_at,
+		SELECT p.id, CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END, p.profile, p.updated_at,
 		       e.id, e.name, e.kind, e.desired_revision, e.live_release_id,
 		       e.strategy, e.expected_downtime,
 		       COALESCE(l.plan_revision, 0),
@@ -110,7 +110,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		   AND build.revision = e.desired_revision
 		  LEFT JOIN deploy_runtime_plans runtime ON runtime.environment_id = e.id
 		   AND runtime.revision = e.desired_revision
-		 WHERE p.archived_at = 0`+projectFilter+`
+		 WHERE `+projectFilter+`
 		 ORDER BY p.name`, projectArgs...)
 	if err != nil {
 		return nil, err

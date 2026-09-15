@@ -102,11 +102,13 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
           "these numbers measure different things, and here is by how much".
         */}
         {data && data.sharedLayers > 0 && (
-          <p className="border-b border-hairline px-4 py-2 text-hint text-muted-foreground">
-            Adding up every image&apos;s own size gives {bytes(data.imagesSize)}, but the layers
-            occupy {bytes(data.layersSize)}: {bytes(data.sharedLayers)} is shared between images and
-            stored once. The figure below is what the disk actually holds.
-          </p>
+          <div className="border-b border-hairline px-4 py-2.5">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Adding up every image&apos;s own size gives {bytes(data.imagesSize)}, but the layers
+              occupy {bytes(data.layersSize)}: {bytes(data.sharedLayers)} is shared between images
+              and stored once. The figure below is what the disk actually holds.
+            </p>
+          </div>
         )}
         {loading && !data ? (
           <LoadingRows rows={4} />

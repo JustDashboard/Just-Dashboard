@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircle, Wrench } from "@/components/icons"
+import { CheckCircle, Cross, Wrench } from "@/components/icons"
 import {
   Accordion,
   AccordionContent,
@@ -55,9 +55,12 @@ const LEVEL_TONE: Record<Finding["level"], DotTone> = {
 export function FindingList({
   findings,
   emptyLabel = "All checks passed",
+  onDismiss,
 }: {
   findings: Finding[]
   emptyLabel?: string
+  /** When set, each row gets a dismiss control that reports the finding id. */
+  onDismiss?: (id: string) => void
 }) {
   if (findings.length === 0) {
     return (
@@ -72,7 +75,22 @@ export function FindingList({
     <Accordion type="multiple" className="min-w-0">
       {findings.map((finding) => (
         <AccordionItem key={finding.id} value={finding.id} className="border-hairline">
-          <AccordionTrigger className="min-w-0 items-center gap-3 py-2.5 text-body hover:no-underline">
+          <AccordionTrigger
+            className="min-w-0 items-center gap-3 py-2.5 text-body hover:no-underline"
+            actions={
+              onDismiss && (
+                <button
+                  type="button"
+                  aria-label="Dismiss finding"
+                  title="Dismiss"
+                  onClick={() => onDismiss(finding.id)}
+                  className="ml-2 shrink-0 rounded-sm p-0.5 text-muted-foreground/70 focus-ring transition-colors hover:text-foreground"
+                >
+                  <Cross className="size-3" />
+                </button>
+              )
+            }
+          >
             <span className="flex min-w-0 flex-1 items-center gap-2.5">
               <StatusDot tone={LEVEL_TONE[finding.level]} />
               <span className="truncate font-medium">{finding.title}</span>
@@ -80,8 +98,8 @@ export function FindingList({
             {/* Dropped on a phone rather than clipped: the row is a title, a
                 severity dot and a chevron, and at 390px the meta had nowhere
                 to go but past the panel's own edge. */}
-            <span className="hidden max-w-[45%] shrink-0 text-hint font-normal text-muted-foreground sm:line-clamp-1">
-              {finding.meta ?? finding.detail}
+            <span className="hidden max-w-[45%] shrink-0 items-center gap-2 text-hint font-normal text-muted-foreground sm:inline-flex">
+              <span className="line-clamp-1 min-w-0">{finding.meta ?? finding.detail}</span>
             </span>
           </AccordionTrigger>
           <AccordionContent className="space-y-2 pl-[1.375rem] text-xs leading-relaxed text-muted-foreground">

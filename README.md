@@ -57,6 +57,10 @@ The installer then generates the master key and a first password, writes `.env`,
 waits for the stack to answer and prints the exact command to get in. Re-running it later
 keeps your `.env` and just rebuilds, so it is safe after a `git pull`.
 
+Before rebuilding, the installer checks for an interrupted `dpkg` transaction and stops with
+the recovery command if packages are half-configured. Run that recovery from SSH because completing
+a pending Docker upgrade can restart the daemon and briefly interrupt the dashboard.
+
 Everything it asked about — address, certificate, ports, allowlist, two-factor — is editable
 afterwards from **Operations → Dashboard → Configuration**, which restarts the stack into the
 change and puts the previous configuration back if it does not come up.
@@ -160,7 +164,7 @@ empty, because a filter restored from yesterday is a table that looks broken.
 
 ![The container list, with the verdict above it](docs/docker.png)
 
-**Run a container** from a starting point, from a pasted `docker run` command, or from a
+**Create container** from a template, from a pasted `docker run` command, or from a
 blank form. The command and the compose service it would produce are rendered back to you,
 by the server, before anything runs. Templates are a set of sane starting points with ports
 bound to loopback, not an app store to maintain.
@@ -316,12 +320,21 @@ original hostname. For private access, use a domain you control and provision it
 DNS-01 on the Certificates page before deploying. An `sslip.io` name pointing at a Tailscale address
 cannot pass the public HTTP challenge.
 
-To remove a project from the active deployment list, open it and choose **Delete project** in the
-header. Confirmation archives its history, disables automatic deployments, and frees its name for a
+To remove a project from the active deployment list, open it and choose **Archive deployment** in the
+header’s actions menu. Confirmation archives its history, disables automatic deployments, and frees its name for a
 new project—even from the same repository. Existing deleted projects get this name-reuse fix on upgrade.
 Run numbers such as “Run #13” are server-wide identifiers, not retry counts. Running containers,
 routes and data are retained; use **Configuration → Archive & managed resources** to preview and
 remove managed resources separately.
+
+Open **Archived** on the deployments page to search retained projects. **Delete permanently** removes
+an archived project’s saved configuration, variables, and history after confirmation. It leaves host
+resources in place and forgets their deployment ownership; use managed-resource removal first if you
+also want those resources removed. Unfinished runs must complete before permanent deletion.
+
+Deployment overviews include an on-demand website preview with mobile and desktop widths. Runtime
+logs and live/recorded service metrics are available inside the deployment's own tabs. If a website
+blocks embedded previews or requires a separate sign-in, use **Open website** to visit it directly.
 
 Container deployments supply `PORT` from the selected application port unless you explicitly configure
 it as a runtime variable. Readiness checks follow the actual allocated host port and report the failed
@@ -333,7 +346,7 @@ This is **0.6.7**: the panel as a finished single-server product — every page 
 above is built and in use. It is not 1.0 because the API is still moving. 1.0 is when it
 stops. Every release is in [CHANGELOG.md](CHANGELOG.md), and in the dashboard itself.
 
-The number is on screen beside the wordmark in the sidebar and on the sign-in page, and the
+The number is on screen beside the logo in the sidebar and on the sign-in page, and the
 server says so at boot as well:
 
 ```bash

@@ -100,7 +100,8 @@ func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // SecurityHeaders keeps the dashboard from being framed or sniffed. The API
-// serves only JSON and streams, so a restrictive CSP costs nothing here.
+// defaults to JSON and streams. The deployment preview wrapper overrides its
+// own frame policy explicitly; dashboard documents remain unframeable.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()

@@ -53,7 +53,7 @@ export function DeploymentRuntime({ runtime }: { runtime?: DeploymentRuntimeServ
                   {service.startedAt && <> · Started {relativeTime(service.startedAt)}</>}
                 </p>
                 <Link
-                  href={`/logs?${new URLSearchParams({ source: `docker:${service.containerId}` })}`}
+                  href={`?${new URLSearchParams({ tab: "logs", service: service.containerId })}`}
                   className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
                 >
                   Open runtime logs for {service.name || service.containerId}

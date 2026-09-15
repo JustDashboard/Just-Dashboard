@@ -83,6 +83,7 @@ export default function AuditPage() {
             />
             <label className="flex items-center gap-2 text-body text-muted-foreground">
               <Checkbox
+                aria-label="Failures only"
                 checked={onlyFailed}
                 onCheckedChange={(v) => {
                   setOnlyFailed(v === true)

@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
-import { FolderOpen, Plus, Servers, Trash } from "@/components/icons"
+import { FolderOpen, Servers, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, truncateMiddle } from "@/lib/format"
@@ -12,9 +12,10 @@ import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList, RowLink } from "@/components/page"
+import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
+import { ChipCount, FilterChip } from "@/components/tabs"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Hint, Term } from "@/components/docker/explain"
 import { Status } from "@/components/status-dot"
@@ -24,7 +25,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  stickyTableHeader,
   Table,
   TableBody,
   TableCell,
@@ -43,20 +43,48 @@ import {
  * was in it. The list joins against every container, running or not, on the
  * server rather than in the browser.
  */
-export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
+export function VolumesTab({
+  confirm,
+  creating: externalCreating,
+  onCreatingChange,
+}: {
+  confirm: ConfirmFn
+  creating?: boolean
+  onCreatingChange?: (open: boolean) => void
+}) {
   const { can } = useAuth()
   // In the URL so a deployment can link straight at the volume it depends on.
   const [selected, setSelected] = useQuerySelection("volume")
-  const [creating, setCreating] = useState(false)
+  const [internalCreating, setInternalCreating] = useState(false)
+  const creating = externalCreating ?? internalCreating
+  const setCreating = onCreatingChange ?? setInternalCreating
+  const [filter, setFilter] = useState("")
+  const [state, setState] = useState<"all" | "used" | "unused">("all")
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<VolumeDetail[]>("/docker/volumes/", undefined, signal),
     30000,
   )
+  const volumes = useMemo(() => data ?? [], [data])
+  const visible = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    return volumes.filter((v) => {
+      if (state === "used" && !v.inUse) return false
+      if (state === "unused" && v.inUse) return false
+      if (!needle) return true
+      return v.name.toLowerCase().includes(needle)
+    })
+  }, [volumes, filter, state])
+  const counts = useMemo(
+    () => ({
+      all: volumes.length,
+      used: volumes.filter((v) => v.inUse).length,
+      unused: volumes.filter((v) => !v.inUse).length,
+    }),
+    [volumes],
+  )
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
-
-  const unused = (data ?? []).filter((v) => !v.inUse)
 
   return (
     <div className="space-y-4">
@@ -65,13 +93,6 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
           title="Volumes"
           actions={
             <>
-              {unused.length > 0 && <Tag tone="warning">{unused.length} unused</Tag>}
-              {can("service.control") && (
-                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-                  <Plus className="size-4" />
-                  New volume
-                </Button>
-              )}
               {can("destructive") && (
                 <Button
                   size="sm"
@@ -114,115 +135,251 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
             </>
           }
         />
-        <PanelBody flush>
-          <Table containerClassName="max-h-[calc(100svh-24rem)]">
-            <TableHeader className={stickyTableHeader}>
-              <TableRow>
-                <TableHead className="w-full">Name</TableHead>
-                <TableHead className="text-right">Size</TableHead>
-                <TableHead>Used by</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.map((volume) => (
-                <TableRow
-                  key={volume.name}
-                  className="group"
-                  onActivate={() => setSelected(volume.name)}
-                >
-                  <TableCell>
-                    <div className="max-w-[24rem] min-w-0">
-                      <RowLink mono onClick={() => setSelected(volume.name)}>
-                        {truncateMiddle(volume.name, 40)}
-                      </RowLink>
-                      <p className="truncate font-mono text-hint text-muted-foreground">
-                        {volume.mountpoint}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="numeric text-right font-mono">
-                    <VolumeSize volume={volume} />
-                  </TableCell>
-                  <TableCell>
-                    <UsedByCell volume={volume} />
-                  </TableCell>
-                  <TableCell>
-                    {/*
-                      Docker refuses to remove a volume something mounts, so
-                      the button is disabled rather than offered and answered
-                      with a 409. What replaces it is the reason: "in use by 2
-                      containers" is the sentence the operator needed, and the
-                      old UI made them press a button to find it out.
-                    */}
-                    {can("destructive") &&
-                      (volume.usedBy.length > 0 ? (
-                        <span className="block text-hint whitespace-nowrap text-muted-foreground">
-                          in use by {volume.usedBy.length}
-                        </span>
-                      ) : (
-                        <IconAction
-                          reveal
-                          label="Remove"
-                          className="text-destructive"
-                          onClick={() =>
-                            confirm({
-                              title: "Delete volume",
-                              phrase: volume.name,
-                              confirmLabel: "Delete",
-                              description: (
-                                <>
-                                  <p className="text-destructive">
-                                    Everything stored in <b>{volume.name}</b> is destroyed
-                                    permanently.
-                                  </p>
-                                  <p>
-                                    Nothing mounts it right now. A volume outlives the container
-                                    that created it, so this is often the data from something that
-                                    was removed and rebuilt — check what is in it first if you are
-                                    not sure.
-                                  </p>
-                                </>
-                              ),
-                              action: async (c) => {
-                                await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, {
-                                  confirm: c,
-                                })
-                                refresh()
-                              },
-                            })
-                          }
-                        >
-                          <Trash />
-                        </IconAction>
-                      ))}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!data?.length && (
-                <TableRow>
-                  <TableCell colSpan={4} className="p-0">
-                    <EmptyState
-                      icon={Servers}
-                      title="No volumes"
-                      description={
-                        <>
-                          A <Term name="volume">volume</Term> is storage Docker manages, kept
-                          outside a container so it survives being recreated.
-                        </>
-                      }
-                    />
-                  </TableCell>
-                </TableRow>
+        {volumes.length > 0 && (
+          <PanelToolbar>
+            <SearchInput
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search volumes"
+            />
+            <div className="flex min-w-0 flex-wrap gap-1">
+              {(["all", "used", "unused"] as const).map((key) =>
+                key === "all" || counts[key] > 0 ? (
+                  <FilterChip
+                    key={key}
+                    selected={state === key}
+                    onClick={() => setState(key)}
+                  >
+                    {key === "all" ? "All" : key === "used" ? "Used" : "Unused"}
+                    <ChipCount>{counts[key]}</ChipCount>
+                  </FilterChip>
+                ) : null,
               )}
-            </TableBody>
-          </Table>
+            </div>
+          </PanelToolbar>
+        )}
+        <PanelBody flush>
+          {volumes.length === 0 ? (
+            <EmptyState
+              icon={Servers}
+              title="No volumes"
+              description={
+                <>
+                  A <Term name="volume">volume</Term> is storage Docker manages, kept outside a
+                  container so it survives being recreated.
+                </>
+              }
+            />
+          ) : visible.length === 0 ? (
+            <EmptyState
+              icon={Servers}
+              title="Nothing matches those filters"
+              description="Clear the search, or look under a different state."
+              action={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setFilter("")
+                    setState("all")
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              <ul className="divide-y divide-hairline lg:hidden">
+                {visible.map((volume) => (
+                  <VolumeListItem
+                    key={volume.name}
+                    volume={volume}
+                    confirm={confirm}
+                    onOpen={() => setSelected(volume.name)}
+                    onChanged={refresh}
+                  />
+                ))}
+              </ul>
+
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-full">Name</TableHead>
+                      <TableHead className="text-right">Size</TableHead>
+                      <TableHead>Used by</TableHead>
+                      <TableHead className="w-px text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visible.map((volume) => (
+                      <TableRow
+                        key={volume.name}
+                        className="group"
+                        onActivate={() => setSelected(volume.name)}
+                      >
+                        <TableCell>
+                          <RowLink mono onClick={() => setSelected(volume.name)}>
+                            {truncateMiddle(volume.name, 40)}
+                          </RowLink>
+                        </TableCell>
+                        <TableCell className="numeric text-right font-mono">
+                          <VolumeSize volume={volume} />
+                        </TableCell>
+                        <TableCell>
+                          <UsedByCell volume={volume} />
+                        </TableCell>
+                        <TableCell>
+                          <span className="flex w-10 justify-end">
+                            {can("destructive") &&
+                              (volume.usedBy.length > 0 ? (
+                                <IconAction
+                                  label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
+                                  className="text-muted-foreground opacity-40"
+                                  onClick={() => setSelected(volume.name)}
+                                >
+                                  <Trash />
+                                </IconAction>
+                              ) : (
+                                <IconAction
+                                  reveal
+                                  label="Remove"
+                                  className="text-destructive"
+                                  onClick={() =>
+                                    confirm({
+                                      title: "Delete volume",
+                                      phrase: volume.name,
+                                      confirmLabel: "Delete",
+                                      description: (
+                                        <>
+                                          <p className="text-destructive">
+                                            Everything stored in <b>{volume.name}</b> is destroyed
+                                            permanently.
+                                          </p>
+                                          <p>
+                                            Nothing mounts it right now. A volume outlives the
+                                            container that created it, so this is often the data from
+                                            something that was removed and rebuilt — check what is in
+                                            it first if you are not sure.
+                                          </p>
+                                        </>
+                                      ),
+                                      action: async (c) => {
+                                        await del(
+                                          `/docker/volumes/${encodeURIComponent(volume.name)}`,
+                                          {
+                                            confirm: c,
+                                          },
+                                        )
+                                        refresh()
+                                      },
+                                    })
+                                  }
+                                >
+                                  <Trash />
+                                </IconAction>
+                              ))}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
         </PanelBody>
       </Panel>
 
       <VolumeDetailPanel name={selected} onOpenChange={(o) => !o && setSelected(null)} />
       <NewVolumeDialog open={creating} onOpenChange={setCreating} onCreated={refresh} />
     </div>
+  )
+}
+
+/**
+ * One volume on a screen too narrow for the table.
+ *
+ * A row and not a card, mirroring `ContainerCard`: no frame of its own, a
+ * hairline between it and the next, a wash under the pointer, and the name as
+ * a real `<button>` so the row is announced as its name rather than as
+ * everything inside it. The removal control is drawn at rest rather than
+ * revealed, because a row whose controls appear only on hover is a row whose
+ * controls a phone cannot reach.
+ */
+function VolumeListItem({
+  volume,
+  confirm,
+  onOpen,
+  onChanged,
+}: {
+  volume: VolumeDetail
+  confirm: ConfirmFn
+  onOpen: () => void
+  onChanged: () => void
+}) {
+  const { can } = useAuth()
+
+  return (
+    <li className="group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="block max-w-full truncate rounded-sm text-left font-mono text-body focus-ring hover:text-primary"
+        >
+          {truncateMiddle(volume.name, 40)}
+        </button>
+        {can("destructive") &&
+          (volume.usedBy.length > 0 ? (
+            <IconAction
+              label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
+              className="text-muted-foreground opacity-40"
+              onClick={onOpen}
+            >
+              <Trash />
+            </IconAction>
+          ) : (
+            <IconAction
+              label="Remove"
+              className="text-destructive"
+              onClick={() =>
+                confirm({
+                  title: "Delete volume",
+                  phrase: volume.name,
+                  confirmLabel: "Delete",
+                  description: (
+                    <>
+                      <p className="text-destructive">
+                        Everything stored in <b>{volume.name}</b> is destroyed permanently.
+                      </p>
+                      <p>
+                        Nothing mounts it right now. A volume outlives the container that created
+                        it, so this is often the data from something that was removed and rebuilt —
+                        check what is in it first if you are not sure.
+                      </p>
+                    </>
+                  ),
+                  action: async (c) => {
+                    await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, { confirm: c })
+                    onChanged()
+                  },
+                })
+              }
+            >
+              <Trash />
+            </IconAction>
+          ))}
+      </div>
+
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <UsedByCell volume={volume} />
+        <span className="numeric font-mono text-hint text-muted-foreground">
+          <VolumeSize volume={volume} />
+        </span>
+      </div>
+    </li>
   )
 }
 
@@ -333,7 +490,7 @@ function VolumeDetailPanel({
               <Button size="sm" variant="outline" asChild>
                 <Link href={`/files?path=${encodeURIComponent(data.mountpoint)}`}>
                   <FolderOpen className="size-3.5" />
-                  Browse its contents
+                  Browse files
                 </Link>
               </Button>
               {looksLikeDatabase(data) && (
@@ -417,7 +574,7 @@ function NewVolumeDialog({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       size="sm"
-      title="New volume"
+      title="Create volume"
       description="Storage Docker manages, ready to mount into a container. Empty until something writes to
             it."
       footer={

@@ -255,6 +255,50 @@ const volumes = [
 ]
 
 /**
+ * Two images and one network, enough to give the phone layouts something to
+ * read: one image a container runs, one dangling and therefore removable.
+ */
+const images = [
+  {
+    id: "sha256:cccccccccccccccc",
+    repoTags: ["nginx:alpine"],
+    repoDigests: [],
+    size: 187 * 1024 * 1024,
+    created: now,
+    containers: 1,
+    labels: {},
+    dangling: false,
+  },
+  {
+    id: "sha256:dddddddddddddddd",
+    repoTags: [],
+    repoDigests: [],
+    size: 12 * 1024 * 1024,
+    created: now,
+    containers: 0,
+    labels: {},
+    dangling: true,
+  },
+]
+
+const networks = [
+  {
+    id: "net0000000000000000",
+    name: "bridge",
+    driver: "bridge",
+    scope: "local",
+    internal: false,
+    attachable: false,
+    ipv6: false,
+    created: now,
+    labels: {},
+    subnets: ["172.17.0.0/16"],
+    containers: 2,
+    usedBy: ["web", "db"],
+  },
+]
+
+/**
  * One tab hid the master key; the next one printed it.
  *
  * Environment detects credential-shaped values and puts them behind Reveal.
@@ -372,6 +416,20 @@ async function mockDocker(page: Page) {
         return json(route, stacks)
       case "/docker/volumes/":
         return json(route, volumes)
+      case "/docker/images/":
+        return json(route, images)
+      case "/docker/images/updates":
+        return json(route, {
+          "nginx:alpine": { ref: "nginx:alpine", state: "current", checkedAt: now },
+        })
+      case "/docker/networks/":
+        return json(route, networks)
+      case "/docker/events":
+        return json(route, { listening: true, since: now, buffered: 0, events: [] })
+      case "/docker/templates":
+        return json(route, [])
+      case "/docker/cleanup/preview":
+        return json(route, { categories: [] })
       case "/docker/disk-usage":
         return json(route, {
           layersSize: 1000,
@@ -409,7 +467,7 @@ test("the overview separates runtime health from attention", async ({ page }) =>
   await page.goto("/docker")
 
   await expect(page.getByText("Runtime health")).toBeVisible()
-  await expect(page.getByText("Everything is up")).toBeVisible()
+  await expect(page.getByText("2 / 2 running")).toBeVisible()
   await expect(page.getByText("2 running, 1 without a health check")).toBeVisible()
 
   // And, at the same time, that something needs attention.
@@ -456,10 +514,6 @@ test("a stack that was never deployed says so", async ({ page }) => {
   await expect(page.getByText("Not deployed · 3 services defined").first()).toBeVisible()
   await expect(page.getByText("Running · 2/2 services").first()).toBeVisible()
   await expect(page.getByText("0/0")).toHaveCount(0)
-
-  // And the two counts the overview and this page used to disagree about are
-  // now the same sentence.
-  await expect(page.getByText(/1 active · 2 detected/)).toBeVisible()
 })
 
 test("a volume in use offers no delete button", async ({ page }) => {
@@ -467,12 +521,12 @@ test("a volume in use offers no delete button", async ({ page }) => {
   await page.goto("/docker/volumes")
 
   const inUse = page.getByRole("row").filter({ hasText: "app-data" })
-  await expect(inUse.getByText("in use by 1")).toBeVisible()
-  await expect(inUse.getByRole("button", { name: "Remove" })).toHaveCount(0)
+  await expect(inUse.getByText("1 container")).toBeVisible()
+  await expect(inUse.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
 
   // The unattached one still can be removed — the gate is usage, not caution.
   const free = page.getByRole("row").filter({ hasText: "orphaned" })
-  await expect(free.getByRole("button", { name: "Remove" })).toHaveCount(1)
+  await expect(free.getByRole("button", { name: "Remove", exact: true })).toHaveCount(1)
   // And an unmeasured size says which of the three things a dash used to mean.
   await expect(free.getByText("not measured")).toBeVisible()
 })
@@ -646,6 +700,43 @@ test("on a phone the containers are a list rather than a table with columns remo
 })
 
 /**
+ * The containers page was the only one that replaced its table on a phone; the
+ * image, volume and network tables were still the remains of one: columns
+ * dropped until a wide first cell and two stubs were left. The same test
+ * applies to them as to the containers list — the table is replaced, not
+ * squeezed, and nothing the table carried is lost on the way.
+ */
+test("the image, volume and network lists read down the row on a phone", async ({ page }) => {
+  await mockDocker(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  await page.goto("/docker/images")
+  await expect(page.getByRole("columnheader")).toHaveCount(0)
+  const imageList = page.getByRole("list").filter({ hasText: "nginx:alpine" })
+  await expect(imageList.getByText("nginx:alpine")).toBeVisible()
+  // The dangling image has no name and is reachable by its id — "untagged" is
+  // the only honest thing the row can say, so that is what it says.
+  await expect(imageList.getByText("untagged")).toBeVisible()
+  await expect(imageList.getByRole("button", { name: "Remove image" })).toBeVisible()
+
+  await page.goto("/docker/volumes")
+  await expect(page.getByRole("columnheader")).toHaveCount(0)
+  const volumeList = page.getByRole("list").filter({ hasText: "app-data" })
+  await expect(volumeList.getByRole("button", { name: "app-data" })).toBeVisible()
+  await expect(volumeList.getByText("not measured")).toBeVisible()
+  // The volume Docker's own prune would delete while calling it unused.
+  await expect(volumeList.getByText("unused")).toBeVisible()
+
+  await page.goto("/docker/networks")
+  await expect(page.getByRole("columnheader")).toHaveCount(0)
+  const networkList = page.getByRole("list").filter({ hasText: "172.17.0.0/16" })
+  await expect(networkList.getByRole("button", { name: "bridge" })).toBeVisible()
+  await expect(networkList.getByText("172.17.0.0/16")).toBeVisible()
+  await expect(networkList.getByText("2 containers")).toBeVisible()
+  await expect(networkList.getByText("Docker system")).toBeVisible()
+})
+
+/**
  * The reveal rule's touch clause, for this page specifically: a card's verbs
  * are never hidden behind a hover that a phone cannot perform.
  */
@@ -782,11 +873,19 @@ test("asking for a container's logs opens the logs", async ({ page }) => {
  * within a pixel or two of the breakpoint that swapped it.
  */
 for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
-  test(`neither Docker page scrolls sideways at ${width}px`, async ({ page }) => {
+  test(`no Docker page scrolls sideways at ${width}px`, async ({ page }) => {
     await mockDocker(page)
     await page.setViewportSize({ width, height: 900 })
 
-    for (const path of ["/docker", "/docker/containers"]) {
+    for (const path of [
+      "/docker",
+      "/docker/containers",
+      "/docker/stacks",
+      "/docker/images",
+      "/docker/volumes",
+      "/docker/networks",
+      "/docker/events",
+    ]) {
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       const overflow = await page.evaluate(

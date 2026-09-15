@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("deploy project not found")
-	ErrBadSignature = errors.New("webhook signature does not match")
-	ErrDisabled     = errors.New("this deploy hook is disabled")
+	ErrArchiveRequired = errors.New("archive the deployment before deleting its records permanently")
+	ErrNotFound        = errors.New("deploy project not found")
+	ErrBadSignature    = errors.New("webhook signature does not match")
+	ErrDisabled        = errors.New("this deploy hook is disabled")
 )
 
 type Store struct {
@@ -402,4 +403,47 @@ func (s *Store) LastRun(ctx context.Context, projectID int64) (*Run, error) {
 		return nil, ErrNotFound
 	}
 	return r, err
+}
+
+// PurgeArchived forgets dashboard records, never host resources. Runs go first
+// because their variable revision joins intentionally do not cascade from variables.
+func (s *Store) PurgeArchived(ctx context.Context, id int64) (*Project, error) {
+	tx, err := s.st.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	project, err := scanProject(tx.QueryRowContext(ctx, `SELECT `+projectCols+` FROM deploy_projects WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if project.ArchivedAt == nil {
+		return nil, ErrArchiveRequired
+	}
+	var active int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_runs WHERE project_id = ? AND
+ ((state = '' AND status = 'running') OR (state <> '' AND state NOT IN ('succeeded','failed','cancelled','rolled_back','superseded')))`, id).Scan(&active)
+	if err != nil {
+		return nil, err
+	}
+	if active > 0 {
+		return nil, ErrAlreadyDeploying
+	}
+	for _, query := range []string{
+		`DELETE FROM deploy_notification_deliveries WHERE run_id IN (SELECT id FROM deploy_runs WHERE project_id = ?)`,
+		`DELETE FROM deploy_drafts WHERE committed_project_id = ?`,
+		`DELETE FROM deploy_runs WHERE project_id = ?`,
+		`DELETE FROM deploy_projects WHERE id = ?`,
+	} {
+		if _, err = tx.ExecContext(ctx, query, id); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return project, nil
 }

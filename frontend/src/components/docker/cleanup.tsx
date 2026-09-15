@@ -166,7 +166,11 @@ export function CleanupPanel({
           onClick={run}
         >
           <Trash className="size-3.5" />
-          {destroys ? "Remove, including volumes" : "Reclaim"}
+          {chosen.length === 0
+            ? "Reclaim"
+            : destroys
+              ? `Remove · Reclaim ${bytes(total)}`
+              : `Reclaim ${bytes(total)}`}
         </Button>
       </PanelFooter>
     </Panel>

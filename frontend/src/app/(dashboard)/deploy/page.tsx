@@ -2,7 +2,18 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, CloudUpload, Filter, Plus, StopCircle } from "@/components/icons"
+import { useSearchParams } from "next/navigation"
+import { ArchivedDeployments } from "@/components/deploy/deployment-archive"
+import {
+  ArrowRight,
+  CloudUpload,
+  Filter,
+  GridSquare,
+  ListUnordered,
+  Plus,
+  StopCircle,
+} from "@/components/icons"
+import { cn } from "@/lib/utils"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -41,15 +52,19 @@ import {
 
 export default function DeployPage() {
   const { can } = useAuth()
+  const archived = useSearchParams().get("view") === "archived"
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     5000,
+    [],
+    { enabled: !archived },
   )
   const [query, setQuery] = useState("")
   const [profile, setProfile] = useState("all")
   const [state, setState] = useState("all")
   const [environment, setEnvironment] = useState("all")
   const [pendingOnly, setPendingOnly] = useState(false)
+  const [layout, setLayout] = useState<"grid" | "list">("grid")
 
   const deployments = useMemo(() => {
     const search = query.trim().toLowerCase()
@@ -83,20 +98,27 @@ export default function DeployPage() {
     }
   }
 
+  if (archived) return <ArchivedDeployments />
+
   return (
     <Page>
       <PageHeader
         eyebrow="Operations"
         title="Deployments"
         actions={
-          can("system.admin") && (
-            <Button size="sm" asChild>
-              <Link href="/deploy/new">
-                <Plus className="size-4" />
-                Deploy something
-              </Link>
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/deploy?view=archived">Archived</Link>
             </Button>
-          )
+            {can("system.admin") && (
+              <Button size="sm" asChild>
+                <Link href="/deploy/new">
+                  <Plus className="size-4" />
+                  Deploy something
+                </Link>
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -121,7 +143,40 @@ export default function DeployPage() {
 
       {fleet.data && (
         <Panel>
-          <PanelHeader title="Deployment fleet" />
+          <PanelHeader
+            title="Deployment fleet"
+            actions={
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="numeric text-xs text-muted-foreground">
+                  {deployments.length} of {fleet.data.deployments.length}
+                </span>
+                <div
+                  className="hidden items-center gap-1 xl:flex"
+                  role="group"
+                  aria-label="Deployment layout"
+                >
+                  <Button
+                    variant={layout === "grid" ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    aria-label="Grid view"
+                    aria-pressed={layout === "grid"}
+                    onClick={() => setLayout("grid")}
+                  >
+                    <GridSquare className="size-4" />
+                  </Button>
+                  <Button
+                    variant={layout === "list" ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    aria-label="List view"
+                    aria-pressed={layout === "list"}
+                    onClick={() => setLayout("list")}
+                  >
+                    <ListUnordered className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            }
+          />
           <PanelToolbar>
             <SearchInput
               value={query}
@@ -235,8 +290,8 @@ export default function DeployPage() {
               />
             ) : (
               <>
-                <FleetTable deployments={deployments} />
-                <FleetCards deployments={deployments} />
+                {layout === "list" && <FleetTable deployments={deployments} />}
+                <FleetCards deployments={deployments} list={layout === "list"} />
               </>
             )}
           </PanelBody>
@@ -326,7 +381,6 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
             <TableHead>Live release</TableHead>
             <TableHead>Reachable at</TableHead>
             <TableHead>Runtime health</TableHead>
-            <TableHead>Pressure</TableHead>
             <TableHead>Last deployment</TableHead>
             <TableHead>Changes</TableHead>
             <TableHead>
@@ -355,7 +409,6 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
               <TableCell>
                 <HealthStatus health={deployment.health} />
               </TableCell>
-              <TableCell className="text-muted-foreground">Not attributed</TableCell>
               <TableCell>
                 {deployment.lastRun ? (
                   <DeploymentStatus state={deployment.lastRun.state} />
@@ -385,9 +438,15 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
   )
 }
 
-function FleetCards({ deployments }: { deployments: DeploymentSummary[] }) {
+function FleetCards({ deployments, list }: { deployments: DeploymentSummary[]; list: boolean }) {
   return (
-    <ul className="grid gap-px bg-hairline xl:hidden">
+    <ul
+      aria-label="Deployment projects"
+      className={cn(
+        "grid gap-px bg-hairline",
+        list ? "xl:hidden" : "lg:grid-cols-2 2xl:grid-cols-3",
+      )}
+    >
       {deployments.map((deployment) => (
         <li key={deployment.id} className="min-w-0 bg-card">
           <Link
@@ -396,7 +455,7 @@ function FleetCards({ deployments }: { deployments: DeploymentSummary[] }) {
           >
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-body font-medium">{deployment.name}</p>
+                <p className="truncate text-title font-medium">{deployment.name}</p>
                 <p className="text-hint text-muted-foreground">
                   {humanize(deployment.profile)} · {deployment.environmentName}
                 </p>
@@ -416,9 +475,6 @@ function FleetCards({ deployments }: { deployments: DeploymentSummary[] }) {
               </Detail>
               <Detail label="Health">
                 <HealthStatus health={deployment.health} />
-              </Detail>
-              <Detail label="Pressure" className="text-muted-foreground">
-                Not attributed
               </Detail>
               <Detail label="Last deploy">
                 {deployment.lastRun ? (

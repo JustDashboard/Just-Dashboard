@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils"
  * section strip, a tab inside a panel, and the anchor form of that tab. Written
  * once so "which one am I on" is the same mark at every level.
  */
-function tabClasses(selected: boolean | undefined, height: string) {
+export function tabClasses(selected: boolean | undefined, height: string) {
   return cn(
     // 12px, not 13. A section strip is chrome — it names the pages of a section
     // and then gets out of the way — and at body size it was competing with the

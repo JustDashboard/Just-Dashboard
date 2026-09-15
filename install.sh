@@ -558,6 +558,18 @@ if [ ! -d "$CLIPBOARD_ROOT" ] || [ -L "$CLIPBOARD_ROOT" ]; then
 fi
 chmod 0711 "$CLIPBOARD_ROOT"
 
+# A half-configured dpkg state — almost always an interrupted docker-ce
+# upgrade, whose postinst restarts the daemon — breaks everything after it in
+# a confusing way: every apt invocation fails with "dpkg was interrupted",
+# and finishing it later restarts dockerd mid-build, which surfaces as
+# `failed to receive status: ... EOF` from BuildKit, or drops the running
+# dashboard for a minute. Fail fast here instead of 100s into the build.
+if command -v dpkg >/dev/null 2>&1 && dpkg --audit 2>/dev/null | grep -q .; then
+	step "Package manager needs attention"
+	dpkg --audit 2>/dev/null | sed 's/^/  /'
+	die "dpkg reports half-configured packages. Finish them first with 'sudo dpkg --configure -a' (it restarts Docker, so the dashboard drops for a couple of minutes — run it from SSH, not the web terminal), then re-run this script."
+fi
+
 step "Building and starting the stack"
 say "  ${DIM}First build compiles the Go backend and the Next.js frontend; give it a few minutes.${RESET}"
 say ""

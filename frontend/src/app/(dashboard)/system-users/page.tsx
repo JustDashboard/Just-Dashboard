@@ -67,7 +67,11 @@ export default function SystemUsersPage() {
           <PanelHeader title="Accounts" />
           <PanelToolbar>
             <label className="flex items-center gap-2 text-body text-muted-foreground">
-              <Checkbox checked={showSystem} onCheckedChange={(v) => setShowSystem(v === true)} />
+              <Checkbox
+                aria-label="Include system accounts"
+                checked={showSystem}
+                onCheckedChange={(v) => setShowSystem(v === true)}
+              />
               Include system accounts
             </label>
           </PanelToolbar>

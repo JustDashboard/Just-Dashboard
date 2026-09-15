@@ -34,6 +34,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
+		r.Method(http.MethodGet, "/{id}/preview-frame", s.handle(s.handleDeploymentPreviewFrame))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
 		r.Method(http.MethodGet, "/{id}/runs/{run}", s.handle(s.handleDeploymentRunGet))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
@@ -100,6 +101,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/env/{key}", s.handle(s.handleDeployEnvDelete))
 		})
 		s.destructive(r, func(r chi.Router) {
+			r.Method(http.MethodDelete, "/{id}/permanent", s.handle(s.handleDeployPurge))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDeployDelete))
 			r.Method(http.MethodPost, "/{id}/archive", s.handle(s.handleDeploymentArchive))
 			r.Method(http.MethodPost, "/{id}/remove-managed", s.handle(s.handleDeploymentRemoveManaged))
@@ -111,6 +113,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 
 func mapDeployError(err error) error {
 	switch {
+	case errors.Is(err, deploy.ErrArchiveRequired):
+		return httpx.Err(http.StatusConflict, "deployment_not_archived", err.Error())
 	case errors.Is(err, deploy.ErrNotFound):
 		return httpx.ErrNotFound
 	case errors.Is(err, deploy.ErrAlreadyDeploying):
@@ -160,6 +164,16 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 	projects, err := s.modules.deployStore.List(r.Context())
 	if err != nil {
 		return httpx.Internal(err)
+	}
+	if r.URL.Query().Get("view") == "archived" {
+		archived := make([]*deploy.Project, 0)
+		for _, p := range projects {
+			if p.ArchivedAt != nil {
+				archived = append(archived, p)
+			}
+		}
+		httpx.JSON(w, http.StatusOK, archived)
+		return nil
 	}
 	for _, p := range projects {
 		s.enrichProject(r, p)
@@ -1029,4 +1043,18 @@ func (s *Server) enqueueLegacyDeployment(
 	}
 	s.modules.deployEngine.Notify()
 	return run, nil
+}
+
+func (s *Server) handleDeployPurge(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	project, err := s.modules.deployStore.PurgeArchived(r.Context(), id)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	httpx.SetAudit(r, "deploy.project.purge", project.Name, map[string]any{"deploymentId": id, "resourcesRemoved": false})
+	httpx.NoContent(w)
+	return nil
 }

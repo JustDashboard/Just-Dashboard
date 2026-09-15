@@ -191,28 +191,28 @@ func (c *Client) PreviewDeploy(
 func summarizePreview(p *DeployPreview) string {
 	parts := []string{}
 	if p.Recreate > 0 {
-		parts = append(parts, plural(p.Recreate, "service recreated", "services recreated"))
+		parts = append(parts, plural(p.Recreate, "service will be recreated", "services will be recreated"))
 	}
 	if p.Create > 0 {
-		parts = append(parts, plural(p.Create, "service created", "services created"))
+		parts = append(parts, plural(p.Create, "service will be created", "services will be created"))
 	}
 	if p.Start > 0 {
-		parts = append(parts, plural(p.Start, "service started", "services started"))
+		parts = append(parts, plural(p.Start, "service will be started", "services will be started"))
 	}
 	if p.Remove > 0 {
-		parts = append(parts, plural(p.Remove, "orphan removed", "orphans removed"))
+		parts = append(parts, plural(p.Remove, "orphan will be removed", "orphans will be removed"))
 	}
 	if p.Unchanged > 0 {
-		parts = append(parts, plural(p.Unchanged, "service unchanged", "services unchanged"))
+		parts = append(parts, plural(p.Unchanged, "service will remain unchanged", "services will remain unchanged"))
 	}
 	if len(parts) == 0 {
 		return "Nothing is expected to change."
 	}
 	out := join(parts, ", ")
 	if len(p.VolumesRemoved) > 0 {
-		out += ". " + plural(len(p.VolumesRemoved), "volume removed", "volumes removed") + " — this destroys data"
+		out += ". " + plural(len(p.VolumesRemoved), "volume will be removed", "volumes will be removed") + " — this destroys data"
 	} else {
-		out += ". No volume is removed"
+		out += ". No volumes will be removed"
 	}
 	return out + "."
 }

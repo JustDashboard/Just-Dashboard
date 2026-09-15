@@ -7,6 +7,205 @@ import type {
 
 const now = "2026-09-03T12:00:00Z"
 
+for (const failImport of [false, true]) {
+  test(`quick setup hands edited settings and environment to the wizard (${failImport ? "recovery" : "success"})`, async ({
+    page,
+  }) => {
+    const quick = await mockQuickDeploy(page)
+    if (failImport) {
+      await page.route("**/api/v1/deploy/77/environments/78/variables/import", (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "Environment import unavailable" },
+          }),
+        }),
+      )
+    }
+    await page.goto("/deploy/new")
+    await page.getByText("From GitHub", { exact: true }).click()
+    await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+    await page.getByRole("button", { name: "Continue", exact: true }).click()
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("edited-site")
+    await page
+      .getByRole("textbox", { name: "Environment variables", exact: true })
+      .fill("API_TOKEN=handoff-secret")
+    await page.getByRole("button", { name: "Open in full wizard" }).click()
+    await expect(page).toHaveURL(/draft=journey-draft.*step=configuration/)
+    await expect(
+      page.getByRole("textbox", { name: "Environment values from quick setup" }),
+    ).toHaveValue("API_TOKEN=handoff-secret")
+    await expect(page.getByRole("heading", { name: "edited-site", exact: true })).toBeVisible()
+    expect(page.url()).not.toContain("handoff-secret")
+    expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
+      "handoff-secret",
+    )
+    await page.getByRole("button", { name: "Run preflight" }).click()
+    await page.getByRole("button", { name: "Save deployment", exact: true }).click()
+    if (failImport) {
+      await expect(page.getByText("Environment import unavailable", { exact: true })).toBeVisible()
+      await expect(page.getByRole("link", { name: "Open saved deployment" })).toHaveAttribute(
+        "href",
+        "/deploy/77?tab=variables",
+      )
+      await expect(page.getByRole("button", { name: "Save deployment", exact: true })).toHaveCount(
+        0,
+      )
+      await expect(
+        page.getByRole("textbox", { name: "Environment values from quick setup" }),
+      ).toHaveValue("API_TOKEN=handoff-secret")
+    } else {
+      await expect(page).toHaveURL(/\/deploy\/77$/)
+      expect(quick.imported()).toMatchObject({
+        dotenv: "API_TOKEN=handoff-secret",
+        sensitivity: "secret",
+        scopes: ["runtime", "build"],
+      })
+    }
+    expect(quick.commits()).toBe(1)
+  })
+}
+
+for (const stage of ["variables/import", "runs"]) {
+  test(`quick creation recovers an existing project after ${stage} fails`, async ({ page }) => {
+    const quick = await mockQuickDeploy(page)
+    await page.route(`**/api/v1/deploy/77/environments/78/${stage}`, (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "unavailable", message: "Setup service unavailable" },
+        }),
+      }),
+    )
+    await page.goto("/deploy/new")
+    await page.getByText("From GitHub", { exact: true }).click()
+    await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+    await page.getByRole("button", { name: "Continue", exact: true }).click()
+    await page
+      .getByRole("textbox", { name: "Environment variables", exact: true })
+      .fill("API_TOKEN=keep-this-value")
+    await page.getByRole("button", { name: "Deploy", exact: true }).click()
+    await expect(page.getByRole("heading", { name: "Deployment created" })).toBeVisible()
+    await expect(page.getByText("Setup service unavailable", { exact: true })).toBeVisible()
+    expect(quick.commits()).toBe(1)
+    await expect(page.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(0)
+    if (stage === "variables/import") {
+      await page.getByText("Keep a copy of your environment variables").click()
+      await expect(
+        page.getByRole("textbox", { name: "Unsaved environment variables" }),
+      ).toHaveValue("API_TOKEN=keep-this-value")
+      await expect(page.getByRole("link", { name: "Finish environment setup" })).toHaveAttribute(
+        "href",
+        "/deploy/77?tab=variables",
+      )
+    } else {
+      await expect(
+        page.getByRole("link", { name: "Open deployment", exact: true }),
+      ).toHaveAttribute("href", "/deploy/77?tab=deployments")
+    }
+  })
+}
+
+test("fleet grid and list preserve filters and fit multiple projects", async ({
+  page,
+}, testInfo) => {
+  await mockDashboard(page)
+  const names = [
+    "storefront",
+    "payments-api",
+    "background-worker",
+    "documentation",
+    "staging-site",
+    "status-page",
+  ]
+  await page.route("**/api/v1/deploy/?view=fleet", (route) =>
+    json(route, {
+      deployments: names.map((name, index) => ({
+        ...deployment,
+        id: index + 1,
+        name,
+        endpoint: `https://${name}.example.test`,
+        activeRun: undefined,
+      })),
+      activeWork: [],
+      slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
+    }),
+  )
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/deploy")
+  const projects = page.getByRole("list", { name: "Deployment projects" })
+  await expect(projects.getByRole("link")).toHaveCount(6)
+  await expect(page.getByRole("button", { name: "Grid view" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await testInfo.attach("fleet-project-grid", {
+    body: await page.screenshot({ path: testInfo.outputPath("fleet-grid.png"), fullPage: true }),
+    contentType: "image/png",
+  })
+  await page.getByRole("textbox", { name: "Search deployments" }).fill("payments")
+  await expect(projects.getByRole("link")).toHaveCount(1)
+  await page.getByRole("button", { name: "List view" }).click()
+  await expect(page.getByRole("table")).toBeVisible()
+  await expect(page.getByRole("table").getByText("payments-api", { exact: true })).toBeVisible()
+  await expect(page.getByRole("table").getByText("storefront", { exact: true })).toHaveCount(0)
+  await page.getByRole("textbox", { name: "Search deployments" }).fill("")
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(7)
+  await page.setViewportSize({ width: 390, height: 900 })
+  await expect(projects).toBeVisible()
+  await expect(projects.getByRole("link")).toHaveCount(6)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+})
+
+test("website preview loads on demand inside a constrained frame", async ({ page }) => {
+  await mockDashboard(page)
+  let requests = 0
+  await page.route("**/api/v1/deploy/7/preview-frame", (route) => {
+    requests++
+    return route.fulfill({
+      contentType: "text/html",
+      headers: {
+        "Content-Security-Policy":
+          "default-src 'none'; frame-src https://preview.example.test; frame-ancestors 'self'",
+        "X-Frame-Options": "DENY",
+      },
+      body: '<iframe title="Deployed website" src="https://preview.example.test" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer"></iframe>',
+    })
+  })
+  await page.route("https://preview.example.test/", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<h1 id="app"></h1><script>document.getElementById("app").textContent="My deployed website";try{parent.parent.document.body.innerHTML="Unexpected access"}catch{document.body.insertAdjacentHTML("beforeend","<p>Dashboard isolated</p>")}</script>',
+    }),
+  )
+  await page.goto("/deploy/7")
+  expect(requests).toBe(0)
+  await page.getByRole("button", { name: "Load preview", exact: true }).click()
+  const preview = page.frameLocator('iframe[title="Website preview for api-production"]')
+  await expect(
+    preview
+      .frameLocator('iframe[title="Deployed website"]')
+      .getByRole("heading", { name: "My deployed website" }),
+  ).toBeVisible()
+  await expect(
+    preview.frameLocator('iframe[title="Deployed website"]').getByText("Dashboard isolated"),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Mobile width", exact: true }).click()
+  const width = await page
+    .locator('iframe[title="Website preview for api-production"]')
+    .evaluate((frame) => frame.getBoundingClientRect().width)
+  expect(width).toBeLessThanOrEqual(384)
+  await page.getByRole("button", { name: "Reload website preview" }).click()
+  await expect.poll(() => requests).toBe(2)
+  await page.getByRole("button", { name: "Close preview" }).click()
+  await expect(page.locator('iframe[title="Website preview for api-production"]')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/deploy\/7$/)
+})
+
 for (const normalized of [false, true]) {
   test(`delete project is accessible and confirmed for ${normalized ? "normalized" : "legacy"} deployments`, async ({
     page,
@@ -19,15 +218,17 @@ for (const normalized of [false, true]) {
       await route.fulfill({ status: 204 })
     })
     await page.goto("/deploy/7")
-    await page.getByRole("button", { name: "Delete project", exact: true }).click()
+    await page.getByRole("button", { name: "Deployment actions", exact: true }).click()
+    await page.getByRole("menuitem", { name: /Archive deployment/ }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toContainText("Running containers, routes, and persistent data remain")
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
     expect(deleted).toBe(0)
-    await page.getByRole("button", { name: "Delete project", exact: true }).click()
+    await page.getByRole("button", { name: "Deployment actions", exact: true }).click()
+    await page.getByRole("menuitem", { name: /Archive deployment/ }).click()
     await page
       .getByRole("dialog")
-      .getByRole("button", { name: "Delete project", exact: true })
+      .getByRole("button", { name: "Archive deployment", exact: true })
       .click()
     await expect(page).toHaveURL(/\/deploy$/)
     expect(deleted).toBe(1)
@@ -45,10 +246,11 @@ test("delete project keeps the project open when the server refuses", async ({ p
     })
   })
   await page.goto("/deploy/7")
-  await page.getByRole("button", { name: "Delete project", exact: true }).click()
+  await page.getByRole("button", { name: "Deployment actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: /Archive deployment/ }).click()
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "Delete project", exact: true })
+    .getByRole("button", { name: "Archive deployment", exact: true })
     .click()
   await expect(page.getByText("Project is busy", { exact: true })).toBeVisible()
   await expect(page.getByRole("dialog")).toBeVisible()
@@ -62,7 +264,7 @@ test("delete project is hidden without destructive capability", async ({ page })
   )
   await page.goto("/deploy/7")
   await expect(page.getByRole("heading", { name: /api-production/ })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Delete project", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Archive deployment", exact: true })).toHaveCount(0)
 })
 
 const user = {
@@ -870,6 +1072,17 @@ test("run runtime logs open the server-provided activation window and withhold u
       ],
     }),
   )
+  const streams: string[] = []
+  await page.routeWebSocket(/\/api\/v1\/logs\/stream/, (socket) => {
+    streams.push(new URL(socket.url()).searchParams.get("source") || "")
+    socket.send(
+      JSON.stringify({
+        type: "logs",
+        data: [{ text: "GET /api/health 200", level: "info" }],
+        ts: Date.now(),
+      }),
+    )
+  })
   const searches: URL[] = []
   await page.route("**/api/v1/logs/**", (route) => {
     const url = new URL(route.request().url())
@@ -896,11 +1109,14 @@ test("run runtime logs open the server-provided activation window and withhold u
     return json(route, {})
   })
   await page.goto("/deploy/7/runs/84")
-  const link = page.getByRole("link", { name: "Activation logs for preview-web" })
-  await expect(link).toHaveAttribute("href", `/logs?${query}`)
+  await expect(page.getByText("GET /api/health 200", { exact: true })).toBeVisible()
+  expect(streams).toContain("docker:preview")
+  const link = page.getByRole("button", { name: "Around activation", exact: true })
+  await expect(link).toBeVisible()
   await link.focus()
   await page.keyboard.press("Enter")
   await expect.poll(() => searches.length).toBe(1)
+  await expect(page).toHaveURL(/\/deploy\/7\/runs\/84$/)
   expect(searches[0].searchParams.get("source")).toBe("docker:preview")
   expect(searches[0].searchParams.get("since")).toBe(since)
   expect(searches[0].searchParams.get("until")).toBe(until)
@@ -909,8 +1125,8 @@ test("run runtime logs open the server-provided activation window and withhold u
   await expect(
     page.getByText("This run has no completed activation evidence.", { exact: true }),
   ).toBeVisible()
-  await expect(page.getByRole("link", { name: "Activation logs for preview-web" })).toHaveCount(0)
-  await expect(page.getByRole("link", { name: "Live logs for preview-web" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Around activation", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("combobox", { name: "Runtime log source" })).toHaveText("preview-web")
 })
 
 const draft = {
@@ -1257,6 +1473,7 @@ test("quick deploy takes a GitHub repository to a running release without the wi
   await page.getByRole("button", { name: "Continue" }).click()
 
   // Detection fills the build in, and the public hostname is already chosen.
+  await page.locator("summary").filter({ hasText: "Build settings" }).click()
   await expect(page.getByRole("textbox", { name: "Build command" })).toHaveValue("bun run build")
   await expect(page.getByRole("textbox", { name: "Start command" })).toHaveValue("bun start")
   await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("3000")
@@ -1482,14 +1699,17 @@ test("normalized workspace exposes distinct immutable release actions and ordina
   await page.goto("/deploy/7?tab=deployments")
 
   await expect(page.getByRole("button", { name: "Deploy changes" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Redeploy live" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Restart" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Force build" })).toBeVisible()
+  await page.getByRole("button", { name: "Deployment actions" }).click()
+  await expect(page.getByRole("menuitem", { name: /Redeploy live/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /Restart/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /Rebuild without cache/ })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("heading", { name: "Immutable releases" })).toBeVisible()
   await expect(page.getByText("Release #2", { exact: true })).toBeVisible()
   await expect(page.getByText("Live", { exact: true })).toBeVisible()
 
-  await page.getByRole("button", { name: "Redeploy live" }).click()
+  await page.getByRole("button", { name: "Deployment actions" }).click()
+  await page.getByRole("menuitem", { name: /Redeploy live/ }).click()
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/88$/)
   await page.goBack()
   await expect(page.getByText("Pending deployment", { exact: true })).toBeVisible()
@@ -2166,4 +2386,166 @@ test("quick deploy keeps HTTPS automatic when Docker Caddy owns the public ports
   ).toBeVisible()
   await expect(page.getByText("Automatic HTTPS needs attention")).toHaveCount(0)
   await expect(page.getByText("Install certbot", { exact: false })).toHaveCount(0)
+})
+
+test("deployment metrics show scoped live readings and history without leaving the page", async ({
+  page,
+}) => {
+  const runtime: DeploymentRuntimeServices = {
+    status: "available",
+    observedAt: now,
+    services: [
+      {
+        containerId: "metrics-web",
+        name: "web",
+        releaseId: 20,
+        liveRelease: true,
+        state: "running",
+        health: "healthy",
+        imageId: "sha256:web",
+      },
+      {
+        containerId: "metrics-worker",
+        name: "worker",
+        releaseId: 20,
+        liveRelease: true,
+        state: "running",
+        health: "healthy",
+        imageId: "sha256:worker",
+      },
+    ],
+  }
+  await mockDashboard(page, { normalized: true, runtime })
+  const requested: string[] = []
+  await page.routeWebSocket(/\/docker\/containers\/.*\/stats\/stream/, (socket) => {
+    const worker = socket.url().includes("metrics-worker")
+    socket.send(
+      JSON.stringify({
+        type: "stats",
+        data: {
+          ts: now,
+          cpuPercent: worker ? 37 : 12,
+          memUsage: 104857600,
+          memLimit: 0,
+          memLimited: false,
+          pids: worker ? 6 : 3,
+        },
+      }),
+    )
+  })
+  await page.route("**/api/v1/docker/containers/**", (route) => {
+    const path = new URL(route.request().url()).pathname
+    requested.push(path)
+    if (path.endsWith("/anomalies")) return json(route, { anomalies: [] })
+    return json(route, { points: [], sampleIntervalSeconds: 15 })
+  })
+  await page.goto("/deploy/7?tab=metrics")
+  await expect(page.getByText("12.0%", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Processor", exact: true })).toBeVisible()
+  await page.getByRole("combobox", { name: "Metrics service" }).click()
+  await page.getByRole("option", { name: "worker", exact: true }).click()
+  await expect(page.getByText("37.0%", { exact: true })).toBeVisible()
+  await expect
+    .poll(() => requested.some((path) => path.includes("metrics-worker/stats/history")))
+    .toBe(true)
+  await expect(page).toHaveURL(/\/deploy\/7\?tab=metrics$/)
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(page.getByRole("combobox", { name: "Metrics service" })).toBeVisible()
+    const activeSection = page
+      .getByRole("navigation", { name: "Deployment sections" })
+      .getByRole("link", { name: "Metrics", exact: true })
+    await expect
+      .poll(async () => {
+        const bounds = await activeSection.boundingBox()
+        return Boolean(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width)
+      })
+      .toBe(true)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page.screenshot({ path: `test-results/deployment-metrics-${width}.png`, fullPage: true })
+  }
+})
+
+test("creation entry points select the matching workload defaults", async ({ page }) => {
+  await mockWizardJourney(page)
+  for (const [label, profile] of [
+    ["Compose stack", "compose"],
+    ["Application template", "service"],
+    ["Game server", "game"],
+    ["Worker or bot", "worker"],
+    ["Static website", "static"],
+    ["Existing workload", "imported"],
+  ]) {
+    await page.goto("/deploy/new")
+    await page.getByText(label, { exact: true }).click()
+    await expect(page.locator(`input[name="profile"][value="${profile}"]`)).toBeChecked()
+  }
+})
+
+test("creation choices fit mobile and desktop and name errors appear beside the input", async ({
+  page,
+}) => {
+  await mockQuickDeploy(page)
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto("/deploy/new")
+    await expect(page.getByText("More ways to deploy", { exact: true })).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page.screenshot({ path: `test-results/deployment-create-${width}.png`, fullPage: true })
+  }
+  await page.getByText("From GitHub", { exact: true }).click()
+  await page.getByText("Wayy01/wesmokefish", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  const name = page.getByRole("textbox", { name: "Name", exact: true })
+  await name.fill("invalid name")
+  await name.blur()
+  await expect(name).toHaveAttribute("aria-invalid", "true")
+  await expect(page.getByText("Start with a letter or number.", { exact: false })).toBeVisible()
+  await name.fill("valid-name")
+  await expect(name).toHaveAttribute("aria-invalid", "false")
+})
+
+test("archived deployments can be permanently deleted with confirmation and errors remain reviewable", async ({
+  page,
+}) => {
+  await mockDashboard(page)
+  let deleted = false
+  let refuse = true
+  let calls = 0
+  await page.route("**/api/v1/deploy/?view=archived", (route) =>
+    json(route, deleted ? [] : [{ id: 7, name: "retired-api", archivedAt: now }]),
+  )
+  await page.route("**/api/v1/deploy/7/permanent", (route) => {
+    calls++
+    if (refuse)
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "already_running", message: "A deployment run is still active" },
+        }),
+      })
+    deleted = true
+    return route.fulfill({ status: 204 })
+  })
+  await page.goto("/deploy")
+  await page.getByRole("link", { name: "Archived", exact: true }).click()
+  await expect(page.getByRole("link", { name: "retired-api" })).toBeVisible()
+  await page.getByRole("button", { name: "Delete permanently" }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("persistent data remain on the server")
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  expect(calls).toBe(0)
+  await page.getByRole("button", { name: "Delete permanently" }).click()
+  await dialog.getByRole("button", { name: "Delete permanently" }).click()
+  await expect(page.getByText("A deployment run is still active", { exact: true })).toBeVisible()
+  await expect(dialog).toBeVisible()
+  refuse = false
+  await dialog.getByRole("button", { name: "Delete permanently" }).click()
+  await expect(page.getByText("No archived deployments", { exact: true })).toBeVisible()
+  expect(calls).toBe(2)
 })

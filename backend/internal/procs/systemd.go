@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/shirou/gopsutil/v4/host"
 )
 
@@ -329,7 +330,13 @@ func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, er
 	if opts.Follow {
 		args = append(args, "-f")
 	}
-	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	// The journal is host state, not container state: this image mounts
+	// /var/log but not the volatile /run/log/journal where the current boot's
+	// records live, so a container-local journalctl returns the previous
+	// boot's flushed entries and follows nothing new. Crossing into the host's
+	// namespaces reads the live journal; on a bare-metal install this runs
+	// directly and behaves as before.
+	cmd := hostexec.CommandOnHost(ctx, "journalctl", args...)
 	// Same host-PID-namespace chroot detection that run() works around.
 	cmd.Env = append(os.Environ(), "SYSTEMD_IGNORE_CHROOT=1")
 	return cmd, nil
