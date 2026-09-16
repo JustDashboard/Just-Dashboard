@@ -94,7 +94,7 @@ export const ChartPanel = memo(function ChartPanel({
           a strip under it for the ticks — so the body's `p-4` was drawing a
           second inset around one that already existed. Ten of these on a page
           is most of a screen of nothing. */}
-      <PanelBody className="flex flex-1 flex-col gap-2.5 p-3">
+      <PanelBody className="flex flex-1 flex-col gap-2.5 px-4 pt-3 pb-4">
         {empty ? (
           <ChartPlaceholder note={note ?? "Nothing recorded in this window."} height={height} />
         ) : (

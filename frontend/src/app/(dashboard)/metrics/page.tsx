@@ -251,7 +251,7 @@ export default function MetricsPage() {
           with nothing wrong loses no height to a panel saying so, because the
           header already said it. */}
       {health && health.findings.length > 0 && (
-        <HealthPanel health={health} loading={healthLoading} />
+        <HealthPanel plain health={health} loading={healthLoading} />
       )}
 
       <Section title="Utilisation">

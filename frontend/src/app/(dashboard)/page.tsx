@@ -23,6 +23,7 @@ import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
 import { Page, PageHeader, PageState, Metric, MetricStrip, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
@@ -167,9 +168,13 @@ export default function OverviewPage() {
         />
       </StatGrid>
 
-      <HealthPanel health={health} loading={healthLoading} />
+      {/* A titled list on the page, not a box: the verdict is already in the
+          host row above, and the findings are the first thing to read after
+          the numbers — a frame around them made the page open with a stack of
+          two containers before anything else. */}
+      <HealthPanel plain health={health} loading={healthLoading} />
 
-      <div className="grid items-start gap-4 lg:grid-cols-3 [&>*]:min-w-0">
+      <div className="grid items-start gap-6 lg:grid-cols-3 [&>*]:min-w-0">
         <TrendsPanel
           className="lg:col-span-2"
           disabled={recorded.disabled}
@@ -206,7 +211,7 @@ export default function OverviewPage() {
       </div>
 
       <Section title="Services">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
           <DockerCard />
           <DatabasesCard />
           <ProxyCard />
@@ -294,35 +299,35 @@ function ActivityPanel({ events }: { events: MetricEvent[] }) {
   const newestFirst = useMemo(() => [...events].reverse(), [events])
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Recent activity" />
-      <PanelBody className={newestFirst.length === 0 ? undefined : "max-h-[15rem] overflow-y-auto"}>
+      <PanelBody
+        flush
+        className={newestFirst.length === 0 ? "py-4" : "max-h-[17rem] overflow-y-auto py-1"}
+      >
         {newestFirst.length === 0 ? (
           <p className="text-body text-muted-foreground">Nothing in the last hour.</p>
         ) : (
-          <ol className="space-y-2.5">
+          <RowList>
             {newestFirst.map((event, i) => (
-              <li key={`${event.ts}-${i}`} className="flex min-w-0 gap-2.5">
-                <span
-                  aria-hidden
-                  className="mt-1.5 size-1.5 shrink-0 rounded-full"
-                  style={{ background: eventColor(event) }}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-baseline justify-between gap-2">
-                    <span className="truncate text-body">{event.title}</span>
-                    <span className="numeric shrink-0 text-hint text-muted-foreground">
-                      {clock(event.ts)}
-                    </span>
-                  </div>
-                  <p className="truncate text-hint text-muted-foreground">
-                    {relativeTime(event.ts)}
-                    {event.detail ? ` · ${event.detail}` : ""}
-                  </p>
-                </div>
-              </li>
+              <Row
+                key={`${event.ts}-${i}`}
+                leading={
+                  <span
+                    aria-hidden
+                    className="size-1.5 rounded-full"
+                    style={{ background: eventColor(event) }}
+                  />
+                }
+                title={event.title}
+                subtitle={`${relativeTime(event.ts)}${event.detail ? ` · ${event.detail}` : ""}`}
+                trailing={
+                  <span className="numeric text-hint text-muted-foreground">{clock(event.ts)}</span>
+                }
+                className="py-2.5"
+              />
             ))}
-          </ol>
+          </RowList>
         )}
       </PanelBody>
     </Panel>
@@ -366,9 +371,9 @@ function ServiceCard({
   unavailable?: boolean
 }) {
   return (
-    <Link href={href} className="group block min-w-0">
-      <Panel className="h-full transition-colors group-hover:border-rule-brand group-hover:bg-row-hover">
-        <PanelBody className="flex flex-col gap-3">
+    <Link href={href} className="group block min-w-0 rounded-xl focus-ring">
+      <Panel interactive className="h-full">
+        <PanelBody className="flex flex-col gap-4">
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-brand">
@@ -386,8 +391,10 @@ function ServiceCard({
             <p className="text-body text-muted-foreground">Unreachable</p>
           ) : (
             <div className="min-w-0">
-              <p className="numeric truncate text-lg leading-tight font-semibold">{value}</p>
-              {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
+              <p className="numeric truncate text-xl leading-tight font-semibold tracking-tight">
+                {value}
+              </p>
+              {hint && <p className="mt-0.5 truncate text-hint text-muted-foreground">{hint}</p>}
             </div>
           )}
         </PanelBody>

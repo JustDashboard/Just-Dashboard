@@ -41,7 +41,7 @@ export function tabClasses(selected: boolean | undefined, height: string) {
     // three ranks of text set within two pixels of each other. Dropping a step
     // puts the strip where it belongs in the ladder: quieter than the content
     // it switches between, still comfortably above the 11px hint row.
-    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs font-medium whitespace-nowrap transition-colors",
+    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap transition-colors",
     height,
     "focus-ring-inset",
     // The underline is the brand orange: a section tab says where you are,
@@ -71,7 +71,7 @@ export function SectionNav({ tabs, root }: { tabs: SectionTab[]; root?: string }
     <div className="sticky top-0 z-10 border-b border-hairline bg-background/85 backdrop-blur-md">
       <nav
         aria-label="Section"
-        className="mx-auto flex w-full max-w-[1600px] gap-1 overflow-x-auto px-4 md:px-6"
+        className="mx-auto flex w-full max-w-[1440px] gap-1 overflow-x-auto px-2 md:px-5"
       >
         {tabs.map((tab) => {
           const active = tab.href === base ? pathname === base : pathname.startsWith(tab.href)
@@ -80,7 +80,7 @@ export function SectionNav({ tabs, root }: { tabs: SectionTab[]; root?: string }
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={tabClasses(active, "h-10")}
+              className={tabClasses(active, "h-11")}
             >
               {tab.title}
             </Link>

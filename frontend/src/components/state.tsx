@@ -31,12 +31,12 @@ export function LoadingRows({ rows = 5, className }: { rows?: number; className?
 export function LoadingPanel({ rows = 6, className }: { rows?: number; className?: string }) {
   return (
     <div className={cn("min-w-0 overflow-hidden rounded-xl border bg-card", className)}>
-      <div className="border-b border-hairline bg-surface-header px-4 py-2.5">
+      <div className="flex min-h-12 items-center border-b border-hairline px-5 py-3">
         <Skeleton className="h-4 w-40" />
       </div>
       <div className="divide-y divide-hairline">
         {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3">
+          <div key={i} className="flex items-center gap-3 px-5 py-3.5">
             <Skeleton className="h-3.5 flex-1" style={{ maxWidth: `${34 + ((i * 13) % 26)}%` }} />
             <Skeleton className="h-3.5 w-16" />
             <Skeleton className="h-3.5 w-24" />

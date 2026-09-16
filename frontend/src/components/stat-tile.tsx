@@ -1,25 +1,23 @@
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
+import { ArrowRight } from "@/components/icons"
+import { rowReveal } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
 
 /**
  * A single headline figure.
  *
- * These used to be four-line cards: an eyebrow, a 24px figure on its own line,
- * a meter, and a hint — `p-4`, `gap-2.5`, about 120px tall each. Four of them
- * across the top of Overview spent a fifth of a laptop screen on four numbers,
- * and the page's actual content started below the fold.
+ * The name sits above the number, small and quiet; the number is the largest
+ * type on the page apart from the title. That order is fixed — name, number,
+ * meter, detail — because a run of these is read as a table: the eye lands on
+ * one row of numbers and reads the names only to tell them apart.
  *
- * The name and the figure share a line now. That was previously argued against
- * — "the label would compete for the same line as the figure" — but the
- * competition was a function of the figure being 24px. At `text-base` against a
- * 10px eyebrow there is no contest, and putting them on one line is what lets a
- * row of these scan horizontally as label → value the way a table does, which
- * is what the original docstring said it wanted all along.
- *
- * The order is still fixed — name, number, meter, detail — because a row of
- * them is read as a table: the eye lands on one column of numbers, not on four
- * cards that each start somewhere different.
+ * It draws no frame of its own. A tile used to be a bordered card, four of
+ * them across the top of every page, and a row of four boxes is the first
+ * thing a reader sees on a page that then goes on to be a stack of more boxes.
+ * The figures now sit on the page's own ground, and `StatGrid` draws the one
+ * hairline between neighbours that keeps them from running together.
  */
 export function StatTile({
   label,
@@ -46,46 +44,29 @@ export function StatTile({
   return (
     <div
       data-slot="stat-tile"
-      className={cn(
-        "flex min-w-0 flex-col justify-center gap-1.5 rounded-lg border bg-card px-3 py-2.5 text-card-foreground",
-        className,
-      )}
+      className={cn("flex min-w-0 flex-col justify-center gap-1.5 px-5 py-4", className)}
     >
-      {/*
-        The pair wraps rather than the name being amputated.
-        `Runtime health` beside `Something is stopped` did not fit four-up on a
-        1400px screen, and because the figure was `shrink-0` and the name was
-        `min-w-0 truncate`, the name was the one that lost: the tile read
-        `RUNTIME ⋯`. Every label here is two or three words, so the name keeps
-        its width and a figure too long to share the line drops under it — which
-        is the shape these tiles had before they were put on one line, arrived
-        at only where it is actually needed.
-      */}
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3">
-        <p className="eyebrow flex shrink-0 items-center gap-1.5">
-          {Icon && <Icon className="size-3 shrink-0 self-center" />}
-          <span>{label}</span>
-        </p>
-        <span className="flex shrink-0 items-baseline gap-1.5">
-          {/*
-            `leading-none` beside `truncate` clipped its own descenders. The
-            overflow rule that stops a long figure escaping the tile also clips
-            anything outside the line box, and at line-height 1 the line box
-            ends at the baseline — so "Everything is up" lost the tails of its
-            y, g and p, on the one tile most likely to be read as a sentence.
-          */}
-          <span
-            className={cn(
-              "numeric truncate text-base leading-tight font-semibold",
-              tone === "warning" && "text-warning",
-              tone === "danger" && "text-destructive",
-              tone === "success" && "text-success",
-            )}
-          >
-            {value}
-          </span>
-          {trailing && <span className="text-hint text-muted-foreground">{trailing}</span>}
+      <p className="eyebrow flex min-w-0 items-center gap-1.5">
+        {Icon && <Icon className="size-3 shrink-0 self-center" />}
+        <span className="truncate">{label}</span>
+      </p>
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+        {/*
+          `leading-tight`, not `leading-none`: beside `truncate` a line box that
+          ends at the baseline clips its own descenders, and "Everything is up"
+          would lose the tails of its y, g and p.
+        */}
+        <span
+          className={cn(
+            "numeric truncate text-2xl leading-tight font-semibold tracking-tight",
+            tone === "warning" && "text-warning",
+            tone === "danger" && "text-destructive",
+            tone === "success" && "text-success",
+          )}
+        >
+          {value}
         </span>
+        {trailing && <span className="text-hint text-muted-foreground">{trailing}</span>}
       </div>
 
       {meter !== undefined && (
@@ -93,6 +74,7 @@ export function StatTile({
           value={meter}
           tone={tone}
           size="thin"
+          className="mt-1"
           label={typeof label === "string" ? label : undefined}
         />
       )}
@@ -103,12 +85,59 @@ export function StatTile({
 }
 
 /**
- * A run of `StatTile`s as one object rather than as a row of separate cards.
+ * A stat tile that is also a destination.
  *
- * Four bordered cards with a gap between them draw eight vertical edges to
- * separate four numbers. One frame with a hairline between each cell draws
- * three, reads as the table the tiles were always trying to be, and saves the
- * gap as well. The tiles inside drop their own border and radius.
+ * The arrow is the whole point: a tile with a hover wash and nothing else is a
+ * surface that reacts without saying what pressing it does. It appears through
+ * `rowReveal` rather than a hand-written `group-hover`, which is what makes it
+ * permanently visible on a touch screen — where there is no hover to reveal it
+ * with, and where a row of these is often the page's main navigation.
+ *
+ * This lived in the Docker overview and was retyped, without the arrow and
+ * with a hover the tile could no longer show, on the proxy overview. Once,
+ * here, beside the tile it wraps.
+ */
+export function StatLink({
+  href,
+  label,
+  children,
+}: {
+  href: string
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      // The wash lands on the tile rather than on this anchor: a `StatTile`
+      // paints nothing of its own, so the hover class the caller passes it
+      // (`group-hover:bg-row-hover`) is what answers the pointer. The hint is
+      // the tile's last line and the arrow sits over its right end, so it
+      // gives the arrow its width back rather than truncating under it.
+      className="group relative block min-w-0 focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
+    >
+      {children}
+      <ArrowRight
+        aria-hidden
+        className={cn("absolute right-4 bottom-4 size-3.5 text-muted-foreground", rowReveal())}
+      />
+    </Link>
+  )
+}
+
+/**
+ * A run of `StatTile`s as one object.
+ *
+ * No outer frame. Four bordered cards with a gap between them drew eight
+ * vertical edges to separate four numbers; one framed grid with hairlines
+ * drew five; this draws three — a hairline between neighbours and nothing
+ * around the outside — so the figures read as a row of readings on the page
+ * rather than as a box of them above it. The first column starts on the page's
+ * own edge, in line with the title.
+ *
+ * `framed` restores the box, for the one place a run of figures sits inside
+ * another surface and needs an edge of its own.
  *
  * `columns` is the count at the widest breakpoint; below it they stack two-up
  * and then one-up, which is the arrangement every call site had written out by
@@ -116,28 +145,37 @@ export function StatTile({
  */
 export function StatGrid({
   columns = 4,
+  framed,
   className,
   ...props
-}: React.ComponentProps<"div"> & { columns?: 2 | 3 | 4 }) {
+}: React.ComponentProps<"div"> & { columns?: 2 | 3 | 4; framed?: boolean }) {
   return (
     <div
       data-slot="stat-grid"
       className={cn(
-        "grid min-w-0 overflow-hidden rounded-xl border bg-card",
-        // The tile drops its own frame wherever it sits — some call sites wrap
-        // one in a <Link>, so this has to reach a grandchild, not just a child.
-        "[&_[data-slot=stat-tile]]:rounded-none [&_[data-slot=stat-tile]]:border-0",
+        "grid min-w-0",
+        framed && "overflow-hidden rounded-xl border bg-card",
         "[&>*]:min-w-0 [&>a]:block [&>a]:h-full",
-        // A hairline between cells and only between them: the grid's own border
-        // is the outside edge, so a cell starting a row draws no left edge and
-        // the first row draws no top one.
+        // A hairline between cells and only between them: a cell starting a
+        // row draws no left edge and the first row draws no top one. Unframed,
+        // the cell that starts a row also drops its left padding so the
+        // column of names lines up with the page title above it.
         "[&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0",
+        !framed && "[&_[data-slot=stat-tile]]:pl-0",
         "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
+        !framed &&
+          "sm:[&_[data-slot=stat-tile]]:pl-5 sm:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0",
         "grid-cols-1 sm:grid-cols-2",
         columns === 3 &&
           "lg:grid-cols-3 lg:[&>*]:border-l lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*:nth-child(2n+1)]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0",
+        columns === 3 &&
+          !framed &&
+          "lg:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 lg:[&>*:nth-child(3n+1)_[data-slot=stat-tile]]:pl-0",
         columns === 4 &&
           "xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0",
+        columns === 4 &&
+          !framed &&
+          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(4n+1)_[data-slot=stat-tile]]:pl-0",
         className,
       )}
       {...props}

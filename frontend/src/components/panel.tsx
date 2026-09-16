@@ -4,29 +4,54 @@ import type { Tone } from "@/components/tone"
 /**
  * The one content block in the dashboard.
  *
- * Every page is a stack of these: a framed surface with an optional header
- * strip, an optional toolbar under it, and a body. Before this existed each
- * page assembled its own out of Card/CardHeader/CardContent with whatever
- * padding and title size that page's author picked, which is why fourteen
- * pages read as fourteen products. A panel has exactly one look, and the props
- * decide what it contains rather than how it is drawn.
+ * Every page is a stack of these: a framed surface with an optional header,
+ * an optional toolbar under it, and a body. Before this existed each page
+ * assembled its own out of Card/CardHeader/CardContent with whatever padding
+ * and title size that page's author picked, which is why fourteen pages read
+ * as fourteen products. A panel has exactly one look, and the props decide
+ * what it contains rather than how it is drawn.
  *
- * The header is a strip with its own tint and a hairline under it, not a block
- * of padding sharing the body's ground — that is what makes a panel legible as
- * "chrome, then content" at a glance, and what lets a toolbar or a full-bleed
- * table sit flush beneath it without inventing a second edge.
+ * The header is no longer a tinted strip. It was a shade off the body so a
+ * panel read as "chrome, then content" — and on a page of six panels that was
+ * six two-tone boxes, each one announcing itself twice. The header now sits on
+ * the panel's own ground with a hairline under it: the title is the chrome,
+ * and the frame is the only thing saying where the block begins and ends.
  *
- * It does not lift. A panel separates from the page by its own ground being a
- * step above it and by a single border — the gloss, shine, lip and drop shadow
+ * `plain` removes the frame as well. A list that is the whole of a section —
+ * recent activity, the compose projects on the Docker overview, a run of
+ * findings — does not need a box around it to be legible as one thing; the
+ * title and a hairline do that, and the box was the reason every page felt
+ * like a page of containers. A plain panel keeps the same anatomy (header,
+ * toolbar, body, footer) so a block can move between framed and plain without
+ * its contents changing.
+ *
+ * It does not lift. A framed panel separates from the page by a border and by
+ * its ground being one step above it — the gloss, shine, lip and drop shadow
  * it used to carry said the same thing four more times, and once every surface
- * on a page was saying it, none of them were.
+ * on a page was saying it, none of them were. `interactive` is the one hover a
+ * panel takes, for a panel that is also a link: the border steps up, and
+ * nothing else moves.
  */
-export function Panel({ className, children, ...props }: React.ComponentProps<"section">) {
+export function Panel({
+  plain,
+  interactive,
+  className,
+  children,
+  ...props
+}: React.ComponentProps<"section"> & {
+  /** No frame: title, hairline, content — for a block that is its own section. */
+  plain?: boolean
+  /** The panel is a destination. Its border answers the pointer. */
+  interactive?: boolean
+}) {
   return (
     <section
       data-slot="panel"
+      data-plain={plain ? "" : undefined}
       className={cn(
-        "flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card text-card-foreground",
+        "group/panel flex min-w-0 flex-col",
+        plain ? "" : "overflow-hidden rounded-xl border bg-card text-card-foreground",
+        interactive && !plain && "transition-colors hover:border-border-strong",
         className,
       )}
       {...props}
@@ -37,15 +62,14 @@ export function Panel({ className, children, ...props }: React.ComponentProps<"s
 }
 
 /**
- * A panel's chrome strip: what this block is, and what you can do to it.
+ * A panel's header: what this block is, and what you can do to it.
  *
  * **No icon.** Every header used to open with a brand-tinted plot and a glyph
  * inside it, which on a page of six panels is six orange marks competing with
  * the one control the reader is meant to press — and none of them said anything
- * the title beside them did not already say. A `Servers` box in front of the
- * word "Filesystems" is decoration with a colour budget. The title is the
- * panel's name, drawn one step up the ladder now that it stands alone, and the
- * header's ground and hairline do the separating the plot was crowding.
+ * the title beside them did not already say. The title is the panel's name,
+ * drawn one step up the ladder now that it stands alone, and the hairline under
+ * it does the separating.
  *
  * Icons still carry meaning elsewhere — a `Status`'s verdict, a `Notice`'s
  * severity, a verb on a button — because there the glyph *is* the message.
@@ -80,14 +104,17 @@ export function PanelHeader({
     <header
       data-slot="panel-header"
       className={cn(
-        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline bg-surface-header px-4 py-2.5",
+        "flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-5 py-3",
+        // Plain: the title sits on the page's own edge, and the hairline is
+        // the only rule between it and the rows beneath.
+        "group-data-[plain]/panel:min-h-0 group-data-[plain]/panel:px-0 group-data-[plain]/panel:pt-0 group-data-[plain]/panel:pb-3",
         className,
       )}
     >
       <div className="min-w-0">
         {eyebrow && <p className="eyebrow mb-0.5">{eyebrow}</p>}
         {title && (
-          <h2 className="flex min-w-0 items-center gap-1.5 text-title leading-tight font-medium">
+          <h2 className="flex min-w-0 items-center gap-1.5 text-title leading-tight font-medium tracking-tight">
             <span className="truncate">{title}</span>
             {advanced && (
               <span
@@ -109,8 +136,8 @@ export function PanelHeader({
 /**
  * A strip of filters directly under a panel header.
  *
- * Kept on the header's ground rather than the body's, so search inputs and
- * segmented controls read as part of the frame and the body below is only the
+ * On the panel's own ground rather than a tinted one, with a hairline under
+ * it, so the filters read as part of the frame and the body below is only the
  * data. Also the reason a filter row never scrolls away with the rows it
  * filters.
  */
@@ -119,7 +146,8 @@ export function PanelToolbar({ className, ...props }: React.ComponentProps<"div"
     <div
       data-slot="panel-toolbar"
       className={cn(
-        "flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-header/60 px-3 py-2",
+        "flex flex-wrap items-center gap-2 border-b border-hairline px-4 py-2.5",
+        "group-data-[plain]/panel:px-0",
         className,
       )}
       {...props}
@@ -144,7 +172,7 @@ export function PanelBody({
       data-flush={flush ? "" : undefined}
       className={cn(
         "min-w-0",
-        flush ? "" : "p-4",
+        flush ? "" : "p-5 group-data-[plain]/panel:px-0 group-data-[plain]/panel:py-4",
         scroll && "min-h-0 flex-1 overflow-auto",
         className,
       )}
@@ -160,7 +188,8 @@ export function PanelFooter({ className, ...props }: React.ComponentProps<"div">
       className={cn(
         // mt-auto so a row of panels stretched to a common height still ends
         // with their footers on the same line rather than mid-card.
-        "mt-auto flex flex-wrap items-center gap-2 border-t border-hairline bg-surface-header/60 px-4 py-2.5",
+        "mt-auto flex flex-wrap items-center gap-2 border-t border-hairline px-5 py-3",
+        "group-data-[plain]/panel:px-0",
         className,
       )}
       {...props}
@@ -202,16 +231,16 @@ export function Pane({ className, ...props }: React.ComponentProps<"div">) {
  * misaligned. `px-2 py-1.5` is the terminal rail's, which is the one the brief
  * called correct.
  *
- * It is tighter than `PanelHeader` on purpose: a panel's header carries a
- * title and actions for a block of content, and a pane's carries a name and two
- * icon buttons for a region of the screen.
+ * It is tighter than `PanelHeader` on purpose, and it keeps a faint tint: a
+ * pane's strip carries a name and two icon buttons for a region of the screen,
+ * and in a split view the strips are what line the regions up.
  */
 export function PaneHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="pane-header"
       className={cn(
-        "flex min-h-9 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header px-2 py-1.5",
+        "flex min-h-9 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header px-2.5 py-1.5",
         className,
       )}
       {...props}
@@ -225,7 +254,7 @@ export function PaneFooter({ className, ...props }: React.ComponentProps<"div">)
     <div
       data-slot="pane-footer"
       className={cn(
-        "mt-auto flex min-h-9 shrink-0 flex-wrap items-center gap-2 border-t border-hairline bg-surface-header px-2 py-1.5",
+        "mt-auto flex min-h-9 shrink-0 flex-wrap items-center gap-2 border-t border-hairline bg-surface-header px-2.5 py-1.5",
         className,
       )}
       {...props}
@@ -237,7 +266,7 @@ export function PaneFooter({ className, ...props }: React.ComponentProps<"div">)
  * A recessed well: command output, a log tail, a diff, a stored secret.
  *
  * Its ground is mixed towards the page background rather than being a flat
- * black, which is the only version of this that survives a light palette.
+ * black, so it reads as a step down from the panel rather than as a hole.
  */
 export function Well({
   plain,
@@ -269,7 +298,7 @@ export function Well({
  * A fenced group of fields inside a body: a set of ports, one release task, a
  * schedule, a repeated row in a form.
  *
- * Not a `Panel` — it has no header strip and does not lift, because it is not a
+ * Not a `Panel` — it has no header and does not lift, because it is not a
  * block of content sitting on the page; it is a fence around part of one. Not a
  * `Well` either: a well is *recessed*, for output you read rather than controls
  * you operate.

@@ -116,7 +116,10 @@ export function AreaFindings({
       ? "warning"
       : "notice"
   return (
-    <Panel className={className}>
+    // Plain, like the Overview's health list: findings are the first thing to
+    // read on the page, and a frame around them put a box above the box that
+    // holds the thing they are about.
+    <Panel plain className={className}>
       <PanelHeader
         title="Needs attention"
         actions={

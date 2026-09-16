@@ -8,7 +8,7 @@ import { useSelfUpdate } from "@/hooks/use-self-update"
 import { DashboardUpdatePanel } from "@/components/update/update-panel"
 import { ReleaseList } from "@/components/update/release-notes"
 import { Page, PageHeader, Section, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -112,7 +112,6 @@ export default function DashboardVersionPage() {
       {report && (
         <Section title="Version history">
           <Panel>
-            <PanelHeader title="Release notes" />
             <PanelToolbar>
               <SearchInput
                 value={filter}

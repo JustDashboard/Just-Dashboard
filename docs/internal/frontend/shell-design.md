@@ -29,12 +29,16 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink`. **None of the heading primitives takes a
   `description`** — see rule 5 in [`design-system.md`](design-system.md).
 - `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`; `Pane`,
-  `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a tinted
-  header strip and a hairline, so it reads as "chrome, then content" and a toolbar or full-bleed table
-  sits flush beneath without a second edge. A **pane** is the same frame, for a working
-  region of the page rather than a block of content on it — a session rail, a file tree, a log console.
-  Neither lifts; the distinction is semantic and shows in how the two are composed and in their header
-  heights.
+  `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a header
+  on its own ground and a hairline under it, so a toolbar or full-bleed table sits flush beneath
+  without a second edge. `Panel plain` is the same anatomy with no frame, for a list that is the
+  whole of a section; `interactive` is the hover a panel-as-link takes. A **pane** is the same frame,
+  for a working region of the page rather than a block of content on it — a session rail, a file
+  tree, a log console — and its strips keep a faint tint. Neither lifts; the distinction is semantic
+  and shows in how the two are composed and in their header heights.
+- `components/row-list.tsx` — `RowList` and `Row`: the one list-of-rows. A leading mark, a title, an
+  optional second line and whatever sits at the right edge; a row with `href` is a link with a
+  revealed arrow, with `onClick` a button, with neither inert.
 - `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
   input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
   `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only
@@ -43,9 +47,11 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   components** — a page or a feature panel never opens one itself.
 - `components/tabs.tsx` — every switcher: `SectionNav` (the sticky strip under the top bar), `TabLink`,
   `FilterChip`, `ChipCount`.
-- `components/stat-tile.tsx` — `StatTile` (name and figure on one line, an optional meter and one hint)
-  and `StatGrid`, which frames a run of them as a single object with hairlines between cells rather
-  than as a row of separate cards.
+- `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
+  hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
+  around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
+  tile that is also a destination — the Docker and proxy overviews — with the revealed arrow that says
+  so on touch.
 - `components/status-dot.tsx` — `Status`, the one live-state indicator: a coloured dot and a word.
   `components/tag.tsx` — `Tag`, small-caps text marking a *fixed property* of a row. No chip, no border.
   **There is no badge and no pill in this product**; `ui/badge.tsx` was deleted so the decision cannot

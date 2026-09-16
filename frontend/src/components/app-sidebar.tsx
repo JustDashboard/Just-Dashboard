@@ -275,7 +275,11 @@ export function AppSidebar() {
         <button
           type="button"
           onClick={palette.open}
-          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          // A row in the rail, not a box in it: the rail is a list of places
+          // and the palette is the fastest way to any of them, so it is drawn
+          // like the entries under it rather than as an input sitting above
+          // them.
+          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <MagnifyingGlass className="size-3.5 shrink-0" />
           <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search</span>
@@ -457,7 +461,7 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex w-full min-w-0 items-center gap-2.5 rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-1.5 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
+          className="flex w-full min-w-0 items-center gap-2.5 rounded-md p-1.5 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
         >
           <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-primary text-hint font-semibold text-primary">
             {initials}
