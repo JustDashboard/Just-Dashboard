@@ -286,6 +286,8 @@ func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, er
 
 func mapDeploymentPlanningError(err error) error {
 	switch {
+	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation):
+		return mapAutomationError(err)
 	case errors.Is(err, deploy.ErrDraftNotFound), errors.Is(err, deploy.ErrDraftExpired),
 		errors.Is(err, deploy.ErrDraftForbidden):
 		return httpx.Err(http.StatusNotFound, "draft_not_found", "deployment draft was not found")

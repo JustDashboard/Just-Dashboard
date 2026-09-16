@@ -1,0 +1,64 @@
+{
+  "name": "live-database-connections",
+  "command": [
+    "/tmp/jd-go1.26.8/bin/go",
+    "test",
+    "-json",
+    "-count=1",
+    "./internal/api",
+    "-run",
+    "TestLiveDeploymentDatabaseConnection"
+  ],
+  "cwd": "backend",
+  "started": "2026-09-16T01:22:06.868563+00:00",
+  "elapsed_seconds": 40.102,
+  "exit_code": 0,
+  "packages": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Action": "pass",
+      "Elapsed": 37.027
+    }
+  ],
+  "tests": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection/postgres",
+      "Action": "pass",
+      "Elapsed": 4.49
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection/mysql",
+      "Action": "pass",
+      "Elapsed": 11.49
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection/mariadb",
+      "Action": "pass",
+      "Elapsed": 11.3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection/redis",
+      "Action": "pass",
+      "Elapsed": 1.88
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection/mongodb",
+      "Action": "pass",
+      "Elapsed": 7.84
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection",
+      "Action": "pass",
+      "Elapsed": 37
+    }
+  ],
+  "failure_markers": [],
+  "skip_output": [],
+  "non_json_output": []
+}

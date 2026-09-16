@@ -115,7 +115,7 @@ export default function LogsPage() {
         }
       />
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[17rem_minmax(0,1fr)] [&>*]:min-w-0">
+      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[17rem_minmax(0,1fr)] [&>*]:min-w-0">
         <SourceRail
           index={sources.data}
           loading={sources.loading}

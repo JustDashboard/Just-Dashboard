@@ -11,8 +11,8 @@ func TestRunNumbersBelongToProjectAcrossEnvironmentsAndWriters(t *testing.T) {
 	legacy := NewStore(f.store, nil, nil)
 	production := f.addEnvironment(t, "production", EnvironmentProduction)
 	first := f.enqueue(t, production)
-	preview := f.addEnvironment(t, "preview", EnvironmentPreview)
-	second := f.enqueue(t, preview)
+	staging := f.addEnvironment(t, "staging", EnvironmentStaging)
+	second := f.enqueue(t, staging)
 	if first.RunNumber != 1 || second.RunNumber != 2 {
 		t.Fatalf("environment runs: first=%+v second=%+v", first, second)
 	}

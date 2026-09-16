@@ -31,6 +31,34 @@ implementation documentation, security invariants and source contracts govern th
    mobile screenshots, keyboard and overflow checks, lint/build/unit/browser gates; backend gates
    appropriate to changes. Update deployment and frontend documentation to match final behavior.
 
+## Strip-down — 2026-09-16
+
+The delivered surfaces above were composed of framed panels, each with a tinted header, and the
+projects page put four bands of chrome — a section heading, a count, a view switch and a toolbar —
+between the title and the first project. This pass keeps every behaviour and test named below and
+removes the containers:
+
+- **Projects:** one toolbar row (search, a quiet Filters popover, clear, count, grid/list) above the
+  cards. A card is the workload mark, the name, its address, the branch and release, then one line
+  with the last run's state, its age and the environment. Health appears in that line only when it
+  is not healthy; a pending-changes strip appears only when there are pending changes. Active work is
+  a plain list above the fleet.
+- **Create:** the page is titled "New project"; the three ways in are the product's underline tab
+  strip rather than toggle buttons. The import form and the "Start with something ready" catalogue
+  are plain (`Panel plain`, `RowList`). The configure step opens with a one-line source row instead
+  of a step indicator and a titled box, and its sections — settings, environment variables, database,
+  public address — are titled and ruled rather than framed. Preflight findings keep their frame.
+- **Project overview:** the preview and its facts sit on the page; branch and deploy-on-push are two
+  facts beside the source instead of a fourth panel; recent deployments and resource usage are plain
+  lists. The settings destinations keep framed forms with a footer action, which is the shape a
+  settings page reads best in.
+- **Run:** the summary is the page's own opening (facts, progress line, outcome) rather than a box;
+  the four views switch with the underline strip; execution details are a plain list. The build
+  transcript keeps its frame because it is a scrolling console.
+- **Archive:** a plain list with the search in its toolbar.
+
+`deploy-ui.spec.ts` passes unchanged (56 checks) against these surfaces.
+
 ## Acceptance evidence
 
 Completion requires inspection of the implemented routes and rendered screenshots plus passing

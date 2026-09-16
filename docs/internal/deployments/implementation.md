@@ -37,8 +37,10 @@ only renderer/executor/validation authority for their feature.
   for a Git repository, an image, or a database, and hands its own draft to the wizard for extended
   configuration. Connected GitHub repositories and manual HTTPS/SSH import are visible immediately;
   branch/tag and saved credential choices stay available before inspection. Compose stacks and adoption
-  use the extended wizard. Blueprint and game-server creation are unavailable in this release; the
-  catalogue reports the reason, and direct API calls are refused before deployment work is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default one
+  use the extended wizard. Reviewed blueprints deploy as image releases (below); game-server blueprints
+  and blueprints that install configuration files or downloaded artifacts stay preview-only, the
+  catalogue names the reason per blueprint, and direct API calls are refused with the same reason
+  before deployment work is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default one
   flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises `readiness_missing`
   as a *decision* for those profiles, so an empty check list made the most ordinary deployment there is
@@ -105,16 +107,19 @@ only renderer/executor/validation authority for their feature.
   succeed for a name the operator has just asked to publish.
 - `GET /databases/{id}/url` is an admin read with its own audit entry and `Cache-Control: no-store`.
   Its default (or `?target=host`) returns the saved connection unchanged. `?target=container` prepares
-  an application URL: a known database's loopback binding is matched to its observed Docker default
-  bridge address and internal port. The observed binding must match the saved loopback IP; ambiguous
+  an application URL: a known database's loopback binding is matched to its Docker container and
+  internal port, with a stable `db-ID.jd.internal` hostname. The binding must match the saved loopback IP; ambiguous
   localhost bindings are refused. It never publishes a new port, attaches networks, or changes the
   saved connection. An unreachable loopback service and SQLite fail with an actionable error.
   Remote URLs retain their credentials, options, SRV discovery and seed lists. Plain TCP MySQL driver
   strings become `mysql://` URLs; driver-specific query/socket options require manual configuration
-  instead of being silently discarded. Bridge addresses must be reconnected if a database container
-  is replaced or its address changes.
-- Detected JavaScript commands name the package manager the checkout's single lockfile locks to
-  (`bun`/`pnpm`/`yarn`/`npm run …`). The recipe picks its base image from that same lockfile, and
+  instead of being silently discarded. Setup saves a typed database reference; activation joins an owned
+  environment network and reconciliation repairs the DNS alias after a matching container replacement.
+  Existing literal IP variables require reconnecting once. See [database networks](database-networks.md).
+- Detected JavaScript commands name the package manager the checkout's lockfile locks to
+  (`bun`/`pnpm`/`yarn`/`npm run …`). Competing lockfiles resolve only through the explicit build setting
+  or `package.json` `packageManager`; changing the setting in the UI rewrites plain `<manager> run
+  <script>` commands to the new runner. The recipe picks its base image from that same lockfile, and
   `oven/bun` carries no npm, so a hardcoded `npm run build` was a build that installed cleanly and then
   died on `npm: not found`.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
@@ -126,6 +131,9 @@ only renderer/executor/validation authority for their feature.
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
   never argv/build args; custom Dockerfiles with requested secrets or obvious embedded credentials fail
   closed because their layer history cannot be guaranteed.
+  Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
+  package credentials. Static/SvelteKit serving defaults and Go version/command behavior are defined in
+  [the recipe contract](recipes.md), including the exact limits of live framework verification.
 - Enqueue atomically freezes exact variable revision ids plus canonical dependency/check JSON. The header
   exists for an empty set, digests are checked before variable decryption, and retry copies the original
   snapshots instead of observing later rotations. Release runtime snapshots store the actual secret-free
@@ -150,6 +158,18 @@ only renderer/executor/validation authority for their feature.
   starting at **Run #1** across its environments and operations. Existing history is numbered in run-ID
   order on upgrade; a SQLite insert trigger allocates subsequent numbers atomically for both legacy
   and normalized runs. Global run IDs still identify API routes, links, events and audit evidence.
+- The runtime plan carries optional resource limits — `memoryMb`, `cpus`, `pidsLimit` — and a
+  `restartPolicy` from the closed set `unless-stopped` (default), `always`, `on-failure`, `no`. Zero means
+  Docker's own unlimited default. Validation bounds them (16 MiB–4 TiB, 0.01–1024 CPUs, 16–1,048,576
+  processes); preflight warns when a limit exceeds the host's available memory or CPU count; the Docker
+  runtime owner passes them to container creation and release comparison labels them. Compose services keep
+  the limits their files declare.
+- A failed readiness or smoke gate first asks the runtime owner to diagnose the candidate: container
+  state, exit code, OOM flag, restart count and a bounded log tail (200 lines, 32 KiB, most recent kept).
+  The tail is written to the run transcript after redaction of every runtime variable value; step
+  evidence records state and counts, never output. Compensation runs afterwards, so the operator reads
+  why the application never listened instead of only "could not connect". The step message points at the
+  transcript when output was captured.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move.
@@ -181,7 +201,8 @@ only renderer/executor/validation authority for their feature.
   cutover, and records sequenced cleanup evidence.
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
-  stops and starts the existing live runtime without creating a release. Rollback uses the destructive
+  stops and starts the existing live runtime without creating a release, then verifies the plan's
+  readiness and smoke checks against that live release before recording it. Rollback uses the destructive
   capability and ordinary confirmation, not a typed phrase.
 - Normalized configuration edits are desired state only. Saving runtime/domain/dependency settings or a
   variable clones the source/build/runtime rows into the next complete revision and never moves the live
@@ -204,24 +225,32 @@ only renderer/executor/validation authority for their feature.
   treated as reusable ownership. HTTPS activation resolves an already-issued certificate/key pair through
   Proxy and fails closed if it no longer exists; deployment activation never invents certificate paths or
   performs issuance itself.
-- A configured backup dependency executes as a step before candidate start. The Backups adapter verifies
-  coverage, success, freshness and any required restore-test evidence and returns only bounded evidence;
-  a required failure terminates the run before a release/runtime or live-pointer change. Restore evidence
-  is explicitly unavailable until the Backups owner persists it, never inferred from artifact existence.
+- A configured backup dependency executes as a step before candidate start. A linked database whose
+  connection the backup job dumps natively is covered by that dump (`BackupGateEvidence.databaseDumps`
+  lists it); only a database the job does not dump falls back to covering the engine's files. The
+  Backups adapter verifies coverage, success, freshness and any required restore-test evidence and
+  returns only bounded evidence;
+  a required failure terminates the run before candidate startup or a live-pointer change. Restore evidence
+  comes from the Backups owner's isolated application checker, bound to the exact artifact, image,
+  schema, canary and completed cleanup. Missing or failed evidence blocks; it is never inferred from
+  artifact existence. See [restore verification](restore-verification.md).
+  Coverage resolves named volumes and every writable merged Compose service mount, verifies the immutable
+  manifest and artifact checksum, and rejects filtered or uncovered data. See [backup coverage](backup-coverage.md).
 - Import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
   exact acknowledgement of unsupported observations. It records the external resource as observed and
   does not start, stop, reset or claim it. Archiving only disables deployment triggers and visibility; it
   never removes runtime or data. A separate destructive route first returns a digest-bound, managed-only
   target list; data targets require their exact resource name and every removal is delegated to its owning
   feature and audited. Linked and observed targets never enter that plan.
-- Remote Git production branches are monitored automatically after the first explicit deployment,
-  including existing projects; there is no opt-in switch. `GitWatcher` checks refs every five seconds
+- Remote Git production branches default to monitoring after the first explicit deployment,
+  including existing projects. The environment's [automatic deployment policy](git-policy.md) supplies
+  manual-only mode and shared include/exclude filters for polling and push hooks. `GitWatcher` checks refs every five seconds
   with four bounded concurrent observations using the source adapter's credential isolation and
   `git ls-remote`. This works behind the dashboard's private network allowlist without public ingress
   or GitHub hook registration. Outages and slow Git reads can delay detection; it is polling, not an
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
   are excluded. Monitoring status and access failures appear on the overview and Automations page.
-  `deploy_git_watches` persists the last attempted revision and observation generation: restarts,
+  `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
   a later branch change (including a force-push back to an older commit) remains eligible. Watching
   never advances a live release pointer. Eligible web/static projects retain blue/green health-gated
@@ -236,14 +265,22 @@ only renderer/executor/validation authority for their feature.
   same persistent queue, configuration/variable snapshots, checks and activation as manual runs.
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
-  effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Watch paths apply
-  only to webhook delivery; default branch monitoring, manual and rollback runs are never filtered.
+  effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
+  path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
 - The scheduler advances a persisted next-run claim atomically and executes a bounded, ordered action
-  chain. Chain history stores only action/status/error-code/duration evidence. Preview environments clone
-  immutable desired configuration and sealed variables, inherit only linked/observed dependencies, and own
-  only their generated route/runtime; PR close retires those exact preview resources before archival.
-  Outbound notifications sign the exact JSON body, keep headers and signing keys sealed, discard response
-  bodies, and can warn but never change an otherwise successful deployment outcome.
+  chain. Chain history stores only action/status/error-code/duration evidence. Preview environments require
+  session administrator approval of each exact PR revision before creation or execution. They start without
+  inherited variables, linked databases or release tasks; container mounts become fresh preview volumes on
+  a dedicated bridge. Compose and host-access plans currently fail closed. PR close retires only owned
+  resources and archives after successful cleanup. Reopening waits for cleanup and a new approval
+  generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
+  containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
+  isolation retries while the UI reports the block. See [preview isolation](preview-isolation.md).
+  Outbound notifications are delivered by engine run observers for every terminal outcome and for run
+  start, through Discord, Slack, Telegram, e-mail or a signed webhook; a failed or cancelled run reaches
+  the same channels as a successful one. Credentials are sealed and never listed, deliveries record only
+  a status class and are deduplicated per run and event, and a delivery failure never changes a run's
+  outcome. GitHub commit statuses ride the same hook. See [notifications](notifications.md).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching running containers once each.
   The five-second bounded read returns container/release/Compose identities, state, health and start
@@ -278,15 +315,40 @@ only renderer/executor/validation authority for their feature.
   use `IN (…)` and `ROW_NUMBER() OVER (PARTITION BY …)`, and `DeploymentSummary` reads one deployment
   rather than filtering the whole fleet in Go. Both are pinned by statement-counting tests: the cost of
   a fleet read is fixed in the number of deployments, and a regression fails rather than slows.
-- Blueprint deployment is currently unavailable: source materialization, immutable image resolution,
-  generated variable persistence and lifecycle automation are not connected end to end. Catalogue and
-  detail responses expose `deploymentSupported: false` and `unavailableReason`; previews remain pure.
-  Source saves, preflight, commit, materialization and new deployment queue admission reject blueprint
-  sources. Existing workload read, restart and removal controls remain available. Preview volume names
-  include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked and read-only,
-  startup budgets use bounded retries, and Bedrock does not receive Java save commands. UDP remains an
-  explicit unsupported runtime protocol, never silently converted to TCP. Completing this feature still
-  requires durable resource identities and runtime integration; removing the gate alone is unsafe.
+- A blueprint deploys as an image release with reviewed defaults. `blueprint.DeploymentSupport`
+  decides per definition: game profiles, blueprints that ship configuration files, blueprints that
+  download an install-time artifact and UDP ports stay preview-only with a specific reason, exposed as
+  `deploymentSupported`/`unavailableReason` on the catalogue and detail responses and enforced by
+  `DraftSourceConfig.ValidateForDeployment` at source save, preflight, commit, materialization, Git
+  watching and queue admission (the stored source is re-validated, so a stale draft cannot enter the
+  queue). Detection renders the definition and resolves its image through the registry exactly as an
+  operator-typed image is resolved: the source identity carries the normalized image reference
+  (`repository`), the reviewed `id@version` (`ref`), the render digest (`revision`) and the image digest
+  (`digest`); a preview-only blueprint renders without a registry lookup and has no digest. Saving that
+  detection stores the rendered `PlanConfiguration` on the draft — image, command, stop signal, memory
+  and CPU from the definition's resources, managed `docker_volume` mounts named
+  `<slug>-<hash>-<volume>`, command/HTTP checks with bounded retries, domains — and the wizard offers
+  it for review instead of composing a default; the runtime and variable sections open for a blueprint.
+  Input values become plain variables through the additive `PlannedVariable.value` field (refused for
+  secrets and for anything shaped like a reference); declared secrets become
+  `PlannedVariable.generate` (16–128 characters, secret only) and commit produces each value from
+  `crypto/rand` so it exists only sealed, revealed through the audited reveal route. Preflight accepts a
+  literal or generated value for a required variable, and a managed `docker_volume` that Docker has not
+  created yet passes as `storage_pending_creation` (Docker creates it on first start); a linked or
+  uninspectable volume still blocks. Default automation presets that need a backup job arrive paused so
+  the operator links a job on the Automations page instead of a nightly `invalid_plan` failure. Preview
+  volume names include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked
+  and read-only, startup budgets use bounded retries, and Bedrock does not receive Java save commands.
+  UDP remains an explicit unsupported runtime protocol, never silently converted to TCP.
+  `scripts/e2e-deployments.py` deploys the Redis blueprint against a real backend and Docker daemon and
+  checks the digest, the rendered plan, the container's limit and volume, and the generated password.
+- `GET /deploy/{id}/insights?days=N` (7–365, default 30) computes delivery figures from persisted runs
+  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`) that reached a terminal state,
+  success rate over decided runs, median and p95 claim-to-finish duration of successful releases,
+  successful releases per week, mean time from a failed release's end to the next successful one,
+  the current failure streak, a per-day series with zero-filled days, and the five most common terminal
+  codes. Restarts and scheduler markers are excluded. The Deployments tab renders it with each figure's
+  basis and a window selector; nothing is estimated in the browser.
 - Legacy compatibility logs redact stored environment values before persistent output, including secrets
   split across stdout/stderr writes. Error text passes through the same redaction. Generated `.env` files
   use private, random staging files and atomic replacement; dotenv escaping preserves literal dollars.
@@ -419,8 +481,8 @@ wizard; existing drafts keep their saved intent. Quick application setup shows t
 selected source and branch before configuration. Project type and detected build settings are
 editable; a Dockerfile supports other languages and custom builds. Missing detection keeps the build
 settings open. Environment values have masked key/value rows and a separate dotenv import disclosure.
-The database sheet creates or links a connection, explicitly reads its container URL, adds the chosen
-environment key and records a linked database dependency before deployment. Created databases remain
+The database sheet creates or links a connection, explicitly reads its container URL, saves its typed
+reference under the chosen environment key and records a linked database dependency before deployment. Created databases remain
 independent resources if project creation is abandoned. Retrying setup reuses the created container,
 including after closing and reopening the sheet. Compose projects declare database services in their
 Compose file to share its network. Deployment names are validated on blur and again before submission.
@@ -444,10 +506,15 @@ details, application runtime logs and metrics are separate views. A successful r
 when its recorded release is the project's current live release; older runs link back to the project.
 
 Settings has dedicated Build settings, Runtime settings, Environment variables, Domains & ports,
-Storage, Databases & backups, Automations and Lifecycle destinations. Variable edits and automation
-creation use sheets. Automatic branch monitoring has read-only status; Automation separates additional
-webhooks, schedules, previews and notifications;
-one-time signing secrets remain visible after either provider or notification creation. Dependency
+Storage, Databases & backups, Automations and Lifecycle destinations. Runtime settings include the
+memory, CPU and process limits and the restart policy. Variable edits and automation
+creation use sheets. Automatic branch monitoring has read-only status; its Deployment policy editor also
+holds the GitHub commit-status toggle. Automation separates additional webhooks, schedules, previews and
+notifications; the notification sheet chooses Discord, Slack, Telegram, e-mail or a signed webhook,
+selects events, and the list offers pause/resume, a test delivery, delivery history and removal.
+One-time signing secrets remain visible after provider creation and after signed-webhook creation.
+The Console tab opens the Docker owner's audited exec session inside the live release container
+(with a service selector for Compose) behind the terminal capability; game servers keep their own console. Dependency
 pickers show resource names, while the owner modules retain execution authority. Game console output
 uses numbered lines, and the raw server settings file is available through a disclosure.
 

@@ -106,9 +106,39 @@ func loadCatalog() {
 	})
 }
 
+// DeploymentSupport says whether this dashboard can deploy a blueprint end to
+// end, and when it cannot, exactly why. A blueprint is deployed as an
+// immutable image release: its inputs become variables, its secrets are
+// generated at commit, its volumes become managed storage and its checks gate
+// activation. What that release path cannot yet do is write configuration
+// files or downloaded artifacts into a volume before the container starts, or
+// run the game-server integration; those blueprints stay in the catalogue as
+// previews and say so.
+func DeploymentSupport(blueprint *Blueprint) (bool, string) {
+	if blueprint == nil {
+		return false, "Blueprint is unavailable."
+	}
+	if blueprint.Profile == ProfileGame {
+		return false, "Game servers deploy through the reviewed game-server integration, which is not available in this release."
+	}
+	if len(blueprint.Files) > 0 {
+		return false, "This blueprint installs configuration files before start, which runtime materialization does not support yet."
+	}
+	for _, operation := range blueprint.Operations.Startup {
+		if operation.Kind == OperationFetchArtifact {
+			return false, "This blueprint downloads an install-time artifact, which runtime materialization does not support yet."
+		}
+	}
+	for _, port := range blueprint.Ports {
+		if strings.ToLower(port.Protocol) == "udp" {
+			return false, "UDP ports are not supported by the deployment runtime yet."
+		}
+	}
+	return true, ""
+}
+
 // Summary is the listing shape. It carries enough to choose a blueprint and
 // nothing that would let a client render one without asking the server.
-const DeploymentUnavailableReason = "Blueprint deployment is not available in this release. Runtime materialization, generated credentials and lifecycle integration are incomplete."
 
 type Summary struct {
 	DeploymentSupported bool     `json:"deploymentSupported"`
@@ -131,7 +161,8 @@ type Summary struct {
 }
 
 func Summarize(blueprint *Blueprint) Summary {
-	summary := Summary{UnavailableReason: DeploymentUnavailableReason,
+	supported, reason := DeploymentSupport(blueprint)
+	summary := Summary{DeploymentSupported: supported, UnavailableReason: reason,
 		ID: blueprint.ID, Version: blueprint.Version, Name: blueprint.Name,
 		Category: blueprint.Category, Profile: blueprint.Profile, Description: blueprint.Description,
 		IconID: blueprint.IconID, DocsURL: blueprint.DocsURL, License: blueprint.Provenance.License,

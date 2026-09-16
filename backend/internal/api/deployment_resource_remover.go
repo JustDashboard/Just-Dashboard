@@ -16,23 +16,29 @@ import (
 )
 
 type deploymentResourceRemover struct {
-	docker  *dockerx.Client
-	proxy   *proxysvc.Service
-	backups *backups.Store
-	dbs     *dbx.Manager
-	store   *basestore.Store
-	files   *files.Service
+	docker   *dockerx.Client
+	proxy    *proxysvc.Service
+	backups  *backups.Store
+	dbs      *dbx.Manager
+	store    *basestore.Store
+	files    *files.Service
+	networks *deploymentDatabaseNetworks
 }
 
 func newDeploymentResourceRemover(s *Server) *deploymentResourceRemover {
 	return &deploymentResourceRemover{
 		docker: s.modules.docker, proxy: s.modules.proxy, backups: s.modules.backupStore,
-		dbs: s.modules.dbs, store: s.Store, files: files.New(s.Cfg.DeployRoots),
+		dbs: s.modules.dbs, store: s.Store, files: files.New(s.Cfg.DeployRoots), networks: s.modules.deployDatabases,
 	}
 }
 
 func (r *deploymentResourceRemover) RemoveManagedResource(ctx context.Context, target deploy.RemovalTarget) error {
 	switch target.Kind {
+	case "deployment_database_network":
+		if r.networks == nil {
+			return errors.New("managed database networks are unavailable")
+		}
+		return r.networks.RemoveNetworkByID(ctx, target.ResourceID)
 	case "docker_container":
 		if r.docker == nil {
 			return errors.New("Docker is unavailable")
@@ -85,12 +91,12 @@ func (r *deploymentResourceRemover) RemoveManagedResource(ctx context.Context, t
 		if err != nil || id <= 0 {
 			return errors.New("database connection id is invalid")
 		}
-		result, err := r.store.DB.ExecContext(ctx, `DELETE FROM db_connections WHERE id = ?`, id)
+		result, err := r.store.DB.ExecContext(ctx, `DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
 		if err != nil {
 			return err
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
-			return errors.New("database connection was not found")
+			return errors.New("database connection is missing or still linked to a managed deployment network")
 		}
 		if r.dbs != nil {
 			r.dbs.Close(id)

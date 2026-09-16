@@ -1,13 +1,18 @@
 "use client"
 
 import { useState } from "react"
-import { Bell, Clock, GitPullRequest, GitBranch, Plus } from "@/components/icons"
+import { Clock, GitPullRequest, GitHubMark, Plus } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import type { DeploymentPreview, DeploymentSchedule, DeploymentTrigger } from "@/lib/types"
+import type {
+  DeploymentPreview,
+  DeploymentPreviewApproval,
+  DeploymentSchedule,
+  DeploymentTrigger,
+} from "@/lib/types"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -25,14 +30,9 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { DeploymentGitStatus } from "@/components/deploy/deployment-git-status"
-
-type NotificationChannel = {
-  id: number
-  name: string
-  url: string
-  events: string[]
-  enabled: boolean
-}
+import { DeploymentNotifications } from "@/components/deploy/deployment-notifications"
+import { NormalizedVariablesTab } from "@/components/deploy/deployment-configuration"
+import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
 
 type Props = {
   projectID: number
@@ -78,12 +78,20 @@ export function DeploymentAutomation({
     [projectID],
     { enabled: normalized },
   )
-  const notifications = usePoll(
-    (signal) => get<NotificationChannel[]>("/deploy/notifications", undefined, signal),
+  const approvals = usePoll(
+    (signal) =>
+      get<DeploymentPreviewApproval[]>(
+        `/deploy/${projectID}/previews/approvals`,
+        undefined,
+        signal,
+      ),
     5000,
-    [],
+    [projectID],
     { enabled: normalized },
   )
+  const [previewVariables, setPreviewVariables] = useState<DeploymentPreview>()
+  const [previewConfirm, setPreviewConfirm] = useState<ConfirmRequest | null>(null)
+  const [deployingPreview, setDeployingPreview] = useState<number>()
   const [area, setArea] = useState("source")
   const [showTrigger, setShowTrigger] = useState(false)
   const [provider, setProvider] = useState("github")
@@ -92,6 +100,7 @@ export function DeploymentAutomation({
   const [branch, setBranch] = useState("main")
   const [include, setInclude] = useState("")
   const [previewsEnabled, setPreviewsEnabled] = useState(false)
+  const [previewDomain, setPreviewDomain] = useState("")
   const [saving, setSaving] = useState(false)
   const [newSecret, setNewSecret] = useState<{ url: string; secret: string }>()
   const [showSchedule, setShowSchedule] = useState(false)
@@ -100,10 +109,53 @@ export function DeploymentAutomation({
   const [timezone, setTimezone] = useState("UTC")
   const [scheduleAction, setScheduleAction] = useState("deploy")
   const [scheduleConfig, setScheduleConfig] = useState("{}")
-  const [showNotification, setShowNotification] = useState(false)
-  const [notificationName, setNotificationName] = useState("Deployment events")
-  const [notificationURL, setNotificationURL] = useState("")
   const base = `/deploy/${projectID}/environments/${environmentID}`
+
+  const approvePreview = (approval: DeploymentPreviewApproval) => {
+    let configuredPreview: DeploymentPreview | undefined
+    setPreviewConfirm({
+      title: `Approve PR ${approval.providerRef}`,
+      description: (
+        <div className="space-y-3">
+          <p>
+            Allow this revision from {approval.author || "an unknown author"} to build and run on
+            your server. Review its code before approving.
+          </p>
+          <Well className="font-mono text-xs break-all">{approval.revision}</Well>
+          <p>
+            The preview starts with empty storage and its own variables. Add any preview settings
+            before deploying. Future revisions require another approval.
+          </p>
+        </div>
+      ),
+      confirmLabel: "Approve and configure",
+      action: async () => {
+        const result = await post<{ preview: DeploymentPreview }>(
+          `/deploy/${projectID}/previews/approvals/${approval.id}/approve`,
+          { revision: approval.revision, deploy: false },
+        )
+        approvals.refresh()
+        previews.refresh()
+        configuredPreview = result.preview
+      },
+      onDone: () => setPreviewVariables(configuredPreview),
+    })
+  }
+
+  const deployPreview = async (preview: DeploymentPreview) => {
+    setDeployingPreview(preview.id)
+    try {
+      await post(`/deploy/${projectID}/environments/${preview.environmentId}/runs`, {
+        operation: "deploy",
+      })
+      notify.success("Approved preview deployment queued")
+      previews.refresh()
+    } catch (error) {
+      notify.error("Could not deploy preview", error)
+    } finally {
+      setDeployingPreview(undefined)
+    }
+  }
 
   const saveTrigger = async () => {
     setSaving(true)
@@ -119,12 +171,15 @@ export function DeploymentAutomation({
             repository,
             ref: branch,
             events: provider === "github" ? ["push", "pull_request"] : [],
-            watchInclude: include
-              .split("\n")
-              .map((v) => v.trim())
-              .filter(Boolean),
+            watchInclude: include.trim()
+              ? include
+                  .split("\n")
+                  .map((v) => v.trim())
+                  .filter(Boolean)
+              : undefined,
             preview: previewsEnabled,
             previewQuota: 5,
+            previewDomain: previewsEnabled ? previewDomain.trim() : undefined,
           },
         },
       )
@@ -161,24 +216,6 @@ export function DeploymentAutomation({
       notify.success("Schedule created")
     } catch (error) {
       notify.error("Could not create schedule", error)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const saveNotification = async () => {
-    setSaving(true)
-    try {
-      const result = await post<{ channel: NotificationChannel; secret: string }>(
-        "/deploy/notifications",
-        { name: notificationName, url: notificationURL, events: ["run.finished"], enabled: true },
-      )
-      setNewSecret({ url: result.channel.url, secret: result.secret })
-      setShowNotification(false)
-      notifications.refresh()
-      notify.success("Notification channel created")
-    } catch (error) {
-      notify.error("Could not create notification", error)
     } finally {
       setSaving(false)
     }
@@ -282,12 +319,16 @@ export function DeploymentAutomation({
                     Watched paths{" "}
                     <span className="font-normal text-muted-foreground">(one glob per line)</span>
                   </Label>
-                  <Input
+                  <Textarea
                     id="automation-paths"
                     placeholder="services/api/**"
                     value={include}
                     onChange={(e) => setInclude(e.target.value)}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Updates the shared filters for branch polling and all push webhooks. Leave empty
+                    to keep the current policy.
+                  </p>
                 </div>
                 <label className="flex min-h-11 items-center gap-2 text-xs sm:col-span-2">
                   <Checkbox
@@ -296,6 +337,27 @@ export function DeploymentAutomation({
                   />{" "}
                   Create isolated environments for pull requests
                 </label>
+                {previewsEnabled && (
+                  <Notice title="Preview policy" tone="default" className="sm:col-span-2">
+                    Each pull request revision needs administrator approval. Preview variables and
+                    storage are separate from production. Container previews have a dedicated
+                    network; Compose and workloads needing host access require a separate plan.
+                  </Notice>
+                )}
+                {previewsEnabled && (
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="preview-domain">Preview domain pattern (optional)</Label>
+                    <Input
+                      id="preview-domain"
+                      placeholder="pr-{number}.example.com"
+                      value={previewDomain}
+                      onChange={(event) => setPreviewDomain(event.target.value)}
+                    />
+                    <p className="text-hint text-muted-foreground">
+                      Use {"{number}"} for the pull request number and point its DNS to this server.
+                    </p>
+                  </div>
+                )}
                 <div className="flex gap-2 sm:col-span-2">
                   <Button
                     disabled={
@@ -319,7 +381,7 @@ export function DeploymentAutomation({
               <ErrorState error={triggers.error} />
             ) : (triggers.data?.length ?? 0) === 0 ? (
               <EmptyState
-                icon={GitBranch}
+                icon={GitHubMark}
                 title="No additional webhooks"
                 description="Git branch deployments work automatically. Add a webhook only for another integration or pull request previews."
                 className="border-0 py-6"
@@ -499,30 +561,111 @@ export function DeploymentAutomation({
       {area === "previews" && (
         <Panel>
           <PanelHeader title="Preview environments" />
-          <PanelBody>
+          <PanelBody className="space-y-4">
+            {approvals.error && <ErrorState error={approvals.error} />}
+            {approvals.data
+              ?.filter((approval) => approval.state === "pending" || !approval.configured)
+              .map((approval) => (
+                <Group
+                  key={approval.id}
+                  className="flex flex-wrap items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium">
+                      PR {approval.providerRef} ·{" "}
+                      {approval.state === "pending" ? "Awaiting approval" : "Setup incomplete"}
+                    </p>
+                    <p className="text-hint break-all text-muted-foreground">
+                      {approval.author || "Unknown author"} ·{" "}
+                      {approval.headRepository || approval.repository}
+                    </p>
+                    <p className="font-mono text-xs break-all">{approval.revision.slice(0, 12)}</p>
+                  </div>
+                  {can("system.admin") && (
+                    <Button size="sm" onClick={() => approvePreview(approval)}>
+                      Review revision
+                    </Button>
+                  )}
+                </Group>
+              ))}
             {previews.error ? (
               <ErrorState error={previews.error} />
             ) : (previews.data?.length ?? 0) === 0 ? (
               <EmptyState
                 icon={GitPullRequest}
                 title="No previews"
-                description="An enabled preview automation creates one when a pull request opens."
+                description="Pull requests appear for review above. Approve a revision, configure its variables, then deploy."
                 className="border-0 py-5"
               />
             ) : (
               <div className="space-y-2">
                 {previews.data?.map((preview) => (
-                  <Group key={preview.id} className="flex items-center justify-between">
+                  <Group
+                    key={preview.id}
+                    className="flex flex-wrap items-center justify-between gap-3"
+                  >
                     <div>
                       <p className="font-mono text-xs">{preview.environmentSlug}</p>
                       <p className="text-hint text-muted-foreground">
                         PR {preview.providerRef} · updated {relativeTime(preview.updatedAt)}
                       </p>
+                      {preview.isolationStatus === "pending" && (
+                        <p className="mt-2 max-w-prose text-xs text-muted-foreground">
+                          This older preview may share production resources. Deployments are blocked
+                          while its containers and route are isolated. Cleanup retries
+                          automatically; check Docker and proxy availability if it remains blocked.
+                        </p>
+                      )}
+                      {preview.isolationStatus === "quarantined" && (
+                        <p className="mt-2 max-w-prose text-xs text-muted-foreground">
+                          The previous runtime is stopped and stored data is retained. Redeliver the
+                          pull request event, approve its revision, and configure preview settings
+                          before deploying again.
+                        </p>
+                      )}
                     </div>
                     <Status
-                      state={preview.state === "open" ? "open" : "closed"}
-                      label={preview.state}
+                      state={
+                        preview.isolationStatus === "pending"
+                          ? "failed"
+                          : preview.isolationStatus === "quarantined"
+                            ? "stopped"
+                            : preview.state
+                      }
+                      label={
+                        preview.isolationStatus === "pending"
+                          ? "Isolation incomplete"
+                          : preview.isolationStatus === "quarantined"
+                            ? "Stopped for isolation"
+                            : preview.state
+                      }
                     />
+                    {preview.state === "open" && (
+                      <div className="flex flex-wrap gap-2">
+                        {can("system.admin") && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setPreviewVariables(preview)}
+                          >
+                            Variables
+                          </Button>
+                        )}
+                        {can("service.control") && (
+                          <Button
+                            size="sm"
+                            disabled={
+                              deployingPreview !== undefined ||
+                              preview.isolationStatus === "pending" ||
+                              preview.isolationStatus === "quarantined"
+                            }
+                            onClick={() => deployPreview(preview)}
+                          >
+                            {deployingPreview === preview.id ? "Queuing…" : "Deploy preview"}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </Group>
                 ))}
               </div>
@@ -530,94 +673,25 @@ export function DeploymentAutomation({
           </PanelBody>
         </Panel>
       )}
-      {area === "notifications" && (
-        <Panel className="xl:col-span-2">
-          <PanelHeader
-            title="Notifications"
-            actions={
-              can("system.admin") && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => setShowNotification((value) => !value)}
-                >
-                  <Plus className="size-3" /> Add channel
-                </Button>
-              )
-            }
+      <ConfirmDialog
+        request={previewConfirm}
+        onOpenChange={(open) => !open && setPreviewConfirm(null)}
+      />
+      <SidePanel
+        open={previewVariables !== undefined}
+        onOpenChange={(open) => !open && setPreviewVariables(undefined)}
+        title={`Preview ${previewVariables?.providerRef ?? ""} variables`}
+        description="Configure values used only by this preview before deploying."
+        width="lg"
+      >
+        {previewVariables && (
+          <NormalizedVariablesTab
+            projectID={projectID}
+            environmentID={previewVariables.environmentId}
           />
-          <PanelBody className="space-y-3">
-            <SidePanel
-              open={showNotification}
-              onOpenChange={setShowNotification}
-              title="Add notification channel"
-              description="Configure this project automation."
-              width="md"
-            >
-              <div className="grid gap-3 sm:grid-cols-2" aria-busy={saving}>
-                <div className="space-y-1.5">
-                  <Label htmlFor="notification-name">Name</Label>
-                  <Input
-                    id="notification-name"
-                    value={notificationName}
-                    onChange={(event) => setNotificationName(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="notification-url">HTTPS endpoint</Label>
-                  <Input
-                    id="notification-url"
-                    type="url"
-                    placeholder="https://hooks.example.com/deploy"
-                    value={notificationURL}
-                    onChange={(event) => setNotificationURL(event.target.value)}
-                  />
-                </div>
-                <div className="flex gap-2 sm:col-span-2">
-                  <Button
-                    size="sm"
-                    disabled={saving || !notificationName.trim() || !notificationURL.trim()}
-                    onClick={saveNotification}
-                  >
-                    {saving ? "Creating…" : "Create channel"}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowNotification(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            </SidePanel>
-            {notifications.error ? (
-              <ErrorState error={notifications.error} />
-            ) : (notifications.data?.length ?? 0) === 0 ? (
-              <EmptyState
-                icon={Bell}
-                title="No notification channels"
-                description="Add an endpoint to receive signed deployment outcomes."
-                className="border-0 py-5"
-              />
-            ) : (
-              <div className="divide-y divide-hairline">
-                {notifications.data?.map((channel) => (
-                  <div
-                    key={channel.id}
-                    className="flex min-w-0 items-center justify-between gap-3 py-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-body font-medium">{channel.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{channel.url}</p>
-                    </div>
-                    <Status
-                      state={channel.enabled ? "enabled" : "stopped"}
-                      label={channel.enabled ? "Enabled" : "Paused"}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </PanelBody>
-        </Panel>
-      )}
+        )}
+      </SidePanel>
+      {area === "notifications" && <DeploymentNotifications enabled={normalized} />}
     </div>
   )
 }

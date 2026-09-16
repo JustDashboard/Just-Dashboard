@@ -1,0 +1,4 @@
+=== RUN   TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute
+--- PASS: TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute (13.70s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	13.719s

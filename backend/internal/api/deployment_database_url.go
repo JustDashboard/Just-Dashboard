@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
-// Application containers cannot dial the host's loopback. Resolve an existing
-// database binding to its observed default-bridge address without publishing a
-// new port or changing the saved connection used by the database owner.
+// Application containers use a stable logical identity. Runtime activation owns
+// attaching the database and application to the environment's managed network;
+// revealing a URL never mutates Docker or the host-side saved connection.
 func (s *Server) databaseApplicationURL(ctx context.Context, conn *dbConnection, dsn string) (string, error) {
 	if conn.Driver == dbx.DriverSQLite {
 		return "", httpx.BadRequest("SQLite needs a shared file mount; use the project's Storage settings")
@@ -25,57 +26,59 @@ func (s *Server) databaseApplicationURL(ctx context.Context, conn *dbConnection,
 	}
 	host, port := info.Host, info.Port
 	if databaseLoopback(host) {
-		if s.modules.docker == nil {
-			return "", httpx.BadRequest("this database listens on host loopback; no Docker bridge address is available")
-		}
-		containers, err := s.modules.docker.ListContainers(ctx, false)
+		_, internalPort, err := s.databaseContainer(ctx, conn, info)
 		if err != nil {
-			return "", httpx.BadRequest("could not inspect database containers")
+			return "", err
 		}
-		matches := 0
-		for _, container := range containers {
-			candidate, _ := dbx.Detect(container.Name, container.Image, nil, publishedPorts(container.Ports), nil)
-			if candidate != nil && candidate.Driver == conn.Driver && sameDatabaseLoopback(host, candidate.Host) && strconv.Itoa(candidate.Port) == port {
-				matches++
-			}
+		if conn.ID <= 0 {
+			return "", httpx.BadRequest("save the database connection before linking it")
 		}
-		if matches > 1 {
-			return "", httpx.BadRequest("multiple database bindings match localhost; save the connection with its explicit loopback IP before linking it")
-		}
-		found := false
-		for _, container := range containers {
-			candidate, _ := dbx.Detect(container.Name, container.Image, nil, publishedPorts(container.Ports), nil)
-			if candidate == nil || candidate.Driver != conn.Driver || !sameDatabaseLoopback(host, candidate.Host) || strconv.Itoa(candidate.Port) != port {
-				continue
-			}
-			detail, err := s.modules.docker.Inspect(ctx, container.ID)
-			if err != nil {
-				return "", httpx.BadRequest("could not inspect the database network")
-			}
-			for _, network := range detail.NetworkList {
-				if network.Name != "bridge" || net.ParseIP(network.IPAddress) == nil {
-					continue
-				}
-				internal, _ := dbx.Detect(container.Name, container.Image, nil, nil, []string{network.IPAddress})
-				if internal == nil || !internal.Connectable() {
-					continue
-				}
-				host, port, found = internal.Host, strconv.Itoa(internal.Port), true
-				break
-			}
-			if found {
-				break
-			}
-		}
-		if !found {
-			return "", httpx.BadRequest("this database listens on host loopback and has no default-bridge address; connect it through a shared Compose network or configure an address reachable by your application")
-		}
+		host, port = databaseDNSName(conn.ID), strconv.Itoa(internalPort)
 	}
 	result, err := applicationConnectionURL(conn.Driver, dsn, info, host, port)
 	if err != nil {
 		return "", httpx.BadRequest("this connection has no supported application URL")
 	}
 	return result, nil
+}
+
+func databaseDNSName(id int64) string { return fmt.Sprintf("db-%d.jd.internal", id) }
+
+func (s *Server) databaseContainer(ctx context.Context, conn *dbConnection, info *dbx.ConnInfo) (*dockerx.ContainerDetail, int, error) {
+	if s.modules.docker == nil {
+		return nil, 0, httpx.BadRequest("Docker is required to link a loopback database")
+	}
+	containers, err := s.modules.docker.ListContainers(ctx, false)
+	if err != nil {
+		return nil, 0, httpx.BadRequest("could not inspect database containers")
+	}
+	var matched *dockerx.Container
+	for i := range containers {
+		container := &containers[i]
+		candidate, _ := dbx.Detect(container.Name, container.Image, nil, publishedPorts(container.Ports), nil)
+		if candidate == nil || candidate.Driver != conn.Driver || !sameDatabaseLoopback(info.Host, candidate.Host) || strconv.Itoa(candidate.Port) != info.Port {
+			continue
+		}
+		if matched != nil {
+			return nil, 0, httpx.BadRequest("multiple database bindings match localhost; save an explicit loopback IP before linking it")
+		}
+		matched = container
+	}
+	if matched == nil {
+		return nil, 0, httpx.BadRequest("the loopback database has no matching container; use an application-reachable host connection")
+	}
+	detail, err := s.modules.docker.Inspect(ctx, matched.ID)
+	if err != nil {
+		return nil, 0, httpx.BadRequest("could not inspect the database network")
+	}
+	if detail.NetworkMode == "host" || detail.NetworkMode == "none" || strings.HasPrefix(detail.NetworkMode, "container:") {
+		return nil, 0, httpx.BadRequest("the database cannot join a managed bridge network")
+	}
+	internal, _ := dbx.Detect(detail.Name, detail.Image, nil, nil, []string{databaseDNSName(conn.ID)})
+	if internal == nil || !internal.Connectable() {
+		return nil, 0, httpx.BadRequest("the database container port is unknown")
+	}
+	return detail, internal.Port, nil
 }
 
 func databaseLoopback(host string) bool {

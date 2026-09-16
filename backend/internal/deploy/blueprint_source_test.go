@@ -199,8 +199,10 @@ func TestBlueprintDefaultSchedulesTranslateExactlyOrNotAtAll(t *testing.T) {
 		t.Fatalf("schedules = %#v, want only the preset marked default", writes)
 	}
 	nightly := writes[0]
+	// No backup job is linked at creation, so the preset arrives paused rather
+	// than failing every night with an empty backup step.
 	if nightly.Name != "Nightly world backup" || nightly.Expression != "0 4 * * *" ||
-		nightly.Timezone != "UTC" || !nightly.Enabled {
+		nightly.Timezone != "UTC" || nightly.Enabled {
 		t.Fatalf("schedule = %#v", nightly)
 	}
 	// Saving before backing up is the whole point of the preset; a backup of an

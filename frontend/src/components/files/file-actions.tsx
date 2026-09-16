@@ -9,7 +9,7 @@ import {
   Download,
   FileZip,
   FolderOpen,
-  GitBranch,
+  GitHubMark,
   Image as ImageIcon,
   Pencil,
   Shield,
@@ -132,7 +132,7 @@ export function FileActionsMenu({
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href={`/git?repo=${encodeURIComponent(entry.path)}`}>
-                <GitBranch className="size-3.5" />
+                <GitHubMark className="size-3.5" />
                 Open in Git
               </Link>
             </DropdownMenuItem>

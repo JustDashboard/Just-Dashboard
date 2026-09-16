@@ -39,6 +39,11 @@ scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#c
 CONTRIBUTING requires backend build/vet/tests and frontend lint/build/browser journeys to pass before a
 PR.
 
+The browser gate serves the latest `bun run build` output on `127.0.0.1:43117`; it does not reuse a
+development server or an unrelated dashboard on port 3000. Rebuild after frontend edits before running
+browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
+Generated Playwright reports and traces are excluded from source linting.
+
 **Backend testing.** 33 internal packages carry unit and integration tests. Unit fixtures are isolated;
 live database and Docker tests can contact reachable services, so configure disposable test targets.
 Integration families skip rather than fail when their dependencies are absent:

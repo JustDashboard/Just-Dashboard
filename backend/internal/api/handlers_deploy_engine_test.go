@@ -541,3 +541,84 @@ func createLegacyDeploymentFixture(t *testing.T, s *Server, name string) *deploy
 	}
 	return project
 }
+
+// Preview and schedule lifecycle operations have their own authorized entry
+// points; the manual route must not become a side door for them.
+func TestManualRunRouteRefusesLifecycleOperations(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "lifecycle-admin", auth.RoleAdmin)}
+	path := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/runs", projectID, environmentID)
+	for _, operation := range []string{"preview_create", "preview_update", "preview_remove", "scheduled", "bogus"} {
+		response := admin.do(http.MethodPost, path, fmt.Sprintf(`{"operation":%q}`, operation), nil)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d %s", operation, response.Code, response.Body.String())
+		}
+	}
+	var count int
+	_ = s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_runs WHERE project_id=?`, projectID).Scan(&count)
+	if count != 0 {
+		t.Fatalf("refused operations persisted %d run(s)", count)
+	}
+}
+
+// A rolled-back deployment kept the previous release serving, but the chain's
+// deploy step did not happen; the chain must stop rather than restart what the
+// operator meant to replace.
+func TestScheduledChainTreatsRollbackAsFailure(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "chain-admin", auth.RoleAdmin)}
+	path := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/runs", projectID, environmentID)
+	response := admin.do(http.MethodPost, path, `{"operation":"deploy"}`, nil)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create run = %d %s", response.Code, response.Body.String())
+	}
+	var run deploy.EngineRun
+	if err := json.Unmarshal(response.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_runs SET state='rolled_back', status='failed', ended_at=? WHERE id=?`, time.Now().Unix(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForScheduledRun(t.Context(), run.ID); err == nil || !strings.Contains(err.Error(), "rolled_back") {
+		t.Fatalf("rolled back chain step = %v, want failure", err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_runs SET state='succeeded', status='success' WHERE id=?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForScheduledRun(t.Context(), run.ID); err != nil {
+		t.Fatalf("succeeded chain step = %v", err)
+	}
+}
+
+func TestDeploymentInsightsRouteReadsProjectHistory(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "insights-admin", auth.RoleAdmin)}
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "insights-reader", auth.RoleReadOnly)}
+	response := admin.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/runs", projectID, environmentID), `{"operation":"deploy"}`, nil)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create run = %d %s", response.Code, response.Body.String())
+	}
+	var run deploy.EngineRun
+	_ = json.Unmarshal(response.Body.Bytes(), &run)
+	now := time.Now().Unix()
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_runs SET state='failed', status='failed', claimed_at=?, ended_at=?, terminal_code='build_failed' WHERE id=?`, now-90, now, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	insights := reader.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/insights?days=14", projectID), "", nil)
+	if insights.Code != http.StatusOK {
+		t.Fatalf("insights = %d %s", insights.Code, insights.Body.String())
+	}
+	var body deploy.DeploymentInsights
+	if err := json.Unmarshal(insights.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.WindowDays != 14 || body.Runs != 1 || body.Failed != 1 || body.FailureStreak != 1 || len(body.Daily) != 15 || len(body.TopFailures) != 1 || body.TopFailures[0].Code != "build_failed" {
+		t.Fatalf("insights body = %+v", body)
+	}
+	if missing := reader.do(http.MethodGet, "/api/v1/deploy/999999/insights", "", nil); missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown project insights = %d", missing.Code)
+	}
+}

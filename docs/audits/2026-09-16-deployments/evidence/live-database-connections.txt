@@ -1,0 +1,9 @@
+Command: /tmp/jd-go1.26.8/bin/go test -json -count=1 ./internal/api -run TestLiveDeploymentDatabaseConnection
+Exit code: 0
+pass github.com/Wayy01/Just-Dashboard/backend/internal/api 37.027
+
+Skipped tests:
+
+
+Non-JSON output:
+

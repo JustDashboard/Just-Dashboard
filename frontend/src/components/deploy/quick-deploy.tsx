@@ -16,7 +16,7 @@ import {
   Layers,
   Servers,
   Code,
-  GitBranch,
+  GitHubMark,
   LockClosed,
   RefreshClockwise,
   SettingsSliders,
@@ -35,6 +35,7 @@ import type {
   DockerImage,
   GitHubBranch,
   GitHubRepoSummary,
+  NodePackageManager,
   WorkloadProfile,
 } from "@/lib/types"
 import { useCopy } from "@/hooks/use-copy"
@@ -43,7 +44,9 @@ import { ProjectDatabase } from "@/components/deploy/project-database"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageHeader, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
+import { tabClasses } from "@/components/tabs"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 import {
@@ -51,7 +54,10 @@ import {
   blockingFindings,
   warningFindings,
 } from "@/components/deploy/deployment-findings"
-import { defaultConfiguration } from "@/components/deploy/deployment-defaults"
+import {
+  defaultConfiguration,
+  withPackageManagerRunner,
+} from "@/components/deploy/deployment-defaults"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -97,7 +103,7 @@ const LANES: { lane: Lane; title: string; description: string; icon: typeof Clou
     lane: "github",
     title: "From GitHub",
     description: "Pick a repository, set the environment, deploy. Detection reads the framework.",
-    icon: GitBranch,
+    icon: GitHubMark,
   },
   {
     lane: "image",
@@ -124,28 +130,30 @@ export function QuickDeploy() {
       <PageHeader
         eyebrow={
           <Link href="/deploy" className="inline-flex items-center gap-1 hover:underline">
-            <ArrowLeft className="size-3" /> Projects
+            <ArrowLeft className="size-3" /> Deployments
           </Link>
         }
-        title="Let's deploy something new"
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/deploy">Back to projects</Link>
-          </Button>
-        }
+        title="New project"
       />
-      <div role="group" aria-label="Project source" className="flex flex-wrap gap-2">
+      {/* The three ways in, as the same underline strip every section of the
+          product switches with. They were three toggle buttons, which read as
+          three commands on a page whose one command is Deploy. */}
+      <div
+        role="group"
+        aria-label="Project source"
+        className="-mt-2 flex gap-1 overflow-x-auto border-b border-hairline"
+      >
         {LANES.map((option) => (
-          <Button
+          <button
             key={option.lane}
-            variant={lane === option.lane ? "secondary" : "ghost"}
-            size="sm"
+            type="button"
             aria-pressed={lane === option.lane}
             onClick={() => setLane(option.lane)}
+            className={tabClasses(lane === option.lane, "h-10")}
           >
-            <option.icon className="size-4" />
+            <option.icon className="size-3.5" />
             {option.title}
-          </Button>
+          </button>
         ))}
       </div>
       {lane === "database" ? (
@@ -161,37 +169,34 @@ export function QuickDeploy() {
 
 function SourceCatalog({ onLane }: { onLane: (lane: Lane) => void }) {
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Start with something ready" />
-      <PanelBody className="space-y-1 p-2">
-        {[
-          {
-            title: "Database",
-            hint: "Postgres, MySQL, Redis, MongoDB & more",
-            icon: Database,
-            lane: "database" as const,
-          },
-          {
-            title: "Docker image",
-            hint: "Run an image from any registry",
-            icon: Box,
-            lane: "image" as const,
-          },
-        ].map((option) => (
-          <button
-            key={option.title}
-            onClick={() => onLane(option.lane)}
-            className="flex min-h-20 w-full items-center gap-3 rounded-md p-3 text-left focus-ring-inset hover:bg-row-hover"
-          >
-            <option.icon className="size-5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium">{option.title}</span>
-              <span className="mt-1 block text-xs text-muted-foreground">{option.hint}</span>
-            </span>
-            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
-          </button>
-        ))}
-        {[
+      <PanelBody flush>
+        <RowList>
+          {[
+            {
+              title: "Database",
+              hint: "Postgres, MySQL, Redis, MongoDB & more",
+              icon: Database,
+              lane: "database" as const,
+            },
+            {
+              title: "Docker image",
+              hint: "Run an image from any registry",
+              icon: Box,
+              lane: "image" as const,
+            },
+          ].map((option) => (
+            <Row
+              key={option.title}
+              onClick={() => onLane(option.lane)}
+              leading={<option.icon className="size-4 text-muted-foreground" />}
+              title={option.title}
+              subtitle={option.hint}
+              trailing={<ArrowRight className="size-3.5 text-muted-foreground" />}
+            />
+          ))}
+          {[
           {
             profile: "compose",
             title: "Compose stack",
@@ -228,28 +233,23 @@ function SourceCatalog({ onLane }: { onLane: (lane: Lane) => void }) {
             hint: "Bring a running service into your projects",
             icon: Box,
           },
-        ].map((option) => (
-          <Link
-            key={option.profile}
-            href={`/deploy/new?mode=advanced&profile=${option.profile}`}
-            className="flex min-h-20 items-center gap-3 rounded-md p-3 focus-ring-inset hover:bg-row-hover"
-          >
-            <option.icon className="size-5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium">{option.title}</span>
-              <span className="mt-1 block text-xs text-muted-foreground">{option.hint}</span>
-            </span>
-            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
-          </Link>
-        ))}
+          ].map((option) => (
+            <Row
+              key={option.profile}
+              href={`/deploy/new?mode=advanced&profile=${option.profile}`}
+              leading={<option.icon className="size-4 text-muted-foreground" />}
+              title={option.title}
+              subtitle={option.hint}
+            />
+          ))}
+        </RowList>
+        <Link
+          href="/deploy/new?mode=advanced"
+          className="mt-3 inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+        >
+          All configuration options <ArrowRight className="size-3" />
+        </Link>
       </PanelBody>
-      <PanelFooter>
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/deploy/new?mode=advanced">
-            All configuration options <ArrowRight className="size-3.5" />
-          </Link>
-        </Button>
-      </PanelFooter>
     </Panel>
   )
 }
@@ -261,6 +261,8 @@ type ApplicationForm = {
   profile: WorkloadProfile
   buildMethod: DeploymentBuildMethod
   recipe: "node" | "go" | "python"
+  goVersion?: string
+  packageManager?: NodePackageManager
   dockerfile: string
   rootDirectory: string
   buildCommand: string
@@ -340,6 +342,7 @@ function ApplicationFlow({
           databaseIds: [],
           buildMethod: defaults.build.method,
           recipe: defaults.build.recipe ?? "node",
+          goVersion: defaults.build.goVersion,
           dockerfile: defaults.build.dockerfile ?? "Dockerfile",
           rootDirectory: defaults.build.rootDirectory ?? "",
           buildCommand: defaults.build.buildCommand ?? "",
@@ -561,7 +564,7 @@ function ApplicationFlow({
 
   if (!form || !draft)
     return (
-      <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="grid min-w-0 items-start gap-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-4">
           {failure && <ErrorState error={failure} />}
           {lane === "github" ? (
@@ -579,41 +582,35 @@ function ApplicationFlow({
   const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-6">
       {failure && <ErrorState error={failure} />}
-      <nav aria-label="Deployment setup" className="flex flex-wrap items-center gap-3 text-xs">
-        <span className="text-muted-foreground">1. Source selected</span>
-        <ArrowRight className="size-3 text-muted-foreground" />
-        <span aria-current="step" className="font-medium">
-          2. Configure & deploy
-        </span>
-      </nav>
-      <Panel>
-        <PanelHeader
-          title="Selected source"
-          actions={
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={Boolean(busy)}
-              onClick={() => {
-                setForm(undefined)
-                setDraft(undefined)
-              }}
-            >
-              Change source
-            </Button>
-          }
-        />
-        <PanelBody className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm">
-          <span className="min-w-0 font-medium break-all">
+      {/* Where this project comes from, as one line above the form rather
+          than a titled box with a step indicator over it. */}
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline pb-4">
+        <div className="min-w-0">
+          <p className="eyebrow">Source</p>
+          <p className="mt-1 min-w-0 text-body font-medium break-all">
             {source?.repository || source?.image || source?.url}
-          </span>
-          {source?.ref && (
-            <span className="font-mono text-xs text-muted-foreground">{source.ref}</span>
-          )}
-        </PanelBody>
-      </Panel>
+            {source?.ref && (
+              <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
+                {source.ref}
+              </span>
+            )}
+          </p>
+        </div>
+        <Button
+          size="xs"
+          variant="ghost"
+          className="text-muted-foreground"
+          disabled={Boolean(busy)}
+          onClick={() => {
+            setForm(undefined)
+            setDraft(undefined)
+          }}
+        >
+          Change source
+        </Button>
+      </div>
       <ConfigureStep
         lane={lane}
         form={form}
@@ -728,6 +725,12 @@ function configurationFor(
       ...defaults.build,
       method: form.buildMethod,
       recipe: form.buildMethod === "recipe" ? form.recipe : undefined,
+      goVersion:
+        form.buildMethod === "recipe" && form.recipe === "go"
+          ? form.goVersion?.trim() || undefined
+          : undefined,
+      packageManager:
+        form.buildMethod === "recipe" && form.recipe === "node" ? form.packageManager : undefined,
       dockerfile: form.buildMethod === "dockerfile" ? form.dockerfile : undefined,
       rootDirectory: form.rootDirectory.trim() || undefined,
       buildCommand: form.buildCommand.trim() || undefined,
@@ -816,7 +819,7 @@ function GitHubSource({
   )
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader
         title="Import Git repository"
         actions={<GitHubAccountControl status={status} compact />}
@@ -983,7 +986,7 @@ function GitHubSource({
           </>
         )}
         {selected && (
-          <div className="grid gap-3 rounded-xl border border-hairline bg-surface-header p-3 sm:grid-cols-2">
+          <div className="grid gap-3 rounded-lg border border-hairline p-4 sm:grid-cols-2">
             <QuickField id="branch" label="Branch">
               {branches && branches.length > 0 ? (
                 <Select value={ref} onValueChange={setRef}>
@@ -1070,7 +1073,7 @@ function ImageSource({
     .sort((a, b) => a.tag.localeCompare(b.tag))
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Choose an image" />
       <PanelBody className="space-y-4">
         {images.error && <ErrorState error={images.error} />}
@@ -1184,7 +1187,7 @@ function ConfigureStep({
           New commits to the selected branch deploy automatically after your first deployment.
         </p>
       )}
-      <Panel>
+      <Panel plain>
         <PanelHeader
           title={form.name || "New deployment"}
           actions={candidate?.framework && <Tag tone="success">{candidate.framework}</Tag>}
@@ -1314,6 +1317,56 @@ function ConfigureStep({
                     </Select>
                   </QuickField>
                 )}
+                {form.buildMethod === "recipe" && form.recipe === "node" && (
+                  <QuickField
+                    id="quick-package-manager"
+                    label="Package manager"
+                    hint={
+                      (candidate?.packageManagers?.length ?? 0) > 1 && !candidate?.packageManager
+                        ? `This repository has lockfiles for ${candidate?.packageManagers?.join(" and ")}. Choose the one it uses.`
+                        : "Leave on the lockfile unless the repository has more than one."
+                    }
+                  >
+                    <Select
+                      value={form.packageManager ?? "lockfile"}
+                      onValueChange={(value) => {
+                        const packageManager =
+                          value === "lockfile" ? undefined : (value as NodePackageManager)
+                        onChange({
+                          ...form,
+                          packageManager,
+                          buildCommand: withPackageManagerRunner(form.buildCommand, packageManager),
+                          startCommand: withPackageManagerRunner(form.startCommand, packageManager),
+                        })
+                      }}
+                    >
+                      <SelectTrigger id="quick-package-manager" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="lockfile">From the lockfile</SelectItem>
+                        <SelectItem value="bun">Bun</SelectItem>
+                        <SelectItem value="npm">npm</SelectItem>
+                        <SelectItem value="pnpm">pnpm</SelectItem>
+                        <SelectItem value="yarn">Yarn</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </QuickField>
+                )}
+                {form.buildMethod === "recipe" && form.recipe === "go" && (
+                  <QuickField
+                    id="quick-go-version"
+                    label="Go version"
+                    hint="Leave empty to use .go-version or go.mod. Custom builds must write /out/app; CGO requires a Dockerfile."
+                  >
+                    <Input
+                      id="quick-go-version"
+                      value={form.goVersion ?? ""}
+                      onChange={(event) => set("goVersion", event.target.value)}
+                      placeholder="1.26"
+                    />
+                  </QuickField>
+                )}
                 {form.buildMethod === "dockerfile" && (
                   <QuickField
                     id="quick-dockerfile"
@@ -1391,7 +1444,7 @@ function ConfigureStep({
         </PanelBody>
       </Panel>
 
-      <Panel>
+      <Panel plain>
         <PanelHeader title="Environment variables" actions={<Tag>Optional</Tag>} />
         <PanelBody className="space-y-3">
           {form.variables.map((entry, index) => (
@@ -1472,7 +1525,8 @@ function ConfigureStep({
             />
           </details>
           <p className="text-xs text-muted-foreground">
-            Encrypted when saved. Available during build and at runtime.
+            Encrypted when saved. Available to the recipe build command and at runtime. Values
+            embedded into browser assets, including NEXT_PUBLIC_ and VITE_ values, are public.
           </p>
         </PanelBody>
       </Panel>
@@ -1543,7 +1597,7 @@ function PublicAddress({
   }
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Public address" />
       <PanelBody className="space-y-4">
         <Label className="flex min-h-11 items-center gap-3 text-xs">

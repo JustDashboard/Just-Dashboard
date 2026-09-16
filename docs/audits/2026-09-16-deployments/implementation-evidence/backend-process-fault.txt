@@ -1,0 +1,36 @@
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/resolve_source
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/acquire_source
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/analyze_plan
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/prepare_context
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/build_artifact
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/render_runtime
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/release_task
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/backup_gate
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/provision_certificate
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/start_candidate
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/verify_readiness
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/verify_smoke
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/activate
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/retire_previous
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/record_release
+=== RUN   TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/notify
+--- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun (48.51s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/resolve_source (2.27s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/acquire_source (3.00s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/analyze_plan (2.99s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/prepare_context (3.01s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/build_artifact (3.01s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/render_runtime (3.00s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/release_task (2.99s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/backup_gate (2.99s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/provision_certificate (3.01s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/start_candidate (3.02s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/verify_readiness (2.98s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/verify_smoke (3.01s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/activate (2.99s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/retire_previous (2.99s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/record_release (3.02s)
+    --- PASS: TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun/notify (2.99s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	48.526s

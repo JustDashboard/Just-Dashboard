@@ -156,7 +156,7 @@ export function BlueprintPicker({
                         {entry.deploymentSupported === false && (
                           <span className="block text-xs text-warning">
                             {entry.unavailableReason ||
-                              "Blueprint deployment is unavailable in this release."}
+                              "This blueprint cannot be deployed by this dashboard version."}
                           </span>
                         )}
                         <span className="block font-mono text-hint break-all text-muted-foreground">

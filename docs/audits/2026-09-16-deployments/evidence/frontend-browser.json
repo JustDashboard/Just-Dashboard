@@ -1,0 +1,12 @@
+{
+  "name": "frontend-browser",
+  "command": [
+    "bun",
+    "run",
+    "test:browser"
+  ],
+  "cwd": "frontend",
+  "started": "2026-09-16T01:21:49.937780+00:00",
+  "elapsed_seconds": 518.502,
+  "exit_code": 1
+}

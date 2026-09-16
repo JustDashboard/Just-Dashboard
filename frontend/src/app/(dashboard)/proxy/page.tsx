@@ -1,14 +1,14 @@
 "use client"
 
 import { useMemo } from "react"
-import Link from "next/link"
 import { Globe, Router, Servers, ShieldCheck } from "@/components/icons"
 import { get } from "@/lib/api"
 import type { Certificate, Listener, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageHeader, PageState, Section } from "@/components/page"
-import { Panel, PanelBody } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { Page, PageHeader, PageState } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
+import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { StatusDot } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
 import { useProxy } from "@/components/proxy/proxy-context"
@@ -57,18 +57,18 @@ export default function ProxyOverviewPage() {
           hint={status?.certbot ? "certbot available" : "no certbot"}
           tone={status?.nginx || status?.caddy ? "default" : "warning"}
         />
-        <Link href="/proxy/sites" className="block min-w-0">
+        <StatLink href="/proxy/sites" label="Sites">
           <StatTile
-            className="h-full transition-colors hover:border-rule-brand"
+            className="h-full transition-colors group-hover:bg-row-hover"
             label="Sites"
             icon={Globe}
             value={hosts.length}
             hint={`${onTls} on TLS`}
           />
-        </Link>
-        <Link href="/proxy/certificates" className="block min-w-0">
+        </StatLink>
+        <StatLink href="/proxy/certificates" label="Certificates">
           <StatTile
-            className="h-full transition-colors hover:border-rule-brand"
+            className="h-full transition-colors group-hover:bg-row-hover"
             label="Certificates"
             icon={ShieldCheck}
             value={certs.data?.length ?? "—"}
@@ -81,60 +81,52 @@ export default function ProxyOverviewPage() {
                   : "success"
             }
           />
-        </Link>
-        <Link href="/proxy/ports" className="block min-w-0">
+        </StatLink>
+        <StatLink href="/proxy/ports" label="Exposed ports">
           <StatTile
-            className="h-full transition-colors hover:border-rule-brand"
+            className="h-full transition-colors group-hover:bg-row-hover"
             label="Exposed ports"
             icon={Router}
             value={exposed.length}
             hint={exposed.length ? "reachable off the machine" : "all on loopback"}
             tone={exposed.length ? "warning" : "success"}
           />
-        </Link>
+        </StatLink>
       </StatGrid>
 
       {(badCerts.length > 0 || exposed.length > 0) && (
-        <Section title="Needs attention">
-          <Panel>
-            <PanelBody flush>
-              <ul className="divide-y divide-hairline">
-                {badCerts.map((cert) => (
-                  <li key={`cert-${cert.path || cert.name}`}>
-                    <Link
-                      href="/proxy/certificates"
-                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 hover:bg-row-hover"
-                    >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-body font-medium">{cert.name}</span>
-                      </span>
-                      <ExpiryStatus cert={cert} />
-                    </Link>
-                  </li>
-                ))}
-                {exposed.map((listener, i) => (
-                  <li key={`port-${listener.port}-${i}`}>
-                    <Link
-                      href="/proxy/ports"
-                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 hover:bg-row-hover"
-                    >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <StatusDot tone="warning" />
-                        <span className="truncate text-body font-medium">
-                          {listener.process || "unknown"}
-                        </span>
-                      </span>
-                      <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
-                        :{listener.port} {listener.protocol}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </PanelBody>
-          </Panel>
-        </Section>
+        <Panel plain>
+          <PanelHeader title="Needs attention" />
+          <PanelBody flush>
+            <RowList>
+              {badCerts.map((cert) => (
+                <Row
+                  key={`cert-${cert.path || cert.name}`}
+                  href="/proxy/certificates"
+                  leading={<ShieldCheck className="size-3.5 text-muted-foreground" />}
+                  title={cert.name}
+                  subtitle={cert.domains.join(", ")}
+                  trailing={<ExpiryStatus cert={cert} />}
+                />
+              ))}
+              {exposed.map((listener, i) => (
+                <Row
+                  key={`port-${listener.port}-${i}`}
+                  href="/proxy/ports"
+                  leading={<StatusDot tone="warning" />}
+                  title={listener.process || "unknown"}
+                  subtitle={listener.address}
+                  mono
+                  trailing={
+                    <span className="numeric font-mono text-hint text-muted-foreground">
+                      :{listener.port} {listener.protocol}
+                    </span>
+                  }
+                />
+              ))}
+            </RowList>
+          </PanelBody>
+        </Panel>
       )}
 
       {hosts.length === 0 && !vhosts.loading && badCerts.length === 0 && exposed.length === 0 && (

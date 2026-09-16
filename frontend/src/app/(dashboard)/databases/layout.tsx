@@ -244,8 +244,8 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
     >
       <div className="flex h-full min-h-0 flex-col">
         <div className="shrink-0 border-b border-hairline bg-background/85 backdrop-blur-md">
-          <div className="mx-auto w-full max-w-[1600px] px-4 md:px-6">
-            <div className="flex flex-wrap items-center gap-2 py-2.5">
+          <div className="mx-auto w-full max-w-[1440px] px-5 md:px-8">
+            <div className="flex flex-wrap items-center gap-2 pt-4 pb-3">
               <Select
                 value={conn?.id.toString() ?? ""}
                 onValueChange={(v) => goto(pathname, { conn: Number(v) })}
@@ -271,7 +271,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
                 </Button>
               )}
             </div>
-            <nav className="-mb-px flex gap-1 overflow-x-auto">
+            <nav className="-mx-3 -mb-px flex gap-1 overflow-x-auto">
               {tabs.map((tab) => {
                 const active =
                   tab.href === "/databases"

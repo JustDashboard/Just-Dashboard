@@ -1,0 +1,7 @@
+=== RUN   TestLiveLegacyPreviewQuarantinePreservesProduction
+    preview_quarantine_live_test.go:157: legacy preview stopped with restart disabled; exact ownership refusal preserved production, canary data and shared volume; reviewed configuration discarded inherited credential and storage source
+--- PASS: TestLiveLegacyPreviewQuarantinePreservesProduction (7.56s)
+=== RUN   TestLivePreviewStorageCredentialsNetworkAndCleanup
+--- PASS: TestLivePreviewStorageCredentialsNetworkAndCleanup (12.39s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	20.034s

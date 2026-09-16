@@ -97,7 +97,7 @@ func TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans(t *testing.T) {
 			name:   "go",
 			files:  map[string]string{"go.mod": "module example.test/app\n", "cmd/app/main.go": "package main\nfunc main() {}\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "go"},
-			want:   []string{"FROM golang:1.25-alpine@sha256:", "go mod download", "go build -trimpath", "ENTRYPOINT [\"/app\"]"},
+			want:   []string{"FROM golang:1.26-alpine@sha256:", "go mod download", "go build -trimpath", "ENTRYPOINT [\"/app\"]"},
 		},
 		{
 			name:   "python",

@@ -12,12 +12,13 @@ projects with unfinished engine or legacy runs return 409. Unknown engine states
 
 The transaction checks archive and run state before deleting notification delivery records, committed
 drafts, runs, and the project. Foreign keys remove its environments, variable revisions, releases,
-configuration, triggers, schedules, and ownership joins. Runs are deleted before variables because
+configuration, triggers, schedules, database network bindings, and ownership joins. Runs are deleted before variables because
 run-to-variable revision references intentionally do not cascade from the variable side. The audit
-log is outside this cascade and survives deletion. There is no schema change.
+log is outside this cascade and survives deletion.
 
 This operation does not invoke Docker, Proxy, Files, Backups, or a host command. Containers, images,
-routes, persistent storage, checkouts, and on-disk artifacts remain. Their deployment ownership and
+routes, database networks, persistent storage, checkouts, and on-disk artifacts remain. Database network
+reconciliation ends when its binding records are deleted. Their deployment ownership and
 rollback history are forgotten. Operators wanting managed resources removed must use the existing
 previewed Configuration removal flow first; it retains its per-target capability and typed-phrase
 rules. The permanent-delete dialog explicitly explains both the record loss and retained resources.

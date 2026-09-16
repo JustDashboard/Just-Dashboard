@@ -1,0 +1,6 @@
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	183.972s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	300.286s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	4.634s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/backups	26.186s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	12.149s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	26.145s

@@ -80,21 +80,24 @@ type GitWatchTarget struct {
 	Source                                      DraftSourceConfig
 	SourceKey, BaselineRevision, LatestRevision string
 	LatestRunID                                 int64
+	PolicyKey                                   string
 }
 
 type GitWatchStatus struct {
-	Automatic       bool       `json:"automatic"`
-	Branch          string     `json:"branch,omitempty"`
-	Status          string     `json:"status"`
-	Revision        string     `json:"revision,omitempty"`
-	RunID           int64      `json:"runId,omitempty"`
-	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
-	IntervalSeconds int        `json:"intervalSeconds"`
+	Automatic       bool                `json:"automatic"`
+	Branch          string              `json:"branch,omitempty"`
+	Status          string              `json:"status"`
+	Revision        string              `json:"revision,omitempty"`
+	RunID           int64               `json:"runId,omitempty"`
+	CheckedAt       *time.Time          `json:"checkedAt,omitempty"`
+	IntervalSeconds int                 `json:"intervalSeconds"`
+	Reason          string              `json:"reason,omitempty"`
+	Policy          GitDeploymentPolicy `json:"policy"`
 }
 
 type gitWatchCursor struct {
-	SourceKey, Revision, Status  string
-	Generation, RunID, CheckedAt int64
+	SourceKey, Revision, Status, Reason, PolicyKey, BaselineRevision string
+	Generation, RunID, CheckedAt                                     int64
 }
 
 func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, environmentID int64) ([]GitWatchTarget, error) {
@@ -144,8 +147,8 @@ func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, env
 
 func (s *OrchestrationStore) gitWatchCursor(ctx context.Context, environmentID int64) (gitWatchCursor, error) {
 	var cursor gitWatchCursor
-	err := s.db.QueryRowContext(ctx, `SELECT source_key,revision,generation,run_id,status,checked_at FROM deploy_git_watches WHERE environment_id = ?`, environmentID).
-		Scan(&cursor.SourceKey, &cursor.Revision, &cursor.Generation, &cursor.RunID, &cursor.Status, &cursor.CheckedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT source_key,revision,generation,run_id,status,checked_at,reason,policy_key,baseline_revision FROM deploy_git_watches WHERE environment_id = ?`, environmentID).
+		Scan(&cursor.SourceKey, &cursor.Revision, &cursor.Generation, &cursor.RunID, &cursor.Status, &cursor.CheckedAt, &cursor.Reason, &cursor.PolicyKey, &cursor.BaselineRevision)
 	return cursor, err
 }
 
@@ -154,6 +157,11 @@ func (s *OrchestrationStore) GitWatchStatus(ctx context.Context, projectID, envi
 	if _, err := s.EnvironmentExecutionTarget(ctx, projectID, environmentID); err != nil {
 		return status, err
 	}
+	policy, err := gitDeploymentPolicy(ctx, s.db, environmentID)
+	if err != nil {
+		return status, err
+	}
+	status.Policy = policy
 	targets, err := s.gitWatchTargets(ctx, projectID, environmentID)
 	if err != nil || len(targets) == 0 {
 		return status, err
@@ -162,6 +170,15 @@ func (s *OrchestrationStore) GitWatchStatus(ctx context.Context, projectID, envi
 	status.Automatic, status.Branch, status.Status = true, target.Source.Ref, "starting"
 	if status.Branch == "" {
 		status.Branch = "main"
+	}
+	status.Automatic = policy.Automatic && !policy.Conflict
+	if !policy.Automatic {
+		status.Status, status.Reason = "manual_only", "manual_only"
+		return status, nil
+	}
+	if policy.Conflict {
+		status.Status, status.Reason = "policy_conflict", "policy_conflict"
+		return status, nil
 	}
 	if target.LatestRunID == 0 {
 		status.Status = "awaiting_first_deployment"
@@ -175,6 +192,7 @@ func (s *OrchestrationStore) GitWatchStatus(ctx context.Context, projectID, envi
 		return status, err
 	}
 	status.Status, status.Revision, status.RunID = cursor.Status, cursor.Revision, cursor.RunID
+	status.Reason = cursor.Reason
 	status.CheckedAt = unixTimePtr(cursor.CheckedAt)
 	if cursor.CheckedAt != 0 && s.now().UTC().Unix()-cursor.CheckedAt > 30 {
 		status.Status = "stale"
@@ -261,44 +279,148 @@ func (w *GitWatcher) poll(ctx context.Context) error {
 }
 
 func (w *GitWatcher) check(ctx context.Context, target GitWatchTarget) error {
-	_, err := w.store.db.ExecContext(ctx, `INSERT INTO deploy_git_watches(environment_id,source_key,revision)
-		VALUES(?,?,?) ON CONFLICT(environment_id) DO UPDATE SET source_key=excluded.source_key,
-		revision=excluded.revision,generation=generation+1,run_id=0,status='watching',checked_at=0
-		WHERE deploy_git_watches.source_key <> excluded.source_key`, target.EnvironmentID, target.SourceKey, target.BaselineRevision)
+	decision, err := w.evaluate(ctx, target, "")
 	if err != nil {
 		return err
+	}
+	var dispatchErr error
+	if decision.Allowed {
+		key := "git:" + digestBytes([]byte(fmt.Sprintf("%s:%d:%s:%s", target.SourceKey, decision.cursor.Generation, decision.Revision, decision.Target.PolicyKey)))
+		run, err := w.dispatch(ctx, decision.Target, decision.Revision, key)
+		dispatchErr = err
+		if err == nil {
+			decision.RunID = run.ID
+		}
+	}
+	return w.RecordDecision(ctx, decision, dispatchErr)
+}
+
+type GitDeploymentDecision struct {
+	Target           GitWatchTarget
+	Revision, Reason string
+	Allowed          bool
+	RunID            int64
+	cursor           gitWatchCursor
+	record           bool
+	unavailable      bool
+}
+
+// EvaluateWebhook uses the same remote observation and complete tree diff as
+// polling. Late deliveries cannot move the environment back to an old commit.
+func (w *GitWatcher) EvaluateWebhook(ctx context.Context, projectID, environmentID int64, event ProviderEvent) (*GitDeploymentDecision, error) {
+	if w == nil {
+		return nil, ErrSourceUnavailable
+	}
+	targets, err := w.store.gitWatchTargets(ctx, projectID, environmentID)
+	if err != nil || len(targets) == 0 {
+		return nil, err
+	}
+	target := targets[0]
+	_, repository, err := remoteForSource(target.Source)
+	if err != nil {
+		return nil, err
+	}
+	if event.Repository != "" && !strings.EqualFold(strings.TrimSuffix(event.Repository, ".git"), repository) {
+		return nil, ErrWrongRepository
+	}
+	want, _ := planningGitRef(target.Source.Ref)
+	if event.Ref != "" {
+		got, _ := planningGitRef(event.Ref)
+		if got != want {
+			return nil, ErrWrongRef
+		}
+	}
+	if event.Revision != "" && !validGitObjectID(event.Revision) {
+		return nil, ErrInvalidRef
+	}
+	return w.evaluate(ctx, target, event.Revision)
+}
+
+func (w *GitWatcher) evaluate(ctx context.Context, target GitWatchTarget, expectedRevision string) (*GitDeploymentDecision, error) {
+	_, err := w.store.db.ExecContext(ctx, `INSERT INTO deploy_git_watches(environment_id,source_key,revision)
+		VALUES(?,?,?) ON CONFLICT(environment_id) DO UPDATE SET source_key=excluded.source_key,
+		revision=excluded.revision,generation=generation+1,run_id=0,status='watching',checked_at=0,reason='',policy_key=''
+		WHERE deploy_git_watches.source_key <> excluded.source_key`, target.EnvironmentID, target.SourceKey, target.BaselineRevision)
+	if err != nil {
+		return nil, err
 	}
 	cursor, err := w.store.gitWatchCursor(ctx, target.EnvironmentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	policy, err := gitDeploymentPolicy(ctx, w.store.db, target.EnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	target.PolicyKey = policy.Key()
+	d := &GitDeploymentDecision{Target: target, Revision: cursor.Revision, Reason: cursor.Reason, RunID: cursor.RunID, cursor: cursor, record: true}
+	if !policy.Automatic {
+		d.Reason = "manual_only"
+		return d, nil
+	}
+	if policy.Conflict {
+		d.Reason = "policy_conflict"
+		return d, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	revision, resolveErr := w.sources.ResolveGitRevision(ctx, target.Source)
-	status, runID := "watching", cursor.RunID
-	if resolveErr == nil && !validGitObjectID(revision) {
-		resolveErr = ErrInvalidRef
+	if resolveErr != nil || !validGitObjectID(revision) {
+		d.Reason, d.unavailable = "source_unavailable", true
+		return d, nil
 	}
-	if resolveErr == nil && revision != cursor.Revision {
-		if revision == target.LatestRevision {
-			runID = target.LatestRunID
-		} else {
-			// A crash after enqueue reuses the same key. Remember attempted commits,
-			// including failures, so a broken push is not rebuilt every five seconds.
-			key := "git:" + digestBytes([]byte(fmt.Sprintf("%s:%d:%s", target.SourceKey, cursor.Generation, revision)))
-			run, dispatchErr := w.dispatch(ctx, target, revision, key)
-			resolveErr = dispatchErr
-			if dispatchErr == nil {
-				runID = run.ID
-			}
+	if expectedRevision != "" && expectedRevision != revision {
+		d.Revision, d.Reason, d.record = expectedRevision, "superseded_revision", false
+		return d, nil
+	}
+	d.Revision = revision
+	if revision == cursor.Revision && cursor.PolicyKey == target.PolicyKey && cursor.BaselineRevision == target.BaselineRevision && cursor.Status == "watching" {
+		return d, nil
+	}
+	if revision == target.LatestRevision && target.LatestRunID != 0 {
+		d.Reason, d.RunID = "already_attempted", target.LatestRunID
+		return d, nil
+	}
+	if target.LatestRunID != 0 && revision == cursor.Revision && cursor.PolicyKey == "" {
+		d.Reason = "unchanged_revision"
+		return d, nil
+	}
+	d.Reason = "branch_changed"
+	if len(policy.WatchInclude)+len(policy.WatchExclude) > 0 {
+		resolver, ok := w.sources.(GitChangedPathResolver)
+		if !ok || !validGitObjectID(target.BaselineRevision) {
+			d.Reason, d.unavailable = "changes_unavailable", true
+			return d, nil
+		}
+		paths, err := resolver.ResolveGitChangedPaths(ctx, target.Source, target.BaselineRevision, revision)
+		if err != nil {
+			d.Reason, d.unavailable = "changes_unavailable", true
+			return d, nil
+		}
+		if len(paths) == 0 || !MatchWatchPaths(paths, policy.WatchInclude, policy.WatchExclude) {
+			d.Reason = "watch_paths_ignored"
+			return d, nil
+		}
+		d.Reason = "watched_paths_changed"
+	}
+	d.Allowed = true
+	return d, nil
+}
+
+func (w *GitWatcher) RecordDecision(ctx context.Context, d *GitDeploymentDecision, dispatchErr error) error {
+	if d == nil || !d.record {
+		return nil
+	}
+	status, revision, reason := "watching", d.Revision, d.Reason
+	if d.unavailable || dispatchErr != nil {
+		status, revision = "unavailable", d.cursor.Revision
+		if dispatchErr != nil {
+			reason = "enqueue_failed"
 		}
 	}
-	if resolveErr != nil {
-		status, revision = "unavailable", cursor.Revision
-	}
-	_, err = w.store.db.ExecContext(ctx, `UPDATE deploy_git_watches
-		SET revision=?,generation=generation+CASE WHEN revision<>? THEN 1 ELSE 0 END,run_id=?,status=?,checked_at=?
-		WHERE environment_id=? AND source_key=? AND generation=?`, revision, revision, runID, status,
-		w.store.now().UTC().Unix(), target.EnvironmentID, target.SourceKey, cursor.Generation)
+	_, err := w.store.db.ExecContext(ctx, `UPDATE deploy_git_watches
+		SET revision=?,generation=generation+CASE WHEN revision<>? OR policy_key<>? OR baseline_revision<>? THEN 1 ELSE 0 END,run_id=?,status=?,reason=?,policy_key=?,baseline_revision=?,checked_at=?
+		WHERE environment_id=? AND source_key=? AND generation=?`, revision, revision, d.Target.PolicyKey, d.Target.BaselineRevision, d.RunID, status, reason, d.Target.PolicyKey,
+		d.Target.BaselineRevision, w.store.now().UTC().Unix(), d.Target.EnvironmentID, d.Target.SourceKey, d.cursor.Generation)
 	return err
 }

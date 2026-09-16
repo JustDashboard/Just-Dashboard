@@ -55,6 +55,7 @@ import {
 } from "@/components/deploy/deployment-configuration"
 import { DeploymentAutomation } from "@/components/deploy/deployment-automation"
 import { DeleteArchivedDeployment } from "@/components/deploy/deployment-archive"
+import { DeploymentConsole } from "@/components/deploy/deployment-console"
 import { DeploymentLogs } from "@/components/deploy/deployment-logs"
 import { DeploymentRuntime } from "@/components/deploy/deployment-runtime"
 import { DeploymentOverview } from "@/components/deploy/deployment-overview"
@@ -65,6 +66,7 @@ import {
   DeploymentStorage,
 } from "@/components/deploy/deployment-operations"
 import { DeploymentReleaseComparison } from "@/components/deploy/deployment-release-comparison"
+import { DeploymentInsightsPanel } from "@/components/deploy/deployment-insights"
 import { DeploymentMetrics } from "@/components/deploy/deployment-metrics"
 import { DeploymentRunMetrics } from "@/components/deploy/deployment-run-metrics"
 import {
@@ -481,7 +483,7 @@ export function DeploymentWorkspace() {
             (deployment.profile === "game" ? (
               <GameConsoleTab projectID={projectID} />
             ) : (
-              <OwnedFeatureTab kind="console" deployment={deployment} />
+              <DeploymentConsole runtime={detail.data.runtime} />
             ))}
           {activeTab === "players" && deployment.profile === "game" && (
             <GamePlayersTab projectID={projectID} />
@@ -591,6 +593,7 @@ function DeploymentsTab({
   if (loading && runs.length === 0) return <LoadingPanel rows={5} />
   return (
     <div className="space-y-4">
+      {!legacy && <DeploymentInsightsPanel projectID={project.id} />}
       <Panel>
         <PanelHeader title="Deployment history" />
         <PanelBody flush>
@@ -896,7 +899,7 @@ function OwnedFeatureTab({
   kind,
   deployment,
 }: {
-  kind: "logs" | "network" | "storage" | "metrics" | "console" | "players"
+  kind: "logs" | "network" | "storage" | "metrics" | "players"
   deployment: DeploymentSummary
 }) {
   const content = {
@@ -932,14 +935,6 @@ function OwnedFeatureTab({
         "CPU, memory, disk, and network measurements are not attributed to this deployment yet. Server-wide history remains available.",
       href: "/metrics",
       label: "Open server metrics",
-    },
-    console: {
-      icon: Logs,
-      title: "Console & files",
-      description:
-        "A deployment-scoped console and file root require managed runtime ownership. Existing terminal and file tools remain available.",
-      href: "/terminal",
-      label: "Open terminal",
     },
     players: {
       icon: Box,

@@ -385,7 +385,13 @@ export function DeploymentWizard() {
       const selected = saved.data.detection?.candidates.find(
         (candidate) => candidate.id === selectedCandidate,
       )
-      setConfiguration(defaultConfiguration(intent.profile, selected, source, saved.data.detection))
+      // A blueprint's configuration is rendered by the server from the reviewed
+      // definition when it is inspected; the browser only offers it for review.
+      setConfiguration(
+        source.mode === "blueprint" && saved.data.configuration
+          ? saved.data.configuration
+          : defaultConfiguration(intent.profile, selected, source, saved.data.detection),
+      )
       navigate(3)
     })
   }
@@ -1850,7 +1856,12 @@ function ConfigurationStep({
           )}
         </div>
       </details>
-      <details open={profile === "game"} className="space-y-4 border-t border-hairline pt-3">
+      {/* A blueprint has nothing to build; its image, storage and limits are
+          the plan, so they open for review instead of hiding behind a fold. */}
+      <details
+        open={profile === "game" || source?.mode === "blueprint"}
+        className="space-y-4 border-t border-hairline pt-3"
+      >
         <summary
           id="runtime-title"
           className="cursor-pointer rounded-sm py-2 text-sm font-medium focus-ring"
@@ -2010,7 +2021,10 @@ function ConfigurationStep({
         </div>
       </details>
       <WizardEnvironment draftId={draftId} configuration={configuration} onChange={onChange} />
-      <details className="border-t border-hairline pt-3">
+      <details
+        open={source?.mode === "blueprint" && configuration.variables.length > 0}
+        className="border-t border-hairline pt-3"
+      >
         <summary className="cursor-pointer rounded-sm py-2 text-sm font-medium focus-ring">
           Variable references & scopes
         </summary>
@@ -2130,19 +2144,42 @@ function VariableEditor({
                   <SelectItem value="plain">Plain</SelectItem>
                 </SelectContent>
               </Select>
-              <Input
-                aria-label={`Variable ${variable.name || index + 1} reference`}
-                value={variable.reference ?? ""}
-                onChange={(event) =>
-                  onChange(
-                    variables.map((item, i) =>
-                      i === index ? { ...item, reference: event.target.value } : item,
-                    ),
-                  )
-                }
-                placeholder="${{credential.name}}"
-                className="font-mono"
-              />
+              {variable.generate ? (
+                <Input
+                  aria-label={`Variable ${variable.name || index + 1} value`}
+                  value={`Generated on save (${variable.generate} characters)`}
+                  readOnly
+                  className="font-mono text-muted-foreground"
+                />
+              ) : variable.value !== undefined && variable.sensitivity === "plain" ? (
+                <Input
+                  aria-label={`Variable ${variable.name || index + 1} value`}
+                  value={variable.value}
+                  onChange={(event) =>
+                    onChange(
+                      variables.map((item, i) =>
+                        i === index ? { ...item, value: event.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder="value"
+                  className="font-mono"
+                />
+              ) : (
+                <Input
+                  aria-label={`Variable ${variable.name || index + 1} reference`}
+                  value={variable.reference ?? ""}
+                  onChange={(event) =>
+                    onChange(
+                      variables.map((item, i) =>
+                        i === index ? { ...item, reference: event.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder="${{credential.name}}"
+                  className="font-mono"
+                />
+              )}
               <Button
                 size="icon"
                 variant="ghost"

@@ -218,7 +218,7 @@ func (s *OrchestrationStore) CompletePreviewRemoval(ctx context.Context, runID i
 	if _, err = tx.ExecContext(ctx, `UPDATE deploy_releases SET state='retained',retired_at=? WHERE id=?`, now, releaseID); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE deploy_environments SET live_release_id=0,updated_at=? WHERE id=?`, now, environmentID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE deploy_environments SET live_release_id=0,archived_at=?,updated_at=? WHERE id=?`, now, now, environmentID); err != nil {
 		return err
 	}
 	return tx.Commit()

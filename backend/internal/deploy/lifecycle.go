@@ -105,6 +105,26 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	rows, err = s.db.QueryContext(ctx, `SELECT n.network_id,n.network_name FROM deploy_database_networks n
+		JOIN deploy_environments e ON e.id=n.environment_id WHERE e.project_id=? AND n.network_id<>'' ORDER BY n.environment_id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		add(RemovalTarget{Kind: "deployment_database_network", ResourceID: id, DisplayName: name, Owner: "docker", DeepLink: "/docker/networks/" + id})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT DISTINCT e.id FROM deploy_dependencies d
 		  JOIN deploy_environments e ON e.id = d.environment_id
@@ -278,6 +298,17 @@ func (s *PlanningStore) RemoveManaged(
 		selected = append(selected, target)
 	}
 	execution := &RemovalExecution{DeploymentID: projectID, Removed: []RemovalTarget{}, Remaining: []RemovalTarget{}}
+	priority := func(target RemovalTarget) int {
+		switch target.Kind {
+		case "docker_container", "compose_stack":
+			return 0
+		case "deployment_database_network":
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(selected, func(i, j int) bool { return priority(selected[i]) < priority(selected[j]) })
 	for _, target := range selected {
 		if err := remover.RemoveManagedResource(ctx, target); err != nil {
 			return execution, fmt.Errorf("remove %s %s: %w", target.Kind, target.ResourceID, err)

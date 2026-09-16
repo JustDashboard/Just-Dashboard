@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -99,6 +100,15 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	if err := httpx.RequireTypedConfirmation(w, r, target); err != nil {
 		return err
 	}
+	if sameDatabase(conn, target) {
+		var linked bool
+		if err := s.Store.DB.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id).Scan(&linked); err != nil {
+			return httpx.Internal(err)
+		}
+		if linked {
+			return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before dropping this linked database")
+		}
+	}
 	// Let go of our own connections first. Postgres refuses to drop a database
 	// while anything is attached to it, and the pool this dashboard has been
 	// browsing with is one of the things attached.
@@ -120,10 +130,15 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	// perfectly usable.
 	removed := res.Gone && sameDatabase(conn, target)
 	if removed {
-		if _, err := s.Store.DB.ExecContext(r.Context(),
-			`DELETE FROM db_connections WHERE id = ?`, id); err != nil {
+		// A deployment may have linked the connection during the engine call.
+		// Retain that identity rather than reporting a successful drop as failed.
+		result, err := s.Store.DB.ExecContext(r.Context(),
+			`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+		if err != nil {
 			return httpx.Internal(err)
 		}
+		affected, _ := result.RowsAffected()
+		removed = affected == 1
 	}
 	httpx.SetAudit(r, "database.drop", conn.Name, map[string]any{
 		"database": target, "detail": res.Detail, "connectionRemoved": removed,
@@ -217,8 +232,12 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.SetAudit(r, "database.connection.reveal", conn.Name,
 		map[string]any{"driver": string(conn.Driver), "target": target})
+	reference := ""
+	if target == "container" {
+		reference = fmt.Sprintf("${{database.%d}}", conn.ID)
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"id": conn.ID, "name": conn.Name, "driver": conn.Driver, "url": dsn,
+		"id": conn.ID, "name": conn.Name, "driver": conn.Driver, "url": dsn, "reference": reference,
 	})
 	return nil
 }

@@ -141,6 +141,9 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   schedule    TEXT NOT NULL DEFAULT '',
   retention   INTEGER NOT NULL DEFAULT 7,
   enabled     INTEGER NOT NULL DEFAULT 1,
+  recovery_json TEXT NOT NULL DEFAULT 'null',
+  sqlite_paths TEXT NOT NULL DEFAULT '[]',
+  database_dumps TEXT NOT NULL DEFAULT '[]',
   created_at  INTEGER NOT NULL
 );
 
@@ -153,9 +156,20 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   artifact   TEXT NOT NULL DEFAULT '',
   size_bytes INTEGER NOT NULL DEFAULT 0,
   log        TEXT NOT NULL DEFAULT '',
-  trigger    TEXT NOT NULL DEFAULT 'manual'
+  trigger    TEXT NOT NULL DEFAULT 'manual',
+  manifest_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_backup_runs_job ON backup_runs(job_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS backup_restore_tests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES backup_runs(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  owner_key TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  record_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_backup_restore_tests_run ON backup_restore_tests(run_id,id DESC);
 
 CREATE TABLE IF NOT EXISTS deploy_projects (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -578,7 +592,39 @@ CREATE TABLE IF NOT EXISTS deploy_git_watches (
   generation     INTEGER NOT NULL DEFAULT 0,
   run_id         INTEGER NOT NULL DEFAULT 0,
   status         TEXT NOT NULL DEFAULT 'watching',
+  reason         TEXT NOT NULL DEFAULT '',
+  policy_key     TEXT NOT NULL DEFAULT '',
+  baseline_revision TEXT NOT NULL DEFAULT '',
   checked_at     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS deploy_git_policies (
+  environment_id  INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  automatic       INTEGER NOT NULL DEFAULT 1,
+  include_json    TEXT NOT NULL DEFAULT '[]',
+  exclude_json    TEXT NOT NULL DEFAULT '[]',
+  commit_statuses INTEGER NOT NULL DEFAULT 1,
+  revision        INTEGER NOT NULL DEFAULT 1,
+  updated_at      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS deploy_database_networks (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  network_name TEXT NOT NULL UNIQUE,
+  network_id TEXT NOT NULL DEFAULT '',
+  owner_key TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deploy_database_bindings (
+  environment_id INTEGER NOT NULL REFERENCES deploy_database_networks(environment_id) ON DELETE CASCADE,
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE RESTRICT,
+  container_name TEXT NOT NULL,
+  compose_project TEXT NOT NULL DEFAULT '',
+  compose_service TEXT NOT NULL DEFAULT '',
+  container_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  checked_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(environment_id, connection_id)
 );
 
 CREATE TABLE IF NOT EXISTS deploy_blueprint_installs (
@@ -674,9 +720,12 @@ CREATE TABLE IF NOT EXISTS deploy_schedule_steps (
 CREATE TABLE IF NOT EXISTS deploy_notification_channels (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
+  kind        TEXT NOT NULL DEFAULT 'webhook',
   url         TEXT NOT NULL,
+  target      TEXT NOT NULL DEFAULT '',
   headers_enc TEXT NOT NULL DEFAULT '',
   secret_enc  TEXT NOT NULL DEFAULT '',
+  config_enc  TEXT NOT NULL DEFAULT '',
   events      TEXT NOT NULL DEFAULT '',
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  INTEGER NOT NULL,
@@ -705,6 +754,28 @@ CREATE TABLE IF NOT EXISTS deploy_preview_refs (
   state          TEXT NOT NULL DEFAULT 'open',
   updated_at     INTEGER NOT NULL,
   UNIQUE(trigger_id, provider_ref)
+);
+
+CREATE TABLE IF NOT EXISTS deploy_preview_approvals (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  trigger_id   INTEGER NOT NULL REFERENCES deploy_triggers(id) ON DELETE CASCADE,
+  provider_ref TEXT NOT NULL,
+  revision     TEXT NOT NULL,
+  event_json   TEXT NOT NULL,
+  state        TEXT NOT NULL DEFAULT 'pending',
+  approved_by  TEXT NOT NULL DEFAULT '',
+  generation   INTEGER NOT NULL DEFAULT 1,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  UNIQUE(trigger_id, provider_ref, revision)
+);
+
+CREATE TABLE IF NOT EXISTS deploy_preview_quarantines (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL DEFAULT 'pending',
+  reason         TEXT NOT NULL DEFAULT '',
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS watched_domains (
@@ -892,6 +963,24 @@ END;
 // one strands whichever installs stopped at that version.
 var addedColumns = []struct{ table, column, spec string }{
 	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
+	{"backup_runs", "manifest_json", "TEXT NOT NULL DEFAULT '{}'"},
+	{"backup_jobs", "recovery_json", "TEXT NOT NULL DEFAULT 'null'"},
+	{"backup_jobs", "sqlite_paths", "TEXT NOT NULL DEFAULT '[]'"},
+	// Backup jobs learned to capture native database dumps beside their files.
+	{"backup_jobs", "database_dumps", "TEXT NOT NULL DEFAULT '[]'"},
+	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
+	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// Notification channels grew provider kinds beside the signed webhook.
+	// Existing rows are webhooks whose URL is also their display target.
+	{"deploy_notification_channels", "kind", "TEXT NOT NULL DEFAULT 'webhook'"},
+	{"deploy_notification_channels", "target", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_notification_channels", "config_enc", "TEXT NOT NULL DEFAULT ''"},
+	// Commit statuses default on: an environment that already deploys from
+	// GitHub gains them without an edit, and the policy editor can turn them off.
+	{"deploy_git_policies", "commit_statuses", "INTEGER NOT NULL DEFAULT 1"},
 	// 0.6.7 keeps the shipped project/run rows as stable compatibility
 	// identities while normalized environments, releases, steps and events
 	// grow beside them. Every legacy row receives a usable zero/default before
@@ -1036,7 +1125,14 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	path := filepath.Join(dataDir, DatabaseFile)
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	// Transactions begin IMMEDIATE: a transaction that reads first and writes
+	// later under a deferred BEGIN fails at once with SQLITE_BUSY_SNAPSHOT
+	// when any other connection commits in between, and the busy timeout never
+	// applies to that failure. Taking the write lock up front makes the second
+	// writer wait instead. A deployment worker's step transition racing a
+	// notification delivery or an operator's settings save is exactly that
+	// case, and a lost transition used to end the run as unrecoverable.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}

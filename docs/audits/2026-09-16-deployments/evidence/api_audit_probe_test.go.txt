@@ -1,0 +1,35 @@
+package api
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+)
+
+// Assert the observed coverage hole using only files under the test's TempDir.
+func TestAuditNamedVolumeBackupCoverageObservation(t *testing.T) {
+	server := testServer(t)
+	source := filepath.Join(server.Cfg.FileRoots[0], "unrelated-source")
+	destination := filepath.Join(server.Cfg.FileRoots[0], "backup-output")
+	for _, path := range []string{source, destination} {
+		if err := os.MkdirAll(path, 0700); err != nil { t.Fatal(err) }
+	}
+	if err := os.WriteFile(filepath.Join(source, "unrelated.txt"), []byte("fixture"), 0600); err != nil { t.Fatal(err) }
+	job, err := server.modules.backupStore.Create(context.Background(), &backups.Job{
+		Name:"audit-coverage", Sources:[]string{source}, Excludes:[]string{},
+		TargetKind:backups.TargetLocal, Target:backups.TargetConfig{Path:destination}, Retention:2, Enabled:true,
+	}, nil)
+	if err != nil { t.Fatal(err) }
+	gate := newDeploymentBackupGate(server.modules.backupStore, server.modules.backupRunner)
+	evidence, err := gate.Evaluate(context.Background(), deploy.BackupGateRequest{
+		JobID:job.ID, RequiredBeforeDeploy:true, PersistentSources:[]string{"production-data"},
+	})
+	if err != nil || evidence.Status != string(backups.StatusSuccess) || !evidence.Fresh {
+		t.Fatalf("observation changed: status=%s fresh=%t error=%v", evidence.Status, evidence.Fresh, err)
+	}
+	t.Log("Named volume production-data accepted with a successful backup containing only an unrelated fixture directory")
+}

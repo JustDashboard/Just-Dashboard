@@ -472,6 +472,76 @@ func TestRestartReusesLiveRuntimeWithoutCreatingARelease(t *testing.T) {
 	}
 }
 
+// A restart verifies its checks against the live release it restarted. Before
+// the fix, verifyChecks looked the release up by run id and every restart with
+// a readiness check ended as artifact_missing after the runtime was already
+// stopped and started again.
+func TestRestartVerifiesChecksAgainstTheLiveRelease(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, HostPort: 31995, BindAddress: "127.0.0.1",
+		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("e", 40), plan)
+	deployRun, deployLease := fixture.claimedRun(t, 1)
+	check := PlannedCheck{
+		Name: "ready", Kind: string(CheckCommand), Phase: "readiness", Required: true,
+		Config: json.RawMessage(`{"command":["app","check"],"attempts":1,"timeoutSeconds":1}`),
+	}
+	live := createRuntimeCandidateWithDomains(t, fixture, *deployRun, deployLease, plan, "restart-checked", []PlannedCheck{check}, nil)
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *deployRun, deployLease.Token,
+		ReleaseRuntimeInput{
+			ReleaseID: live.Release.ID, Kind: "container", RuntimeID: "restart-checked-runtime",
+			Host: "127.0.0.1", Port: plan.HostPort, Metadata: json.RawMessage(`{"version":1}`),
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.ActivateCandidate(context.Background(), deployRun.ID, deployLease.Token, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.finishActivatedRun(t, deployRun.ID, live.Release.ID, deployLease.Token)
+
+	restartRun, _, err := fixture.runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: fixture.projectID, EnvironmentID: fixture.envID,
+		Operation: OperationRestart, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: "restart-checked-runtime", PlanRevision: 1,
+		VariableSnapshotRunID: deployRun.ID, SlotClass: SlotLight,
+		Metadata: mustJSON(map[string]any{"targetReleaseId": live.Release.ID}),
+		Steps:    []StepKey{StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepRecordRelease},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartLease, err := fixture.runs.ClaimNext(context.Background(), "restart-check-worker", QueueBudget{}, time.Minute)
+	if err != nil || restartLease == nil {
+		t.Fatalf("restart lease = %#v, error=%v", restartLease, err)
+	}
+	claimed, _ := fixture.runs.Run(context.Background(), restartRun.ID)
+	owner := &orderingRuntimeOwner{running: map[string]bool{"restart-checked-runtime": true}}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, variables: fixture.variables, runtime: owner,
+		checks: NewCheckRunner(&checkBackendFake{}), proxy: &countingActivationProxy{},
+	}
+	execution := StepExecution{Run: *claimed, ClaimToken: restartLease.Token, Output: discardStepOutput{}}
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed)); result.State != StepPassed {
+		t.Fatalf("restart start = %#v", result)
+	}
+	result := executor.verifyChecks(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed), "readiness")
+	if result.State != StepPassed {
+		t.Fatalf("restart readiness = %#v", result)
+	}
+	if result := executor.recordRelease(context.Background(), execution); result.State != StepPassed {
+		t.Fatalf("restart record release = %#v", result)
+	}
+	owner.mu.Lock()
+	running := owner.running["restart-checked-runtime"]
+	owner.mu.Unlock()
+	if !running {
+		t.Fatal("restart left the live runtime stopped")
+	}
+}
+
 func createRuntimeCandidate(
 	t *testing.T,
 	fixture *releaseStoreFixture,

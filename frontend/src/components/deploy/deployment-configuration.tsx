@@ -27,9 +27,12 @@ import type {
   DeploymentRemovalExecution,
   DeploymentRemovalPlan,
   DeploymentRemovalTarget,
+  DeploymentRestartPolicy,
   DeploymentRunSnapshot,
   DeploymentVariable,
+  NodePackageManager,
 } from "@/lib/types"
+import { withPackageManagerRunner } from "@/components/deploy/deployment-defaults"
 import { humanize } from "@/components/deploy/deployment-ui"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -183,6 +186,9 @@ function BuildSettingsForm({
                   setBuild({
                     ...build,
                     method: method as DeploymentConfiguration["build"]["method"],
+                    secrets: method === "recipe" ? build.secrets : [],
+                    goVersion: method === "recipe" ? build.goVersion : undefined,
+                    packageManager: method === "recipe" ? build.packageManager : undefined,
                   })
                 }
               >
@@ -204,7 +210,12 @@ function BuildSettingsForm({
                   value={build.recipe ?? "node"}
                   disabled={!can("system.admin")}
                   onValueChange={(recipe) =>
-                    setBuild({ ...build, recipe: recipe as "node" | "go" | "python" })
+                    setBuild({
+                      ...build,
+                      recipe: recipe as "node" | "go" | "python",
+                      goVersion: recipe === "go" ? build.goVersion : undefined,
+                      packageManager: recipe === "node" ? build.packageManager : undefined,
+                    })
                   }
                 >
                   <SelectTrigger id="saved-recipe" className="w-full">
@@ -218,9 +229,49 @@ function BuildSettingsForm({
                 </Select>
               </Field>
             )}
+            {build.method === "recipe" && (build.recipe ?? "node") === "node" && (
+              <Field
+                htmlFor="saved-package-manager"
+                label="Package manager"
+                hint="Choose one when the repository has more than one lockfile."
+              >
+                <Select
+                  value={build.packageManager ?? "lockfile"}
+                  disabled={!can("system.admin")}
+                  onValueChange={(value) => {
+                    const packageManager =
+                      value === "lockfile" ? undefined : (value as NodePackageManager)
+                    setBuild({
+                      ...build,
+                      packageManager,
+                      buildCommand:
+                        build.buildCommand &&
+                        withPackageManagerRunner(build.buildCommand, packageManager),
+                      startCommand:
+                        build.startCommand &&
+                        withPackageManagerRunner(build.startCommand, packageManager),
+                    })
+                  }}
+                >
+                  <SelectTrigger id="saved-package-manager" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="lockfile">From the lockfile</SelectItem>
+                    <SelectItem value="bun">Bun</SelectItem>
+                    <SelectItem value="npm">npm</SelectItem>
+                    <SelectItem value="pnpm">pnpm</SelectItem>
+                    <SelectItem value="yarn">Yarn</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             {(
               [
                 ["rootDirectory", "Root directory"],
+                ...(build.method === "recipe" && build.recipe === "go"
+                  ? [["goVersion", "Go version (optional)"]]
+                  : []),
                 ...(build.method === "dockerfile" ? [["dockerfile", "Dockerfile path"]] : []),
                 ...(["recipe", "static"].includes(build.method)
                   ? [
@@ -232,6 +283,7 @@ function BuildSettingsForm({
               ] as [
                 (
                   | "rootDirectory"
+                  | "goVersion"
                   | "dockerfile"
                   | "buildCommand"
                   | "startCommand"
@@ -251,6 +303,53 @@ function BuildSettingsForm({
               </Field>
             ))}
           </div>
+          {build.method === "recipe" && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Build-scoped variables reach the build command automatically. Private package
+                credentials can be limited to dependency installation. Values compiled into browser
+                assets are public regardless of their secret setting.
+              </p>
+              {configuration.variables
+                .filter((variable) => variable.scopes.includes("build"))
+                .map((variable) => (
+                  <Field
+                    key={variable.name}
+                    htmlFor={`build-stage-${variable.name}`}
+                    label={`Stage for ${variable.name}`}
+                  >
+                    <Select
+                      value={
+                        build.secrets?.find((binding) => binding.variable === variable.name)
+                          ?.step ?? "build"
+                      }
+                      disabled={!can("system.admin")}
+                      onValueChange={(step) =>
+                        setBuild({
+                          ...build,
+                          secrets: [
+                            ...(build.secrets ?? []).filter(
+                              (binding) => binding.variable !== variable.name,
+                            ),
+                            ...(step === "install"
+                              ? [{ variable: variable.name, step: "install" as const }]
+                              : []),
+                          ],
+                        })
+                      }
+                    >
+                      <SelectTrigger id={`build-stage-${variable.name}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="build">Build command</SelectItem>
+                        <SelectItem value="install">Dependency installation only</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                ))}
+            </div>
+          )}
           {error && <ErrorState error={error} />}
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">Saving prepares the next release.</p>
@@ -418,6 +517,80 @@ function RuntimeConfigurationForm({
               readOnly={!can("system.admin")}
               className="min-h-28 font-mono"
             />
+          </Field>
+          <Field
+            label="Memory limit (MiB)"
+            htmlFor="runtime-memory"
+            hint="Zero means no limit. The kernel stops a container that exceeds its limit; the run's diagnostics say so."
+          >
+            <Input
+              id="runtime-memory"
+              type="number"
+              min={0}
+              step={64}
+              value={runtime.memoryMb ?? 0}
+              onChange={(event) =>
+                setRuntime({ ...runtime, memoryMb: Math.max(0, Number(event.target.value)) })
+              }
+              readOnly={!can("system.admin")}
+            />
+          </Field>
+          <Field
+            label="CPU limit"
+            htmlFor="runtime-cpus"
+            hint="Whole or fractional CPUs, for example 0.5 or 2. Zero means no limit."
+          >
+            <Input
+              id="runtime-cpus"
+              type="number"
+              min={0}
+              step={0.25}
+              value={runtime.cpus ?? 0}
+              onChange={(event) =>
+                setRuntime({ ...runtime, cpus: Math.max(0, Number(event.target.value)) })
+              }
+              readOnly={!can("system.admin")}
+            />
+          </Field>
+          <Field
+            label="Process limit"
+            htmlFor="runtime-pids"
+            hint="Maximum processes and threads inside the container. Zero means no limit."
+          >
+            <Input
+              id="runtime-pids"
+              type="number"
+              min={0}
+              step={16}
+              value={runtime.pidsLimit ?? 0}
+              onChange={(event) =>
+                setRuntime({ ...runtime, pidsLimit: Math.max(0, Number(event.target.value)) })
+              }
+              readOnly={!can("system.admin")}
+            />
+          </Field>
+          <Field
+            label="Restart policy"
+            htmlFor="runtime-restart"
+            hint="How Docker treats a container that exits on its own. Deployments always stop and start their own releases."
+          >
+            <Select
+              value={runtime.restartPolicy ?? "unless-stopped"}
+              onValueChange={(restartPolicy: DeploymentRestartPolicy) =>
+                setRuntime({ ...runtime, restartPolicy })
+              }
+              disabled={!can("system.admin")}
+            >
+              <SelectTrigger id="runtime-restart" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unless-stopped">Unless stopped (default)</SelectItem>
+                <SelectItem value="always">Always</SelectItem>
+                <SelectItem value="on-failure">On failure</SelectItem>
+                <SelectItem value="no">Never</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
         </div>
         {error && (
@@ -651,6 +824,13 @@ function VariableWorkspace({
                   />
                 ))}
               </div>
+              {scopes.includes("build") && (
+                <p className="text-xs text-muted-foreground">
+                  Recipe build commands receive these values through temporary secret mounts. Values
+                  compiled into browser assets are public. Use an install-stage mapping in build
+                  settings for private package credentials.
+                </p>
+              )}
               {error && (
                 <p role="alert" className="text-sm text-destructive">
                   {error}
@@ -1313,6 +1493,10 @@ function StorageForm({
       )}
 
       {section === "dependencies" && (
+        <DatabaseNetworkStatus projectID={projectID} environmentID={environmentID} />
+      )}
+
+      {section === "dependencies" && (
         <BackupEvidence
           evidence={backupEvidence}
           loading={evidence.loading}
@@ -1320,6 +1504,62 @@ function StorageForm({
         />
       )}
     </div>
+  )
+}
+
+function DatabaseNetworkStatus({ projectID, environmentID }: ConfigurationProps) {
+  const links = usePoll(
+    (signal) =>
+      get<
+        {
+          connectionId: number
+          name: string
+          network: string
+          hostname: string
+          status: string
+          checkedAt?: string
+        }[]
+      >(`/deploy/${projectID}/environments/${environmentID}/database-links`, undefined, signal),
+    5000,
+    [projectID, environmentID],
+  )
+  if (links.error)
+    return <p className="text-xs text-warning">Database network status is unavailable.</p>
+  if (!links.data?.length) return null
+  return (
+    <Panel>
+      <PanelHeader title="Database connections" />
+      <PanelBody className="space-y-3">
+        {links.data.map((link) => (
+          <div key={link.connectionId} className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/databases/${link.connectionId}`}
+                className="text-sm underline underline-offset-4"
+              >
+                {link.name}
+              </Link>
+              <Status
+                verdict={link.status === "connected" ? "ok" : "warning"}
+                label={link.status === "connected" ? "Network connected" : "Needs reconnection"}
+              />
+            </div>
+            <p className="font-mono text-xs break-all text-muted-foreground">{link.hostname}</p>
+            {link.status !== "connected" && (
+              <p className="text-xs text-warning">
+                Check that the original database container or Compose service is running. The
+                dashboard retries the connection every five seconds.
+              </p>
+            )}
+            {link.checkedAt && (
+              <p className="text-xs text-muted-foreground">
+                Last checked {relativeTime(link.checkedAt)}
+              </p>
+            )}
+          </div>
+        ))}
+      </PanelBody>
+    </Panel>
   )
 }
 
@@ -1542,6 +1782,20 @@ function BackupEvidence({
                   label="Restore tested"
                   value={item.restoreTested ? "Yes" : "No evidence"}
                 />
+                {(item.databaseDumps?.length ?? 0) > 0 && (
+                  <p className="text-muted-foreground sm:col-span-4">
+                    {item.databaseDumps!.length === 1
+                      ? "1 linked database covered by a native dump"
+                      : `${item.databaseDumps!.length} linked databases covered by native dumps`}
+                  </p>
+                )}
+                {item.restoreVerificationId && (
+                  <p className="break-all text-muted-foreground sm:col-span-4">
+                    Recovery check #{item.restoreVerificationId} · Schema{" "}
+                    {item.restoreSchemaVersion}
+                    {item.restoreApplicationImage ? ` · ${item.restoreApplicationImage}` : ""}
+                  </p>
+                )}
                 {item.endedAt && (
                   <p className="text-muted-foreground sm:col-span-4">
                     Completed {relativeTime(item.endedAt)} · {humanize(item.status)}

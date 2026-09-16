@@ -46,16 +46,21 @@ type TargetSecrets struct {
 }
 
 type Job struct {
-	ID         int64        `json:"id"`
-	Name       string       `json:"name"`
-	Sources    []string     `json:"sources"`
-	Excludes   []string     `json:"excludes"`
-	TargetKind TargetKind   `json:"targetKind"`
-	Target     TargetConfig `json:"target"`
-	Schedule   string       `json:"schedule"`
-	Retention  int          `json:"retention"`
-	Enabled    bool         `json:"enabled"`
-	CreatedAt  time.Time    `json:"createdAt"`
+	ID          int64         `json:"id"`
+	Name        string        `json:"name"`
+	Sources     []string      `json:"sources"`
+	Excludes    []string      `json:"excludes"`
+	TargetKind  TargetKind    `json:"targetKind"`
+	Target      TargetConfig  `json:"target"`
+	Schedule    string        `json:"schedule"`
+	Retention   int           `json:"retention"`
+	Enabled     bool          `json:"enabled"`
+	CreatedAt   time.Time     `json:"createdAt"`
+	Recovery    *RecoveryPlan `json:"recovery,omitempty"`
+	SQLitePaths []string      `json:"sqlitePaths,omitempty"`
+	// DatabaseDumps are saved database connections whose native dump every
+	// run captures into the archive beside the filesystem sources.
+	DatabaseDumps []int64 `json:"databaseDumps,omitempty"`
 	// HasCredentials tells the UI whether keys are stored without revealing
 	// anything about them.
 	HasCredentials bool       `json:"hasCredentials"`
@@ -72,16 +77,18 @@ const (
 )
 
 type Run struct {
-	ID        int64      `json:"id"`
-	JobID     int64      `json:"jobId"`
-	StartedAt time.Time  `json:"startedAt"`
-	EndedAt   *time.Time `json:"endedAt,omitempty"`
-	Status    RunStatus  `json:"status"`
-	Artifact  string     `json:"artifact"`
-	SizeBytes int64      `json:"sizeBytes"`
-	Log       string     `json:"log"`
-	Trigger   string     `json:"trigger"`
-	Duration  string     `json:"duration,omitempty"`
+	ID                  int64                `json:"id"`
+	JobID               int64                `json:"jobId"`
+	StartedAt           time.Time            `json:"startedAt"`
+	EndedAt             *time.Time           `json:"endedAt,omitempty"`
+	Status              RunStatus            `json:"status"`
+	Artifact            string               `json:"artifact"`
+	SizeBytes           int64                `json:"sizeBytes"`
+	Log                 string               `json:"log"`
+	Trigger             string               `json:"trigger"`
+	Duration            string               `json:"duration,omitempty"`
+	Manifest            *Manifest            `json:"manifest,omitempty"`
+	RestoreVerification *RestoreVerification `json:"restoreVerification,omitempty"`
 }
 
 func encodeJSON(v any) string {
@@ -114,6 +121,9 @@ func decodeStrings(raw string) []string {
 // Validate catches configuration that would only fail later, at 3am, in a
 // scheduled run nobody is watching.
 func (j *Job) Validate() error {
+	if err := j.Recovery.Validate(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(j.Name) == "" {
 		return fmt.Errorf("name is required")
 	}

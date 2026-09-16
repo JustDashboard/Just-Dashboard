@@ -24,6 +24,24 @@ func (s *Server) handleDeploymentGitWatch(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+func (s *Server) handleDeploymentGitPolicyPut(w http.ResponseWriter, r *http.Request) error {
+	projectID, environmentID, err := deploymentEnvironmentIDs(r)
+	if err != nil {
+		return err
+	}
+	var policy deploy.GitDeploymentPolicy
+	if err := httpx.DecodeJSON(r, &policy); err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "deploy.git.policy", fmt.Sprint(projectID), map[string]any{"environmentId": environmentID, "automatic": policy.Automatic})
+	updated, err := s.modules.deployRuns.SetGitDeploymentPolicy(r.Context(), projectID, environmentID, policy)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	httpx.JSON(w, http.StatusOK, updated)
+	return nil
+}
+
 func (s *Server) dispatchGitDeployment(ctx context.Context, target deploy.GitWatchTarget, revision, key string) (*deploy.EngineRun, error) {
 	project, err := s.modules.deployStore.Get(ctx, target.ProjectID)
 	if err != nil {
@@ -31,7 +49,7 @@ func (s *Server) dispatchGitDeployment(ctx context.Context, target deploy.GitWat
 	}
 	run, err := s.enqueueNormalizedDeploymentAtSource(ctx, project, target.EnvironmentID,
 		deploy.OperationDeploy, 0, deploy.TriggerGitPush, "git-monitor", key,
-		map[string]any{"automatic": true}, revision, target.PlanRevision)
+		map[string]any{"automatic": true, "gitPolicy": target.PolicyKey}, revision, target.PlanRevision, target.PolicyKey)
 	detail := map[string]any{"environmentId": target.EnvironmentID, "sourceRevision": revision}
 	if run != nil {
 		detail["runId"] = run.ID

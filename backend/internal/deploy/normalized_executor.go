@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -143,6 +142,29 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	var environmentKind EnvironmentKind
+	if err := e.store.db.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, execution.Run.EnvironmentID).Scan(&environmentKind); err != nil {
+		return normalizedStepFailure(err)
+	}
+	if environmentKind == EnvironmentPreview && execution.Run.Operation != OperationPreviewRemove {
+		var quarantined int
+		if err := e.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_preview_quarantines WHERE environment_id=? AND status<>'cleared'`, execution.Run.EnvironmentID).Scan(&quarantined); err != nil {
+			return normalizedStepFailure(err)
+		}
+		if quarantined != 0 {
+			return normalizedStepFailure(ErrPreviewIsolation)
+		}
+		if err := validatePreviewPlan(execution.Run.EnvironmentID, plan.Build, plan.Runtime); err != nil {
+			return normalizedStepFailure(err)
+		}
+		approved, err := reviewedPreviewRevisionTx(ctx, e.store.db, execution.Run.EnvironmentID, plan.SourceIdentity.Revision)
+		if err != nil {
+			return normalizedStepFailure(err)
+		}
+		if !approved {
+			return normalizedStepFailure(ErrPreviewApproval)
+		}
+	}
 	switch execution.Step.Key {
 	case StepResolveSource:
 		if err := validateImmutableExecutionSource(plan); err != nil {
@@ -174,7 +196,7 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 	case StepReleaseTask:
 		return e.runReleaseTasks(ctx, execution, plan)
 	case StepBackupGate:
-		return e.backupGate(ctx, plan)
+		return e.backupGate(ctx, execution, plan)
 	case StepProvisionCertificate:
 		return e.provisionCertificate(ctx, execution)
 	case StepStartCandidate:
@@ -221,41 +243,42 @@ func (e *NormalizedStepExecutor) notify(ctx context.Context, execution StepExecu
 	channels, err := e.notifications.ListNotificationChannels(ctx)
 	if err != nil {
 		if schedule.Marker && schedule.Status == "failed" {
-			return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"delivered": 0, "failed": 1, "reason": "notification channels unavailable"})}
+			return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"reason": "notification channels unavailable"})}
 		}
-		return StepResult{State: StepWarning, Evidence: mustJSON(map[string]any{"delivered": 0, "failed": 1, "reason": "notification channels unavailable"})}
+		return StepResult{State: StepWarning, Evidence: mustJSON(map[string]any{"reason": "notification channels unavailable"})}
 	}
-	delivered, failed := 0, 0
+	// Delivery itself happens after the run reaches its terminal state, from
+	// the engine's run observers, so failed and cancelled runs are announced
+	// through the same channels as successful ones. This step records which
+	// channels will hear about the outcome and keeps the scheduled-chain gate.
+	selected := 0
 	for _, channel := range channels {
-		if !channel.Enabled || !notificationEventSelected(channel.Events, "run.finished") {
-			continue
+		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForState(RunState(terminalState))) {
+			selected++
 		}
-		err := e.notifications.DeliverNotification(ctx, nil, channel.ID, NotificationEnvelope{Event: "run.finished", RunID: execution.Run.ID, ProjectID: execution.Run.ProjectID, EnvironmentID: execution.Run.EnvironmentID, State: terminalState, SentAt: time.Now().UTC()})
-		if err != nil {
-			failed++
-		} else {
-			delivered++
-		}
-	}
-	state := StepPassed
-	if delivered == 0 && failed == 0 {
-		state = StepSkipped
-	}
-	if failed > 0 {
-		state = StepWarning
 	}
 	if schedule.Marker && schedule.Status == "failed" {
-		return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"delivered": delivered, "failed": failed})}
+		return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"channels": selected, "deliveredBy": "run observers"})}
 	}
-	return StepResult{State: state, Evidence: mustJSON(map[string]any{"delivered": delivered, "failed": failed})}
+	if selected == 0 {
+		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"channels": 0, "reason": "no enabled channel selects this outcome"})}
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{"channels": selected, "deliveredBy": "run observers"})}
 }
 
+// notificationEventSelected decides whether a channel's event list wants an
+// event. An empty list means everything. The historical "run.finished" value
+// stays valid as "every terminal outcome", so channels created before failure
+// notifications existed start receiving them without being edited.
 func notificationEventSelected(events []string, want string) bool {
 	if len(events) == 0 {
 		return true
 	}
 	for _, event := range events {
 		if event == want {
+			return true
+		}
+		if event == NotificationEventFinished && want != NotificationEventStarted {
 			return true
 		}
 	}
@@ -336,12 +359,16 @@ func (e *NormalizedStepExecutor) prepareContext(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
 	source, buildRoot, err := e.materializedBuildRoot(ctx, execution.Run, plan)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
-	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag)
+	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
@@ -370,7 +397,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 		return normalizedStepFailure(err)
 	}
 	registryAuth := ""
-	if plan.SourceKind == SourceImage {
+	if plan.SourceKind == SourceImage || plan.SourceKind == SourceBlueprint {
 		registryAuth, err = e.sources.registryAuth(ctx, plan.SourceConfig.CredentialID, plan.SourceIdentity.Repository)
 		if err != nil {
 			return normalizedStepFailure(err)
@@ -605,8 +632,13 @@ func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {
 		if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) && plan.SourceIdentity.Revision == "" {
 			return fmt.Errorf("%w: Compose source has no immutable identity", ErrInvalidPlan)
 		}
-	case SourceBlueprint, SourceImport:
-		return fmt.Errorf("%w: source must be rendered or adopted before execution", ErrUnsupportedSource)
+	case SourceBlueprint:
+		if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) || plan.SourceIdentity.Repository == "" ||
+			!contentDigestRE.MatchString(plan.SourceIdentity.Revision) {
+			return fmt.Errorf("%w: blueprint source has no immutable image digest and render digest", ErrInvalidPlan)
+		}
+	case SourceImport:
+		return fmt.Errorf("%w: source must be adopted before execution", ErrUnsupportedSource)
 	default:
 		return ErrUnsupportedSource
 	}

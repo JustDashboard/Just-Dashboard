@@ -1,0 +1,11 @@
+=== RUN   TestAuditPreviewInheritanceObservation
+    audit_20260916_test.go:66: constraint failed: deployment runtime plan revision is immutable (1811)
+--- FAIL: TestAuditPreviewInheritanceObservation (0.10s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	0.123s
+=== RUN   TestAuditNamedVolumeBackupCoverageObservation
+    audit_20260916_test.go:34: Named volume production-data accepted with a successful backup containing only an unrelated fixture directory
+--- PASS: TestAuditNamedVolumeBackupCoverageObservation (0.07s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.123s
+FAIL

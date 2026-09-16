@@ -1009,6 +1009,15 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if current != request.Revision {
 		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
 	}
+	var kind EnvironmentKind
+	if err := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, environmentID).Scan(&kind); err != nil {
+		return nil, err
+	}
+	if kind == EnvironmentPreview {
+		if err := validatePreviewPlan(environmentID, configuration.Build, configuration.Runtime); err != nil {
+			return nil, err
+		}
+	}
 	next, now := current+1, s.now().UTC().Unix()
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at)

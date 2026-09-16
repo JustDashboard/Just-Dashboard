@@ -27,10 +27,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { Row, RowList } from "@/components/row-list"
+import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Status, StatusDot } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
-import { rowReveal } from "@/components/icon-action"
 import { AttentionPanel, attentionLabel, runtimeLabel } from "@/components/docker/attention"
 import { CleanupPanel } from "@/components/docker/cleanup"
 import { DiskSummary } from "@/components/docker/disk-panel"
@@ -145,7 +145,7 @@ export default function DockerOverviewPage() {
         the tile most likely to be pressed.
       */}
       <StatGrid columns={4}>
-        <TileLink href="/docker/containers" label="Running containers">
+        <StatLink href="/docker/containers" label="Running containers">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Running"
@@ -160,7 +160,7 @@ export default function DockerOverviewPage() {
                   : `${containers.length - running} not running`
             }
           />
-        </TileLink>
+        </StatLink>
 
         {/*
           Runtime health, and only runtime health. The hint spells out how many
@@ -168,7 +168,7 @@ export default function DockerOverviewPage() {
           "everything is up" quietly includes every container nothing is
           watching.
         */}
-        <TileLink href="/docker/containers" label="Runtime health">
+        <StatLink href="/docker/containers" label="Runtime health">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Runtime health"
@@ -193,14 +193,14 @@ export default function DockerOverviewPage() {
             }
             hint={runtime?.summary ?? "checking"}
           />
-        </TileLink>
+        </StatLink>
 
         {/*
           Attention is never called health. It counts posture, storage,
           configuration and exposure — none of which stops a service, all of
           which costs something later, and none of which clears itself.
         */}
-        <TileLink href="/docker/containers" label="Things needing attention">
+        <StatLink href="/docker/containers" label="Things needing attention">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Attention"
@@ -221,9 +221,9 @@ export default function DockerOverviewPage() {
                 : "nothing to act on"
             }
           />
-        </TileLink>
+        </StatLink>
 
-        <TileLink href="/docker/stacks" label="Compose stacks">
+        <StatLink href="/docker/stacks" label="Compose stacks">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Compose stacks"
@@ -231,7 +231,7 @@ export default function DockerOverviewPage() {
             value={`${active.length} active`}
             hint={`${detected.length} detected on this server`}
           />
-        </TileLink>
+        </StatLink>
       </StatGrid>
 
       {/* A server with nothing on it is not an error state, and it is the one
@@ -247,7 +247,7 @@ export default function DockerOverviewPage() {
             reboot was to open another page and read a column.
           */}
           {idle.length > 0 && (
-            <Panel>
+            <Panel plain>
               <PanelHeader
                 title={`${idle.length} not running`}
                 actions={
@@ -260,7 +260,7 @@ export default function DockerOverviewPage() {
                 }
               />
               <PanelBody flush>
-                <ul className="divide-y divide-hairline">
+                <RowList>
                   {idle.slice(0, 6).map((container) => (
                     <IdleRow
                       key={container.id}
@@ -271,9 +271,9 @@ export default function DockerOverviewPage() {
                       onChanged={refreshContainers}
                     />
                   ))}
-                </ul>
+                </RowList>
                 {idle.length > 6 && (
-                  <p className="border-t border-hairline px-4 py-2 text-hint text-muted-foreground">
+                  <p className="border-t border-hairline py-2 text-hint text-muted-foreground">
                     and {idle.length - 6} more.
                   </p>
                 )}
@@ -284,7 +284,7 @@ export default function DockerOverviewPage() {
           {/* Problems first. Everything below is context for them. */}
           <AttentionPanel diagnosis={health.data} onRescan={health.refresh} />
 
-          <Panel>
+          <Panel plain>
             <PanelHeader
               title={
                 <span className="inline-flex items-center gap-1.5">
@@ -309,28 +309,21 @@ export default function DockerOverviewPage() {
                   description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
                 />
               ) : (
-                <ul className="divide-y divide-hairline">
+                <RowList>
                   {detected.map((stack) => (
-                    <li key={stack.name}>
-                      <Link
-                        href={`/docker/stacks?stack=${encodeURIComponent(stack.name)}`}
-                        className="group flex min-w-0 items-center justify-between gap-3 px-4 py-2.5 focus-ring-inset transition-colors hover:bg-row-hover"
-                      >
-                        <span className="flex min-w-0 items-center gap-2.5">
-                          <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
-                          <span className="truncate text-body font-medium">{stack.name}</span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <StackStateBadge stack={stack} />
-                          <ArrowRight
-                            className={cn("size-3 text-muted-foreground", rowReveal())}
-                            aria-hidden
-                          />
-                        </span>
-                      </Link>
-                    </li>
+                    <Row
+                      key={stack.name}
+                      href={`/docker/stacks?stack=${encodeURIComponent(stack.name)}`}
+                      leading={
+                        <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
+                      }
+                      title={stack.name}
+                      subtitle={stack.workingDir}
+                      mono
+                      trailing={<StackStateBadge stack={stack} />}
+                    />
                   ))}
-                </ul>
+                </RowList>
               )}
             </PanelBody>
           </Panel>
@@ -383,48 +376,6 @@ export default function DockerOverviewPage() {
 }
 
 /**
- * A stat tile that is also a destination.
- *
- * The arrow is the whole point: a tile with a hover wash and nothing else is a
- * surface that reacts without saying what pressing it does. It appears through
- * `rowReveal` rather than a hand-written `group-hover`, which is what makes it
- * permanently visible on a touch screen — where there is no hover to reveal it
- * with, and where these four tiles are the page's main navigation.
- */
-function TileLink({
-  href,
-  label,
-  children,
-}: {
-  href: string
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <Link
-      href={href}
-      aria-label={label}
-      // The wash lands on the tile rather than on this anchor: a `StatTile`
-      // paints its own opaque `bg-card`, so a background set out here is behind
-      // it and invisible. Three of these tiles were links before and none of
-      // them had a working hover for exactly that reason.
-      // The hint is the tile's last line and the arrow sits on top of its right
-      // end, so it gives the arrow its width back rather than truncating under
-      // it — "6 without a health check" ended as "6 without a health che⋯→".
-      className="group relative block min-w-0 focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
-    >
-      {children}
-      {/* Bottom right, because the figure is top right: an arrow in the corner
-          a `StatTile` right-aligns its number into sits on top of the number. */}
-      <ArrowRight
-        aria-hidden
-        className={cn("absolute right-3 bottom-2.5 size-3 text-muted-foreground", rowReveal())}
-      />
-    </Link>
-  )
-}
-
-/**
  * One container that is not running, and the one button that changes that.
  *
  * Deliberately not the full verb set: this panel exists to answer "what is
@@ -460,7 +411,7 @@ function IdleRow({
   return (
     <li
       className={cn(
-        "group flex min-w-0 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-row-hover",
+        "group -mx-3 flex min-w-0 items-center gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-row-hover",
         pending && "opacity-70",
       )}
     >

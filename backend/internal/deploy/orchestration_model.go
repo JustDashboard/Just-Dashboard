@@ -28,6 +28,7 @@ type RunRequest struct {
 	PlanRevision         int
 	SourceRevision       string
 	ExpectedPlanRevision int
+	ExpectedGitPolicy    string
 	RetryOfRunID         int64
 	// VariableSnapshotRunID is internal retry provenance. A normal enqueue
 	// captures the environment's active revisions; a retry copies this run's

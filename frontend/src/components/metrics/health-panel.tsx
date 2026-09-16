@@ -18,15 +18,18 @@ import { FindingList } from "@/components/finding-list"
 export function HealthPanel({
   health,
   loading,
+  plain,
   className,
 }: {
   health: Health | undefined
   loading: boolean
+  /** Drawn as a titled list on the page rather than in a frame — see `Panel`. */
+  plain?: boolean
   className?: string
 }) {
   if (loading && !health) {
     return (
-      <Panel className={className}>
+      <Panel plain={plain} className={className}>
         <PanelHeader title="Health" />
         <PanelBody className="space-y-2">
           <Skeleton className="h-4 w-40" />
@@ -38,7 +41,7 @@ export function HealthPanel({
   if (!health) return null
 
   return (
-    <Panel className={className}>
+    <Panel plain={plain} className={className}>
       <PanelHeader
         title="Health"
         actions={<Status verdict={health.status} label={verdictLabel(health.status)} />}

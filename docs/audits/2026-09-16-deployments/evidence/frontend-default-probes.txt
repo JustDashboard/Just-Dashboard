@@ -1,0 +1,4 @@
+{"fixture":"static","internalPort":0,"checkCount":0,"buildSecrets":[]}
+{"fixture":"vite","internalPort":0,"checkCount":0,"buildSecrets":[]}
+{"fixture":"vite-start","internalPort":3000,"checkCount":1,"buildSecrets":[]}
+{"fixture":"containerfile","internalPort":3000,"checkCount":1,"dockerfile":"Dockerfile","buildSecrets":[]}

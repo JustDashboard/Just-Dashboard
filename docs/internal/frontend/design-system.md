@@ -37,6 +37,27 @@ What separates a surface now:
 - `shadow-*` **only** for the three things that genuinely float above the page: popover, dropdown,
   dialog.
 
+**And not every block is a surface.** The 0.6.7 pass found the other failure: a page on which every
+block *was* framed read as a page of containers, and the frames stopped separating anything because
+there was nothing unframed left to separate from. The ground went darker (`--background` 0.105,
+`--card` 0.128) so the one step still reads, and three things stopped taking a frame:
+
+- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
+  first column starts on the page's own edge, in line with the title (`framed` restores the box for
+  the one case a run sits inside another surface);
+- a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
+  body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
+  activity on the Overview, the idle containers and compose projects on the Docker overview, the
+  areas list on the Security overview, "Needs attention" on the proxy overview and on every security
+  area page, health findings, the runtime-health bar, and the deployment pages' lists, overview
+  facts, run summary and create flow are plain;
+- a panel's header — it is no longer a tinted strip. The title sits on the panel's own ground with a
+  hairline under it. `--surface-header` survives at a fainter mix for the two places a strip is still
+  chrome: a `Pane`'s header and footer.
+
+A panel that is also a destination takes `interactive`: its border steps up to `--border-strong`
+under the pointer, and nothing else moves.
+
 Press feedback is colour. A control with a face takes its own `active:` step — `active:bg-control-active`
 for the neutral faces, `active:bg-brand-active` for the orange command; a ghost or link button has no
 face to move and borrows the accent wash. Nothing translates, and nothing casts a shadow to say it was
@@ -173,7 +194,8 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 
 | Surface | Is | Is not |
 | --- | --- | --- |
-| `Panel` | A block of content *on* the page: framed, tinted header strip, hairline, body | Not a working region |
+| `Panel` | A block of content *on* the page: framed, header, hairline, body — or `plain`, the same anatomy with no frame | Not a working region |
+| `RowList` / `Row` | A list of rows with hairlines between them: a leading mark, a title, a second line, a trailing state | Not a table — nothing lines up in columns |
 | `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console | Not a block in a page's flow |
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
@@ -187,6 +209,13 @@ Before these existed, fourteen pages read as fourteen products.
 
 ## 8. Type
 
+The face is **Satoshi**, self-hosted. The variable files sit in `src/app/fonts/` and
+`next/font/local` loads them in `app/layout.tsx`, which emits them as `--font-satoshi`; `--font-sans`
+in `globals.css` puts it ahead of the system stack, which stays behind it as the fallback. Nothing at
+build or run time reaches out to a font CDN — this product is built and run on locked-down networks,
+which is why the face was self-hosted rather than fetched, and the licence file travels with the
+files.
+
 The ladder is `text-micro` (10) → `text-hint` (11) → `text-xs` (12) → `text-body` (13) →
 `text-sm` (14) → `text-title` (15). An arbitrary `text-[Npx]` is a departure from it, and the linter
 says so.
@@ -196,16 +225,24 @@ says so.
 underneath it — legible only because a tinted icon square was sitting in front of it doing the
 separating. With the square gone (§14) the title has to be the thing that reads as a heading, and two
 pixels is the whole of what that takes: `text-title` is a step the ladder already had, so the ranks
-now run page (20) → surface (15) → body (13) with nothing invented in between.
+now run page (24, `text-2xl`) → section (16, `text-base`) → surface (15) → body (13) with nothing
+invented in between. The page title went from 20 to 24 in 0.6.7: at 20 it sat five pixels from the
+panel titles it ranks above, and on the darker ground the page needed one thing that is plainly the
+largest. A `StatTile`'s figure is the same 24, because a headline number is the other thing a reader
+finds without reading.
 
 Weight carries hierarchy where size cannot. The sidebar is the one surface dense enough to need
 three: group labels in the eyebrow's small caps, resting entries `font-normal` so the column reads as
 a list rather than as forty-nine headings, and the current entry `font-medium` alongside its accent
 fill and brand-orange icon.
 
-A **section tab strip** is `text-xs`, not `text-body`. It is chrome — it names the pages of a section
-and then gets out of the way — and at body size it sat within two pixels of both the page title above
-it and the panel titles below, three ranks of text with no rank between them.
+A **section tab strip** is `text-body`. It was `text-xs` while the page title was 20px and the strip
+sat within two pixels of both the title and the panel titles; with the title at 24 the strip has a
+rank of its own again, and 12px chrome under a 24px title read as an afterthought.
+
+A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
+tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to
+name.
 
 `.eyebrow` is the small-caps label that opens a section, a panel header or a stat tile. `.numeric` is
 any figure meant to be compared with the one above it — tabular digits stop a polling table from

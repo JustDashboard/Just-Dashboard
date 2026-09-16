@@ -22,8 +22,9 @@ import { notify } from "@/lib/toast"
 import type { DeploymentActiveWork, DeploymentFleet, DeploymentSummary } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader, SearchInput, Section, Toolbar } from "@/components/page"
+import { Page, PageHeader, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import {
@@ -61,6 +62,16 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
+/**
+ * The fleet: every project, and what is happening to it right now.
+ *
+ * One row of controls above a grid of cards. It used to be a section heading,
+ * a count, a view switch, a toolbar and then the grid — four bands of chrome
+ * before the first project — and every card closed with a strip of three
+ * statuses whether or not any of them had something to say. A card now says
+ * what it is, where it lives, what is deployed and how the last deployment
+ * went; health and pending changes appear only when they are news.
+ */
 export default function DeployPage() {
   const { can } = useAuth()
   const archived = useSearchParams().get("view") === "archived"
@@ -97,6 +108,14 @@ export default function DeployPage() {
     })
   }, [environment, fleet.data?.deployments, pendingOnly, profile, query, state])
 
+  const filtered =
+    profile !== "all" || state !== "all" || environment !== "all" || pendingOnly
+  const filterCount =
+    Number(profile !== "all") +
+    Number(state !== "all") +
+    Number(environment !== "all") +
+    Number(pendingOnly)
+
   const cancel = async (work: DeploymentActiveWork) => {
     try {
       await post(`/deploy/${work.run.projectId}/runs/${work.run.id}/cancel`, {})
@@ -118,7 +137,7 @@ export default function DeployPage() {
         title="Deployments"
         actions={
           <>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="ghost" size="sm" asChild>
               <Link href="/deploy?view=archived">Archived</Link>
             </Button>
             {can("system.admin") && (
@@ -144,7 +163,7 @@ export default function DeployPage() {
       )}
 
       {fleet.data && fleet.data.activeWork.length > 0 && (
-        <ActiveWorkStrip
+        <ActiveWork
           work={fleet.data.activeWork}
           slots={fleet.data.slots}
           canCancel={can("service.control")}
@@ -154,68 +173,22 @@ export default function DeployPage() {
 
       {fleet.data && (
         <div className="space-y-5">
-          <Section
-            title="Projects"
-            actions={
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="numeric text-xs text-muted-foreground">
-                  {deployments.length} of {fleet.data.deployments.length}
-                </span>
-                <div
-                  className="flex items-center gap-1"
-                  role="group"
-                  aria-label="Deployment layout"
-                >
-                  <Button
-                    variant={layout === "grid" ? "secondary" : "ghost"}
-                    size="icon-sm"
-                    aria-label="Grid view"
-                    aria-pressed={layout === "grid"}
-                    onClick={() => setLayout("grid")}
-                  >
-                    <GridSquare className="size-4" />
-                  </Button>
-                  <Button
-                    variant={layout === "list" ? "secondary" : "ghost"}
-                    size="icon-sm"
-                    aria-label="List view"
-                    aria-pressed={layout === "list"}
-                    onClick={() => setLayout("list")}
-                  >
-                    <ListUnordered className="size-4" />
-                  </Button>
-                </div>
-              </div>
-            }
-          >
-            {null}
-          </Section>
-          <Toolbar className="gap-3">
+          <Toolbar className="gap-2">
             <SearchInput
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search deployments"
               aria-label="Search deployments"
-              containerClassName="min-w-0 flex-1 sm:w-auto"
+              containerClassName="min-w-0 flex-1 sm:w-auto sm:max-w-sm"
             />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="ghost" size="sm" className="text-muted-foreground">
                   <Filter className="size-3.5" /> Filters
-                  {(profile !== "all" ||
-                    state !== "all" ||
-                    environment !== "all" ||
-                    pendingOnly) && (
-                    <span className="numeric">
-                      {Number(profile !== "all") +
-                        Number(state !== "all") +
-                        Number(environment !== "all") +
-                        Number(pendingOnly)}
-                    </span>
-                  )}
+                  {filtered && <span className="numeric text-foreground">{filterCount}</span>}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 space-y-3">
+              <PopoverContent align="start" className="w-72 space-y-3">
                 <p className="text-sm font-medium">Filter projects</p>
                 <Select value={state} onValueChange={setState}>
                   <SelectTrigger size="sm" className="w-full" aria-label="Filter by status">
@@ -272,14 +245,11 @@ export default function DeployPage() {
                 </Label>
               </PopoverContent>
             </Popover>
-            {(query ||
-              profile !== "all" ||
-              state !== "all" ||
-              environment !== "all" ||
-              pendingOnly) && (
+            {(query || filtered) && (
               <Button
                 size="sm"
                 variant="ghost"
+                className="text-muted-foreground"
                 onClick={() => {
                   setQuery("")
                   setProfile("all")
@@ -288,54 +258,80 @@ export default function DeployPage() {
                   setPendingOnly(false)
                 }}
               >
-                <Filter className="size-3.5" />
                 Clear
               </Button>
             )}
+            <span className="flex-1" />
+            <span className="numeric text-hint text-muted-foreground">
+              {deployments.length} of {fleet.data.deployments.length}
+            </span>
+            <div className="flex items-center gap-0.5" role="group" aria-label="Deployment layout">
+              <Button
+                variant={layout === "grid" ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="Grid view"
+                aria-pressed={layout === "grid"}
+                onClick={() => setLayout("grid")}
+              >
+                <GridSquare className="size-4" />
+              </Button>
+              <Button
+                variant={layout === "list" ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="List view"
+                aria-pressed={layout === "list"}
+                onClick={() => setLayout("list")}
+              >
+                <ListUnordered className="size-4" />
+              </Button>
+            </div>
           </Toolbar>
-          <div>
-            {deployments.length === 0 ? (
-              <EmptyState
-                icon={CloudUpload}
-                title={
-                  fleet.data.deployments.length === 0
-                    ? "Your next project starts here"
-                    : "No deployments match"
-                }
-                description={
-                  fleet.data.deployments.length === 0
-                    ? "Import a repository, launch a database, or start from an application template. Everything you deploy has a home here."
-                    : "Change or clear the filters to see the rest of the fleet."
-                }
-                action={
-                  fleet.data.deployments.length === 0 ? (
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      {can("system.admin") && (
-                        <Button size="sm" asChild>
-                          <Link href="/deploy/new">New project</Link>
-                        </Button>
-                      )}
-                      <Button size="sm" variant="outline" asChild>
-                        <Link href="/docker/stacks">See what is already running</Link>
+
+          {deployments.length === 0 ? (
+            <EmptyState
+              icon={CloudUpload}
+              title={
+                fleet.data.deployments.length === 0
+                  ? "Your next project starts here"
+                  : "No deployments match"
+              }
+              description={
+                fleet.data.deployments.length === 0
+                  ? "Import a repository, launch a database, or start from an application template. Everything you deploy has a home here."
+                  : "Change or clear the filters to see the rest of the fleet."
+              }
+              action={
+                fleet.data.deployments.length === 0 ? (
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {can("system.admin") && (
+                      <Button size="sm" asChild>
+                        <Link href="/deploy/new">New project</Link>
                       </Button>
-                    </div>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <>
-                {layout === "list" && <FleetTable deployments={deployments} />}
-                <FleetCards deployments={deployments} list={layout === "list"} />
-              </>
-            )}
-          </div>
+                    )}
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href="/docker/stacks">See what is already running</Link>
+                    </Button>
+                  </div>
+                ) : undefined
+              }
+            />
+          ) : (
+            <>
+              {layout === "list" && <FleetTable deployments={deployments} />}
+              <FleetCards deployments={deployments} list={layout === "list"} />
+            </>
+          )}
         </div>
       )}
     </Page>
   )
 }
 
-function ActiveWorkStrip({
+/**
+ * Runs in flight, as a plain list above the fleet. It is the one thing on the
+ * page that changes under the reader, so it gets the top and no frame.
+ */
+function ActiveWork({
   work,
   slots,
   canCancel,
@@ -347,58 +343,59 @@ function ActiveWorkStrip({
   onCancel: (work: DeploymentActiveWork) => void
 }) {
   return (
-    <Panel aria-labelledby="active-work-title">
+    <Panel plain aria-labelledby="active-work-title">
       <PanelHeader
         title={<span id="active-work-title">Active work</span>}
         actions={
           <span className="numeric text-hint text-muted-foreground">
-            Build slots {slots.heavyUsed}/{slots.heavyCapacity} · control slots {slots.lightUsed}/
-            {slots.lightCapacity}
+            {slots.heavyUsed}/{slots.heavyCapacity} build · {slots.lightUsed}/
+            {slots.lightCapacity} control
           </span>
         }
       />
       <PanelBody flush>
-        <ul className="divide-y divide-hairline" aria-live="polite" aria-atomic="true">
+        <RowList aria-live="polite" aria-atomic="true">
           {work.map((item) => (
-            <li
+            <Row
               key={item.run.id}
-              className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5"
-            >
-              <div className="min-w-40 flex-1">
+              leading={<DeploymentStatus state={item.run.state} className="w-24" />}
+              title={
                 <Link
                   href={`/deploy/${item.run.projectId}/runs/${item.run.id}`}
-                  className="text-body font-medium hover:underline"
+                  className="rounded-sm focus-ring hover:underline"
                 >
                   {item.projectName}
                 </Link>
-                <p className="truncate text-hint text-muted-foreground">
-                  {item.environment} ·{" "}
-                  {item.currentStep ? humanize(item.currentStep) : "Waiting for next step"}
-                </p>
-              </div>
-              <DeploymentStatus state={item.run.state} />
-              <span className="numeric text-hint text-muted-foreground">
-                {item.queuePosition
-                  ? `Queue ${item.queuePosition}`
-                  : relativeTime(item.run.claimedAt ?? item.run.requestedAt)}
-              </span>
-              <Button variant="outline" size="xs" asChild>
-                <Link href={`/deploy/${item.run.projectId}/runs/${item.run.id}`}>View</Link>
-              </Button>
-              {canCancel && !item.run.cancelRequested && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="text-destructive"
-                  onClick={() => onCancel(item)}
-                >
-                  <StopCircle className="size-3" />
-                  Cancel
-                </Button>
-              )}
-            </li>
+              }
+              subtitle={`${item.environment} · ${
+                item.currentStep ? humanize(item.currentStep) : "Waiting for next step"
+              }`}
+              trailing={
+                <>
+                  <span className="numeric text-hint text-muted-foreground">
+                    {item.queuePosition
+                      ? `Queue ${item.queuePosition}`
+                      : relativeTime(item.run.claimedAt ?? item.run.requestedAt)}
+                  </span>
+                  <Button variant="outline" size="xs" asChild>
+                    <Link href={`/deploy/${item.run.projectId}/runs/${item.run.id}`}>View</Link>
+                  </Button>
+                  {canCancel && !item.run.cancelRequested && (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="text-destructive"
+                      onClick={() => onCancel(item)}
+                    >
+                      <StopCircle className="size-3" />
+                      Cancel
+                    </Button>
+                  )}
+                </>
+              }
+            />
           ))}
-        </ul>
+        </RowList>
       </PanelBody>
     </Panel>
   )
@@ -472,111 +469,125 @@ function FleetTable({ deployments }: { deployments: DeploymentSummary[] }) {
   )
 }
 
+/** Health worth a word: a healthy service is the normal case and says nothing. */
+function healthIsNews(health: string) {
+  return health !== "healthy" && health !== "passed"
+}
+
 function FleetCards({ deployments, list }: { deployments: DeploymentSummary[]; list: boolean }) {
   return (
     <ul
       aria-label="Deployment projects"
-      className={cn("grid gap-4", list ? "md:hidden" : "md:grid-cols-2 2xl:grid-cols-3")}
+      className={cn("grid gap-5", list ? "md:hidden" : "md:grid-cols-2 2xl:grid-cols-3")}
     >
       {deployments.map((deployment) => {
         const url = deploymentURL(deployment.endpoint)
+        const run = deployment.activeRun ?? deployment.lastRun
         return (
           <li key={deployment.id} className="min-w-0">
-            <Panel className="group h-full transition-colors hover:border-muted-foreground/50">
-              <div className="flex items-start gap-3 p-5 pb-3">
-                <WorkloadMark profile={deployment.profile} />
-                <div className="min-w-0 flex-1">
-                  <Link
-                    href={`/deploy/${deployment.id}`}
-                    className="block truncate rounded-sm text-title font-medium focus-ring hover:underline"
-                  >
-                    {deployment.name}
-                  </Link>
-                  {url ? (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 block truncate rounded-sm text-xs text-muted-foreground focus-ring hover:text-foreground"
+            <Panel interactive className="h-full">
+              <div className="flex flex-1 flex-col gap-5 p-5">
+                <div className="flex items-start gap-3">
+                  <WorkloadMark profile={deployment.profile} />
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/deploy/${deployment.id}`}
+                      className="block truncate rounded-sm text-title font-medium focus-ring hover:underline"
                     >
-                      {new URL(url).host}
-                    </a>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {deployment.liveReleaseId ? "Private service" : "No production deployment"}
-                    </p>
-                  )}
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Actions for ${deployment.name}`}
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem asChild>
-                      <Link href={`/deploy/${deployment.id}`}>Open project</Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link href={`/deploy/${deployment.id}?tab=logs`}>View runtime logs</Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link href={`/deploy/${deployment.id}?tab=configuration`}>
-                        Project settings
-                      </Link>
-                    </DropdownMenuItem>
-                    {url && (
-                      <DropdownMenuItem asChild>
-                        <a href={url} target="_blank" rel="noopener noreferrer">
-                          Visit website
-                        </a>
-                      </DropdownMenuItem>
+                      {deployment.name}
+                    </Link>
+                    {url ? (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-0.5 block truncate rounded-sm text-xs text-muted-foreground focus-ring hover:text-foreground"
+                      >
+                        {new URL(url).host}
+                      </a>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {deployment.liveReleaseId ? "Private service" : "Not deployed yet"}
+                      </p>
                     )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <Link
-                href={`/deploy/${deployment.id}`}
-                className="flex min-h-20 flex-1 flex-col justify-end gap-2 px-5 pb-5 focus-ring-inset hover:bg-row-hover"
-              >
-                <div className="flex items-center gap-2 text-xs">
-                  <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate" title={deployment.sourceRef}>
-                    {deployment.sourceRef || humanize(deployment.profile)}
-                  </span>
-                  {deployment.sourceRevision && (
-                    <span className="ml-auto font-mono text-hint text-muted-foreground">
-                      {releaseLabel(deployment)}
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="-mt-1 -mr-2 text-muted-foreground"
+                        aria-label={`Actions for ${deployment.name}`}
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem asChild>
+                        <Link href={`/deploy/${deployment.id}`}>Open project</Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href={`/deploy/${deployment.id}?tab=logs`}>View runtime logs</Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href={`/deploy/${deployment.id}?tab=configuration`}>
+                          Project settings
+                        </Link>
+                      </DropdownMenuItem>
+                      {url && (
+                        <DropdownMenuItem asChild>
+                          <a href={url} target="_blank" rel="noopener noreferrer">
+                            Visit website
+                          </a>
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* The rest of the card is one link: what is deployed, and how
+                    the last deployment went. */}
+                <Link
+                  href={`/deploy/${deployment.id}`}
+                  className="-mx-2 -mb-2 flex flex-col gap-2 rounded-md px-2 py-2 text-xs focus-ring-inset hover:bg-row-hover"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate" title={deployment.sourceRef}>
+                      {deployment.sourceRef || humanize(deployment.profile)}
                     </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>{deployment.environmentName}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>
-                    {relativeTime(deployment.lastRun?.requestedAt ?? deployment.updatedAt)}
+                    {deployment.sourceRevision && (
+                      <span className="ml-auto shrink-0 font-mono text-hint text-muted-foreground">
+                        {releaseLabel(deployment)}
+                      </span>
+                    )}
                   </span>
-                </div>
-              </Link>
-              <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-t border-hairline px-5 py-3">
-                {deployment.activeRun ? (
-                  <DeploymentStatus state={deployment.activeRun.state} />
-                ) : deployment.lastRun ? (
-                  <DeploymentStatus state={deployment.lastRun.state} />
-                ) : (
-                  <span className="text-xs text-muted-foreground">Ready for first deploy</span>
-                )}
-                <div className="flex flex-wrap items-center gap-3">
-                  <HealthStatus health={deployment.health} />
-                  {deployment.pendingChanges && (
-                    <Status verdict="warning" label="Pending changes" />
-                  )}
-                </div>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+                    {run ? (
+                      <DeploymentStatus state={run.state} />
+                    ) : (
+                      <span className="text-xs">Ready for first deploy</span>
+                    )}
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      {relativeTime(deployment.lastRun?.requestedAt ?? deployment.updatedAt)}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>{deployment.environmentName}</span>
+                    {healthIsNews(deployment.health) && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <HealthStatus health={deployment.health} />
+                      </>
+                    )}
+                  </span>
+                </Link>
               </div>
+              {deployment.pendingChanges && (
+                <div className="flex items-center border-t border-hairline px-5 py-2.5">
+                  <Status verdict="warning" label="Pending changes" />
+                </div>
+              )}
             </Panel>
           </li>
         )

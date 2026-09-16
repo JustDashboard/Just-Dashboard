@@ -1,0 +1,143 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JD_TEST_POSTGRES_DSN: postgres://jd_test:jd_test@127.0.0.1:1/jd_test?sslmode=disable
+  JD_TEST_MYSQL_DSN: jd_test:jd_test@tcp(127.0.0.1:1)/jd_test
+  JD_TEST_MSSQL_DSN: sqlserver://jd_test:jd_test@127.0.0.1:1?database=jd_test
+  JD_TEST_ORACLE_DSN: oracle://jd_test:jd_test@127.0.0.1:1/FREE
+  JD_TEST_CLICKHOUSE_DSN: clickhouse://jd_test:jd_test@127.0.0.1:1/jd_test
+  JD_TEST_MONGO_DSN: mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=100
+  JD_TEST_REDIS_DSN: redis://127.0.0.1:1
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Build, vet and test
+        run: |
+          mkdir -p "$RUNNER_TEMP/jd-ci"
+          go version | tee "$RUNNER_TEMP/jd-ci/go-version.txt"
+          go build ./... 2>&1 | tee "$RUNNER_TEMP/jd-ci/backend-build.txt"
+          go vet ./... 2>&1 | tee "$RUNNER_TEMP/jd-ci/backend-vet.txt"
+          go test -count=1 -json ./... | tee "$RUNNER_TEMP/jd-ci/backend-tests.jsonl"
+      - name: Deployment race gate
+        run: |
+          go test -race -p 1 -count=1 -json ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store ./internal/dockerx | tee "$RUNNER_TEMP/jd-ci/backend-race.jsonl"
+      - name: Retain backend evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-evidence
+          path: ${{ runner.temp }}/jd-ci/
+          retention-days: 30
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: frontend/package.json
+      - name: Install locked dependencies and Chromium
+        run: |
+          bun install --frozen-lockfile
+          bun run test:browser:install --with-deps
+      - name: Lint, unit tests, production build and browser gate
+        run: |
+          mkdir -p "$RUNNER_TEMP/jd-ci"
+          bun --version | tee "$RUNNER_TEMP/jd-ci/bun-version.txt"
+          bun run lint 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-lint.txt"
+          bun run test 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-unit.txt"
+          bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
+          bun run test:browser 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frontend-evidence
+          path: |
+            ${{ runner.temp }}/jd-ci/
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 30
+
+  deployment-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      JD_DEPLOY_LIVE: "1"
+    defaults:
+      run:
+        working-directory: backend
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify disposable runner infrastructure
+        run: |
+          mkdir -p "$RUNNER_TEMP/jd-ci"
+          docker version | tee "$RUNNER_TEMP/jd-ci/docker-version.txt"
+          docker compose version | tee "$RUNNER_TEMP/jd-ci/compose-version.txt"
+          docker buildx version | tee "$RUNNER_TEMP/jd-ci/buildx-version.txt"
+          go version | tee "$RUNNER_TEMP/jd-ci/go-version.txt"
+      - name: Artifact, framework, activation and preview fixtures
+        run: |
+          go test -count=1 -timeout 30m -json ./internal/deploy -run 'TestLive(C4ArtifactAdapters|DetectedFrameworkBuildAndServing|C5ActivationAdapters|PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction|RuntimeDiagnoserReadsExitedContainer)$' | tee "$RUNNER_TEMP/jd-ci/deploy-live.jsonl"
+          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/deploy-live.jsonl" TestLiveC4ArtifactAdapters TestLiveDetectedFrameworkBuildAndServing TestLiveC5ActivationAdapters TestLivePreviewStorageCredentialsNetworkAndCleanup TestLiveLegacyPreviewQuarantinePreservesProduction TestLiveRuntimeDiagnoserReadsExitedContainer
+      - name: Database replacement and Compose storage/network fixtures
+        run: |
+          go test -count=1 -timeout 15m -json ./internal/api -run '^TestLive(DeploymentDatabaseConnection|SQLiteApplicationRecoveryVerification|BackupDumpsAndRestoresAPostgresDatabase)$' | tee "$RUNNER_TEMP/jd-ci/database-live.jsonl"
+          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/database-live.jsonl" TestLiveDeploymentDatabaseConnection TestLiveSQLiteApplicationRecoveryVerification TestLiveBackupDumpsAndRestoresAPostgresDatabase
+          go test -count=1 -json ./internal/dockerx -run '^TestLive(DeploymentComposeStorageUsesMergedMountsAndFrozenVariables|ComposeDatabaseNetworkMerge)$' | tee "$RUNNER_TEMP/jd-ci/compose-live.jsonl"
+          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/compose-live.jsonl" TestLiveDeploymentComposeStorageUsesMergedMountsAndFrozenVariables TestLiveComposeDatabaseNetworkMerge
+      - name: Cutover continuity and runtime fault matrix
+        env:
+          JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
+        run: |
+          go test -count=1 -timeout 20m -json ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' | tee "$RUNNER_TEMP/jd-ci/cutover-live.jsonl"
+          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/cutover-live.jsonl" TestLiveCutoverTrafficContinuity TestLiveCutoverSurvivesProxyLoss
+          go test -count=1 -timeout 15m -json ./internal/deploy -run '^TestLive(RuntimeLossKeepsExactlyOneReleaseLive|BackendKillAtEveryStepLeavesOneRecoveredRun)$' | tee "$RUNNER_TEMP/jd-ci/runtime-fault.jsonl"
+          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/runtime-fault.jsonl" TestLiveRuntimeLossKeepsExactlyOneReleaseLive TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun
+      - name: Retain live evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-live-evidence
+          path: ${{ runner.temp }}/jd-ci/
+          retention-days: 30

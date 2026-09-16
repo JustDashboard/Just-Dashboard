@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/docker/docker/errdefs"
 	"os"
 	"strconv"
 	"time"
@@ -95,6 +96,10 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 			}
 			if _, err := o.docker.InspectVolume(ctx, dependency.ResourceID); err != nil {
 				observed.Detail = "Docker volume was not found"
+				observed.Missing = errdefs.IsNotFound(err)
+				if !observed.Missing {
+					observed.Detail = "Docker volume could not be inspected"
+				}
 				break
 			}
 			observed.Available, observed.Status = true, "available"

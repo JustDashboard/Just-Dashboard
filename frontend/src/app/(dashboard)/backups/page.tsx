@@ -5,7 +5,7 @@ import { Archive, CloudDownload, CloudUpload, Play, Plus, Trash } from "@/compon
 import { notify } from "@/lib/toast"
 import { del, get, post, put } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
-import type { BackupJob, BackupRun } from "@/lib/types"
+import type { BackupJob, BackupRun, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -17,6 +17,7 @@ import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -98,6 +99,13 @@ export default function BackupsPage() {
                 <Detail label="Keep">
                   {job.retention > 0 ? `${job.retention} archives` : "everything"}
                 </Detail>
+                {(job.databaseDumps?.length ?? 0) > 0 && (
+                  <Detail label="Databases">
+                    {job.databaseDumps!.length === 1
+                      ? "1 native dump"
+                      : `${job.databaseDumps!.length} native dumps`}
+                  </Detail>
+                )}
                 <Detail label="Last run">
                   {job.lastRun ? (
                     <span className="flex items-center gap-1.5">
@@ -194,7 +202,7 @@ function HistorySheet({
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [logFor, setLogFor] = useState<BackupRun | null>(null)
+  const [selectedLog, setLogFor] = useState<BackupRun | null>(null)
   const { data, loading, refresh } = usePoll(
     (signal) =>
       job
@@ -203,6 +211,7 @@ function HistorySheet({
     5000,
     [job?.id],
   )
+  const logFor = data?.runs.find((run) => run.id === selectedLog?.id) ?? selectedLog
 
   return (
     <>
@@ -237,6 +246,11 @@ function HistorySheet({
                       </TableCell>
                       <TableCell>
                         <Status state={run.status} />
+                        {run.restoreVerification && (
+                          <p className="mt-1 text-hint text-muted-foreground">
+                            Restore check: {run.restoreVerification.state.replaceAll("_", " ")}
+                          </p>
+                        )}
                       </TableCell>
                       <TableCell className="numeric text-right font-mono">
                         {run.sizeBytes ? bytes(run.sizeBytes) : "—"}
@@ -251,6 +265,14 @@ function HistorySheet({
                           </Button>
                           {run.status === "success" && can("destructive") && (
                             <RestoreButton run={run} confirm={confirm} onDone={refresh} />
+                          )}
+                          {run.status === "success" &&
+                            can("destructive") &&
+                            (run.manifest?.databaseDumps?.length ?? 0) > 0 && (
+                              <RestoreDatabaseButton run={run} confirm={confirm} onDone={refresh} />
+                            )}
+                          {run.status === "success" && job?.recovery && can("system.admin") && (
+                            <VerifyRestoreButton run={run} onDone={refresh} />
                           )}
                         </div>
                       </TableCell>
@@ -279,12 +301,158 @@ function HistorySheet({
                   {logFor.artifact}
                 </p>
               )}
+              {logFor.restoreVerification && (
+                <div className="space-y-2 rounded-md border p-3 text-body">
+                  <p>{logFor.restoreVerification.detail}</p>
+                  <DetailList>
+                    <Detail label="Recovery check">#{logFor.restoreVerification.id}</Detail>
+                    <Detail label="Schema">{logFor.restoreVerification.schemaVersion}</Detail>
+                    <Detail label="Temporary resources">
+                      {logFor.restoreVerification.cleanupComplete ? "Removed" : "Cleanup pending"}
+                    </Detail>
+                  </DetailList>
+                  <p className="font-mono text-hint break-all text-muted-foreground">
+                    {logFor.restoreVerification.applicationImage}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
       </SidePanel>
       {dialog}
     </>
+  )
+}
+
+/**
+ * Loads one of the run's native database dumps back into its saved connection.
+ * The default target is the dumped database itself; a drill names another
+ * database on the same server so the live one is never touched. The operator
+ * types the target database's name, because this overwrites data.
+ */
+function RestoreDatabaseButton({
+  run,
+  confirm,
+  onDone,
+}: {
+  run: BackupRun
+  confirm: ReturnType<typeof useConfirm>["confirm"]
+  onDone: () => void
+}) {
+  const dumps = run.manifest?.databaseDumps ?? []
+  const [open, setOpen] = useState(false)
+  const [connectionId, setConnectionId] = useState(String(dumps[0]?.connectionId ?? ""))
+  const [database, setDatabase] = useState("")
+  const selected = dumps.find((dump) => String(dump.connectionId) === connectionId)
+  const target = database.trim() || selected?.database || ""
+  return (
+    <>
+      <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
+        Restore database
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title={<>Restore a database from run {run.id}</>}
+        footer={
+          <Button
+            variant="destructive"
+            disabled={!selected || !target}
+            onClick={() => {
+              if (!selected) return
+              setOpen(false)
+              void confirm({
+                title: `Restore ${selected.name} into ${target}`,
+                confirmLabel: "Restore database",
+                phrase: target,
+                description: (
+                  <p>
+                    The <span className="font-mono">{selected.method}</span> dump of{" "}
+                    <span className="font-mono">{selected.database}</span> ({bytes(selected.bytes)})
+                    replaces the contents of <span className="font-mono">{target}</span> on{" "}
+                    {selected.name}. Type the target database name to continue.
+                  </p>
+                ),
+                action: async (confirmation) => {
+                  const res = await post<{ output: string }>(
+                    `/backups/runs/${run.id}/restore-database`,
+                    { connectionId: selected.connectionId, database: database.trim() || undefined },
+                    { confirm: confirmation },
+                  )
+                  notify.success(`Restored ${selected.name} into ${target}`, {
+                    description: res.output || undefined,
+                  })
+                  onDone()
+                },
+              })
+            }}
+          >
+            Continue
+          </Button>
+        }
+      >
+        <div className="grid gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="restore-db-connection">Database dump</Label>
+            <Select value={connectionId} onValueChange={setConnectionId}>
+              <SelectTrigger id="restore-db-connection" className="w-full">
+                <SelectValue placeholder="Choose a dump" />
+              </SelectTrigger>
+              <SelectContent>
+                {dumps.map((dump) => (
+                  <SelectItem key={dump.connectionId} value={String(dump.connectionId)}>
+                    {dump.name} · {dump.driver} · {dump.database} · {bytes(dump.bytes)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="restore-db-target">Target database</Label>
+            <Input
+              id="restore-db-target"
+              value={database}
+              onChange={(e) => setDatabase(e.target.value)}
+              placeholder={selected?.database ?? ""}
+              className="font-mono text-body"
+            />
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Leave blank to restore over the dumped database. Naming another database on the same
+              server is the safe way to rehearse a recovery.
+            </p>
+          </div>
+        </div>
+      </Modal>
+    </>
+  )
+}
+
+function VerifyRestoreButton({ run, onDone }: { run: BackupRun; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await post(`/backups/runs/${run.id}/verify-restore`)
+          notify.success("Application recovery verified", {
+            description: "The restored canary passed and temporary resources were removed.",
+          })
+        } catch (err) {
+          notify.error("Recovery check did not pass", err)
+        } finally {
+          setBusy(false)
+          onDone()
+        }
+      }}
+    >
+      {busy && <Spinner className="size-3" />}
+      Verify restore
+    </Button>
   )
 }
 
@@ -376,6 +544,20 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
   const [schedule, setSchedule] = useState(job?.schedule ?? "0 3 * * *")
   const [retention, setRetention] = useState(job?.retention ?? 7)
   const [enabled, setEnabled] = useState(job?.enabled ?? true)
+  const [sqlitePaths, setSQLitePaths] = useState((job?.sqlitePaths ?? []).join("\n"))
+  const [databaseDumps, setDatabaseDumps] = useState<number[]>(job?.databaseDumps ?? [])
+  const connections = usePoll(
+    (signal) => get<DbConnection[]>("/databases/", undefined, signal),
+    0,
+    [],
+    { enabled: open },
+  )
+  const [recoveryEnabled, setRecoveryEnabled] = useState(Boolean(job?.recovery))
+  const [recoveryImage, setRecoveryImage] = useState(job?.recovery?.image ?? "")
+  const [recoveryCommand, setRecoveryCommand] = useState((job?.recovery?.command ?? []).join("\n"))
+  const [recoverySchema, setRecoverySchema] = useState(job?.recovery?.schemaVersion ?? "")
+  const [expectedOutput, setExpectedOutput] = useState("")
+  const [recoveryAutomatic, setRecoveryAutomatic] = useState(job?.recovery?.automatic ?? false)
 
   const submit = async () => {
     const body = {
@@ -393,6 +575,23 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
       schedule,
       retention: Number(retention),
       enabled,
+      sqlitePaths: sqlitePaths
+        .split("\n")
+        .map((path) => path.trim())
+        .filter(Boolean),
+      databaseDumps,
+      recovery: recoveryEnabled
+        ? {
+            image: recoveryImage.trim(),
+            command: recoveryCommand.split("\n").filter((arg) => arg.length > 0),
+            schemaVersion: recoverySchema.trim(),
+            expectedOutputDigest: job?.recovery?.expectedOutputDigest ?? "",
+            timeoutSeconds: job?.recovery?.timeoutSeconds ?? 60,
+            maxBytes: job?.recovery?.maxBytes ?? 16 * 1024 ** 3,
+            automatic: recoveryAutomatic,
+          }
+        : null,
+      expectedRecoveryOutput: expectedOutput.trim() || undefined,
       // Omitted when blank so editing a schedule does not wipe stored keys.
       secrets:
         accessKey || secretKey ? { accessKeyId: accessKey, secretAccessKey: secretKey } : undefined,
@@ -579,6 +778,145 @@ function JobDialog({ job, onDone }: { job?: BackupJob; onDone: () => void }) {
               Enabled
             </label>
           </div>
+          <details className="rounded-md border p-3">
+            <summary className="cursor-pointer text-body font-medium">
+              Consistency and recovery checks
+            </summary>
+            <div className="mt-4 space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="job-sqlite">SQLite files to snapshot (one per line)</Label>
+                <Textarea
+                  id="job-sqlite"
+                  value={sqlitePaths}
+                  onChange={(e) => setSQLitePaths(e.target.value)}
+                  rows={3}
+                  className="font-mono text-xs"
+                />
+                <p className="text-hint text-muted-foreground">
+                  Files must be inside the sources above. Each database gets a native consistent
+                  snapshot; its live journals are replaced by that snapshot in the archive. Other
+                  files use ordinary filesystem capture.
+                </p>
+              </div>
+              <fieldset className="space-y-1.5">
+                <legend className="text-body">Database dumps</legend>
+                <p className="text-hint text-muted-foreground">
+                  Each saved connection is dumped with its engine&apos;s own tool (pg_dump,
+                  mysqldump, mongodump, a Redis snapshot) or the built-in dump, and the file is
+                  stored in the archive. A deployment linked to the database accepts this as its
+                  backup coverage.
+                </p>
+                {connections.error && <ErrorState error={connections.error} />}
+                {(connections.data?.length ?? 0) === 0 && !connections.loading && (
+                  <p className="text-hint text-muted-foreground">
+                    No saved database connections yet. Add one on the Databases page first.
+                  </p>
+                )}
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {connections.data?.map((connection) => (
+                    <Label
+                      key={connection.id}
+                      className="flex min-h-9 items-center gap-2 text-xs font-normal"
+                    >
+                      <Checkbox
+                        checked={databaseDumps.includes(connection.id)}
+                        onCheckedChange={(checked) =>
+                          setDatabaseDumps((current) =>
+                            checked
+                              ? [...current, connection.id].sort((a, b) => a - b)
+                              : current.filter((id) => id !== connection.id),
+                          )
+                        }
+                        aria-label={`Dump ${connection.name}`}
+                      />
+                      <span className="min-w-0 truncate">
+                        {connection.name}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {connection.driver}
+                          {connection.database ? ` · ${connection.database}` : ""}
+                        </span>
+                      </span>
+                    </Label>
+                  ))}
+                </div>
+              </fieldset>
+              <label className="flex items-center gap-2 text-body">
+                <Switch checked={recoveryEnabled} onCheckedChange={setRecoveryEnabled} />
+                Application recovery check
+              </label>
+              {recoveryEnabled && (
+                <div className="space-y-3">
+                  <p className="text-hint text-muted-foreground">
+                    Restore a temporary copy and run your application’s checker without network
+                    access. Restored sources are available at /restore/source-0001,
+                    /restore/source-0002, in source order. The checker must open the restored data,
+                    verify its schema and canary record, then print the expected result and exit 0.
+                  </p>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-recovery-image">Application image digest</Label>
+                    <Input
+                      id="job-recovery-image"
+                      value={recoveryImage}
+                      onChange={(e) => setRecoveryImage(e.target.value)}
+                      placeholder="sha256:… or registry/app@sha256:…"
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-hint text-muted-foreground">
+                      Retain or pull this exact image on the server before checking.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-recovery-command">
+                      Checker executable and arguments (one per line)
+                    </Label>
+                    <Textarea
+                      id="job-recovery-command"
+                      value={recoveryCommand}
+                      onChange={(e) => setRecoveryCommand(e.target.value)}
+                      rows={4}
+                      className="font-mono text-xs"
+                      placeholder="/app/check-recovery&#10;/restore/source-0001"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-recovery-schema">Expected schema version</Label>
+                    <Input
+                      id="job-recovery-schema"
+                      value={recoverySchema}
+                      onChange={(e) => setRecoverySchema(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-recovery-output">Expected canary output</Label>
+                    <Input
+                      id="job-recovery-output"
+                      value={expectedOutput}
+                      onChange={(e) => setExpectedOutput(e.target.value)}
+                      placeholder={
+                        job?.recovery
+                          ? "Leave blank to keep the saved fingerprint"
+                          : "schema-v1:canary-present"
+                      }
+                    />
+                    <p className="text-hint text-muted-foreground">
+                      Only its SHA-256 fingerprint is saved. Leading and trailing whitespace are
+                      ignored.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-body">
+                    <Switch checked={recoveryAutomatic} onCheckedChange={setRecoveryAutomatic} />
+                    Verify after every successful backup
+                  </label>
+                  <p className="text-hint text-muted-foreground">
+                    Each check is limited to {job?.recovery?.timeoutSeconds ?? 60} seconds and{" "}
+                    {bytes(job?.recovery?.maxBytes ?? 16 * 1024 ** 3)} of restored data. Deployment
+                    policies requiring restore evidence also run a missing check before activation.
+                  </p>
+                </div>
+              )}
+            </div>
+          </details>
         </div>
       </Modal>
     </>

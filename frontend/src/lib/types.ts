@@ -1983,6 +1983,57 @@ export type BackupJob = {
   hasCredentials: boolean
   lastRun?: BackupRun
   nextRun?: string
+  sqlitePaths?: string[]
+  // Saved database connections whose native dump every run captures.
+  databaseDumps?: number[]
+  recovery?: BackupRecoveryPlan
+}
+
+export type BackupDatabaseDump = {
+  connectionId: number
+  name: string
+  driver: string
+  database: string
+  method: string
+  file: string
+  archivePath: string
+  digest: string
+  bytes: number
+}
+
+export type BackupManifest = {
+  version: number
+  artifactDigest: string
+  complete: boolean
+  databaseDumps?: BackupDatabaseDump[]
+}
+
+export type BackupRecoveryPlan = {
+  image: string
+  command: string[]
+  schemaVersion: string
+  expectedOutputDigest: string
+  timeoutSeconds: number
+  maxBytes: number
+  automatic: boolean
+}
+
+export type BackupRestoreVerification = {
+  id: number
+  runId: number
+  state: "running" | "passed" | "failed" | "cleanup_failed"
+  startedAt: string
+  endedAt?: string
+  artifactDigest: string
+  manifestDigest: string
+  planDigest: string
+  applicationImage?: string
+  schemaVersion: string
+  outputDigest?: string
+  entries: number
+  bytes: number
+  cleanupComplete: boolean
+  detail?: string
 }
 
 export type BackupRun = {
@@ -1996,6 +2047,8 @@ export type BackupRun = {
   log: string
   trigger: string
   duration?: string
+  manifest?: BackupManifest
+  restoreVerification?: BackupRestoreVerification
 }
 
 export type DeployProject = {
@@ -2548,6 +2601,34 @@ export type DeploymentSummary = {
   updatedAt: string
 }
 
+export type DeploymentInsights = {
+  projectId: number
+  windowDays: number
+  generatedAt: string
+  runs: number
+  succeeded: number
+  failed: number
+  rolledBack: number
+  cancelled: number
+  successRate: number
+  failureStreak: number
+  medianDurationSeconds: number
+  p95DurationSeconds: number
+  deploysPerWeek: number
+  meanRecoverySeconds: number
+  recoveredFailures: number
+  lastSuccessAt?: string
+  lastFailureAt?: string
+  daily: {
+    date: string
+    succeeded: number
+    failed: number
+    cancelled: number
+    medianDurationSeconds: number
+  }[]
+  topFailures: { code: string; count: number }[]
+}
+
 export type DeploymentRelease = {
   id: number
   projectId: number
@@ -2610,6 +2691,22 @@ export type DeploymentPreview = {
   environmentId: number
   environmentSlug: string
   state: "open" | "closed"
+  updatedAt: string
+  isolationStatus?: "pending" | "quarantined" | "cleared"
+  isolationReason?: string
+}
+
+export type DeploymentPreviewApproval = {
+  configured: boolean
+  id: number
+  triggerId: number
+  providerRef: string
+  revision: string
+  repository: string
+  headRepository: string
+  author: string
+  state: "pending" | "approved" | "superseded" | "closed"
+  approvedBy?: string
   updatedAt: string
 }
 
@@ -2677,7 +2774,14 @@ export type DeploymentDraftSource = {
   blueprintInputs?: Record<string, string>
 }
 
+export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
+
 export type DeploymentDetectionCandidate = {
+  dockerfile?: string
+  goVersion?: string
+  packageManager?: NodePackageManager
+  packageManagers?: NodePackageManager[]
+  recipeIssue?: string
   id: string
   name: string
   root: string
@@ -2742,10 +2846,56 @@ export type DeploymentBuildMethod =
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
+export type DeploymentRestartPolicy = "unless-stopped" | "always" | "on-failure" | "no"
+
+export type NotificationChannelKind = "webhook" | "discord" | "slack" | "telegram" | "email"
+
+export type NotificationEvent = "run.started" | "run.succeeded" | "run.failed" | "run.cancelled"
+
+export type NotificationChannel = {
+  id: number
+  name: string
+  kind: NotificationChannelKind
+  url: string
+  target: string
+  events: string[]
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type NotificationChannelConfig = {
+  webhookUrl?: string
+  botToken?: string
+  chatId?: string
+  smtpHost?: string
+  smtpPort?: number
+  smtpUsername?: string
+  smtpPassword?: string
+  smtpSecurity?: "starttls" | "tls" | "none"
+  from?: string
+  to?: string[]
+}
+
+export type NotificationDelivery = {
+  id: number
+  channelId: number
+  runId?: number
+  event: string
+  attempt: number
+  status: string
+  responseClass: string
+  nextAttemptAt?: string
+  createdAt: string
+  completedAt?: string
+}
+
 export type DeploymentConfiguration = {
   build: {
     method: DeploymentBuildMethod
     recipe?: "node" | "go" | "python"
+    goVersion?: string
+    packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string
     buildCommand?: string
@@ -2763,6 +2913,7 @@ export type DeploymentConfiguration = {
     }[]
   }
   runtime: {
+    previewIsolation?: boolean
     image?: string
     command?: string[]
     internalPort?: number
@@ -2773,6 +2924,10 @@ export type DeploymentConfiguration = {
     hostNetwork?: boolean
     capabilities?: string[]
     devices?: string[]
+    memoryMb?: number
+    cpus?: number
+    pidsLimit?: number
+    restartPolicy?: DeploymentRestartPolicy
     mounts?: {
       source: string
       target: string
@@ -2786,6 +2941,10 @@ export type DeploymentConfiguration = {
     scopes: string[]
     required?: boolean
     reference?: string
+    // A plain literal a blueprint input became; secrets never travel here.
+    value?: string
+    // Length of a secret the server generates when the deployment is saved.
+    generate?: number
   }[]
   dependencies: {
     kind: string
@@ -2878,6 +3037,10 @@ export type DeploymentBackupGateEvidence = {
   endedAt?: string
   fresh: boolean
   restoreTested: boolean
+  databaseDumps?: number[]
+  restoreVerificationId?: number
+  restoreApplicationImage?: string
+  restoreSchemaVersion?: string
   detail?: string
 }
 

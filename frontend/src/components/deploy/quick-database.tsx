@@ -38,7 +38,11 @@ export function DatabaseQuickDeploy({
   const [database, setDatabase] = useState("")
   const [progress, setProgress] = useState("")
   const [failure, setFailure] = useState<Error>()
-  const [created, setCreated] = useState<{ connection: DbConnection; url: string }>()
+  const [created, setCreated] = useState<{
+    connection: DbConnection
+    url: string
+    reference?: string
+  }>()
 
   useEffect(() => {
     alive.current = true
@@ -102,9 +106,12 @@ export function DatabaseQuickDeploy({
       }
       if (!alive.current) return
       setProgress("Preparing the connection string…")
-      const revealed = await get<{ url: string }>(`/databases/${connection.id}/url`, { target })
+      const revealed = await get<{ url: string; reference?: string }>(
+        `/databases/${connection.id}/url`,
+        { target },
+      )
       if (!alive.current) return
-      setCreated({ connection, url: revealed.url })
+      setCreated({ connection, url: revealed.url, reference: revealed.reference })
       setProgress("")
     } catch (error) {
       if (!alive.current) return
@@ -161,7 +168,7 @@ export function DatabaseQuickDeploy({
           {onConnect ? (
             <Button
               disabled={!canConnect}
-              onClick={() => onConnect(created.connection, created.url)}
+              onClick={() => onConnect(created.connection, created.reference || created.url)}
             >
               Use this database
             </Button>
@@ -184,7 +191,7 @@ export function DatabaseQuickDeploy({
     )
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Start a database" />
       <PanelBody className="space-y-4">
         {failure && <ErrorState error={failure} />}

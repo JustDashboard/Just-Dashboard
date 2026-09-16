@@ -1,0 +1,16 @@
+id,priority,phase,work,suggested_owner_area,acceptance
+F01,P0,0,Preview trust and secret/storage isolation,"Automation, runtime, configuration",Untrusted preview cannot execute sensitive work; trusted preview cannot read production sentinel/credentials; cleanup preserves production
+F02,P0,0,Complete backup coverage and restore evidence,"Backups, deployment activation, Compose",Missing named/bind/Compose volume blocks; actual isolated restore verifies a canary record through the application
+F03,P1,1,Deliver build-scoped variables from quick setup,"Quick setup, artifact builder",Real Next/Vite compiled assets use configured public values while private credentials stay out of layers/logs
+F04,P1,1,Fix static/Vite serving ports and readiness defaults,"Frontend defaults, static runtime",Plain HTML and Vite with/without start scripts deploy without advanced-field repairs
+F05,P1,1,Correct SvelteKit and Containerfile handoff,"Detector, frontend defaults",Server/static SvelteKit and Containerfile-only fixtures build and serve correctly
+F06,P1,1,Honor or reject Go overrides and define version selection,"Artifact recipes, planning validation",Code generation/custom startup observable; unsupported CGO/version combinations rejected before execution
+F07,P1,1,Make required checks reliable and add real full-stack acceptance,"Verification, CI, browser tests",Full required gate green; real UI/API/runtime/proxy acceptance retained; initial failures remain recorded
+F08,P1,1,Unify polling and hook auto-deploy policy,"Git watcher, trigger configuration",Polling/hooks agree on watch filters; manual-only honored; duplicate commit yields one run
+F09,P1,2,Use stable database service identity,"Database connections, Docker networking",Database recreated with changed IP; application reconnects using original logical name
+R13,P1,2,Prove availability and recovery under real faults,"Engine, proxy, observability, backups",Traffic during cutovers; process kills at transitions; public TLS staging; state restored with measured RPO/RTO
+F10,P2,3,Ship a small verified template catalog and separate game contract,"Blueprints, runtime, backups",Each supported template passes install/upgrade/restore/removal; game path includes UDP/save/protocol requirements
+R11,P2,3,Complete GitHub App and PR status workflow,"Provider integration, automation, frontend",Real PR open/update/close reaches preview status/domain and cleans only preview resources
+R12,P2,3,"Add declarative config, promotion, and supported CLI/API","Configuration, releases, developer tooling",Reconciled project config and artifact promotion retain identity and enforce environment-specific inputs
+R14,P2,4,Design complete multi-server execution and remote builds,"Architecture, agent, registry, scheduler",Remote deployment survives host identity/reconnect failures and reports target ownership accurately
+R15,P2,4,Add project/team authorization for shared operation,"Authentication, API capability model, audit",Cross-project access denied throughout API and remote execution; existing network/2FA invariants preserved

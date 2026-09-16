@@ -197,6 +197,14 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 	if req.ExpectedPlanRevision != 0 && desiredRevision != req.ExpectedPlanRevision {
 		return nil, false, ErrRevisionConflict
 	}
+	if err := validateGitPolicyAdmissionTx(ctx, tx, req); err != nil {
+		return nil, false, err
+	}
+	if EnvironmentKind(environmentKind) == EnvironmentPreview {
+		if err := validatePreviewAdmissionTx(ctx, tx, req); err != nil {
+			return nil, false, err
+		}
+	}
 	// Provider deliveries and the private branch monitor may observe the same
 	// push. Serialize their enqueue against the latest attempted commit, while
 	// manual rebuilds and a branch moving back to an older commit remain valid.
@@ -212,17 +220,24 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 		}
 	}
 
-	// Existing workloads keep restart/removal controls, but unsupported blueprint
-	// deployments cannot enter the queue through stale drafts or direct API calls.
+	// Existing workloads keep restart/removal controls, but a blueprint this
+	// dashboard cannot deploy end to end must not enter the queue through a
+	// stale draft or a direct API call.
 	switch req.Operation {
 	case OperationDeploy, OperationRedeploy, OperationForceBuild, OperationPreviewCreate, OperationPreviewUpdate:
-		var kind string
-		sourceErr := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_sources WHERE environment_id = ? ORDER BY revision DESC LIMIT 1`, req.EnvironmentID).Scan(&kind)
+		var kind, configJSON string
+		sourceErr := tx.QueryRowContext(ctx, `SELECT kind, config_json FROM deploy_sources WHERE environment_id = ? ORDER BY revision DESC LIMIT 1`, req.EnvironmentID).Scan(&kind, &configJSON)
 		if sourceErr != nil && !errors.Is(sourceErr, sql.ErrNoRows) {
 			return nil, false, sourceErr
 		}
 		if SourceKind(kind) == SourceBlueprint {
-			return nil, false, fmt.Errorf("%w: blueprint deployment is unavailable in this release", ErrUnsupportedSource)
+			var source DraftSourceConfig
+			if json.Unmarshal([]byte(configJSON), &source) != nil {
+				return nil, false, fmt.Errorf("%w: blueprint source configuration is malformed", ErrInvalidPlan)
+			}
+			if err := source.ValidateForDeployment(); err != nil {
+				return nil, false, err
+			}
 		}
 	}
 
@@ -525,11 +540,28 @@ func normalizeRunRequest(req *RunRequest) error {
 
 func sourceTriggered(trigger TriggerKind) bool {
 	switch trigger {
-	case TriggerGitPush, TriggerGitHub, TriggerGitLab, TriggerBitbucket, TriggerGitea:
+	case TriggerGitPush, TriggerGitHub, TriggerGitLab, TriggerBitbucket, TriggerGitea, TriggerGenericHook:
 		return true
 	default:
 		return false
 	}
+}
+
+// RunByIdempotencyKey finds the run an earlier request with this key created
+// in the environment, whatever operation label it carried. It lets a retried
+// request answer with the same run when the label itself depends on state the
+// first request changed (a preview that exists only because it was created).
+func (s *OrchestrationStore) RunByIdempotencyKey(ctx context.Context, environmentID int64, key string) (*EngineRun, error) {
+	if key == "" {
+		return nil, nil
+	}
+	run, err := scanEngineRun(s.db.QueryRowContext(ctx, `
+		SELECT `+engineRunColumns+` FROM deploy_runs
+		 WHERE environment_id = ? AND idempotency_key = ? ORDER BY id LIMIT 1`, environmentID, key))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return run, err
 }
 
 func (s *OrchestrationStore) idempotentRun(ctx context.Context, req RunRequest) (*EngineRun, error) {

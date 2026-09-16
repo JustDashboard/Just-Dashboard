@@ -122,6 +122,9 @@ type Engine struct {
 	running  map[int64]context.CancelCauseFunc
 	workerWG sync.WaitGroup
 	loopWG   sync.WaitGroup
+
+	observers  RunObservers
+	observerWG sync.WaitGroup
 }
 
 func NewEngine(
@@ -192,7 +195,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		return e.waitObservers(ctx)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -215,6 +218,11 @@ func (e *Engine) Cancel(ctx context.Context, runID int64) (*EngineRun, error) {
 	e.mu.Unlock()
 	if cancel != nil && run.State == RunCancelling {
 		cancel(errOperatorCancellation)
+	}
+	// A run cancelled before any worker claimed it ends here, with no worker
+	// goroutine to announce it.
+	if run.State.Terminal() {
+		e.observeFinished(run.ID)
 	}
 	e.Notify()
 	return run, nil
@@ -276,10 +284,17 @@ func (e *Engine) startWorker(lease QueueLease, prepared func(context.Context, Qu
 			e.mu.Lock()
 			delete(e.running, lease.RunID)
 			e.mu.Unlock()
+			// Every path out of a worker — success, failure, cancellation or
+			// a reconciliation decision — passes here, so this is the one
+			// place a terminal run is announced.
+			e.observeFinished(lease.RunID)
 			e.Notify()
 		}()
 		heartbeatDone := make(chan struct{})
 		go e.heartbeat(workerCtx, lease, cancel, heartbeatDone)
+		if prepared == nil {
+			e.observeStarted(lease.RunID)
+		}
 		if prepared != nil {
 			if err := prepared(workerCtx, lease); err != nil {
 				e.logFailure(lease.RunID, err)

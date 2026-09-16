@@ -1,0 +1,5 @@
+=== RUN   TestLiveSQLiteApplicationRecoveryVerification
+    backup_recovery_live_test.go:194: application image sha256:007a9a93ed860010453481b26854aa058fea2caf31100e706f34a788e38ef040, artifact sha256:9fd30d1a93514f7c59bc839db2d0e0f0f4d0987f4a0ccb5603af16f586f316cf: restored 8192 bytes through the application's SQLite connection in 1.105s; incompatible schema blocked
+--- PASS: TestLiveSQLiteApplicationRecoveryVerification (5.40s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	5.428s

@@ -45,15 +45,18 @@ func (l DetectionLimits) normalized() DetectionLimits {
 type Detector struct{ Limits DetectionLimits }
 
 type detectedMarkers struct {
-	root        string
-	dockerfile  string
-	compose     []string
-	lockfiles   []string
-	packageJSON []byte
-	packagePath string
-	goMod       string
-	pythonFiles map[string][]byte
-	staticFile  string
+	root              string
+	dockerfile        string
+	dockerfileContent []byte
+	compose           []string
+	lockfiles         []string
+	packageJSON       []byte
+	packagePath       string
+	goMod             string
+	goModContent      []byte
+	goVersionFile     []byte
+	pythonFiles       map[string][]byte
+	staticFile        string
 }
 
 func (d Detector) DetectPath(ctx context.Context, root string, identity SourceIdentity) (DetectionResult, error) {
@@ -71,8 +74,10 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	markers := map[string]*detectedMarkers{}
 	gitModulesPath := ""
 	lfsAttributesPath := ""
+	cgoPaths := []string{}
 	skip := map[string]bool{
-		".git": true, "node_modules": true, "vendor": true, ".next": true,
+		".just-dashboard": true,
+		".git":            true, "node_modules": true, "vendor": true, ".next": true,
 		"dist": true, "build": true, "target": true, ".cache": true,
 		".venv": true, "venv": true, "__pycache__": true,
 	}
@@ -110,7 +115,20 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return stop
 		}
 		name := strings.ToLower(entry.Name())
+		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if result.ScannedBytes > limits.MaxReadBytes {
+				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+				return stop
+			}
+			if err == nil && sourceUsesCGO(content) {
+				cgoPaths = append(cgoPaths, rel)
+			}
+			return nil
+		}
 		interesting := name == "package.json" || name == "go.mod" || name == "dockerfile" ||
+			name == ".go-version" ||
 			name == "containerfile" || name == "compose.yml" || name == "compose.yaml" ||
 			name == "docker-compose.yml" || name == "docker-compose.yaml" ||
 			name == "index.html" || name == ".gitmodules" || name == ".gitattributes" ||
@@ -150,11 +168,30 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		case "dockerfile", "containerfile":
 			if marker.dockerfile == "" {
 				marker.dockerfile = rel
+				content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+				result.ScannedBytes += n
+				if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
+					marker.dockerfileContent = content
+				} else if result.ScannedBytes > limits.MaxReadBytes {
+					result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+					return stop
+				}
 			}
 		case "compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml":
 			marker.compose = append(marker.compose, rel)
 		case "go.mod":
 			marker.goMod = rel
+			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if err == nil {
+				marker.goModContent = content
+			}
+		case ".go-version":
+			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if err == nil {
+				marker.goVersionFile = content
+			}
 		case "bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock":
 			marker.lockfiles = append(marker.lockfiles, rel)
 		case "uv.lock", "poetry.lock":
@@ -182,6 +219,10 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				return stop
 			}
 		}
+		if result.ScannedBytes > limits.MaxReadBytes {
+			result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+			return stop
+		}
 		return nil
 	})
 	if walkErr != nil && !errors.Is(walkErr, stop) && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
@@ -207,6 +248,15 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		return result.Candidates[i].ID < result.Candidates[j].ID
 	})
 	for index := range result.Candidates {
+		candidate := &result.Candidates[index]
+		if candidate.Recipe == "go" {
+			for _, path := range cgoPaths {
+				if candidate.Root == "" || strings.HasPrefix(path, candidate.Root+string(filepath.Separator)) {
+					candidate.RecipeIssue = "CGO source requires a Dockerfile with the required C toolchain"
+					break
+				}
+			}
+		}
 		if gitModulesPath != "" {
 			result.Candidates[index].Evidence = append(result.Candidates[index].Evidence,
 				DetectionEvidence{Path: gitModulesPath, Reason: "Git submodules are declared but not fetched during bounded detection"})
@@ -253,6 +303,8 @@ func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
 	if marker.dockerfile != "" {
 		result = append(result, newDetectedCandidate(marker.root, BuildDockerfile, DetectedCandidate{
 			Name: "Dockerfile in " + rootLabel, Profile: ProfileWeb, Confidence: ConfidenceHigh,
+			Dockerfile:    filepath.Base(marker.dockerfile),
+			Port:          detectedDockerfilePort(marker.dockerfileContent),
 			Evidence:      []DetectionEvidence{{Path: marker.dockerfile, Reason: "container build definition"}},
 			NeedsDecision: []string{"confirm container port and readiness check"},
 		}))
@@ -273,12 +325,20 @@ func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
 		result = append(result, packageCandidate(marker)...)
 	}
 	if marker.goMod != "" {
-		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, DetectedCandidate{
+		candidate := DetectedCandidate{
 			Name: "Go service in " + rootLabel, Profile: ProfileService, Confidence: ConfidenceHigh,
-			Framework: "go", Recipe: "go", BuildCommand: "go build ./...",
+			Framework: "go", Recipe: "go",
 			Evidence:      []DetectionEvidence{{Path: marker.goMod, Reason: "Go module definition"}},
 			NeedsDecision: []string{"confirm executable, start command, port, and readiness check"},
-		}))
+		}
+		version, err := chooseGoRecipeVersion("", string(marker.goVersionFile), marker.goModContent)
+		candidate.GoMinimumVersion = goModuleMinimum(marker.goModContent)
+		if err != nil {
+			candidate.RecipeIssue = err.Error()
+		} else {
+			candidate.GoVersion = version
+		}
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, candidate))
 	}
 	if pythonLock, ok := detectedPythonLock(marker.pythonFiles); ok {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, DetectedCandidate{
@@ -291,9 +351,9 @@ func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
 	if marker.staticFile != "" && len(marker.packageJSON) == 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildStatic, DetectedCandidate{
 			Name: "Static site in " + rootLabel, Profile: ProfileStatic, Confidence: ConfidenceMedium,
-			OutputDirectory: marker.root,
-			Evidence:        []DetectionEvidence{{Path: marker.staticFile, Reason: "static HTML entry point"}},
-			NeedsDecision:   []string{"confirm the public directory"},
+			Port:          80,
+			Evidence:      []DetectionEvidence{{Path: marker.staticFile, Reason: "static HTML entry point"}},
+			NeedsDecision: []string{"confirm the public directory"},
 		}))
 	}
 	return result
@@ -331,24 +391,41 @@ func packageCandidate(marker *detectedMarkers) []DetectedCandidate {
 		Evidence:      []DetectionEvidence{{Path: marker.packagePath, Reason: "JavaScript package manifest"}},
 		NeedsDecision: []string{},
 	}
-	if len(marker.lockfiles) == 1 {
+	present := make([]string, 0, len(marker.lockfiles))
+	for _, lockfile := range marker.lockfiles {
+		present = append(present, filepath.Base(lockfile))
+	}
+	candidate.PackageManagers = nodePackageManagers(present)
+	manager, lockfile, _ := resolveNodePackageManager(present, declaredNodePackageManager(marker.packageJSON), "")
+	candidate.PackageManager = manager
+	switch {
+	case len(marker.lockfiles) == 1:
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
 			Path: marker.lockfiles[0], Reason: "single recognized JavaScript lockfile",
 		})
-	} else if len(marker.lockfiles) == 0 {
+	case len(marker.lockfiles) == 0:
 		candidate.Confidence = ConfidenceLow
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "add one supported JavaScript lockfile")
-	} else {
+	case manager != "":
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
+			Path: marker.packagePath, Reason: "packageManager selects " + manager + " and " + lockfile + " among competing lockfiles",
+		})
+	default:
 		candidate.Confidence = ConfidenceLow
-		candidate.NeedsDecision = append(candidate.NeedsDecision, "choose one JavaScript package manager and remove competing lockfiles")
+		candidate.NeedsDecision = append(candidate.NeedsDecision, "choose the package manager: competing lockfiles "+strings.Join(present, ", "))
 	}
 	// The runner has to be the one the lockfile names. The build recipe picks
 	// its base image from that lockfile — a bun.lock project builds on
 	// oven/bun, which has no npm on it at all — so "npm run build" was not a
 	// harmless stylistic default: it was a build that died on `npm: not found`
 	// after a successful install, with nothing in the configuration screen
-	// saying which field was wrong.
-	runner := jsRunner(marker.lockfiles)
+	// saying which field was wrong. With no lockfile, or with competing ones
+	// nothing resolves, npm is the guess that fails most legibly: the recipe
+	// refuses a build it cannot pin before any command is run.
+	runner := manager
+	if runner == "" {
+		runner = "npm"
+	}
 	if command := manifest.Scripts["build"]; command != "" {
 		candidate.BuildCommand = runner + " run build"
 		candidate.Evidence = append(candidate.Evidence,
@@ -370,36 +447,32 @@ func packageCandidate(marker *detectedMarkers) []DetectedCandidate {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
 			Path: marker.packagePath, Reason: "next dependency " + boundedEvidence(dependencies["next"]),
 		})
-	case dependencies["vite"] != "":
-		candidate.Framework, candidate.Profile = "vite", ProfileStatic
-		candidate.Confidence, candidate.OutputDirectory = ConfidenceHigh, "dist"
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: marker.packagePath, Reason: "vite dependency " + boundedEvidence(dependencies["vite"]),
-		})
 	case dependencies["@sveltejs/kit"] != "":
 		candidate.Framework, candidate.Profile = "sveltekit", ProfileWeb
 		candidate.Confidence, candidate.Port = ConfidenceHigh, 3000
+		switch {
+		case dependencies["@sveltejs/adapter-node"] != "" && dependencies["@sveltejs/adapter-static"] == "":
+			candidate.StartCommand = "node build"
+			if runner == "bun" {
+				candidate.StartCommand = "bun ./build/index.js"
+			}
+		case dependencies["@sveltejs/adapter-static"] != "" && dependencies["@sveltejs/adapter-node"] == "":
+			candidate.Profile, candidate.OutputDirectory, candidate.Port, candidate.StartCommand = ProfileStatic, "build", 80, ""
+		default:
+			candidate.Confidence = ConfidenceLow
+			candidate.NeedsDecision = append(candidate.NeedsDecision, "select adapter-node or adapter-static for this server; adapter-auto and provider adapters require a Dockerfile")
+		}
+	case dependencies["vite"] != "":
+		candidate.Framework, candidate.Profile = "vite", ProfileStatic
+		candidate.Confidence, candidate.OutputDirectory, candidate.Port, candidate.StartCommand = ConfidenceHigh, "dist", 80, ""
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
+			Path: marker.packagePath, Reason: "vite dependency " + boundedEvidence(dependencies["vite"]),
+		})
+	}
+	if _, err := validateNodeRecipeContent(marker.packageJSON, BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {
+		candidate.RecipeIssue = err.Error()
 	}
 	return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, candidate)}
-}
-
-// jsRunner names the package manager the checkout's single lockfile implies.
-// With no lockfile, or with several, npm is the guess that fails most legibly:
-// the recipe refuses a build it cannot pin before any command is run.
-func jsRunner(lockfiles []string) string {
-	if len(lockfiles) != 1 {
-		return "npm"
-	}
-	switch filepath.Base(lockfiles[0]) {
-	case "bun.lock", "bun.lockb":
-		return "bun"
-	case "pnpm-lock.yaml":
-		return "pnpm"
-	case "yarn.lock":
-		return "yarn"
-	default:
-		return "npm"
-	}
 }
 
 func detectedPythonLock(files map[string][]byte) (string, bool) {

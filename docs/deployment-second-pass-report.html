@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployments Second Pass</title>
+<style>
+  :root {
+    --bg: #111214;
+    --panel: #17181b;
+    --text: #f2f2f3;
+    --dim: #a3a5aa;
+    --faint: #6f7176;
+    --line: #2a2c30;
+    --ok: #6ee7a8;
+    --warn: #f0c76b;
+    --bad: #f08b8b;
+    --link: #8ab4f8;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 64px 28px 120px; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 44px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; font-weight: bold; letter-spacing: -0.01em; }
+  .sub { color: var(--dim); font-size: 14px; margin: 0; }
+  .meta { color: var(--faint); font-size: 13px; margin-top: 14px; }
+
+  h2 {
+    font-size: 20px; margin: 52px 0 6px; font-weight: bold; letter-spacing: -0.01em;
+    padding-top: 22px; border-top: 1px solid var(--line);
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 { font-size: 15px; margin: 28px 0 8px; font-weight: bold; color: var(--text); }
+  p { margin: 10px 0; color: var(--dim); }
+  p.lead { color: var(--text); }
+
+  ul { margin: 10px 0 10px 0; padding-left: 20px; color: var(--dim); }
+  li { margin: 5px 0; }
+  li strong, p strong { color: var(--text); font-weight: bold; }
+
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: #d9dbe0;
+    white-space: nowrap;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 6px; font-size: 14px; }
+  th {
+    text-align: left; color: var(--faint); font-weight: bold; font-size: 11px;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    padding: 0 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: bottom;
+  }
+  td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--dim); }
+  td:first-child { color: var(--text); }
+  tr:last-child td { border-bottom: none; }
+
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .tag { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: bold; }
+
+  .box {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 18px 22px; margin: 20px 0;
+  }
+  .box p:first-child { margin-top: 0; }
+  .box p:last-child { margin-bottom: 0; }
+
+  .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 6px; }
+  .kpi {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 18px; min-width: 132px; flex: 1 1 132px;
+  }
+  .kpi .n { font-size: 24px; font-weight: bold; color: var(--text); line-height: 1.1; }
+  .kpi .l { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-top: 5px; }
+
+  footer { margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Deployments Second Pass</h1>
+  <p class="sub">Re-evaluation of the Just Dashboard deployment feature after the Codex audit, competitor position, the defects found, and what was fixed and proven in this pass.</p>
+  <p class="meta">2026-09-16 · branch <code>patch/0.6.7</code> at <code>d1389e7</code> plus uncommitted worktree · Go 1.26.8, Bun 1.4.0, Docker 29.8.0</p>
+</header>
+
+<div class="kpis">
+  <div class="kpi"><div class="n">9</div><div class="l">Defects found</div></div>
+  <div class="kpi"><div class="n">8</div><div class="l">Fixed and tested</div></div>
+  <div class="kpi"><div class="n ok">18 / 18</div><div class="l">Real-backend e2e checks</div></div>
+  <div class="kpi"><div class="n ok">107</div><div class="l">Browser tests passing</div></div>
+  <div class="kpi"><div class="n ok">PASS</div><div class="l">Build / vet / tests / race</div></div>
+</div>
+
+<h2>1. Summary</h2>
+<p class="lead">The Codex implementation of the first audit (F01–F09, part of R13) holds up, but the product still had two defects an operator hits on the first bad deploy: nobody was notified when a deployment failed, and a failed health check threw away the container's own logs before anyone could read them. Both are fixed and proven against a real backend on this server's Docker daemon.</p>
+<p>Two further bugs surfaced only when the real product was driven end to end rather than through unit tests. Every restart of a deployment that has a readiness check ended as <code>artifact_missing</code> after the runtime had already been stopped and started. A concurrent SQLite writer, such as a notification being recorded or an operator saving settings while a worker ran, could kill the run with <code>database is locked (517)</code> and leave it as <code>restart_evidence_missing</code>. Both are fixed with regression tests.</p>
+<p>Against Coolify, Dokploy and Vercel the deployment engine is now at parity on notifications (Discord, Slack, Telegram, e-mail, signed webhook), resource limits, failure diagnostics and a per-deployment console, and ahead on rollback fidelity, readiness-gated cutover and preview trust. It remains behind on build breadth (no PHP, Ruby, Java, Rust or .NET recipes), one-click templates, a full GitHub App flow, multi-server and teams. Those are scoped in section 7.</p>
+
+<div class="box">
+  <p><strong>Verified working, on this machine:</strong> backend build, vet and all 33 test packages; the five-package deployment race gate run serially; frontend lint, type check, production build, 29 unit tests and all 107 Chromium tests against the production build; the live Docker activation fixture and the new live diagnoser fixture; and an isolated real-backend acceptance run (<code>scripts/e2e-deployments.py</code>) that deploys nginx with limits, deploys a crashing busybox image, restarts, and checks notifications, transcript, evidence and <code>docker inspect</code> at each step: 18 of 18 checks.</p>
+</div>
+
+<h2>2. What changed</h2>
+<table>
+  <tr><th>ID</th><th>Defect or gap</th><th>Severity</th><th>Fix</th></tr>
+  <tr><td>D1</td><td>Notifications only fired on success. The <code>notify</code> step is last in the release path, so failed, rolled-back and cancelled runs never reached anyone. Confirmed on the operator's own database: run 22 failed and <code>notify</code> stayed <code>pending</code>.</td><td class="bad">P1</td><td>Engine run observers announce <code>run.started</code>, <code>run.succeeded</code>, <code>run.failed</code>, <code>run.cancelled</code> for every outcome through every exit path, deduplicated per channel, run and event. The step now records which channels select the outcome and keeps the scheduled-chain gate.</td></tr>
+  <tr><td>D2</td><td>A failed readiness or smoke gate removed the candidate before its logs could be read; the operator saw only "could not connect after 20 attempts".</td><td class="bad">P1</td><td>Before compensation the Docker owner inspects the candidate (state, exit code, OOM flag, restart count) and writes its last 200 lines, redacted of every runtime variable value, into the run transcript. Evidence stores state and counts, never output. The failure message points at the transcript.</td></tr>
+  <tr><td>D3</td><td>No memory, CPU or process limits and a hard-coded <code>unless-stopped</code> restart policy, although the Docker layer already supported limits.</td><td class="bad">P1</td><td>Additive <code>memoryMb</code>, <code>cpus</code>, <code>pidsLimit</code>, <code>restartPolicy</code> on the runtime plan with closed validation, preflight warnings against host memory and CPU count, runtime wiring, release-comparison labels and a Runtime settings form.</td></tr>
+  <tr><td>D4</td><td>Console tab said "Integration not available" for every non-game project.</td><td class="warn">P2</td><td>Console opens the Docker owner's audited exec session inside the live release container, with a service selector for Compose, behind the terminal capability.</td></tr>
+  <tr><td>D5</td><td>Fleet-read p95 budget (500 ms) is exceeded under <code>-race</code> when packages run in parallel (516 ms; 313 ms alone).</td><td class="warn">P2</td><td>Not changed. Documented; CI already runs race packages serially. See section 7.</td></tr>
+  <tr><td>D6</td><td>Only a signed generic webhook existed; every competitor ships chat and e-mail delivery.</td><td class="warn">P2</td><td>Discord, Slack, Telegram and e-mail (SMTP with STARTTLS/TLS) channel kinds. Credentials are sealed and masked in listings; events are selectable; pause, test delivery, delivery history and removal in the UI.</td></tr>
+  <tr><td>D7</td><td>No deployment state reached GitHub commits or pull requests.</td><td class="warn">P2</td><td>Commit statuses (<code>pending</code>, <code>success</code>, <code>failure</code>, <code>error</code>) posted through the dashboard's own <code>gh</code> credential with a link to the run, default on per environment, off switch in the Deployment policy editor. Posting failures are warnings only.</td></tr>
+  <tr><td>D8</td><td>Every restart with a readiness check failed with <code>artifact_missing</code> after stopping and starting the live runtime. Found by the real-backend run; the only existing restart test covered the restart step alone.</td><td class="bad">P1</td><td><code>verifyChecks</code> resolves the operation's target release, as start and record-release already did. Regression test drives start, readiness and record-release for a restart.</td></tr>
+  <tr><td>D9</td><td>A concurrent SQLite writer ended a run as <code>restart_evidence_missing</code>: orchestration transactions began deferred, so a commit by another connection between a worker's read and write failed the write instantly with <code>SQLITE_BUSY_SNAPSHOT</code>. Pre-existing; the new observers made it likelier, and a run under CPU load reproduced it.</td><td class="bad">P1</td><td>Write transactions begin <code>IMMEDIATE</code> (<code>_txlock=immediate</code>), so a second writer waits on the 5-second busy timeout instead of failing. Regression test fails on the old setting and passes on the new one.</td></tr>
+</table>
+
+<h3>Security review of the touched surfaces</h3>
+<p>Provider and generic hooks compare raw-body HMACs in constant time and answer the same way for unknown ids and bad signatures; the preview frame's CSP restricts framing to the recorded origin and the dashboard; variable listing and reveal join environment to project in SQL; run logs check project membership. New surfaces follow the same rules: notification mutations and the enable/disable route require <code>system.admin</code> and a session and are audited; Discord and Slack webhook URLs and Telegram tokens are sealed and never returned; the commit-status poster validates repository, SHA, state and context before anything reaches <code>gh</code>'s argv or a REST path. No new vulnerability was found in the reviewed code.</p>
+
+<h2>3. Findings on the operator's server</h2>
+<p>These come from a read-only copy of the live <code>vpsd.db</code> and from Docker on this host. Nothing on the running dashboard was changed.</p>
+<table>
+  <tr><th>Observation</th><th>Measured</th><th>Consequence</th></tr>
+  <tr><td>Failed deployments on <code>garage-barbershop</code></td><td>3 × <code>unsupported_builder</code> (competing <code>bun.lock</code> and <code>package-lock.json</code>), 1 × <code>health_gate_failed</code> after 20 connection attempts</td><td>The lockfile refusal is now resolvable through the package-manager setting. The health-gate failure is the D1/D2 case: the app's own output is now captured and a failure notification would have been sent.</td></tr>
+  <tr><td>Root filesystem</td><td class="bad">97% used, 7.1 GB free of 193 GB</td><td>Docker reports 43 GB in container writable layers, 20 GB of images and 22 GB of build cache (12.7 GB reclaimable). A dashboard rebuild or the next 1.6 GB deployment image could fill the disk, which affects every running container. Reclaim before rebuilding.</td></tr>
+  <tr><td>Deployment images</td><td>Four retained deployment images of 1.2–1.7 GB each</td><td>Next.js recipe images are large; retention keeps the live release and five prior successes per project by design.</td></tr>
+</table>
+
+<h2>4. What was tested</h2>
+<table>
+  <tr><th>Check</th><th>Scope</th><th>Result</th></tr>
+  <tr><td>Backend build, vet, full suite</td><td><code>go build ./... && go vet ./... && go test -count=1 ./...</code>, database DSNs pointed at closed ports</td><td class="ok">33 packages pass</td></tr>
+  <tr><td>Deployment race gate</td><td><code>go test -race</code> on deploy, api, proxysvc, backups, store, one package at a time</td><td class="ok">Pass (216 s, 314 s, 5 s, 26 s, 12 s), no data race</td></tr>
+  <tr><td>Frontend</td><td><code>bun run lint</code>, <code>bunx tsc --noEmit</code>, <code>bun run build</code>, <code>bun test src</code></td><td class="ok">Clean; 29 unit tests</td></tr>
+  <tr><td>Browser suite</td><td><code>bun run test:browser</code> against the production build, all specs</td><td class="ok">107 passed in 4.6 minutes, including 4 new deployment tests</td></tr>
+  <tr><td>Live Docker fixtures</td><td><code>TestLiveC5ActivationAdapters</code>, <code>TestLiveRuntimeDiagnoserReadsExitedContainer</code></td><td class="ok">Pass on this host's daemon</td></tr>
+  <tr><td>Real-backend acceptance</td><td><code>scripts/e2e-deployments.py</code>: isolated backend, fresh database, local webhook receiver, nginx and busybox images</td><td class="ok">18 of 18 on the final run</td></tr>
+</table>
+
+<h3>What the acceptance run proves</h3>
+<table>
+  <tr><th>Step</th><th>Observed</th></tr>
+  <tr><td>nginx image with limits deploys</td><td>Run succeeded; <code>docker inspect</code> shows Memory 134217728, NanoCpus 500000000, PidsLimit 64, RestartPolicy on-failure.</td></tr>
+  <tr><td>Notifications for success</td><td>Webhook received <code>run.started</code> and <code>run.succeeded</code> exactly once each, signed with <code>X-JD-Signature-256</code>, naming project, environment, run number, duration and the run URL.</td></tr>
+  <tr><td>busybox that exits before listening</td><td>Run failed <code>health_gate_failed</code>; the transcript carries "Application output from jd-e2-r1 (running, restarted 1 time(s)), last 4 line(s)" followed by the container's own stdout and stderr; the evidence records the crash state without log text; the failed candidate was removed after diagnosis.</td></tr>
+  <tr><td>Notifications for failure</td><td>Webhook received <code>run.failed</code> with the readiness reason while the <code>notify</code> step stayed <code>pending</code>; four delivered rows in delivery history.</td></tr>
+  <tr><td>Restart of the healthy release</td><td>Succeeded after the D8 fix; a paused channel received nothing.</td></tr>
+</table>
+<p>Earlier runs of the same script are preserved as findings rather than discarded: the first real run exposed D8 and three wrong test assumptions (Go's canonical header case, no comparison for a first release, Docker restarting the crashed container); a later run under <code>-race</code> CPU load exposed D9.</p>
+
+<h2>5. Competitive position</h2>
+<p>"Documented" means the competitor's official documentation describes the capability; nothing was installed or benchmarked side by side. The first-audit matrix of 71 capabilities in <code>docs/audits/2026-09-16-deployments/</code> remains the detailed inventory.</p>
+<table>
+  <tr><th>Capability</th><th>Just Dashboard now</th><th>Coolify</th><th>Dokploy</th><th>Vercel</th><th>Standing</th></tr>
+  <tr><td>Automatic builds</td><td>Node (npm, pnpm, yarn, bun), Go, Python, static, Dockerfile/Containerfile, image, Compose</td><td>Nixpacks, Railpack, static, Dockerfile, Compose</td><td>Nixpacks, Railpack, buildpacks, static, Dockerfile</td><td>Framework presets</td><td class="warn">Behind on PHP, Ruby, Java, Rust, .NET; ahead on digest-pinned bases and secret mounts</td></tr>
+  <tr><td>Zero-downtime cutover</td><td>Blue/green for stateless HTTP with required readiness; stop-first declared otherwise; continuity measured under traffic</td><td>Rolling when eligible; no healthcheck counts as ready</td><td>Swarm health and rollback</td><td>Atomic</td><td class="ok">Ahead</td></tr>
+  <tr><td>Rollback fidelity</td><td>Frozen artifact and frozen configuration and variables</td><td>Retained image with current config</td><td>Registry image</td><td>Instant to prior deployment</td><td class="ok">Ahead</td></tr>
+  <tr><td>Resource limits</td><td>Memory, CPU, PIDs, restart policy</td><td>Yes</td><td>Yes</td><td>n/a</td><td class="ok">Parity (this pass)</td></tr>
+  <tr><td>Notifications</td><td>Discord, Slack, Telegram, e-mail, signed webhook; started, succeeded, failed, cancelled</td><td>Discord, Slack, Telegram, e-mail, Pushover</td><td>Discord, Slack, Telegram, e-mail</td><td>Slack, webhooks, e-mail</td><td class="ok">Parity (this pass)</td></tr>
+  <tr><td>Failure diagnostics</td><td>Candidate logs and exit state captured before compensation; numbered, searchable transcript</td><td>Deployment log with container output</td><td>Deployment log</td><td>Build and runtime logs</td><td class="ok">Parity or ahead (this pass)</td></tr>
+  <tr><td>Per-app console</td><td>Console tab into the live container</td><td>Yes</td><td>Yes</td><td>n/a</td><td class="ok">Parity (this pass)</td></tr>
+  <tr><td>Commit and PR feedback</td><td>Commit statuses via <code>gh</code>; no PR comments or GitHub App</td><td>GitHub App, PR comments</td><td>GitHub App</td><td>Full</td><td class="warn">Behind on PR comments and preview URLs in PRs</td></tr>
+  <tr><td>PR previews</td><td>Approval-gated, isolated storage, network and secrets</td><td>Preview env vars, fork restrictions</td><td>Previews with quota</td><td>Automatic</td><td class="ok">Ahead on trust; behind on trusted-author automation</td></tr>
+  <tr><td>Backups and restore proof</td><td>Coverage manifests, consistent SQLite snapshots, artifact-bound restore checks</td><td>Engine-aware database backups to S3</td><td>Volume backups to S3</td><td>n/a</td><td class="warn">Ahead on proof; behind on native PostgreSQL, MySQL, Mongo dumps and S3 targets</td></tr>
+  <tr><td>One-click services</td><td>17 definitions, deployment refused</td><td>Large template library</td><td>Template catalogue</td><td>Marketplace</td><td class="bad">Behind</td></tr>
+  <tr><td>Teams, roles, multi-server</td><td>Single server, server-wide capabilities</td><td>Teams, remote servers</td><td>Remote servers, Swarm</td><td>Teams</td><td class="bad">Behind</td></tr>
+  <tr><td>Private control plane</td><td>Outbound Git polling behind the allowlist; no inbound hooks required</td><td>Hooks or polling</td><td>Same</td><td>Hosted</td><td class="ok">Ahead for private single-server operators</td></tr>
+</table>
+
+<h2>6. Not tested, and why</h2>
+<ul>
+  <li><strong>Real Discord, Slack, Telegram and SMTP delivery.</strong> No provider credentials exist in this environment. Payload shapes are tested through a rewriting transport and a captured mailer, and the signed-webhook kind was delivered for real in the acceptance run. Use <strong>Send test</strong> on each channel after configuring it.</li>
+  <li><strong>A real GitHub commit status.</strong> Posting needs the dashboard's <code>gh</code> credential with write access to a repository; the poster is tested with a recorder. The first deployment of a GitHub-sourced project after this change will show <code>just-dashboard/production</code> on the commit.</li>
+  <li><strong>The running dashboard was not rebuilt.</strong> The changes live in the worktree. The host is at 97% disk, and an image build that fails on disk space would affect every running container, so the rebuild is left for after space is reclaimed (see section 7).</li>
+  <li><strong>Hosted CI.</strong> Nothing was pushed; the workflow gained the new live fixture and was checked locally with actionlint.</li>
+  <li><strong>Public TLS, clean-host installation, ARM64, a 24-hour soak</strong> remain unverified, as in the first audit.</li>
+</ul>
+
+<h2>7. Known gaps — flagged for a decision</h2>
+<ul>
+  <li><strong>Rebuild the live dashboard.</strong> Decision: reclaim disk first (<code>docker builder prune</code> alone frees about 12.7 GB; the 43 GB of container writable layers deserve a look at which containers are writing where), then rebuild from Settings or with <code>docker compose build && docker compose up -d</code>. Rollback is the previous image tags.</li>
+  <li><strong>Build breadth (B05).</strong> Rust, Java, .NET, Ruby and PHP have no automatic recipe; a Dockerfile still works. Decision: add native recipes one language at a time with locked live fixtures, or integrate Railpack or Nixpacks behind the same digest-pinning and secret-mount contract. The second is faster but hands base-image policy to a third party.</li>
+  <li><strong>One-click templates (F10).</strong> The catalogue exists but deployment is refused by design until materialization, generated credentials and lifecycle are connected. Decision: which six templates ship first.</li>
+  <li><strong>GitHub App and PR comments (R11).</strong> Commit statuses cover the commit view; preview URLs in pull requests need an App installation flow. Decision: whether to register a GitHub App for the product.</li>
+  <li><strong>Native database backups (D8 of the plan).</strong> <code>pg_dump</code>, <code>mysqldump</code>, <code>mongodump</code> and S3-compatible destinations, wired into the coverage gate. Decision: scope of engines for the first release.</li>
+  <li><strong>Multi-server and teams (R14, R15).</strong> Architectural work, not an extension of local Docker calls. Decision: whether the product stays single-server for 0.7.</li>
+  <li><strong>Fleet p95 under parallel <code>-race</code> (D5).</strong> Ten statements per read is already fixed-cost; the budget fails only under contention from other race packages. Decision: keep serial CI (current) or profile the read model further.</li>
+  <li><strong>Notification targets are unrestricted outbound URLs.</strong> Same trust boundary as every competitor; an administrator can point a webhook at any address. Decision: whether to refuse loopback and link-local targets for signed webhooks.</li>
+</ul>
+
+<h2>8. Checks run</h2>
+<table>
+  <tr><th>Check</th><th>Command</th><th>Result</th></tr>
+  <tr><td>Backend build</td><td><code>go build ./...</code></td><td class="ok">Clean</td></tr>
+  <tr><td>Backend vet</td><td><code>go vet ./...</code></td><td class="ok">Clean</td></tr>
+  <tr><td>Backend tests</td><td><code>go test -count=1 ./...</code></td><td class="ok">33 packages ok</td></tr>
+  <tr><td>Race gate</td><td><code>go test -race ./internal/{deploy,api,proxysvc,backups,store} -count=1</code> (serial)</td><td class="ok">5 packages ok</td></tr>
+  <tr><td>Busy-snapshot regression</td><td><code>go test ./internal/store -run TestConcurrentWritersWaitInsteadOfFailingWithBusySnapshot</code></td><td class="ok">Fails without <code>_txlock=immediate</code>, passes with it</td></tr>
+  <tr><td>Live fixtures</td><td><code>JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLiveC5ActivationAdapters|TestLiveRuntimeDiagnoserReadsExitedContainer'</code></td><td class="ok">Pass</td></tr>
+  <tr><td>Frontend lint</td><td><code>bun run lint</code></td><td class="ok">Clean</td></tr>
+  <tr><td>Frontend types</td><td><code>bunx tsc --noEmit</code></td><td class="ok">Clean</td></tr>
+  <tr><td>Frontend build</td><td><code>bun run build</code></td><td class="ok">Clean</td></tr>
+  <tr><td>Frontend unit</td><td><code>bun test src</code></td><td class="ok">29 passed</td></tr>
+  <tr><td>Browser</td><td><code>bun run test:browser</code></td><td class="ok">107 passed</td></tr>
+  <tr><td>Acceptance</td><td><code>python3 scripts/e2e-deployments.py</code></td><td class="ok">18 / 18</td></tr>
+  <tr><td>Workflow lint</td><td><code>actionlint .github/workflows/verify.yml</code></td><td class="ok">Clean</td></tr>
+  <tr><td>Whitespace</td><td><code>git diff --check</code></td><td class="ok">Clean</td></tr>
+</table>
+
+<h3>Files added or changed in this pass</h3>
+<p>Backend: <code>internal/deploy/run_observer.go</code>, <code>notifications.go</code>, <code>github_status.go</code>, <code>engine.go</code>, <code>normalized_executor.go</code>, <code>activation_executor.go</code>, <code>runtime_owner.go</code>, <code>planning_model.go</code>, <code>preflight.go</code>, <code>release_comparison.go</code>, <code>git_policy.go</code>, <code>automation.go</code>; <code>internal/ghx/status.go</code>; <code>internal/dockerx/containers.go</code>; <code>internal/store/store.go</code>; <code>internal/api/handlers_deploy.go</code>, <code>handlers_deploy_automation.go</code>, <code>modules.go</code>, <code>server.go</code>; nine new test files. Frontend: <code>deployment-notifications.tsx</code>, <code>deployment-console.tsx</code>, <code>deployment-configuration.tsx</code>, <code>deployment-git-status.tsx</code>, <code>deployment-automation.tsx</code>, <code>deployment-workspace.tsx</code>, <code>deployment-ui.tsx</code>, <code>lib/types.ts</code>, <code>tests/browser/deploy-ui.spec.ts</code>. Docs: <code>docs/internal/deployments/notifications.md</code>, <code>implementation.md</code>, <code>README.md</code>, <code>docs/internal/frontend/feature-map.md</code>, <code>docs/audits/2026-09-16-deployments/gap-closure-plan.md</code>, <code>implementation-progress.md</code>, repository <code>README.md</code>, <code>CONTRIBUTING.md</code>, <code>.github/workflows/verify.yml</code>, <code>scripts/e2e-deployments.py</code>. Nothing was committed or pushed.</p>
+
+<footer>
+  Just Dashboard report · generated 2026-09-16 · disposable, safe to delete
+</footer>
+
+</div>
+</body>
+</html>

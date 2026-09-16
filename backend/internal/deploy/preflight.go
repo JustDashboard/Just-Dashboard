@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,7 @@ type HostObservation struct {
 	Architecture    string                         `json:"architecture"`
 	AvailableMemory int64                          `json:"availableMemoryBytes"`
 	AvailableDisk   int64                          `json:"availableDiskBytes"`
+	CPUCount        int                            `json:"cpuCount,omitempty"`
 	Domains         []DomainObservation            `json:"domains"`
 	Firewall        FirewallObservation            `json:"firewall"`
 	Dependencies    []DependencyObservation        `json:"dependencies"`
@@ -83,10 +85,14 @@ type DependencyObservation struct {
 	ResourceKind string `json:"resourceKind"`
 	ResourceID   string `json:"resourceId"`
 	Available    bool   `json:"available"`
-	Fresh        bool   `json:"fresh,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Detail       string `json:"detail,omitempty"`
-	DeepLink     string `json:"deepLink,omitempty"`
+	// Missing distinguishes "the owner looked and it is not there" from
+	// "the owner could not look". A managed resource the deployment creates
+	// itself is allowed to be missing before its first start.
+	Missing  bool   `json:"missing,omitempty"`
+	Fresh    bool   `json:"fresh,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+	DeepLink string `json:"deepLink,omitempty"`
 }
 
 type ObservationRequest struct {
@@ -336,6 +342,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		}
 	}
 	observation.AvailableMemory = availableMemory()
+	observation.CPUCount = runtime.NumCPU()
 	diskRoot := o.volumeRoot
 	if diskRoot == "" {
 		diskRoot = "/"
@@ -538,6 +545,34 @@ func preflightFindings(
 		}
 	}
 	selected := selectedDetectionCandidate(detection)
+	if selected != nil && selected.Recipe == "go" && configuration.Build.Method == BuildRecipe && configuration.Build.GoVersion != "" {
+		if _, err := chooseGoRecipeVersion(configuration.Build.GoVersion, "", []byte("go "+selected.GoMinimumVersion)); err != nil {
+			findings = append(findings, finding("go_version_unsupported", PreflightBlocked,
+				"Selected Go version cannot build this source", err.Error(),
+				"The toolchain must satisfy the module's declared language requirement.",
+				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
+		}
+	}
+	if selected != nil && selected.Recipe == "node" && configuration.Build.Method == BuildRecipe {
+		switch chosen := configuration.Build.PackageManager; {
+		case chosen != "" && len(selected.PackageManagers) > 0 && !slices.Contains(selected.PackageManagers, chosen):
+			findings = append(findings, finding("package_manager_lockfile_missing", PreflightBlocked,
+				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(selected.PackageManagers, ", "),
+				"A frozen install needs the selected manager's own lockfile.",
+				"Choose a package manager whose lockfile is committed, or commit its lockfile.", "deploy", "configuration.build.packageManager"))
+		case chosen == "" && selected.PackageManager == "" && len(selected.PackageManagers) > 1:
+			findings = append(findings, finding("package_manager_ambiguous", PreflightBlocked,
+				"Competing lockfiles need a package manager", strings.Join(selected.PackageManagers, ", "),
+				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
+				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
+		}
+	}
+	if selected != nil && selected.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
+		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
+			"Source needs a different build plan", selected.RecipeIssue,
+			"The automatic recipe cannot satisfy the detected source requirements.",
+			"Use a Dockerfile or correct the source adapter/toolchain and run detection again.", "deploy", "configuration.build"))
+	}
 	if selected != nil && selected.BuildMethod != configuration.Build.Method {
 		severity := PreflightPass
 		title := "Detected build method was explicitly overridden"
@@ -846,7 +881,9 @@ func preflightFindings(
 		}
 	}
 	for _, variable := range configuration.Variables {
-		if variable.Required && variable.Reference == "" {
+		// A literal value or a generation request satisfies a required
+		// variable as well as a typed reference does.
+		if variable.Required && variable.Reference == "" && variable.Value == "" && variable.Generate == 0 {
 			findings = append(findings, finding("variable_required_"+strings.ToLower(variable.Name), PreflightDecision,
 				"Required variable needs a value", variable.Name, "The runtime would receive an empty required value.",
 				"Set or reference the variable.", "deploy", "variables."+variable.Name))
@@ -891,6 +928,18 @@ func preflightFindings(
 			}
 			continue
 		}
+		if !observed.Available && observed.Missing && dependency.Ownership == OwnershipManaged && dependency.ResourceKind == "docker_volume" {
+			// Docker creates a named volume the first time a container mounts
+			// it. Blocking on its absence made every blueprint with data
+			// storage undeployable on a fresh host.
+			item := finding("storage_pending_creation", PreflightPass,
+				"Managed volume will be created on first start", dependency.ResourceID,
+				"The deployment owns this volume; Docker creates it when the first release starts.",
+				"", dependencyOwner(dependency), field)
+			item.DeepLink = observed.DeepLink
+			findings = append(findings, item)
+			continue
+		}
 		if !observed.Available {
 			severity := PreflightBlocked
 			if dependency.Ownership == OwnershipObserved {
@@ -918,6 +967,20 @@ func preflightFindings(
 			item.DeepLink = observed.DeepLink
 			findings = append(findings, item)
 		}
+	}
+	if limit := configuration.Runtime.MemoryMB; limit > 0 && observation.AvailableMemory > 0 && limit<<20 > observation.AvailableMemory {
+		findings = append(findings, finding("runtime_memory_limit_exceeds_host", PreflightWarning,
+			"Memory limit exceeds available host memory",
+			fmt.Sprintf("%d MiB requested, %d MiB available", limit, observation.AvailableMemory>>20),
+			"The container may be allowed more memory than the host can currently give it.",
+			"Lower the limit or free host memory.", "metrics", "runtime.memoryMb"))
+	}
+	if limit := configuration.Runtime.CPUs; limit > 0 && observation.CPUCount > 0 && limit > float64(observation.CPUCount) {
+		findings = append(findings, finding("runtime_cpu_limit_exceeds_host", PreflightWarning,
+			"CPU limit exceeds host CPUs",
+			fmt.Sprintf("%s CPU requested, %d available", strconv.FormatFloat(limit, 'f', -1, 64), observation.CPUCount),
+			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
+			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
 	if observation.AvailableMemory > 0 && observation.AvailableMemory < 256<<20 {
 		findings = append(findings, finding("host_memory_low", PreflightWarning,

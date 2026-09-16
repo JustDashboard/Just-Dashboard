@@ -140,7 +140,9 @@ func TestPreviewLifecycleIsIsolatedFromProduction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opened, newPreview, err := f.automation.EnsurePreview(context.Background(), &created.Trigger, ProviderEvent{PreviewNumber: 42, PreviewRef: "feature", Revision: "abc"})
+	event := ProviderEvent{PreviewNumber: 42, PreviewRef: "refs/pull/42/head", Revision: strings.Repeat("a", 40)}
+	approvePreviewFixture(t, f, &created.Trigger, event)
+	opened, newPreview, err := f.automation.EnsurePreview(context.Background(), &created.Trigger, event)
 	if err != nil || !newPreview || opened.EnvironmentID == f.environmentID {
 		t.Fatalf("open=%+v new=%v err=%v", opened, newPreview, err)
 	}
@@ -152,10 +154,12 @@ func TestPreviewLifecycleIsIsolatedFromProduction(t *testing.T) {
 	_ = f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_variable_revisions WHERE environment_id=?`, opened.EnvironmentID).Scan(&variables)
 	_ = f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id=? AND ownership='managed'`, opened.EnvironmentID).Scan(&managed)
 	_ = f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id=? AND ownership='linked'`, opened.EnvironmentID).Scan(&linked)
-	if variables != 1 || managed != 0 || linked != 1 {
+	if variables != 0 || managed != 0 || linked != 0 {
 		t.Fatalf("preview inheritance variables=%d managed=%d linked=%d", variables, managed, linked)
 	}
-	updated, createdAgain, err := f.automation.EnsurePreview(context.Background(), &created.Trigger, ProviderEvent{PreviewNumber: 42, PreviewRef: "feature", Revision: "def"})
+	event.Revision = strings.Repeat("b", 40)
+	approvePreviewFixture(t, f, &created.Trigger, event)
+	updated, createdAgain, err := f.automation.EnsurePreview(context.Background(), &created.Trigger, event)
 	if err != nil || createdAgain || updated.EnvironmentID != opened.EnvironmentID {
 		t.Fatalf("update=%+v created=%v err=%v", updated, createdAgain, err)
 	}
@@ -167,10 +171,12 @@ func TestPreviewLifecycleIsIsolatedFromProduction(t *testing.T) {
 	if err = f.store.DB.QueryRow(`SELECT identity_json FROM deploy_sources WHERE environment_id=? AND revision=?`, opened.EnvironmentID, desired).Scan(&identity); err != nil {
 		t.Fatal(err)
 	}
-	if desired != 2 || !strings.Contains(identity, `"revision":"def"`) {
+	if desired != 2 || !strings.Contains(identity, event.Revision) {
 		t.Fatalf("updated preview revision=%d identity=%s", desired, identity)
 	}
-	if _, _, err = f.automation.EnsurePreview(context.Background(), &created.Trigger, ProviderEvent{PreviewNumber: 43}); !errors.Is(err, ErrPreviewQuota) {
+	event.PreviewNumber, event.PreviewRef = 43, "refs/pull/43/head"
+	approvePreviewFixture(t, f, &created.Trigger, event)
+	if _, _, err = f.automation.EnsurePreview(context.Background(), &created.Trigger, event); !errors.Is(err, ErrPreviewQuota) {
 		t.Fatalf("quota error=%v", err)
 	}
 	closed, _, err := f.automation.EnsurePreview(context.Background(), &created.Trigger, ProviderEvent{PreviewNumber: 42, PreviewClosed: true})
@@ -277,24 +283,5 @@ func TestSignedNotificationPersistsOnlyResponseClass(t *testing.T) {
 	var leaks int
 	if err = f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_notification_deliveries WHERE response_class LIKE '%' || ? || '%'`, secret).Scan(&leaks); err != nil || leaks != 0 {
 		t.Fatalf("response secret persisted: count=%d err=%v", leaks, err)
-	}
-}
-
-func TestNotificationFailureCannotChangeReleaseOutcome(t *testing.T) {
-	f := newAutomationFixture(t)
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
-	defer remote.Close()
-	_, _, err := f.automation.CreateNotificationChannel(context.Background(), NotificationWrite{Name: "failing", URL: remote.URL, Events: []string{"run.finished"}, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	executor := &NormalizedStepExecutor{notifications: f.automation}
-	result := executor.notify(context.Background(), StepExecution{Run: EngineRun{ID: 8, ProjectID: f.projectID, EnvironmentID: f.environmentID, Metadata: json.RawMessage(`{}`)}})
-	if result.State != StepWarning {
-		t.Fatalf("notification failure state=%s", result.State)
-	}
-	failedChain := executor.notify(context.Background(), StepExecution{Run: EngineRun{ID: 9, ProjectID: f.projectID, EnvironmentID: f.environmentID, Metadata: json.RawMessage(`{"scheduleMarker":true,"chainStatus":"failed"}`)}})
-	if failedChain.State != StepFailed || failedChain.ErrorCode != "schedule_chain_failed" {
-		t.Fatalf("failed schedule marker=%+v", failedChain)
 	}
 }

@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,7 +23,7 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v1"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v2"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -30,7 +32,7 @@ var recipeBaseCatalogue = map[string][]string{
 	"node:pnpm": {"node:22-alpine"},
 	"node:yarn": {"node:22-alpine"},
 	"node:bun":  {"oven/bun:1-alpine"},
-	"go":        {"golang:1.25-alpine", "alpine:3.22"},
+	"go":        {"golang:1.26-alpine", "alpine:3.22"},
 	"python":    {"python:3.13-slim"},
 	"static":    {"nginx:1.29-alpine"},
 }
@@ -78,6 +80,7 @@ type PreparedBuild struct {
 	Method               BuildMethod              `json:"method"`
 	Recipe               string                   `json:"recipe,omitempty"`
 	RecipeVersion        string                   `json:"recipeVersion,omitempty"`
+	GoVersion            string                   `json:"goVersion,omitempty"`
 	Dockerfile           string                   `json:"dockerfile,omitempty"`
 	DockerfileDigest     string                   `json:"dockerfileDigest,omitempty"`
 	DockerfilePreview    string                   `json:"dockerfilePreview,omitempty"`
@@ -86,6 +89,7 @@ type PreparedBuild struct {
 	TargetPlatform       string                   `json:"targetPlatform,omitempty"`
 	CachePolicy          string                   `json:"cachePolicy"`
 	SecretIDs            []string                 `json:"secretIds"`
+	SecretBindings       []BuildSecretConfig      `json:"secretBindings,omitempty"`
 	SecretLayerGuarantee string                   `json:"secretLayerGuarantee"`
 	ComposeServices      []PreparedComposeService `json:"composeServices,omitempty"`
 }
@@ -131,11 +135,18 @@ func (b *ArtifactBuilder) Prepare(
 	config BuildPlanConfig,
 	forceNoCache bool,
 	tag string,
+	buildVariableNames ...string,
 ) (PreparedBuild, error) {
+	bindings, err := recipeBuildBindings(config, buildVariableNames)
+	if err != nil {
+		return PreparedBuild{}, err
+	}
+	config.Secrets = bindings
 	prepared := PreparedBuild{
 		Method: config.Method, Recipe: config.Recipe, BuildArgv: []string{},
 		BaseImages: []ResolvedImage{}, TargetPlatform: strings.ToLower(config.TargetPlatform),
 		CachePolicy: "reuse", SecretIDs: []string{}, SecretLayerGuarantee: "not_applicable",
+		SecretBindings: bindings,
 	}
 	if config.NoCache || forceNoCache {
 		prepared.CachePolicy = "no_cache"
@@ -157,6 +168,10 @@ func (b *ArtifactBuilder) Prepare(
 		prepared.Recipe = recipe.kind
 		prepared.RecipeVersion = AutomaticRecipeVersion
 		baseRefs := append([]string(nil), recipeBaseCatalogue[recipe.catalogueKey]...)
+		if recipe.kind == "go" {
+			prepared.GoVersion = recipe.goVersion
+			baseRefs[0] = "golang:" + recipe.goVersion + "-alpine"
+		}
 		if recipe.kind == "node" && config.OutputDirectory != "" {
 			baseRefs = append(baseRefs, recipeBaseCatalogue["static"]...)
 		}
@@ -243,8 +258,21 @@ func (b *ArtifactBuilder) Build(
 	}
 	switch config.Method {
 	case BuildRecipe, BuildDockerfile, BuildStatic:
-		secrets := make([]BuildSecretValue, 0, len(config.Secrets))
-		for _, requested := range config.Secrets {
+		bindings := prepared.SecretBindings
+		if bindings == nil {
+			bindings = config.Secrets
+		}
+		if config.Method == BuildRecipe {
+			expected, err := recipeBuildBindings(config, buildVariableNames(variables))
+			if err != nil {
+				return result, err
+			}
+			if !slices.Equal(expected, bindings) {
+				return result, fmt.Errorf("%w: build variable bindings changed after preparation; prepare the build with its frozen variable names", ErrArtifactMissing)
+			}
+		}
+		secrets := make([]BuildSecretValue, 0, len(bindings))
+		for _, requested := range bindings {
 			value, ok := variables[requested.Variable]
 			if !ok {
 				return result, fmt.Errorf("%w: build variable %s is unavailable", ErrArtifactMissing, requested.Variable)
@@ -378,6 +406,8 @@ func (b *ArtifactBuilder) Build(
 type selectedRecipe struct {
 	kind, catalogueKey, lockfile string
 	mainPackage                  string
+	framework                    string
+	goVersion                    string
 }
 
 func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -394,32 +424,59 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 	}
 	switch requested {
 	case "node":
-		locks := []struct{ path, manager string }{
-			{"bun.lock", "bun"}, {"bun.lockb", "bun"}, {"package-lock.json", "npm"},
-			{"pnpm-lock.yaml", "pnpm"}, {"yarn.lock", "yarn"},
-		}
-		found := []struct{ path, manager string }{}
-		for _, lock := range locks {
+		present := []string{}
+		for _, lock := range nodeLockfiles {
 			if regularExists(root, lock.path) {
-				found = append(found, lock)
+				present = append(present, lock.path)
 			}
 		}
-		if len(found) != 1 {
-			return selectedRecipe{}, fmt.Errorf("%w: Node recipes require exactly one supported lockfile; found %d", ErrUnsupportedBuilder, len(found))
+		manifest, err := readContainedRegular(root, "package.json", 512<<10)
+		if err != nil {
+			return selectedRecipe{}, fmt.Errorf("%w: Node recipe requires package.json", ErrUnsupportedBuilder)
 		}
-		return selectedRecipe{kind: "node", catalogueKey: "node:" + found[0].manager, lockfile: found[0].path}, nil
+		manager, lockfile, err := resolveNodePackageManager(present, declaredNodePackageManager(manifest), config.PackageManager)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		framework, err := validateNodeRecipeContent(manifest, config)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "node", catalogueKey: "node:" + manager, lockfile: lockfile, framework: framework}, nil
 	case "go":
 		if !regularExists(root, "go.mod") {
 			return selectedRecipe{}, fmt.Errorf("%w: Go recipe requires go.mod", ErrUnsupportedBuilder)
+		}
+		module, err := readContainedRegular(root, "go.mod", 512<<10)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		var versionFile []byte
+		if regularExists(root, ".go-version") {
+			versionFile, err = readContainedRegular(root, ".go-version", 1024)
+			if err != nil {
+				return selectedRecipe{}, err
+			}
+		}
+		goVersion, err := chooseGoRecipeVersion(config.GoVersion, string(versionFile), module)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		if cgoEnabledCommandRE.MatchString(config.BuildCommand) {
+			return selectedRecipe{}, fmt.Errorf("%w: CGO requires a Dockerfile with a C toolchain", ErrUnsupportedBuilder)
 		}
 		mains, err := findGoMainPackages(root, 10_000)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		if len(mains) != 1 {
+		if len(mains) != 1 && (strings.TrimSpace(config.BuildCommand) == "" || config.BuildCommand == "go build ./...") {
 			return selectedRecipe{}, fmt.Errorf("%w: Go recipe requires exactly one detected main package; found %d", ErrUnsupportedBuilder, len(mains))
 		}
-		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: mains[0]}, nil
+		main := "."
+		if len(mains) == 1 {
+			main = mains[0]
+		}
+		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion}, nil
 	case "python":
 		lock, err := selectPythonLock(root)
 		if err != nil {
@@ -455,6 +512,9 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		if command := strings.TrimSpace(config.BuildCommand); command != "" {
 			lines = append(lines, "RUN "+buildSecrets+command)
 		}
+		if recipe.framework == "sveltekit-node" && (config.StartCommand == "node build" || config.StartCommand == "bun ./build/index.js") {
+			lines = append(lines, `RUN test -f /app/build/index.js || (echo 'SvelteKit adapter-node must produce build/index.js; configure its output and start command together' >&2; exit 1)`)
+		}
 		if output := strings.TrimSpace(config.OutputDirectory); output != "" {
 			static, err := resolveCatalogueImage(bases, recipeBaseCatalogue["static"][0])
 			if err != nil {
@@ -477,10 +537,27 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		}
 		lines = append(lines,
 			"FROM "+immutableImageReference(bases[0])+" AS build", "WORKDIR /src", "COPY . .",
+			"ENV CGO_ENABLED=0 GOTOOLCHAIN=local",
 			"RUN "+installSecrets+"go mod download",
-			"RUN "+buildSecrets+"CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app "+packagePath,
-			"FROM "+immutableImageReference(bases[1]), "RUN adduser -D -u 10001 app", "USER app", "COPY --from=build /out/app /app", `ENTRYPOINT ["/app"]`,
 		)
+		command := strings.TrimSpace(config.BuildCommand)
+		if command == "go build ./..." {
+			// Old detection saved this literal default without an output path.
+			// Execute it, then produce the runtime binary under the current contract.
+			lines = append(lines, "RUN "+buildSecrets+command)
+			command = ""
+		}
+		if command == "" {
+			command = "go build -trimpath -ldflags='-s -w' -o /out/app " + packagePath
+		}
+		lines = append(lines, "RUN "+buildSecrets+command,
+			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`,
+			"FROM "+immutableImageReference(bases[1]), "RUN adduser -D -u 10001 app", "USER app", "COPY --from=build /out/app /app")
+		if strings.TrimSpace(config.StartCommand) == "" {
+			lines = append(lines, `ENTRYPOINT ["/app"]`)
+		} else {
+			lines = append(lines, shellCMD(config.StartCommand))
+		}
 	case "python":
 		base := immutableImageReference(bases[0])
 		lines = append(lines, "FROM "+base, "WORKDIR /app", "COPY . .")
@@ -552,7 +629,7 @@ func buildSecretMounts(secrets []BuildSecretConfig, step string) string {
 	sort.Strings(ids)
 	parts := make([]string, 0, len(ids))
 	for _, id := range ids {
-		parts = append(parts, "--mount=type=secret,id="+id+",env="+id)
+		parts = append(parts, "--mount=type=secret,id="+id+",env="+id+",required=true")
 	}
 	if len(parts) == 0 {
 		return ""
@@ -590,6 +667,7 @@ func imageArtifact(image ResolvedImage, prepared PreparedBuild) ReleaseArtifactI
 	metadata := mustJSON(map[string]any{
 		"configDigest": image.ConfigDigest, "os": image.OS, "architecture": image.Architecture,
 		"platforms": image.Platforms, "dockerfileDigest": prepared.DockerfileDigest,
+		"goVersion": prepared.GoVersion,
 	})
 	return ReleaseArtifactInput{
 		Kind: ArtifactImage, Reference: image.Reference, Digest: image.Digest,
@@ -648,16 +726,28 @@ func redactBuildEmitter(values map[string]string, emit func(BuildLog) error) fun
 }
 
 func writeGeneratedDockerfile(root, content string) error {
-	directory := filepath.Join(root, ".just-dashboard")
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	directory, err := os.OpenRoot(root)
+	if err != nil {
 		return err
 	}
-	path := filepath.Join(directory, "Dockerfile")
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
+	defer directory.Close()
+	if err := directory.MkdirAll(".just-dashboard", 0o700); err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	// The checkout can contain symlinks. Root-relative operations and an
+	// exclusive temporary file keep generated output inside this build context.
+	temporary := ".just-dashboard/.Dockerfile-" + rand.Text()
+	file, err := directory.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer directory.Remove(temporary)
+	_, writeErr := file.WriteString(content)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return err
+	}
+	return directory.Rename(temporary, ".just-dashboard/Dockerfile")
 }
 
 func readContainedRegular(root, relative string, limit int64) ([]byte, error) {
@@ -745,6 +835,9 @@ func findGoMainPackages(root string, maxFiles int) ([]string, error) {
 		content, err := readContainedRegular(root, rel, 1<<20)
 		if err != nil {
 			return err
+		}
+		if sourceUsesCGO(content) {
+			return fmt.Errorf("CGO source requires a Dockerfile with the required C toolchain")
 		}
 		if strings.Contains(string(content), "package main") {
 			directory := filepath.ToSlash(filepath.Dir(rel))

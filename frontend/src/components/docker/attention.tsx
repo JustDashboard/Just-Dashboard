@@ -484,7 +484,9 @@ export function RuntimeHealthPanel({
   const segments = RUNTIME_SEGMENTS.map((s) => ({ ...s, count: s.of(runtime) }))
 
   return (
-    <Panel className={className}>
+    // Plain: a bar and a legend are a reading, not a block of content, and
+    // framing them put a box above the box that holds the containers.
+    <Panel plain className={className}>
       <PanelHeader
         title={
           <span className="inline-flex items-center gap-1.5">

@@ -375,8 +375,12 @@ func TestLocalGitImageAndImportSourceAdapters(t *testing.T) {
 		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java",
 		BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"},
 	})
+	// A game blueprint renders as a preview: its identity names the image the
+	// release would pull and the reviewed definition, but no digest is
+	// resolved because the game integration cannot deploy it yet.
 	if err != nil || blueprintSource.Source.Kind != SourceBlueprint ||
-		blueprintSource.Source.Repository != "minecraft-java" || blueprintSource.Source.Ref != "1.0.0" ||
+		blueprintSource.Source.Repository != "itzg/minecraft-server:2025.1.1-java21" || blueprintSource.Source.Ref != "minecraft-java@1.0.0" ||
+		!strings.HasPrefix(blueprintSource.Source.Revision, "sha256:") || blueprintSource.Source.Digest != "" ||
 		len(blueprintSource.Candidates) != 1 || blueprintSource.Candidates[0].Profile != ProfileGame ||
 		blueprintSource.Candidates[0].Port != 25565 {
 		t.Fatalf("blueprint source result = %#v, %v", blueprintSource, err)

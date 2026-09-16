@@ -100,10 +100,53 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 		if err != nil {
 			return DetectionResult{}, err
 		}
-		return plan.Detection, nil
+		if err := source.ValidateForDeployment(); err != nil {
+			// A preview-only blueprint still renders; it just has no digest to
+			// deploy from, and the picker already explains why.
+			return plan.Detection, nil
+		}
+		return a.resolveBlueprintImage(ctx, plan.Detection)
 	default:
 		return DetectionResult{}, ErrUnsupportedSource
 	}
+}
+
+// resolveBlueprintImage gives a rendered blueprint the immutable image digest
+// its release will pull, exactly as an operator-typed image reference gets one.
+func (a *HostSourceAnalyzer) resolveBlueprintImage(ctx context.Context, detection DetectionResult) (DetectionResult, error) {
+	reference, err := normalizeImageReference(detection.Source.Repository)
+	if err != nil {
+		return DetectionResult{}, fmt.Errorf("%w: blueprint image reference: %v", ErrInvalidSource, err)
+	}
+	detection.Source.Repository = reference
+	if a.docker == nil {
+		detection.Unavailable = "Docker is unavailable"
+		return detection, nil
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resolved, err := a.docker.ResolveDistributionImage(resolveCtx, reference, "")
+	if err != nil {
+		return DetectionResult{}, fmt.Errorf("%w: %w: registry manifest lookup failed: %v", ErrSourceUnavailable, ErrDockerUnavailable, err)
+	}
+	if resolved == nil || !contentDigestRE.MatchString(resolved.Digest) {
+		return DetectionResult{}, fmt.Errorf("%w: %w: registry returned no immutable image digest", ErrSourceUnavailable, ErrDockerUnavailable)
+	}
+	platforms := make([]string, 0, len(resolved.Platforms))
+	for _, platform := range resolved.Platforms {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		if !validPlatform(platform) {
+			return DetectionResult{}, fmt.Errorf("%w: %w: registry returned malformed platform metadata", ErrSourceUnavailable, ErrDockerUnavailable)
+		}
+		platforms = append(platforms, platform)
+	}
+	detection.Source.Digest = resolved.Digest
+	detection.Source.Platforms = uniqueSorted(platforms)
+	for index := range detection.Candidates {
+		detection.Candidates[index].Evidence = append(detection.Candidates[index].Evidence,
+			DetectionEvidence{Path: reference, Reason: "registry digest " + resolved.Digest})
+	}
+	return detection, nil
 }
 
 func (a *HostSourceAnalyzer) analyzeLocal(ctx context.Context, source DraftSourceConfig) (DetectionResult, error) {

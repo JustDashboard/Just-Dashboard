@@ -1,0 +1,35 @@
+?   	github.com/Wayy01/Just-Dashboard/backend/cmd/server	[no test files]
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/agent	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	84.990s
+?   	github.com/Wayy01/Just-Dashboard/backend/internal/audit	[no test files]
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/auth	4.731s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/backups	2.750s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/blueprint	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/config	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dbx	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	15.057s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	33.280s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/files	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/gameserver	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/ghx	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/gitx	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/hostexec	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/httpx	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/jobs	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/logsx	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/metrics	3.712s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/portalloc	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/procs	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/safepath	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/stackports	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	1.141s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/term	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/updates	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/version	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/wsx	(cached)

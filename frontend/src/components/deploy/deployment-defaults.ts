@@ -5,6 +5,7 @@ import type {
   DeploymentDetectionCandidate,
   DeploymentDraftSource,
   DeploymentSourceMode,
+  NodePackageManager,
   WorkloadProfile,
 } from "@/lib/types"
 
@@ -160,6 +161,18 @@ export function blueprintAcceptances(source?: DeploymentDraftSource): string[] {
     .filter((name) => name === "eula")
 }
 
+/**
+ * Detected commands run a script through the manager the lockfile implied, so
+ * choosing a manager has to move that runner with it: oven/bun has no npm and
+ * the node image has no bun, and a stale runner fails after a clean install.
+ * Only the plain `<manager> run <script>` form is rewritten; anything else is
+ * the operator's own command.
+ */
+export function withPackageManagerRunner(command: string, manager?: NodePackageManager) {
+  const match = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(command.trim())
+  return manager && match ? `${manager} run ${match[1]}` : command
+}
+
 export function defaultConfiguration(
   profile: WorkloadProfile,
   candidate?: DeploymentDetectionCandidate,
@@ -171,7 +184,11 @@ export function defaultConfiguration(
   const method: DeploymentBuildMethod =
     candidate?.buildMethod ??
     (source?.kind === "image" ? "image" : source?.kind === "compose" ? "compose" : "none")
-  const port = candidate?.port ?? (game ? 25565 : profile === "web" ? 3000 : 0)
+  const packagedStatic =
+    method === "static" || (method === "recipe" && !!candidate?.outputDirectory)
+  const port = packagedStatic
+    ? 80
+    : (candidate?.port ?? (game ? 25565 : profile === "web" ? 3000 : 0))
   const composeVariables = detection?.compose?.variables ?? []
   return {
     build: {
@@ -181,7 +198,7 @@ export function defaultConfiguration(
       buildCommand: candidate?.buildCommand,
       startCommand: candidate?.startCommand,
       outputDirectory: candidate?.outputDirectory,
-      dockerfile: method === "dockerfile" ? "Dockerfile" : undefined,
+      dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       noCache: false,
       secrets: [],
       releaseTasks: [],

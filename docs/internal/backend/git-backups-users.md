@@ -43,14 +43,38 @@ bucket access before the operator depends on a schedule.
 
 `Scheduler` rebuilds its in-memory robfig/cron entries from enabled jobs at start and after edits. Manual
 and scheduled runs share `Runner.Execute`; a per-job running set prevents overlap. Execution records a run,
-streams a gzip-compressed tar archive to a `0600` staging file, skips unreadable entries with transcript
-evidence, applies exclusions to both full paths and basenames, then moves locally or uploads through the
+streams a gzip-compressed tar archive to a `0600` staging file, fails on unreadable or changing files,
+applies exclusions to both full paths and basenames, then moves locally or uploads through the
 AWS S3 multipart client. B2 uses the same client with its endpoint and path-style addressing. Run logs are
 bounded before persistence.
 
+New runs persist an immutable manifest of resolved sources, exclusions, destination and SHA-256 artifact
+digest. Each source has a separate `source-0001`, `source-0002`, etc. archive root, so identically named
+Docker volume directories restore without overwriting one another. Listing and restore verify the
+artifact digest and use the run's original destination even after job edits. Legacy runs remain readable
+but cannot prove deployment coverage. Jobs may explicitly select SQLite files for native `VACUUM INTO`
+capture, with snapshot digests in the manifest and live sidecars omitted. Jobs may also name saved
+database connections (`database_dumps`): each run asks the Databases owner for a native dump of every
+one (`dbx.Dump`: pg_dump, mysqldump, mongodump, Redis, or the built-in driver dump) into `database-NNNN/`
+inside the archive and records connection, engine, method, file, digest and size in the manifest; a
+failed dump fails the run. `POST /backups/runs/{runID}/restore-database` (destructive, typed
+confirmation of the target database name) extracts one recorded dump bounded by its manifest size,
+verifies its digest and restores it through `dbx.Restore` into the connection or a named drill
+database. Other sources retain ordinary filesystem capture. See
+[`../deployments/backup-coverage.md`](../deployments/backup-coverage.md).
+
+An optional recovery plan runs a pinned application image against a private extracted copy with no
+network access or production mounts. Check status, exact-artifact evidence and cleanup results are
+persisted in `backup_restore_tests` and shown in run history. Recovery can run after each backup, manually
+through the admin `POST /backups/runs/{runID}/verify-restore`, or to satisfy a deployment gate. Existing
+destination restores retain destructive/typed confirmation. See
+[`../deployments/restore-verification.md`](../deployments/restore-verification.md) for the checker contract
+and supported consistency protocols.
+
 Retention deletes the oldest successful artifacts and their run rows, but skips an artifact while archive
-listing or restore holds a read reference. Cross-device local moves fall back from rename to copy. Deleting
-a job deliberately leaves its existing artifacts alone.
+listing or restore holds a read reference; deletion reserves an exclusive lease against new readers.
+Active or cleanup-pending recovery records also block pruning and job deletion. Cross-device local moves
+fall back from rename to copy. Deleting a job deliberately leaves its existing artifacts alone.
 
 Archive listing is bounded and does not extract. Restore requires a successful artifact, downloads remote
 objects into private staging, refuses `/`, and is typed-confirmed with the destination. The API resolves the

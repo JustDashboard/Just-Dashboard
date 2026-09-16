@@ -528,8 +528,16 @@ async function mockDashboard(
   let configurationRevision = 3
   let configurationPending = true
   let automationTriggers: Record<string, unknown>[] = []
+  let gitPolicy = {
+    automatic: true,
+    commitStatuses: true,
+    revision: 0,
+    watchInclude: [] as string[],
+    watchExclude: [] as string[],
+  }
   let automationSchedules: Record<string, unknown>[] = []
   let notificationChannels: Record<string, unknown>[] = []
+  let notificationTests = 0
   let scopedVariables = [
     {
       name: "API_TOKEN",
@@ -674,12 +682,56 @@ async function mockDashboard(
         : []
     } else if (path === "/deploy/7/runs" && url.searchParams.get("view") === "engine") {
       body = { runs: [liveRun()], running: true }
+    } else if (path === "/deploy/7/insights") {
+      const days = Number(url.searchParams.get("days") ?? "30")
+      body = {
+        projectId: 7,
+        windowDays: days,
+        generatedAt: now,
+        runs: days === 7 ? 3 : 12,
+        succeeded: days === 7 ? 2 : 9,
+        failed: days === 7 ? 1 : 3,
+        rolledBack: 1,
+        cancelled: 0,
+        successRate: days === 7 ? 2 / 3 : 0.75,
+        failureStreak: 1,
+        medianDurationSeconds: 95,
+        p95DurationSeconds: 240,
+        deploysPerWeek: days === 7 ? 2 : 2.1,
+        meanRecoverySeconds: 5400,
+        recoveredFailures: 2,
+        lastSuccessAt: "2026-09-02T09:00:00Z",
+        lastFailureAt: "2026-09-03T11:00:00Z",
+        daily: Array.from({ length: days + 1 }, (_, index) => ({
+          date: `2026-08-${String(4 + (index % 27)).padStart(2, "0")}`,
+          succeeded: index % 5 === 0 ? 1 : 0,
+          failed: index % 9 === 0 ? 1 : 0,
+          cancelled: 0,
+          medianDurationSeconds: index % 5 === 0 ? 95 : 0,
+        })),
+        topFailures: [
+          { code: "health_gate_failed", count: 2 },
+          { code: "build_failed", count: 1 },
+        ],
+      }
     } else if (path === "/deploy/7/runs/84" && method === "GET") {
       body = { run: liveRun(), steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
       body = configurationBody()
     } else if (path === "/deploy/7/environments/12/git-watch" && method === "GET") {
-      body = { automatic: true, branch: "main", status: "watching", intervalSeconds: 5 }
+      body = {
+        automatic: gitPolicy.automatic,
+        branch: "main",
+        status: gitPolicy.automatic ? "watching" : "manual_only",
+        intervalSeconds: 5,
+        policy: gitPolicy,
+      }
+    } else if (path === "/deploy/7/environments/12/git-policy" && method === "PUT") {
+      const input = request.postDataJSON() as typeof gitPolicy
+      gitPolicy = { ...input, revision: input.revision + 1 }
+      body = gitPolicy
+    } else if (path === "/deploy/7/environments/12/database-links" && method === "GET") {
+      body = []
     } else if (path === "/deploy/7/environments/12/triggers" && method === "GET") {
       body = automationTriggers
     } else if (path === "/deploy/7/environments/12/triggers" && method === "POST") {
@@ -707,6 +759,8 @@ async function mockDashboard(
       }
       automationSchedules = [schedule]
       body = schedule
+    } else if (path === "/deploy/7/previews/approvals") {
+      body = []
     } else if (path === "/deploy/7/previews") {
       body = [
         {
@@ -723,9 +777,49 @@ async function mockDashboard(
       body = notificationChannels
     } else if (path === "/deploy/notifications" && method === "POST") {
       const input = request.postDataJSON() as Record<string, unknown>
-      const channel = { id: 61, ...input }
+      const config = (input.config ?? {}) as Record<string, unknown>
+      const target =
+        input.kind === "discord"
+          ? "https://discord.com/api/webhooks/123456/••••"
+          : input.kind === "telegram"
+            ? `Telegram chat ${config.chatId}`
+            : input.url
+      const channel = {
+        id: 61,
+        target,
+        createdAt: now,
+        updatedAt: now,
+        ...input,
+        config: undefined,
+        url: input.kind === "webhook" ? input.url : target,
+      }
       notificationChannels = [channel]
-      body = { channel, secret: "one-time-notification-secret" }
+      body = { channel, secret: input.kind === "webhook" ? "one-time-notification-secret" : "" }
+    } else if (path === "/deploy/notifications/61/enabled" && method === "PUT") {
+      const input = request.postDataJSON() as { enabled: boolean }
+      notificationChannels = notificationChannels.map((channel) => ({ ...channel, ...input }))
+      body = notificationChannels[0]
+    } else if (path === "/deploy/notifications/61/test" && method === "POST") {
+      notificationTests += 1
+      body = { delivered: true }
+    } else if (path === "/deploy/notifications/61/deliveries" && method === "GET") {
+      body = [
+        {
+          id: 1,
+          channelId: 61,
+          runId: 84,
+          event: "run.failed",
+          attempt: 1,
+          status: "delivered",
+          responseClass: "2xx",
+          createdAt: now,
+          completedAt: now,
+        },
+      ]
+    } else if (path === "/deploy/notifications/61" && method === "DELETE") {
+      notificationChannels = []
+      await route.fulfill({ status: 204 })
+      return
     } else if (path === "/deploy/7/environments/12/configuration" && method === "PUT") {
       const requestBody = request.postDataJSON() as typeof normalizedConfiguration
       normalizedConfiguration = {
@@ -867,6 +961,15 @@ async function mockDashboard(
     },
     actions() {
       return [...actions]
+    },
+    notificationTests() {
+      return notificationTests
+    },
+    gitPolicy() {
+      return gitPolicy
+    },
+    configuration() {
+      return normalizedConfiguration
     },
   }
 }
@@ -1188,8 +1291,116 @@ const blueprintCatalogue = [
     reviewedAt: "2026-09-11",
     image: "louislam/uptime-kuma:1.23.16",
     memoryMb: 512,
+    deploymentSupported: true,
+  },
+  {
+    id: "postgresql",
+    version: "1.0.0",
+    name: "PostgreSQL",
+    category: "database",
+    profile: "database",
+    description: "The default relational database.",
+    iconId: "database",
+    docsUrl: "https://www.postgresql.org/docs/16/index.html",
+    license: "PostgreSQL",
+    maintainer: "Just Dashboard",
+    reviewedAt: "2026-09-11",
+    image: "postgres:16-alpine",
+    memoryMb: 512,
+    deploymentSupported: true,
   },
 ]
+
+const postgresBlueprint = {
+  ...blueprintCatalogue[2],
+  provenance: {
+    maintainer: "Just Dashboard",
+    license: "PostgreSQL",
+    upstreamUrl: "https://hub.docker.com/_/postgres",
+    reviewedAt: "2026-09-11",
+    minimumDashboard: "0.6.7",
+  },
+  resources: { memoryMb: 512, minMemoryMb: 256 },
+  update: { detector: "registry", backupFirst: true, notes: "" },
+  inputs: [
+    {
+      name: "database",
+      kind: "text",
+      label: "Database name",
+      default: "app",
+      required: true,
+      variable: "POSTGRES_DB",
+    },
+    {
+      name: "username",
+      kind: "text",
+      label: "Database user",
+      default: "app",
+      required: true,
+      variable: "POSTGRES_USER",
+    },
+  ],
+  secrets: [
+    { name: "password", variable: "POSTGRES_PASSWORD", label: "Database password", length: 40 },
+  ],
+}
+
+// What the server renders for the PostgreSQL blueprint when it is inspected:
+// the browser never composes this itself.
+const postgresRenderedConfiguration = {
+  build: { method: "image", noCache: false, secrets: [], releaseTasks: [] },
+  runtime: {
+    image: "postgres:16-alpine",
+    command: [],
+    internalPort: 5432,
+    hostPort: 0,
+    bindAddress: "127.0.0.1",
+    strategy: "stop_first",
+    privileged: false,
+    hostNetwork: false,
+    capabilities: [],
+    devices: [],
+    memoryMb: 512,
+    stopSignal: "SIGINT",
+    mounts: [
+      {
+        source: "shop-db-0123456789abcdef",
+        target: "/var/lib/postgresql/data",
+        ownership: "managed",
+      },
+    ],
+  },
+  variables: [
+    { name: "POSTGRES_DB", sensitivity: "plain", scopes: ["runtime"], value: "shop" },
+    {
+      name: "POSTGRES_PASSWORD",
+      sensitivity: "secret",
+      scopes: ["runtime"],
+      required: true,
+      generate: 40,
+    },
+    { name: "POSTGRES_USER", sensitivity: "plain", scopes: ["runtime"], value: "app" },
+  ],
+  dependencies: [
+    {
+      kind: "storage",
+      ownership: "managed",
+      resourceKind: "docker_volume",
+      resourceId: "shop-db-0123456789abcdef",
+      config: { purpose: "Every table this server holds", data: true, backup: true },
+    },
+  ],
+  checks: [
+    {
+      name: "Accepts connections",
+      kind: "command",
+      phase: "readiness",
+      required: true,
+      config: { command: ["pg_isready", "-U", "postgres"], timeoutSeconds: 10, attempts: 6 },
+    },
+  ],
+  domains: [],
+}
 
 const minecraftBlueprint = {
   ...blueprintCatalogue[0],
@@ -1288,6 +1499,16 @@ async function mockWizardJourney(page: Page) {
     if (path === "/deploy/blueprints/") return json(route, blueprintCatalogue)
     if (path === "/deploy/blueprints/minecraft-java") return json(route, minecraftBlueprint)
     if (path === "/deploy/blueprints/minecraft-java/versions") return json(route, minecraftVersions)
+    if (path === "/deploy/blueprints/postgresql") return json(route, postgresBlueprint)
+    if (path === "/deploy/blueprints/uptime-kuma") {
+      return json(route, {
+        ...blueprintCatalogue[1],
+        provenance: postgresBlueprint.provenance,
+        resources: { memoryMb: 512, minMemoryMb: 256 },
+        update: { detector: "registry", notes: "" },
+        inputs: [],
+      })
+    }
     if (path === "/deploy/drafts" && method === "POST") return json(route, currentDraft())
     if (path === "/deploy/drafts/journey-draft" && method === "GET") {
       return json(route, currentDraft())
@@ -1308,7 +1529,57 @@ async function mockWizardJourney(page: Page) {
     }
     if (path === "/deploy/drafts/journey-draft/detect" && method === "POST") {
       const intent = data.intent as { profile: string }
-      const source = data.source as { kind: string; url?: string; image?: string }
+      const source = data.source as {
+        kind: string
+        url?: string
+        image?: string
+        blueprintId?: string
+        blueprintInputs?: Record<string, string>
+      }
+      if (source.kind === "blueprint" && source.blueprintId === "postgresql") {
+        revision += 1
+        currentStep = "detection"
+        const candidate = {
+          id: "postgresql",
+          name: "PostgreSQL",
+          root: "",
+          profile: "service",
+          buildMethod: "image",
+          confidence: "high",
+          port: 5432,
+          evidence: [
+            { path: "postgresql@1.0.0", reason: "reviewed blueprint shipped with this dashboard" },
+            {
+              path: "docker.io/library/postgres:16-alpine",
+              reason: `registry digest sha256:${"c".repeat(64)}`,
+            },
+          ],
+          needsDecision: [],
+        }
+        const rendered = structuredClone(postgresRenderedConfiguration)
+        rendered.variables[0].value = source.blueprintInputs?.database ?? "app"
+        data = {
+          ...data,
+          configuration: rendered,
+          detection: {
+            source: {
+              kind: "blueprint",
+              repository: "docker.io/library/postgres:16-alpine",
+              ref: "postgresql@1.0.0",
+              revision: `sha256:${"d".repeat(64)}`,
+              digest: `sha256:${"c".repeat(64)}`,
+              platforms: ["linux/amd64"],
+            },
+            candidates: [candidate],
+            selectedId: candidate.id,
+            scannedFiles: 0,
+            scannedBytes: 0,
+            truncated: false,
+            gitRequirements: { submodules: false, lfs: false },
+          },
+        }
+        return json(route, currentDraft())
+      }
       const image = intent.profile === "game"
       const candidate = {
         id: `${intent.profile}-candidate`,
@@ -1707,6 +1978,26 @@ test("project workspace keeps pending state and permanent run links visible", as
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/86$/)
 })
 
+test("the deployments tab reports delivery figures with their basis and window", async ({
+  page,
+}) => {
+  await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7?tab=deployments")
+  const delivery = page.getByRole("heading", { name: "Delivery" }).locator("..").locator("..")
+  await expect(page.getByText("75%", { exact: true })).toBeVisible()
+  await expect(page.getByText("9 of 12 decided releases", { exact: true })).toBeVisible()
+  await expect(page.getByText("2.1", { exact: true })).toBeVisible()
+  await expect(page.getByText("1.5h", { exact: true })).toBeVisible()
+  await expect(page.getByText("mean over 2 recovered failures", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Health Gate Failed/)).toBeVisible()
+  await expect(page.getByTestId("insights-daily").locator("li")).toHaveCount(31)
+  await page.getByRole("combobox", { name: "Insights window" }).click()
+  await page.getByRole("option", { name: "Last 7 days" }).click()
+  await expect(page.getByText("67%", { exact: true })).toBeVisible()
+  await expect(page.getByTestId("insights-daily").locator("li")).toHaveCount(8)
+  await expect(delivery).toBeVisible()
+})
+
 test("normalized workspace exposes distinct immutable release actions and ordinary rollback confirmation", async ({
   page,
 }) => {
@@ -1804,7 +2095,7 @@ test("normalized configuration joins keep secrets masked and saved changes pendi
   await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible()
 })
 
-test("automatic Git deployments are read-only and repository failures stay visible", async ({ page }) => {
+test("automatic Git status keeps repository failures visible", async ({ page }) => {
   await mockDashboard(page, { normalized: true })
   await page.goto("/deploy/7")
   await expect(page.getByLabel("Automatic deployments")).toContainText(
@@ -1820,6 +2111,38 @@ test("automatic Git deployments are read-only and repository failures stay visib
   )
   await expect(page.getByLabel("Automatic deployments")).toContainText(
     "Check repository access and credentials",
+  )
+})
+
+test("deployment policy saves shared paths and manual-only mode", async ({ page }) => {
+  await mockDashboard(page, { normalized: true })
+  await page.setViewportSize({ width: 375, height: 900 })
+  await page.goto("/deploy/7?tab=automations")
+  await page.getByRole("button", { name: "Deployment policy", exact: true }).click()
+  const panel = page.getByRole("dialog", { name: "Deployment policy" })
+  await panel.getByLabel("Include paths").fill("services/api/**\nshared/**")
+  await panel.getByLabel("Exclude paths").fill("services/api/docs/**")
+  const saved = page.waitForRequest(
+    (request) => request.url().endsWith("/git-policy") && request.method() === "PUT",
+  )
+  await panel.getByRole("button", { name: "Save deployment policy" }).click()
+  expect((await saved).postDataJSON()).toMatchObject({
+    automatic: true,
+    revision: 0,
+    watchInclude: ["services/api/**", "shared/**"],
+    watchExclude: ["services/api/docs/**"],
+  })
+  await expect(page.getByLabel("Automatic deployments")).toContainText("same path filters apply")
+  await page.getByRole("button", { name: "Deployment policy", exact: true }).click()
+  await expect(panel.getByLabel("Exclude paths")).toHaveValue("services/api/docs/**")
+  await panel.getByRole("checkbox", { name: "Deploy automatically" }).uncheck()
+  await panel.getByRole("button", { name: "Save deployment policy" }).click()
+  await expect(page.getByLabel("Automatic deployments")).toContainText("Manual deployments only")
+  await expect(page.getByLabel("Automatic deployments")).toContainText(
+    "cannot queue new deployments",
+  )
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
   )
 })
 
@@ -1853,6 +2176,8 @@ test("automation workspace creates provider, schedule, preview and signed notifi
 
   await page.getByRole("button", { name: "Notifications", exact: true }).click()
   await page.getByRole("button", { name: "Add channel" }).click()
+  await page.getByLabel("Deliver to").click()
+  await page.getByRole("option", { name: "Signed webhook" }).click()
   await page.getByLabel("HTTPS endpoint").fill("https://hooks.example.test/deploy")
   await page.getByRole("button", { name: "Create channel" }).click()
   await expect(page.getByText("one-time-notification-secret", { exact: true })).toBeVisible()
@@ -1860,6 +2185,113 @@ test("automation workspace creates provider, schedule, preview and signed notifi
     page.getByRole("paragraph").filter({ hasText: "https://hooks.example.test/deploy" }),
   ).toBeVisible()
   await expect(page.locator("main")).not.toHaveCSS("overflow-x", "scroll")
+})
+
+test("preview approval exposes the exact revision and configures only preview variables before deployment", async ({
+  page,
+}) => {
+  await mockDashboard(page, { normalized: true })
+  const revision = "a".repeat(40)
+  const preview = {
+    id: 51,
+    triggerId: 31,
+    providerRef: "42",
+    environmentId: 52,
+    environmentSlug: "pr-42",
+    state: "open",
+    updatedAt: now,
+  }
+  let approved = false
+  let deployed = false
+  await page.route("**/api/v1/deploy/7/previews", (route) => json(route, approved ? [preview] : []))
+  await page.route("**/api/v1/deploy/7/previews/approvals", (route) =>
+    json(route, [
+      {
+        id: 61,
+        triggerId: 31,
+        providerRef: "42",
+        revision,
+        repository: "acme/app",
+        headRepository: "contributor/app",
+        author: "contributor",
+        updatedAt: now,
+        state: approved ? "approved" : "pending",
+        configured: approved,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/deploy/7/previews/approvals/61/approve", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ revision, deploy: false })
+    approved = true
+    await json(route, { preview })
+  })
+  await page.route("**/api/v1/deploy/7/environments/52/configuration", (route) =>
+    json(route, {
+      revision: 1,
+      variables: [],
+      build: { method: "recipe" },
+      runtime: {},
+      dependencies: [],
+      checks: [],
+      domains: [],
+      pending: { pending: false, desiredRevision: 1, changes: [] },
+    }),
+  )
+  await page.route("**/api/v1/deploy/7/environments/52/runs", async (route) => {
+    expect(approved).toBe(true)
+    expect(route.request().postDataJSON()).toEqual({ operation: "deploy" })
+    deployed = true
+    await json(route, { id: 91 })
+  })
+  await page.goto("/deploy/7?tab=automations")
+  await page.getByRole("button", { name: "Preview environments", exact: true }).click()
+  await expect(page.getByText("contributor · contributor/app")).toBeVisible()
+  await page.getByRole("button", { name: "Review revision" }).click()
+  const approvalDialog = page.getByRole("dialog", { name: "Approve PR 42" })
+  await expect(approvalDialog.getByText(revision, { exact: true })).toBeVisible()
+  expect(approved).toBe(false)
+  await approvalDialog.getByRole("button", { name: "Approve and configure" }).click()
+  const variables = page.getByRole("dialog", { name: "Preview 42 variables" })
+  await expect(variables.getByText("No scoped variables")).toBeVisible()
+  await expect(variables.getByText("API_TOKEN", { exact: true })).toHaveCount(0)
+  expect(deployed).toBe(false)
+  await page.keyboard.press("Escape")
+  await expect(variables).toHaveCount(0)
+  await page.getByRole("button", { name: "Deploy preview" }).click()
+  await expect.poll(() => deployed).toBe(true)
+})
+
+test("older previews explain isolation failures and block deployment until reviewed", async ({
+  page,
+}) => {
+  await mockDashboard(page, { normalized: true })
+  let isolationStatus = "pending"
+  await page.route("**/api/v1/deploy/7/previews", (route) =>
+    json(route, [
+      {
+        id: 51,
+        triggerId: 31,
+        providerRef: "42",
+        environmentId: 52,
+        environmentSlug: "pr-42",
+        state: "open",
+        updatedAt: now,
+        isolationStatus,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/deploy/7/previews/approvals", (route) => json(route, []))
+  await page.goto("/deploy/7?tab=automations")
+  await page.getByRole("button", { name: "Preview environments", exact: true }).click()
+  await expect(page.getByText("Isolation incomplete", { exact: true })).toBeVisible()
+  await expect(page.getByText(/check Docker and proxy availability/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Deploy preview", exact: true })).toBeDisabled()
+  isolationStatus = "quarantined"
+  await page.reload()
+  await page.getByRole("button", { name: "Preview environments", exact: true }).click()
+  await expect(page.getByText("Stopped for isolation", { exact: true })).toBeVisible()
+  await expect(page.getByText(/stored data is retained/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Deploy preview", exact: true })).toBeDisabled()
 })
 
 test("run page renders persisted release evidence and keyboard-selectable transcript steps", async ({
@@ -2623,7 +3055,8 @@ test("redesign connects a new database before deploying without leaving setup", 
     database: "app",
     createdAt: now,
   }
-  const connectionURL = "postgres://jd:setup-secret@172.17.0.4:5432/app?sslmode=disable"
+  const connectionURL = "postgres://jd:setup-secret@db-42.jd.internal:5432/app?sslmode=disable"
+  const connectionReference = "${{database.42}}"
   await page.route("**/api/v1/databases/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace("/api/v1", "")
@@ -2644,7 +3077,7 @@ test("redesign connects a new database before deploying without leaving setup", 
     if (path.endsWith("/ping")) return json(route, { ok: true })
     if (path.endsWith("/url")) {
       expect(url.searchParams.get("target")).toBe("container")
-      return json(route, { url: connectionURL })
+      return json(route, { url: connectionURL, reference: connectionReference })
     }
     return json(route, [connection])
   })
@@ -2666,7 +3099,7 @@ test("redesign connects a new database before deploying without leaving setup", 
   await page.getByRole("button", { name: "Use this database" }).click()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.locator("#env-key-1")).toHaveValue("DATABASE_URL")
-  await expect(page.locator("#env-value-1")).toHaveValue(connectionURL)
+  await expect(page.locator("#env-value-1")).toHaveValue(connectionReference)
   await page.screenshot({ path: testInfo.outputPath("configure-desktop.png"), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -2686,7 +3119,8 @@ test("redesign connects a new database before deploying without leaving setup", 
       },
     ],
   })
-  expect(quick.imported()?.dotenv).toContain(connectionURL)
+  expect(quick.imported()?.dotenv).toContain(connectionReference)
+  expect(quick.imported()?.dotenv).not.toContain("setup-secret")
   expect(quick.imported()?.dotenv).toContain('API_KEY="another-secret"')
   expect(provisioned).toBe(1)
   expect(quick.commits()).toBe(1)
@@ -2990,7 +3424,7 @@ test("switching a Git project to a static website retains its build recipe", asy
   expect((quick.configuration()?.build as Record<string, unknown>).startCommand).toBeUndefined()
 })
 
-test("existing database setup uses a private application URL without provisioning another server", async ({
+test("existing database setup saves a logical connection reference without provisioning another server", async ({
   page,
 }) => {
   const quick = await mockQuickDeploy(page)
@@ -3001,7 +3435,10 @@ test("existing database setup uses a private application URL without provisionin
     if (url.pathname.endsWith("/provision")) provisions++
     if (url.pathname.endsWith("/url")) {
       expect(url.searchParams.get("target")).toBe("container")
-      return json(route, { url: "postgres://app:existing-secret@172.17.0.4:5432/app" })
+      return json(route, {
+        url: "postgres://app:existing-secret@db-42.jd.internal:5432/app",
+        reference: "${{database.42}}",
+      })
     }
     return json(
       route,
@@ -3026,10 +3463,61 @@ test("existing database setup uses a private application URL without provisionin
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
   expect(provisions).toBe(0)
-  expect(quick.imported()?.dotenv).toContain("existing-secret@172.17.0.4")
+  expect(quick.imported()?.dotenv).toContain("${{database.42}}")
+  expect(quick.imported()?.dotenv).not.toContain("existing-secret")
   expect(quick.configuration()?.dependencies).toMatchObject([
     { kind: "database", resourceId: "42" },
   ])
+})
+
+test("a supported blueprint reaches a reviewed plan with the server's rendered configuration", async ({
+  page,
+}) => {
+  await mockWizardJourney(page)
+  const configurationWrites: unknown[] = []
+  page.on("request", (request) => {
+    if (
+      request.method() === "PUT" &&
+      request.url().includes("/deploy/drafts/") &&
+      request.postDataJSON()?.step === "configuration"
+    )
+      configurationWrites.push(request.postDataJSON().configuration)
+  })
+  await page.goto("/deploy/new?mode=advanced")
+  await page.getByRole("textbox", { name: "Deployment name" }).fill("shop-db")
+  await page.getByText("Service from a blueprint", { exact: true }).click()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByRole("radio", { name: /Uptime Kuma/ })).toBeEnabled()
+  await page.getByRole("radio", { name: /PostgreSQL/ }).check()
+  await page.getByRole("textbox", { name: "Database name" }).fill("shop")
+  await page.getByRole("button", { name: "Inspect source", exact: true }).click()
+  await expect(page.getByText("reviewed blueprint shipped with this dashboard")).toBeVisible()
+  await page.getByRole("button", { name: "Use this detection", exact: true }).click()
+  // The plan the operator reviews is the render, not a browser default.
+  await expect(page.getByRole("textbox", { name: "Runtime image" })).toHaveValue(
+    "postgres:16-alpine",
+  )
+  await expect(page.getByRole("textbox", { name: "Variable POSTGRES_DB value" })).toHaveValue(
+    "shop",
+  )
+  await expect(page.getByRole("textbox", { name: "Variable POSTGRES_PASSWORD value" })).toHaveValue(
+    "Generated on save (40 characters)",
+  )
+  await page.getByRole("button", { name: "Run preflight" }).click()
+  await expect(page.getByRole("button", { name: "Save deployment", exact: true })).toBeVisible()
+  expect(configurationWrites).toHaveLength(1)
+  expect(configurationWrites[0]).toMatchObject({
+    runtime: {
+      image: "postgres:16-alpine",
+      strategy: "stop_first",
+      mounts: [{ target: "/var/lib/postgresql/data", ownership: "managed" }],
+    },
+    variables: expect.arrayContaining([
+      expect.objectContaining({ name: "POSTGRES_PASSWORD", generate: 40 }),
+      expect.objectContaining({ name: "POSTGRES_DB", value: "shop" }),
+    ]),
+  })
+  expect(JSON.stringify(configurationWrites[0])).not.toContain("hunter")
 })
 
 test("unavailable blueprints explain their status and cannot create a source plan", async ({
@@ -3064,4 +3552,115 @@ test("unavailable blueprints explain their status and cannot create a source pla
   await expect(page.getByText(reason).first()).toBeVisible()
   await expect(page.getByRole("button", { name: "Inspect source", exact: true })).toBeDisabled()
   expect(sourceWrites).toBe(0)
+})
+
+test("notification channels deliver to Discord, pause, test and show delivery history", async ({
+  page,
+}) => {
+  const dashboard = await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7?tab=automations")
+  await page.getByRole("button", { name: "Notifications", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible()
+  await page.getByRole("button", { name: "Add channel" }).click()
+  await expect(page.getByLabel("Deliver to")).toContainText("Discord")
+  await page.getByLabel("Name").fill("Ops room")
+  await page
+    .getByLabel("Discord webhook URL")
+    .fill("https://discord.com/api/webhooks/123456/secret-token-value")
+  await page.getByRole("checkbox", { name: /Started/ }).check()
+  await page.getByRole("button", { name: "Create channel" }).click()
+  const channel = page.getByRole("listitem").filter({ hasText: "Ops room" })
+  await expect(channel).toBeVisible()
+  await expect(channel).toContainText("https://discord.com/api/webhooks/123456/••••")
+  await expect(channel).not.toContainText("secret-token-value")
+  await expect(channel).toContainText("Started, Succeeded, Failed")
+  await expect(channel.getByText("Enabled", { exact: true })).toBeVisible()
+  await expect(page.getByText("one-time-notification-secret")).toHaveCount(0)
+
+  await channel.getByRole("switch", { name: "Pause Ops room" }).click()
+  await expect(channel.getByText("Paused", { exact: true })).toBeVisible()
+  await channel.getByRole("button", { name: "Send test" }).click()
+  await expect(page.getByText("Test message sent to Ops room")).toBeVisible()
+  expect(dashboard.notificationTests()).toBe(1)
+  await channel.getByRole("button", { name: "History" }).click()
+  await expect(page.getByRole("heading", { name: "Deliveries · Ops room" })).toBeVisible()
+  await expect(page.getByText(/run\.failed/)).toBeVisible()
+  await expect(page.getByText("Delivered", { exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await channel.getByRole("button", { name: "Remove Ops room" }).click()
+  await page.getByRole("button", { name: "Remove channel" }).click()
+  await expect(page.getByText("No notification channels")).toBeVisible()
+})
+
+test("runtime settings save memory, CPU, process limits and the restart policy", async ({
+  page,
+}) => {
+  const dashboard = await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7?tab=runtime-settings")
+  await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible()
+  await page.getByLabel("Memory limit (MiB)").fill("512")
+  await page.getByLabel("CPU limit").fill("1.5")
+  await page.getByLabel("Process limit").fill("256")
+  await page.getByLabel("Restart policy").click()
+  await page.getByRole("option", { name: "On failure" }).click()
+  await page.getByRole("button", { name: "Save configuration" }).click()
+  await expect(page.getByText("Configuration saved")).toBeVisible()
+  const runtime = dashboard.configuration().runtime as Record<string, unknown>
+  expect(runtime.memoryMb).toBe(512)
+  expect(runtime.cpus).toBe(1.5)
+  expect(runtime.pidsLimit).toBe(256)
+  expect(runtime.restartPolicy).toBe("on-failure")
+})
+
+test("the console tab opens a shell inside the live release container", async ({ page }) => {
+  const runtime: DeploymentRuntimeServices = {
+    status: "available",
+    observedAt: now,
+    services: [
+      {
+        containerId: "abc123",
+        name: "jd-e12-r20",
+        releaseId: 20,
+        liveRelease: true,
+        state: "running",
+        health: "healthy",
+        imageId: "sha256:abc",
+      },
+      {
+        containerId: "def456",
+        name: "jd-e12-r19",
+        releaseId: 19,
+        liveRelease: false,
+        state: "running",
+        health: "healthy",
+        imageId: "sha256:def",
+      },
+    ],
+  }
+  await mockDashboard(page, { normalized: true, runtime })
+  await page.goto("/deploy/7?tab=console")
+  await expect(page.getByRole("heading", { name: "Console" })).toBeVisible()
+  await expect(page.getByText("jd-e12-r20 · deployment shell")).toBeVisible()
+  await page.getByRole("combobox", { name: "Console container" }).click()
+  await page.getByRole("option", { name: "jd-e12-r19" }).click()
+  await expect(page.getByText("jd-e12-r19 · deployment shell")).toBeVisible()
+
+  await mockDashboard(page, {
+    normalized: true,
+    runtime: { status: "available", observedAt: now, services: [] },
+  })
+  await page.goto("/deploy/7?tab=console")
+  await expect(page.getByText("No running container")).toBeVisible()
+})
+
+test("the deployment policy can stop reporting commit statuses to GitHub", async ({ page }) => {
+  const dashboard = await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7")
+  await page.getByRole("button", { name: "Deployment policy" }).click()
+  const statuses = page.getByRole("checkbox", { name: /Report deployment status to GitHub/ })
+  await expect(statuses).toBeChecked()
+  await statuses.uncheck()
+  await page.getByRole("button", { name: "Save deployment policy" }).click()
+  await expect(page.getByText("Deployment policy saved")).toBeVisible()
+  expect(dashboard.gitPolicy().commitStatuses).toBe(false)
 })

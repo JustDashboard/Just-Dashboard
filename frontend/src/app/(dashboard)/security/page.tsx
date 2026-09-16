@@ -1,9 +1,7 @@
 "use client"
 
-import Link from "next/link"
 import {
   Bug,
-  ChevronRight,
   Connection,
   Crosshair,
   NetworkDevice,
@@ -14,6 +12,7 @@ import {
 import type { SecurityFinding } from "@/lib/types"
 import { Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
 import { Status, type DotTone } from "@/components/status-dot"
 import { ExposurePanel } from "@/components/security/exposure-panel"
 import { PosturePanel } from "@/components/security/posture-panel"
@@ -98,38 +97,39 @@ export default function SecurityOverviewPage() {
       {/* items-start so the shorter of the two keeps its own height. Stretched
           to a common height, whichever panel had less to say ended in a block
           of empty card — the page's most prominent feature being nothing. */}
-      <div className="grid items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <ExposurePanel />
         <PosturePanel posture={posture} loading={postureLoading} onFix={applyFix} />
       </div>
 
-      <Panel>
+      {/* The section's own table of contents: a plain list, because a box
+          around seven links to the pages beside this one is a box around the
+          navigation. The glyphs stay — they are wayfinding, the same marks the
+          reader is about to click through to in the rail. */}
+      <Panel plain>
         <PanelHeader title="Areas" />
         <PanelBody flush>
-          <div className="divide-y divide-hairline">
+          <RowList>
             {AREAS.map(({ areas, href, title, icon: Icon, blurb }) => {
               const findings = areas.length
                 ? (posture?.findings.filter((f) => areas.includes(f.area)) ?? [])
                 : null
               return (
-                <Link
+                <Row
                   key={href}
                   href={href}
-                  className="group flex min-w-0 items-center gap-3 px-4 py-3 transition-colors hover:bg-row-hover"
-                >
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <Icon className="size-3.5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-body font-medium">{title}</span>
-                    <span className="block truncate text-hint text-muted-foreground">{blurb}</span>
-                  </span>
-                  <AreaVerdict href={href} findings={findings} firewall={firewall} />
-                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
-                </Link>
+                  leading={
+                    <span className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                      <Icon className="size-3.5" />
+                    </span>
+                  }
+                  title={title}
+                  subtitle={blurb}
+                  trailing={<AreaVerdict href={href} findings={findings} firewall={firewall} />}
+                />
               )
             })}
-          </div>
+          </RowList>
         </PanelBody>
       </Panel>
     </Page>

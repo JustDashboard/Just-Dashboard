@@ -44,16 +44,20 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/env", s.handle(s.handleDeployEnvList))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/releases", s.handle(s.handleDeploymentReleases))
 		r.Method(http.MethodGet, "/{id}/operations", s.handle(s.handleDeploymentOperations))
+		r.Method(http.MethodGet, "/{id}/insights", s.handle(s.handleDeploymentInsights))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/releases/{release}/comparison", s.handle(s.handleDeploymentReleaseComparison))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules/{schedule}/runs", s.handle(s.handleDeploymentScheduleRuns))
 		r.Method(http.MethodGet, "/{id}/previews", s.handle(s.handleDeploymentPreviews))
+		r.Method(http.MethodGet, "/{id}/previews/approvals", s.handle(s.handleDeploymentPreviewApprovals))
 		r.Method(http.MethodGet, "/notifications", s.handle(s.handleDeploymentNotifications))
+		r.Method(http.MethodGet, "/notifications/options", s.handle(s.handleDeploymentNotificationOptions))
 		r.Method(http.MethodGet, "/notifications/{channel}/deliveries", s.handle(s.handleDeploymentNotificationDeliveries))
 
 		r.Group(func(r chi.Router) {
@@ -79,6 +83,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/generate", s.handle(s.handleDeploymentVariableGenerate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/rotate", s.handle(s.handleDeploymentVariableRotate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
+				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggerCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/triggers/{trigger}", s.handle(s.handleDeploymentTriggerUpdate))
@@ -92,6 +98,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/notifications", s.handle(s.handleDeploymentNotificationCreate))
 				r.Method(http.MethodPut, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationUpdate))
 				r.Method(http.MethodPost, "/notifications/{channel}/test", s.handle(s.handleDeploymentNotificationTest))
+				r.Method(http.MethodPut, "/notifications/{channel}/enabled", s.handle(s.handleDeploymentNotificationEnabled))
 				r.Method(http.MethodDelete, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationDelete))
 			})
 			r.Method(http.MethodPost, "/", s.handle(s.handleDeployCreate))
@@ -114,6 +121,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 
 func mapDeployError(err error) error {
 	switch {
+	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrPreviewCleanupPending), errors.Is(err, deploy.ErrGitManualOnly), errors.Is(err, deploy.ErrGitPolicyConflict):
+		return mapAutomationError(err)
 	case errors.Is(err, deploy.ErrArchiveRequired):
 		return httpx.Err(http.StatusConflict, "deployment_not_archived", err.Error())
 	case errors.Is(err, deploy.ErrNotFound):
@@ -130,6 +139,8 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusNotFound, "run_not_found", err.Error())
 	case errors.Is(err, deploy.ErrIdempotencyConflict):
 		return httpx.Err(http.StatusConflict, "idempotency_conflict", err.Error())
+	case errors.Is(err, deploy.ErrRevisionConflict):
+		return httpx.Err(http.StatusConflict, "revision_conflict", err.Error())
 	case errors.Is(err, deploy.ErrRunTerminal):
 		return httpx.Err(http.StatusConflict, "run_terminal", err.Error())
 	case errors.Is(err, deploy.ErrRunNotCancellable):
@@ -492,6 +503,14 @@ func (s *Server) handleDeploymentRunCreate(w http.ResponseWriter, r *http.Reques
 	if req.Operation == "" {
 		req.Operation = deploy.OperationDeploy
 	}
+	// Preview and schedule lifecycle operations are owned by their own
+	// routes and observers. Accepting them here let a service.control
+	// principal run the release path under a lifecycle label.
+	switch req.Operation {
+	case deploy.OperationDeploy, deploy.OperationRedeploy, deploy.OperationRestart, deploy.OperationForceBuild:
+	default:
+		return httpx.BadRequest("operation %q cannot be requested manually", req.Operation)
+	}
 	project, err := s.modules.deployStore.Get(r.Context(), projectID)
 	if err != nil {
 		return mapDeployError(err)
@@ -570,6 +589,7 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	extraMetadata map[string]any,
 	sourceRevision string,
 	expectedPlanRevision int,
+	expectedGitPolicy ...string,
 ) (*deploy.EngineRun, error) {
 	target, err := s.modules.deployRuns.EnvironmentExecutionTarget(ctx, project.ID, environmentID)
 	if err != nil {
@@ -578,6 +598,9 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	if target.BuildMethod == deploy.BuildLegacyCompose {
 		return nil, fmt.Errorf("%w: normalized action requires a normalized deployment", deploy.ErrInvalidPlan)
 	}
+	if operation == deploy.OperationPreviewRemove && (target.Kind != deploy.EnvironmentPreview || trigger != deploy.TriggerPreview) {
+		return nil, fmt.Errorf("%w: preview cleanup requires an authorized preview lifecycle event", deploy.ErrInvalidPlan)
+	}
 	planRevision := target.DesiredRevision
 	if expectedPlanRevision != 0 && planRevision != expectedPlanRevision {
 		return nil, deploy.ErrRevisionConflict
@@ -585,7 +608,7 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	variableSnapshotRunID := int64(0)
 	var selected *deploy.ReleaseWithArtifacts
 	switch operation {
-	case deploy.OperationDeploy, deploy.OperationForceBuild, deploy.OperationPreviewCreate, deploy.OperationPreviewUpdate, deploy.OperationScheduled:
+	case deploy.OperationDeploy, deploy.OperationForceBuild, deploy.OperationPreviewCreate, deploy.OperationPreviewUpdate, deploy.OperationPreviewRemove, deploy.OperationScheduled:
 		if targetReleaseID != 0 {
 			return nil, fmt.Errorf("%w: this operation does not accept a release target", deploy.ErrInvalidPlan)
 		}
@@ -628,7 +651,11 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 		if selected != nil {
 			sourceRevision = selected.Release.SourceRevision
 		} else if sourceRevision == "" && operation != deploy.OperationPreviewRemove {
-			sourceRevision, err = s.modules.deploySources.ResolveGitRevision(ctx, source)
+			if target.Kind == deploy.EnvironmentPreview {
+				sourceRevision, err = s.modules.deployAutomation.ApprovedPreviewRevision(ctx, environmentID, planRevision)
+			} else {
+				sourceRevision, err = s.modules.deploySources.ResolveGitRevision(ctx, source)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -677,11 +704,16 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	digestInput := fmt.Sprintf("normalized:%d:%d:%s:%d:%d", project.ID, environmentID,
 		operation, planRevision, targetReleaseID)
 	digest := sha256.Sum256([]byte(digestInput))
+	policyKey := ""
+	if len(expectedGitPolicy) > 0 {
+		policyKey = expectedGitPolicy[0]
+	}
 	run, _, err := s.modules.deployRuns.Enqueue(ctx, deploy.RunRequest{
 		ProjectID: project.ID, EnvironmentID: environmentID, Operation: operation,
 		Trigger: trigger, Actor: actor, IdempotencyKey: idempotencyKey,
 		RequestDigest: hex.EncodeToString(digest[:]), PlanRevision: planRevision,
 		SourceRevision: sourceRevision, ExpectedPlanRevision: expectedPlanRevision,
+		ExpectedGitPolicy:     policyKey,
 		VariableSnapshotRunID: variableSnapshotRunID,
 		Priority:              priority, SlotClass: slot, Metadata: metadata, Steps: steps,
 	})
@@ -690,6 +722,24 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	}
 	s.modules.deployEngine.Notify()
 	return run, nil
+}
+
+// handleDeploymentInsights answers the delivery figures for one project over
+// a window of days (7..365, default 30), computed from persisted runs only.
+func (s *Server) handleDeploymentInsights(w http.ResponseWriter, r *http.Request) error {
+	projectID, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	if _, err := s.modules.deployStore.Get(r.Context(), projectID); err != nil {
+		return mapDeployError(err)
+	}
+	insights, err := s.modules.deployRuns.ProjectInsights(r.Context(), projectID, atoiDefault(r.URL.Query().Get("days"), 30))
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, insights)
+	return nil
 }
 
 func (s *Server) handleDeploymentRunGet(w http.ResponseWriter, r *http.Request) error {

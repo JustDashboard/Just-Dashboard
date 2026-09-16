@@ -70,6 +70,8 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   refuse to drop the database the session is inside) and has no verb at all on two engines — a SQLite
   database is a file to unlink, a Redis keyspace can only be emptied, which `DropResult.Gone` reports
   rather than pretending. The connection is deleted with the database when it was that connection's own.
+  A managed deployment network binding blocks forgetting the connection or dropping its database before
+  data is changed; remove that network through deployment lifecycle first.
 - **Live tests skip rather than fail**, or a suite failing for want of a database teaches people to ignore
   it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
   the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
@@ -81,9 +83,11 @@ Redis on pure-Go drivers, so the image still needs no CGO.
 
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
 Provisioning publishes database ports to host loopback only. The URL endpoint's `target=container`
-option resolves a matching default-bridge address without changing networking or the saved DSN;
+option resolves a matching Docker database to a stable `db-ID.jd.internal` hostname without changing networking or the saved DSN;
 `target=host` and the default retain the original DSN. Replies are non-cacheable and audits contain
-the connection identity and target, never credentials. See the [deployment contract](../deployments/implementation.md).
+the connection identity and target, never credentials. Setup saves the returned typed database reference.
+Activation and reconciliation own the environment network and database alias, including replacement
+with a different IP. See [deployment database networks](../deployments/database-networks.md).
 
 Redis provisioning writes its generated password to a mode-0600 configuration inside the container
 before the official entrypoint drops privileges. Redis requires explicit password configuration;
@@ -96,7 +100,9 @@ See the [official MongoDB image](https://hub.docker.com/_/mongo/).
 
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
 provisions all five supported quick-setup engines, adopts and pings them, authenticates from separate
-application containers, verifies loopback-only host bindings, and removes its own containers/volumes.
+application containers, replaces each database at a different IP, and authenticates from the same client
+container using its unchanged URL after reconciliation. It verifies loopback-only publication, network
+ownership and cleanup, then removes its own containers/volumes/networks.
 
 ## Proxy
 

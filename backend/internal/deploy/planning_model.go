@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -138,20 +140,26 @@ type DetectionEvidence struct {
 }
 
 type DetectedCandidate struct {
-	ID              string              `json:"id"`
-	Name            string              `json:"name"`
-	Root            string              `json:"root"`
-	Profile         WorkloadProfile     `json:"profile"`
-	BuildMethod     BuildMethod         `json:"buildMethod"`
-	Confidence      DetectionConfidence `json:"confidence"`
-	Framework       string              `json:"framework,omitempty"`
-	Recipe          string              `json:"recipe,omitempty"`
-	BuildCommand    string              `json:"buildCommand,omitempty"`
-	StartCommand    string              `json:"startCommand,omitempty"`
-	OutputDirectory string              `json:"outputDirectory,omitempty"`
-	Port            int                 `json:"port,omitempty"`
-	Evidence        []DetectionEvidence `json:"evidence"`
-	NeedsDecision   []string            `json:"needsDecision"`
+	ID               string              `json:"id"`
+	Name             string              `json:"name"`
+	Root             string              `json:"root"`
+	Profile          WorkloadProfile     `json:"profile"`
+	BuildMethod      BuildMethod         `json:"buildMethod"`
+	Confidence       DetectionConfidence `json:"confidence"`
+	Framework        string              `json:"framework,omitempty"`
+	Recipe           string              `json:"recipe,omitempty"`
+	BuildCommand     string              `json:"buildCommand,omitempty"`
+	StartCommand     string              `json:"startCommand,omitempty"`
+	OutputDirectory  string              `json:"outputDirectory,omitempty"`
+	Dockerfile       string              `json:"dockerfile,omitempty"`
+	GoVersion        string              `json:"goVersion,omitempty"`
+	GoMinimumVersion string              `json:"goMinimumVersion,omitempty"`
+	PackageManager   string              `json:"packageManager,omitempty"`
+	PackageManagers  []string            `json:"packageManagers,omitempty"`
+	RecipeIssue      string              `json:"recipeIssue,omitempty"`
+	Port             int                 `json:"port,omitempty"`
+	Evidence         []DetectionEvidence `json:"evidence"`
+	NeedsDecision    []string            `json:"needsDecision"`
 }
 
 type DetectionResult struct {
@@ -175,6 +183,8 @@ type GitRequirements struct {
 type BuildPlanConfig struct {
 	Method          BuildMethod         `json:"method"`
 	Recipe          string              `json:"recipe,omitempty"`
+	GoVersion       string              `json:"goVersion,omitempty"`
+	PackageManager  string              `json:"packageManager,omitempty"`
 	RootDirectory   string              `json:"rootDirectory,omitempty"`
 	Dockerfile      string              `json:"dockerfile,omitempty"`
 	BuildCommand    string              `json:"buildCommand,omitempty"`
@@ -205,6 +215,7 @@ type ReleaseTaskConfig struct {
 }
 
 type RuntimePlanConfig struct {
+	PreviewIsolation   bool            `json:"previewIsolation,omitempty"`
 	Protocol           string          `json:"protocol,omitempty"`
 	Image              string          `json:"image,omitempty"`
 	Command            []string        `json:"command,omitempty"`
@@ -220,6 +231,40 @@ type RuntimePlanConfig struct {
 	Capabilities       []string        `json:"capabilities,omitempty"`
 	Devices            []string        `json:"devices,omitempty"`
 	Mounts             []RuntimeMount  `json:"mounts,omitempty"`
+	// Resource limits are optional caps handed to the container runtime. Zero
+	// means unlimited, which is Docker's own default; the plan carries them so a
+	// release snapshot pins exactly what the candidate was allowed to use.
+	MemoryMB      int64   `json:"memoryMb,omitempty"`
+	CPUs          float64 `json:"cpus,omitempty"`
+	PidsLimit     int64   `json:"pidsLimit,omitempty"`
+	RestartPolicy string  `json:"restartPolicy,omitempty"`
+}
+
+// Resource limit bounds. The floor keeps a typo such as "5" (MiB) from producing
+// a container the kernel kills before its runtime starts; the ceiling keeps a
+// stray unit conversion from asking Docker for a petabyte.
+const (
+	MinRuntimeMemoryMB = 16
+	MaxRuntimeMemoryMB = 4 << 20
+	MaxRuntimeCPUs     = 1024
+	MinRuntimePids     = 16
+	MaxRuntimePids     = 1 << 20
+)
+
+// RestartPolicies is the closed set the runtime accepts. Empty means the
+// historical default, unless-stopped, so existing plans keep their behavior.
+var RestartPolicies = []string{"unless-stopped", "always", "on-failure", "no"}
+
+func validRestartPolicy(policy string) bool {
+	return policy == "" || slices.Contains(RestartPolicies, policy)
+}
+
+// EffectiveRestartPolicy resolves the policy the runtime owner applies.
+func (c RuntimePlanConfig) EffectiveRestartPolicy() string {
+	if c.RestartPolicy == "" {
+		return "unless-stopped"
+	}
+	return c.RestartPolicy
 }
 
 type RuntimeMount struct {
@@ -235,7 +280,22 @@ type PlannedVariable struct {
 	Scopes      []string `json:"scopes"`
 	Required    bool     `json:"required,omitempty"`
 	Reference   string   `json:"reference,omitempty"`
+	// Value is a plain initial value the plan may carry literally: a blueprint
+	// input such as a database name. Secrets never travel this way; they are
+	// typed references or are generated.
+	Value string `json:"value,omitempty"`
+	// Generate asks commit to produce a random secret of this many characters
+	// instead of accepting a value. It is how a blueprint's declared secrets
+	// exist on this host without ever appearing in a plan or a request.
+	Generate int `json:"generate,omitempty"`
 }
+
+// Bounds for generated secrets: long enough to be a real credential, short
+// enough for every engine's password field.
+const (
+	MinGeneratedSecretLength = 16
+	MaxGeneratedSecretLength = 128
+)
 
 type PlannedDependency struct {
 	Kind         string          `json:"kind"`
@@ -718,6 +778,15 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.Method != BuildRecipe && c.Build.Recipe != "" {
 		return fmt.Errorf("a recipe is valid only for the automatic builder")
 	}
+	if c.Build.GoVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !goRecipeVersionRE.MatchString(c.Build.GoVersion)) {
+		return fmt.Errorf("Go version must select stable Go 1.25 or 1.26 in a Go recipe; use a Dockerfile for other toolchains")
+	}
+	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !validNodePackageManager(c.Build.PackageManager)) {
+		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript recipe")
+	}
+	if c.Build.Recipe == "go" && cgoEnabledCommandRE.MatchString(c.Build.BuildCommand) {
+		return fmt.Errorf("the Go recipe builds without CGO; use a Dockerfile with the required C toolchain")
+	}
 	if c.Build.TargetPlatform != "" && !validPlatform(strings.ToLower(c.Build.TargetPlatform)) {
 		return fmt.Errorf("build target platform is malformed")
 	}
@@ -776,6 +845,18 @@ func (c PlanConfiguration) Validate() error {
 	if c.Runtime.BindAddress != "" && c.Runtime.BindAddress != "127.0.0.1" && c.Runtime.BindAddress != "::1" && c.Runtime.BindAddress != "0.0.0.0" && c.Runtime.BindAddress != "::" {
 		return fmt.Errorf("runtime bind address is not supported")
 	}
+	if c.Runtime.MemoryMB != 0 && (c.Runtime.MemoryMB < MinRuntimeMemoryMB || c.Runtime.MemoryMB > MaxRuntimeMemoryMB) {
+		return fmt.Errorf("runtime memory limit must be between %d MiB and %d MiB, or zero for no limit", MinRuntimeMemoryMB, MaxRuntimeMemoryMB)
+	}
+	if c.Runtime.CPUs != 0 && (c.Runtime.CPUs < 0.01 || c.Runtime.CPUs > MaxRuntimeCPUs || math.IsNaN(c.Runtime.CPUs) || math.IsInf(c.Runtime.CPUs, 0)) {
+		return fmt.Errorf("runtime CPU limit must be between 0.01 and %d CPUs, or zero for no limit", MaxRuntimeCPUs)
+	}
+	if c.Runtime.PidsLimit != 0 && (c.Runtime.PidsLimit < MinRuntimePids || c.Runtime.PidsLimit > MaxRuntimePids) {
+		return fmt.Errorf("runtime PID limit must be between %d and %d, or zero for no limit", MinRuntimePids, MaxRuntimePids)
+	}
+	if !validRestartPolicy(c.Runtime.RestartPolicy) {
+		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
+	}
 	seenMountTargets := map[string]bool{}
 	for _, mount := range c.Runtime.Mounts {
 		source := strings.TrimSpace(mount.Source)
@@ -830,6 +911,31 @@ func (c PlanConfiguration) Validate() error {
 			}
 			if (reference.Kind == "credential" || reference.Kind == "database") && variable.Sensitivity != "secret" {
 				return fmt.Errorf("%s reference for %s must be secret", reference.Kind, variable.Name)
+			}
+		}
+		if variable.Value != "" {
+			if variable.Reference != "" || variable.Generate != 0 {
+				return fmt.Errorf("%s may carry a value, a reference or a generation request, not several", variable.Name)
+			}
+			if variable.Sensitivity == "secret" {
+				return fmt.Errorf("%s is secret and cannot carry a literal value; use a typed reference or generate it", variable.Name)
+			}
+			if len(variable.Value) > 4096 || strings.ContainsAny(variable.Value, "\x00") || strings.HasPrefix(strings.TrimSpace(variable.Value), "${{") {
+				return fmt.Errorf("literal value for %s is malformed", variable.Name)
+			}
+			if err := rejectPlanSecretLiteral("value for "+variable.Name, variable.Value); err != nil {
+				return err
+			}
+		}
+		if variable.Generate != 0 {
+			if variable.Reference != "" {
+				return fmt.Errorf("%s cannot be both generated and referenced", variable.Name)
+			}
+			if variable.Sensitivity != "secret" {
+				return fmt.Errorf("generated variable %s must be secret", variable.Name)
+			}
+			if variable.Generate < MinGeneratedSecretLength || variable.Generate > MaxGeneratedSecretLength {
+				return fmt.Errorf("generated length for %s must be between %d and %d", variable.Name, MinGeneratedSecretLength, MaxGeneratedSecretLength)
 			}
 		}
 	}
@@ -1160,12 +1266,17 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			(candidate.Recipe != "" && candidate.Recipe != "node" && candidate.Recipe != "go" && candidate.Recipe != "python") ||
 			len(candidate.BuildCommand) > 4096 ||
 			len(candidate.StartCommand) > 4096 || len(candidate.OutputDirectory) > 4096 ||
+			len(candidate.Dockerfile) > 4096 || (candidate.Dockerfile != "" && !safeRelativePath(candidate.Dockerfile)) ||
+			len(candidate.GoVersion) > 32 || (candidate.GoVersion != "" && !goRecipeVersionRE.MatchString(candidate.GoVersion)) || len(candidate.RecipeIssue) > 512 ||
+			len(candidate.GoMinimumVersion) > 32 || (candidate.GoMinimumVersion != "" && !stableGoVersionRE.MatchString(candidate.GoMinimumVersion)) ||
+			(candidate.PackageManager != "" && !validNodePackageManager(candidate.PackageManager)) || len(candidate.PackageManagers) > 4 ||
+			slices.ContainsFunc(candidate.PackageManagers, func(manager string) bool { return !validNodePackageManager(manager) }) ||
 			(candidate.OutputDirectory != "" && !safeRelativePath(candidate.OutputDirectory)) ||
 			candidate.Port < 0 || candidate.Port > 65535 ||
 			len(candidate.Evidence) > 128 || len(candidate.NeedsDecision) > 128 {
 			return fmt.Errorf("%w: detected candidate is malformed", ErrInvalidPlan)
 		}
-		for _, command := range []string{candidate.BuildCommand, candidate.StartCommand} {
+		for _, command := range []string{candidate.BuildCommand, candidate.StartCommand, candidate.RecipeIssue} {
 			if rejectPlanSecretLiteral("detected command", command) != nil {
 				return fmt.Errorf("%w: detected candidate contains credential material", ErrInvalidPlan)
 			}

@@ -1,0 +1,9 @@
+Command: /tmp/jd-go1.26.8/bin/go test -json -count=1 ./internal/proxysvc -run TestLive(DockerCaddy|DeploymentWebroot)
+Exit code: 1
+fail github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc 7.761
+
+Skipped tests:
+
+
+Non-JSON output:
+

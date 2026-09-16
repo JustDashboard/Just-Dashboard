@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
@@ -40,6 +41,12 @@ type Server struct {
 	// Disk usage recursively visits client-selected trees. Two concurrent
 	// scans are enough for the UI without letting requests multiply host I/O.
 	diskScans chan struct{}
+
+	// The dashboard's own address, for links that leave the dashboard
+	// (notifications, commit statuses). See dashboardEndpoint.
+	endpointMu       sync.Mutex
+	endpointCache    string
+	endpointCachedAt time.Time
 
 	modules moduleSet
 }
@@ -81,6 +88,14 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := s.modules.backupRunner.RecoverInterruptedRuns(cleanupCtx); err != nil {
+		s.Log.Warn("interrupted backup runs could not be recovered", "err", err)
+	}
+	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
+		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
+	}
+	cleanupCancel()
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole
 	// purpose is to have been running while nobody was looking.
@@ -119,18 +134,24 @@ func (s *Server) Start(ctx context.Context) error {
 			s.Audit.Record(context.Background(), audit.Entry{Actor: "system", Action: "proxy.ingress.reconcile", Target: name, Success: success})
 		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
 	}()
+	if err := s.modules.deployPreviews.Start(ctx); err != nil {
+		return err
+	}
 	s.modules.deploySchedule.Start(ctx)
 	if err := s.modules.deployEngine.Start(ctx); err != nil {
 		return err
 	}
 	s.modules.deployGit.Start(ctx)
+	s.modules.deployDatabases.Start(ctx)
 	return nil
 }
 
 // Shutdown releases the resources that outlive a request: database pools,
 // live PTY sessions, the metrics sampler and the backup scheduler.
 func (s *Server) Shutdown() {
+	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
+	s.modules.deployDatabases.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.

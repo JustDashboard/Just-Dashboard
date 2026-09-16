@@ -6,7 +6,7 @@ import {
   Cross,
   FloppyDisk,
   FolderOpen,
-  GitBranch,
+  GitHubMark,
   GitMerge,
   SidebarRight,
 } from "@/components/icons"
@@ -125,7 +125,7 @@ export function WorkspaceTools({
         <TabButton
           active={tab === "git"}
           onClick={() => showTab("git")}
-          icon={GitBranch}
+          icon={GitHubMark}
           hint="Stage, commit and push the repository the shell is in"
         >
           Git

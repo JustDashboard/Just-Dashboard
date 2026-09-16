@@ -1,0 +1,11 @@
+=== RUN   TestLiveDeploymentDatabaseConnection
+=== RUN   TestLiveDeploymentDatabaseConnection/redis
+    deployment_database_live_test.go:282: redis: authenticated before and after replacement at a different IP using the same client container and logical URL on port 6379
+--- PASS: TestLiveDeploymentDatabaseConnection (5.02s)
+    --- PASS: TestLiveDeploymentDatabaseConnection/redis (5.02s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	5.064s
+=== RUN   TestLiveComposeDatabaseNetworkMerge
+--- PASS: TestLiveComposeDatabaseNetworkMerge (0.26s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	0.273s

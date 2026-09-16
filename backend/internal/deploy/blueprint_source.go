@@ -49,10 +49,14 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 			candidate.Port = port.Internal
 		}
 	}
+	// The identity names three immutable things: the image reference the
+	// release pulls (its digest is resolved by detection), the reviewed
+	// definition, and the digest of this exact render. Digest stays empty here
+	// because only a registry lookup may fill it.
 	detection := DetectionResult{
 		Source: SourceIdentity{
-			Kind: SourceBlueprint, Repository: definition.ID, Ref: definition.Version,
-			Revision: rendered.Digest, Digest: rendered.Digest,
+			Kind: SourceBlueprint, Repository: rendered.Image, Ref: definition.ID + "@" + definition.Version,
+			Revision: rendered.Digest,
 		},
 		Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
 	}
@@ -109,6 +113,12 @@ func blueprintConfiguration(
 	}
 	if rendered.StopSignal != "" {
 		configuration.Runtime.StopSignal = rendered.StopSignal
+	}
+	if rendered.MemoryMB >= MinRuntimeMemoryMB && rendered.MemoryMB <= MaxRuntimeMemoryMB {
+		configuration.Runtime.MemoryMB = int64(rendered.MemoryMB)
+	}
+	if rendered.CPUs >= 0.01 && rendered.CPUs <= MaxRuntimeCPUs {
+		configuration.Runtime.CPUs = rendered.CPUs
 	}
 
 	// A workload holding exclusive local data cannot run two copies at once, so
@@ -170,6 +180,15 @@ func blueprintConfiguration(
 		planned := PlannedVariable{
 			Name: variable.Name, Sensitivity: variable.Sensitivity,
 			Scopes: []string{"runtime"}, Required: variable.Generated,
+		}
+		switch {
+		case variable.Generated:
+			// The blueprint declares the shape; the value is produced by the
+			// planning store when the deployment is committed.
+			planned.Sensitivity = "secret"
+			planned.Generate = max(MinGeneratedSecretLength, min(MaxGeneratedSecretLength, variable.Length))
+		case variable.Sensitivity != "secret":
+			planned.Value = variable.Value
 		}
 		configuration.Variables = append(configuration.Variables, planned)
 	}
@@ -287,9 +306,18 @@ func BlueprintSchedules(rendered *blueprint.Plan) []ScheduleWrite {
 		if timezone == "" {
 			timezone = "UTC"
 		}
+		// A backup step needs a backup job the operator has not linked yet. The
+		// schedule is created paused so it appears on the Automations page to
+		// be completed, instead of failing every night as an invalid plan.
+		enabled := true
+		for _, step := range steps {
+			if step.Action == "backup" && !strings.Contains(string(step.Config), "jobId") {
+				enabled = false
+			}
+		}
 		writes = append(writes, ScheduleWrite{
 			Name: preset.Name, Expression: preset.Cron, Timezone: timezone,
-			Enabled: true, Steps: steps,
+			Enabled: enabled, Steps: steps,
 		})
 	}
 	return writes
@@ -320,12 +348,21 @@ func blueprintScheduleStep(action string) (ScheduleStep, bool) {
 
 // ValidateForDeployment keeps schema-valid previews readable while refusing
 // unsupported new work before a draft or run can create persistent resources.
+// A blueprint the catalogue cannot deploy end to end is refused here with the
+// catalogue's own reason, so a stale draft or a direct API call gets the same
+// answer the picker shows.
 func (c DraftSourceConfig) ValidateForDeployment() error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
 	if c.Kind == SourceBlueprint {
-		return fmt.Errorf("%w: %s", ErrUnsupportedSource, blueprint.DeploymentUnavailableReason)
+		definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnsupportedSource, err)
+		}
+		if supported, reason := blueprint.DeploymentSupport(definition); !supported {
+			return fmt.Errorf("%w: %s", ErrUnsupportedSource, reason)
+		}
 	}
 	return nil
 }

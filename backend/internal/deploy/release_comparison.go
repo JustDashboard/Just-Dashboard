@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -127,6 +128,10 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("strategy", string(fromSnapshot.Plan.Strategy), string(toSnapshot.Plan.Strategy))
 	field("stop signal", fromSnapshot.Plan.StopSignal, toSnapshot.Plan.StopSignal)
 	field("grace period", secondsLabel(fromSnapshot.Plan.GracePeriodSeconds), secondsLabel(toSnapshot.Plan.GracePeriodSeconds))
+	field("memory limit", memoryLimitLabel(fromSnapshot.Plan.MemoryMB), memoryLimitLabel(toSnapshot.Plan.MemoryMB))
+	field("cpu limit", cpuLimitLabel(fromSnapshot.Plan.CPUs), cpuLimitLabel(toSnapshot.Plan.CPUs))
+	field("pid limit", countLimitLabel(fromSnapshot.Plan.PidsLimit), countLimitLabel(toSnapshot.Plan.PidsLimit))
+	field("restart policy", fromSnapshot.Plan.EffectiveRestartPolicy(), toSnapshot.Plan.EffectiveRestartPolicy())
 	field("host network", boolLabel(fromSnapshot.Plan.HostNetwork), boolLabel(toSnapshot.Plan.HostNetwork))
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
 	field("capabilities", strings.Join(fromSnapshot.Plan.Capabilities, ", "), strings.Join(toSnapshot.Plan.Capabilities, ", "))
@@ -372,4 +377,25 @@ func (s *OrchestrationStore) ReleaseArtifactStatus(
 		return nil, err
 	}
 	return s.releaseArtifactStatus(ctx, release)
+}
+
+func memoryLimitLabel(mb int64) string {
+	if mb <= 0 {
+		return "unlimited"
+	}
+	return fmt.Sprintf("%d MiB", mb)
+}
+
+func cpuLimitLabel(cpus float64) string {
+	if cpus <= 0 {
+		return "unlimited"
+	}
+	return strconv.FormatFloat(cpus, 'f', -1, 64) + " CPU"
+}
+
+func countLimitLabel(count int64) string {
+	if count <= 0 {
+		return "unlimited"
+	}
+	return strconv.FormatInt(count, 10)
 }

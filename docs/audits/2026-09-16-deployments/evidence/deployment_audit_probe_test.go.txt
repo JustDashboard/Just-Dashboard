@@ -1,0 +1,82 @@
+package deploy
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+// These probes assert the observed limitations, not desired product behavior.
+// Use Go's -overlay flag to include this file without changing product sources.
+func TestAuditSvelteKitDetectionObservation(t *testing.T) {
+	marker := &detectedMarkers{
+		packagePath: "package.json",
+		packageJSON: []byte(`{"name":"sveltekit-fixture","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"2.0.0","vite":"6.0.0"}}`),
+		lockfiles: []string{"package-lock.json"},
+	}
+	candidates := packageCandidate(marker)
+	if len(candidates) != 1 || candidates[0].Framework != "vite" || candidates[0].Profile != ProfileStatic {
+		t.Fatalf("observation changed: %#v", candidates)
+	}
+	t.Logf("SvelteKit + Vite is detected as framework=%s profile=%s output=%s", candidates[0].Framework, candidates[0].Profile, candidates[0].OutputDirectory)
+}
+
+func TestAuditBuildScopedVariableObservation(t *testing.T) {
+	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
+		t.Skip("requires isolated live Docker build fixtures")
+	}
+	client := liveC4Docker(t)
+	builder := NewArtifactBuilder(NewDockerArtifactBackend(client))
+	root := t.TempDir()
+	writeBuildFixture(t, root, "package.json", `{"name":"audit-build-env","version":"1.0.0","scripts":{"start":"node -e 'setInterval(()=>{},1000)'"}}`)
+	writeBuildFixture(t, root, "package-lock.json", `{"name":"audit-build-env","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"audit-build-env","version":"1.0.0"}}}`)
+	tag := fmt.Sprintf("just-dashboard-audit-env:%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
+	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: `test -n "$NEXT_PUBLIC_API_URL"`, StartCommand: "npm start"}
+	variables := map[string]string{"NEXT_PUBLIC_API_URL": "https://audit.example.test"}
+	prepared, err := builder.Prepare(context.Background(), root, config, false, tag)
+	if err != nil { t.Fatal(err) }
+	_, err = builder.Build(context.Background(), root, tag, config, prepared, variables, "", SourceIdentity{}, nil, nil)
+	if err == nil { t.Fatal("expected build variable to be absent without an explicit stage mapping") }
+	t.Log("Build-scoped variable supplied to builder, no build.secrets mapping: real Docker build failed as expected")
+	config.Secrets = []BuildSecretConfig{{Variable: "NEXT_PUBLIC_API_URL", Step: "build"}}
+	prepared, err = builder.Prepare(context.Background(), root, config, false, tag)
+	if err != nil { t.Fatal(err) }
+	_, err = builder.Build(context.Background(), root, tag, config, prepared, variables, "", SourceIdentity{}, nil, nil)
+	if err != nil { t.Fatal(err) }
+	t.Log("Same variable with explicit build-stage mapping: real Docker build succeeded")
+}
+
+func TestAuditGoBuildCommandObservation(t *testing.T) {
+	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "go", BuildCommand: "echo AUDIT_CUSTOM_BUILD_COMMAND", StartCommand: "echo AUDIT_CUSTOM_START_COMMAND"}
+	bases := []ResolvedImage{{Reference: "golang:1.25-alpine", Digest: fakeContentDigest("go")}, {Reference: "alpine:3.22", Digest: fakeContentDigest("alpine")}}
+	text, err := renderRecipeDockerfile(selectedRecipe{kind: "go", mainPackage: "."}, config, bases)
+	if err != nil { t.Fatal(err) }
+	if strings.Contains(text, "AUDIT_CUSTOM_") { t.Fatal("observation changed: recipe now uses command overrides") }
+	t.Log("Go recipe ignores configured build/start commands and emits its fixed CGO_ENABLED=0 build plus /app entrypoint")
+}
+
+func TestAuditPreviewInheritanceObservation(t *testing.T) {
+	f := newAutomationFixture(t)
+	ctx := context.Background()
+	runtimeJSON := `{"strategy":"stop_first","mounts":[{"source":"production-data","target":"/data","ownership":"managed"}]}`
+	if _, err := f.store.DB.Exec(`INSERT INTO deploy_runtime_plans(environment_id,revision,config_json,preview,digest,created_at) VALUES(?,2,?,'','runtime2',2)`, f.environmentID, runtimeJSON); err != nil { t.Fatal(err) }
+	if _, err := f.store.DB.Exec(`INSERT INTO deploy_sources(environment_id,revision,kind,config_json,identity_json,digest,created_at) SELECT environment_id,2,kind,config_json,identity_json,digest,created_at FROM deploy_sources WHERE environment_id=? AND revision=1`, f.environmentID); err != nil { t.Fatal(err) }
+	if _, err := f.store.DB.Exec(`INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) SELECT environment_id,2,method,config_json,evidence_json,preview,digest,created_at FROM deploy_build_plans WHERE environment_id=? AND revision=1`, f.environmentID); err != nil { t.Fatal(err) }
+	if _, err := f.store.DB.Exec(`UPDATE deploy_environments SET desired_revision=2 WHERE id=?`, f.environmentID); err != nil { t.Fatal(err) }
+	sealed, err := f.automation.sealer.Seal("audit-fixture-production-secret")
+	if err != nil { t.Fatal(err) }
+	if _, err := f.store.DB.Exec(`INSERT INTO deploy_variable_revisions(environment_id,key,revision,sensitivity,scopes,value_enc,value_digest,active,created_by,created_at) VALUES(?,'PRODUCTION_TOKEN',1,'secret','runtime',?,'digest',1,'admin',1)`, f.environmentID, sealed); err != nil { t.Fatal(err) }
+	created, err := f.automation.CreateTrigger(ctx, f.projectID, f.environmentID, TriggerWrite{Name:"audit previews", Kind:TriggerGitHub, Provider:"github", Enabled:true, Config:TriggerConfig{Repository:"fixture/app", Ref:"main", Preview:true, PreviewQuota:1}})
+	if err != nil { t.Fatal(err) }
+	preview, _, err := f.automation.EnsurePreview(ctx, &created.Trigger, ProviderEvent{PreviewNumber:7, PreviewRef:"feature", Revision:strings.Repeat("a", 40)})
+	if err != nil { t.Fatal(err) }
+	var inheritedPlan, inheritedSecret string
+	if err := f.store.DB.QueryRow(`SELECT config_json FROM deploy_runtime_plans WHERE environment_id=?`, preview.EnvironmentID).Scan(&inheritedPlan); err != nil { t.Fatal(err) }
+	if err := f.store.DB.QueryRow(`SELECT value_enc FROM deploy_variable_revisions WHERE environment_id=? AND key='PRODUCTION_TOKEN'`, preview.EnvironmentID).Scan(&inheritedSecret); err != nil { t.Fatal(err) }
+	if inheritedPlan != runtimeJSON || inheritedSecret != sealed { t.Fatal("observation changed: preview no longer copies source runtime and secret") }
+	t.Log("Preview inherited the production writable volume source unchanged and the same production secret ciphertext")
+}

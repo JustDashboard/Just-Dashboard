@@ -1,0 +1,33 @@
+Command: /tmp/jd-go1.26.8/bin/go test -race -json -count=1 ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store
+Exit code: 1
+pass github.com/Wayy01/Just-Dashboard/backend/internal/backups 4.608
+pass github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc 6.6129999999999995
+pass github.com/Wayy01/Just-Dashboard/backend/internal/store 14.634
+fail github.com/Wayy01/Just-Dashboard/backend/internal/deploy 201.318
+pass github.com/Wayy01/Just-Dashboard/backend/internal/api 339.496
+
+Skipped tests:
+--- SKIP: TestLiveC5ActivationAdapters (0.00s)
+--- SKIP: TestLiveDeploymentWebroot (0.00s)
+--- SKIP: TestLiveDockerCaddyProvisionAndRestart (0.00s)
+--- SKIP: TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute (0.00s)
+--- SKIP: TestLiveC4ArtifactAdapters (0.00s)
+=== RUN   TestCertificateStepSkipsAndReusesWithoutOrdering
+--- PASS: TestCertificateStepSkipsAndReusesWithoutOrdering (0.00s)
+--- SKIP: TestLiveDeploymentDatabaseConnection (0.00s)
+--- PASS: TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/unavailable (1.26s)
+    handlers_db_live_test.go:102: mongodb unreachable: server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] }
+--- SKIP: TestLiveAPIMongo (9.31s)
+    handlers_db_live_test.go:212: redis unreachable: dial tcp 127.0.0.1:1: connect: connection refused
+--- SKIP: TestLiveAPIRedis (3.53s)
+    handlers_db_live_test.go:280: postgres unreachable: failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused
+--- SKIP: TestLiveAPIPostgres (1.81s)
+    handlers_db_live_test.go:357: postgres unreachable: failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused
+--- SKIP: TestLiveAPIDeveloperSurface (1.55s)
+=== RUN   TestFirstIPv4SkipsUnusableAddresses
+--- PASS: TestFirstIPv4SkipsUnusableAddresses (0.00s)
+--- PASS: TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/unavailable (3.89s)
+--- SKIP: TestCertbotReportsItselfUnavailable (2.95s)
+
+Non-JSON output:
+

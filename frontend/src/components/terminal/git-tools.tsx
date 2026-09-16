@@ -7,6 +7,7 @@ import {
   ChevronDoubleUp,
   ClockRewind,
   CornerUpLeft,
+  GitHubMark,
   GitBranch as GitBranchIcon,
   GitCommit as GitCommitIcon,
   Minus,
@@ -125,7 +126,7 @@ export function GitTools({
     return (
       <EmptyState
         className="m-3"
-        icon={GitBranchIcon}
+        icon={GitHubMark}
         title="git is not installed"
         description="Install git on this host to work with repositories from the terminal."
       />
@@ -138,7 +139,7 @@ export function GitTools({
         className="m-3"
         tone="warning"
         title="Outside the configured git roots"
-        icon={GitBranchIcon}
+        icon={GitHubMark}
       >
         This is a checkout at <span className="font-mono break-all">{detect.root}</span>, but it
         falls outside <code className="font-mono">JD_GIT_ROOTS</code>, so the dashboard will not act
@@ -151,7 +152,7 @@ export function GitTools({
     return (
       <EmptyState
         className="m-3"
-        icon={GitBranchIcon}
+        icon={GitHubMark}
         title="Not a git repository"
         description={
           <>

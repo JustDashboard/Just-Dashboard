@@ -37,7 +37,7 @@ export function Page({
     <div
       data-slot="page"
       className={cn(
-        "mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-4 px-4 py-4 md:gap-5 md:px-6 md:py-5",
+        "mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
         fill && "h-full min-h-0 overflow-hidden",
         className,
       )}
@@ -76,9 +76,12 @@ export function PageHeader({
       data-slot="page-header"
       className={cn("flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}
     >
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 space-y-1.5">
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1 className="truncate text-xl leading-tight font-semibold">{title}</h1>
+        {/* The largest type on the page, by a clear step: the title is the one
+            thing that has to be found without reading, and at 20px it sat two
+            pixels from the panel titles it was meant to rank above. */}
+        <h1 className="truncate text-2xl leading-tight font-semibold tracking-tight">{title}</h1>
       </div>
       {actions && (
         <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
@@ -103,10 +106,10 @@ export function Section({
   children: React.ReactNode
 }) {
   return (
-    <section className={cn("flex min-w-0 flex-col gap-3", className)}>
+    <section className={cn("flex min-w-0 flex-col gap-4", className)}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="min-w-0">
-          <h2 className="flex min-w-0 items-center gap-1.5 text-title font-semibold">
+          <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold tracking-tight">
             <span className="truncate">{title}</span>
           </h2>
         </div>

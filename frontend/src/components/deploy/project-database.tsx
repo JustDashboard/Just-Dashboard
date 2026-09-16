@@ -55,10 +55,13 @@ export function ProjectDatabase({
     setBusy(true)
     setError(undefined)
     try {
-      const result = await get<{ url: string }>(`/databases/${connection.id}/url`, {
-        target,
-      })
-      connect(connection, result.url)
+      const result = await get<{ url: string; reference?: string }>(
+        `/databases/${connection.id}/url`,
+        {
+          target,
+        },
+      )
+      connect(connection, result.reference || result.url)
     } catch (caught) {
       setError(caught instanceof Error ? caught : new Error(String(caught)))
     } finally {
@@ -67,7 +70,7 @@ export function ProjectDatabase({
   }
   return (
     <>
-      <Panel>
+      <Panel plain>
         <PanelHeader
           title="Database"
           actions={
@@ -89,7 +92,7 @@ export function ProjectDatabase({
             <p className="text-sm leading-relaxed text-muted-foreground">
               {started
                 ? `Database ${started.container} has started. Open Add database to finish connecting it.`
-                : "Need a database? Create one or connect an existing database. Its connection string is added to your environment automatically."}
+                : "Need a database? Create one or connect an existing database. A saved connection reference keeps its application address stable across container replacement."}
             </p>
           )}
         </PanelBody>

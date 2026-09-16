@@ -286,10 +286,10 @@ opened from the branch you are on without leaving for a browser tab.
 | **Databases** | Eight engines: PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis — all on pure-Go drivers, so the image still needs no CGO. A data grid that edits rows through forms (always scoped to a primary key), server-side sort and filtering, schema editing with the statement shown before it runs, CSV/JSON import inside one transaction, a structure view and an entity diagram, a query runner that classifies a statement as destructive before it runs with schema-aware completion, history and saved snippets, CSV/JSON export, one-click Prisma, Drizzle, TypeScript or Zod generation from the live database, and a value search that finds which table an id lives in without knowing where to look. A Monitor tab lists what the server is running right now — with the blocking session named — and stops a stuck query, next to a per-table size breakdown for when the disk alert fires. Any row copies out as JSON or as a runnable INSERT in that engine's own syntax, or duplicates into a pre-filled form. MongoDB gets document editing, an aggregation runner, and its own export and import; Redis gets a SCAN-based key browser with full collection editing. Plus a dump that downloads to the browser as it is written, restores, and a typed-confirmation delete of the database itself, for every one of the eight — the three with a client-side tool use it, the rest are dumped over the connection the dashboard already has, so no engine's backup depends on a binary that may not be installed. Passwords never appear in argv. Optional live tests exercise configured engines and skip unavailable servers. |
 | **Security** | A verdict on the host, not just its settings: exposure, firewall, sshd, intrusion prevention, open ports, certificates and pending security patches, each finding carrying what was measured, what it means, what to do, and where the dashboard can do it, a button. Firewall rules on ufw **or firewalld**, with a named-service catalogue that warns before you open Redis to the world, default policies, logging, ordering, editing (the replacement goes in before the original comes out, so the port is never briefly unprotected) and outbound rules. sshd's own settings — root login, passwords, keys, port, account lists — applied through its parser and rolled back if it objects, refused outright when the change would leave nobody a way in, and streamed step by step so "it said it worked" and "the daemon came back" are not the same claim. fail2ban jails tuned in place and kept across a restart, folded into the one question a ban list cannot answer: who keeps coming back. Live connections by peer, interfaces and routes, the host's login record with the ability to end a session, and ping, DNS, traceroute and port checks on the page the question came from. |
 | **Updates** | Two things that can be behind. The dashboard itself — with the release notes for every version between yours and the newest, and a one-click pull-rebuild-restart that runs in its own container so it survives replacing the dashboard. And the host's packages: what is behind, which of it is security, and whether a reboot is due, on apt, dnf, yum, zypper, pacman or apk. Alpine and Arch publish no advisory data, so they say so rather than reporting zero security updates. Upgrades run as a job with its output streamed, so closing the tab does not abandon a half-finished run. Upgrades only — it never installs or removes packages. |
-| **Deployments** | Browse projects in a searchable grid or list. Import a connected GitHub repository or any HTTPS/SSH Git URL, configure environment variables, and create or connect a database before deploying. Follow numbered, searchable build logs and open the finished URL; each project opens on a website preview, release details, recent deployments and measured usage, with separate settings for configuration. A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, or an existing container; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Automatic production Git deployments, plus signed provider hooks, scheduled actions, PR previews and signed outbound webhooks. |
-| **Blueprints** | Seventeen reviewed, versioned definitions with a browsable catalogue and deterministic previews. New blueprint deployments are unavailable in this release because runtime materialization, generated credentials and lifecycle automation are incomplete. The UI explains this and the backend refuses new work before resources are created. Existing workloads remain manageable. |
+| **Deployments** | Browse projects in a searchable grid or list. Import a connected GitHub repository or any HTTPS/SSH Git URL, configure environment variables, and create or connect a database before deploying. Follow numbered, searchable build logs and open the finished URL; each project opens on a website preview, release details, recent deployments and measured usage, with separate settings for configuration. A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, or an existing container; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Automatic production Git deployments, plus signed provider hooks, scheduled actions, PR previews, and notifications to Discord, Slack, Telegram, e-mail or a signed webhook for every started, succeeded, failed or cancelled run. Runs report their state to GitHub commits, a failed health check shows the application's own last output next to the failure, runtime settings cap memory, CPU and processes, and a Console tab opens a shell inside the live container. Notifications that fail are retried with backoff, and the Deployments tab shows delivery figures computed from the run history: success rate, deploys per week, median release time, recovery time and the current failure streak, each with its basis. |
+| **Blueprints** | Seventeen reviewed, versioned definitions with a browsable catalogue and deterministic previews. PostgreSQL, MariaDB, MongoDB, Redis, MinIO, Adminer, Dozzle, Grafana, n8n, Uptime Kuma, Vaultwarden and the static nginx site deploy in one click as immutable image releases: the image is pinned to a digest at inspection, inputs become variables, declared passwords are generated on the server and only ever revealed on demand, data volumes are managed storage, and the definition's readiness checks and memory limit gate activation. Blueprints that install configuration files or download artifacts, and game servers, stay preview-only and say exactly why. |
 | **Game servers** | Adapters for existing Minecraft Java and Bedrock deployments provide supported console/player controls and declared `server.properties` settings. Property reads exclude undeclared credentials, and edits preserve unrelated settings. New game-server deployments through blueprints are unavailable in this release; UDP runtime deployment and Bedrock save/backup automation remain unsupported. |
-| **Backups** | Scheduled archives to local disk, S3 or Backblaze B2, with retention and restore. |
+| **Backups** | Scheduled archives to local disk, S3 or Backblaze B2, with retention and restore. A job can also name saved database connections: every run captures a native dump of each (pg_dump, mysqldump, mongodump, a Redis snapshot, or the built-in dump when the tool is not installed) into the same archive with its own manifest evidence, a deployment linked to that database accepts the dump as its backup coverage, and any run can restore a dump back into the connection or into a drill database on the same server with a typed confirmation. |
 | **System users** | Host accounts, SSH keys, lock and unlock. |
 | **Audit log** | Every state-changing request, filterable by actor, action and outcome. |
 | **Dashboard → Configuration** | The panel's own settings: the address and port it answers on, which certificate it presents, the network allowlist, whether two-factor is compulsory, session lifetimes, and the internal ports. Applying a change restarts the stack into it from a container that outlives the restart, narrates each phase, and **puts the previous configuration back automatically** if the new one does not come up. Restart and rebuild live here too. |
@@ -316,11 +316,14 @@ original hostname. For private access, use a domain you control and provision it
 DNS-01 on the Certificates page before deploying. An `sslip.io` name pointing at a Tailscale address
 cannot pass the public HTTP challenge.
 
-Git projects deploy new commits from their selected production branch automatically after the first
-deployment. There is nothing to enable or register in GitHub. The server checks the branch every five
-seconds over an outbound Git connection, so this works while the dashboard remains private. A new
-branch revision starts a deployment; an unchanged failed revision is not retried repeatedly. Repository
-access failures appear under **Automatic deployments** on the project overview.
+Git projects default to deploying new commits from their selected production branch after the first
+deployment. The server checks the branch every five seconds over an outbound Git connection, so this
+works while the dashboard remains private. **Deployment policy** on the overview or Automations page
+can disable automatic deployments or set repository-relative include/exclude paths. Polling and push
+webhooks share the same branch, complete Git change comparison and commit deduplication. Manual-only
+mode also blocks new signed-hook and scheduled deployments; already queued runs continue. An unchanged
+failed revision is not retried repeatedly. Repository failures and suppressed-change reasons appear
+under **Automatic deployments**. See [automatic deployment policy](docs/internal/deployments/git-policy.md).
 
 For eligible web and static applications, the old release keeps serving while the new candidate builds
 and passes its checks. Traffic switches automatically only after success; a failed candidate leaves the
@@ -329,6 +332,29 @@ recovery behavior. Default HTTP readiness follows redirects only within the cand
 requires a final 2xx response; redirecting to a failing page or an external site does not count as ready.
 Additional signed webhooks, preview environments and schedules remain separate integrations. Webhook
 watch-path filters do not disable the default production branch monitor.
+
+Pull-request previews require administrator approval of each exact commit. Review it under
+**Settings → Automations → Preview environments**, configure the preview's own variables, then deploy.
+Production credentials and database links are not inherited; container previews receive separate storage
+and a dedicated network. Compose and host-access preview plans are currently refused. PR close removes
+only preview-owned resources and archives the environment after cleanup succeeds.
+Preview storage is disposable: closing the PR deletes its owned volumes. Reopening waits for cleanup
+and requires approval again. On upgrade, older unsafe previews are stopped and their routes withdrawn;
+their existing containers and data are retained. The preview list reports isolation failures and guides
+fresh approval/configuration before another deployment.
+
+For automatic recipes, build-scoped variables reach the build command without extra mapping. Use
+**Build settings** to limit private package credentials to dependency installation. Values compiled
+into browser assets (including `NEXT_PUBLIC_` and `VITE_` settings) are public. Static sites use port 80;
+SvelteKit requires its Node or static adapter. Go builds select a toolchain from the source or an explicit
+Go version, and custom build commands must produce `/out/app`. CGO workloads use a Dockerfile.
+
+Connecting a database saves a reference to its encrypted connection. Locally provisioned databases use
+a stable hostname on the deployment's managed network; matching database container replacements are
+reconnected automatically even when their IP changes. Applications must retry lost connections. Existing
+literal IP settings need reconnecting once to adopt this behavior. **Configuration → Dependencies** shows
+the network status. Removing that network leaves the database and its data intact. See
+[database connections](docs/internal/deployments/database-networks.md) for supported cases and cleanup.
 
 To remove a project from the active deployment list, open it and choose **Archive deployment** in the
 header’s actions menu. Confirmation archives its history, disables automatic deployments, and frees its name for a
@@ -747,6 +773,12 @@ and every encrypted secret.
 
 Back up that directory **and** keep `JD_MASTER_KEY` somewhere separate. Either one alone will
 not restore.
+
+Backup jobs offer **Consistency and recovery checks**. Select SQLite files for native snapshots while
+the application is running. A pinned application image can check a restored copy against its schema
+and a known canary record; history shows verification and cleanup results. Deployment policies can
+require that exact-artifact evidence before activation. Other database engines still need their own
+consistent capture protocol. See [application restore verification](docs/internal/deployments/restore-verification.md).
 
 ## Licence
 

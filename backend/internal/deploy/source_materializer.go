@@ -120,8 +120,9 @@ func (a *HostSourceAnalyzer) Materialize(
 		_ = os.RemoveAll(workspace)
 		return nil, fmt.Errorf("%w: observed imports must be adopted before materialization", ErrUnsupportedSource)
 	case SourceModeBlueprint:
-		_ = os.RemoveAll(workspace)
-		return nil, fmt.Errorf("%w: blueprint deployment is unavailable in this release", ErrUnsupportedSource)
+		// A blueprint release is an image release with reviewed defaults; it
+		// has no filesystem source either. Blueprints that would need files
+		// written here are refused by ValidateForDeployment above.
 	default:
 		_ = os.RemoveAll(workspace)
 		return nil, ErrUnsupportedSource

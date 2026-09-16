@@ -49,23 +49,80 @@ carries no licensing question at all.
 - Run the checks: `cd backend && go build ./... && go vet ./... && go test ./...`, then
   `cd ../frontend && bun run lint && bun run build && bun run test:browser`. Install the required
   Chromium build once with `bun run test:browser:install`.
+  Browser tests use the freshly built production frontend on loopback port 43117 and refuse to reuse
+  an unrelated server. Run `bun run build` after source changes before running browser tests alone.
+  `JD_BROWSER_BASE_URL` explicitly selects an externally managed test frontend when needed.
+- `.github/workflows/verify.yml` runs the backend, deployment race, frontend and live Docker gates
+  on fresh Ubuntu 24.04 runners for pushes and pull requests. Go and Bun come from `go.mod` and
+  `package.json`; dependencies use the frozen Bun lockfile. Race packages run serially on a dedicated
+  job so frontend builds do not compete with the fleet latency check. Required live fixtures fail CI
+  if skipped or absent. Logs and browser failure traces are retained for 30 days, including failed runs.
+  CI does not replace public TLS, clean-host installation, remote-host, architecture or soak acceptance.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
+  Recipe/detection/default changes also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`.
+  This uses locked application fixtures and checks served build values, private install credentials,
+  SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior.
 - The daemon-wide prune integration tests are separate: set `JD_DOCKER_PRUNE_LIVE=1` and `DOCKER_HOST`
   to an isolated disposable Docker daemon before running
   `go test ./internal/dockerx -run 'TestLive(PruneAllActuallyDeletes|BuildCachePruneRoundTrips)' -count=1 -v`. A normal `go test ./...`
   does not authorize pruning the Docker host it happens to find.
 - Changes to runtime activation, checks, graceful shutdown or Compose release ownership also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC5ActivationAdapters -count=1 -v` on a Docker
-  and Buildx release host.
+  and Buildx release host. Changes to runtime resource limits or failed-gate diagnostics also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeDiagnoserReadsExitedContainer -count=1 -v`,
+  which starts a real container with limits, lets it exit non-zero and checks the captured state, output
+  and the limits the daemon applied.
+- `python3 scripts/e2e-deployments.py` is the real-backend acceptance lane for deployments: it builds the
+  backend, starts it on loopback with a fresh data directory, and drives the public API through a signed
+  webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
+  listens, and a restart. It needs Docker and Go and touches only the containers it creates; run it after
+  changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
+- Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are
+  covered by component tests with fake providers; a real provider or GitHub post is verified manually
+  through **Send test** and a deployment of a GitHub-sourced project, and the pull request must say which
+  providers were exercised.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
   the browser gate covers the project overview, build transcript and focused settings, including
   variables, domains, storage, dependencies, automation and lifecycle.
+- Preview changes also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction)$' -count=1 -v`.
+  These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
+  Compose backup coverage changes run
+  `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
 - Changes to database provisioning or deployment connection URLs also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
-  on a Docker host. It exercises all five quick-setup engines from separate application containers
-  and cleans up its own containers and volumes.
+  on a Docker host. It exercises all five quick-setup engines from separate application containers,
+  replaces databases at a different IP, reconnects the same clients using their original URLs,
+  verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
+  integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+- Changes to deployment routes, activation cutover or runtime ownership also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeLossKeepsExactlyOneReleaseLive -count=1 -v`.
+  The first drives sustained fast, long-streamed and WebSocket traffic through 100 real nginx
+  activations and fails on a single lost request; set `JD_CUTOVER_TRANSITIONS` lower only for local
+  iteration, never for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts.
+  The second kills real containers in the blue/green window and at a live release, and requires that
+  exactly one release is running afterwards.
+- Changes to the engine, its reconciler or run persistence also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
+  It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every
+  step in turn, and requires that the restarted engine ends the run with `restart_evidence_missing`,
+  leaves no claimable run behind, and still has the killed process's step output.
+- Backup consistency or restore-verification changes also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSQLiteApplicationRecoveryVerification -count=1 -v`.
+  This uses a real application image and live SQLite snapshot, destroys only the fixture's table,
+  verifies the archived canary through the application, rejects a wrong schema and checks cleanup.
+- Native database dump changes also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveBackupDumpsAndRestoresAPostgresDatabase -count=1 -v`.
+  It provisions a real PostgreSQL container, dumps a canary row through a backup job, deletes the row
+  live, restores the dump into a drill database over the typed-confirmation route and checks the live
+  database was not touched.
+- Blueprint, planning or activation changes also run `python3 scripts/e2e-deployments.py`, which
+  starts an isolated backend and deploys real nginx, busybox and Redis-blueprint releases through the
+  public API.
 - Keep the security posture intact. The network allowlist runs before
   authentication, enrolled accounts always require their second factor, every destructive route sits behind
   the destructive capability with an audit entry, and the rare irreversible ones

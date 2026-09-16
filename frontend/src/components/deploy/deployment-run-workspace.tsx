@@ -27,6 +27,7 @@ import type {
 } from "@/lib/types"
 import { Page, PageHeader, Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { tabClasses } from "@/components/tabs"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import {
   DeploymentStatus,
@@ -209,7 +210,9 @@ export function DeploymentRunWorkspace() {
         {selected ? `. Current step: ${humanize(selected.key)}, ${selected.state}` : ""}
       </p>
 
-      <Panel>
+      {/* The summary is the page's own opening, not a box on it: the facts of
+          the run, one line of progress, and the outcome when there is one. */}
+      <Panel plain>
         <PanelHeader
           title={
             active
@@ -218,9 +221,8 @@ export function DeploymentRunWorkspace() {
                 ? "Deployment complete"
                 : "Deployment summary"
           }
-          actions={<DeploymentStatus state={run.state} />}
         />
-        <PanelBody className="space-y-5 p-5">
+        <PanelBody flush className="space-y-5 pt-5">
           <MetricStrip>
             <Metric
               label="Project"
@@ -290,22 +292,28 @@ export function DeploymentRunWorkspace() {
         </Notice>
       )}
 
-      <div role="group" aria-label="Run views" className="flex flex-wrap gap-2">
+      {/* The same underline strip every section in the product switches with,
+          rather than a row of toggle buttons that read as four commands. */}
+      <div
+        role="group"
+        aria-label="Run views"
+        className="flex gap-1 overflow-x-auto border-b border-hairline"
+      >
         {[
           ["build", "Build logs"],
           ["runtime", "Runtime logs"],
           ["metrics", "Metrics"],
           ["details", "Execution details"],
         ].map(([key, label]) => (
-          <Button
+          <button
             key={key}
-            variant={view === key ? "secondary" : "ghost"}
-            size="sm"
+            type="button"
             aria-pressed={view === key}
             onClick={() => setView(key)}
+            className={tabClasses(view === key, "h-10")}
           >
             {label}
-          </Button>
+          </button>
         ))}
       </div>
       {view === "build" && (
@@ -321,7 +329,7 @@ export function DeploymentRunWorkspace() {
       {view === "runtime" && <DeploymentRunLogs projectID={projectID} runID={runID} />}
       {view === "metrics" && <DeploymentRunMetrics projectID={projectID} runID={runID} />}
       {view === "details" && (
-        <Panel>
+        <Panel plain>
           <PanelHeader title="Execution details" />
           <PanelBody>
             <ReleasePath steps={attempts} />
@@ -336,7 +344,7 @@ export function DeploymentRunWorkspace() {
                       setSelectedStepID(step.id)
                       setView("build")
                     }}
-                    className="flex min-h-14 w-full items-start gap-3 px-4 py-3 text-left focus-ring-inset hover:bg-row-hover"
+                    className="-mx-3 flex min-h-14 w-[calc(100%+1.5rem)] items-start gap-3 rounded-md px-3 py-3 text-left focus-ring-inset hover:bg-row-hover"
                   >
                     <StepMarker state={step.state} />
                     <span className="min-w-0 flex-1">

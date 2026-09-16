@@ -20,6 +20,9 @@ type Store struct {
 	st     *store.Store
 	sealer *auth.Sealer
 	paths  *files.Service
+	// describeDatabase is the Databases owner's answer for a saved connection
+	// id; nil means a job's dump list is bounded but not checked for existence.
+	describeDatabase func(context.Context, int64) (DatabaseDescription, error)
 }
 
 func NewStore(st *store.Store, sealer *auth.Sealer, pathServices ...*files.Service) *Store {
@@ -53,10 +56,13 @@ func (s *Store) ValidatePaths(j *Job) error {
 		}
 		j.Target.Path = resolved
 	}
-	return nil
+	if err := s.validateSQLitePaths(j); err != nil {
+		return err
+	}
+	return s.validateDatabaseDumps(context.Background(), j)
 }
 
-const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at`
+const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps`
 
 func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var (
@@ -65,9 +71,11 @@ func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 		targetCfg, secrets, schedule  string
 		enabled                       int
 		created                       int64
+		recovery, sqlitePaths         string
+		databaseDumps                 string
 	)
 	if err := row.Scan(&j.ID, &j.Name, &sources, &excludes, &targetKind,
-		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created); err != nil {
+		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps); err != nil {
 		return nil, err
 	}
 	j.Sources = decodeStrings(sources)
@@ -78,7 +86,23 @@ func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	j.CreatedAt = time.Unix(created, 0).UTC()
 	j.HasCredentials = secrets != ""
 	json.Unmarshal([]byte(targetCfg), &j.Target)
+	if err := json.Unmarshal([]byte(recovery), &j.Recovery); err != nil {
+		return nil, errors.New("backup recovery configuration is malformed")
+	}
+	j.SQLitePaths = decodeStrings(sqlitePaths)
+	j.DatabaseDumps = decodeInt64s(databaseDumps)
 	return &j, nil
+}
+
+func decodeInt64s(raw string) []int64 {
+	out := []int64{}
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
+		return []int64{}
+	}
+	return out
 }
 
 func (s *Store) List(ctx context.Context) ([]*Job, error) {
@@ -157,10 +181,10 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 		enabled = 1
 	}
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO backup_jobs(name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO backup_jobs(name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), sealed, j.Schedule, j.Retention, enabled, time.Now().Unix())
+		encodeJSON(j.Target), sealed, j.Schedule, j.Retention, enabled, time.Now().Unix(), encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps))
 	if err != nil {
 		return nil, err
 	}
@@ -192,9 +216,9 @@ func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSec
 	}
 	_, err := s.st.DB.ExecContext(ctx,
 		`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,
-		 schedule = ?, retention = ?, enabled = ? WHERE id = ?`,
+		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ? WHERE id = ?`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, id)
+		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), id)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +226,20 @@ func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSec
 }
 
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM backup_jobs WHERE id = ?`, id)
+	result, err := s.st.DB.ExecContext(ctx, `DELETE FROM backup_jobs WHERE id=?
+ AND NOT EXISTS (SELECT 1 FROM backup_runs WHERE job_id=? AND status='running')
+ AND NOT EXISTS (SELECT 1 FROM backup_restore_tests t JOIN backup_runs r ON r.id=t.run_id WHERE r.job_id=? AND t.state IN ('running','cleanup_failed'))`, id, id, id)
+	if err == nil {
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			var exists bool
+			if err := s.st.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM backup_jobs WHERE id=?)`, id).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return ErrAlreadyRunning
+			}
+		}
+	}
 	return err
 }
 
@@ -217,9 +254,13 @@ func (s *Store) StartRun(ctx context.Context, jobID int64, trigger string) (int6
 }
 
 func (s *Store) FinishRun(ctx context.Context, runID int64, status RunStatus, artifact string, size int64, log string) error {
+	return s.finishRun(ctx, runID, status, artifact, size, log, nil)
+}
+
+func (s *Store) finishRun(ctx context.Context, runID int64, status RunStatus, artifact string, size int64, log string, manifest *Manifest) error {
 	_, err := s.st.DB.ExecContext(ctx,
-		`UPDATE backup_runs SET ended_at = ?, status = ?, artifact = ?, size_bytes = ?, log = ? WHERE id = ?`,
-		time.Now().Unix(), string(status), artifact, size, truncate(log, 16000), runID)
+		`UPDATE backup_runs SET ended_at = ?, status = ?, artifact = ?, size_bytes = ?, log = ?, manifest_json = ? WHERE id = ?`,
+		time.Now().Unix(), string(status), artifact, size, truncate(log, 16000), encodeJSON(manifest), runID)
 	return err
 }
 
@@ -230,16 +271,28 @@ func truncate(s string, n int) string {
 	return s[len(s)-n:]
 }
 
-const runCols = `id, job_id, started_at, ended_at, status, artifact, size_bytes, log, trigger`
+const runCols = `id, job_id, started_at, ended_at, status, artifact, size_bytes, log, trigger, manifest_json,
+ COALESCE((SELECT record_json FROM backup_restore_tests WHERE run_id=backup_runs.id ORDER BY id DESC LIMIT 1),'null')`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 	var (
 		r             Run
 		status        string
 		started, ends int64
+		manifest      string
+		verification  string
 	)
-	if err := row.Scan(&r.ID, &r.JobID, &started, &ends, &status, &r.Artifact, &r.SizeBytes, &r.Log, &r.Trigger); err != nil {
+	if err := row.Scan(&r.ID, &r.JobID, &started, &ends, &status, &r.Artifact, &r.SizeBytes, &r.Log, &r.Trigger, &manifest, &verification); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(manifest), &r.Manifest); err != nil {
+		return nil, fmt.Errorf("backup manifest is malformed: %w", err)
+	}
+	if r.Manifest != nil && r.Manifest.Version == 0 {
+		r.Manifest = nil
+	}
+	if err := json.Unmarshal([]byte(verification), &r.RestoreVerification); err != nil {
+		return nil, errors.New("backup recovery evidence is malformed")
 	}
 	r.Status = RunStatus(status)
 	r.StartedAt = time.Unix(started, 0).UTC()
@@ -256,7 +309,7 @@ func (s *Store) Runs(ctx context.Context, jobID int64, limit int) ([]*Run, error
 		limit = 50
 	}
 	rows, err := s.st.DB.QueryContext(ctx,
-		`SELECT `+runCols+` FROM backup_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?`, jobID, limit)
+		`SELECT `+runCols+` FROM backup_runs WHERE job_id = ? ORDER BY started_at DESC, id DESC LIMIT ?`, jobID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +327,7 @@ func (s *Store) Runs(ctx context.Context, jobID int64, limit int) ([]*Run, error
 
 func (s *Store) LastRun(ctx context.Context, jobID int64) (*Run, error) {
 	row := s.st.DB.QueryRowContext(ctx,
-		`SELECT `+runCols+` FROM backup_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT 1`, jobID)
+		`SELECT `+runCols+` FROM backup_runs WHERE job_id = ? ORDER BY started_at DESC, id DESC LIMIT 1`, jobID)
 	r, err := scanRun(row)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -296,7 +349,7 @@ func (s *Store) Run(ctx context.Context, runID int64) (*Run, error) {
 func (s *Store) SuccessfulRuns(ctx context.Context, jobID int64) ([]*Run, error) {
 	rows, err := s.st.DB.QueryContext(ctx,
 		`SELECT `+runCols+` FROM backup_runs WHERE job_id = ? AND status = ? AND artifact != ''
-		 ORDER BY started_at DESC`, jobID, string(StatusSuccess))
+		 ORDER BY started_at DESC, id DESC`, jobID, string(StatusSuccess))
 	if err != nil {
 		return nil, err
 	}

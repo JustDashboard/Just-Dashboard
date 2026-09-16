@@ -409,10 +409,11 @@ export function ProjectTabs({
       className="max-w-full [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden"
     >
       <ul className="flex w-max min-w-full gap-1 border-b border-hairline">
-        {/* Console, Players and Server settings belong to a game server; an
-            ordinary web deployment has a terminal in Docker instead. */}
+        {/* Players and Server settings belong to a game server. Console is a
+            shell into whichever container the release runs — a game's own
+            console for games, the Docker exec session for everything else. */}
         {PROJECT_TABS.filter(
-          ([key]) => !["players", "console", "settings"].includes(key) || profile === "game",
+          ([key]) => !["players", "settings"].includes(key) || profile === "game",
         ).map(([key, label]) => (
           <li key={key}>
             <Link

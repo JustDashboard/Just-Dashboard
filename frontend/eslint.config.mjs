@@ -82,6 +82,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Browser reports bundle third-party trace viewers, not application source.
+    "playwright-report/**",
+    "test-results/**",
     // The Monaco runtime, copied in from node_modules by
     // scripts/sync-monaco.mjs. It is a vendored build, not source: linting it
     // buries every real finding under twenty-five thousand from minified code

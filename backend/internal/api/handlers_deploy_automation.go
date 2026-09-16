@@ -313,14 +313,53 @@ func (s *Server) handleDeploymentNotificationTest(w http.ResponseWriter, r *http
 	if err != nil || id <= 0 {
 		return httpx.BadRequest("notification channel id must be positive")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	err = s.modules.deployAutomation.DeliverNotification(ctx, nil, id, deploy.NotificationEnvelope{Event: "test", SentAt: time.Now().UTC()})
-	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "notification_failed", "notification delivery failed")
+	envelope := deploy.NotificationEnvelope{
+		Event: deploy.NotificationEventTest, State: string(deploy.RunSucceeded), SentAt: time.Now().UTC(),
+		ProjectName: "Just Dashboard", EnvironmentName: "test", Operation: string(deploy.OperationDeploy),
+		Trigger: string(deploy.TriggerManual), Actor: httpx.MustPrincipal(r).Username(), URL: strings.TrimRight(s.dashboardEndpoint(), "/") + "/deploy",
 	}
-	httpx.SetAudit(r, "deploy.notification.test", fmt.Sprint(id), nil)
+	err = s.modules.deployAutomation.DeliverNotification(ctx, nil, id, envelope)
+	if err != nil {
+		httpx.SetAudit(r, "deploy.notification.test", fmt.Sprint(id), map[string]any{"delivered": false})
+		return httpx.Err(http.StatusBadGateway, "notification_failed", "notification delivery failed: "+err.Error())
+	}
+	httpx.SetAudit(r, "deploy.notification.test", fmt.Sprint(id), map[string]any{"delivered": true})
 	httpx.JSON(w, http.StatusOK, map[string]any{"delivered": true})
+	return nil
+}
+
+// handleDeploymentNotificationEnabled pauses or resumes a channel. It is its
+// own route because the full update contract requires the channel's
+// configuration, which the list view deliberately never has.
+func (s *Server) handleDeploymentNotificationEnabled(w http.ResponseWriter, r *http.Request) error {
+	id, err := automationParam(r, "channel")
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err = httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	channel, err := s.modules.deployAutomation.SetNotificationChannelEnabled(r.Context(), id, req.Enabled)
+	if err != nil {
+		return mapAutomationError(err)
+	}
+	httpx.SetAudit(r, "deploy.notification.update", channel.Name, map[string]any{"enabled": channel.Enabled})
+	httpx.JSON(w, http.StatusOK, channel)
+	return nil
+}
+
+// handleDeploymentNotificationOptions tells the form what it may offer, so the
+// closed vocabularies live in one place.
+func (s *Server) handleDeploymentNotificationOptions(w http.ResponseWriter, r *http.Request) error {
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"kinds": deploy.NotificationKinds, "events": deploy.NotificationEvents,
+		"smtpSecurity": []string{deploy.SMTPSecurityStartTLS, deploy.SMTPSecurityTLS, deploy.SMTPSecurityNone},
+	})
 	return nil
 }
 func (s *Server) handleDeploymentNotificationDelete(w http.ResponseWriter, r *http.Request) error {
@@ -391,7 +430,7 @@ func (s *Server) handleAutomationWebhook(w http.ResponseWriter, r *http.Request,
 	if err == nil {
 		err = validateAutomationEvent(trigger, event)
 	}
-	if err == nil && !event.PreviewClosed && !deploy.MatchWatchPaths(event.ChangedPaths, trigger.Config.WatchInclude, trigger.Config.WatchExclude) {
+	if err == nil && event.PreviewNumber > 0 && !event.PreviewClosed && !deploy.MatchWatchPaths(event.ChangedPaths, trigger.Config.WatchInclude, trigger.Config.WatchExclude) {
 		err = deploy.ErrWatchPathsIgnored
 	}
 	if err != nil {
@@ -404,39 +443,99 @@ func (s *Server) handleAutomationWebhook(w http.ResponseWriter, r *http.Request,
 	if err = s.modules.deployAutomation.RecordDelivery(r.Context(), trigger, event, body, "processing", "", 0); err != nil {
 		return mapAutomationError(err)
 	}
+	var decision *deploy.GitDeploymentDecision
+	policyKey := ""
+	if event.PreviewNumber == 0 {
+		policy, policyErr := s.modules.deployRuns.GitDeploymentPolicy(r.Context(), trigger.ProjectID, trigger.EnvironmentID)
+		if policyErr == nil && !policy.Automatic {
+			policyErr = deploy.ErrGitManualOnly
+		}
+		if policyErr == nil && policy.Conflict {
+			policyErr = deploy.ErrGitPolicyConflict
+		}
+		if policyErr == nil {
+			policyKey = policy.Key()
+			decision, policyErr = s.modules.deployGit.EvaluateWebhook(r.Context(), trigger.ProjectID, trigger.EnvironmentID, event)
+		}
+		if policyErr == nil && decision == nil && !deploy.MatchWatchPaths(event.ChangedPaths, policy.WatchInclude, policy.WatchExclude) {
+			policyErr = deploy.ErrWatchPathsIgnored
+		}
+		if policyErr != nil {
+			_ = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "rejected", automationReason(policyErr), 0)
+			return mapAutomationError(policyErr)
+		}
+		if decision != nil && !decision.Allowed {
+			if err := s.modules.deployGit.RecordDecision(r.Context(), decision, nil); err != nil {
+				return httpx.Internal(err)
+			}
+			if err := s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "suppressed", decision.Reason, decision.RunID); err != nil {
+				return httpx.Internal(err)
+			}
+			httpx.SetAudit(r, "deploy.provider.delivery", trigger.Name, map[string]any{"deliveryId": event.DeliveryID, "reason": decision.Reason, "revision": decision.Revision})
+			httpx.JSON(w, http.StatusAccepted, map[string]any{"accepted": false, "reason": decision.Reason, "runId": decision.RunID})
+			return nil
+		}
+	}
 	project, err := s.modules.deployStore.Get(r.Context(), trigger.ProjectID)
 	if err != nil {
 		return mapDeployError(err)
 	}
 	environmentID, operation, runTrigger := trigger.EnvironmentID, deploy.OperationDeploy, trigger.Kind
-	var previewID int64
 	if trigger.Config.Preview && event.PreviewNumber > 0 {
 		preview, created, previewErr := s.modules.deployAutomation.EnsurePreview(r.Context(), trigger, event)
 		if previewErr != nil {
+			if errors.Is(previewErr, deploy.ErrPreviewApproval) || (event.PreviewClosed && errors.Is(previewErr, deploy.ErrWrongEvent)) {
+				status, reason := "pending", "preview_approval_required"
+				if event.PreviewClosed {
+					status, reason = "accepted", "preview_closed"
+				}
+				if err := s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, status, reason, 0); err != nil {
+					return mapAutomationError(err)
+				}
+				httpx.SetAudit(r, "deploy.preview.review", trigger.Name, map[string]any{"deliveryId": event.DeliveryID, "revision": event.Revision, "state": status})
+				httpx.JSON(w, http.StatusAccepted, map[string]any{"accepted": true, "approvalRequired": !event.PreviewClosed})
+				return nil
+			}
 			_ = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "rejected", automationReason(previewErr), 0)
 			return mapAutomationError(previewErr)
 		}
 		environmentID, runTrigger = preview.EnvironmentID, deploy.TriggerPreview
-		previewID = preview.ID
 		if event.PreviewClosed {
 			operation = deploy.OperationPreviewRemove
+			if err := s.modules.deployRuns.CancelPreviewWork(r.Context(), environmentID); err != nil {
+				return mapDeployError(err)
+			}
 		} else if created {
 			operation = deploy.OperationPreviewCreate
 		} else {
 			operation = deploy.OperationPreviewUpdate
 		}
 	}
-	run, err := s.enqueueNormalizedDeployment(r.Context(), project, environmentID, operation, 0, runTrigger, "webhook", trigger.HookID+":"+event.DeliveryID)
+	sourceRevision, expectedPlanRevision := "", 0
+	if runTrigger == deploy.TriggerPreview && !event.PreviewClosed {
+		sourceRevision = event.Revision
+	}
+	if decision != nil {
+		sourceRevision, expectedPlanRevision, policyKey = decision.Revision, decision.Target.PlanRevision, decision.Target.PolicyKey
+	}
+	run, err := s.enqueueNormalizedDeploymentAtSource(r.Context(), project, environmentID, operation, 0, runTrigger, "webhook", trigger.HookID+":"+event.DeliveryID, nil, sourceRevision, expectedPlanRevision, policyKey)
+	if decision != nil {
+		if run != nil {
+			decision.RunID = run.ID
+		}
+		if recordErr := s.modules.deployGit.RecordDecision(r.Context(), decision, err); recordErr != nil && err == nil {
+			err = recordErr
+		}
+	}
 	if err != nil {
 		_ = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "rejected", "enqueue_failed", 0)
 		return mapDeployError(err)
 	}
-	if event.PreviewClosed {
-		if err = s.modules.deployAutomation.ArchiveClosedPreview(r.Context(), previewID); err != nil {
-			return httpx.Internal(err)
-		}
+	reason := "hook_requested"
+	if decision != nil {
+		reason = decision.Reason
 	}
-	if err = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "accepted", "", run.ID); err != nil {
+	if err = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "accepted", reason, run.ID); err != nil {
 		return mapAutomationError(err)
 	}
 	httpx.SetAudit(r, "deploy.provider.delivery", trigger.Name, map[string]any{"provider": trigger.Provider, "deliveryId": event.DeliveryID, "runId": run.ID})
@@ -445,6 +544,9 @@ func (s *Server) handleAutomationWebhook(w http.ResponseWriter, r *http.Request,
 }
 
 func validateAutomationEvent(t *deploy.Trigger, e deploy.ProviderEvent) error {
+	if e.PreviewNumber > 0 && !t.Config.Preview {
+		return deploy.ErrWrongEvent
+	}
 	allowed := len(t.Config.Events) == 0
 	for _, value := range t.Config.Events {
 		if strings.EqualFold(value, e.Event) {
@@ -468,6 +570,16 @@ func validateAutomationEvent(t *deploy.Trigger, e deploy.ProviderEvent) error {
 
 func automationReason(err error) string {
 	switch {
+	case errors.Is(err, deploy.ErrGitManualOnly):
+		return "manual_only"
+	case errors.Is(err, deploy.ErrGitPolicyConflict):
+		return "policy_conflict"
+	case errors.Is(err, deploy.ErrPreviewApproval):
+		return "preview_approval_required"
+	case errors.Is(err, deploy.ErrPreviewIsolation):
+		return "preview_isolation_required"
+	case errors.Is(err, deploy.ErrPreviewCleanupPending):
+		return "preview_cleanup_pending"
 	case errors.Is(err, deploy.ErrBadHookSignature):
 		return "bad_signature"
 	case errors.Is(err, deploy.ErrWrongEvent):
@@ -487,6 +599,12 @@ func automationReason(err error) string {
 }
 
 func mapAutomationError(err error) error {
+	if errors.Is(err, deploy.ErrInvalidNotification) {
+		return httpx.BadRequest("%v", err)
+	}
+	if errors.Is(err, deploy.ErrTriggerNotFound) {
+		return httpx.Err(http.StatusNotFound, "not_found", "automation resource not found")
+	}
 	code, status := automationReason(err), http.StatusUnprocessableEntity
 	if errors.Is(err, deploy.ErrBadHookSignature) {
 		status = http.StatusUnauthorized
@@ -588,7 +706,10 @@ func (s *Server) waitForScheduledRun(ctx context.Context, runID int64) error {
 			return err
 		}
 		if run.State.Terminal() {
-			if run.State == deploy.RunSucceeded || run.State == deploy.RunRolledBack {
+			// A rolled-back deployment kept the old release serving, but the
+			// step the chain asked for did not happen; a following restart
+			// would restart the release the operator meant to replace.
+			if run.State == deploy.RunSucceeded {
 				return nil
 			}
 			return fmt.Errorf("scheduled deployment ended in %s", run.State)

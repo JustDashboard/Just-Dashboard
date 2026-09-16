@@ -1,0 +1,38 @@
+$ playwright test tests/browser/backup-recovery.spec.ts
+[WebServer] $ next start --hostname "127.0.0.1" --port "43117"
+[WebServer] (node:2345399) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+Running 2 tests using 1 worker
+
+(node:2345444) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] Failed to proxy http://127.0.0.1:8080/api/v1/system/stream?interval=2000 Error: connect ECONNREFUSED 127.0.0.1:8080
+[WebServer]     at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+[WebServer]   errno: -111,
+[WebServer]   code: 'ECONNREFUSED',
+[WebServer]   syscall: 'connect',
+[WebServer]   address: '127.0.0.1',
+[WebServer]   port: 8080
+[WebServer] }
+  ✓  1 [chromium] › tests/browser/backup-recovery.spec.ts:115:5 › backup setup records native SQLite sources and an application recovery check (1.6s)
+[WebServer] Failed to proxy http://127.0.0.1:8080/api/v1/system/stream?interval=2000 Error: connect ECONNREFUSED 127.0.0.1:8080
+[WebServer]     at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+[WebServer]   errno: -111,
+[WebServer]   code: 'ECONNREFUSED',
+[WebServer]   syscall: 'connect',
+[WebServer]   address: '127.0.0.1',
+[WebServer]   port: 8080
+[WebServer] }
+[WebServer] Failed to proxy http://127.0.0.1:8080/api/v1/system/stream?interval=2000 Error: connect ECONNREFUSED 127.0.0.1:8080
+[WebServer]     at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8080) {
+[WebServer]   errno: -111,
+[WebServer]   code: 'ECONNREFUSED',
+[WebServer]   syscall: 'connect',
+[WebServer]   address: '127.0.0.1',
+[WebServer]   port: 8080
+[WebServer] }
+  ✓  2 [chromium] › tests/browser/backup-recovery.spec.ts:149:5 › restore verification failure remains visible and a successful retry shows its evidence (1.9s)
+
+  2 passed (5.5s)

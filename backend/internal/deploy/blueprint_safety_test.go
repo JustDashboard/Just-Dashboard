@@ -67,8 +67,18 @@ func TestBlueprintPreviewKeepsSocketReadOnlyAndUDPExplicit(t *testing.T) {
 			t.Fatalf("%s: %v", check.Name, err)
 		}
 	}
-	if summary := blueprint.Summarize(mustBlueprint(t, "dozzle")); summary.DeploymentSupported || summary.UnavailableReason == "" {
-		t.Fatal("catalogue hides deployment limitation")
+	// Blueprints the release path cannot run end to end say so in the
+	// catalogue; the ones it can are offered without a caveat.
+	if summary := blueprint.Summarize(mustBlueprint(t, "prometheus")); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "configuration files") {
+		t.Fatalf("catalogue hides the config-file limitation: %+v", summary)
+	}
+	if summary := blueprint.Summarize(mustBlueprint(t, "minecraft-java")); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "game-server") {
+		t.Fatalf("catalogue hides the game limitation: %+v", summary)
+	}
+	for _, id := range []string{"redis", "postgresql", "uptime-kuma", "dozzle"} {
+		if summary := blueprint.Summarize(mustBlueprint(t, id)); !summary.DeploymentSupported || summary.UnavailableReason != "" {
+			t.Fatalf("%s should be deployable: %+v", id, summary)
+		}
 	}
 }
 func mustBlueprint(t *testing.T, id string) *blueprint.Blueprint {

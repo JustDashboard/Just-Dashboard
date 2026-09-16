@@ -1,0 +1,2 @@
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.815s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	0.443s

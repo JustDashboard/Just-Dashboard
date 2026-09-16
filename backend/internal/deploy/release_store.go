@@ -125,6 +125,7 @@ type ReleaseWithArtifacts struct {
 }
 
 type EnvironmentExecutionTarget struct {
+	Kind            EnvironmentKind
 	ProjectID       int64
 	EnvironmentID   int64
 	DesiredRevision int
@@ -138,11 +139,11 @@ func (s *OrchestrationStore) EnvironmentExecutionTarget(
 ) (*EnvironmentExecutionTarget, error) {
 	var target EnvironmentExecutionTarget
 	err := s.db.QueryRowContext(ctx, `
-		SELECT e.project_id, e.id, e.desired_revision, b.method, e.live_release_id
+		SELECT e.project_id, e.id, e.desired_revision, b.method, e.live_release_id, e.kind
 		  FROM deploy_environments e
 		  JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
 		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&target.ProjectID, &target.EnvironmentID, &target.DesiredRevision, &target.BuildMethod, &target.LiveReleaseID)
+		Scan(&target.ProjectID, &target.EnvironmentID, &target.DesiredRevision, &target.BuildMethod, &target.LiveReleaseID, &target.Kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrEnvironmentNotFound
 	}

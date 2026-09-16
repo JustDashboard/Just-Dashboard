@@ -212,6 +212,7 @@ type ContainerDetail struct {
 	LogPath     string            `json:"logPath"`
 	Platform    string            `json:"platform"`
 	ExitCode    int               `json:"exitCode"`
+	OOMKilled   bool              `json:"oomKilled,omitempty"`
 	Error       string            `json:"error,omitempty"`
 	RestartNum  int               `json:"restartCount"`
 	Args        []string          `json:"args"`
@@ -341,6 +342,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, erro
 		d.State = insp.State.Status
 		d.Status = insp.State.Status
 		d.ExitCode = insp.State.ExitCode
+		d.OOMKilled = insp.State.OOMKilled
 		d.Error = insp.State.Error
 		if insp.State.Health != nil {
 			d.Health = insp.State.Health.Status

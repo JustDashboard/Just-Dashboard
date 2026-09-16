@@ -186,3 +186,61 @@ func assertC6Finding(t *testing.T, findings []PreflightFinding, code string, sev
 	}
 	t.Fatalf("missing %s/%s finding in %#v", code, severity, findings)
 }
+
+// A managed named volume does not exist until the first release mounts it.
+// Its absence is what a fresh deployment looks like, not a broken dependency;
+// only a volume the deployment does not own, or one Docker could not inspect,
+// keeps blocking.
+func TestPreflightLetsAManagedVolumeBeCreatedOnFirstStart(t *testing.T) {
+	candidate := newDetectedCandidate("", BuildImage, DetectedCandidate{
+		Name: "redis", Profile: ProfileService, Confidence: ConfidenceHigh,
+		Evidence: []DetectionEvidence{{Path: "redis@1.0.0", Reason: "fixture"}}, NeedsDecision: []string{},
+	})
+	draft := &Draft{Data: DraftData{
+		Intent: &DraftIntentConfig{Name: "cache", Profile: ProfileService},
+		Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "redis", BlueprintVersion: "1.0.0"},
+		Detection: &DetectionResult{
+			Source:     SourceIdentity{Kind: SourceBlueprint, Repository: "redis:7.4-alpine", Revision: "sha256:" + strings.Repeat("a", 64), Digest: "sha256:" + strings.Repeat("b", 64)},
+			Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
+		},
+	}}
+	configuration := PlanConfiguration{
+		Build: BuildPlanConfig{Method: BuildImage},
+		Runtime: RuntimePlanConfig{
+			Image: "redis:7.4-alpine", Strategy: StrategyStopFirst, BindAddress: "127.0.0.1", InternalPort: 6379,
+			Command: []string{}, Capabilities: []string{}, Devices: []string{},
+			Mounts: []RuntimeMount{
+				{Source: "cache-0123456789abcdef-data", Target: "/data", Ownership: OwnershipManaged},
+				{Source: "shared-uploads", Target: "/uploads", Ownership: OwnershipLinked},
+			},
+		},
+		Variables: []PlannedVariable{}, Checks: []PlannedCheck{}, Domains: []PlannedDomain{},
+		Dependencies: []PlannedDependency{
+			{Kind: "storage", Ownership: OwnershipManaged, ResourceKind: "docker_volume", ResourceID: "cache-0123456789abcdef-data", Config: json.RawMessage(`{}`)},
+			{Kind: "storage", Ownership: OwnershipLinked, ResourceKind: "docker_volume", ResourceID: "shared-uploads", Config: json.RawMessage(`{}`)},
+			{Kind: "storage", Ownership: OwnershipManaged, ResourceKind: "docker_volume", ResourceID: "cache-0123456789abcdef-logs", Config: json.RawMessage(`{}`)},
+		},
+	}
+	observation := HostObservation{
+		Facilities: map[string]FacilityObservation{"docker": {Available: true}},
+		Dependencies: []DependencyObservation{
+			{Kind: "storage", ResourceKind: "docker_volume", ResourceID: "cache-0123456789abcdef-data", Available: false, Missing: true, Detail: "Docker volume was not found", DeepLink: "/docker/volumes/cache-0123456789abcdef-data"},
+			{Kind: "storage", ResourceKind: "docker_volume", ResourceID: "shared-uploads", Available: false, Missing: true, Detail: "Docker volume was not found", DeepLink: "/docker/volumes/shared-uploads"},
+			{Kind: "storage", ResourceKind: "docker_volume", ResourceID: "cache-0123456789abcdef-logs", Available: false, Detail: "Docker volume could not be inspected", DeepLink: "/docker/volumes/cache-0123456789abcdef-logs"},
+		},
+	}
+	findings := preflightFindings(draft, configuration, observation, false)
+	assertC6Finding(t, findings, "storage_pending_creation", PreflightPass, "/docker/volumes/cache-0123456789abcdef-data")
+	blocked := 0
+	for _, item := range findings {
+		if item.Code == "storage_unavailable" {
+			blocked++
+			if item.Severity != PreflightBlocked {
+				t.Fatalf("%s should block: %#v", item.FieldID, item)
+			}
+		}
+	}
+	if blocked != 2 {
+		t.Fatalf("storage_unavailable findings = %d, want the linked volume and the uninspectable one (%#v)", blocked, findings)
+	}
+}

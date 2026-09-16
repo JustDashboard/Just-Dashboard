@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Check, GitBranch, RefreshClockwise } from "@/components/icons"
+import { Check, GitHubMark, GitBranch, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import type { GitRepo } from "@/lib/types"
@@ -100,7 +100,7 @@ export default function GitPage() {
 
       {repos.data && !repos.data.available && (
         <EmptyState
-          icon={GitBranch}
+          icon={GitHubMark}
           title="git is not installed on this host"
           description="Install git to manage repositories from here."
         />
@@ -109,7 +109,7 @@ export default function GitPage() {
       {repos.data?.available &&
         (repos.data.repos.length === 0 ? (
           <EmptyState
-            icon={GitBranch}
+            icon={GitHubMark}
             title="No repositories found"
             description="Nothing under the configured git roots. Set JD_GIT_ROOTS to point at where your projects live."
           />
@@ -199,7 +199,7 @@ export default function GitPage() {
                   {visible.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={5} className="p-0">
-                        <EmptyState icon={GitBranch} title="No repository matches that filter" />
+                        <EmptyState icon={GitHubMark} title="No repository matches that filter" />
                       </TableCell>
                     </TableRow>
                   )}

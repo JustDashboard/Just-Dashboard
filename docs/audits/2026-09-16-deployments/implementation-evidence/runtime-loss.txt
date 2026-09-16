@@ -1,0 +1,4 @@
+=== RUN   TestLiveRuntimeLossKeepsExactlyOneReleaseLive
+--- PASS: TestLiveRuntimeLossKeepsExactlyOneReleaseLive (3.49s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	3.509s

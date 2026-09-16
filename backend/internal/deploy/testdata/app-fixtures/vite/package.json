@@ -1,0 +1,14 @@
+{
+  "name": "jd-acceptance-vite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-check.cjs && vite build",
+    "start": "vite --port 5173",
+    "postinstall": "node install-check.cjs"
+  },
+  "dependencies": {
+    "vite": "8.3.0"
+  }
+}

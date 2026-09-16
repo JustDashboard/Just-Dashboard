@@ -3,6 +3,7 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -48,6 +49,12 @@ type PlanningStore struct {
 	managedRoot string
 	now         func() time.Time
 	mu          sync.Mutex
+	databaseURL func(context.Context, int64, int, string) (string, error)
+}
+
+func (s *PlanningStore) WithDatabaseURLResolver(resolve func(context.Context, int64, int, string) (string, error)) *PlanningStore {
+	s.databaseURL = resolve
+	return s
 }
 
 func NewPlanningStore(st *basestore.Store, sealer *auth.Sealer, deployRoots []string) *PlanningStore {
@@ -275,6 +282,10 @@ func (s *PlanningStore) resolveExternalVariableReference(
 		}
 		return value, true, nil
 	case "database":
+		if s.databaseURL != nil {
+			value, err := s.databaseURL(ctx, environmentID, planRevision, reference.Target)
+			return value, true, err
+		}
 		sealed, err := s.referenceSealedValue(ctx, "db_connections", "dsn_enc", reference.Target)
 		if err != nil && strings.HasSuffix(reference.Target, ".url") {
 			sealed, err = s.referenceSealedValue(ctx, "db_connections", "dsn_enc", strings.TrimSuffix(reference.Target, ".url"))
@@ -613,6 +624,21 @@ func (s *PlanningStore) SaveDetection(
 		return nil, err
 	}
 	draft.Data.Detection = &detection
+	if draft.Data.Source.Mode == SourceModeBlueprint {
+		// The reviewed definition, not the browser, decides what a blueprint
+		// deployment looks like: image, volumes, checks, limits and variables
+		// come from the render and are offered to the operator to adjust.
+		name := ""
+		if draft.Data.Intent != nil {
+			name = draft.Data.Intent.Name
+		}
+		plan, err := RenderBlueprintPlan(*draft.Data.Source, name)
+		if err != nil {
+			return nil, err
+		}
+		configuration := canonicalConfiguration(plan.Configuration)
+		draft.Data.Configuration = &configuration
+	}
 	draft.CurrentStep = DraftDetection
 	draft.Revision++
 	draft.Findings = []PreflightFinding{}
@@ -873,6 +899,17 @@ func (s *PlanningStore) Commit(
 	}
 	for _, variable := range configuration.Variables {
 		value := variable.Reference
+		switch {
+		case variable.Generate > 0:
+			// Generated here and never anywhere else: the value exists only
+			// sealed, revealed on demand through the audited reveal route.
+			value, err = generatedSecret(variable.Generate)
+			if err != nil {
+				return nil, err
+			}
+		case variable.Value != "":
+			value = variable.Value
+		}
 		sealed, err := s.sealer.Seal(value)
 		if err != nil {
 			return nil, err
@@ -960,6 +997,21 @@ func (s *PlanningStore) Commit(
 	return &DraftCommitResult{
 		ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: 1, Created: true,
 	}, nil
+}
+
+// generatedSecret produces a URL- and shell-safe credential of exactly the
+// requested length from the operating system's random source.
+func generatedSecret(length int) (string, error) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	raw := make([]byte, length)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	out := make([]byte, length)
+	for i, b := range raw {
+		out[i] = alphabet[int(b)%len(alphabet)]
+	}
+	return string(out), nil
 }
 
 func validateDraftComplete(draft *Draft) error {

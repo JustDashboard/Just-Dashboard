@@ -6,9 +6,10 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `jobs`, three backup pieces, and eleven deployment components covering legacy
-execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, and Git branch
-monitoring.
+`linuxUsers`, `netsec`, `jobs`, three backup pieces, and deployment components covering legacy
+execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
+monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
+Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
 
 **Every module is optional.** A host with no Docker socket, no systemd or no fail2ban serves everything
 else; affected routes return a precise "unavailable on this host" code the frontend renders as
@@ -26,6 +27,15 @@ The monitor makes bounded outbound ref reads every five seconds and queues immut
 it stops before engine shutdown so no new automatic work arrives during the drain. Its persisted
 cursor survives restarts. See the [deployment guide](../deployments/implementation.md) for eligibility,
 failure handling and the unchanged health-gated activation contract.
+
+Startup marks interrupted archive runs failed and reconciles owned restore-check containers before
+scheduling new backups. Interrupted restore checks are cleaned and recorded as failed, never promoted
+to recovery proof. Managed database network reconciliation follows retained environment bindings every
+five seconds and stops before deployment engine shutdown.
+Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
+fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
+and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
+before the deployment engine on shutdown; retained legacy data is never deleted by quarantine.
 
 `helpers.detachedContext` is the deliberate opposite: work that must outlive its request (a backup
 transfer, a `compose up --build`) descends from `context.Background()` and is not cancelled by shutdown
@@ -92,7 +102,7 @@ State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` blo
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
 `api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`); backups
-(`backup_jobs`, `backup_runs`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
+(`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,

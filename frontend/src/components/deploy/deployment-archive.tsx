@@ -6,6 +6,7 @@ import { Archive, Trash } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/hooks/use-auth"
@@ -80,16 +81,16 @@ export function ArchivedDeployments() {
         }
         title="Archived deployments"
         actions={
-          <Button variant="outline" size="sm" asChild>
+          <Button variant="ghost" size="sm" asChild>
             <Link href="/deploy">Active deployments</Link>
           </Button>
         }
       />
-      <Panel>
+      <Panel plain>
         <PanelHeader
           title="Archive"
           actions={
-            <span className="numeric text-xs text-muted-foreground">
+            <span className="numeric text-hint text-muted-foreground">
               {result.data?.length ?? 0} deployments
             </span>
           }
@@ -106,10 +107,11 @@ export function ArchivedDeployments() {
           {result.error ? (
             <ErrorState error={result.error} />
           ) : result.loading && !result.data ? (
-            <LoadingRows />
+            <LoadingRows className="pt-4" />
           ) : projects.length === 0 ? (
             <EmptyState
               icon={Archive}
+              className="mt-4"
               title={query ? "No matching deployments" : "No archived deployments"}
               description={
                 query
@@ -118,27 +120,25 @@ export function ArchivedDeployments() {
               }
             />
           ) : (
-            <ul className="divide-y divide-hairline">
+            <RowList>
               {projects.map((project) => (
-                <li
+                <Row
                   key={project.id}
-                  className="flex min-w-0 flex-wrap items-center justify-between gap-3 px-4 py-4"
-                >
-                  <div className="min-w-0">
+                  title={
                     <Link
                       href={`/deploy/${project.id}`}
-                      className="text-sm font-medium break-all focus-ring hover:underline"
+                      className="rounded-sm break-all focus-ring hover:underline"
                     >
                       {project.name}
                     </Link>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Archived {relativeTime(project.archivedAt!)}
-                    </p>
-                  </div>
-                  <DeleteArchivedDeployment project={project} onDeleted={result.refresh} />
-                </li>
+                  }
+                  subtitle={`Archived ${relativeTime(project.archivedAt!)}`}
+                  trailing={
+                    <DeleteArchivedDeployment project={project} onDeleted={result.refresh} />
+                  }
+                />
               ))}
-            </ul>
+            </RowList>
           )}
         </PanelBody>
       </Panel>

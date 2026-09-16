@@ -1,0 +1,245 @@
+Command: /tmp/jd-go1.26.8/bin/go test -json -count=1 ./...
+Exit code: 0
+skip github.com/Wayy01/Just-Dashboard/backend/cmd/server 0
+pass github.com/Wayy01/Just-Dashboard/backend/internal/agent 0.026
+skip github.com/Wayy01/Just-Dashboard/backend/internal/audit 0
+pass github.com/Wayy01/Just-Dashboard/backend/internal/config 0.032
+pass github.com/Wayy01/Just-Dashboard/backend/internal/blueprint 0.058
+pass github.com/Wayy01/Just-Dashboard/backend/internal/files 0.054
+pass github.com/Wayy01/Just-Dashboard/backend/internal/ghx 0.012
+pass github.com/Wayy01/Just-Dashboard/backend/internal/gameserver 0.153
+pass github.com/Wayy01/Just-Dashboard/backend/internal/hostexec 0.135
+pass github.com/Wayy01/Just-Dashboard/backend/internal/httpx 0.021
+pass github.com/Wayy01/Just-Dashboard/backend/internal/backups 0.386
+pass github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers 0.015
+pass github.com/Wayy01/Just-Dashboard/backend/internal/gitx 0.668
+pass github.com/Wayy01/Just-Dashboard/backend/internal/jobs 0.456
+pass github.com/Wayy01/Just-Dashboard/backend/internal/logsx 0.741
+pass github.com/Wayy01/Just-Dashboard/backend/internal/portalloc 0.006
+pass github.com/Wayy01/Just-Dashboard/backend/internal/procs 0.047
+pass github.com/Wayy01/Just-Dashboard/backend/internal/netsec 0.634
+pass github.com/Wayy01/Just-Dashboard/backend/internal/safepath 0.007
+pass github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg 0.513
+pass github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc 0.917
+pass github.com/Wayy01/Just-Dashboard/backend/internal/stackports 0.269
+pass github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate 1.565
+pass github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo 0.016
+pass github.com/Wayy01/Just-Dashboard/backend/internal/store 1.377
+pass github.com/Wayy01/Just-Dashboard/backend/internal/updates 0.089
+pass github.com/Wayy01/Just-Dashboard/backend/internal/version 0.023
+pass github.com/Wayy01/Just-Dashboard/backend/internal/wsx 0.02
+pass github.com/Wayy01/Just-Dashboard/backend/internal/metrics 3.161
+pass github.com/Wayy01/Just-Dashboard/backend/internal/auth 6.505
+pass github.com/Wayy01/Just-Dashboard/backend/internal/term 5.533
+pass github.com/Wayy01/Just-Dashboard/backend/internal/deploy 14.154
+pass github.com/Wayy01/Just-Dashboard/backend/internal/dockerx 29.701
+pass github.com/Wayy01/Just-Dashboard/backend/internal/dbx 47.467
+pass github.com/Wayy01/Just-Dashboard/backend/internal/api 79.703
+
+Skipped tests:
+--- SKIP: TestLiveComposeRecoversPortConflictAndInvalidatesEditedPreferences (0.00s)
+=== RUN   TestFindSkipsNoiseAndHiddenDirectories
+--- PASS: TestFindSkipsNoiseAndHiddenDirectories (0.00s)
+--- SKIP: TestLiveCreateSurvivesOccupiedPort (0.00s)
+=== RUN   TestDiagnoseComposeMemberSkipsRestartAdvice
+--- PASS: TestDiagnoseComposeMemberSkipsRestartAdvice (0.00s)
+--- SKIP: TestAsOwnerPreservesExistingProcessGroupPolicy (0.00s)
+--- SKIP: TestAccountCommandDropsPrivilegeBeforeLoadingUserEnvironment (0.00s)
+--- SKIP: TestLiveC5ActivationAdapters (0.00s)
+=== RUN   TestBranchesSkipsRemoteHEAD
+--- PASS: TestBranchesSkipsRemoteHEAD (0.08s)
+=== RUN   TestIPTablesSkipsShortRows
+--- PASS: TestIPTablesSkipsShortRows (0.00s)
+=== RUN   TestReplaceRuleDeletesNothingWhenTheAddWasSkipped
+--- PASS: TestReplaceRuleDeletesNothingWhenTheAddWasSkipped (0.00s)
+=== RUN   TestUFWAddAcceptsAPartialSkip
+--- PASS: TestUFWAddAcceptsAPartialSkip (0.00s)
+=== RUN   TestParseLastSkipsWhatItCannotRead
+--- PASS: TestParseLastSkipsWhatItCannotRead (0.00s)
+=== RUN   TestDiscoverPM2HomesSkipsEmptyHomes
+--- PASS: TestDiscoverPM2HomesSkipsEmptyHomes (0.00s)
+--- SKIP: TestLiveC4ArtifactAdapters (0.00s)
+=== RUN   TestCertificateStepSkipsAndReusesWithoutOrdering
+--- PASS: TestCertificateStepSkipsAndReusesWithoutOrdering (0.00s)
+=== RUN   TestAssessSkipsPressureWithoutPSI
+--- SKIP: TestLiveDeploymentWebroot (0.00s)
+--- SKIP: TestLiveDockerCaddyProvisionAndRestart (0.00s)
+--- SKIP: TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute (0.00s)
+--- PASS: TestAssessSkipsPressureWithoutPSI (0.06s)
+=== RUN   TestLowestRegularAccountSkipsSystemAndNologin
+--- PASS: TestLowestRegularAccountSkipsSystemAndNologin (0.00s)
+--- SKIP: TestLoginArgv (0.00s)
+--- SKIP: TestLoginArgvKeepingTheWorkingDirectory (0.00s)
+--- SKIP: TestDefaultCommandIsTheLogin (0.00s)
+--- SKIP: TestLiveDeploymentDatabaseConnection (0.00s)
+--- PASS: TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/unavailable (0.07s)
+=== RUN   TestImportSkipsBadRowsWhenAsked
+--- PASS: TestImportSkipsBadRowsWhenAsked (0.00s)
+    live_devx_test.go:22: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveActivity/postgres (0.00s)
+    live_devx_test.go:22: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveActivity/mysql (0.00s)
+    live_devx_test.go:22: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveActivity/sqlserver (0.00s)
+    live_devx_test.go:22: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveActivity/oracle (0.00s)
+--- SKIP: TestLiveActivity/sqlite (0.00s)
+    live_devx_test.go:22: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveActivity/clickhouse (0.01s)
+    live_devx_test.go:57: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRefusesRubbish/postgres (0.00s)
+    live_devx_test.go:57: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRefusesRubbish/mysql (0.00s)
+    live_devx_test.go:57: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRefusesRubbish/sqlserver (0.00s)
+    live_devx_test.go:57: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRefusesRubbish/oracle (0.00s)
+    live_devx_test.go:57: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRefusesRubbish/clickhouse (0.00s)
+    live_devx_test.go:110: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRunningQuery/postgres (0.00s)
+    live_devx_test.go:110: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRunningQuery/mysql (0.00s)
+    live_devx_test.go:110: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRunningQuery/sqlserver (0.00s)
+    live_devx_test.go:110: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveKillRunningQuery/clickhouse (0.00s)
+    live_devx_test.go:162: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSearch/postgres (0.00s)
+    live_devx_test.go:162: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSearch/mysql (0.00s)
+    live_devx_test.go:162: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSearch/sqlserver (0.00s)
+    live_devx_test.go:162: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSearch/oracle (0.00s)
+    live_devx_test.go:162: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSearch/clickhouse (0.00s)
+    live_devx_test.go:214: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveStorageOverview/postgres (0.00s)
+    live_devx_test.go:214: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveStorageOverview/mysql (0.00s)
+    live_devx_test.go:214: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveStorageOverview/sqlserver (0.00s)
+    live_devx_test.go:214: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveStorageOverview/oracle (0.00s)
+    live_devx_test.go:214: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveStorageOverview/clickhouse (0.00s)
+    live_devx_test.go:258: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveGeneratedTypes/postgres (0.00s)
+    live_devx_test.go:258: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveGeneratedTypes/mysql (0.00s)
+    live_devx_test.go:258: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveGeneratedTypes/sqlserver (0.00s)
+    live_devx_test.go:258: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveGeneratedTypes/oracle (0.00s)
+    live_devx_test.go:258: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveGeneratedTypes/clickhouse (0.00s)
+    live_devx_test.go:310: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQL/postgres (0.00s)
+    live_devx_test.go:310: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQL/mysql (0.00s)
+    live_devx_test.go:310: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQL/sqlserver (0.00s)
+    live_devx_test.go:310: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQL/oracle (0.00s)
+    live_devx_test.go:310: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQL/clickhouse (0.00s)
+    live_devx_test.go:359: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQLQuoting/postgres (0.00s)
+    live_devx_test.go:359: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQLQuoting/mysql (0.00s)
+    live_devx_test.go:359: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQLQuoting/sqlserver (0.00s)
+    live_devx_test.go:359: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQLQuoting/oracle (0.00s)
+    live_devx_test.go:359: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRowInsertSQLQuoting/clickhouse (0.00s)
+    live_drop_test.go:64: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDropDatabase/postgres (0.00s)
+    live_drop_test.go:64: mysql unreachable — set JD_TEST_MYSQL_ADMIN_DSN to run these (dial tcp 127.0.0.1:3306: connect: connection refused)
+--- SKIP: TestLiveDropDatabase/mysql (0.00s)
+    live_drop_test.go:64: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDropDatabase/sqlserver (0.00s)
+    live_drop_test.go:64: oracle unreachable — set JD_TEST_ORACLE_ADMIN_DSN to run these (dial tcp 127.0.0.1:1521: connect: connection refused)
+--- SKIP: TestLiveDropDatabase/oracle (0.00s)
+    live_drop_test.go:64: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDropDatabase/clickhouse (0.00s)
+--- SKIP: TestLiveBuildCachePruneRoundTrips (0.00s)
+--- PASS: TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/unavailable (0.14s)
+    live_drop_test.go:106: MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] })
+--- SKIP: TestLiveDropMongoDatabase (8.00s)
+--- SKIP: TestLivePruneAllActuallyDeletes (0.00s)
+    live_drop_test.go:142: Redis unreachable — set JD_TEST_REDIS_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDropRedisEmptiesRatherThanRemoves (1.69s)
+    live_dump_test.go:30: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpRoundTrip/postgres (0.00s)
+    live_dump_test.go:30: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpRoundTrip/mysql (0.00s)
+    live_dump_test.go:30: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpRoundTrip/sqlserver (0.00s)
+    live_dump_test.go:30: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpRoundTrip/oracle (0.00s)
+    live_dump_test.go:30: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpRoundTrip/clickhouse (0.00s)
+    live_dump_test.go:98: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpKeepsAwkwardValues/postgres (0.00s)
+    live_dump_test.go:98: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpKeepsAwkwardValues/mysql (0.00s)
+    live_dump_test.go:98: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpKeepsAwkwardValues/sqlserver (0.00s)
+    live_dump_test.go:98: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpKeepsAwkwardValues/oracle (0.00s)
+    handlers_db_live_test.go:102: mongodb unreachable: server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] }
+--- SKIP: TestLiveAPIMongo (8.06s)
+    handlers_db_live_test.go:212: redis unreachable: dial tcp 127.0.0.1:1: connect: connection refused
+--- SKIP: TestLiveAPIRedis (1.71s)
+    handlers_db_live_test.go:280: postgres unreachable: failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused
+--- SKIP: TestLiveAPIPostgres (0.05s)
+    handlers_db_live_test.go:357: postgres unreachable: failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused
+--- SKIP: TestLiveAPIDeveloperSurface (0.05s)
+    live_dump_test.go:144: MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] })
+--- SKIP: TestLiveDumpMongoRoundTrip (8.00s)
+=== RUN   TestFirstIPv4SkipsUnusableAddresses
+--- PASS: TestFirstIPv4SkipsUnusableAddresses (0.00s)
+=== RUN   TestServiceVolumeNamesSkipsBindMounts
+--- PASS: TestServiceVolumeNamesSkipsBindMounts (0.00s)
+    live_dump_test.go:190: MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] })
+--- SKIP: TestLiveDumpMongoWithoutTheTools (8.00s)
+    live_dump_test.go:230: Redis unreachable — set JD_TEST_REDIS_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveDumpRedisRoundTrip (1.75s)
+    live_nosql_test.go:48: MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] })
+--- SKIP: TestLiveMongo (8.00s)
+    live_nosql_test.go:271: Redis unreachable — set JD_TEST_REDIS_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRedis (1.76s)
+    live_nosql_test.go:473: Redis unreachable — set JD_TEST_REDIS_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveRedisScanFindsASelectiveMatch (1.83s)
+    live_test.go:238: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSQLEngines/postgres (0.00s)
+    live_test.go:238: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSQLEngines/mysql (0.00s)
+    live_test.go:238: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSQLEngines/sqlserver (0.00s)
+    live_test.go:238: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSQLEngines/oracle (0.00s)
+    live_test.go:238: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveSQLEngines/clickhouse (0.00s)
+    live_test.go:573: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExplainDoesNotExecute/postgres (0.00s)
+    live_test.go:573: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExplainDoesNotExecute/mysql (0.00s)
+    live_test.go:573: sqlserver unreachable — set JD_TEST_MSSQL_DSN to run these (unable to open tcp connection with host '127.0.0.1:1': dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExplainDoesNotExecute/sqlserver (0.00s)
+    live_test.go:573: oracle unreachable — set JD_TEST_ORACLE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExplainDoesNotExecute/oracle (0.00s)
+    live_test.go:573: clickhouse unreachable — set JD_TEST_CLICKHOUSE_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExplainDoesNotExecute/clickhouse (0.00s)
+    postgres_size_test.go:14: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLivePostgresSizesTolerateConcurrentRelationDrop (0.00s)
+    precision_test.go:175: postgres unreachable — set JD_TEST_POSTGRES_DSN to run these (failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExactNumericMutations/postgres (0.00s)
+    precision_test.go:175: mysql unreachable — set JD_TEST_MYSQL_DSN to run these (dial tcp 127.0.0.1:1: connect: connection refused)
+--- SKIP: TestLiveExactNumericMutations/mysql (0.00s)
+--- SKIP: TestCertbotReportsItselfUnavailable (1.63s)
+
+Non-JSON output:
+

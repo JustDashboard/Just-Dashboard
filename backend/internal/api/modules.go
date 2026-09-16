@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
@@ -79,6 +81,8 @@ type moduleSet struct {
 	deployAutomation *deploy.AutomationStore
 	deploySchedule   *deploy.AutomationScheduler
 	deployGit        *deploy.GitWatcher
+	deployDatabases  *deploymentDatabaseNetworks
+	deployPreviews   *deploy.PreviewQuarantineController
 	// Upstream game-version metadata, behind one bounded client and a short
 	// cache so opening the wizard does not hammer somebody else's API.
 	gameVersions *gameserver.Adapter
@@ -155,15 +159,27 @@ func (s *Server) initModules() {
 	s.modules.netsec = netsec.New()
 	s.modules.jobs = jobs.New(s.Log)
 
-	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files)
+	databaseDumper := &backupDatabaseDumper{server: s}
+	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files).
+		WithDatabaseValidator(databaseDumper.DescribeDatabase)
 	s.modules.backupRunner = backups.NewRunner(s.modules.backupStore,
-		filepath.Join(s.Cfg.DataDir, "staging"), s.Log)
+		filepath.Join(s.Cfg.DataDir, "staging"), s.Log).
+		WithRecoveryChecker(&backupRecoveryChecker{server: s}).
+		WithDatabaseDumper(databaseDumper).
+		WithSQLiteSnapshotter(func(ctx context.Context, source, directory string) (string, error) {
+			dump, err := dbx.Dump(ctx, dbx.DriverSQLite, source, "", directory)
+			if err != nil {
+				return "", err
+			}
+			return dump.Path, nil
+		})
 	s.modules.backupSched = backups.NewScheduler(s.modules.backupStore, s.modules.backupRunner, s.Log)
 
 	s.modules.deployStore = deploy.NewStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
 	s.modules.deployer = deploy.NewDeployer(s.modules.deployStore, s.Log)
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
-	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
+	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
 	s.modules.deploySources = deploy.NewHostSourceAnalyzer(
 		s.Cfg.DeployRoots,
@@ -182,17 +198,22 @@ func (s *Server) initModules() {
 	))
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
+	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
+	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
+		func(ctx context.Context, environmentID int64, phase string, success bool) {
+			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
+		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
 		s.modules.deploySources,
 		s.modules.deployArtifacts,
-		deploy.NewDockerRuntimeOwner(s.modules.docker),
+		runtimeOwner,
 		deploy.NewCheckRunner(s.modules.docker),
 		s.modules.proxy,
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),
 	).WithPreflightObserver(s.modules.deployPreflight).
-		WithBackupGate(newDeploymentBackupGate(s.modules.backupStore, s.modules.backupRunner)).
+		WithBackupGate(newDeploymentBackupGate(s.modules.backupStore, s.modules.backupRunner, s.modules.docker).WithDatabaseSources(s.databaseBackupSources)).
 		// Automatic HTTPS. Issuance is still the Certificates feature's code
 		// and activation still resolves an already-existing pair; what this
 		// join adds is that the run asks for one before it starts anything,
@@ -215,7 +236,16 @@ func (s *Server) initModules() {
 		},
 		s.Log,
 	)
-	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule)
+	// Every terminal outcome reaches its audience, not only the release
+	// path's success step: a failed deployment is the one somebody most
+	// needs to hear about.
+	notifications := deploy.NewNotificationDispatcher(s.modules.deployAutomation, s.modules.deployRuns, s.dashboardEndpoint, s.Log)
+	s.modules.deployEngine.WithObservers(
+		notifications,
+		deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{s.modules.github}, s.dashboardEndpoint, s.Log),
+	)
+	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
+		WithSweep(notifications.RetryFailedDeliveries)
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 }
 
@@ -334,4 +364,40 @@ func (s *Server) healthURL() string {
 		scheme = "https"
 	}
 	return scheme + "://" + net.JoinHostPort(host, port) + "/healthz"
+}
+
+// githubStatusPoster adapts the GitHub CLI service to the deploy package's
+// narrow commit-status contract.
+type githubStatusPoster struct{ github *ghx.Service }
+
+func (p githubStatusPoster) PostCommitStatus(ctx context.Context, nameWithOwner, sha string, status deploy.CommitStatus) error {
+	if p.github == nil {
+		return ghx.ErrNotInstalled
+	}
+	return p.github.PostCommitStatus(ctx, nameWithOwner, sha, ghx.CommitStatus{
+		State: status.State, TargetURL: status.TargetURL, Description: status.Description, Context: status.Context,
+	})
+}
+
+// dashboardEndpoint is the address links in notifications and commit statuses
+// point at. It is the self-configuration report's endpoint — the one the
+// settings page shows — cached briefly because the report reads the stack's
+// env file and asks Docker where the stack lives.
+func (s *Server) dashboardEndpoint() string {
+	s.endpointMu.Lock()
+	defer s.endpointMu.Unlock()
+	if s.endpointCache != "" && time.Since(s.endpointCachedAt) < 5*time.Minute {
+		return s.endpointCache
+	}
+	endpoint := ""
+	if s.modules.selfConfig != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		endpoint = s.modules.selfConfig.Report(ctx).Endpoint
+	}
+	if endpoint == "" {
+		endpoint = "https://" + s.Cfg.Site + ":8443"
+	}
+	s.endpointCache, s.endpointCachedAt = endpoint, time.Now()
+	return endpoint
 }

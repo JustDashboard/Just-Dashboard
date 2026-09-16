@@ -1,0 +1,44 @@
+=== RUN   TestLiveDeploymentDatabaseConnection
+=== RUN   TestLiveDeploymentDatabaseConnection/postgres
+    deployment_database_live_test.go:298: postgres: authenticated before and after replacement at a different IP using the same client container and logical URL on port 5432
+=== RUN   TestLiveDeploymentDatabaseConnection/mysql
+[mysql] 2026/09/16 05:33:48 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:50 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:51 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:52 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:53 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:54 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:55 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:57 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:58 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:33:59 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:03 connection.go:801 closing bad idle connection: EOF
+[mysql] 2026/09/16 05:34:03 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:03 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:04 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:04 packets.go:58 unexpected EOF
+    deployment_database_live_test.go:298: mysql: authenticated before and after replacement at a different IP using the same client container and logical URL on port 3306
+=== RUN   TestLiveDeploymentDatabaseConnection/mariadb
+[mysql] 2026/09/16 05:34:07 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:09 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:10 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:11 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:12 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:16 connection.go:801 closing bad idle connection: EOF
+[mysql] 2026/09/16 05:34:16 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:16 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:17 packets.go:58 unexpected EOF
+[mysql] 2026/09/16 05:34:17 packets.go:58 unexpected EOF
+    deployment_database_live_test.go:298: mariadb: authenticated before and after replacement at a different IP using the same client container and logical URL on port 3306
+=== RUN   TestLiveDeploymentDatabaseConnection/redis
+    deployment_database_live_test.go:298: redis: authenticated before and after replacement at a different IP using the same client container and logical URL on port 6379
+=== RUN   TestLiveDeploymentDatabaseConnection/mongodb
+    deployment_database_live_test.go:298: mongodb: authenticated before and after replacement at a different IP using the same client container and logical URL on port 27017
+--- PASS: TestLiveDeploymentDatabaseConnection (56.91s)
+    --- PASS: TestLiveDeploymentDatabaseConnection/postgres (8.92s)
+    --- PASS: TestLiveDeploymentDatabaseConnection/mysql (18.98s)
+    --- PASS: TestLiveDeploymentDatabaseConnection/mariadb (12.52s)
+    --- PASS: TestLiveDeploymentDatabaseConnection/redis (4.93s)
+    --- PASS: TestLiveDeploymentDatabaseConnection/mongodb (11.56s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	56.969s

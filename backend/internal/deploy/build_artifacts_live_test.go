@@ -200,7 +200,7 @@ func livePrepareAndBuild(
 	emit func(BuildLog) error,
 ) BuildArtifactResult {
 	t.Helper()
-	prepared, err := builder.Prepare(context.Background(), root, config, false, tag)
+	prepared, err := builder.Prepare(context.Background(), root, config, false, tag, buildVariableNames(variables)...)
 	if err != nil {
 		t.Fatal(err)
 	}

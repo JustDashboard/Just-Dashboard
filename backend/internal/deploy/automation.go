@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -22,15 +23,18 @@ import (
 )
 
 var (
-	ErrTriggerNotFound   = errors.New("deployment trigger not found")
-	ErrHookDisabled      = errors.New("deployment hook is disabled")
-	ErrBadHookSignature  = errors.New("deployment hook signature is invalid")
-	ErrWrongEvent        = errors.New("deployment provider event is not supported")
-	ErrWrongRepository   = errors.New("deployment provider repository does not match")
-	ErrWrongRef          = errors.New("deployment provider ref does not match")
-	ErrDeliveryReplayed  = errors.New("deployment provider delivery was already received")
-	ErrWatchPathsIgnored = errors.New("deployment change does not match watched paths")
-	ErrPreviewQuota      = errors.New("deployment preview quota has been reached")
+	ErrTriggerNotFound       = errors.New("deployment trigger not found")
+	ErrHookDisabled          = errors.New("deployment hook is disabled")
+	ErrBadHookSignature      = errors.New("deployment hook signature is invalid")
+	ErrWrongEvent            = errors.New("deployment provider event is not supported")
+	ErrWrongRepository       = errors.New("deployment provider repository does not match")
+	ErrWrongRef              = errors.New("deployment provider ref does not match")
+	ErrDeliveryReplayed      = errors.New("deployment provider delivery was already received")
+	ErrWatchPathsIgnored     = errors.New("deployment change does not match watched paths")
+	ErrPreviewQuota          = errors.New("deployment preview quota has been reached")
+	ErrPreviewApproval       = errors.New("this pull request revision needs administrator approval before it can build or run")
+	ErrPreviewIsolation      = errors.New("preview configuration does not satisfy storage and execution isolation")
+	ErrPreviewCleanupPending = errors.New("the previous preview must finish cleanup before this pull request can reopen; retry approval after cleanup completes")
 )
 
 const MaxAutomationBody = 4 << 20
@@ -39,6 +43,7 @@ type AutomationStore struct {
 	db     *sql.DB
 	sealer *auth.Sealer
 	now    func() time.Time
+	mailer Mailer
 }
 
 func NewAutomationStore(st *basestore.Store, sealer *auth.Sealer) *AutomationStore {
@@ -185,11 +190,25 @@ func (s *AutomationStore) CreateTrigger(ctx context.Context, projectID, environm
 		return nil, err
 	}
 	now := s.now().UTC().Unix()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO deploy_triggers(environment_id,name,kind,provider,config_json,secret_enc,hook_id,enabled,created_at,updated_at) SELECT id,?,?,?,?,?,?,?,?,? FROM deploy_environments WHERE id=? AND project_id=? AND archived_at=0`, in.Name, in.Kind, in.Provider, string(cfg), sealed, hook, boolInt(in.Enabled), now, now, environmentID, projectID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `INSERT INTO deploy_triggers(environment_id,name,kind,provider,config_json,secret_enc,hook_id,enabled,created_at,updated_at) SELECT id,?,?,?,?,?,?,?,?,? FROM deploy_environments WHERE id=? AND project_id=? AND archived_at=0`, in.Name, in.Kind, in.Provider, string(cfg), sealed, hook, boolInt(in.Enabled), now, now, environmentID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if changed, _ := res.RowsAffected(); changed != 1 {
+		return nil, ErrEnvironmentNotFound
+	}
+	if err := syncTriggerGitPolicyTx(ctx, tx, environmentID, in.Config, now); err != nil {
+		return nil, err
+	}
 	id, _ := res.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	t, err := s.triggerByID(ctx, id, projectID)
 	if err != nil {
 		return nil, err
@@ -201,13 +220,25 @@ func (s *AutomationStore) UpdateTrigger(ctx context.Context, projectID, environm
 		return nil, err
 	}
 	cfg, _ := json.Marshal(in.Config)
-	result, err := s.db.ExecContext(ctx, `UPDATE deploy_triggers SET name=?,kind=?,provider=?,config_json=?,enabled=?,updated_at=? WHERE id=? AND environment_id=? AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id=?)`, in.Name, in.Kind, in.Provider, string(cfg), boolInt(in.Enabled), s.now().UTC().Unix(), triggerID, environmentID, projectID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	now := s.now().UTC().Unix()
+	result, err := tx.ExecContext(ctx, `UPDATE deploy_triggers SET name=?,kind=?,provider=?,config_json=?,enabled=?,updated_at=? WHERE id=? AND environment_id=? AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id=?)`, in.Name, in.Kind, in.Provider, string(cfg), boolInt(in.Enabled), now, triggerID, environmentID, projectID)
 	if err != nil {
 		return nil, err
 	}
 	changed, _ := result.RowsAffected()
 	if changed != 1 {
 		return nil, ErrTriggerNotFound
+	}
+	if err := syncTriggerGitPolicyTx(ctx, tx, environmentID, in.Config, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return s.triggerByID(ctx, triggerID, projectID)
 }
@@ -224,6 +255,12 @@ func (s *AutomationStore) DeleteTrigger(ctx context.Context, projectID, environm
 }
 
 func validateTriggerWrite(in *TriggerWrite) error {
+	if _, err := canonicalWatchPatterns(in.Config.WatchInclude); err != nil {
+		return err
+	}
+	if _, err := canonicalWatchPatterns(in.Config.WatchExclude); err != nil {
+		return err
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
 	in.Config.Repository = strings.TrimSpace(in.Config.Repository)
@@ -233,6 +270,12 @@ func validateTriggerWrite(in *TriggerWrite) error {
 	}
 	if in.Config.PreviewQuota < 0 || in.Config.PreviewQuota > 20 {
 		return fmt.Errorf("preview quota must be between 0 and 20")
+	}
+	if domain := strings.TrimSpace(in.Config.PreviewDomain); domain != "" {
+		if strings.Count(domain, "{number}") != 1 || len(domain) > 240 || !strings.Contains(domain, ".") || strings.ContainsAny(strings.ReplaceAll(domain, "{number}", "1"), " {}:/\\\x00\r\n") {
+			return fmt.Errorf("preview domain must be a hostname containing one {number} placeholder")
+		}
+		in.Config.PreviewDomain = strings.ToLower(domain)
 	}
 	valid := map[TriggerKind]bool{TriggerGenericHook: true, TriggerAPI: true, TriggerGitHub: true, TriggerGitLab: true, TriggerBitbucket: true, TriggerGitea: true}
 	if !valid[in.Kind] {
@@ -261,16 +304,18 @@ func (s *AutomationStore) triggerByID(ctx context.Context, id, projectID int64) 
 }
 
 type ProviderEvent struct {
-	DeliveryID    string
-	Event         string
-	Repository    string
-	Ref           string
-	Action        string
-	Revision      string
-	ChangedPaths  []string
-	PreviewRef    string
-	PreviewNumber int
-	PreviewClosed bool
+	DeliveryID     string
+	Event          string
+	Repository     string
+	Ref            string
+	Action         string
+	Revision       string
+	ChangedPaths   []string
+	PreviewRef     string
+	PreviewNumber  int
+	PreviewClosed  bool
+	Author         string
+	HeadRepository string
 }
 
 func VerifyProvider(provider string, headers http.Header, body []byte, secret string) (ProviderEvent, error) {
@@ -328,6 +373,9 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 			result.PreviewRef = nestedString(pr, "head", "ref")
 			result.Revision = nestedString(pr, "head", "sha")
 			result.PreviewClosed = result.Action == "closed"
+			result.Author = nestedString(pr, "user", "login")
+			result.HeadRepository = nestedString(pr, "head", "repo", "full_name")
+			result.PreviewRef = fmt.Sprintf("refs/pull/%d/head", result.PreviewNumber)
 		}
 	}
 	if provider == "gitlab" {
@@ -341,6 +389,9 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 			result.Revision = nestedString(attrs, "last_commit", "id")
 			state := stringValue(attrs["state"])
 			result.PreviewClosed = state == "closed" || state == "merged"
+			result.Author = nestedString(raw, "user", "username")
+			result.HeadRepository = nestedString(attrs, "source", "path_with_namespace")
+			result.PreviewRef = fmt.Sprintf("refs/merge-requests/%d/head", result.PreviewNumber)
 		}
 	}
 	if provider == "bitbucket" {
@@ -358,6 +409,13 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 			result.PreviewRef = nestedString(pr, "source", "branch", "name")
 			result.Revision = nestedString(pr, "source", "commit", "hash")
 			result.PreviewClosed = strings.Contains(event, "fulfilled") || strings.Contains(event, "rejected")
+			result.Author = nestedString(pr, "author", "nickname")
+			result.HeadRepository = nestedString(pr, "source", "repository", "full_name")
+		}
+	}
+	if event == "pull_request" || event == "Merge Request Hook" || strings.HasPrefix(event, "pullrequest:") {
+		if result.PreviewNumber <= 0 || (!result.PreviewClosed && !gitObjectIDRE.MatchString(result.Revision)) {
+			return ProviderEvent{}, ErrWrongEvent
 		}
 	}
 	return result, nil
@@ -617,12 +675,22 @@ func (s *AutomationStore) ClaimDueSchedules(ctx context.Context, limit int) ([]S
 type AutomationScheduler struct {
 	store    *AutomationStore
 	dispatch func(context.Context, ScheduleDispatch) error
+	sweeps   []func(context.Context)
 	cancel   context.CancelFunc
 	done     chan struct{}
 }
 
 func NewAutomationScheduler(store *AutomationStore, dispatch func(context.Context, ScheduleDispatch) error) *AutomationScheduler {
 	return &AutomationScheduler{store: store, dispatch: dispatch}
+}
+
+// WithSweep adds periodic housekeeping that rides the scheduler's tick, such
+// as retrying failed notification deliveries. It must be called before Start.
+func (s *AutomationScheduler) WithSweep(sweep func(context.Context)) *AutomationScheduler {
+	if sweep != nil {
+		s.sweeps = append(s.sweeps, sweep)
+	}
+	return s
 }
 func (s *AutomationScheduler) Start(ctx context.Context) {
 	if s == nil || s.cancel != nil {
@@ -653,6 +721,12 @@ func (s *AutomationScheduler) run(ctx context.Context) {
 	}
 	for _, item := range due {
 		_ = s.dispatch(ctx, item)
+	}
+	for _, sweep := range s.sweeps {
+		if ctx.Err() != nil {
+			return
+		}
+		sweep(ctx)
 	}
 }
 func (s *AutomationScheduler) Stop() {
@@ -816,10 +890,12 @@ type PreviewRef struct {
 	EnvironmentSlug string    `json:"environmentSlug"`
 	State           string    `json:"state"`
 	UpdatedAt       time.Time `json:"updatedAt"`
+	IsolationStatus string    `json:"isolationStatus,omitempty"`
+	IsolationReason string    `json:"isolationReason,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.trigger_id,p.provider_ref,p.environment_id,e.slug,p.state,p.updated_at FROM deploy_preview_refs p JOIN deploy_environments e ON e.id=p.environment_id WHERE e.project_id=? ORDER BY p.updated_at DESC`, projectID)
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.trigger_id,p.provider_ref,p.environment_id,e.slug,p.state,p.updated_at,COALESCE(q.status,''),COALESCE(q.reason,'') FROM deploy_preview_refs p JOIN deploy_environments e ON e.id=p.environment_id LEFT JOIN deploy_preview_quarantines q ON q.environment_id=e.id WHERE e.project_id=? ORDER BY p.updated_at DESC`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -828,7 +904,7 @@ func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]
 	for rows.Next() {
 		var p PreviewRef
 		var updated int64
-		if err := rows.Scan(&p.ID, &p.TriggerID, &p.ProviderRef, &p.EnvironmentID, &p.EnvironmentSlug, &p.State, &updated); err != nil {
+		if err := rows.Scan(&p.ID, &p.TriggerID, &p.ProviderRef, &p.EnvironmentID, &p.EnvironmentSlug, &p.State, &updated, &p.IsolationStatus, &p.IsolationReason); err != nil {
 			return nil, err
 		}
 		p.UpdatedAt = time.Unix(updated, 0).UTC()
@@ -840,19 +916,65 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 	if !t.Config.Preview || event.PreviewNumber <= 0 {
 		return nil, false, ErrWrongEvent
 	}
+	if err := s.requirePreviewApproval(ctx, t, event); err != nil {
+		return nil, false, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err
 	}
 	defer tx.Rollback()
 	ref := fmt.Sprintf("%d", event.PreviewNumber)
+	if !event.PreviewClosed {
+		// A close or new-head delivery can arrive between the initial approval
+		// lookup and this transaction. Configuration must not revive that head.
+		var approved int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_preview_approvals WHERE trigger_id=? AND provider_ref=? AND revision=? AND state='approved'`, t.ID, ref, event.Revision).Scan(&approved); err != nil {
+			return nil, false, err
+		}
+		if approved != 1 {
+			return nil, false, ErrPreviewApproval
+		}
+	}
 	var existing PreviewRef
 	var updated int64
 	err = tx.QueryRowContext(ctx, `SELECT p.id,p.trigger_id,p.provider_ref,p.environment_id,e.slug,p.state,p.updated_at FROM deploy_preview_refs p JOIN deploy_environments e ON e.id=p.environment_id WHERE p.trigger_id=? AND p.provider_ref=?`, t.ID, ref).Scan(&existing.ID, &existing.TriggerID, &existing.ProviderRef, &existing.EnvironmentID, &existing.EnvironmentSlug, &existing.State, &updated)
 	if err == nil {
 		existing.UpdatedAt = time.Unix(updated, 0).UTC()
-		if existing.State == "closed" {
-			return nil, false, ErrWrongEvent
+		if !event.PreviewClosed {
+			if err := previewQuarantineAdmissionTx(ctx, tx, existing.EnvironmentID); err != nil {
+				return nil, false, err
+			}
+		}
+		if existing.State == "closed" && !event.PreviewClosed {
+			var archived, liveID int64
+			var active int
+			if err := tx.QueryRowContext(ctx, `SELECT archived_at,live_release_id FROM deploy_environments WHERE id=? AND kind='preview'`, existing.EnvironmentID).Scan(&archived, &liveID); err != nil {
+				return nil, false, err
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_runs WHERE environment_id=? AND state NOT IN ('succeeded','failed','cancelled','rolled_back','superseded')`, existing.EnvironmentID).Scan(&active); err != nil {
+				return nil, false, err
+			}
+			if archived == 0 || liveID != 0 || active != 0 {
+				return nil, false, ErrPreviewCleanupPending
+			}
+			quota := t.Config.PreviewQuota
+			if quota == 0 {
+				quota = 5
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_preview_refs WHERE trigger_id=? AND state='open'`, t.ID).Scan(&active); err != nil {
+				return nil, false, err
+			}
+			if active >= quota {
+				return nil, false, ErrPreviewQuota
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE deploy_environments SET archived_at=0,updated_at=? WHERE id=?`, s.now().UTC().Unix(), existing.EnvironmentID); err != nil {
+				return nil, false, err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE deploy_preview_refs SET state='open',updated_at=? WHERE id=?`, s.now().UTC().Unix(), existing.ID); err != nil {
+				return nil, false, err
+			}
+			existing.State = "open"
 		}
 		if event.PreviewClosed {
 			now := s.now().UTC().Unix()
@@ -861,19 +983,34 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 		} else {
 			var revision int
 			if err = tx.QueryRowContext(ctx, `SELECT desired_revision FROM deploy_environments WHERE id=? AND kind='preview' AND archived_at=0`, existing.EnvironmentID).Scan(&revision); err == nil {
-				next := revision + 1
-				for _, table := range []string{"deploy_build_plans", "deploy_runtime_plans"} {
-					columns := map[string]string{"deploy_sources": "kind,config_json,credential_id,identity_json,digest,created_at", "deploy_build_plans": "method,config_json,evidence_json,preview,digest,created_at", "deploy_runtime_plans": "config_json,preview,digest,created_at"}[table]
-					_, err = tx.ExecContext(ctx, `INSERT INTO `+table+`(environment_id,revision,`+columns+`) SELECT ?,?,`+columns+` FROM `+table+` WHERE environment_id=? AND revision=?`, existing.EnvironmentID, next, existing.EnvironmentID, revision)
-					if err != nil {
-						break
-					}
+				var currentRevision string
+				var isolated bool
+				var quarantined int
+				if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_preview_quarantines WHERE environment_id=? AND status='quarantined'`, existing.EnvironmentID).Scan(&quarantined); err != nil {
+					return nil, false, err
 				}
+				if err = tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(s.identity_json,'$.revision'),''),COALESCE(json_extract(r.config_json,'$.previewIsolation'),0) FROM deploy_sources s JOIN deploy_runtime_plans r ON r.environment_id=s.environment_id AND r.revision=s.revision WHERE s.environment_id=? AND s.revision=?`, existing.EnvironmentID, revision).Scan(&currentRevision, &isolated); err != nil {
+					return nil, false, err
+				}
+				if currentRevision == event.Revision && isolated && quarantined == 0 {
+					if _, err := tx.ExecContext(ctx, `UPDATE deploy_preview_quarantines SET status='cleared',updated_at=? WHERE environment_id=? AND status='quarantined'`, s.now().UTC().Unix(), existing.EnvironmentID); err != nil {
+						return nil, false, err
+					}
+					if err := tx.Commit(); err != nil {
+						return nil, false, err
+					}
+					return &existing, false, nil
+				}
+				next := revision + 1
+				err = createIsolatedPreviewPlansTx(ctx, tx, existing.EnvironmentID, revision, existing.EnvironmentID, next, s.now().UTC().Unix())
 				if err == nil {
 					err = createPreviewSourceTx(ctx, tx, existing.EnvironmentID, revision, existing.EnvironmentID, next, event)
 				}
 				if err == nil {
 					_, err = tx.ExecContext(ctx, `UPDATE deploy_environments SET desired_revision=?,updated_at=? WHERE id=?`, next, s.now().UTC().Unix(), existing.EnvironmentID)
+				}
+				if err == nil {
+					_, err = tx.ExecContext(ctx, `UPDATE deploy_preview_quarantines SET status='cleared',updated_at=? WHERE environment_id=? AND status='quarantined'`, s.now().UTC().Unix(), existing.EnvironmentID)
 				}
 			}
 		}
@@ -908,33 +1045,22 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 	if err = tx.QueryRowContext(ctx, `SELECT name,desired_revision,strategy,expected_downtime,protected FROM deploy_environments WHERE id=?`, t.EnvironmentID).Scan(&name, &desired, &strategy, &downtime, &protected); err != nil {
 		return nil, false, err
 	}
-	slug := fmt.Sprintf("pr-%d", event.PreviewNumber)
+	slug := fmt.Sprintf("pr-%d-t%d", event.PreviewNumber, t.ID)
 	now := s.now().UTC().Unix()
 	res, err := tx.ExecContext(ctx, `INSERT INTO deploy_environments(project_id,name,slug,kind,desired_revision,strategy,expected_downtime,protected,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, t.ProjectID, "Preview "+ref, slug, EnvironmentPreview, desired, strategy, downtime, 0, now, now)
 	if err != nil {
 		return nil, false, err
 	}
 	envID, _ := res.LastInsertId()
-	for _, table := range []string{"deploy_build_plans", "deploy_runtime_plans"} {
-		columns := map[string]string{"deploy_sources": "revision,kind,config_json,credential_id,identity_json,digest,created_at", "deploy_build_plans": "revision,method,config_json,evidence_json,preview,digest,created_at", "deploy_runtime_plans": "revision,config_json,preview,digest,created_at"}[table]
-		if _, err = tx.ExecContext(ctx, `INSERT INTO `+table+`(environment_id,`+columns+`) SELECT ?,`+columns+` FROM `+table+` WHERE environment_id=? AND revision=?`, envID, t.EnvironmentID, desired); err != nil {
-			return nil, false, err
-		}
+	if err = createIsolatedPreviewPlansTx(ctx, tx, t.EnvironmentID, desired, envID, desired, now); err != nil {
+		return nil, false, err
 	}
 	if err = createPreviewSourceTx(ctx, tx, t.EnvironmentID, desired, envID, desired, event); err != nil {
 		return nil, false, err
 	}
-	// Secret values are inherited as ciphertext revisions, never opened during
-	// preview creation. Managed production resources are deliberately not
-	// copied: a preview may link read-only dependencies, but must create any
-	// mutable runtime, route, or storage under its own ownership.
-	if _, err = tx.ExecContext(ctx, `INSERT INTO deploy_variable_revisions(environment_id,key,revision,sensitivity,scopes,value_enc,value_digest,active,created_by,created_at) SELECT ?,key,revision,sensitivity,scopes,value_enc,value_digest,active,'preview',? FROM deploy_variable_revisions WHERE environment_id=? AND active=1`, envID, now, t.EnvironmentID); err != nil {
-		return nil, false, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO deploy_dependencies(environment_id,release_id,kind,ownership,resource_kind,resource_id,config_json,created_at) SELECT ?,0,kind,ownership,resource_kind,resource_id,config_json,? FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND ownership IN ('linked','observed')`, envID, now, t.EnvironmentID); err != nil {
-		return nil, false, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO deploy_checks(environment_id,runtime_plan_id,name,kind,phase,config_json,required,ordinal,created_at) SELECT ?,0,name,kind,phase,config_json,required,ordinal,? FROM deploy_checks WHERE environment_id=? AND runtime_plan_id=0`, envID, now, t.EnvironmentID); err != nil {
+	// Variables and dependencies belong to the preview itself. Even a linked
+	// database or a read-only production mount can expose production secrets.
+	if err = copyPreviewChecksTx(ctx, tx, t.EnvironmentID, envID, now); err != nil {
 		return nil, false, err
 	}
 	if domain := strings.TrimSpace(t.Config.PreviewDomain); domain != "" {
@@ -1066,31 +1192,29 @@ func parseCronField(raw string, min, max int) (map[int]bool, error) {
 	return out, nil
 }
 
-type NotificationEnvelope struct {
-	Event         string    `json:"event"`
-	RunID         int64     `json:"runId"`
-	ProjectID     int64     `json:"projectId"`
-	EnvironmentID int64     `json:"environmentId"`
-	State         string    `json:"state"`
-	SentAt        time.Time `json:"sentAt"`
-}
-
 type NotificationChannel struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
+	Kind      string    `json:"kind"`
 	URL       string    `json:"url"`
+	Target    string    `json:"target"`
 	Events    []string  `json:"events"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// NotificationWrite is the create/update request. Kind is fixed at creation;
+// Config carries the per-kind credentials and is never echoed back.
 type NotificationWrite struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Secret  string            `json:"secret,omitempty"`
-	Events  []string          `json:"events"`
-	Enabled bool              `json:"enabled"`
+	Name    string             `json:"name"`
+	Kind    string             `json:"kind,omitempty"`
+	URL     string             `json:"url,omitempty"`
+	Headers map[string]string  `json:"headers,omitempty"`
+	Secret  string             `json:"secret,omitempty"`
+	Config  NotificationConfig `json:"config,omitempty"`
+	Events  []string           `json:"events"`
+	Enabled bool               `json:"enabled"`
 }
 type NotificationDelivery struct {
 	ID            int64      `json:"id"`
@@ -1135,22 +1259,32 @@ func (s *AutomationStore) NotificationDeliveries(ctx context.Context, channelID 
 	return out, rows.Err()
 }
 
-func (s *AutomationStore) ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,url,events,enabled,created_at,updated_at FROM deploy_notification_channels ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// WithMailer replaces the SMTP delivery function, for tests.
+func (s *AutomationStore) WithMailer(mailer Mailer) *AutomationStore {
+	s.mailer = mailer
+	return s
+}
+
+func scanNotificationChannels(rows *sql.Rows) ([]NotificationChannel, error) {
 	out := []NotificationChannel{}
 	for rows.Next() {
 		var c NotificationChannel
 		var events string
 		var enabled int
 		var created, updated int64
-		if err := rows.Scan(&c.ID, &c.Name, &c.URL, &events, &enabled, &created, &updated); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.URL, &c.Target, &events, &enabled, &created, &updated); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(events), &c.Events)
+		if c.Events == nil {
+			c.Events = []string{}
+		}
+		if c.Kind == "" {
+			c.Kind = NotificationKindWebhook
+		}
+		if c.Target == "" {
+			c.Target = c.URL
+		}
 		c.Enabled = enabled != 0
 		c.CreatedAt = time.Unix(created, 0).UTC()
 		c.UpdatedAt = time.Unix(updated, 0).UTC()
@@ -1158,19 +1292,48 @@ func (s *AutomationStore) ListNotificationChannels(ctx context.Context) ([]Notif
 	}
 	return out, rows.Err()
 }
+
+func (s *AutomationStore) ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,kind,url,target,events,enabled,created_at,updated_at FROM deploy_notification_channels ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNotificationChannels(rows)
+}
+
+func (s *AutomationStore) notificationChannel(ctx context.Context, id int64) (*NotificationChannel, error) {
+	channels, err := s.ListNotificationChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range channels {
+		if channels[i].ID == id {
+			return &channels[i], nil
+		}
+	}
+	return nil, ErrTriggerNotFound
+}
+
 func (s *AutomationStore) CreateNotificationChannel(ctx context.Context, in NotificationWrite) (*NotificationChannel, string, error) {
 	in.Name = strings.TrimSpace(in.Name)
-	in.URL = strings.TrimSpace(in.URL)
 	if in.Name == "" || len(in.Name) > 100 {
-		return nil, "", fmt.Errorf("channel name is required")
+		return nil, "", invalidNotification("channel name is required")
 	}
-	if !strings.HasPrefix(in.URL, "https://") && !strings.HasPrefix(in.URL, "http://") {
-		return nil, "", fmt.Errorf("notification URL must use http or https")
+	resolved, err := validateNotificationChannel(in.Kind, in.URL, in.Config, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	kind := strings.ToLower(strings.TrimSpace(in.Kind))
+	if kind == "" {
+		kind = NotificationKindWebhook
+	}
+	events, err := normalizeNotificationEvents(in.Events)
+	if err != nil {
+		return nil, "", err
 	}
 	if in.Secret == "" {
-		var err error
-		in.Secret, err = randomHex(32)
-		if err != nil {
+		if in.Secret, err = randomHex(32); err != nil {
 			return nil, "", err
 		}
 	}
@@ -1186,32 +1349,58 @@ func (s *AutomationStore) CreateNotificationChannel(ctx context.Context, in Noti
 	if err != nil {
 		return nil, "", err
 	}
-	events, _ := json.Marshal(in.Events)
+	sealedConfig, err := s.sealer.Seal(string(mustJSON(resolved.Config)))
+	if err != nil {
+		return nil, "", err
+	}
 	now := s.now().UTC().Unix()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO deploy_notification_channels(name,url,headers_enc,secret_enc,events,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, in.Name, in.URL, sealedHeaders, sealedSecret, string(events), boolInt(in.Enabled), now, now)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO deploy_notification_channels(name,kind,url,target,headers_enc,secret_enc,config_enc,events,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		in.Name, kind, resolved.URL, resolved.Target, sealedHeaders, sealedSecret, sealedConfig, string(mustJSON(events)), boolInt(in.Enabled), now, now)
 	if err != nil {
 		return nil, "", err
 	}
 	id, _ := res.LastInsertId()
-	channels, err := s.ListNotificationChannels(ctx)
+	channel, err := s.notificationChannel(ctx, id)
 	if err != nil {
 		return nil, "", err
 	}
-	for i := range channels {
-		if channels[i].ID == id {
-			return &channels[i], in.Secret, nil
-		}
+	if kind != NotificationKindWebhook {
+		// Only the signed webhook contract has a shared secret the caller
+		// needs to copy; provider kinds carry their credential in Config.
+		in.Secret = ""
 	}
-	return nil, "", ErrTriggerNotFound
+	return channel, in.Secret, nil
 }
+
 func (s *AutomationStore) UpdateNotificationChannel(ctx context.Context, id int64, in NotificationWrite) (*NotificationChannel, error) {
 	in.Name = strings.TrimSpace(in.Name)
-	in.URL = strings.TrimSpace(in.URL)
 	if in.Name == "" || len(in.Name) > 100 {
-		return nil, fmt.Errorf("channel name is required")
+		return nil, invalidNotification("channel name is required")
 	}
-	if !strings.HasPrefix(in.URL, "https://") && !strings.HasPrefix(in.URL, "http://") {
-		return nil, fmt.Errorf("notification URL must use http or https")
+	current, err := s.notificationChannel(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	requested := strings.ToLower(strings.TrimSpace(in.Kind))
+	if requested != "" && requested != current.Kind {
+		return nil, invalidNotification("a channel's kind cannot change; create a new channel instead")
+	}
+	existing, err := s.notificationConfig(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	url := in.URL
+	if current.Kind != NotificationKindWebhook && strings.TrimSpace(url) == current.URL {
+		// The masked display value came back unchanged from the form.
+		url = ""
+	}
+	resolved, err := validateNotificationChannel(current.Kind, url, in.Config, &existing)
+	if err != nil {
+		return nil, err
+	}
+	events, err := normalizeNotificationEvents(in.Events)
+	if err != nil {
+		return nil, err
 	}
 	headers, err := json.Marshal(in.Headers)
 	if err != nil {
@@ -1221,14 +1410,17 @@ func (s *AutomationStore) UpdateNotificationChannel(ctx context.Context, id int6
 	if err != nil {
 		return nil, err
 	}
-	events, _ := json.Marshal(in.Events)
-	now := s.now().UTC().Unix()
-	result, err := s.db.ExecContext(ctx, `UPDATE deploy_notification_channels SET name=?,url=?,headers_enc=?,events=?,enabled=?,updated_at=? WHERE id=?`, in.Name, in.URL, sealedHeaders, string(events), boolInt(in.Enabled), now, id)
+	sealedConfig, err := s.sealer.Seal(string(mustJSON(resolved.Config)))
 	if err != nil {
 		return nil, err
 	}
-	changed, _ := result.RowsAffected()
-	if changed != 1 {
+	now := s.now().UTC().Unix()
+	result, err := s.db.ExecContext(ctx, `UPDATE deploy_notification_channels SET name=?,url=?,target=?,headers_enc=?,config_enc=?,events=?,enabled=?,updated_at=? WHERE id=?`,
+		in.Name, resolved.URL, resolved.Target, sealedHeaders, sealedConfig, string(mustJSON(events)), boolInt(in.Enabled), now, id)
+	if err != nil {
+		return nil, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, ErrTriggerNotFound
 	}
 	if in.Secret != "" {
@@ -1240,16 +1432,40 @@ func (s *AutomationStore) UpdateNotificationChannel(ctx context.Context, id int6
 			return nil, err
 		}
 	}
-	channels, err := s.ListNotificationChannels(ctx)
+	return s.notificationChannel(ctx, id)
+}
+
+// SetNotificationChannelEnabled pauses or resumes a channel without touching
+// its configuration or credentials.
+func (s *AutomationStore) SetNotificationChannelEnabled(ctx context.Context, id int64, enabled bool) (*NotificationChannel, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE deploy_notification_channels SET enabled=?,updated_at=? WHERE id=?`, boolInt(enabled), s.now().UTC().Unix(), id)
 	if err != nil {
 		return nil, err
 	}
-	for i := range channels {
-		if channels[i].ID == id {
-			return &channels[i], nil
-		}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return nil, ErrTriggerNotFound
 	}
-	return nil, ErrTriggerNotFound
+	return s.notificationChannel(ctx, id)
+}
+
+func (s *AutomationStore) notificationConfig(ctx context.Context, id int64) (NotificationConfig, error) {
+	var sealed string
+	if err := s.db.QueryRowContext(ctx, `SELECT config_enc FROM deploy_notification_channels WHERE id=?`, id).Scan(&sealed); err != nil {
+		return NotificationConfig{}, err
+	}
+	var cfg NotificationConfig
+	if sealed == "" {
+		return cfg, nil
+	}
+	raw, err := s.sealer.Open(sealed)
+	if err != nil {
+		return cfg, err
+	}
+	if raw == "" || raw == "null" {
+		return cfg, nil
+	}
+	err = json.Unmarshal([]byte(raw), &cfg)
+	return cfg, err
 }
 func (s *AutomationStore) DeleteNotificationChannel(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM deploy_notification_channels WHERE id=?`, id)
@@ -1263,37 +1479,175 @@ func (s *AutomationStore) DeleteNotificationChannel(ctx context.Context, id int6
 	return nil
 }
 
-// DeliverNotification signs the exact JSON bytes and deliberately discards
-// the response body. History retains only its status class, so a remote
-// endpoint cannot reflect a secret into this database or the deployment log.
+// DeliverNotification renders and sends one envelope to one channel. Every
+// kind records only a status class in history: a remote endpoint or mail
+// relay cannot reflect a secret into this database or the deployment log.
 func (s *AutomationStore) DeliverNotification(ctx context.Context, client *http.Client, channelID int64, envelope NotificationEnvelope) error {
-	var url, sealedHeaders, sealedSecret, events string
+	var kind, url, sealedHeaders, sealedSecret, sealedConfig, events string
 	var enabled int
-	if err := s.db.QueryRowContext(ctx, `SELECT url,headers_enc,secret_enc,events,enabled FROM deploy_notification_channels WHERE id=?`, channelID).Scan(&url, &sealedHeaders, &sealedSecret, &events, &enabled); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT kind,url,headers_enc,secret_enc,config_enc,events,enabled FROM deploy_notification_channels WHERE id=?`, channelID).Scan(&kind, &url, &sealedHeaders, &sealedSecret, &sealedConfig, &events, &enabled); err != nil {
 		return err
 	}
 	if enabled == 0 {
 		return ErrHookDisabled
 	}
-	secret, err := s.sealer.Open(sealedSecret)
+	if kind == "" {
+		kind = NotificationKindWebhook
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	if envelope.SentAt.IsZero() {
+		envelope.SentAt = s.now().UTC()
+	}
+	attempt, reserved, err := s.reserveNotificationAttempt(ctx, channelID, envelope.RunID, envelope.Event)
 	if err != nil {
 		return err
+	}
+	if !reserved {
+		// Another observer owns this event already: one message per outcome.
+		return nil
+	}
+	var sendErr error
+	responseClass := "network"
+	switch kind {
+	case NotificationKindWebhook:
+		responseClass, sendErr = s.deliverWebhook(ctx, client, url, sealedHeaders, sealedSecret, envelope)
+	case NotificationKindEmail:
+		responseClass, sendErr = s.deliverEmail(ctx, sealedConfig, envelope)
+	default:
+		responseClass, sendErr = s.deliverProvider(ctx, client, kind, sealedConfig, envelope)
+	}
+	status := "delivered"
+	nextAttempt := int64(0)
+	if sendErr != nil {
+		status = "failed"
+		if envelope.RunID != 0 && attempt < notificationMaxAttempts {
+			nextAttempt = s.now().UTC().Add(notificationRetryDelays[min(attempt, len(notificationRetryDelays))-1]).Unix()
+		}
+	}
+	completed := s.now().UTC().Unix()
+	// The row is written with a context detached from the caller: a delivery
+	// that happened must be recorded even when the observer deadline expired
+	// while the provider was answering.
+	if _, storeErr := s.db.ExecContext(context.WithoutCancel(ctx), `UPDATE deploy_notification_deliveries SET status=?,response_class=?,completed_at=?,next_attempt_at=? WHERE channel_id=? AND run_id=? AND event=? AND attempt=?`,
+		status, responseClass, completed, nextAttempt, channelID, envelope.RunID, envelope.Event, attempt); storeErr != nil {
+		return storeErr
+	}
+	return sendErr
+}
+
+// reserveNotificationAttempt claims the next attempt for (channel, run, event)
+// in one write transaction. The store opens write transactions IMMEDIATE, so
+// two observers announcing the same outcome serialize here and the second sees
+// the first one's pending row. Test deliveries (run 0) are never deduplicated.
+func (s *AutomationStore) reserveNotificationAttempt(ctx context.Context, channelID, runID int64, event string) (int, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+	now := s.now().UTC()
+	if runID != 0 {
+		var owned int
+		// Delivered, being delivered, or failed with a retry still ahead: the
+		// event is owned and a repeated observer call must not jump the
+		// backoff queue.
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM deploy_notification_deliveries WHERE channel_id=? AND run_id=? AND event=? AND (status='delivered' OR (status='pending' AND created_at>?) OR (status='failed' AND next_attempt_at>?))`,
+			channelID, runID, event, now.Add(-notificationReservationTTL).Unix(), now.Unix()).Scan(&owned); err != nil {
+			return 0, false, err
+		}
+		if owned > 0 {
+			return 0, false, nil
+		}
+		// A stale reservation is a send whose process died; it is recorded as
+		// failed so history says what happened, and the retry it never
+		// scheduled is not scheduled now either.
+		if _, err := tx.ExecContext(ctx, `UPDATE deploy_notification_deliveries SET status='failed',response_class='interrupted',completed_at=?,next_attempt_at=0 WHERE channel_id=? AND run_id=? AND event=? AND status='pending'`, now.Unix(), channelID, runID, event); err != nil {
+			return 0, false, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE deploy_notification_deliveries SET next_attempt_at=0 WHERE channel_id=? AND run_id=? AND event=? AND status='failed'`, channelID, runID, event); err != nil {
+			return 0, false, err
+		}
+	}
+	var attempt int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(attempt),0)+1 FROM deploy_notification_deliveries WHERE channel_id=? AND run_id=? AND event=?`, channelID, runID, event).Scan(&attempt); err != nil {
+		return 0, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_notification_deliveries(channel_id,run_id,event,attempt,status,response_class,created_at,completed_at) VALUES(?,?,?,?,'pending','',?,0)`, channelID, runID, event, attempt, now.Unix()); err != nil {
+		if isUniqueConstraint(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return attempt, true, nil
+}
+
+type notificationRetry struct {
+	ChannelID, RunID int64
+	Event            string
+	Attempt          int
+}
+
+// dueNotificationRetries lists failed deliveries whose retry time has passed
+// and for which no later attempt exists.
+func (s *AutomationStore) dueNotificationRetries(ctx context.Context, limit int) ([]notificationRetry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.channel_id, d.run_id, d.event, d.attempt
+		  FROM deploy_notification_deliveries d
+		  JOIN deploy_notification_channels c ON c.id = d.channel_id AND c.enabled = 1
+		 WHERE d.run_id <> 0 AND d.status = 'failed' AND d.next_attempt_at > 0 AND d.next_attempt_at <= ?
+		   AND NOT EXISTS (SELECT 1 FROM deploy_notification_deliveries later
+		                    WHERE later.channel_id = d.channel_id AND later.run_id = d.run_id
+		                      AND later.event = d.event AND later.attempt > d.attempt)
+		 ORDER BY d.next_attempt_at, d.id LIMIT ?`, s.now().UTC().Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []notificationRetry{}
+	for rows.Next() {
+		var item notificationRetry
+		if err := rows.Scan(&item.ChannelID, &item.RunID, &item.Event, &item.Attempt); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+// abandonNotificationRetry clears the retry of a delivery whose run can no
+// longer be read; there is nothing left to say about it.
+func (s *AutomationStore) abandonNotificationRetry(ctx context.Context, item notificationRetry) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE deploy_notification_deliveries SET next_attempt_at=0 WHERE channel_id=? AND run_id=? AND event=? AND attempt=?`, item.ChannelID, item.RunID, item.Event, item.Attempt)
+	return err
+}
+
+func (s *AutomationStore) deliverWebhook(ctx context.Context, client *http.Client, url, sealedHeaders, sealedSecret string, envelope NotificationEnvelope) (string, error) {
+	secret, err := s.sealer.Open(sealedSecret)
+	if err != nil {
+		return "sealed", err
 	}
 	headersJSON, err := s.sealer.Open(sealedHeaders)
 	if err != nil {
-		return err
+		return "sealed", err
 	}
 	var headers map[string]string
-	if err = json.Unmarshal([]byte(headersJSON), &headers); err != nil {
-		return err
+	if headersJSON != "" {
+		if err = json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+			return "sealed", err
+		}
 	}
 	body, err := json.Marshal(envelope)
 	if err != nil {
-		return err
+		return "network", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return "network", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-JD-Event", envelope.Event)
@@ -1304,36 +1658,83 @@ func (s *AutomationStore) DeliverNotification(ctx context.Context, client *http.
 		}
 		req.Header.Set(key, value)
 	}
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
-	now := s.now().UTC().Unix()
-	var attempt int
-	if err = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(attempt),0)+1 FROM deploy_notification_deliveries WHERE channel_id=? AND run_id=? AND event=?`, channelID, envelope.RunID, envelope.Event).Scan(&attempt); err != nil {
-		return err
-	}
-	res, err := client.Do(req)
-	status := "failed"
-	responseClass := "network"
-	if err == nil {
-		res.Body.Close()
-		responseClass = fmt.Sprintf("%dxx", res.StatusCode/100)
-		if res.StatusCode >= 200 && res.StatusCode < 300 {
-			status = "delivered"
-		}
-	}
-	completed := s.now().UTC().Unix()
-	_, storeErr := s.db.ExecContext(ctx, `INSERT INTO deploy_notification_deliveries(channel_id,run_id,event,attempt,status,response_class,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?)`, channelID, envelope.RunID, envelope.Event, attempt, status, responseClass, now, completed)
-	if storeErr != nil {
-		return storeErr
-	}
+	return postNotification(client, req)
+}
+
+func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Client, kind, sealedConfig string, envelope NotificationEnvelope) (string, error) {
+	cfg, err := s.openNotificationConfig(sealedConfig)
 	if err != nil {
-		return err
+		return "sealed", err
 	}
-	if status != "delivered" {
-		return fmt.Errorf("notification endpoint returned %s", responseClass)
+	message := renderNotification(envelope)
+	var target string
+	var body []byte
+	switch kind {
+	case NotificationKindDiscord:
+		target, body = cfg.WebhookURL, discordPayload(message, envelope.SentAt)
+	case NotificationKindSlack:
+		target, body = cfg.WebhookURL, slackPayload(message)
+	case NotificationKindTelegram:
+		target = "https://api.telegram.org/bot" + cfg.BotToken + "/sendMessage"
+		body = telegramPayload(cfg.ChatID, message)
+	default:
+		return "unsupported", invalidNotification("unknown channel kind %q", kind)
 	}
-	return nil
+	if target == "" {
+		return "sealed", invalidNotification("channel has no delivery target configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+	if err != nil {
+		return "network", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "just-dashboard-notifications")
+	return postNotification(client, req)
+}
+
+func (s *AutomationStore) deliverEmail(ctx context.Context, sealedConfig string, envelope NotificationEnvelope) (string, error) {
+	cfg, err := s.openNotificationConfig(sealedConfig)
+	if err != nil {
+		return "sealed", err
+	}
+	_, body := emailMessage(cfg, renderNotification(envelope), envelope.SentAt)
+	mailer := s.mailer
+	if mailer == nil {
+		mailer = sendSMTPMail
+	}
+	if err := mailer(ctx, cfg, body); err != nil {
+		return "smtp", err
+	}
+	return "smtp", nil
+}
+
+func (s *AutomationStore) openNotificationConfig(sealed string) (NotificationConfig, error) {
+	var cfg NotificationConfig
+	if sealed == "" {
+		return cfg, nil
+	}
+	raw, err := s.sealer.Open(sealed)
+	if err != nil {
+		return cfg, err
+	}
+	if raw == "" || raw == "null" {
+		return cfg, nil
+	}
+	err = json.Unmarshal([]byte(raw), &cfg)
+	return cfg, err
+}
+
+func postNotification(client *http.Client, req *http.Request) (string, error) {
+	res, err := client.Do(req)
+	if err != nil {
+		return "network", err
+	}
+	discardBody(res.Body)
+	responseClass := fmt.Sprintf("%dxx", res.StatusCode/100)
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		return responseClass, nil
+	}
+	return responseClass, fmt.Errorf("notification endpoint returned %s", responseClass)
 }
 
 func SignNotification(body []byte, secret string) string {

@@ -1,14 +1,14 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CheckCircle, Clock, ClockRewind, GitBranch, Sparkles } from "@/components/icons"
+import { CheckCircle, Clock, ClockRewind, GitHubMark, Sparkles } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import type { Release } from "@/lib/types"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { DashboardUpdatePanel } from "@/components/update/update-panel"
 import { ReleaseList } from "@/components/update/release-notes"
 import { Page, PageHeader, Section, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -93,7 +93,7 @@ export default function DashboardVersionPage() {
         />
         <StatTile
           label="Tracking"
-          icon={GitBranch}
+          icon={GitHubMark}
           value={report?.check.ref ?? "—"}
           hint={report?.check.repo}
         />
@@ -112,7 +112,6 @@ export default function DashboardVersionPage() {
       {report && (
         <Section title="Version history">
           <Panel>
-            <PanelHeader title="Release notes" />
             <PanelToolbar>
               <SearchInput
                 value={filter}

@@ -1,0 +1,76 @@
+$ node scripts/sync-monaco.mjs && next build
+monaco: /home/ubuntu/Just-Dashboard/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard/frontend/public/monaco/vs
+▲ Next.js 16.3.5 (Turbopack)
+✓ Running next.config.ts took 36ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.6s
+  Running TypeScript ...
+  Finished TypeScript in 4.5s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/51) ...
+  Generating static pages using 7 workers (12/51) 
+  Generating static pages using 7 workers (25/51) 
+  Generating static pages using 7 workers (38/51) 
+✓ Generating static pages using 7 workers (51/51) in 718ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /account
+├ ○ /apple-icon.png
+├ ƒ /audit
+├ ƒ /backups
+├ ƒ /dashboard
+├ ƒ /dashboard/configuration
+├ ƒ /databases
+├ ƒ /databases/connection
+├ ƒ /databases/diagram
+├ ƒ /databases/find
+├ ƒ /databases/generate
+├ ƒ /databases/monitor
+├ ƒ /databases/query
+├ ƒ /databases/structure
+├ ƒ /deploy
+├ ƒ /deploy/[id]
+├ ƒ /deploy/[id]/runs/[run]
+├ ƒ /deploy/new
+├ ƒ /docker
+├ ƒ /docker/containers
+├ ƒ /docker/events
+├ ƒ /docker/images
+├ ƒ /docker/networks
+├ ƒ /docker/stacks
+├ ƒ /docker/volumes
+├ ƒ /files
+├ ƒ /git
+├ ○ /icon.svg
+├ ƒ /login
+├ ƒ /logs
+├ ƒ /metrics
+├ ƒ /packages
+├ ƒ /processes
+├ ƒ /proxy
+├ ƒ /proxy/certificates
+├ ƒ /proxy/ports
+├ ƒ /proxy/sites
+├ ƒ /proxy/streams
+├ ƒ /proxy/tls
+├ ƒ /security
+├ ƒ /security/connections
+├ ƒ /security/firewall
+├ ƒ /security/intrusion
+├ ƒ /security/logins
+├ ƒ /security/network
+├ ƒ /security/ssh
+├ ƒ /security/tools
+├ ƒ /system-users
+└ ƒ /terminal
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
