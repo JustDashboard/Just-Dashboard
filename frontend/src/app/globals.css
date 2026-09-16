@@ -70,7 +70,10 @@
    * "this is a warning", so the identity hue stays where the logo put it and
    * the warning stays where every operator already expects amber. */
   --brand: oklch(0.6289 0.1829 38.78); /* #E05623 — the mark's own orange */
-  --brand-foreground: oklch(0.16 0.04 38.78);
+  /* The label on the orange face is charcoal, not black: a #000-adjacent ink
+     on a saturated ground reads as a cut-out, while this dark neutral sits on
+     it as printed type does. */
+  --brand-foreground: oklch(0.209 0 0); /* #181818 */
   --signal: oklch(0.72 0.172 38.78);
   --signal-foreground: oklch(0.16 0.04 38.78);
 
