@@ -380,6 +380,11 @@ It returns and audits Docker's actual host binding if a competing process claims
 `install.sh` sources `scripts/install-dependencies.sh` before any operation requiring curl or OpenSSL.
 It installs only missing curl/OpenSSL/Certbot packages using apt, dnf, yum, apk, zypper or pacman, validates
 Certbot's HTTP authenticators and enables an existing packaged renewal timer. Package failures stop setup.
+The same `jd_pkg_install` dispatch (one `apt-get update` per run) backs `jd_install_terminal_extras`,
+which `install.sh` runs when the terminal is enabled: it installs `zsh`, `zsh-autosuggestions` and
+`zsh-syntax-highlighting` where missing and, on success, appends `JD_TERMINAL_SHELL=<zsh path>` to a fresh
+`.env`. A re-run that kept its `.env` asks first, and never touches a file that already names a shell.
+That install is best effort: a failure is a warning, and the terminal opens the account's own shell.
 The backend image still includes Certbot for container execution; host installation supplies host tooling
 and the distribution renewal schedule. `python3 scripts/test_install_dependencies.py` verifies the
 installer with fake package commands, without changing host packages. Hostname readiness returns

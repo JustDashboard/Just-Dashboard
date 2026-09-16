@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 
-const GRADE: Record<Exposure["grade"], { label: string; verdict: Verdict }> = {
+export const EXPOSURE_GRADE: Record<Exposure["grade"], { label: string; verdict: Verdict }> = {
   tailscale: { label: "Tailscale only", verdict: "ok" },
   tunnel: { label: "SSH tunnel only", verdict: "ok" },
   private: { label: "Private network", verdict: "ok" },
@@ -44,7 +44,7 @@ export function ExposurePanel({ className }: { className?: string }) {
     )
   }
 
-  const grade = GRADE[data.grade]
+  const grade = EXPOSURE_GRADE[data.grade]
 
   return (
     <Panel className={className}>

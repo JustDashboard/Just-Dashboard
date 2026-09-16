@@ -165,6 +165,12 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and
   Zsh startup files install a compact directory/chevron prompt and native Tab completion in new windows.
+  The Zsh startup also loads the host's `zsh-syntax-highlighting` and `zsh-autosuggestions` packages
+  when present (Debian's `/usr/share/<plugin>` or Arch's `/usr/share/zsh/plugins/<plugin>`), guarded so
+  an account rc that already loaded one is not wrapped twice, and sets a history file, `HISTSIZE` and
+  `SAVEHIST` only when the account left them unset — a bash-by-default account has no `.zshrc`, and
+  suggestions drawn from history need one. `install.sh` installs those packages and writes
+  `JD_TERMINAL_SHELL` so a fresh install has the ghost text without touching the account's login shell.
   Account profiles and interactive configuration still load; account dotfiles are never edited.
   `term.SetupShell` atomically installs readable scripts in the process-owned shared terminal root's
   `.shell` directory, rejecting symlink or foreign-owned directories. A constant login bootstrap passes

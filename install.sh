@@ -536,6 +536,48 @@ if [ "$KEEP_ENV" -eq 1 ]; then
 	fi
 fi
 
+# ── web terminal shell ──────────────────────────────────────────────────────
+#
+# The terminal runs a real shell on the host, so whatever it can do at the
+# prompt is whatever the host's shell can do. Out of the box that is bash with
+# Tab completion. What people miss from a fresh server is the grey ghost text
+# that finishes a command from history, and that is zsh with two packaged
+# plugins — so they are installed here, and the dashboard is pointed at zsh
+# for its terminal only. ssh keeps the account's login shell exactly as chsh
+# left it: JD_TERMINAL_SHELL overrides the shell the *dashboard* opens, and
+# blanking it in .env goes back to honouring chsh.
+#
+# On a re-run this is an upgrade to how a working terminal behaves, so it is
+# asked rather than assumed, and a .env that already names a shell — even an
+# empty one — is a decision that stands.
+TERMINAL_ON="$(grep -E '^JD_TERMINAL_ENABLED=' .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"
+if [ "${TERMINAL_ON:-true}" != "false" ]; then
+	WANT_ZSH=1
+	if [ "$KEEP_ENV" -eq 1 ]; then
+		if grep -qE '^JD_TERMINAL_SHELL=' .env; then
+			WANT_ZSH=0
+		else
+			step "Web terminal"
+			say "  ${DIM}The terminal can open zsh with inline history suggestions and command${RESET}"
+			say "  ${DIM}colouring. ssh keeps using the account's own shell either way.${RESET}"
+			say ""
+			yes_no "Use zsh with history suggestions in the web terminal?" y || WANT_ZSH=0
+		fi
+	fi
+	if [ "$WANT_ZSH" -eq 1 ]; then
+		step "Setting up the web terminal's shell"
+		if jd_install_terminal_extras; then
+			ZSH_BIN="$(command -v zsh)"
+			printf '\n# The shell the web terminal opens. ssh still uses the account'"'"'s own login\n# shell; leave this empty to honour chsh in the terminal as well.\nJD_TERMINAL_SHELL=%s\n' "$ZSH_BIN" >> .env
+			ok "zsh with history suggestions and command colouring ($ZSH_BIN)"
+		else
+			warn "zsh and its plugins could not be installed; the terminal opens the account's own shell."
+			warn "Install zsh, zsh-autosuggestions and zsh-syntax-highlighting by hand and set"
+			warn "JD_TERMINAL_SHELL in .env to the zsh path to get suggestions later."
+		fi
+	fi
+fi
+
 # ── build and start ─────────────────────────────────────────────────────────
 
 # Clipboard images cross from the backend container into a host-side shell.

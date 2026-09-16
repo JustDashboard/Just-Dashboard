@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Bug, ClockRewind, Slash } from "@/components/icons"
+import { ClockRewind, Slash } from "@/components/icons"
 import { get, ApiError } from "@/lib/api"
 import { timestamp } from "@/lib/format"
 import type { BanEvent, Fail2banJail } from "@/lib/types"
@@ -81,26 +81,19 @@ export function IntrusionPanels() {
           a "·"-joined sentence in each jail's header, which meant comparing two
           jails was reading two sentences. */}
       <StatGrid columns={4}>
-        <StatTile label="Jails" value={jails.length} icon={Slash} hint="Configured and running" />
+        <StatTile label="Jails" value={jails.length} hint="Configured and running" />
         <StatTile
           label="Banned now"
           value={bannedNow}
-          icon={Bug}
           tone={bannedNow > 0 ? "warning" : "default"}
           hint="Held this instant — bans expire"
         />
         <StatTile
           label="Failing now"
           value={failingNow}
-          icon={Bug}
           hint="Attempts inside the current window"
         />
-        <StatTile
-          label="Bans in total"
-          value={bansTotal}
-          icon={ClockRewind}
-          hint="Since fail2ban last started"
-        />
+        <StatTile label="Bans in total" value={bansTotal} hint="Since fail2ban last started" />
       </StatGrid>
 
       <JailsPanel jails={jails} canManage={can("system.admin")} onChanged={refresh} />

@@ -23,7 +23,6 @@ export function StatTile({
   label,
   value,
   hint,
-  icon: Icon,
   meter,
   tone = "default",
   trailing,
@@ -33,7 +32,6 @@ export function StatTile({
   value: React.ReactNode
   /** One short line under the figure. Omit it — most of these did not earn it. */
   hint?: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
   /** 0–100. Draws the utilisation bar under the figure. */
   meter?: number
   tone?: Tone
@@ -44,12 +42,12 @@ export function StatTile({
   return (
     <div
       data-slot="stat-tile"
-      className={cn("flex min-w-0 flex-col justify-center gap-1.5 px-5 py-4", className)}
+      // Top-aligned, not centred: a run of these is read across as a table, and
+      // a tile with no meter or hint centred itself a line lower than its
+      // neighbours, so the row of names stopped being a row.
+      className={cn("flex min-w-0 flex-col justify-start gap-1.5 px-5 py-4", className)}
     >
-      <p className="eyebrow flex min-w-0 items-center gap-1.5">
-        {Icon && <Icon className="size-3 shrink-0 self-center" />}
-        <span className="truncate">{label}</span>
-      </p>
+      <p className="eyebrow truncate">{label}</p>
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
         {/*
           `leading-tight`, not `leading-none`: beside `truncate` a line box that
@@ -148,7 +146,7 @@ export function StatGrid({
   framed,
   className,
   ...props
-}: React.ComponentProps<"div"> & { columns?: 2 | 3 | 4; framed?: boolean }) {
+}: React.ComponentProps<"div"> & { columns?: 2 | 3 | 4 | 5; framed?: boolean }) {
   return (
     <div
       data-slot="stat-grid"
@@ -176,6 +174,11 @@ export function StatGrid({
         columns === 4 &&
           !framed &&
           "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(4n+1)_[data-slot=stat-tile]]:pl-0",
+        columns === 5 &&
+          "xl:grid-cols-5 xl:[&>*]:border-l xl:[&>*:nth-child(-n+5)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(5n+1)]:border-l-0",
+        columns === 5 &&
+          !framed &&
+          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(5n+1)_[data-slot=stat-tile]]:pl-0",
         className,
       )}
       {...props}

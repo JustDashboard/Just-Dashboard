@@ -3,13 +3,9 @@
 import { useMemo, useState } from "react"
 import {
   ChevronDown,
-  Globe,
   Information,
   Lightning,
-  LockClosed,
   RefreshClockwise,
-  Router,
-  ShieldCheck,
   Warning,
   Wrench,
 } from "@/components/icons"
@@ -268,28 +264,20 @@ export default function DashboardConfigurationPage() {
           and calling that "trusted" would be the one word the padlock
           disagrees with. */}
       <StatGrid columns={4}>
-        <StatTile
-          label="Answers at"
-          icon={Globe}
-          value={report.settings.site}
-          hint={report.endpoint}
-        />
+        <StatTile label="Answers at" value={report.settings.site} hint={report.endpoint} />
         <StatTile
           label="Certificate"
-          icon={LockClosed}
           value={certLabel(report.settings.tls, report.certificate.issued)}
           tone={certTone(report.settings.tls, report.certificate.issued)}
           hint={certHint(report.settings.tls, report.certificate.issued)}
         />
         <StatTile
           label="Port"
-          icon={Router}
           value={String(report.settings.port)}
           hint={`frontend ${report.settings.frontendPort} · backend ${report.settings.backendPort}`}
         />
         <StatTile
           label="Two-factor"
-          icon={ShieldCheck}
           value={report.settings.require2fa ? "Required" : "Optional"}
           hint={`session ${report.settings.sessionTtl} · idle ${report.settings.idleTtl}`}
         />

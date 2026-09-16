@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CheckCircle, Clock, ClockRewind, GitHubMark, Sparkles } from "@/components/icons"
+import { ClockRewind } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import type { Release } from "@/lib/types"
 import { useSelfUpdate } from "@/hooks/use-self-update"
@@ -61,13 +61,11 @@ export default function DashboardVersionPage() {
       <StatGrid columns={4}>
         <StatTile
           label="Installed"
-          icon={Sparkles}
           value={report ? report.version : "—"}
           hint={report?.install.supported ? "updates in place" : "updates by hand"}
         />
         <StatTile
           label="Status"
-          icon={CheckCircle}
           value={report ? (behind === 0 ? "Current" : `${behind} behind`) : "—"}
           tone={behind > 0 ? "warning" : report ? "success" : "default"}
           hint={
@@ -80,7 +78,6 @@ export default function DashboardVersionPage() {
         />
         <StatTile
           label="Checked"
-          icon={Clock}
           value={
             report?.check.checkedAt
               ? relativeTime(report.check.checkedAt)
@@ -91,12 +88,7 @@ export default function DashboardVersionPage() {
           tone={report?.check.error ? "warning" : "default"}
           hint={report?.check.error ? "the last check failed" : "re-checked when this page loads"}
         />
-        <StatTile
-          label="Tracking"
-          icon={GitHubMark}
-          value={report?.check.ref ?? "—"}
-          hint={report?.check.repo}
-        />
+        <StatTile label="Tracking" value={report?.check.ref ?? "—"} hint={report?.check.repo} />
       </StatGrid>
 
       {error && <ErrorState error={error} />}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Globe, Router, Servers, ShieldCheck } from "@/components/icons"
+import { Globe, ShieldCheck } from "@/components/icons"
 import { get } from "@/lib/api"
 import type { Certificate, Listener, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -44,15 +44,11 @@ export default function ProxyOverviewPage() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Network"
-        title="Proxy & TLS"
-      />
+      <PageHeader eyebrow="Network" title="Proxy & TLS" />
 
       <StatGrid columns={4}>
         <StatTile
           label="Reverse proxy"
-          icon={Servers}
           value={engine}
           hint={status?.certbot ? "certbot available" : "no certbot"}
           tone={status?.nginx || status?.caddy ? "default" : "warning"}
@@ -61,7 +57,6 @@ export default function ProxyOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Sites"
-            icon={Globe}
             value={hosts.length}
             hint={`${onTls} on TLS`}
           />
@@ -70,7 +65,6 @@ export default function ProxyOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Certificates"
-            icon={ShieldCheck}
             value={certs.data?.length ?? "—"}
             hint={badCerts.length > 0 ? `${badCerts.length} need attention` : "all valid"}
             tone={
@@ -86,7 +80,6 @@ export default function ProxyOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Exposed ports"
-            icon={Router}
             value={exposed.length}
             hint={exposed.length ? "reachable off the machine" : "all on loopback"}
             tone={exposed.length ? "warning" : "success"}

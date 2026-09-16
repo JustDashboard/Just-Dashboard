@@ -50,8 +50,8 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
 - `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
   around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
-  tile that is also a destination — the Docker and proxy overviews — with the revealed arrow that says
-  so on touch.
+  tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
+  overview — with the revealed arrow that says so on touch.
 - `components/status-dot.tsx` — `Status`, the one live-state indicator: a coloured dot and a word.
   `components/tag.tsx` — `Tag`, small-caps text marking a *fixed property* of a row. No chip, no border.
   **There is no badge and no pill in this product**; `ui/badge.tsx` was deleted so the decision cannot

@@ -106,6 +106,16 @@
           "kind": "added",
           "text": "The Docker pages explain themselves, and the overview names what is not running",
           "detail": "Docker, runtime health, attention, exit codes and how CPU and memory are counted all have a definition a hover away, written for somebody who has never run a container. A server with nothing on it gets an introduction rather than four zeros. A stopped container used to be visible on the overview only as a digit changing in the Running tile, so it now has a panel that names it with a Start button beside it; disk is a breakdown of where the space went rather than a sentence about how little of it is worth reclaiming; and runtime health is one bar that shows how much of the estate nothing is checking. Filters on the containers page answer \"which of these is down\" without reading a column."
+        },
+        {
+          "kind": "added",
+          "text": "The web terminal opens zsh with inline history suggestions and command colouring on a fresh install",
+          "detail": "The grey text that finishes a command from your history, accepted with the right arrow, used to depend on whatever the operator had set up for their own shell. The installer now puts zsh, zsh-autosuggestions and zsh-syntax-highlighting on the host and points the terminal at zsh through JD_TERMINAL_SHELL, so a clean server has it from the first window. The account's ssh login shell is not changed, an existing .env is asked before its terminal shell is changed, and a history file is kept for an account whose own shell never set one."
+        },
+        {
+          "kind": "changed",
+          "text": "The overview answers what is wrong and what is waiting, not only how busy the machine is",
+          "detail": "A fifth tile shows the fullest filesystem, which is the number that stops a server and the one the health checks never carried. The health list now includes a systemd unit that has failed and a container that is unhealthy or stuck restarting, beside the recorder's own findings. The Services row grew from four cards to the eight modules in the sidebar: security exposure, pending package updates and whether a reboot is owed, deployments that are running or failed, and the last backup run and the next one due. Stat tiles lost the small glyph before their label, service figures took the same 24px as the tiles, and a scrollbar that appeared under Recent activity is gone."
         }
       ]
     },

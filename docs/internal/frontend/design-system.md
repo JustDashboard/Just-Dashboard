@@ -40,17 +40,22 @@ What separates a surface now:
 **And not every block is a surface.** The 0.6.7 pass found the other failure: a page on which every
 block *was* framed read as a page of containers, and the frames stopped separating anything because
 there was nothing unframed left to separate from. The ground went darker (`--background` 0.105,
-`--card` 0.128) so the one step still reads, and three things stopped taking a frame:
+`--card` 0.128) so the one step still reads, and the default flipped: **a block on a page is plain
+unless it can say why it needs an edge.** The host Overview ended 0.6.7 with no framed block at all
+above its Services row and none in it — see §15 for what that took. Three kinds of thing stopped
+taking a frame:
 
 - a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
   first column starts on the page's own edge, in line with the title (`framed` restores the box for
-  the one case a run sits inside another surface);
+  the one case a run sits inside another surface). The Overview's Services row is one of these too:
+  a module's headline figure is a reading, and eight framed cards under a page that had just stopped
+  drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
-  activity on the Overview, the idle containers and compose projects on the Docker overview, the
+  activity and the last-hour sparklines on the Overview, the idle containers and compose projects on the Docker overview, the
   areas list on the Security overview, "Needs attention" on the proxy overview and on every security
-  area page, health findings, the runtime-health bar, and the deployment pages' lists, overview
-  facts, run summary and create flow are plain;
+  area page, health findings, the runtime-health bar, the Overview's last-hour sparklines, and the
+  deployment pages' lists, overview facts, run summary and create flow are plain;
 - a panel's header — it is no longer a tinted strip. The title sits on the panel's own ground with a
   hairline under it. `--surface-header` survives at a fainter mix for the two places a strip is still
   chrome: a `Pane`'s header and footer.
@@ -300,6 +305,14 @@ actually has to say:
 | `animate-rise` | this was not here a moment ago | Opacity and four pixels, once, on arrival: a panel that appears, a disclosure that opens, a sparkline whose data landed. |
 | `animate-sweep` | this is working, and cannot say how far along | An indeterminate bar for a pull or a prune, where a spinner in the corner of a wide panel is too small to be the answer. |
 
+**`rise` is expected wherever a fetch settles**, not reserved for special occasions. The Overview is
+the reference: the page rises once when its first snapshot lands; each sparkline when its hour of
+history arrives; the activity list when its events arrive; each service figure when its own poll
+settles (swap the figure's `key` between skeleton and value so it remounts). Hover is colour only —
+`transition-colors` on a wash or a border — and a meter eases its width. Nothing translates, scales,
+glows or casts a shadow to say it was hovered or pressed; the one `group-hover:translate` the product
+had was removed from the Overview's service arrow in 0.6.7.
+
 `animate-pulse` is not one of them. It dims the element itself, which on a table of twenty running
 containers reads as twenty things blinking for attention — `breathe` leaves the dot constant and
 moves only the air around it, so the column still scans as "all green" at a glance.
@@ -375,7 +388,9 @@ anything the word beside them did not. `Servers` in front of "Filesystems", `Cpu
 spelled out. Where the picture and the title disagreed, the title was the one that was right.
 
 The prop is gone from all four components, so this one is enforced by the type checker rather than by
-judgement: there is no `icon` to pass. `ChartPanel` forwarded one too, and does not any more.
+judgement: there is no `icon` to pass. `ChartPanel` forwarded one too, and does not any more. Nor does
+`StatTile`: the 12px glyph it drew before its eyebrow was the same guess at a smaller size — `Cpu` in
+front of "CPU" is the label twice — and twenty-eight tiles across the product carried one.
 
 What the header has instead: the title at `text-title` (§8), the header's own ground and hairline
 doing the separating, and — where there is something to say about state — a `Status` in the actions.
@@ -394,3 +409,59 @@ A `Pane`'s chrome strip is the one place a small inline glyph still sits beside 
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip
 is deliberately tighter than a panel's, and the mark there is a bare 14px outline rather than a tinted
 plate — it reads as part of the chrome, which is what it is.
+
+## 15. Redesigning a page
+
+What "redesign this page with the design system" means, in the order to do it. It was settled on the
+host Overview (`app/(dashboard)/page.tsx`) in 0.6.7, and that page is the reference: open it beside
+the page being redesigned and make the second one read like the first.
+
+**The look in one sentence: readings on the page, not boxes on the page.** One dark ground. A hairline
+where two things meet. Type doing the hierarchy. One orange. Motion only to say something arrived.
+"Modern and clean" here means *fewer edges*, never more decoration — no gradients, no glow, no glass,
+no shadows, no icon plates, no badges, no rounded cards floating over the ground.
+
+The passes, in order. Each one is a diff you can review on its own.
+
+1. **Remove the frames.** Every `Panel` becomes `Panel plain` unless it is one of the exceptions in §7:
+   a `Pane` (a working region with its own scrolling), a `Well` (output you read), a `Group` (a fence
+   inside a body), or something that genuinely floats (popover, dropdown, dialog). "It is a card" is
+   not a reason. A block that is the whole of a section is a title and a hairline. Two blocks side by
+   side are both plain; the gap between them is the separation. A framed block that survives this pass
+   has a sentence in a comment saying why.
+2. **Figures are tiles.** Any set of headline numbers — utilisation, counts, one-per-module "service
+   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, the first column on the
+   page's own edge. A tile that is a destination is wrapped in `StatLink` and takes
+   `className="h-full transition-colors group-hover:bg-row-hover"`; the arrow is the link's, not yours.
+   The figure is 24px (`text-2xl`): `text-xl` is not on the ladder. A state colours the figure through
+   `tone`, never through a badge beside it.
+3. **Lists are rows.** `RowList`/`Row` for things with a title and a second line, `FindingList` for
+   verdicts, a table for columns. Never a grid of framed cards standing in for rows. A scroll container
+   that holds plain rows pads by the rows' bleed (`-mx-3 px-3`), or it grows a sideways scrollbar.
+4. **No decorative glyphs.** Headers, sections, tiles and modals carry no icon (§14). The glyphs that
+   stay are wayfinding — the sidebar entry and a module tile's mark, drawn as a 12px `text-brand`
+   glyph inline before the tile's eyebrow — and the ones that *are* the message: a `Status`, a
+   `Notice`, an `EmptyState`, a verb on a button.
+5. **Type on the ladder.** Page 24 → section 16 → surface 15 → body 13 → hint 11 → micro 10, and a
+   headline figure 24. Anything in between is deleted, not rounded to the nearest.
+6. **Colour by role.** Brand orange is a command's face or a location mark. Amber, red and green arrive
+   only attached to a reading — a figure's `tone`, a `Status` dot and word, a `Notice`. Selection is
+   `bg-accent`; hover is `bg-row-hover` on a row or tile and a border step on a framed destination;
+   never both, never movement.
+7. **Motion says one of three things** (§11). Add `animate-rise` where a fetch settles: the page once,
+   each block once, a figure once (swap its `key`). `transition-colors` on hover. Nothing else moves.
+8. **Data, not captions.** No sentence under a title (§5). What the reader needs is a `Tag`, a
+   `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —
+   is its own row.
+9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; the
+   first column starts where the page title starts.
+10. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser` (at least
+    `tests/browser/design-system.spec.ts`), then a screenshot at 1280 and 1720 wide against a mocked
+    API in the pattern `mockShell` uses, and look at it: a scrollbar where none belongs, a label a
+    line lower than its neighbours, a figure at the wrong size, are things the checks do not catch.
+
+**What the Overview looks like after these passes**, as a checklist for the page you are on: a page
+header with an eyebrow, a 24px title and a `MetricStrip` of figures on the right; a row of facts under
+it; a five-tile `StatGrid` of readings; a plain `Health` list; a plain sparkline block beside a plain
+activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module. No
+frame anywhere on the page. Everything that arrived, rose.

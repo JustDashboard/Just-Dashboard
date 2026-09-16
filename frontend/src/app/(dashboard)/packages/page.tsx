@@ -3,9 +3,7 @@
 import { useMemo, useState } from "react"
 import {
   ArrowCircleUp,
-  Box,
   CloudDownload,
-  Pause,
   Puzzle,
   RefreshClockwise,
   RotateCounterClockwise,
@@ -221,7 +219,6 @@ export default function PackagesPage() {
       <StatGrid columns={4}>
         <StatTile
           label="Installed"
-          icon={Box}
           value={data?.available ? data.packages.length.toLocaleString() : data ? "n/a" : "—"}
           hint={
             data?.manager
@@ -233,7 +230,6 @@ export default function PackagesPage() {
         />
         <StatTile
           label="Installed by hand"
-          icon={Pause}
           value={knowsExplicit ? data!.explicitCount.toLocaleString() : "—"}
           hint={
             knowsExplicit
@@ -245,7 +241,6 @@ export default function PackagesPage() {
         />
         <StatTile
           label="Updates"
-          icon={Puzzle}
           value={data?.available ? (data.upgradeCount ?? 0) : "—"}
           tone={
             (data?.securityCount ?? 0) > 0
@@ -266,7 +261,6 @@ export default function PackagesPage() {
         />
         <StatTile
           label="On disk"
-          icon={Servers}
           value={data?.totalSize ? bytes(data.totalSize) : "—"}
           hint="what the installed packages occupy"
         />

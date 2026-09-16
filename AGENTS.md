@@ -12,6 +12,9 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
   deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
   The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
+- A request to *redesign a page with the design system* means running the ordered passes in
+  [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md) §15 against
+  that page, with the host Overview as the reference. Read §15 before touching any UI for that request.
 - Use **Bun only** in `frontend/`. Keep `bun.lock`; never create `package-lock.json` or `yarn.lock`.
 - Match project style: Go uses standard formatting; TS/TSX uses Prettier with no semicolons, double
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.

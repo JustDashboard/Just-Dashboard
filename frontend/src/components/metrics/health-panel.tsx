@@ -19,12 +19,15 @@ export function HealthPanel({
   health,
   loading,
   plain,
+  emptyLabel,
   className,
 }: {
   health: Health | undefined
   loading: boolean
   /** Drawn as a titled list on the page rather than in a frame — see `Panel`. */
   plain?: boolean
+  /** What "nothing found" covers, when the caller has folded more checks in. */
+  emptyLabel?: string
   className?: string
 }) {
   if (loading && !health) {
@@ -50,9 +53,10 @@ export function HealthPanel({
         <FindingList
           findings={health.findings}
           emptyLabel={
-            health.recorded
+            emptyLabel ??
+            (health.recorded
               ? "Capacity, memory, CPU steal, pressure and sockets all within limits"
-              : "Every check passed on the current reading"
+              : "Every check passed on the current reading")
           }
         />
       </PanelBody>

@@ -227,6 +227,11 @@ else.
 A real PTY over a WebSocket, running `su -l` into a host account, not a shell inside the
 container. Your dotfiles, your PATH, your installed tools.
 
+The installer puts zsh on the host with `zsh-autosuggestions` and `zsh-syntax-highlighting`
+and points the terminal at it: commands are coloured as you type, and the grey text that
+finishes a command from history is accepted with the right arrow. Your `ssh` login shell is
+not changed; blank `JD_TERMINAL_SHELL` in `.env` if you want the terminal to follow `chsh`.
+
 Each session groups independent shell windows. Name a session, file it in a folder, drag it
 somewhere else, filter the list, and pin the sessions you use most. Windows appear along the
 top, with rename, reorder and close controls. Closing one window stops that shell; closing a
@@ -502,7 +507,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | --- | --- | --- |
 | `JD_REQUIRE_2FA` | `false` | Whether an account with no authenticator may sign in. An account that *has* enrolled is always asked for its code, whatever this says. |
 | `JD_TERMINAL_ENABLED` | `true` | The web terminal. |
-| `JD_TERMINAL_SHELL` | account's shell | Overrides the login shell. Empty honours `chsh`. |
+| `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. |
 | `JD_TERMINAL_USER` | lowest regular account | Host account a terminal session logs in as. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
 | `JD_SESSION_IDLE_TTL` | `60m` | Idle timeout. |

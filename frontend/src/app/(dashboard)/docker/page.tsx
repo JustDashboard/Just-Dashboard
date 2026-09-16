@@ -3,25 +3,11 @@
 import { useCallback, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import {
-  ArrowRight,
-  Box,
-  Clipboard,
-  Heart,
-  Layers,
-  Lifebuoy,
-  Play,
-  Sparkles,
-} from "@/components/icons"
+import { ArrowRight, Box, Clipboard, Layers, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type {
-  ComposeStack,
-  Container,
-  DockerDiagnosis,
-  DockerDiskUsage,
-} from "@/lib/types"
+import type { ComposeStack, Container, DockerDiagnosis, DockerDiskUsage } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -149,7 +135,6 @@ export default function DockerOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Running"
-            icon={Play}
             value={`${running} / ${containers.length}`}
             tone={running > 0 ? "success" : "default"}
             hint={
@@ -172,7 +157,6 @@ export default function DockerOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Runtime health"
-            icon={Heart}
             value={runtimeLabel(runtime)}
             /*
               "notice" is a stopped container, not a failure and not a success:
@@ -204,7 +188,6 @@ export default function DockerOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Attention"
-            icon={Lifebuoy}
             value={attentionLabel(attention)}
             tone={
               attention?.critical
@@ -227,7 +210,6 @@ export default function DockerOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Compose stacks"
-            icon={Layers}
             value={`${active.length} active`}
             hint={`${detected.length} detected on this server`}
           />

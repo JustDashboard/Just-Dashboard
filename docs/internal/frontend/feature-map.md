@@ -7,7 +7,7 @@ hiding a control through `useAuth().can()` is affordance only.
 | Route area | UI responsibility | Primary implementation |
 | --- | --- | --- |
 | `/login` | One centred column: password, TOTP challenge, enrolment where the install requires it, recovery codes, and partial-session states | `src/app/login/page.tsx`, auth hooks, shared logo/state/controls |
-| `/` | Host overview, current health, capacity, recent events, and sparklines | dashboard root page plus `components/metrics/` |
+| `/` | Host overview: five capacity tiles (CPU, memory, load, network, and the fullest filesystem), a health list that folds failed systemd units and unhealthy or restarting containers into the recorder's findings, an hour of sparklines, recent events, and one destination tile per module — Docker, databases, proxy, security exposure, package updates and reboot state, deployments, backups, and the dashboard's own version | dashboard root page plus `components/metrics/` |
 | `/dashboard` | Dashboard self-update status and searchable release notes | `components/update/`, self-update provider |
 | `/dashboard/configuration` | The panel's own settings — address, certificate mode, ports, allowlist, two-factor policy, session lifetimes — plus restart, rebuild, and a run record that is followed across the restart it describes. Picking a certificate mode carries the address, listening interface and allowlist with it, filled from the machine's own tailnet identity | `components/config/restart-progress.tsx`, `hooks/use-self-config.tsx` (`system.admin` only) |
 | `/account` | Password, TOTP/recovery codes, dashboard users, roles, and API tokens | account page, auth hook, confirmation primitives |

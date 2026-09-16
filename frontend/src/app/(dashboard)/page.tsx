@@ -3,19 +3,34 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import {
+  Archive,
   ArrowRight,
   Box,
-  ChartActivity,
-  Cpu,
+  CloudUpload,
   Database,
-  Gauge,
   Globe,
-  GridSquare,
   Puzzle,
+  SettingsGear,
+  Shield,
 } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { bytes, clock, duration, percent, rate, relativeTime } from "@/lib/format"
-import type { Certificate, Container, DbConnection, MetricEvent } from "@/lib/types"
+import type {
+  BackupJob,
+  BackupRun,
+  Certificate,
+  Container,
+  DbConnection,
+  DeploymentFleet,
+  DockerDiagnosis,
+  Exposure,
+  Health,
+  HealthFinding,
+  MetricEvent,
+  MountStats,
+  SystemdUnit,
+  UpdateReport,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
@@ -24,13 +39,16 @@ import type { MetricsWindow } from "@/lib/metrics-range"
 import { Page, PageHeader, PageState, Metric, MetricStrip, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
+import type { Tone } from "@/components/tone"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
+import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { eventColor } from "@/components/metrics/metric-chart"
 
 import { Tag } from "@/components/tag"
+import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
 // A fixed hour, not the metrics page's draggable window: the landing page is a
@@ -41,7 +59,22 @@ export default function OverviewPage() {
   const { host, snapshot, error } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
   const events = useMetricEvents(HOUR)
-  const { health, loading: healthLoading } = useHealth()
+  const { health: recordedHealth, loading: healthLoading } = useHealth()
+  // Two verdicts the metrics recorder never sees, folded into the same list:
+  // a systemd unit that has failed and a container failing its own health
+  // check are exactly the "is anything wrong" a landing page exists to answer.
+  const failedUnits = usePoll<SystemdUnit[]>(
+    (signal) => get("/systemd/", { state: "failed" }, signal),
+    60_000,
+  )
+  const docker = usePoll<DockerDiagnosis>(
+    (signal) => get("/docker/health", undefined, signal),
+    120_000,
+  )
+  const health = useMemo(
+    () => foldHealth(recordedHealth, failedUnits.data, docker.data),
+    [recordedHealth, failedUnits.data, docker.data],
+  )
 
   const trends = useMemo(() => {
     const points = recorded.history?.points ?? []
@@ -84,9 +117,13 @@ export default function OverviewPage() {
   const availPercent =
     snapshot.memory.total > 0 ? (snapshot.memory.available / snapshot.memory.total) * 100 : 0
   const cores = snapshot.cpu.cores || 1
+  const fullest = snapshot.mounts.reduce<MountStats | undefined>(
+    (worst, m) => (!worst || m.usedPercent > worst.usedPercent ? m : worst),
+    undefined,
+  )
 
   return (
-    <Page>
+    <Page className="animate-rise">
       <PageHeader
         eyebrow="Server"
         title={host.hostname}
@@ -115,10 +152,9 @@ export default function OverviewPage() {
         {health && <HealthVerdict status={health.status} />}
       </div>
 
-      <StatGrid columns={4}>
+      <StatGrid columns={5}>
         <StatTile
           label="CPU"
-          icon={Cpu}
           value={percent(snapshot.cpu.totalPercent)}
           meter={snapshot.cpu.totalPercent}
           tone={utilisationTone(snapshot.cpu.totalPercent)}
@@ -139,7 +175,6 @@ export default function OverviewPage() {
         />
         <StatTile
           label="Memory"
-          icon={GridSquare}
           value={bytes(snapshot.memory.available)}
           meter={100 - availPercent}
           tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
@@ -148,7 +183,6 @@ export default function OverviewPage() {
         />
         <StatTile
           label="Load"
-          icon={Gauge}
           value={snapshot.cpu.loadAvg1.toFixed(2)}
           meter={(snapshot.cpu.loadAvg1 / cores) * 100}
           tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
@@ -161,10 +195,30 @@ export default function OverviewPage() {
         />
         <StatTile
           label="Network"
-          icon={ChartActivity}
           value={rate(throughput.rx)}
           hint={`${rate(throughput.tx)} out · ${snapshot.sockets?.tcpInUse ?? 0} TCP sockets`}
           trailing={<span className="text-hint text-muted-foreground">in</span>}
+        />
+        {/* The fullest real filesystem, because that is the one that stops the
+            machine — the recorder has no disk rule, so this tile is the only
+            place a root partition at 96% is said out loud before it fails. */}
+        <StatTile
+          label="Storage"
+          value={fullest ? bytes(fullest.free) : "—"}
+          meter={fullest?.usedPercent}
+          tone={fullest ? utilisationTone(fullest.usedPercent) : "default"}
+          hint={
+            fullest
+              ? `${percent(fullest.usedPercent, 0)} used of ${bytes(fullest.total)}`
+              : "No filesystems reported"
+          }
+          trailing={
+            fullest && (
+              <span className="truncate text-hint text-muted-foreground">
+                free on {fullest.mountpoint}
+              </span>
+            )
+          }
         />
       </StatGrid>
 
@@ -172,7 +226,16 @@ export default function OverviewPage() {
           host row above, and the findings are the first thing to read after
           the numbers — a frame around them made the page open with a stack of
           two containers before anything else. */}
-      <HealthPanel plain health={health} loading={healthLoading} />
+      <HealthPanel
+        plain
+        health={health}
+        loading={healthLoading}
+        emptyLabel={
+          health?.recorded
+            ? "Capacity, memory, CPU steal, pressure, sockets, services and containers all within limits"
+            : "Every check passed on the current reading"
+        }
+      />
 
       <div className="grid items-start gap-6 lg:grid-cols-3 [&>*]:min-w-0">
         <TrendsPanel
@@ -210,13 +273,20 @@ export default function OverviewPage() {
         <ActivityPanel events={events} />
       </div>
 
+      {/* The same run of readings as the tiles at the top, one per module,
+          because a module's headline figure *is* a reading. Eight framed cards
+          were eight boxes under a page that had just stopped drawing any. */}
       <Section title="Services">
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
+        <StatGrid columns={4}>
           <DockerCard />
           <DatabasesCard />
           <ProxyCard />
+          <SecurityCard />
+          <PackagesCard />
+          <DeploymentsCard />
+          <BackupsCard />
           <UpdatesCard />
-        </div>
+        </StatGrid>
       </Section>
     </Page>
   )
@@ -224,6 +294,71 @@ export default function OverviewPage() {
 
 function Dot() {
   return <span className="text-muted-foreground/40">·</span>
+}
+
+const VERDICT_RANK: Record<Health["status"], number> = { ok: 0, notice: 1, warning: 2, critical: 3 }
+
+/**
+ * The recorder's verdict plus the two the host reports about itself. A poll
+ * that failed contributes nothing rather than a finding about the poll: the
+ * list is what is wrong with the server, not with this page's fetches.
+ */
+function foldHealth(
+  health: Health | undefined,
+  failedUnits: SystemdUnit[] | undefined,
+  docker: DockerDiagnosis | undefined,
+): Health | undefined {
+  if (!health) return health
+  const extra: HealthFinding[] = []
+  if (failedUnits && failedUnits.length > 0) {
+    const n = failedUnits.length
+    const names = failedUnits.map((u) => u.name)
+    extra.push({
+      id: "systemd.failed",
+      level: "warning",
+      title: n === 1 ? `${names[0]} has failed` : `${n} services have failed`,
+      detail: n === 1 ? failedUnits[0].description || names[0] : names.join(", "),
+      advice:
+        "Read the unit's journal under Processes → Services, then restart it — or disable it if nothing needs it any more.",
+      value: n,
+      threshold: 0,
+    })
+  }
+  const runtime = docker?.runtime
+  if (runtime && runtime.unhealthy > 0) {
+    const n = runtime.unhealthy
+    extra.push({
+      id: "docker.unhealthy",
+      level: runtime.status === "critical" ? "critical" : "warning",
+      title: n === 1 ? "1 container is unhealthy" : `${n} containers are unhealthy`,
+      detail:
+        n === 1
+          ? `1 of ${runtime.running} running containers fails its own health check`
+          : `${n} of ${runtime.running} running containers fail their own health checks`,
+      advice:
+        "Open Docker → Containers: the failure diagnosis on each one says what the check saw.",
+      value: n,
+      threshold: 0,
+    })
+  }
+  if (runtime && runtime.restarting > 0) {
+    const n = runtime.restarting
+    extra.push({
+      id: "docker.restarting",
+      level: "warning",
+      title: n === 1 ? "1 container is restarting" : `${n} containers are restarting`,
+      detail: "Docker keeps restarting it, which means it keeps exiting",
+      advice: "Its logs and failure diagnosis under Docker → Containers say why it exits.",
+      value: n,
+      threshold: 0,
+    })
+  }
+  if (extra.length === 0) return health
+  const status = extra.reduce<Health["status"]>(
+    (worst, f) => (VERDICT_RANK[f.level] > VERDICT_RANK[worst] ? f.level : worst),
+    health.status,
+  )
+  return { ...health, status, findings: [...health.findings, ...extra] }
 }
 
 type TrendItem = {
@@ -238,7 +373,9 @@ type TrendItem = {
  * An hour of shape for the four figures the stat tiles show as one instant.
  *
  * Sparklines, not charts: this answers "did anything happen while I was away",
- * and the answer to "what exactly" is one click into /metrics.
+ * and the answer to "what exactly" is one click into /metrics. Plain, like the
+ * health list beside it: it was the one box left on the top half of the page,
+ * and a frame around four lines separated them from nothing.
  */
 function TrendsPanel({
   items,
@@ -250,7 +387,7 @@ function TrendsPanel({
   className?: string
 }) {
   return (
-    <Panel className={className}>
+    <Panel plain className={className}>
       <PanelHeader
         title="Last hour"
         actions={
@@ -274,15 +411,17 @@ function TrendsPanel({
                 {disabled ? "History off" : "Collecting…"}
               </div>
             ) : (
-              <Sparkline
-                values={item.data}
-                max={item.max}
-                color={item.color}
-                width={320}
-                height={32}
-                className="h-8 w-full"
-                label={`${item.label} over the last hour`}
-              />
+              <div className="animate-rise">
+                <Sparkline
+                  values={item.data}
+                  max={item.max}
+                  color={item.color}
+                  width={320}
+                  height={32}
+                  className="h-8 w-full"
+                  label={`${item.label} over the last hour`}
+                />
+              </div>
             )}
           </div>
         ))}
@@ -303,12 +442,14 @@ function ActivityPanel({ events }: { events: MetricEvent[] }) {
       <PanelHeader title="Recent activity" />
       <PanelBody
         flush
-        className={newestFirst.length === 0 ? "py-4" : "max-h-[17rem] overflow-y-auto py-1"}
+        className={
+          newestFirst.length === 0 ? "py-4" : "-mx-3 max-h-[17rem] overflow-y-auto px-3 py-1"
+        }
       >
         {newestFirst.length === 0 ? (
           <p className="text-body text-muted-foreground">Nothing in the last hour.</p>
         ) : (
-          <RowList>
+          <RowList className="animate-rise">
             {newestFirst.map((event, i) => (
               <Row
                 key={`${event.ts}-${i}`}
@@ -350,15 +491,23 @@ function moduleGone(error: Error | undefined): boolean {
 }
 
 /**
- * One service, its headline figure, and the way to its page. Composed from
- * `Panel` rather than a hand-rolled card so it re-themes with everything else.
+ * One module, its headline figure, and the way to its page — a `StatTile`
+ * behind a `StatLink`, exactly as the Docker overview draws its own run, so
+ * the Services row reads as the top row does: figures on the page, hairlines
+ * between them, and an arrow that says the tile goes somewhere.
+ *
+ * The glyph before the name is wayfinding, not decoration: it is the same
+ * mark the sidebar entry carries, so the eye finds "Docker" without reading.
+ * The figure rises once when its poll lands, so a page of eight tiles fills in
+ * rather than flickering from bone to number.
  */
-function ServiceCard({
+function ServiceTile({
   icon: Icon,
   title,
   href,
   value,
   hint,
+  tone = "default",
   loading,
   unavailable,
 }: {
@@ -367,39 +516,46 @@ function ServiceCard({
   href: string
   value?: React.ReactNode
   hint?: React.ReactNode
+  /** Colours the figure as a reading of state, never as decoration. */
+  tone?: Tone
   loading?: boolean
   unavailable?: boolean
 }) {
+  const settled = !loading
+  const figure = loading ? (
+    <Skeleton className="my-1.5 h-5 w-24" />
+  ) : unavailable ? (
+    "Not available"
+  ) : value == null ? (
+    "Unreachable"
+  ) : (
+    value
+  )
   return (
-    <Link href={href} className="group block min-w-0 rounded-xl focus-ring">
-      <Panel interactive className="h-full">
-        <PanelBody className="flex flex-col gap-4">
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-brand">
-                <Icon className="size-3.5" />
-              </span>
-              <span className="truncate text-body font-medium">{title}</span>
-            </div>
-            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-          </div>
-          {loading ? (
-            <Skeleton className="h-6 w-24" />
-          ) : unavailable ? (
-            <p className="text-body text-muted-foreground">Not available on this host</p>
-          ) : value == null ? (
-            <p className="text-body text-muted-foreground">Unreachable</p>
-          ) : (
-            <div className="min-w-0">
-              <p className="numeric truncate text-xl leading-tight font-semibold tracking-tight">
-                {value}
-              </p>
-              {hint && <p className="mt-0.5 truncate text-hint text-muted-foreground">{hint}</p>}
-            </div>
-          )}
-        </PanelBody>
-      </Panel>
-    </Link>
+    <StatLink href={href} label={title}>
+      <StatTile
+        className="h-full transition-colors group-hover:bg-row-hover"
+        label={
+          <>
+            <Icon aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
+            {title}
+          </>
+        }
+        value={
+          <span
+            key={settled ? "figure" : "skeleton"}
+            className={cn(
+              "inline-block max-w-full truncate align-bottom",
+              settled && "animate-rise",
+            )}
+          >
+            {figure}
+          </span>
+        }
+        tone={unavailable || value == null ? "default" : tone}
+        hint={unavailable ? "on this host" : hint}
+      />
+    </StatLink>
   )
 }
 
@@ -410,7 +566,7 @@ function DockerCard() {
   )
   const running = data?.filter((c) => c.state === "running").length
   return (
-    <ServiceCard
+    <ServiceTile
       icon={Box}
       title="Docker"
       href="/docker"
@@ -428,7 +584,7 @@ function DatabasesCard() {
     60_000,
   )
   return (
-    <ServiceCard
+    <ServiceTile
       icon={Database}
       title="Databases"
       href="/databases"
@@ -450,7 +606,7 @@ function ProxyCard() {
     return [...data].sort((a, b) => a.daysLeft - b.daysLeft)[0]
   }, [data])
   return (
-    <ServiceCard
+    <ServiceTile
       icon={Globe}
       title="Proxy & TLS"
       href="/proxy"
@@ -470,12 +626,174 @@ function ProxyCard() {
   )
 }
 
+function SecurityCard() {
+  const { data, error, loading } = usePoll<Exposure>(
+    (signal) => get<Exposure>("/exposure", undefined, signal),
+    60_000,
+  )
+  const grade = data ? EXPOSURE_GRADE[data.grade] : undefined
+  return (
+    <ServiceTile
+      icon={Shield}
+      title="Security"
+      href="/security"
+      loading={loading && !data}
+      unavailable={moduleGone(error)}
+      value={grade?.label}
+      tone={
+        grade?.verdict === "critical"
+          ? "danger"
+          : grade?.verdict === "warning"
+            ? "warning"
+            : "default"
+      }
+      hint={
+        data
+          ? `${data.allowlist.length} allowed range${data.allowlist.length === 1 ? "" : "s"} · ${data.interfaces.length} interface${data.interfaces.length === 1 ? "" : "s"}`
+          : undefined
+      }
+    />
+  )
+}
+
+function PackagesCard() {
+  const { data, error, loading } = usePoll<UpdateReport>(
+    (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
+    300_000,
+  )
+  const pending = data?.packages.length ?? 0
+  return (
+    <ServiceTile
+      icon={Puzzle}
+      title="Packages"
+      href="/packages"
+      loading={loading && !data}
+      unavailable={moduleGone(error) || data?.available === false}
+      value={
+        data
+          ? pending === 0
+            ? "Up to date"
+            : `${pending} update${pending === 1 ? "" : "s"}`
+          : undefined
+      }
+      tone={data?.rebootRequired || (data?.securityCount ?? 0) > 0 ? "warning" : "default"}
+      hint={
+        data?.rebootRequired
+          ? "Reboot required"
+          : data && data.securityCount > 0
+            ? `${data.securityCount} security`
+            : data && pending > 0 && data.securityFiltering
+              ? "None are security updates"
+              : undefined
+      }
+    />
+  )
+}
+
+/** A deployment's last run, read as a verdict rather than as a state machine. */
+function runFailed(state: string | undefined): boolean {
+  return state === "failed" || state === "failed_activation" || state === "rolled_back"
+}
+
+function DeploymentsCard() {
+  const { data, error, loading } = usePoll<DeploymentFleet>(
+    (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
+    60_000,
+  )
+  const deployments = data?.deployments ?? []
+  const active = data?.activeWork.length ?? 0
+  const failed = deployments.filter((d) => runFailed(d.lastRun?.state)).length
+  const unhealthy = deployments.filter((d) => d.health === "unhealthy").length
+  const count = `${deployments.length} deployment${deployments.length === 1 ? "" : "s"}`
+  return (
+    <ServiceTile
+      icon={CloudUpload}
+      title="Deployments"
+      href="/deploy"
+      loading={loading && !data}
+      unavailable={moduleGone(error)}
+      value={
+        !data
+          ? undefined
+          : deployments.length === 0
+            ? "None yet"
+            : active > 0
+              ? `${active} deploying`
+              : failed > 0
+                ? `${failed} failed`
+                : unhealthy > 0
+                  ? `${unhealthy} unhealthy`
+                  : `${deployments.length} live`
+      }
+      tone={active === 0 && (failed > 0 || unhealthy > 0) ? "danger" : "default"}
+      hint={
+        !data || deployments.length === 0
+          ? undefined
+          : active > 0 && failed > 0
+            ? `${count} · ${failed} failed`
+            : count
+      }
+    />
+  )
+}
+
+function BackupsCard() {
+  const { data, error, loading } = usePoll<BackupJob[]>(
+    (signal) => get<BackupJob[]>("/backups/", undefined, signal),
+    120_000,
+  )
+  const latest = useMemo(() => {
+    if (!data) return undefined
+    return data
+      .map((j) => j.lastRun)
+      .filter((r): r is BackupRun => Boolean(r))
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]
+  }, [data])
+  const next = useMemo(() => {
+    if (!data) return undefined
+    return data
+      .filter((j) => j.enabled && j.nextRun)
+      .map((j) => j.nextRun as string)
+      .sort()[0]
+  }, [data])
+  return (
+    <ServiceTile
+      icon={Archive}
+      title="Backups"
+      href="/backups"
+      loading={loading && !data}
+      unavailable={moduleGone(error)}
+      value={
+        !data
+          ? undefined
+          : data.length === 0
+            ? "None yet"
+            : !latest
+              ? "No runs yet"
+              : latest.status === "failed"
+                ? "Last run failed"
+                : latest.status === "running"
+                  ? "Running"
+                  : "Last run OK"
+      }
+      tone={latest?.status === "failed" ? "danger" : "default"}
+      hint={
+        latest
+          ? `${relativeTime(latest.startedAt)}${next ? ` · next ${relativeTime(next)}` : ""}`
+          : data && data.length > 0
+            ? `${data.length} job${data.length === 1 ? "" : "s"} scheduled`
+            : undefined
+      }
+    />
+  )
+}
+
 function UpdatesCard() {
   const { report, loading } = useSelfUpdate()
   const behind = report?.releases.length ?? 0
   return (
-    <ServiceCard
-      icon={Puzzle}
+    <ServiceTile
+      icon={SettingsGear}
       title="Dashboard"
       href="/dashboard"
       loading={loading && !report}
