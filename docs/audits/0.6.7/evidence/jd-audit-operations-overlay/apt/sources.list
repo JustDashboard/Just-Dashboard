@@ -1,0 +1,2 @@
+deb [trusted=yes] http://audit.invalid/ normal main
+deb [trusted=yes] http://audit.invalid/ audit-security main

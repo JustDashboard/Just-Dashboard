@@ -1,0 +1,10 @@
+Package: audit-package
+Status: install ok installed
+Priority: optional
+Section: misc
+Installed-Size: 1
+Maintainer: Audit <audit@example.invalid>
+Architecture: amd64
+Version: 1.0
+Description: fixture
+

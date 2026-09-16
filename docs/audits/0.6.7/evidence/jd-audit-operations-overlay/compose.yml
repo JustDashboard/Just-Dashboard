@@ -1,0 +1,5 @@
+services:
+  test:
+    image: busybox
+    environment:
+      PASSWORD: ${JD_AUDIT_PASSWORD}

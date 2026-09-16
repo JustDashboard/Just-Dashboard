@@ -1,0 +1,10 @@
+Package: audit-package
+Version: 2.0
+Architecture: amd64
+Maintainer: Audit <audit@example.invalid>
+Installed-Size: 1
+Filename: pool/audit-package.deb
+Size: 1
+SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Description: fixture
+
