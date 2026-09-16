@@ -316,7 +316,7 @@ func (s *Store) EnvMap(ctx context.Context, projectID int64) (map[string]string,
 
 // --- runs ---
 
-const runCols = `id, project_id, started_at, ended_at, status, trigger, actor, from_commit, to_commit, log`
+const runCols = `id, run_number, project_id, started_at, ended_at, status, trigger, actor, from_commit, to_commit, log`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 	var (
@@ -324,7 +324,7 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 		status        string
 		started, ends int64
 	)
-	if err := row.Scan(&r.ID, &r.ProjectID, &started, &ends, &status,
+	if err := row.Scan(&r.ID, &r.RunNumber, &r.ProjectID, &started, &ends, &status,
 		&r.Trigger, &r.Actor, &r.FromCommit, &r.ToCommit, &r.Log); err != nil {
 		return nil, err
 	}

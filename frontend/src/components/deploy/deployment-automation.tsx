@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { DeploymentGitStatus } from "@/components/deploy/deployment-git-status"
 
 type NotificationChannel = {
   id: number
@@ -86,7 +87,7 @@ export function DeploymentAutomation({
   const [area, setArea] = useState("source")
   const [showTrigger, setShowTrigger] = useState(false)
   const [provider, setProvider] = useState("github")
-  const [name, setName] = useState("Deploy on push")
+  const [name, setName] = useState("Deployment webhook")
   const [repository, setRepository] = useState("")
   const [branch, setBranch] = useState("main")
   const [include, setInclude] = useState("")
@@ -186,6 +187,7 @@ export function DeploymentAutomation({
   if (!normalized) return <LegacyAutomation hook={legacyHook} enabled={legacyEnabled} />
   return (
     <div className="min-w-0 space-y-4">
+      <DeploymentGitStatus projectID={projectID} environmentID={environmentID} />
       <div role="group" aria-label="Automation sections" className="flex flex-wrap gap-2">
         {[
           ["source", "Git & webhooks"],
@@ -215,11 +217,11 @@ export function DeploymentAutomation({
       {area === "source" && (
         <Panel className="xl:col-span-2">
           <PanelHeader
-            title="Source automations"
+            title="Additional webhooks"
             actions={
               can("system.admin") && (
                 <Button size="sm" onClick={() => setShowTrigger((v) => !v)}>
-                  <Plus className="size-3.5" /> Add automation
+                  <Plus className="size-3.5" /> Add webhook
                 </Button>
               )
             }
@@ -228,8 +230,8 @@ export function DeploymentAutomation({
             <SidePanel
               open={showTrigger}
               onOpenChange={setShowTrigger}
-              title="Add source automation"
-              description="Configure this project automation."
+              title="Add webhook"
+              description="Add an integration or pull request preview hook. Production branch deployments are automatic."
               width="md"
             >
               <div className="grid gap-4 sm:grid-cols-2" aria-busy={saving}>
@@ -303,7 +305,7 @@ export function DeploymentAutomation({
                     }
                     onClick={saveTrigger}
                   >
-                    {saving ? "Creating…" : "Create automation"}
+                    {saving ? "Creating…" : "Create webhook"}
                   </Button>
                   <Button variant="ghost" onClick={() => setShowTrigger(false)}>
                     Cancel
@@ -318,8 +320,8 @@ export function DeploymentAutomation({
             ) : (triggers.data?.length ?? 0) === 0 ? (
               <EmptyState
                 icon={GitBranch}
-                title="No source automations"
-                description="Add a provider or generic signed hook. Manual deployments remain available."
+                title="No additional webhooks"
+                description="Git branch deployments work automatically. Add a webhook only for another integration or pull request previews."
                 className="border-0 py-6"
               />
             ) : (

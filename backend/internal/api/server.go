@@ -120,12 +120,17 @@ func (s *Server) Start(ctx context.Context) error {
 		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
 	}()
 	s.modules.deploySchedule.Start(ctx)
-	return s.modules.deployEngine.Start(ctx)
+	if err := s.modules.deployEngine.Start(ctx); err != nil {
+		return err
+	}
+	s.modules.deployGit.Start(ctx)
+	return nil
 }
 
 // Shutdown releases the resources that outlive a request: database pools,
 // live PTY sessions, the metrics sampler and the backup scheduler.
 func (s *Server) Shutdown() {
+	s.modules.deployGit.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.

@@ -7,6 +7,7 @@ import { Detail, DetailList } from "@/components/page"
 import { EmptyNote, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { DeploymentSitePreview } from "@/components/deploy/deployment-site-preview"
+import { DeploymentGitStatus } from "@/components/deploy/deployment-git-status"
 import {
   DeploymentStatus,
   HealthStatus,
@@ -118,6 +119,14 @@ export function DeploymentOverview({
               >
                 {project.repoPath || humanize(deployment.buildMethod)}
               </p>
+              {deployment.buildMethod !== "legacy_compose" && (
+                <div className="mt-3">
+                  <DeploymentGitStatus
+                    projectID={deployment.id}
+                    environmentID={deployment.environmentId}
+                  />
+                </div>
+              )}
             </div>
             {findings > 0 && (
               <Link
@@ -165,7 +174,7 @@ export function DeploymentOverview({
                       className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 focus-ring-inset hover:bg-row-hover"
                     >
                       <span className="min-w-24 flex-1">
-                        <span className="block text-sm font-medium">Run #{run.id}</span>
+                        <span className="block text-sm font-medium">Run #{run.runNumber}</span>
                         <span className="text-xs text-muted-foreground">
                           {humanize(run.operation)}
                         </span>

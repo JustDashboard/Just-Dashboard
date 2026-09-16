@@ -1179,6 +1179,11 @@ function ConfigureStep({
 
   return (
     <div className="space-y-4">
+      {lane === "github" && (
+        <p className="text-sm text-muted-foreground">
+          New commits to the selected branch deploy automatically after your first deployment.
+        </p>
+      )}
       <Panel>
         <PanelHeader
           title={form.name || "New deployment"}

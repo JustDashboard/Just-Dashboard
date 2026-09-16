@@ -85,8 +85,8 @@ services:
       # Metrics history, recorded whether or not a browser is connected.
       JD_METRICS_INTERVAL: ${JD_METRICS_INTERVAL:-15s}
       JD_METRICS_RETENTION: ${JD_METRICS_RETENTION:-7d}
-      # Updating the dashboard itself. The check is the only outbound request
-      # this product makes on its own initiative; false turns it off entirely.
+      # Updating the dashboard itself. False disables update discovery;
+      # deployment Git branch monitoring remains automatic and independent.
       # JD_UPDATE_DIR is normally empty — the dashboard asks Docker where this
       # stack was deployed from, which is why the label below is not needed.
       JD_UPDATE_CHECK: ${JD_UPDATE_CHECK:-true}

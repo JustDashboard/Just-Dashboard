@@ -27,6 +27,11 @@ hiding a control through `useAuth().can()` is affordance only.
 | `/system-users` | Host account inventory, create/update/delete, groups, lock state, and SSH keys | system-users page; backend contract in [`../backend/git-backups-users.md`](../backend/git-backups-users.md#host-users-and-ssh-keys) |
 | `/terminal` | Direct PTY sessions, folders, windows with retained screens and connections while switching, side tools, replay, clipboard upload, renderer, and keyboard customization | terminal page, `components/terminal/`, `components/xterm-pane.tsx`; see [`features-terminal.md`](features-terminal.md#the-terminal-panel) |
 
+Deployment overviews and Automations show read-only production Git monitoring status, including
+repository access failures. Branch deployments are automatic after the first deployment; additional
+webhooks remain separate integrations. Run labels use a per-project sequence starting at 1, while
+permanent run URLs retain their global identifiers.
+
 Cross-feature navigation is intentional: Files and Docker can open Git or a terminal in context; Git can
 open GitHub authentication; deployments embed scoped runtime logs, service metrics, and automatic live
 website previews while retaining links to owning Docker, proxy, backup, files, and terminal surfaces.

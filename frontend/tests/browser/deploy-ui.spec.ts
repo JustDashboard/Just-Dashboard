@@ -295,6 +295,7 @@ const user = {
 
 const run = {
   id: 84,
+  runNumber: 1,
   projectId: 7,
   environmentId: 12,
   state: "verifying",
@@ -677,6 +678,8 @@ async function mockDashboard(
       body = { run: liveRun(), steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
       body = configurationBody()
+    } else if (path === "/deploy/7/environments/12/git-watch" && method === "GET") {
+      body = { automatic: true, branch: "main", status: "watching", intervalSeconds: 5 }
     } else if (path === "/deploy/7/environments/12/triggers" && method === "GET") {
       body = automationTriggers
     } else if (path === "/deploy/7/environments/12/triggers" && method === "POST") {
@@ -1693,7 +1696,7 @@ test("project workspace keeps pending state and permanent run links visible", as
   await expect(page.getByText("Pending deployment", { exact: true })).toBeVisible()
   await expect(page.getByText("Not observed").first()).toBeVisible()
   await page.getByRole("link", { name: "Deployments", exact: true }).last().click()
-  await expect(page.getByRole("link", { name: /Run #84/ })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: /Run #1\b/ })).toHaveAttribute(
     "href",
     "/deploy/7/runs/84",
   )
@@ -1801,21 +1804,43 @@ test("normalized configuration joins keep secrets masked and saved changes pendi
   await expect(page.getByRole("heading", { name: "Runtime configuration" })).toBeVisible()
 })
 
+test("automatic Git deployments are read-only and repository failures stay visible", async ({ page }) => {
+  await mockDashboard(page, { normalized: true })
+  await page.goto("/deploy/7")
+  await expect(page.getByLabel("Automatic deployments")).toContainText(
+    "New commits to main deploy automatically",
+  )
+  await expect(page.getByRole("switch", { name: /deploy/i })).toHaveCount(0)
+  await page.route("**/api/v1/deploy/7/environments/12/git-watch", (route) =>
+    json(route, { automatic: true, branch: "main", status: "unavailable", intervalSeconds: 5 }),
+  )
+  await page.reload()
+  await expect(page.getByLabel("Automatic deployments")).toContainText(
+    "Automatic deployments need attention",
+  )
+  await expect(page.getByLabel("Automatic deployments")).toContainText(
+    "Check repository access and credentials",
+  )
+})
+
 test("automation workspace creates provider, schedule, preview and signed notification policy", async ({
   page,
 }) => {
   await mockDashboard(page, { normalized: true })
   await page.setViewportSize({ width: 375, height: 900 })
   await page.goto("/deploy/7?tab=automations")
-  await expect(page.getByRole("heading", { name: "Source automations" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Additional webhooks" })).toBeVisible()
+  await expect(page.getByLabel("Automatic deployments")).toContainText(
+    "New commits to main deploy automatically",
+  )
   await page.getByRole("button", { name: "Preview environments", exact: true }).click()
   await expect(page.getByText("pr-42", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Git & webhooks", exact: true }).click()
 
-  await page.getByRole("button", { name: "Add automation" }).click()
+  await page.getByRole("button", { name: "Add webhook" }).click()
   await page.getByLabel("Repository").fill("acme/api")
   await page.getByLabel("Watched paths").fill("services/api/**")
-  await page.getByRole("button", { name: "Create automation" }).click()
+  await page.getByRole("button", { name: "Create webhook" }).click()
   await expect(page.getByText("one-time-provider-secret", { exact: true })).toBeVisible()
   await expect(page.getByText(/acme\/api/)).toBeVisible()
 
@@ -1844,7 +1869,7 @@ test("run page renders persisted release evidence and keyboard-selectable transc
   await page.emulateMedia({ reducedMotion: "reduce" })
   await page.goto("/deploy/7/runs/84")
 
-  await expect(page.getByRole("heading", { name: "Run #84" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Run #1" })).toBeVisible()
   await expect(page.getByText("Verify Readiness…", { exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Build logs", exact: true })).toBeVisible()
   await expect
@@ -1930,7 +1955,7 @@ test("run reload restores closed and active states, then cancel and retry stay k
   ]) {
     dashboard.setRunState(state)
     await page.goto("/deploy/7/runs/84")
-    await expect(page.getByRole("heading", { name: "Run #84", exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Run #1", exact: true })).toBeVisible()
     await expect(header.getByText(label, { exact: true })).toBeVisible()
     await page.reload()
     await expect(header.getByText(label, { exact: true })).toBeVisible()

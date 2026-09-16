@@ -49,6 +49,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules/{schedule}/runs", s.handle(s.handleDeploymentScheduleRuns))
 		r.Method(http.MethodGet, "/{id}/previews", s.handle(s.handleDeploymentPreviews))
@@ -554,6 +555,22 @@ func (s *Server) enqueueNormalizedDeploymentWithMetadata(
 	actor, idempotencyKey string,
 	extraMetadata map[string]any,
 ) (*deploy.EngineRun, error) {
+	return s.enqueueNormalizedDeploymentAtSource(ctx, project, environmentID, operation,
+		targetReleaseID, trigger, actor, idempotencyKey, extraMetadata, "", 0)
+}
+
+func (s *Server) enqueueNormalizedDeploymentAtSource(
+	ctx context.Context,
+	project *deploy.Project,
+	environmentID int64,
+	operation deploy.Operation,
+	targetReleaseID int64,
+	trigger deploy.TriggerKind,
+	actor, idempotencyKey string,
+	extraMetadata map[string]any,
+	sourceRevision string,
+	expectedPlanRevision int,
+) (*deploy.EngineRun, error) {
 	target, err := s.modules.deployRuns.EnvironmentExecutionTarget(ctx, project.ID, environmentID)
 	if err != nil {
 		return nil, err
@@ -562,6 +579,9 @@ func (s *Server) enqueueNormalizedDeploymentWithMetadata(
 		return nil, fmt.Errorf("%w: normalized action requires a normalized deployment", deploy.ErrInvalidPlan)
 	}
 	planRevision := target.DesiredRevision
+	if expectedPlanRevision != 0 && planRevision != expectedPlanRevision {
+		return nil, deploy.ErrRevisionConflict
+	}
 	variableSnapshotRunID := int64(0)
 	var selected *deploy.ReleaseWithArtifacts
 	switch operation {
@@ -599,6 +619,22 @@ func (s *Server) enqueueNormalizedDeploymentWithMetadata(
 		}
 		planRevision = selected.Release.PlanRevision
 		variableSnapshotRunID = selected.Release.RunID
+	}
+	source, err := s.modules.deployRuns.SourceConfiguration(ctx, environmentID, planRevision)
+	if err != nil {
+		return nil, err
+	}
+	if deploy.IsRemoteGitSource(source) {
+		if selected != nil {
+			sourceRevision = selected.Release.SourceRevision
+		} else if sourceRevision == "" && operation != deploy.OperationPreviewRemove {
+			sourceRevision, err = s.modules.deploySources.ResolveGitRevision(ctx, source)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		sourceRevision = ""
 	}
 	metadataValues := map[string]any{
 		"compatibility": false, "targetReleaseId": targetReleaseID, "changedPaths": []string{},
@@ -645,6 +681,7 @@ func (s *Server) enqueueNormalizedDeploymentWithMetadata(
 		ProjectID: project.ID, EnvironmentID: environmentID, Operation: operation,
 		Trigger: trigger, Actor: actor, IdempotencyKey: idempotencyKey,
 		RequestDigest: hex.EncodeToString(digest[:]), PlanRevision: planRevision,
+		SourceRevision: sourceRevision, ExpectedPlanRevision: expectedPlanRevision,
 		VariableSnapshotRunID: variableSnapshotRunID,
 		Priority:              priority, SlotClass: slot, Metadata: metadata, Steps: steps,
 	})

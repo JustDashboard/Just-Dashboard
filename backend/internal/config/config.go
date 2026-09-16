@@ -72,11 +72,9 @@ type Config struct {
 	MetricsRetention time.Duration
 
 	// UpdateCheck is whether the dashboard may ask the repository whether a
-	// newer version exists. It is the only outbound request this product makes
-	// on its own initiative, which is worth a switch of its own: plenty of
-	// these installs sit on machines that deliberately reach nothing. Turning
-	// it off leaves the changelog for the installed version readable, because
-	// that half is compiled in.
+	// newer version exists. Turning it off leaves the compiled-in changelog
+	// readable. Deployment branch monitoring uses separate Git connections
+	// and is independent of update discovery.
 	UpdateCheck bool
 	// UpdateRepo is the GitHub repository releases are read from, as
 	// owner/name. A fork sets it and starts describing its own releases.

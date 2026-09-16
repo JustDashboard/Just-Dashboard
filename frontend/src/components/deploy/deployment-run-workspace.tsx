@@ -184,7 +184,7 @@ export function DeploymentRunWorkspace() {
             {project.data?.deployment.name || `Deployment ${projectID}`}
           </Link>
         }
-        title={`Run #${run.id}`}
+        title={`Run #${run.runNumber}`}
         actions={
           <>
             <DeploymentStatus state={run.state} />

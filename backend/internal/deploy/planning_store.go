@@ -944,19 +944,6 @@ func (s *PlanningStore) Commit(
 			return nil, err
 		}
 	}
-	if configuration.AutoDeploy {
-		kind := automaticTriggerKind(draft.Data.Source)
-		config := mustJSON(map[string]any{
-			"repository": draft.Data.Source.Repository, "ref": branch,
-		})
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO deploy_triggers(
-			  environment_id, name, kind, provider, config_json, enabled, created_at, updated_at)
-			VALUES(?, 'deploy on push', ?, ?, ?, 1, ?, ?)`, environmentID, kind,
-			draft.Data.Source.Provider, string(config), now.Unix(), now.Unix()); err != nil {
-			return nil, err
-		}
-	}
 	update, err := tx.ExecContext(ctx, `
 		UPDATE deploy_drafts SET committed_project_id = ?, updated_at = ?
 		 WHERE id = ? AND revision = ? AND committed_project_id = 0`,
@@ -1007,21 +994,6 @@ func digestBytes(parts ...[]byte) string {
 		_, _ = h.Write([]byte{0})
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
-}
-
-func automaticTriggerKind(source *DraftSourceConfig) TriggerKind {
-	switch source.Provider {
-	case "github":
-		return TriggerGitHub
-	case "gitlab":
-		return TriggerGitLab
-	case "bitbucket":
-		return TriggerBitbucket
-	case "gitea":
-		return TriggerGitea
-	default:
-		return TriggerGenericHook
-	}
 }
 
 func renderBuildPreview(build BuildPlanConfig) string {

@@ -274,7 +274,19 @@ func (r *CheckRunner) runAttempt(
 			result.Code = "invalid_target"
 			break
 		}
-		response, err := r.http.Do(request)
+		client := *r.http
+		if len(config.ExpectedStatus) == 0 {
+			// A redirect alone does not prove the candidate can serve a page.
+			// Stay on that candidate: following an external login/public route
+			// could accidentally check the predecessor instead.
+			client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+				if len(via) >= 5 || next.URL.Scheme != request.URL.Scheme || next.URL.Host != request.URL.Host {
+					return http.ErrUseLastResponse
+				}
+				return nil
+			}
+		}
+		response, err := client.Do(request)
 		result.Address = address
 		if err != nil {
 			result.Code = checkNetworkError(attemptCtx, err)
@@ -363,7 +375,7 @@ func targetAddress(config CheckConfiguration, target CheckTarget) (string, int) 
 
 func expectedHTTPStatus(status int, expected []int) bool {
 	if len(expected) == 0 {
-		return status >= 200 && status < 400
+		return status >= 200 && status < 300
 	}
 	for _, candidate := range expected {
 		if status == candidate {

@@ -89,6 +89,7 @@ type TriggerKind string
 
 const (
 	TriggerManual      TriggerKind = "manual"
+	TriggerGitPush     TriggerKind = "git_push"
 	TriggerLegacyHook  TriggerKind = "legacy_hook"
 	TriggerGenericHook TriggerKind = "generic_hook"
 	TriggerGitHub      TriggerKind = "github"
@@ -325,7 +326,7 @@ func validOperation(value Operation) bool {
 
 func validTrigger(value TriggerKind) bool {
 	switch value {
-	case TriggerManual, TriggerLegacyHook, TriggerGenericHook, TriggerGitHub,
+	case TriggerManual, TriggerGitPush, TriggerLegacyHook, TriggerGenericHook, TriggerGitHub,
 		TriggerGitLab, TriggerBitbucket, TriggerGitea, TriggerAPI, TriggerSchedule,
 		TriggerPreview, TriggerRollback, TriggerMigration:
 		return true

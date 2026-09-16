@@ -91,7 +91,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		       e.id, e.name, e.kind, e.desired_revision, e.live_release_id,
 		       e.strategy, e.expected_downtime,
 		       COALESCE(l.plan_revision, 0),
-		       COALESCE(src.kind, ''), COALESCE(src.identity_json, '{}'),
+		       COALESCE(src.kind, ''), COALESCE(NULLIF(l.source_identity_json, '{}'), src.identity_json, '{}'),
 		       COALESCE(build.method, 'none'),
 		       COALESCE(runtime.config_json, '{}'), COALESCE(live_runtime.port, 0),
 		       COALESCE((

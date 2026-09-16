@@ -78,6 +78,7 @@ type moduleSet struct {
 	deployArtifacts  *deploy.ArtifactBuilder
 	deployAutomation *deploy.AutomationStore
 	deploySchedule   *deploy.AutomationScheduler
+	deployGit        *deploy.GitWatcher
 	// Upstream game-version metadata, behind one bounded client and a short
 	// cache so opening the wizard does not hammer somebody else's API.
 	gameVersions *gameserver.Adapter
@@ -215,6 +216,7 @@ func (s *Server) initModules() {
 		s.Log,
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule)
+	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 }
 
 // restartProxy restarts the Caddy container in this dashboard's own stack.

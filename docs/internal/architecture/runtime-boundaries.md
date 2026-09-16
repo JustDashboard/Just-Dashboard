@@ -6,8 +6,9 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `jobs`, three backup pieces, and ten deployment components covering legacy
-execution, planning, sources, preflight, artifacts, orchestration, automation, and scheduling.
+`linuxUsers`, `netsec`, `jobs`, three backup pieces, and eleven deployment components covering legacy
+execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, and Git branch
+monitoring.
 
 **Every module is optional.** A host with no Docker socket, no systemd or no fail2ban serves everything
 else; affected routes return a precise "unavailable on this host" code the frontend renders as
@@ -19,6 +20,12 @@ purpose is to have been running while nobody was looking), the Docker event log,
 the backup scheduler, `selfupdate.Installer.Reconcile`, `selfcfg.Applier.Reconcile` and the Tailscale
 certificate keeper. `Shutdown` releases what outlives a request:
 sampler, scheduler, live PTYs, database pools, Docker client.
+
+The deployment engine also starts automatic production Git branch monitoring after its recovery.
+The monitor makes bounded outbound ref reads every five seconds and queues immutable source revisions;
+it stops before engine shutdown so no new automatic work arrives during the drain. Its persisted
+cursor survives restarts. See the [deployment guide](../deployments/implementation.md) for eligibility,
+failure handling and the unchanged health-gated activation contract.
 
 `helpers.detachedContext` is the deliberate opposite: work that must outlive its request (a backup
 transfer, a `compose up --build`) descends from `context.Background()` and is not cancelled by shutdown
@@ -88,7 +95,8 @@ Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`
 (`backup_jobs`, `backup_runs`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
-blueprint installs, port and queue leases, removals, drafts, schedules, notifications, and previews; proxy
+blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,
+and previews; proxy
 watching (`watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
 hashed rather than stored); the general `settings` key/value table; and mount, container, and host metric

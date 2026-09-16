@@ -117,7 +117,7 @@ func TestEnqueuePersistsRequestStepsEventsAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created || run.State != RunQueued || run.QueuedAt == nil {
+	if !created || run.State != RunQueued || run.QueuedAt == nil || run.RunNumber != 1 {
 		t.Fatalf("enqueue = %#v, created=%v", run, created)
 	}
 	steps, err := f.runs.Steps(context.Background(), run.ID)
@@ -149,7 +149,7 @@ func TestEnqueuePersistsRequestStepsEventsAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created || replay.ID != run.ID {
+	if created || replay.ID != run.ID || replay.RunNumber != run.RunNumber {
 		t.Fatalf("idempotent replay = %#v, created=%v; want run %d", replay, created, run.ID)
 	}
 	req.RequestDigest = "sha256:different"
@@ -524,14 +524,14 @@ func TestRetryCreatesAJoinedIdempotentRunOnlyForFailedOrCancelledInput(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created || retry.RetryOfRunID != cancelled.ID || retry.State != RunQueued {
+	if !created || retry.RetryOfRunID != cancelled.ID || retry.State != RunQueued || retry.RunNumber != 2 {
 		t.Fatalf("cancelled retry = %#v, created=%v", retry, created)
 	}
 	replay, created, err := f.runs.Retry(context.Background(), cancelled.ID, "admin", "retry-cancelled")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created || replay.ID != retry.ID {
+	if created || replay.ID != retry.ID || replay.RunNumber != retry.RunNumber {
 		t.Fatalf("idempotent retry replay = %#v, created=%v; want run %d", replay, created, retry.ID)
 	}
 

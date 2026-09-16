@@ -187,6 +187,8 @@ CREATE TABLE IF NOT EXISTS deploy_env (
 CREATE TABLE IF NOT EXISTS deploy_runs (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id           INTEGER NOT NULL REFERENCES deploy_projects(id) ON DELETE CASCADE,
+  run_number           INTEGER NOT NULL DEFAULT 0,
+  source_revision      TEXT NOT NULL DEFAULT '',
   environment_id       INTEGER NOT NULL DEFAULT 0,
   started_at           INTEGER NOT NULL,
   ended_at             INTEGER NOT NULL DEFAULT 0,
@@ -569,6 +571,16 @@ BEGIN
   SELECT RAISE(ABORT, 'deployment run plan snapshot is immutable');
 END;
 
+CREATE TABLE IF NOT EXISTS deploy_git_watches (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  source_key     TEXT NOT NULL,
+  revision       TEXT NOT NULL DEFAULT '',
+  generation     INTEGER NOT NULL DEFAULT 0,
+  run_id         INTEGER NOT NULL DEFAULT 0,
+  status         TEXT NOT NULL DEFAULT 'watching',
+  checked_at     INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS deploy_blueprint_installs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id    INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
@@ -822,6 +834,28 @@ CREATE INDEX IF NOT EXISTS idx_stack_deployments_project
 // to a 0.6.6 deploy_runs table; a fresh database reaches the same final shape
 // through this second block.
 const postColumnSchema = `
+CREATE TRIGGER IF NOT EXISTS deploy_run_source_revision_immutable
+BEFORE UPDATE OF source_revision ON deploy_runs
+BEGIN
+  SELECT RAISE(ABORT, 'deployment run source revision is immutable');
+END;
+WITH numbered AS MATERIALIZED (
+  SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY id) AS number
+  FROM deploy_runs
+)
+UPDATE deploy_runs SET run_number = (SELECT number FROM numbered WHERE numbered.id = deploy_runs.id)
+WHERE run_number = 0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_project_number
+  ON deploy_runs(project_id, run_number) WHERE run_number > 0;
+-- Both legacy and persistent-engine inserts allocate inside the same SQLite write.
+CREATE TRIGGER IF NOT EXISTS deploy_run_number_allocate
+AFTER INSERT ON deploy_runs WHEN NEW.run_number = 0
+BEGIN
+  UPDATE deploy_runs SET run_number = (
+    SELECT COALESCE(MAX(run_number), 0) + 1 FROM deploy_runs
+    WHERE project_id = NEW.project_id AND run_number > 0
+  ) WHERE id = NEW.id;
+END;
 CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
   ON metric_container_samples(container_id, ts);
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
@@ -867,6 +901,8 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "archived_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_runs", "run_number", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_runs", "source_revision", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "state", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "operation", "TEXT NOT NULL DEFAULT 'deploy'"},
 	{"deploy_runs", "requested_at", "INTEGER NOT NULL DEFAULT 0"},

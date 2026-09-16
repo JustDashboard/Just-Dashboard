@@ -221,7 +221,6 @@ export function defaultConfiguration(
     dependencies: [],
     checks: defaultChecks(profile, port),
     domains: [],
-    autoDeploy: false,
   }
 }
 

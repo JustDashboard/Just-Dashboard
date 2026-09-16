@@ -275,8 +275,9 @@ done by hand, and the UI refuses to fold it away.
   `raw.githubusercontent.com`, parsed by the same function both times — so a malformed file fails the test
   run before it can be a malformed file every install downloads. The compiled-in copy is what an install
   with `JD_UPDATE_CHECK=false` still shows.
-- **The check is the only outbound request this product makes on its own initiative**: one unauthenticated
-  GET, a user agent with product and version only, and a switch to turn it off. A failure keeps the
+- **Update discovery is independently controlled**: one unauthenticated
+  GET, a user agent with product and version only, and a switch to turn it off. Automatic deployment
+  branch monitoring uses separate outbound Git connections regardless of that switch. A failure keeps the
   previous good answer rather than blanking the banner — a dropped tunnel is a normal Tuesday here.
 - Cadence is two floors, not a timer, because the moment somebody wants a current answer is the moment
   they open the page. `Freshness`: `Cached` nudges past `checkInterval` (2 h), `OnLoad` past

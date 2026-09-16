@@ -609,7 +609,7 @@ function DeploymentsTab({
                     href={`/deploy/${project.id}/runs/${run.id}`}
                     className="grid min-h-14 min-w-0 gap-1 px-4 py-3 hover:bg-row-hover sm:grid-cols-[8rem_minmax(0,1fr)_8rem_auto] sm:items-center sm:gap-4"
                   >
-                    <span className="font-mono text-xs font-medium">Run #{run.id}</span>
+                    <span className="font-mono text-xs font-medium">Run #{run.runNumber}</span>
                     <span className="min-w-0 truncate text-xs text-muted-foreground">
                       {humanize(run.operation)} · {run.trigger} · {run.actor}
                     </span>

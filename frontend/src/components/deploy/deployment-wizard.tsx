@@ -2007,13 +2007,6 @@ function ConfigurationStep({
               Request HTTPS
             </Label>
           )}
-          <Label className="flex min-h-11 items-center gap-2 text-xs">
-            <Switch
-              checked={configuration.autoDeploy ?? false}
-              onCheckedChange={(autoDeploy) => onChange({ ...configuration, autoDeploy })}
-            />
-            Deploy when the selected source changes
-          </Label>
         </div>
       </details>
       <WizardEnvironment draftId={draftId} configuration={configuration} onChange={onChange} />

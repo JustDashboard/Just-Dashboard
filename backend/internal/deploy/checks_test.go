@@ -24,6 +24,52 @@ type checkBackendFake struct {
 	commands [][]string
 }
 
+func TestHTTPReadinessFollowsOnlyCandidateRedirects(t *testing.T) {
+	var externalRequests int
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		externalRequests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer external.Close()
+	candidate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			http.Redirect(w, r, "/page", http.StatusTemporaryRedirect)
+		case "/page":
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/healthy":
+			http.Redirect(w, r, "/ready", http.StatusTemporaryRedirect)
+		case "/ready":
+			w.WriteHeader(http.StatusOK)
+		case "/external":
+			http.Redirect(w, r, external.URL, http.StatusFound)
+		case "/loop":
+			http.Redirect(w, r, "/loop", http.StatusFound)
+		}
+	}))
+	defer candidate.Close()
+	for _, test := range []struct {
+		path     string
+		expected []int
+		outcome  HealthOutcome
+		status   int
+	}{
+		{"/", nil, HealthFailed, 500}, {"/healthy", nil, HealthPassed, 200},
+		{"/external", nil, HealthFailed, 302}, {"/loop", nil, HealthFailed, 302},
+		{"/", []int{307}, HealthPassed, 307},
+	} {
+		check := PlannedCheck{Name: "ready", Kind: "http", Phase: "readiness", Required: true,
+			Config: mustJSON(CheckConfiguration{URL: candidate.URL + test.path, Attempts: 1, TimeoutSeconds: 1, ExpectedStatus: test.expected})}
+		evidence := NewCheckRunner(nil).Run(context.Background(), check, CheckTarget{})
+		if evidence.Outcome != test.outcome || evidence.Attempts[0].StatusCode != test.status {
+			t.Fatalf("%s: %+v", test.path, evidence)
+		}
+	}
+	if externalRequests != 0 {
+		t.Fatal("candidate readiness visited an external server")
+	}
+}
+
 func (f *checkBackendFake) ContainerHealth(_ context.Context, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

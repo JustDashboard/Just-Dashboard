@@ -1006,7 +1006,7 @@ func TestDraftRevisionOwnershipExpiryAndAtomicIdempotentCommit(t *testing.T) {
 		"deploy_projects": 1, "deploy_environments": 1, "deploy_sources": 1,
 		"deploy_build_plans": 1, "deploy_runtime_plans": 1,
 		"deploy_variable_revisions": 1, "deploy_dependencies": 2,
-		"deploy_checks": 1, "deploy_triggers": 1, "deploy_runs": 0,
+		"deploy_checks": 1, "deploy_triggers": 0, "deploy_runs": 0,
 	} {
 		if got := planningTableCount(t, fixture.store, table); got != want {
 			t.Errorf("%s rows = %d, want %d", table, got, want)

@@ -213,6 +213,13 @@ func (s *OrchestrationStore) ExecutionPlan(ctx context.Context, run EngineRun) (
 	if err := plan.SourceConfig.Validate(); err != nil {
 		return nil, err
 	}
+	if run.SourceRevision != "" {
+		if !IsRemoteGitSource(plan.SourceConfig) || !validGitObjectID(run.SourceRevision) {
+			return nil, fmt.Errorf("%w: run source revision does not match a remote Git source", ErrInvalidPlan)
+		}
+		plan.SourceIdentity.Revision = run.SourceRevision
+		plan.SourceDigest = digestBytes([]byte(sourceConfig), mustJSON(plan.SourceIdentity))
+	}
 	if !validBuildMethod(plan.Build.Method) || !validStrategy(plan.Runtime.Strategy) {
 		return nil, fmt.Errorf("%w: persisted build/runtime method is invalid", ErrInvalidPlan)
 	}

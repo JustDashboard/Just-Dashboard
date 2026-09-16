@@ -266,7 +266,8 @@ type PlanConfiguration struct {
 	Dependencies []PlannedDependency `json:"dependencies"`
 	Checks       []PlannedCheck      `json:"checks"`
 	Domains      []PlannedDomain     `json:"domains"`
-	AutoDeploy   bool                `json:"autoDeploy,omitempty"`
+	// Accepted for older clients; remote Git branches are always monitored.
+	AutoDeploy bool `json:"autoDeploy,omitempty"`
 }
 
 type PlanAction struct {

@@ -146,8 +146,10 @@ only renderer/executor/validation authority for their feature.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived
   projects release the live name without deleting history or resources. New projects from the same
-  repository receive independent identities. Run IDs remain globally increasing identifiers, labelled
-  "Run #…" in the UI; they are not per-project retry counts.
+  repository receive independent identities. Each project displays its own persistent run sequence,
+  starting at **Run #1** across its environments and operations. Existing history is numbered in run-ID
+  order on upgrade; a SQLite insert trigger allocates subsequent numbers atomically for both legacy
+  and normalized runs. Global run IDs still identify API routes, links, events and audit evidence.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move.
@@ -160,6 +162,10 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
+  Default HTTP checks require a final 2xx response and follow at most four redirects on the same
+  origin. External redirects and loops fail, so a candidate cannot pass by redirecting to the old
+  public release or to a page that returns 500. Explicit expected-status lists retain exact-status,
+  no-redirect behavior.
 - Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
@@ -208,10 +214,30 @@ only renderer/executor/validation authority for their feature.
   never removes runtime or data. A separate destructive route first returns a digest-bound, managed-only
   target list; data targets require their exact resource name and every removal is delegated to its owning
   feature and audited. Linked and observed targets never enter that plan.
-- Automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
+- Remote Git production branches are monitored automatically after the first explicit deployment,
+  including existing projects; there is no opt-in switch. `GitWatcher` checks refs every five seconds
+  with four bounded concurrent observations using the source adapter's credential isolation and
+  `git ls-remote`. This works behind the dashboard's private network allowlist without public ingress
+  or GitHub hook registration. Outages and slow Git reads can delay detection; it is polling, not an
+  instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
+  are excluded. Monitoring status and access failures appear on the overview and Automations page.
+  `deploy_git_watches` persists the last attempted revision and observation generation: restarts,
+  failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
+  a later branch change (including a force-push back to an older commit) remains eligible. Watching
+  never advances a live release pointer. Eligible web/static projects retain blue/green health-gated
+  activation; exclusive-storage and other stop-first workloads retain their documented downtime and
+  recovery contract. Archiving stops monitoring.
+- Deploy/force-build source resolution records the current remote Git object in the additive,
+  immutable `deploy_runs.source_revision` field before enqueue; execution derives its source identity
+  and digest from that frozen revision. Retries copy it, while redeploy/rollback reuse their selected
+  release's identity. Old runs keep their saved plan identity. The deprecated draft `autoDeploy` input
+  remains accepted for compatibility but has no effect; draft commit no longer creates a hook without
+  a secret or provider registration. Automatic runs are audited as `deploy.git.change` and use the
+  same persistent queue, configuration/variable snapshots, checks and activation as manual runs.
+- Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Watch paths apply
-  only to webhook delivery; manual and rollback runs are never filtered.
+  only to webhook delivery; default branch monitoring, manual and rollback runs are never filtered.
 - The scheduler advances a persisted next-run claim atomically and executes a bounded, ordered action
   chain. Chain history stores only action/status/error-code/duration evidence. Preview environments clone
   immutable desired configuration and sealed variables, inherit only linked/observed dependencies, and own
@@ -419,7 +445,8 @@ when its recorded release is the project's current live release; older runs link
 
 Settings has dedicated Build settings, Runtime settings, Environment variables, Domains & ports,
 Storage, Databases & backups, Automations and Lifecycle destinations. Variable edits and automation
-creation use sheets. Automation separates Git/webhooks, schedules, previews and notifications;
+creation use sheets. Automatic branch monitoring has read-only status; Automation separates additional
+webhooks, schedules, previews and notifications;
 one-time signing secrets remain visible after either provider or notification creation. Dependency
 pickers show resource names, while the owner modules retain execution authority. Game console output
 uses numbered lines, and the raw server settings file is available through a disclosure.

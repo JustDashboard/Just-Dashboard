@@ -2069,6 +2069,8 @@ export type DeploymentStepState =
 
 export type DeploymentEngineRun = {
   id: number
+  runNumber: number
+  sourceRevision?: string
   projectId: number
   environmentId: number
   state: DeploymentRunState
@@ -2800,7 +2802,6 @@ export type DeploymentConfiguration = {
     config?: Record<string, unknown>
   }[]
   domains: { hostname: string; https: boolean; ownership: "managed" | "linked" }[]
-  autoDeploy?: boolean
 }
 
 export type DeploymentVariable = {
@@ -2834,10 +2835,7 @@ export type DeploymentPendingState = {
   changes: DeploymentPendingChange[]
 }
 
-export type DeploymentEnvironmentConfiguration = Omit<
-  DeploymentConfiguration,
-  "variables" | "autoDeploy"
-> & {
+export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "variables"> & {
   revision: number
   variables: DeploymentVariable[]
   pending: DeploymentPendingState
@@ -2933,6 +2931,7 @@ export type DeploymentPreflight = {
 
 export type DeployRun = {
   id: number
+  runNumber: number
   projectId: number
   startedAt: string
   endedAt?: string
