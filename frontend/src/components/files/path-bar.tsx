@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { rowReveal } from "@/components/icon-action"
+import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
 const clean = (p: string) => p.replace(/\/+$/, "") || "/"
 
@@ -31,16 +32,23 @@ const clean = (p: string) => p.replace(/\/+$/, "") || "/"
  * The separators are not decoration either: each one lists the folders beside
  * the crumb after it, which is how you get from `/var/www/site-a/public` to
  * `site-b` without walking back up three levels.
+ *
+ * Every crumb is also a drop target, so a row dragged up onto `www` lands in
+ * /var/www — the one move a tree beside the listing does not make easy.
  */
 export function PathBar({
   path,
   home,
   onNavigate,
+  onDropPaths,
+  onDropFiles,
   className,
 }: {
   path: string
   home?: string
   onNavigate: (path: string) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
   className?: string
 }) {
   const [editing, setEditing] = useState(false)
@@ -50,6 +58,9 @@ export function PathBar({
       if (event.key.toLowerCase() !== "l" || !(event.metaKey || event.ctrlKey) || event.shiftKey) {
         return
       }
+      // A dialog open anywhere owns the keyboard; the editor's own Ctrl+L
+      // must not flip a path bar the operator cannot see into a text field.
+      if (document.querySelector("[role='dialog']")) return
       event.preventDefault()
       setEditing(true)
     }
@@ -102,16 +113,14 @@ export function PathBar({
         <SiblingMenu dir="/" onNavigate={onNavigate} />
         {crumbs.map((crumb, i) => (
           <div key={crumb.href} className="flex shrink-0 items-center">
-            <button
-              type="button"
-              className={cn(
-                "rounded-md px-1.5 py-0.5 text-body transition-colors hover:bg-accent hover:text-accent-foreground",
-                i === crumbs.length - 1 && "font-medium",
-              )}
-              onClick={() => onNavigate(crumb.href)}
-            >
-              {crumb.label}
-            </button>
+            <Crumb
+              href={crumb.href}
+              label={crumb.label}
+              last={i === crumbs.length - 1}
+              onNavigate={onNavigate}
+              onDropPaths={onDropPaths}
+              onDropFiles={onDropFiles}
+            />
             <SiblingMenu dir={crumb.href} onNavigate={onNavigate} />
           </div>
         ))}
@@ -132,6 +141,39 @@ export function PathBar({
         <TooltipContent>Type a path (Ctrl+L)</TooltipContent>
       </Tooltip>
     </div>
+  )
+}
+
+function Crumb({
+  href,
+  label,
+  last,
+  onNavigate,
+  onDropPaths,
+  onDropFiles,
+}: {
+  href: string
+  label: string
+  last: boolean
+  onNavigate: (path: string) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+}) {
+  // The folder being browsed is not a target for its own rows.
+  const drop = useDropTarget({ dir: last ? null : href, onDropPaths, onDropFiles })
+  return (
+    <button
+      type="button"
+      {...drop.handlers}
+      className={cn(
+        "rounded-md px-1.5 py-0.5 text-body transition-colors hover:bg-accent hover:text-accent-foreground",
+        last && "font-medium",
+        drop.over && "bg-wash-brand",
+      )}
+      onClick={() => onNavigate(href)}
+    >
+      {label}
+    </button>
   )
 }
 

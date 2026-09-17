@@ -72,7 +72,7 @@ func TestMutationsRejectOutwardSymlinkBeforeMissingDescendants(t *testing.T) {
 			t.Fatal(err)
 		}
 		dst := filepath.Join(root, "escape", "copy-parent", "copy")
-		if err := s.Copy(src, dst); !errors.Is(err, ErrOutsideRoot) {
+		if err := s.Copy(src, dst, false); !errors.Is(err, ErrOutsideRoot) {
 			t.Fatalf("Copy error = %v, want ErrOutsideRoot", err)
 		}
 		if _, err := os.Stat(filepath.Join(outside, "copy-parent")); !os.IsNotExist(err) {

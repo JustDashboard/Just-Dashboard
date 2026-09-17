@@ -31,6 +31,7 @@ import {
 import { Spinner } from "@/components/state"
 import { RowActions } from "@/components/icon-action"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
 /** What the inline confirm surface needs; the tools panel renders it. */
 export type ConfirmRequest = {
@@ -69,6 +70,13 @@ export function FileTree({
   onConfirm,
   onChanged,
   onOpenInFiles,
+  hidden,
+  chrome = true,
+  foldersOnly = false,
+  refreshTick,
+  onDropPaths,
+  onDropFiles,
+  className,
 }: {
   root: string
   /** Absolute path → its git status, so a changed file can carry a badge. */
@@ -76,7 +84,8 @@ export function FileTree({
   canWrite: boolean
   canDelete: boolean
   activeFile?: string
-  /** Highlight this folder as the one currently open elsewhere on the page. */
+  /** Highlight this folder as the one currently open elsewhere on the page,
+   *  and open the folders above it so it can be seen. */
   activeDir?: string
   onOpenFile: (path: string) => void
   /** When set, clicking a folder also reports it — the Files page navigates its
@@ -85,8 +94,23 @@ export function FileTree({
   onConfirm: (req: ConfirmRequest) => void
   onChanged: () => void
   onOpenInFiles?: (path: string) => void
+  /** Show dotfiles. Controlled by the caller where the page has its own switch. */
+  hidden?: boolean
+  /** Draw the root strip. The Files page's sidebar has its own, so it drops this one. */
+  chrome?: boolean
+  /** A navigator rather than an explorer: folders only, the listing beside it has the files. */
+  foldersOnly?: boolean
+  /** Bumped by the caller when something changed the tree from elsewhere — an
+   *  upload, a rename in the listing — so open folders reload without collapsing. */
+  refreshTick?: number
+  /** Folders become drop targets for paths dragged from the listing. */
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  /** And for files dragged in from the desktop. */
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+  className?: string
 }) {
-  const [showHidden, setShowHidden] = useViewState("files.tree.hidden", false)
+  const [ownHidden, setOwnHidden] = useViewState("files.tree.hidden", false)
+  const showHidden = hidden ?? ownHidden
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([root]))
   const [children, setChildren] = useState<Record<string, FileEntry[]>>({})
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -99,7 +123,8 @@ export function FileTree({
       setLoading((s) => new Set(s).add(path))
       try {
         const listing = await get<FileListing>("/files/list", { path, hidden: showHidden })
-        setChildren((c) => ({ ...c, [path]: sortEntries(listing.entries) }))
+        const entries = foldersOnly ? listing.entries.filter((e) => e.isDir) : listing.entries
+        setChildren((c) => ({ ...c, [path]: sortEntries(entries) }))
         setFailed((f) => {
           if (!f[path]) return f
           const next = { ...f }
@@ -116,7 +141,7 @@ export function FileTree({
         })
       }
     },
-    [showHidden],
+    [showHidden, foldersOnly],
   )
 
   // Load the root, and re-load every already-open folder, whenever the hidden
@@ -136,6 +161,42 @@ export function FileTree({
     },
     [expanded, root, load],
   )
+
+  // Something outside the tree changed the disk. Every open folder is read
+  // again rather than the one guessed at: a rename can move an entry between
+  // two of them, and a folder that is open is a folder worth keeping true.
+  useEffect(() => {
+    if (refreshTick === undefined) return
+    for (const path of expanded) void load(path)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick])
+
+  // Reveal the folder being browsed: open every folder above it, so a
+  // double-click in the listing is answered by the tree unfolding to where
+  // the operator now is, the way a navigator pane does.
+  useEffect(() => {
+    if (!activeDir || activeDir === root) return
+    if (!activeDir.startsWith(root === "/" ? "/" : root + "/")) return
+    const parts = activeDir
+      .slice(root === "/" ? 1 : root.length + 1)
+      .split("/")
+      .filter(Boolean)
+    const ancestors: string[] = []
+    let acc = root
+    for (const part of parts.slice(0, -1)) {
+      acc = acc === "/" ? `/${part}` : `${acc}/${part}`
+      ancestors.push(acc)
+    }
+    if (ancestors.length === 0) return
+    setExpanded((s) => {
+      if (ancestors.every((p) => s.has(p))) return s
+      const next = new Set(s)
+      for (const p of ancestors) next.add(p)
+      return next
+    })
+    for (const p of ancestors) if (!children[p] && !loading.has(p)) void load(p)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDir, root])
 
   /**
    * Opens a folder without the possibility of closing it.
@@ -209,8 +270,46 @@ export function FileTree({
       },
     })
 
+  const body = (
+    <TreeLevel
+      parent={root}
+      depth={0}
+      entries={children[root]}
+      loadingThis={loading.has(root)}
+      error={failed[root]}
+      expanded={expanded}
+      entriesByPath={children}
+      loading={loading}
+      failed={failed}
+      statusMap={statusMap}
+      activeFile={activeFile}
+      activeDir={activeDir}
+      canWrite={canWrite}
+      canDelete={canDelete}
+      creating={creating}
+      onToggle={toggle}
+      onExpand={expand}
+      onOpenFile={onOpenFile}
+      onNavigate={onNavigate}
+      onStartCreate={(parent, kind) => {
+        setExpanded((s) => new Set(s).add(parent))
+        setCreating({ parent, kind })
+      }}
+      onCancelCreate={() => setCreating(null)}
+      onSubmitCreate={submitCreate}
+      onDelete={requestDelete}
+      onDropPaths={onDropPaths}
+      onDropFiles={onDropFiles}
+      foldersOnly={foldersOnly}
+    />
+  )
+
+  // Without its strip the tree is just its rows, for a caller that scrolls
+  // them inside something of its own.
+  if (!chrome) return <div className={cn("py-1", className)}>{body}</div>
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       {/* The root, and what can be done at it. Two verbs inline — a new file
           and a refresh are the ones pressed all day — and the rest behind one
           menu with a word each: five icon buttons and a checkbox in a strip
@@ -255,13 +354,15 @@ export function FileTree({
             <TooltipContent>Hidden files, new folder, open in Files</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuCheckboxItem
-              className="text-xs"
-              checked={showHidden}
-              onCheckedChange={(v) => setShowHidden(v === true)}
-            >
-              Show hidden files
-            </DropdownMenuCheckboxItem>
+            {hidden === undefined && (
+              <DropdownMenuCheckboxItem
+                className="text-xs"
+                checked={showHidden}
+                onCheckedChange={(v) => setOwnHidden(v === true)}
+              >
+                Show hidden files
+              </DropdownMenuCheckboxItem>
+            )}
             {canWrite && (
               <DropdownMenuItem
                 className="gap-2 text-xs"
@@ -282,36 +383,7 @@ export function FileTree({
         </DropdownMenu>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto py-1">
-        <TreeLevel
-          parent={root}
-          depth={0}
-          entries={children[root]}
-          loadingThis={loading.has(root)}
-          error={failed[root]}
-          expanded={expanded}
-          entriesByPath={children}
-          loading={loading}
-          failed={failed}
-          statusMap={statusMap}
-          activeFile={activeFile}
-          activeDir={activeDir}
-          canWrite={canWrite}
-          canDelete={canDelete}
-          creating={creating}
-          onToggle={toggle}
-          onExpand={expand}
-          onOpenFile={onOpenFile}
-          onNavigate={onNavigate}
-          onStartCreate={(parent, kind) => {
-            setExpanded((s) => new Set(s).add(parent))
-            setCreating({ parent, kind })
-          }}
-          onCancelCreate={() => setCreating(null)}
-          onSubmitCreate={submitCreate}
-          onDelete={requestDelete}
-        />
-      </div>
+      <div className="min-h-0 flex-1 overflow-auto py-1">{body}</div>
     </div>
   )
 }
@@ -340,6 +412,9 @@ type LevelProps = {
   onCancelCreate: () => void
   onSubmitCreate: (name: string) => void
   onDelete: (entry: FileEntry, parent: string) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+  foldersOnly?: boolean
 }
 
 /** One directory's contents, plus the create-row that belongs to it. */
@@ -375,7 +450,7 @@ function TreeLevel(props: LevelProps) {
           {error}
         </div>
       )}
-      {entries?.length === 0 && creating?.parent !== parent && (
+      {entries?.length === 0 && creating?.parent !== parent && !props.foldersOnly && (
         <div
           className="px-2 py-1 text-hint text-muted-foreground italic"
           style={{ paddingLeft: indent + 16 }}
@@ -398,6 +473,12 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
   const tone = status ? gitTone(status) : null
   const dirHasChanges =
     entry.isDir && Object.keys(statusMap).some((p) => p.startsWith(entry.path + "/"))
+
+  const drop = useDropTarget({
+    dir: entry.isDir ? entry.path : null,
+    onDropPaths: props.onDropPaths,
+    onDropFiles: props.onDropFiles,
+  })
 
   const onFolderClick = () => {
     props.onToggle(entry.path)
@@ -422,6 +503,8 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
   return (
     <>
       <div
+        data-entry-path={entry.path}
+        {...drop.handlers}
         className={cn(
           "group relative flex items-center gap-1 py-[3px] pr-1 text-body hover:bg-row-hover",
           // The tint and the rule down the edge are the same fact as the
@@ -431,7 +514,8 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
           tone &&
             "bg-(--git-tint) before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-['']",
           activeFile === entry.path && "bg-accent",
-          entry.isDir && activeDir === entry.path && "bg-accent",
+          entry.isDir && activeDir === entry.path && "bg-accent font-medium",
+          drop.over && "bg-wash-brand",
         )}
         style={{ paddingLeft: indent, ...(tone ? gitStyle(tone) : null) }}
       >

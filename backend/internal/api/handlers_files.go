@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime"
@@ -140,14 +141,22 @@ func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) error
 	if q.Get("format") == "zip" {
 		format, ext = files.FormatZip, ".zip"
 	}
+	// Resolved before any header goes out: a refusal has to arrive as a JSON
+	// error, not as a 200 whose attachment is an empty archive.
+	baseDir, members, err := s.modules.files.ResolveArchive(base, paths)
+	if err != nil {
+		return mapFileError(err)
+	}
 	name := "archive"
 	if len(paths) == 1 {
 		name = filepath.Base(paths[0])
+	} else if base != "" {
+		name = filepath.Base(baseDir)
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": name + ext}))
-	if err := s.modules.files.Compress(w, base, paths, format); err != nil {
+	if err := s.modules.files.Compress(w, baseDir, members, format); err != nil {
 		// The archive body has already begun; log rather than attempt a
 		// status code that can no longer be sent.
 		s.Log.Error("archive stream failed", "err", err, "paths", paths)
@@ -179,6 +188,9 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error {
 	dir := r.URL.Query().Get("path")
+	if dir == "" {
+		return httpx.BadRequest("path query parameter is required")
+	}
 	overwrite := r.URL.Query().Get("overwrite") == "true"
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
@@ -193,7 +205,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 			break
 		}
 		if err != nil {
-			return httpx.BadRequest("malformed upload: %v", err)
+			return uploadError(err)
 		}
 		if part.FormName() != "file" || part.FileName() == "" {
 			part.Close()
@@ -203,16 +215,14 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 		// put a path in the filename field, and joining it blindly would let
 		// an upload land anywhere.
 		name := filepath.Base(part.FileName())
-		dst, err := s.modules.files.Create(filepath.Join(dir, name), overwrite)
-		if err != nil {
+		if name == "." || name == string(filepath.Separator) {
 			part.Close()
-			return mapFileError(err)
+			continue
 		}
-		_, copyErr := io.Copy(dst, part)
-		dst.Close()
+		_, err = s.modules.files.Upload(filepath.Join(dir, name), part, overwrite)
 		part.Close()
-		if copyErr != nil {
-			return httpx.BadRequest("upload failed: %v", copyErr)
+		if err != nil {
+			return uploadError(err)
 		}
 		written = append(written, name)
 	}
@@ -222,6 +232,24 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 	httpx.SetAudit(r, "file.upload", dir, map[string]any{"files": written})
 	httpx.JSON(w, http.StatusCreated, map[string]any{"uploaded": written, "path": dir})
 	return nil
+}
+
+// uploadError tells a transfer that hit the request size limit apart from one
+// the filesystem refused: the first is 413 with the limit named, so the page
+// can say "too big" rather than "bad request", and the second is whatever the
+// file operation would have said on its own.
+func uploadError(err error) error {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		return httpx.Err(http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("the upload exceeds the %d GiB limit for one request", maxUploadBytes>>30))
+	}
+	if mapped := mapFileError(err); mapped != nil {
+		if apiErr, ok := mapped.(*httpx.APIError); ok && apiErr.Code != "unknown" && apiErr.Status != http.StatusBadRequest {
+			return mapped
+		}
+	}
+	return httpx.BadRequest("upload failed: %v", err)
 }
 
 type pathRequest struct {
@@ -234,6 +262,9 @@ func (s *Server) handleFileMkdir(w http.ResponseWriter, r *http.Request) error {
 	var req pathRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
+	}
+	if req.Path == "" {
+		return httpx.BadRequest("path is required")
 	}
 	if err := s.modules.files.Mkdir(req.Path, 0); err != nil {
 		return mapFileError(err)
@@ -248,6 +279,9 @@ func (s *Server) handleFileTouch(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	if req.Path == "" {
+		return httpx.BadRequest("path is required")
+	}
 	if err := s.modules.files.Touch(req.Path); err != nil {
 		return mapFileError(err)
 	}
@@ -259,6 +293,20 @@ func (s *Server) handleFileTouch(w http.ResponseWriter, r *http.Request) error {
 type moveRequest struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+	// Overwrite replaces whatever already sits at the destination. Without it
+	// an occupied destination is a 409, which is what lets the page ask
+	// "replace, keep both or skip" instead of finding out afterwards.
+	Overwrite bool `json:"overwrite,omitempty"`
+}
+
+// An empty side of a move or copy resolves to the first configured root —
+// which is to say, "move this to /". Nobody asks for that by leaving a field
+// blank.
+func (req moveRequest) validate() error {
+	if req.From == "" || req.To == "" {
+		return httpx.BadRequest("from and to are both required")
+	}
+	return nil
 }
 
 func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
@@ -266,10 +314,13 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.Move(req.From, req.To); err != nil {
+	if err := req.validate(); err != nil {
+		return err
+	}
+	if err := s.modules.files.Move(req.From, req.To, req.Overwrite); err != nil {
 		return mapFileError(err)
 	}
-	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To})
+	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
 	httpx.NoContent(w)
 	return nil
 }
@@ -279,10 +330,13 @@ func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.Copy(req.From, req.To); err != nil {
+	if err := req.validate(); err != nil {
+		return err
+	}
+	if err := s.modules.files.Copy(req.From, req.To, req.Overwrite); err != nil {
 		return mapFileError(err)
 	}
-	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To})
+	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
 	httpx.NoContent(w)
 	return nil
 }
@@ -296,6 +350,9 @@ func (s *Server) handleFileSymlink(w http.ResponseWriter, r *http.Request) error
 	var req symlinkRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
+	}
+	if req.Target == "" || req.Link == "" {
+		return httpx.BadRequest("target and link are both required")
 	}
 	if err := s.modules.files.Symlink(req.Target, req.Link); err != nil {
 		return mapFileError(err)

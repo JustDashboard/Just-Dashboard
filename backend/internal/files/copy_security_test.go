@@ -39,7 +39,7 @@ func TestCopyAndMoveRejectOutwardDestination(t *testing.T) {
 				if operation == "move" {
 					op = s.Move
 				}
-				if err := op(src, dst); !errors.Is(err, ErrOutsideRoot) {
+				if err := op(src, dst, true); !errors.Is(err, ErrOutsideRoot) {
 					t.Fatalf("want containment refusal, got %v", err)
 				}
 				if data, err := os.ReadFile(src); err != nil || string(data) != "new" {
@@ -70,7 +70,7 @@ func TestMoveReplacesTheSymlinkEntryAndCopyPreservesFileMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New([]string{root})
-	if err := s.Move(source, destination); err != nil {
+	if err := s.Move(source, destination, true); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := os.ReadFile(outside); err != nil || string(b) != "keep" {
@@ -82,7 +82,7 @@ func TestMoveReplacesTheSymlinkEntryAndCopyPreservesFileMode(t *testing.T) {
 	if err := os.Chmod(destination, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Copy(source, destination); err != nil {
+	if err := s.Copy(source, destination, true); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(destination)
@@ -103,7 +103,7 @@ func TestCopyRejectsSameFileAndDescendant(t *testing.T) {
 	}
 	s := New([]string{root})
 	for _, dst := range []string{src, root, alias} {
-		if err := s.Copy(src, dst); err == nil {
+		if err := s.Copy(src, dst, true); err == nil {
 			t.Fatalf("copy onto same inode accepted: %s", dst)
 		}
 		if b, err := os.ReadFile(src); err != nil || string(b) != "keep" {
@@ -114,7 +114,7 @@ func TestCopyRejectsSameFileAndDescendant(t *testing.T) {
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Copy(dir, filepath.Join(dir, "child")); err == nil {
+	if err := s.Copy(dir, filepath.Join(dir, "child"), false); err == nil {
 		t.Fatal("copy into descendant accepted")
 	}
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
@@ -140,7 +140,7 @@ func TestRecursiveCopyRejectsExistingChildSymlink(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dest, "src", "data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := New([]string{root}).Copy(src, dest); err == nil {
+	if err := New([]string{root}).Copy(src, dest, true); err == nil {
 		t.Fatal("recursive symlink destination accepted")
 	}
 	if b, err := os.ReadFile(target); err != nil || string(b) != "keep" {
@@ -161,7 +161,7 @@ func TestCopyPreservesNormalReplacementAndSourceLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New([]string{root})
-	if err := s.Copy(src, dst); err != nil {
+	if err := s.Copy(src, dst, false); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dst, "data")); err != nil || string(b) != "value" {
@@ -170,7 +170,7 @@ func TestCopyPreservesNormalReplacementAndSourceLinks(t *testing.T) {
 	if link, err := os.Readlink(filepath.Join(dst, "link")); err != nil || link != "data" {
 		t.Fatalf("link: %q %v", link, err)
 	}
-	if err := s.Copy(filepath.Join(src, "data"), filepath.Join(dst, "data")); err != nil {
+	if err := s.Copy(filepath.Join(src, "data"), filepath.Join(dst, "data"), true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -227,7 +227,7 @@ func TestCopyPreservesExistingAccessACL(t *testing.T) {
 	if err != nil || before.Mode().Perm() != 0o640 {
 		t.Fatalf("ACL fixture must expose mask as group mode: %v %v", before, err)
 	}
-	if err := New([]string{root}).Copy(source, destination); err != nil {
+	if err := New([]string{root}).Copy(source, destination, true); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.Open(destination)
@@ -253,7 +253,7 @@ func TestCopyRemovesInheritedACLWhenDestinationHadNone(t *testing.T) {
 		}
 	}
 	setCopyACLFixture(t, root, "system.posix_acl_default", restrictedCopyACL())
-	if err := New([]string{root}).Copy(source, destination); err != nil {
+	if err := New([]string{root}).Copy(source, destination, true); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.Open(destination)

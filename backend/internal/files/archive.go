@@ -33,27 +33,50 @@ var (
 	ErrArchiveNoSpace        = errors.New("archive extraction would leave less than 1 GiB free")
 )
 
-// Compress writes an archive of the given paths to w. Streaming rather than
-// building the archive on disk first means a multi-gigabyte directory download
-// costs no temporary space.
-func (s *Service) Compress(w io.Writer, base string, paths []string, format ArchiveFormat) error {
+// ResolveArchive checks what an archive download is asking for before a byte
+// of it is streamed: the base directory the entry names are made relative to,
+// and the members, each of which has to live under it.
+//
+// It is separate from Compress because the handler has to know the request is
+// sound *before* it commits to a 200 and an attachment header — an error found
+// mid-stream can only be logged.
+//
+// Members go through ResolveEntry rather than Resolve. A selected symlink is
+// archived as the link it is; resolving it to its target put the target's
+// bytes into the archive under a name computed from wherever the target
+// actually lived, which for a link out of the base directory was a name
+// beginning "../". An archive this server writes must never carry the path
+// traversal its own extractor exists to refuse.
+func (s *Service) ResolveArchive(base string, paths []string) (string, []string, error) {
 	baseDir, err := s.Resolve(base)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
-	resolved := make([]string, 0, len(paths))
+	members := make([]string, 0, len(paths))
 	for _, p := range paths {
-		full, err := s.Resolve(p)
+		full, err := s.ResolveEntry(p)
 		if err != nil {
-			return err
+			return "", nil, err
 		}
-		resolved = append(resolved, full)
+		rel, err := filepath.Rel(baseDir, full)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", nil, fmt.Errorf("%s is not inside %s", p, base)
+		}
+		members = append(members, full)
 	}
+	return baseDir, members, nil
+}
+
+// Compress writes an archive of the resolved members to w. Streaming rather
+// than building the archive on disk first means a multi-gigabyte directory
+// download costs no temporary space. Callers resolve through ResolveArchive
+// first; nothing here checks a path.
+func (s *Service) Compress(w io.Writer, baseDir string, members []string, format ArchiveFormat) error {
 	switch format {
 	case FormatZip:
-		return writeZip(w, baseDir, resolved)
+		return writeZip(w, baseDir, members)
 	default:
-		return writeTarGz(w, baseDir, resolved)
+		return writeTarGz(w, baseDir, members)
 	}
 }
 
