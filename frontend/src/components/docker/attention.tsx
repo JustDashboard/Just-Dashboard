@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CheckCircle, ChevronDown, Cross, RefreshClockwise } from "@/components/icons"
+import { ChevronDown, Cross, RefreshClockwise } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
@@ -16,6 +16,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { ExplainIcon } from "@/components/docker/explain"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
@@ -217,22 +218,27 @@ function Targets({ group, onAction }: { group: FindingGroup; onAction?: FindingA
     <div className="flex flex-wrap gap-1">
       {group.findings.map((finding) =>
         onAction ? (
-          <button
+          // A container's name is a literal string from the host, so it is
+          // drawn the way every other one is — a `mono` tag — and the press is
+          // the tag itself rather than a control beside it.
+          <Tag
             key={finding.id}
-            type="button"
-            onClick={() => onAction(finding)}
-            title={finding.actionLabel ?? `Open ${finding.target}`}
-            className="rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro text-muted-foreground focus-ring transition-colors hover:text-foreground"
+            mono
+            asChild
+            className="focus-ring transition-colors hover:bg-accent hover:text-foreground"
           >
-            {finding.target}
-          </button>
+            <button
+              type="button"
+              onClick={() => onAction(finding)}
+              title={finding.actionLabel ?? `Open ${finding.target}`}
+            >
+              {finding.target}
+            </button>
+          </Tag>
         ) : (
-          <span
-            key={finding.id}
-            className="rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro text-muted-foreground"
-          >
+          <Tag key={finding.id} mono>
             {finding.target}
-          </span>
+          </Tag>
         ),
       )}
     </div>
@@ -296,15 +302,23 @@ export function AttentionPanel({
   const recommendations = findings.length - issues
   const critical = findings.some((f) => f.severity === "critical")
 
-  // Nothing to act on is a one-line answer, and it used to be a paragraph
-  // inside a body — a fifth of the overview page spent saying "no".
+  // Plain, like the Health list on the Overview it is the Docker twin of: a
+  // titled list of findings on the page, not a box of them above the
+  // containers. The whole block rises once, when the diagnosis lands.
+  //
+  // Nothing to act on is a one-line answer, drawn the way `FindingList` draws
+  // every other clean verdict — a check and a sentence — rather than a header
+  // with nothing under it.
   if (findings.length === 0) {
     return (
-      <Panel className={className}>
-        <PanelHeader
-          title={<PanelTitle />}
-          actions={<Status verdict="ok" icon={CheckCircle} label="Nothing to act on" />}
-        />
+      <Panel plain className={cn("animate-rise", className)}>
+        <PanelHeader title={<PanelTitle />} />
+        <PanelBody>
+          <FindingList
+            findings={[]}
+            emptyLabel="Nothing to act on — posture, storage, configuration and exposure are all as they should be"
+          />
+        </PanelBody>
       </Panel>
     )
   }
@@ -317,7 +331,7 @@ export function AttentionPanel({
       onRescan?.()
     }
     return (
-      <Panel className={className}>
+      <Panel plain className={cn("animate-rise", className)}>
         <PanelHeader
           title={<PanelTitle />}
           actions={
@@ -328,7 +342,7 @@ export function AttentionPanel({
           }
         />
         <PanelBody>
-          <p className="text-hint text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {findings.length} {findings.length === 1 ? "finding" : "findings"} dismissed. They come
             back on the next rescan.
           </p>
@@ -337,7 +351,8 @@ export function AttentionPanel({
     )
   }
 
-  const dismissOne = (key: string) => setDismissed((prev) => (prev.includes(key) ? prev : [...prev, key]))
+  const dismissOne = (key: string) =>
+    setDismissed((prev) => (prev.includes(key) ? prev : [...prev, key]))
   const dismissAll = () =>
     setDismissed((prev) => [...new Set([...prev, ...groups.map((g) => g.key)])])
   const rescan = () => {
@@ -354,7 +369,7 @@ export function AttentionPanel({
         : `${findings.length} ${findings.length === 1 ? "recommendation" : "recommendations"}`
 
   return (
-    <Panel className={className}>
+    <Panel plain className={cn("animate-rise", className)}>
       <PanelHeader
         title={<PanelTitle />}
         actions={
@@ -634,7 +649,9 @@ export function ContainerFindings({
   const recommendations = mine.length - issues
 
   return (
-    <Panel>
+    // Plain inside the detail panel too: the side panel is already the frame,
+    // and a box inside it was a box inside a box.
+    <Panel plain>
       <PanelHeader
         title={<PanelTitle />}
         actions={

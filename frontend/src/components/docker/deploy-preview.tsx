@@ -1,20 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import {
-  CheckCircle,
-  ChevronDown,
-  Clock,
-  Copy,
-  Information,
-  Warning,
-} from "@/components/icons"
+import { CheckCircle, ChevronDown, Clock, Copy, Information, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 import type { DeployPreview, DiffLine, ServiceChange, StackDeployment } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { Group, Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -67,25 +61,25 @@ export function DeployPreviewPanel({ stack }: { stack: string }) {
     // This content mounts when its tab opens — a disclosure — so its arrival
     // is said once, quietly, by the token that means "not here a moment ago".
     <div className="animate-rise space-y-5">
-      <div className="rounded-lg border border-hairline bg-surface-header/40 px-3.5 py-3">
+      {/* The verdict, fenced: it is the one sentence the rest of the tab
+          expands on, and the only framed thing in it. */}
+      <Group tinted>
         <p className="text-body leading-snug font-semibold">{data.summary}</p>
         {data.diffAgainst && (
           <p className="mt-1 text-hint leading-relaxed text-muted-foreground">
             Compared against {data.diffAgainst}.
           </p>
         )}
-      </div>
+      </Group>
 
       <section className="space-y-2">
         <p className="eyebrow">Services</p>
-        <div className="overflow-hidden rounded-lg border border-hairline">
-          <ul className="divide-y divide-hairline">
-            {changed.map((service) => (
-              <ServiceChangeRow key={service.name} change={service} />
-            ))}
-            {unchanged.length > 0 && <UnchangedRow services={unchanged} />}
-          </ul>
-        </div>
+        <ul className="divide-y divide-hairline">
+          {changed.map((service) => (
+            <ServiceChangeRow key={service.name} change={service} />
+          ))}
+          {unchanged.length > 0 && <UnchangedRow services={unchanged} />}
+        </ul>
       </section>
 
       {/* The number that means data is destroyed, stated whether or not it is zero. */}
@@ -121,7 +115,10 @@ export function DeployPreviewPanel({ stack }: { stack: string }) {
         <section className="space-y-2">
           <p className="eyebrow">What this cannot know</p>
           {data.caveats.map((caveat, i) => (
-            <p key={i} className="flex items-start gap-2 text-hint leading-relaxed text-muted-foreground">
+            <p
+              key={i}
+              className="flex items-start gap-2 text-hint leading-relaxed text-muted-foreground"
+            >
               <Information className="mt-0.5 size-3 shrink-0" />
               <span>{caveat}</span>
             </p>
@@ -136,7 +133,7 @@ function ServiceChangeRow({ change }: { change: ServiceChange }) {
   const meta = CHANGE[change.change] ?? CHANGE.unchanged
   const imageChanged = Boolean(change.imageBefore && change.imageAfter)
   return (
-    <li className="space-y-1 px-3.5 py-3">
+    <li className="space-y-1 py-3 first:pt-0">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <span className="min-w-0 truncate text-body font-semibold">{change.name}</span>
         <Tag tone={meta.tag}>{meta.label}</Tag>
@@ -156,7 +153,7 @@ function ServiceChangeRow({ change }: { change: ServiceChange }) {
 /** The unchanged tail, named once rather than explained once per service. */
 function UnchangedRow({ services }: { services: ServiceChange[] }) {
   return (
-    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3.5 py-2.5">
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-2.5 first:pt-0">
       <span className="text-body leading-snug font-medium">
         {services.length === 1
           ? "1 service will remain unchanged"
@@ -171,8 +168,10 @@ function UnchangedRow({ services }: { services: ServiceChange[] }) {
 
 function DiffView({ lines }: { lines: DiffLine[] }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-hairline bg-surface-header/40">
-      <pre className="min-w-fit py-1 font-mono text-hint leading-relaxed">
+    // A diff is output you read, so it sits in the well every other read-only
+    // output in the product sits in.
+    <Well className="p-0 text-hint">
+      <pre className="min-w-fit py-1">
         {lines.map((line, i) => (
           <div
             key={i}
@@ -188,7 +187,7 @@ function DiffView({ lines }: { lines: DiffLine[] }) {
           </div>
         ))}
       </pre>
-    </div>
+    </Well>
   )
 }
 
@@ -227,9 +226,14 @@ export function DeploymentHistoryPanel({ stack }: { stack: string }) {
 
   return (
     <div className="animate-rise space-y-2.5">
-      {data.map((record) => (
-        <DeploymentRow key={record.id} stack={stack} record={record} />
-      ))}
+      {/* One list of disclosures with a hairline between them, in the shape
+          `FindingList` gives a verdict's findings — not a bordered card per
+          deployment. */}
+      <ul className="divide-y divide-hairline">
+        {data.map((record) => (
+          <DeploymentRow key={record.id} stack={stack} record={record} />
+        ))}
+      </ul>
       <p className="pt-1 text-hint leading-relaxed text-muted-foreground">
         Each entry is the state that was <em>replaced</em>. Environment values are hashed, never
         stored.
@@ -253,12 +257,13 @@ function DeploymentRow({ stack, record }: { stack: string; record: StackDeployme
   )
 
   return (
-    <div className="overflow-hidden rounded-lg border border-hairline">
+    <li className="min-w-0">
+      {/* The wash bleeds a step past the text on both sides, as a row's does. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
+        className="-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-2.5 rounded-md px-3 py-2.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
       >
         <span className="min-w-0 flex-1">
           <span className="block text-body leading-snug font-semibold">
@@ -291,7 +296,7 @@ function DeploymentRow({ stack, record }: { stack: string; record: StackDeployme
         />
       </button>
       {open && (
-        <div className="space-y-2.5 border-t border-hairline bg-surface-header/30 px-3.5 py-3 text-hint leading-relaxed">
+        <div className="animate-rise space-y-2.5 pb-3 text-hint leading-relaxed">
           {detail.loading && !detail.data && <LoadingRows rows={2} />}
           {detail.data && (
             <>
@@ -326,10 +331,7 @@ function DeploymentRow({ stack, record }: { stack: string; record: StackDeployme
                   </summary>
                   <ul className="mt-1 space-y-0.5 font-mono text-xs leading-relaxed text-muted-foreground">
                     {Object.entries(detail.data.imageDigests).map(([service, digest]) => (
-                      <li
-                        key={service}
-                        className="group flex items-center gap-1.5 break-all"
-                      >
+                      <li key={service} className="group flex items-center gap-1.5 break-all">
                         <span className="min-w-0 flex-1">
                           {service}: {digest}
                         </span>
@@ -354,9 +356,7 @@ function DeploymentRow({ stack, record }: { stack: string; record: StackDeployme
                     The compose file as it was
                   </summary>
                   <div className="relative mt-1">
-                    <pre className="max-h-64 overflow-auto rounded-md border border-hairline bg-surface-header/40 p-3 font-mono text-xs leading-relaxed whitespace-pre">
-                      {detail.data.config}
-                    </pre>
+                    <Well className="max-h-64 whitespace-pre">{detail.data.config}</Well>
                     <Button
                       size="xs"
                       variant="outline"
@@ -379,6 +379,6 @@ function DeploymentRow({ stack, record }: { stack: string; record: StackDeployme
           )}
         </div>
       )}
-    </div>
+    </li>
   )
 }

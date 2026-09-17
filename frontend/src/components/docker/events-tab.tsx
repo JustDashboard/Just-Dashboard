@@ -8,8 +8,9 @@ import type { DockerEvent, DockerEventFeed } from "@/lib/types"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
 import { Hint } from "@/components/docker/explain"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -95,7 +96,9 @@ export function EventsTab() {
   const groups = groupByDay(merged)
 
   return (
-    <Panel>
+    // Plain: the feed is the page, and a title, a hairline and the day
+    // markers are what structure it.
+    <Panel plain>
       <PanelHeader
         title="Events"
         actions={
@@ -135,7 +138,7 @@ export function EventsTab() {
       </PanelToolbar>
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingPanel />
+          <LoadingRows className="py-3" />
         ) : error ? (
           <ErrorState error={error} />
         ) : merged.length === 0 ? (
@@ -151,15 +154,20 @@ export function EventsTab() {
             }
           />
         ) : (
-          <div className="max-h-[calc(100svh-26rem)] overflow-auto">
+          /* Padded by the rows' bleed, so the hover wash has room without the
+             container growing a sideways scrollbar. Rises once when the feed
+             lands. */
+          <div className="-mx-3 max-h-[calc(100svh-26rem)] animate-rise overflow-auto px-3">
             {groups.map(([day, events]) => (
               <section key={day}>
-                <h3 className="sticky top-0 z-10 border-b border-hairline bg-surface-header/90 px-4 py-1 text-hint font-medium text-muted-foreground backdrop-blur">
+                <h3 className="sticky top-0 z-10 border-b border-hairline bg-background/90 py-1 text-hint font-medium text-muted-foreground backdrop-blur">
                   {day}
                 </h3>
-                {events.map((event, i) => (
-                  <EventRow key={`${event.time}-${event.id}-${i}`} event={event} />
-                ))}
+                <ul className="divide-y divide-hairline">
+                  {events.map((event, i) => (
+                    <EventRow key={`${event.time}-${event.id}-${i}`} event={event} />
+                  ))}
+                </ul>
               </section>
             ))}
           </div>
@@ -247,78 +255,85 @@ function EventRow({ event }: { event: DockerEvent }) {
   const source = SOURCE[event.source as keyof typeof SOURCE] ?? SOURCE.docker
 
   return (
-    <div className="flex min-w-0 items-baseline gap-3 border-b border-hairline px-4 py-1.5 text-xs last:border-0 hover:bg-row-hover">
-      <Icon className={cn("size-2.5 shrink-0 translate-y-0.5", meta.tone)} />
-      <span className="numeric w-20 shrink-0 font-mono text-hint whitespace-nowrap text-muted-foreground">
-        {new Date(event.time).toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })}
-      </span>
-      <span className="min-w-0 flex-1 break-words">{event.message}</span>
+    <li className="min-w-0">
+      <div
+        className={cn(
+          "flex min-w-0 items-baseline gap-3 px-4 py-1.5 text-xs transition-colors hover:bg-row-hover",
+          ROW_BLEED,
+        )}
+      >
+        <Icon className={cn("size-2.5 shrink-0 translate-y-0.5", meta.tone)} />
+        <span className="numeric w-20 shrink-0 font-mono text-hint whitespace-nowrap text-muted-foreground">
+          {new Date(event.time).toLocaleTimeString(undefined, {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
+        </span>
+        <span className="min-w-0 flex-1 break-words">{event.message}</span>
 
-      <HoverCard openDelay={150}>
-        <HoverCardTrigger asChild>
-          <button
-            type="button"
-            title="Where this event came from"
-            className={cn(
-              "shrink-0 cursor-help rounded-sm text-micro whitespace-nowrap focus-ring",
-              source.tone,
+        <HoverCard openDelay={150}>
+          <HoverCardTrigger asChild>
+            <button
+              type="button"
+              title="Where this event came from"
+              className={cn(
+                "shrink-0 cursor-help rounded-sm text-micro whitespace-nowrap focus-ring",
+                source.tone,
+              )}
+            >
+              {source.label}
+            </button>
+          </HoverCardTrigger>
+          <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
+            {event.trigger ? (
+              <>
+                <p className="text-body font-medium">Triggered by this dashboard</p>
+                <p className="text-muted-foreground">
+                  An audit entry for <b>{event.trigger.action}</b> by{" "}
+                  <b>{event.trigger.actor || "an unnamed session"}</b> names the same object within
+                  a minute of this event. That is a likely cause rather than a recorded one — Docker
+                  does not say who asked.
+                </p>
+                <Link
+                  href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
+                  className="inline-block text-primary hover:underline"
+                >
+                  Open the audit log
+                </Link>
+              </>
+            ) : event.source === "compose" ? (
+              <>
+                <p className="text-body font-medium">Compose owns this object</p>
+                <p className="text-muted-foreground">
+                  It carries the labels compose writes, so this is part of the <b>{event.stack}</b>{" "}
+                  project. Nothing in the audit log matches it, so it was run from a shell rather
+                  than from here.
+                </p>
+              </>
+            ) : event.source === "daemon" ? (
+              <>
+                <p className="text-body font-medium">Docker did this on its own</p>
+                <p className="text-muted-foreground">
+                  Nobody asked for it — a restart policy firing, a health check changing verdict, or
+                  the kernel stopping a container.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-body font-medium">External Docker action</p>
+                <p className="text-muted-foreground">
+                  Nothing in this dashboard&apos;s audit log matches this event, so it came from
+                  somewhere else: a shell on this server, a CI job, or another tool holding the
+                  Docker socket.
+                </p>
+              </>
             )}
-          >
-            {source.label}
-          </button>
-        </HoverCardTrigger>
-        <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
-          {event.trigger ? (
-            <>
-              <p className="text-body font-medium">Triggered by this dashboard</p>
-              <p className="text-muted-foreground">
-                An audit entry for <b>{event.trigger.action}</b> by{" "}
-                <b>{event.trigger.actor || "an unnamed session"}</b> names the same object within a
-                minute of this event. That is a likely cause rather than a recorded one — Docker
-                does not say who asked.
-              </p>
-              <Link
-                href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
-                className="inline-block text-primary hover:underline"
-              >
-                Open the audit log
-              </Link>
-            </>
-          ) : event.source === "compose" ? (
-            <>
-              <p className="text-body font-medium">Compose owns this object</p>
-              <p className="text-muted-foreground">
-                It carries the labels compose writes, so this is part of the <b>{event.stack}</b>{" "}
-                project. Nothing in the audit log matches it, so it was run from a shell rather than
-                from here.
-              </p>
-            </>
-          ) : event.source === "daemon" ? (
-            <>
-              <p className="text-body font-medium">Docker did this on its own</p>
-              <p className="text-muted-foreground">
-                Nobody asked for it — a restart policy firing, a health check changing verdict, or
-                the kernel stopping a container.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-body font-medium">External Docker action</p>
-              <p className="text-muted-foreground">
-                Nothing in this dashboard&apos;s audit log matches this event, so it came from
-                somewhere else: a shell on this server, a CI job, or another tool holding the Docker
-                socket.
-              </p>
-            </>
-          )}
-        </HoverCardContent>
-      </HoverCard>
+          </HoverCardContent>
+        </HoverCard>
 
-      {event.stack && <Tag>{event.stack}</Tag>}
-    </div>
+        {event.stack && <Tag>{event.stack}</Tag>}
+      </div>
+    </li>
   )
 }

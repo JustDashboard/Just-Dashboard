@@ -371,6 +371,22 @@ function PlainActions({ className, ...props }: React.ComponentProps<"div">) {
   return <div className={cn("flex shrink-0 items-center gap-0.5", className)} {...props} />
 }
 
+/**
+ * A menu entry's text: the verb, and one line of plain English under it.
+ *
+ * The stack list's overflow menu had retyped this beside the container menu's
+ * copy, and the two had already drifted a pixel apart in line height. One
+ * shape, so every Docker menu reads as the same menu.
+ */
+export function MenuItemBody({ label, detail }: { label: string; detail: string }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="block text-body leading-tight font-medium">{label}</span>
+      <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">{detail}</span>
+    </span>
+  )
+}
+
 /** The overflow menu, where a verb is a word and a line rather than a glyph. */
 export function ContainerMenu({
   verbs,
@@ -409,12 +425,7 @@ export function ContainerMenu({
               }}
             >
               <verb.icon className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-body leading-tight font-medium">{verb.label}</span>
-                <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
-                  {verb.detail}
-                </span>
-              </span>
+              <MenuItemBody label={verb.label} detail={verb.detail} />
             </DropdownMenuItem>
           </Fragment>
         ))}

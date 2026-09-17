@@ -211,16 +211,14 @@ function StackBody({
                   description="This stack has a compose file but no containers. Bring it up to start them."
                 />
               ) : (
-                /* One fenced list, not a stack of bordered rows: the services
-                   are the rows of a table the eye reads down, and a border per
-                   service spends two frames to say what one hairline does. */
-                <div className="overflow-hidden rounded-lg border border-hairline">
-                  <ul className="divide-y divide-hairline">
-                    {data.services.map((svc) => (
-                      <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
-                    ))}
-                  </ul>
-                </div>
+                /* Rows with a hairline between them and nothing around them:
+                   the services are the rows of a table the eye reads down,
+                   and the side panel is already the frame. */
+                <ul className="animate-rise divide-y divide-hairline">
+                  {data.services.map((svc) => (
+                    <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
+                  ))}
+                </ul>
               )}
             </TabsContent>
             <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto">
@@ -415,7 +413,7 @@ function ServiceRow({
   const published = service.ports.filter((p) => p.publicPort)
 
   return (
-    <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+    <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
       <div className="min-w-0 flex-1 basis-48">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="truncate text-body font-medium">{service.name}</span>

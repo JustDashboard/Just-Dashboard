@@ -44,11 +44,7 @@ export function PortTag({ port, className }: { port: PortExposure; className?: s
       : `${port.hostPort} → ${port.containerPort}`
 
   const body = (
-    <Tag
-      mono
-      tone={style.tone}
-      className={cn(port.scope === "internal" && "border-dashed", className)}
-    >
+    <Tag mono tone={style.tone} className={className}>
       <Icon className="size-2.5 shrink-0" />
       {label}
       {url && <External className="size-2.5 shrink-0 opacity-60" />}
@@ -169,12 +165,15 @@ const REACH_STYLE = {
  * The correlation nothing else in this class of tool does, and the place it
  * would be easiest to overclaim. Every verdict carries the reasoning that
  * produced it, and one that was worked out rather than read says so.
+ *
+ * A row in a hairline list, not a fenced card: three ports were three boxes
+ * inside the detail panel, and the frames separated them from nothing.
  */
 export function RouteRow({ route }: { route: PortRoute }) {
   const style = REACH_STYLE[route.reach] ?? REACH_STYLE.unknown
   const Icon = style.icon
   return (
-    <div className="space-y-1.5 rounded-md border border-hairline px-3 py-2.5">
+    <li className="space-y-1.5 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2 font-mono text-xs">
           <Icon className={cn("size-3.5 shrink-0", style.tone)} />
@@ -219,6 +218,6 @@ export function RouteRow({ route }: { route: PortRoute }) {
           No firewall this dashboard can read, so external reachability cannot be judged from here.
         </p>
       )}
-    </div>
+    </li>
   )
 }

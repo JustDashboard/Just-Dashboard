@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Status, StatusDot } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
@@ -105,7 +105,9 @@ export default function DockerOverviewPage() {
     : 0
 
   return (
-    <Page>
+    // The page rises once, when its first container list lands — the same
+    // arrival the host Overview makes.
+    <Page className="animate-rise">
       {/* New containers come from the Deploy pages — no standalone create flow. */}
       <PageHeader
         eyebrow="Server"
@@ -242,7 +244,7 @@ export default function DockerOverviewPage() {
                 }
               />
               <PanelBody flush>
-                <RowList>
+                <RowList className="animate-rise">
                   {idle.slice(0, 6).map((container) => (
                     <IdleRow
                       key={container.id}
@@ -291,7 +293,7 @@ export default function DockerOverviewPage() {
                   description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
                 />
               ) : (
-                <RowList>
+                <RowList className="animate-rise">
                   {detected.map((stack) => (
                     <Row
                       key={stack.name}
@@ -326,8 +328,9 @@ export default function DockerOverviewPage() {
             />
           )}
 
+          {/* Plain, like everything above it: a bar and a legend are a reading. */}
           {disk.data && reclaimable <= 1024 * 1024 * 1024 && (
-            <Panel>
+            <Panel plain className="animate-rise">
               <PanelHeader
                 title="Disk"
                 actions={
@@ -393,7 +396,8 @@ function IdleRow({
   return (
     <li
       className={cn(
-        "group -mx-3 flex min-w-0 items-center gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-row-hover",
+        "group flex min-w-0 items-center gap-3 px-5 py-2.5 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
         pending && "opacity-70",
       )}
     >
@@ -429,15 +433,27 @@ function IdleRow({
  */
 function FirstRun({ canStart }: { canStart: boolean }) {
   return (
-    <Panel className="animate-rise">
-      <PanelHeader title="Nothing is running on this server yet" />
+    // Plain, and the three routes are rows rather than three framed cards in
+    // a framed panel: on a page that draws no other box, the first thing a
+    // new server showed was four of them.
+    <Panel plain className="animate-rise">
+      <PanelHeader
+        title="Nothing is running on this server yet"
+        actions={
+          canStart && (
+            <Button size="sm" asChild>
+              <Link href="/deploy">Open Deploy</Link>
+            </Button>
+          )
+        }
+      />
       <PanelBody className="space-y-4">
         <p className="max-w-prose text-body leading-relaxed text-muted-foreground">
           A <b className="font-medium text-foreground">container</b> is one application packaged
           with everything it needs to run — a database, a web server, a photo library. It cannot
           disturb anything else on this machine, and removing it leaves nothing behind.
         </p>
-        <ul className="grid gap-2 sm:grid-cols-3">
+        <RowList>
           <Route
             icon={Sparkles}
             title="Start from a template"
@@ -453,17 +469,13 @@ function FirstRun({ canStart }: { canStart: boolean }) {
             title="Start custom"
             detail="An empty form, with every field explained beside it."
           />
-        </ul>
-        {canStart && (
-          <Button size="sm" asChild>
-            <Link href="/deploy">Open Deploy</Link>
-          </Button>
-        )}
+        </RowList>
       </PanelBody>
     </Panel>
   )
 }
 
+/** One way in. The glyph is wayfinding: it is the mark the Deploy page draws on the same route. */
 function Route({
   icon: Icon,
   title,
@@ -474,13 +486,12 @@ function Route({
   detail: string
 }) {
   return (
-    <li className="min-w-0 rounded-lg border border-hairline p-3">
-      <p className="flex items-center gap-2 text-body font-medium">
-        <Icon className="size-3.5 shrink-0 text-brand" />
-        <span className="min-w-0 truncate">{title}</span>
-      </p>
-      <p className="mt-1 text-hint leading-relaxed text-muted-foreground">{detail}</p>
-    </li>
+    <Row
+      leading={<Icon className="size-3.5 text-brand" />}
+      title={title}
+      subtitle={detail}
+      className="py-2.5"
+    />
   )
 }
 

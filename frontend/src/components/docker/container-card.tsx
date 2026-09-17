@@ -5,6 +5,7 @@ import { bytes, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Container, ContainerSparkline, ContainerStats, DockerDiagnosis } from "@/lib/types"
 import { Meter, utilisationTone } from "@/components/meter"
+import { ROW_BLEED } from "@/components/row-list"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { Status } from "@/components/status-dot"
 import { PortList } from "@/components/docker/exposure"
@@ -84,6 +85,7 @@ export function ContainerCard({
         }}
         className={cn(
           "group min-w-0 space-y-2 px-4 py-3 transition-colors hover:bg-row-hover",
+          ROW_BLEED,
           pending && "opacity-70",
         )}
       >

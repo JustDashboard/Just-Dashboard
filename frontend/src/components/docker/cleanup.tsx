@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import type { CleanupCategory, CleanupPreview, PruneReport } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { LoadingRows } from "@/components/state"
 import type { ConfirmFn } from "@/components/docker/shared"
@@ -126,11 +127,14 @@ export function CleanupPanel({
     })
 
   return (
-    <Panel className={className}>
+    // Plain: a decision laid out as rows on the page, with the figure it adds
+    // up to on a footer rule. The frame it used to carry made the one panel on
+    // the overview that asks for a decision look like the ones that report.
+    <Panel plain className={cn("animate-rise", className)}>
       <PanelHeader title="Docker cleanup" />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={4} />
+          <LoadingRows rows={4} className="py-3" />
         ) : (
           <ul className="divide-y divide-hairline">
             {(data?.categories ?? []).map((category) => (
@@ -208,6 +212,7 @@ function CategoryRow({
     <li
       className={cn(
         "flex min-w-0 items-center gap-3 px-4 py-2.5",
+        ROW_BLEED,
         empty && "opacity-50",
         category.destroys && !empty && "bg-wash-danger",
       )}

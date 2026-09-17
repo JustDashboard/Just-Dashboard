@@ -22,9 +22,11 @@ import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { RowLink, SearchInput } from "@/components/page"
+import { ROW_BLEED } from "@/components/row-list"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { cn } from "@/lib/utils"
 import { PortLink, type ConfirmFn } from "@/components/docker/shared"
+import { MenuItemBody } from "@/components/docker/container-actions"
 import { StackSummary, stackTone } from "@/components/docker/stack-state"
 import { StackDetailPanel } from "@/components/docker/stack-detail"
 import { ExplainIcon, Field, Term } from "@/components/docker/explain"
@@ -136,7 +138,8 @@ export function StacksTab({
 
   return (
     <div className="space-y-4">
-      <Panel>
+      {/* Plain: the list is the page. */}
+      <Panel plain>
         <PanelHeader
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -177,13 +180,9 @@ export function StacksTab({
 
         <PanelBody flush={hasRows}>
           {loading && !data ? (
-            <div className="p-4">
-              <LoadingRows rows={3} />
-            </div>
+            <LoadingRows rows={3} />
           ) : error ? (
-            <div className="p-4">
-              <ErrorState error={error} />
-            </div>
+            <ErrorState error={error} />
           ) : stacks.length === 0 ? (
             <EmptyState
               icon={Layers}
@@ -216,7 +215,7 @@ export function StacksTab({
               }
             />
           ) : (
-            <ul className="divide-y divide-hairline">
+            <ul className="animate-rise divide-y divide-hairline">
               {visible.map((stack) => (
                 <StackRow
                   key={stack.name}
@@ -230,7 +229,7 @@ export function StacksTab({
           {/* The filters narrowed everything away to nothing rather than the
               server having nothing to show; the count is the difference. */}
           {filtered && !loading && !error && visible.length > 0 && (
-            <p className="border-t border-hairline px-4 py-2 text-hint text-muted-foreground">
+            <p className="border-t border-hairline py-2 text-hint text-muted-foreground">
               {visible.length} of {stacks.length} stacks.
             </p>
           )}
@@ -312,6 +311,7 @@ function StackRow({
         }}
         className={cn(
           "group min-w-0 cursor-pointer space-y-2 px-4 py-2.5 transition-colors hover:bg-row-hover",
+          ROW_BLEED,
           busy && "opacity-70",
         )}
       >
@@ -437,7 +437,7 @@ function StackRowMenu({ stack, onOpen }: { stack: ComposeStack; onOpen: () => vo
           }}
         >
           <Code className="mt-0.5 size-3.5 shrink-0" />
-          <ItemBody
+          <MenuItemBody
             label="View"
             detail="Services, the compose file, deploy history and the merged log feed."
           />
@@ -446,7 +446,7 @@ function StackRowMenu({ stack, onOpen }: { stack: ComposeStack; onOpen: () => vo
           <DropdownMenuItem asChild className="items-start gap-2.5 py-1.5">
             <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>
               <FolderOpen className="mt-0.5 size-3.5 shrink-0" />
-              <ItemBody label="Files" detail="The stack's directory in the file manager." />
+              <MenuItemBody label="Files" detail="The stack's directory in the file manager." />
             </Link>
           </DropdownMenuItem>
         )}
@@ -454,21 +454,15 @@ function StackRowMenu({ stack, onOpen }: { stack: ComposeStack; onOpen: () => vo
           <DropdownMenuItem asChild className="items-start gap-2.5 py-1.5">
             <Link href={`/terminal?cwd=${encodeURIComponent(stack.workingDir)}`}>
               <Terminal className="mt-0.5 size-3.5 shrink-0" />
-              <ItemBody label="Open shell" detail="A terminal opened in the stack's directory." />
+              <MenuItemBody
+                label="Open shell"
+                detail="A terminal opened in the stack's directory."
+              />
             </Link>
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-function ItemBody({ label, detail }: { label: string; detail: string }) {
-  return (
-    <span className="min-w-0 flex-1">
-      <span className="block text-body leading-tight font-medium">{label}</span>
-      <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">{detail}</span>
-    </span>
   )
 }
 

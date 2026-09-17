@@ -14,6 +14,7 @@ import {
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { DockerImage, ImageDetail, ImageUpdateStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -28,6 +29,7 @@ import {
 } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
 import type { ConfirmFn } from "@/components/docker/shared"
@@ -162,7 +164,9 @@ export function ImagesTab({
         </Notice>
       )}
 
-      <Panel>
+      {/* Plain: the image list is the whole of the page under the disk
+          readings, and a title with a hairline marks it. */}
+      <Panel plain className="animate-rise">
         <PanelHeader
           title="Images"
           actions={
@@ -242,7 +246,9 @@ export function ImagesTab({
                 })}
               </ul>
 
-              <div className="hidden xl:block">
+              {/* Bled by the cells' own padding, so the first column starts
+                  where the title does. */}
+              <div className="-mx-4 hidden min-w-0 xl:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -315,7 +321,7 @@ export function ImagesTab({
                                   <Download />
                                 </IconAction>
                               )}
-                                {/*
+                              {/*
                                   An image a container was built from is not deletable
                                   in any useful sense: Docker refuses, and forcing it
                                   leaves a running container whose image is gone and
@@ -323,51 +329,50 @@ export function ImagesTab({
                                   with a disabled control rather than collapsing,
                                   so rows do not shift with state.
                                 */}
-                                {can("destructive") &&
-                                  (image.containers > 0 ? (
-                                    <IconAction
-                                      label={`Used by ${image.containers} container${image.containers === 1 ? "" : "s"} — cannot be removed while in use`}
-                                      className="text-muted-foreground opacity-40"
-                                      onClick={() => setSelected(image.id)}
-                                    >
-                                      <Trash />
-                                    </IconAction>
-                                  ) : (
-                                    <IconAction
-                                      label="Remove image"
-                                      className="text-destructive"
-                                      onClick={() =>
-                                        confirm({
-                                          title: "Delete image",
-                                          confirmLabel: "Delete",
-                                          description: (
-                                            <>
-                                              <p>
-                                                Deletes <b>{imagePhrase(image)}</b>.
-                                              </p>
-                                              <p>
-                                                No container is using it. Anything that needs it
-                                                later has to pull or rebuild it — which for an image
-                                                built here and never pushed means rebuilding from
-                                                source.
-                                              </p>
-                                            </>
-                                          ),
-                                          action: async (c) => {
-                                            await del(
-                                              `/docker/images/${encodeURIComponent(image.id)}`,
-                                              {
-                                                confirm: c,
-                                              },
-                                            )
-                                            refresh()
-                                          },
-                                        })
-                                      }
-                                    >
-                                      <Trash />
-                                    </IconAction>
-                                  ))}
+                              {can("destructive") &&
+                                (image.containers > 0 ? (
+                                  <IconAction
+                                    label={`Used by ${image.containers} container${image.containers === 1 ? "" : "s"} — cannot be removed while in use`}
+                                    className="text-muted-foreground opacity-40"
+                                    onClick={() => setSelected(image.id)}
+                                  >
+                                    <Trash />
+                                  </IconAction>
+                                ) : (
+                                  <IconAction
+                                    label="Remove image"
+                                    className="text-destructive"
+                                    onClick={() =>
+                                      confirm({
+                                        title: "Delete image",
+                                        confirmLabel: "Delete",
+                                        description: (
+                                          <>
+                                            <p>
+                                              Deletes <b>{imagePhrase(image)}</b>.
+                                            </p>
+                                            <p>
+                                              No container is using it. Anything that needs it later
+                                              has to pull or rebuild it — which for an image built
+                                              here and never pushed means rebuilding from source.
+                                            </p>
+                                          </>
+                                        ),
+                                        action: async (c) => {
+                                          await del(
+                                            `/docker/images/${encodeURIComponent(image.id)}`,
+                                            {
+                                              confirm: c,
+                                            },
+                                          )
+                                          refresh()
+                                        },
+                                      })
+                                    }
+                                  >
+                                    <Trash />
+                                  </IconAction>
+                                ))}
                             </span>
                           </TableCell>
                         </TableRow>
@@ -430,7 +435,12 @@ function ImageListItem({
   const removable = can("destructive") && image.containers === 0
 
   return (
-    <li className="group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover">
+    <li
+      className={cn(
+        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
+      )}
+    >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <button
           type="button"
@@ -565,7 +575,10 @@ function ImageListItem({
  */
 function ImageReference({ data }: { data: ImageDetail }) {
   return (
-    <section className="space-y-2.5 rounded-lg border border-hairline bg-surface-header/40 p-3.5">
+    // Not fenced. It was a tinted box, and for a moving tag the `Notice`
+    // inside it made a warning box inside a box: the side panel is the frame,
+    // the name at the top is the block's title, and the notice stands alone.
+    <section className="space-y-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-body font-medium">{data.ref}</span>
         {data.dangling && <Tag>untagged</Tag>}
@@ -584,9 +597,9 @@ function ImageReference({ data }: { data: ImageDetail }) {
       {data.movingTag && (
         <Notice title="Moving tag" tone="warning">
           <p>
-            <span className="font-mono">{data.ref}</span> may resolve to another image in the
-            future — two servers running &ldquo;the same&rdquo; tag can be running different
-            software, and there is no version to roll back to.
+            <span className="font-mono">{data.ref}</span> may resolve to another image in the future
+            — two servers running &ldquo;the same&rdquo; tag can be running different software, and
+            there is no version to roll back to.
           </p>
           {data.repoDigests.length > 0 && (
             <p className="mt-1">Pin by digest to make an update something you choose.</p>
@@ -737,17 +750,16 @@ function ImageDetailPanel({
                 deliberately.
               </Hint>
             ) : (
-              <div className="space-y-1">
+              <RowList>
                 {data.usedBy.map((c) => (
-                  <div
+                  <Row
                     key={c.id}
-                    className="flex items-center justify-between gap-2 rounded-md border border-hairline px-3 py-2 text-body"
-                  >
-                    <span className="truncate font-medium">{c.name}</span>
-                    <Status state={c.state} />
-                  </div>
+                    title={c.name}
+                    trailing={<Status state={c.state} />}
+                    className="px-0 py-2"
+                  />
                 ))}
-              </div>
+              </RowList>
             )}
           </section>
 
@@ -763,7 +775,7 @@ function ImageDetailPanel({
               {data.layers.map((layer, i) => (
                 <div
                   key={`${layer.id}-${i}`}
-                  className="flex items-start gap-3 rounded-md px-2 py-1.5 font-mono text-xs leading-relaxed hover:bg-row-hover"
+                  className="flex items-start gap-3 py-1 font-mono text-xs leading-relaxed"
                 >
                   <span className="numeric w-16 shrink-0 text-right text-muted-foreground">
                     {layer.size > 0 ? bytes(layer.size, 0) : "—"}

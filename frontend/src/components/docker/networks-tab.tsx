@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react"
 import { Linked, NetworkDevice, Slash, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import type { Container, DockerNetwork, NetworkDetail, NetworkMember } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { IconAction, rowReveal } from "@/components/icon-action"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { IconAction } from "@/components/icon-action"
+import { Group, Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -96,13 +98,12 @@ export function NetworksTab({
 
   // The three the Engine owns are never removable, so they are not "unused"
   // in any sense the prune button should count.
-  const unused = networks.filter(
-    (n) => n.usedBy.length === 0 && !SYSTEM_NETWORKS.includes(n.name),
-  )
+  const unused = networks.filter((n) => n.usedBy.length === 0 && !SYSTEM_NETWORKS.includes(n.name))
 
   return (
     <div className="space-y-4">
-      <Panel>
+      {/* Plain: the list is the page. */}
+      <Panel plain className="animate-rise">
         <PanelHeader
           title="Networks"
           actions={
@@ -207,7 +208,7 @@ export function NetworksTab({
                 ))}
               </ul>
 
-              <div className="hidden lg:block">
+              <div className="-mx-4 hidden min-w-0 lg:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -235,7 +236,9 @@ export function NetworksTab({
                           </span>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {SYSTEM_NETWORKS.includes(network.name) ? "Docker system" : "User-created"}
+                          {SYSTEM_NETWORKS.includes(network.name)
+                            ? "Docker system"
+                            : "User-created"}
                         </TableCell>
                         <TableCell>{network.driver}</TableCell>
                         <TableCell className="font-mono text-hint text-muted-foreground">
@@ -344,7 +347,12 @@ function NetworkListItem({
   const removable = can("destructive") && !system && network.usedBy.length === 0
 
   return (
-    <li className="group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover">
+    <li
+      className={cn(
+        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
+      )}
+    >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <button
           type="button"
@@ -421,7 +429,9 @@ function NetworkShape({ name, members }: { name: string; members: NetworkMember[
   return (
     <section className="space-y-2">
       <p className="eyebrow">Shape</p>
-      <div className="space-y-1.5 rounded-lg border border-hairline bg-surface-header/40 p-3.5">
+      {/* The one fence in the panel: a diagram is a region, and its edge is
+          what says the tree inside is one picture rather than a list. */}
+      <Group tinted className="space-y-1.5">
         <div className="flex items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-success" aria-hidden />
           <span className="truncate font-mono text-body font-medium">{name}</span>
@@ -449,7 +459,7 @@ function NetworkShape({ name, members }: { name: string; members: NetworkMember[
             </li>
           ))}
         </ul>
-      </div>
+      </Group>
     </section>
   )
 }
@@ -578,39 +588,40 @@ function NetworkDetailPanel({
             {data.members.length === 0 ? (
               <Hint className="italic">Nothing is attached.</Hint>
             ) : (
-              <div className="space-y-1.5">
+              /* Rows with a hairline between them, not a bordered card per
+                 member. The row carries `group` so the detach control can
+                 appear under the pointer the way every other row's does. */
+              <RowList>
                 {data.members.map((m) => (
-                  <div
+                  <Row
                     key={m.id}
-                    className="group flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline px-3 py-2 text-body"
-                  >
-                    <span className="min-w-0">
-                      <span className="font-medium">{m.name}</span>
-                      <span className="numeric ml-2 font-mono text-hint text-muted-foreground">
-                        {m.ipv4 || "no address"}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      {m.aliases
-                        .filter((a) => a !== m.name && !m.id.startsWith(a))
-                        .map((a) => (
-                          <Tag key={a} mono>
-                            {a}
-                          </Tag>
-                        ))}
-                      {can("service.control") && !data.system && (
-                        <IconAction
-                          label={`Detach ${m.name}`}
-                          className={rowReveal()}
-                          onClick={() => disconnect(m.id, m.name)}
-                        >
-                          <Slash />
-                        </IconAction>
-                      )}
-                    </span>
-                  </div>
+                    className="group px-0 py-2"
+                    title={m.name}
+                    subtitle={m.ipv4 || "no address"}
+                    mono
+                    trailing={
+                      <>
+                        {m.aliases
+                          .filter((a) => a !== m.name && !m.id.startsWith(a))
+                          .map((a) => (
+                            <Tag key={a} mono>
+                              {a}
+                            </Tag>
+                          ))}
+                        {can("service.control") && !data.system && (
+                          <IconAction
+                            reveal
+                            label={`Detach ${m.name}`}
+                            onClick={() => disconnect(m.id, m.name)}
+                          >
+                            <Slash />
+                          </IconAction>
+                        )}
+                      </>
+                    }
+                  />
                 ))}
-              </div>
+              </RowList>
             )}
           </section>
         </div>
@@ -804,21 +815,21 @@ function NewNetworkDialog({
             onChange={(e) => setName(e.target.value)}
           />
         </div>
-        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-hairline p-2.5">
+        <Group className="flex items-start gap-3">
           <Switch
+            id="network-internal"
             checked={internal}
             onCheckedChange={setInternal}
             className="mt-0.5"
-            aria-label="No internet access"
           />
-          <span>
+          <label htmlFor="network-internal" className="cursor-pointer">
             <span className="block text-xs font-medium">Cut it off from the internet</span>
             <Hint>
               Containers on this network can reach each other and nothing else. The right choice for
               a database that only needs to talk to the application in front of it.
             </Hint>
-          </span>
-        </label>
+          </label>
+        </Group>
         <div className="space-y-1.5">
           <Label htmlFor="network-subnet" className="text-xs">
             Subnet (optional)

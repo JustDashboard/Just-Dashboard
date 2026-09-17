@@ -343,7 +343,7 @@ export default function ContainersPage() {
   }
 
   return (
-    <Page>
+    <Page className="animate-rise">
       {/* Containers are deployed from the Deploy pages — there is no standalone
           create flow here anymore. */}
       <PageHeader eyebrow="Docker" title="Containers" />
@@ -360,7 +360,10 @@ export default function ContainersPage() {
 
       {socketError && <ErrorState error={new Error(socketError)} />}
 
-      <Panel>
+      {/* Plain: the list is the whole of the page under the two readings above
+          it, and a title with a hairline marks it. A frame here was the one
+          box left on a page that had just stopped drawing them. */}
+      <Panel plain>
         <PanelHeader
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -442,13 +445,16 @@ export default function ContainersPage() {
                 broken. `CPU · 1h` waits for `2xl`, which is where the ninth
                 column stops being the one that pushes the rest out.
               */}
-              <ul className="divide-y divide-hairline xl:hidden">
+              <ul className="animate-rise divide-y divide-hairline xl:hidden">
                 {visible.map((container) => (
                   <ContainerListItem key={container.id} container={container} {...shared} />
                 ))}
               </ul>
 
-              <div className="hidden xl:block">
+              {/* Bled by the cells' own padding, so the first column starts
+                  where the title does. Rises once, when the socket's first
+                  frame lands. */}
+              <div className="-mx-4 hidden min-w-0 animate-rise xl:block">
                 <Table>
                   <TableHeader>
                     <TableRow>

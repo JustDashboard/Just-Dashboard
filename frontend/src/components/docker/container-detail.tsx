@@ -49,7 +49,9 @@ import type { ConfirmFn } from "@/components/docker/shared"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
 import { Tag } from "@/components/tag"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -554,16 +556,18 @@ function OverviewFields({ detail }: { detail: ContainerDetail }) {
 
         {detail.networkDetails.length > 0 && (
           <FieldGroup title={<Term name="network">Networks</Term>}>
-            <div className="space-y-2">
+            {/* Rows, not a fence per network: two networks were two boxes
+                beside three groups of plain text. */}
+            <ul className="divide-y divide-hairline text-xs">
               {detail.networkDetails.map((net) => (
-                <Group key={net.networkId} className="text-xs">
+                <li key={net.networkId} className="py-1.5 first:pt-0 last:pb-0">
                   <div className="font-medium">{net.name}</div>
                   <p className="font-mono text-muted-foreground">
                     {net.ipAddress || "no address"} · gateway {net.gateway || "—"}
                   </p>
-                </Group>
+                </li>
               ))}
-            </div>
+            </ul>
           </FieldGroup>
         )}
       </div>
@@ -798,9 +802,7 @@ function ContainerActions({
             Open stack
           </Link>
         </Button>
-        {can("service.control") && (
-          <ComposeDriftMenu detail={detail} onChanged={onChanged} />
-        )}
+        {can("service.control") && <ComposeDriftMenu detail={detail} onChanged={onChanged} />}
       </>
     )
   }
@@ -962,7 +964,9 @@ function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
   const kept = mounts.filter((mount) => MOUNT_KIND[mount.type]?.survives).length
 
   return (
-    <Panel>
+    // Plain: the side panel is the frame, and the mount rows are the whole of
+    // this tab.
+    <Panel plain>
       <PanelHeader
         title={
           <span className="inline-flex items-center gap-1.5">
@@ -990,7 +994,7 @@ function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
               const kind = MOUNT_KIND[mount.type]
               const Icon = kind?.icon ?? Servers
               return (
-                <li key={i} className="flex min-w-0 items-start gap-3 px-4 py-2.5">
+                <li key={i} className={cn("flex min-w-0 items-start gap-3 px-4 py-2.5", ROW_BLEED)}>
                   <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
                     {/* The path the application inside was configured with. */}
@@ -1095,12 +1099,9 @@ function WritableLayer({ containerId }: { containerId: string }) {
         </p>
         <div className="mt-2 flex max-h-28 flex-wrap gap-1 overflow-auto">
           {roots.map((path) => (
-            <span
-              key={path}
-              className="rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro"
-            >
+            <Tag key={path} mono className="text-foreground">
               {path}
-            </span>
+            </Tag>
           ))}
         </div>
         <Button
@@ -1157,12 +1158,12 @@ function WritableLayerReportView({
         </p>
       </div>
 
-      <div className="space-y-1">
+      {/* Eight directories as eight rows of a table read down — path, kind,
+          size — with a hairline between them. Framed one by one they were a
+          stack of eight boxes whose figures could not be compared. */}
+      <ul className="divide-y divide-hairline">
         {biggest.map((entry) => (
-          <div
-            key={entry.path}
-            className="flex min-w-0 items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5 text-xs"
-          >
+          <li key={entry.path} className="flex min-w-0 items-center gap-2 py-1.5 text-xs">
             <span className="min-w-0 flex-1 truncate font-mono text-hint">{entry.path}</span>
             {entry.mounted ? (
               <Tag>on a mount</Tag>
@@ -1171,10 +1172,12 @@ function WritableLayerReportView({
             ) : (
               <Tag>{entry.kind}</Tag>
             )}
-            <span className="numeric shrink-0 font-mono text-hint">{bytes(entry.size)}</span>
-          </div>
+            <span className="numeric w-16 shrink-0 text-right font-mono text-hint">
+              {bytes(entry.size)}
+            </span>
+          </li>
         ))}
-      </div>
+      </ul>
 
       {/*
         The two figures come from two different measurements — Docker's diff
@@ -1426,11 +1429,11 @@ function Reachability({ containerId }: { containerId: string }) {
   return (
     <section className="space-y-2">
       <p className="eyebrow">Reachable at</p>
-      <div className="space-y-1.5">
+      <ul className="divide-y divide-hairline">
         {data.map((route) => (
           <RouteRow key={`${route.hostIp}-${route.hostPort}-${route.protocol}`} route={route} />
         ))}
-      </div>
+      </ul>
       {bypassed.length > 0 && (
         <Notice title="The firewall does not apply to these ports" icon={Warning} tone="warning">
           Docker publishes a port by writing NAT rules that are consulted before the firewall&apos;s
@@ -1584,7 +1587,7 @@ function ResourceLimitsEditor({
 
   if (!open) {
     return (
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline px-3 py-2">
+      <Group className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1 text-xs text-muted-foreground">
           <Term name="memoryLimit">Limits</Term> can be changed without recreating this container —
           the one part of its configuration Docker will edit in place.
@@ -1593,7 +1596,7 @@ function ResourceLimitsEditor({
           <Pencil className="size-3" />
           Change limits
         </Button>
-      </div>
+      </Group>
     )
   }
 

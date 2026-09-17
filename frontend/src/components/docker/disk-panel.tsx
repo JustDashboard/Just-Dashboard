@@ -4,11 +4,13 @@ import { Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { prune, pruneContainers, pruneSummary, RECLAIM_SAFE } from "@/lib/docker-prune"
 import type { DiskDefinition, DockerDiskUsage, DockerDiskUsageLine } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
 import { LoadingRows } from "@/components/state"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Term } from "@/components/docker/explain"
@@ -56,7 +58,10 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
   const safe = data ? data.images.reclaimable + data.buildCache.reclaimable : 0
 
   return (
-    <Panel>
+    // Plain: four readings and the buttons that act on them, above the image
+    // list they explain. Framed, it was the first of two boxes on a page whose
+    // subject is the second one.
+    <Panel plain className="animate-rise">
       <PanelHeader
         title="Disk"
         actions={
@@ -102,7 +107,7 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
           "these numbers measure different things, and here is by how much".
         */}
         {data && data.sharedLayers > 0 && (
-          <div className="border-b border-hairline px-4 py-2.5">
+          <div className="border-b border-hairline py-2.5">
             <p className="text-xs leading-relaxed text-muted-foreground">
               Adding up every image&apos;s own size gives {bytes(data.imagesSize)}, but the layers
               occupy {bytes(data.layersSize)}: {bytes(data.sharedLayers)} is shared between images
@@ -111,7 +116,7 @@ export function DiskPanel({ confirm, onPruned }: { confirm: ConfirmFn; onPruned?
           </div>
         )}
         {loading && !data ? (
-          <LoadingRows rows={4} />
+          <LoadingRows rows={4} className="py-3" />
         ) : (
           <ul className="divide-y divide-hairline">
             <DiskRow
@@ -262,7 +267,7 @@ function DiskRow({
   if (!line) return null
   const idle = line.total - line.active
   return (
-    <li className="flex min-w-0 items-center gap-3 px-4 py-2.5">
+    <li className={cn("flex min-w-0 items-center gap-3 px-4 py-2.5", ROW_BLEED)}>
       <span className="min-w-0 flex-1">
         <span className="block text-body font-medium">
           {definition ? (

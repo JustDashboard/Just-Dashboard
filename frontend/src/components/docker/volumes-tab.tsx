@@ -6,6 +6,7 @@ import { FolderOpen, Servers, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, truncateMiddle } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { VolumeDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
@@ -13,6 +14,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -88,7 +90,8 @@ export function VolumesTab({
 
   return (
     <div className="space-y-4">
-      <Panel>
+      {/* Plain: the list is the page. */}
+      <Panel plain className="animate-rise">
         <PanelHeader
           title="Volumes"
           actions={
@@ -145,11 +148,7 @@ export function VolumesTab({
             <div className="flex min-w-0 flex-wrap gap-1">
               {(["all", "used", "unused"] as const).map((key) =>
                 key === "all" || counts[key] > 0 ? (
-                  <FilterChip
-                    key={key}
-                    selected={state === key}
-                    onClick={() => setState(key)}
-                  >
+                  <FilterChip key={key} selected={state === key} onClick={() => setState(key)}>
                     {key === "all" ? "All" : key === "used" ? "Used" : "Unused"}
                     <ChipCount>{counts[key]}</ChipCount>
                   </FilterChip>
@@ -202,7 +201,7 @@ export function VolumesTab({
                 ))}
               </ul>
 
-              <div className="hidden lg:block">
+              <div className="-mx-4 hidden min-w-0 lg:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -259,9 +258,9 @@ export function VolumesTab({
                                           </p>
                                           <p>
                                             Nothing mounts it right now. A volume outlives the
-                                            container that created it, so this is often the data from
-                                            something that was removed and rebuilt — check what is in
-                                            it first if you are not sure.
+                                            container that created it, so this is often the data
+                                            from something that was removed and rebuilt — check what
+                                            is in it first if you are not sure.
                                           </p>
                                         </>
                                       ),
@@ -322,7 +321,12 @@ function VolumeListItem({
   const { can } = useAuth()
 
   return (
-    <li className="group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover">
+    <li
+      className={cn(
+        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
+      )}
+    >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <button
           type="button"
@@ -512,28 +516,23 @@ function VolumeDetailPanel({
                 something that was removed and rebuilt.
               </Hint>
             ) : (
-              <div className="space-y-1">
+              <RowList>
                 {data.usedBy.map((u) => (
-                  <div
+                  <Row
                     key={`${u.id}-${u.destination}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline px-2.5 py-1.5 text-xs"
-                  >
-                    <span className="min-w-0">
-                      <span className="truncate font-medium">{u.name}</span>
-                      <span className="ml-2 font-mono text-hint text-muted-foreground">
-                        at {u.destination}
-                      </span>
-                      {u.stack && (
-                        <span className="ml-2 text-hint text-muted-foreground">· {u.stack}</span>
-                      )}
-                    </span>
-                    <span className="flex shrink-0 gap-1">
-                      {u.readOnly && <Tag>read-only</Tag>}
-                      <Status state={u.state} />
-                    </span>
-                  </div>
+                    className="px-0 py-2"
+                    title={u.name}
+                    subtitle={`at ${u.destination}${u.stack ? ` · ${u.stack}` : ""}`}
+                    mono
+                    trailing={
+                      <>
+                        {u.readOnly && <Tag>read-only</Tag>}
+                        <Status state={u.state} />
+                      </>
+                    }
+                  />
                 ))}
-              </div>
+              </RowList>
             )}
           </section>
         </div>
