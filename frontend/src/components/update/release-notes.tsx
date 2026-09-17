@@ -1,6 +1,7 @@
 "use client"
 
 import { Warning } from "@/components/icons"
+import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import type { ChangeKind, Release } from "@/lib/types"
@@ -86,9 +87,9 @@ export function ReleaseNotes({
           and a warning they have to expand to read is a warning they will
           discover afterwards. */}
       {release.breaking && release.breakingNote && (
-        <p className="rounded-lg border border-rule-warning bg-wash-warning px-3 py-2 text-xs leading-relaxed text-foreground">
+        <Notice title="Before you update" tone="warning">
           {release.breakingNote}
-        </p>
+        </Notice>
       )}
 
       <ul className="space-y-2">

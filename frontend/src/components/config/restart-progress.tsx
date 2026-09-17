@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { relativeTime } from "@/lib/format"
 import type { DashboardConfigRun } from "@/lib/types"
 import { configPhaseLabel } from "@/hooks/use-self-config"
+import { Well } from "@/components/panel"
 import { Notice, Spinner } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
@@ -83,18 +84,20 @@ export function RestartProgress({
       </div>
 
       {run.changes && run.changes.length > 0 && (
-        <ul className="space-y-1 rounded-xl border border-hairline bg-surface-sunken p-2.5 text-xs">
-          {run.changes.map((change) => (
-            <li key={change.key} className="flex flex-wrap items-baseline gap-x-2">
-              <span className="font-medium">{change.label}</span>
-              <span className="font-mono text-hint text-muted-foreground line-through">
-                {change.from || "—"}
-              </span>
-              <span className="text-muted-foreground">→</span>
-              <span className="font-mono text-hint">{change.to || "—"}</span>
-            </li>
-          ))}
-        </ul>
+        <Well plain>
+          <ul className="space-y-1 text-xs">
+            {run.changes.map((change) => (
+              <li key={change.key} className="flex flex-wrap items-baseline gap-x-2">
+                <span className="font-medium">{change.label}</span>
+                <span className="font-mono text-hint text-muted-foreground line-through">
+                  {change.from || "—"}
+                </span>
+                <span className="text-muted-foreground">→</span>
+                <span className="font-mono text-hint">{change.to || "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </Well>
       )}
 
       {/* One banner while it runs, not three. The only thing the reader has to
@@ -196,7 +199,7 @@ function headline(run: DashboardConfigRun) {
  * part that says what went wrong is the end of it.
  */
 function Transcript({ text, follow }: { text: string; follow?: boolean }) {
-  const ref = useRef<HTMLPreElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
   useEffect(() => {
@@ -206,7 +209,7 @@ function Transcript({ text, follow }: { text: string; follow?: boolean }) {
   }, [text, follow])
 
   return (
-    <pre
+    <Well
       ref={ref}
       onScroll={() => {
         const el = ref.current
@@ -215,9 +218,9 @@ function Transcript({ text, follow }: { text: string; follow?: boolean }) {
         // still growing yanks them back down every two seconds.
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
       }}
-      className="max-h-64 min-h-16 overflow-auto rounded-xl border border-hairline bg-surface-sunken p-2.5 font-mono text-hint leading-relaxed break-all whitespace-pre-wrap"
+      className="max-h-64 min-h-16 text-hint break-all whitespace-pre-wrap"
     >
       {text.trimEnd()}
-    </pre>
+    </Well>
   )
 }

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { relativeTime } from "@/lib/format"
 import type { UpdateRun } from "@/lib/types"
 import { phaseLabel } from "@/hooks/use-self-update"
+import { Well } from "@/components/panel"
 import { Notice, Spinner } from "@/components/state"
 
 /**
@@ -88,7 +89,7 @@ export function UpdateProgress({
  * a megabyte on every poll.
  */
 function Transcript({ text, follow }: { text: string; follow?: boolean }) {
-  const ref = useRef<HTMLPreElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
   useEffect(() => {
@@ -98,7 +99,7 @@ function Transcript({ text, follow }: { text: string; follow?: boolean }) {
   }, [text, follow])
 
   return (
-    <pre
+    <Well
       ref={ref}
       onScroll={() => {
         const el = ref.current
@@ -107,9 +108,9 @@ function Transcript({ text, follow }: { text: string; follow?: boolean }) {
         // still growing yanks them back down every two seconds.
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
       }}
-      className="max-h-64 min-h-16 overflow-auto rounded-xl border border-hairline bg-surface-sunken p-2.5 font-mono text-hint leading-relaxed break-all whitespace-pre-wrap"
+      className="max-h-64 min-h-16 text-hint break-all whitespace-pre-wrap"
     >
       {text.trimEnd()}
-    </pre>
+    </Well>
   )
 }

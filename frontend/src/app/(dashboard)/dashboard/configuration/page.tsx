@@ -1,15 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import {
-  ChevronDown,
-  Information,
-  Lightning,
-  RefreshClockwise,
-  Warning,
-  Wrench,
-} from "@/components/icons"
-import { cn } from "@/lib/utils"
+import { ChevronDown, Warning } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DashboardSettings, TailscaleIdentity } from "@/lib/types"
@@ -17,16 +9,14 @@ import { useAuth } from "@/hooks/use-auth"
 import { useSelfConfig } from "@/hooks/use-self-config"
 import { useConfirm } from "@/components/confirm-dialog"
 import { RestartProgress } from "@/components/config/restart-progress"
+import { Field, FieldRow, OptionList, OptionRow } from "@/components/form"
 import { Page, PageHeader, PageState } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -52,6 +42,13 @@ import {
  * that **the page shows state and controls; the prose is one line each, and the
  * reasoning lives behind the ⓘ next to the label**. Nothing was removed, it was
  * moved to where somebody who wants it can ask for it.
+ *
+ * Its second draft then framed everything it had kept: two boxed panels, a
+ * boxed run record, a boxed row of switches and two boxed drawers, on a page
+ * whose neighbours had just stopped drawing boxes. The forms are plain now and
+ * the two titles and the gap between them are the structure; the switches are
+ * `OptionRow`s; the paths the install lives at are a row of facts under the
+ * title, because they are what the page is rather than a setting on it.
  */
 export default function DashboardConfigurationPage() {
   const { can } = useAuth()
@@ -69,7 +66,6 @@ export default function DashboardConfigurationPage() {
   } = useSelfConfig()
   const { confirm, dialog } = useConfirm()
   const [local, setLocal] = useState<DashboardSettings | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const saved = report?.settings
   // The form follows the server until the operator types into it, and does so
@@ -84,7 +80,7 @@ export default function DashboardConfigurationPage() {
   const editable = Boolean(report?.supported) && admin && !running
 
   if ((loading && !report) || error) {
-    return <PageState eyebrow="Operations" title="Configuration" error={error ?? undefined} />
+    return <PageState eyebrow="System" title="Configuration" error={error ?? undefined} />
   }
   if (!report || !draft) return null
 
@@ -149,18 +145,20 @@ export default function DashboardConfigurationPage() {
       confirmLabel: "Apply and restart",
       description: (
         <>
-          <ul className="space-y-1 rounded-lg border border-hairline bg-surface-sunken p-2.5 text-xs">
-            {changes.map((change) => (
-              <li key={change.key} className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-medium">{change.label}</span>
-                <span className="font-mono text-muted-foreground line-through">
-                  {change.from || "—"}
-                </span>
-                <span className="text-muted-foreground">→</span>
-                <span className="font-mono">{change.to || "—"}</span>
-              </li>
-            ))}
-          </ul>
+          <Well plain>
+            <ul className="space-y-1 text-xs">
+              {changes.map((change) => (
+                <li key={change.key} className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-medium">{change.label}</span>
+                  <span className="font-mono text-muted-foreground line-through">
+                    {change.from || "—"}
+                  </span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="font-mono">{change.to || "—"}</span>
+                </li>
+              ))}
+            </ul>
+          </Well>
           {moves && (
             <p>
               Afterwards it answers at <b>{endpointOf(draft)}</b> — open that, not this tab.
@@ -172,9 +170,9 @@ export default function DashboardConfigurationPage() {
           {draft.site === "localhost" && !isLocalhost && (
             <div className="space-y-1">
               <p>This address stops answering. Reach it with a tunnel:</p>
-              <code className="block rounded-lg border border-hairline bg-surface-sunken p-2 font-mono text-hint break-all">
+              <Well className="text-hint break-all">
                 ssh -N -L {draft.port}:localhost:{draft.port} you@{currentHost}
-              </code>
+              </Well>
             </div>
           )}
           <p className="text-muted-foreground">
@@ -220,16 +218,17 @@ export default function DashboardConfigurationPage() {
       },
     })
 
+  const notices = !report.supported || (report.drift?.length ?? 0) > 0
+
   return (
-    <Page>
+    <Page className="animate-rise">
       {dialog}
       <PageHeader
-        eyebrow="Operations"
+        eyebrow="System"
         title="Configuration"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={refresh} disabled={busy}>
-              <RefreshClockwise className="size-4" />
+            <Button variant="outline" size="sm" onClick={refresh}>
               Refresh
             </Button>
             {admin && report.supported && (
@@ -240,7 +239,6 @@ export default function DashboardConfigurationPage() {
                   disabled={running}
                   onClick={() => startRestart(false)}
                 >
-                  <Lightning className="size-4" />
                   Restart
                 </Button>
                 <Button
@@ -249,7 +247,6 @@ export default function DashboardConfigurationPage() {
                   disabled={running}
                   onClick={() => startRestart(true)}
                 >
-                  <Wrench className="size-4" />
                   Rebuild
                 </Button>
               </>
@@ -257,6 +254,45 @@ export default function DashboardConfigurationPage() {
           </>
         }
       />
+
+      {/* Where this install lives. It was a drawer of four facts at the foot of
+          the page; the checkout, its compose file and its settings file are
+          what the page is about, so they are its first row — and the reason
+          the fields below are read-only, when they are, sits beside them. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
+        {report.supported ? (
+          <>
+            <span className="min-w-0 truncate font-mono text-foreground">{report.dir}</span>
+            {report.compose && (
+              <>
+                <Dot />
+                <span className="min-w-0 truncate">
+                  compose{" "}
+                  <span className="font-mono text-foreground">
+                    {within(report.dir, report.compose)}
+                  </span>
+                </span>
+              </>
+            )}
+            {report.envPath && (
+              <>
+                <Dot />
+                <span className="min-w-0 truncate">
+                  settings{" "}
+                  <span className="font-mono text-foreground">
+                    {within(report.dir, report.envPath)}
+                  </span>
+                </span>
+              </>
+            )}
+          </>
+        ) : (
+          <span className="min-w-0 truncate">
+            settings read from <span className="font-mono text-foreground">.env</span>
+          </span>
+        )}
+        <ReadOnlyNote supported={report.supported} admin={admin} running={running} />
+      </div>
 
       {/* What is true right now, in four figures. The certificate tile reads
           the certificate on disk rather than the mode in the file: JD_TLS
@@ -284,7 +320,7 @@ export default function DashboardConfigurationPage() {
       </StatGrid>
 
       {report.run && (
-        <Panel>
+        <Panel plain className="animate-rise">
           <PanelHeader title={running ? "Restarting" : "Last restart"} />
           <PanelBody>
             <RestartProgress
@@ -303,40 +339,44 @@ export default function DashboardConfigurationPage() {
         </Panel>
       )}
 
-      {!report.supported && (
-        <Notice title="This install is configured by hand" icon={Warning}>
-          {report.reason ?? "No compose project was found for this install."} The settings below are
-          read from disk; change them in <code className="font-mono">.env</code> over ssh.
-        </Notice>
+      {notices && (
+        <div className="space-y-3">
+          {!report.supported && (
+            <Notice title="This install is configured by hand" icon={Warning}>
+              {report.reason ?? "No compose project was found for this install."} The settings
+              below are read from disk; change them in{" "}
+              <code className="font-mono">.env</code> over ssh.
+            </Notice>
+          )}
+
+          {report.drift && report.drift.length > 0 && (
+            <Notice title=".env has been edited since this dashboard started" tone="warning">
+              <p className="mb-1">Restarting adopts these. Nothing is lost by leaving them.</p>
+              <ul className="space-y-0.5">
+                {report.drift.map((change) => (
+                  <li key={change.key} className="font-mono text-hint">
+                    {change.label}: {change.from || "—"} → {change.to || "—"}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          )}
+        </div>
       )}
 
-      {report.drift && report.drift.length > 0 && (
-        <Notice title=".env has been edited since this dashboard started" tone="warning">
-          <p className="mb-1">Restarting adopts these. Nothing is lost by leaving them.</p>
-          <ul className="space-y-0.5">
-            {report.drift.map((change) => (
-              <li key={change.key} className="font-mono text-hint">
-                {change.label}: {change.from || "—"} → {change.to || "—"}
-              </li>
-            ))}
-          </ul>
-        </Notice>
-      )}
-
-      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-        <Panel>
-          <PanelHeader
-            title="How it is reached"
-            actions={<EditableNote report={report} admin={admin} running={running} />}
-          />
+      <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+        <Panel plain>
+          <PanelHeader title="How it is reached" />
           <PanelBody className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <FieldRow>
               <Field
                 label="Address"
+                htmlFor="cfg-site"
                 hint="What you type into the browser."
                 info="It is also the name on the certificate, so the address and the certificate can never drift apart."
               >
                 <Input
+                  id="cfg-site"
                   value={draft.site}
                   disabled={!editable}
                   onChange={(e) => set("site", e.target.value)}
@@ -345,10 +385,12 @@ export default function DashboardConfigurationPage() {
 
               <Field
                 label="Port"
+                htmlFor="cfg-port"
                 hint="The only port to remember."
                 info="Everything else in the stack listens on loopback behind the proxy, so this is the single number that has to be reachable."
               >
                 <Input
+                  id="cfg-port"
                   type="number"
                   inputMode="numeric"
                   value={draft.port}
@@ -387,17 +429,19 @@ export default function DashboardConfigurationPage() {
 
               <Field
                 label="Listening interface"
+                htmlFor="cfg-bind"
                 hint={`Blank uses ${draft.site}.`}
                 info="The proxy resolves names inside its own container rather than on the host, so a Tailscale install binds the tailnet IP and answers for the MagicDNS name behind it."
               >
                 <Input
+                  id="cfg-bind"
                   value={draft.bind}
                   placeholder={draft.site}
                   disabled={!editable}
                   onChange={(e) => set("bind", e.target.value)}
                 />
               </Field>
-            </div>
+            </FieldRow>
 
             {editable && (
               <TailscaleNotice
@@ -410,10 +454,11 @@ export default function DashboardConfigurationPage() {
               />
             )}
 
-            <Drawer label="Internal ports" hint="Loopback only, reached by the proxy">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Frontend port" hint="Next.js, on 127.0.0.1.">
+            <Disclosure label="Internal ports" hint="loopback only, reached by the proxy">
+              <FieldRow>
+                <Field label="Frontend port" htmlFor="cfg-frontend" hint="Next.js, on 127.0.0.1.">
                   <Input
+                    id="cfg-frontend"
                     type="number"
                     inputMode="numeric"
                     value={draft.frontendPort}
@@ -421,8 +466,9 @@ export default function DashboardConfigurationPage() {
                     onChange={(e) => set("frontendPort", Number(e.target.value))}
                   />
                 </Field>
-                <Field label="Backend port" hint="The Go API, on 127.0.0.1.">
+                <Field label="Backend port" htmlFor="cfg-backend" hint="The Go API, on 127.0.0.1.">
                   <Input
+                    id="cfg-backend"
                     type="number"
                     inputMode="numeric"
                     value={draft.backendPort}
@@ -430,23 +476,22 @@ export default function DashboardConfigurationPage() {
                     onChange={(e) => set("backendPort", Number(e.target.value))}
                   />
                 </Field>
-              </div>
-            </Drawer>
+              </FieldRow>
+            </Disclosure>
           </PanelBody>
         </Panel>
 
-        <Panel>
-          <PanelHeader
-            title="Who may reach it"
-            actions={<EditableNote report={report} admin={admin} running={running} />}
-          />
+        <Panel plain>
+          <PanelHeader title="Who may reach it" />
           <PanelBody className="space-y-4">
             <Field
               label="Network allowlist"
+              htmlFor="cfg-cidrs"
               hint="Checked before the login page. Keep 127.0.0.1/32."
               info="The allowlist is enforced before authentication, so removing your own network does not give you an error page — it makes the dashboard stop existing for you. Loopback is the way back in over an SSH tunnel."
             >
               <Input
+                id="cfg-cidrs"
                 value={draft.allowedCidrs}
                 disabled={!editable}
                 onChange={(e) => set("allowedCidrs", e.target.value)}
@@ -454,62 +499,55 @@ export default function DashboardConfigurationPage() {
               />
             </Field>
 
-            <div className="divide-y divide-hairline rounded-xl border border-hairline bg-surface-sunken">
-              <Toggle
-                label="Require two-factor"
-                hint="Every account must enrol."
-                info="With this off, an account that has not enrolled signs in with its password alone. An account that has enrolled is always asked for its code either way."
+            <OptionList>
+              <OptionRow
+                title="Require two-factor"
+                hint="Every account must enrol. An enrolled account is asked for its code either way."
                 checked={draft.require2fa}
                 disabled={!editable}
-                onChange={(value) => set("require2fa", value)}
+                onCheckedChange={(value) => set("require2fa", value)}
               />
-              <Toggle
-                label="Web terminal"
-                hint="A root shell in the browser."
-                info="Turning it off removes the routes, not just the page — nothing can reach the terminal API at all."
+              <OptionRow
+                title="Web terminal"
+                hint="A root shell in the browser. Off removes the routes, not just the page."
                 checked={draft.terminalEnabled}
                 disabled={!editable}
-                onChange={(value) => set("terminalEnabled", value)}
+                onCheckedChange={(value) => set("terminalEnabled", value)}
               />
-              <Toggle
-                label="Check for new versions"
+              <OptionRow
+                title="Check for new versions"
                 hint="The only outbound request it makes."
                 checked={draft.updateCheck}
                 disabled={!editable}
-                onChange={(value) => set("updateCheck", value)}
+                onCheckedChange={(value) => set("updateCheck", value)}
               />
-            </div>
+            </OptionList>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Session lifetime" hint="How long a sign-in lasts. e.g. 12h">
+            <FieldRow>
+              <Field
+                label="Session lifetime"
+                htmlFor="cfg-session"
+                hint="How long a sign-in lasts, e.g. 12h."
+              >
                 <Input
+                  id="cfg-session"
                   value={draft.sessionTtl}
                   disabled={!editable}
                   onChange={(e) => set("sessionTtl", e.target.value)}
                 />
               </Field>
-              <Field label="Idle timeout" hint="Unused sessions expire. e.g. 60m">
+              <Field label="Idle timeout" htmlFor="cfg-idle" hint="Unused sessions expire, e.g. 60m.">
                 <Input
+                  id="cfg-idle"
                   value={draft.idleTtl}
                   disabled={!editable}
                   onChange={(e) => set("idleTtl", e.target.value)}
                 />
               </Field>
-            </div>
+            </FieldRow>
           </PanelBody>
         </Panel>
       </div>
-
-      {report.supported && (
-        <Drawer label="Where this install lives" hint={report.dir ?? ""}>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Fact label="Checkout" value={report.dir ?? "—"} />
-            <Fact label="Compose file" value={report.compose ?? "—"} />
-            <Fact label="Settings file" value={report.envPath ?? "—"} />
-            <Fact label="Endpoint" value={report.endpoint} />
-          </div>
-        </Drawer>
-      )}
 
       {/*
         The apply bar follows the reader instead of sitting at the bottom of one
@@ -518,7 +556,7 @@ export default function DashboardConfigurationPage() {
         gets abandoned half-edited.
       */}
       {editable && dirty && (
-        <div className="sticky bottom-0 z-20 -mx-4 mt-auto border-t border-hairline bg-background/85 px-4 py-3 backdrop-blur md:-mx-6 md:px-6">
+        <div className="sticky bottom-0 z-20 -mx-5 mt-auto border-t border-hairline bg-background/85 px-5 py-3 backdrop-blur md:-mx-8 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-body">
               <span className="font-medium">
@@ -527,22 +565,10 @@ export default function DashboardConfigurationPage() {
               <span className="text-muted-foreground"> — applying restarts the dashboard</span>
             </p>
             <div className="flex gap-2">
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setLocal(null)}>
+              <Button variant="ghost" size="sm" onClick={() => setLocal(null)}>
                 Discard
               </Button>
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true)
-                  try {
-                    applyChanges()
-                  } finally {
-                    setBusy(false)
-                  }
-                }}
-              >
-                {busy && <Spinner className="size-4" />}
+              <Button size="sm" onClick={applyChanges}>
                 Apply and restart
               </Button>
             </div>
@@ -553,17 +579,27 @@ export default function DashboardConfigurationPage() {
   )
 }
 
-/** Says why the fields are read-only, on the panel that holds them. */
-function EditableNote({
-  report,
+function Dot() {
+  return <span className="text-muted-foreground/40">·</span>
+}
+
+/** A path inside the checkout, said relative to it; anywhere else, in full. */
+function within(dir: string | undefined, path: string) {
+  if (dir && path.startsWith(`${dir}/`)) return path.slice(dir.length + 1)
+  return path
+}
+
+/** Says why the fields are read-only, once, in the row of facts about the install. */
+function ReadOnlyNote({
+  supported,
   admin,
   running,
 }: {
-  report: { supported: boolean }
+  supported: boolean
   admin: boolean
   running: boolean
 }) {
-  if (report.supported && admin && !running) return null
+  if (supported && admin && !running) return null
   const reason = !admin
     ? "You need the system admin role to change these."
     : running
@@ -674,7 +710,7 @@ function PendingCertificate({ onIssue }: { onIssue: () => Promise<void> }) {
         className="mt-2"
         size="sm"
         variant="outline"
-        disabled={busy}
+        pending={busy}
         onClick={() => {
           setBusy(true)
           onIssue()
@@ -687,7 +723,6 @@ function PendingCertificate({ onIssue }: { onIssue: () => Promise<void> }) {
             .finally(() => setBusy(false))
         }}
       >
-        {busy && <Spinner className="size-4" />}
         Get the certificate now
       </Button>
     </Notice>
@@ -705,87 +740,11 @@ function withTailnet(list: string) {
 }
 
 /**
- * A control, its one-line hint, and the paragraph behind the ⓘ.
- *
- * The split is the point: the hint is what you need while filling the field in,
- * and the reasoning — why loopback has to stay in the allowlist, why the proxy
- * binds an IP rather than a name — is a sentence you want once and never again.
+ * A line that opens onto the settings most operators never touch. No frame and
+ * no ground: the same chevron-and-word a finished restart uses for its
+ * transcript, so "there is more here" is one mark across the page.
  */
-function Field({
-  label,
-  hint,
-  info,
-  className,
-  children,
-}: {
-  label: string
-  hint?: string
-  info?: string
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className={cn("min-w-0 space-y-1.5", className)}>
-      <div className="flex items-center gap-1.5">
-        <Label>{label}</Label>
-        {info && <InfoTip>{info}</InfoTip>}
-      </div>
-      {children}
-      {hint && <p className="text-hint leading-snug text-muted-foreground">{hint}</p>}
-    </div>
-  )
-}
-
-function InfoTip({ children }: { children: React.ReactNode }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label="What this setting does"
-          className="text-muted-foreground/60 transition-colors hover:text-foreground"
-        >
-          <Information className="size-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs text-xs leading-relaxed text-balance">
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function Toggle({
-  label,
-  hint,
-  info,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string
-  hint: string
-  info?: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (value: boolean) => void
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-3 py-2.5">
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-body font-medium">{label}</p>
-          {info && <InfoTip>{info}</InfoTip>}
-        </div>
-        <p className="text-hint text-muted-foreground">{hint}</p>
-      </div>
-      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} />
-    </div>
-  )
-}
-
-/** A row that opens onto the settings most operators never touch. */
-function Drawer({
+function Disclosure({
   label,
   hint,
   children,
@@ -794,25 +753,15 @@ function Drawer({
   hint?: string
   children: React.ReactNode
 }) {
-  const [open, setOpen] = useState(false)
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-hairline bg-surface-sunken px-3 py-2 text-left hover:bg-surface-header">
-        <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-        <span className="text-body font-medium">{label}</span>
-        {hint && <span className="truncate text-hint text-muted-foreground">{hint}</span>}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pt-3">{children}</CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-hint text-muted-foreground">{label}</p>
-      <p className="truncate font-mono text-xs">{value}</p>
-    </div>
+    <details className="group min-w-0">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+        <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+        <span className="font-medium">{label}</span>
+        {hint && <span className="truncate text-hint">· {hint}</span>}
+      </summary>
+      <div className="pt-3">{children}</div>
+    </details>
   )
 }
 

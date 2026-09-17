@@ -7,8 +7,9 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { Job, PackageSearchResult } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/page"
+import { ROW_BLEED } from "@/components/row-list"
 import { EmptyState, Notice, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -32,6 +33,10 @@ import { Button } from "@/components/ui/button"
  * separate runs is three chances to be interrupted halfway. It cost a click
  * and a concept on every single-package install, which is almost all of them,
  * and the run it protects against is a job that survives the tab anyway.
+ *
+ * Plain, like the two lists beside it under the strip: the tab is the block's
+ * name, so it carries no header of its own — a search box, a hairline, and
+ * the rows starting on the page's own edge.
  */
 
 /** Long enough that a word is typed before anything is asked; short enough to feel live. */
@@ -113,24 +118,21 @@ export function InstallPanel({
   const typing = needle.length > 0 && !live
 
   return (
-    <Panel>
-      <PanelHeader title="Add software" />
+    <Panel plain>
       <PanelToolbar>
-        <div className="relative w-full sm:w-96">
-          <SearchInput
-            containerClassName="w-full sm:w-96"
-            value={query}
-            autoFocus
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="What do you need? nginx, htop, postgres client…"
-          />
-          {live && searching && (
-            <Spinner className="absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          )}
-        </div>
+        <SearchInput
+          containerClassName="sm:w-96"
+          value={query}
+          autoFocus
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="What do you need? nginx, htop, postgres client…"
+          trailing={
+            live && searching ? <Spinner className="mr-1.5 size-3.5 text-muted-foreground" /> : null
+          }
+        />
         {shown.length > 0 && (
           <span className="text-xs text-muted-foreground">
-            {shown.length} match{shown.length === 1 ? "" : "es"}
+            <span className="numeric">{shown.length}</span> match{shown.length === 1 ? "" : "es"}
             {shown.length >= 60 ? " — the closest ones" : ""}
           </span>
         )}
@@ -138,16 +140,15 @@ export function InstallPanel({
 
       <PanelBody flush>
         {shownError && (
-          <div className="p-4">
-            <Notice tone="warning" title="The search failed">
-              {shownError}
-            </Notice>
-          </div>
+          <Notice tone="warning" title="The search failed" className="mt-4">
+            {shownError}
+          </Notice>
         )}
 
         {!shownError && shown.length === 0 && (
           <EmptyState
             icon={MagnifyingGlass}
+            className="mt-4"
             title={
               typing
                 ? "Keep typing"
@@ -166,15 +167,15 @@ export function InstallPanel({
         )}
 
         {shown.length > 0 && (
-          <ul className="divide-y divide-hairline">
+          <ul className="min-w-0 divide-y divide-hairline">
             {shown.map((result) => {
               const queued = started.includes(result.name)
               return (
                 <li
                   key={result.name}
                   className={cn(
-                    "flex min-w-0 items-start gap-3 px-4 py-2.5 transition-colors hover:bg-row-hover",
-                    queued && "bg-wash-primary",
+                    "group flex min-w-0 items-center gap-3 py-2.5 transition-colors hover:bg-row-hover",
+                    ROW_BLEED,
                   )}
                 >
                   <button
@@ -182,22 +183,27 @@ export function InstallPanel({
                     onClick={() => onInspect(result.name)}
                     className="min-w-0 flex-1 space-y-0.5 text-left"
                   >
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="truncate font-mono text-body font-medium">
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="truncate font-mono text-body font-medium group-hover:underline">
                         {result.name}
                       </span>
                       {result.version && (
-                        <span className="numeric text-hint text-muted-foreground">
+                        <span className="numeric shrink-0 text-hint text-muted-foreground">
                           {result.version}
                         </span>
                       )}
-                      {result.installed && <Status verdict="ok" icon={Check} label="Installed" />}
-                      {result.repository && <Tag>{result.repository}</Tag>}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {result.summary || "No description published"}
                     </span>
                   </button>
+
+                  {/* The row's fixed properties and its state at the edge,
+                      before its verbs — never against the name. */}
+                  <span className="hidden shrink-0 items-center gap-3 sm:flex">
+                    {result.repository && <Tag>{result.repository}</Tag>}
+                    {result.installed && <Status verdict="ok" icon={Check} label="Installed" />}
+                  </span>
 
                   <div className="flex shrink-0 items-center gap-1">
                     <IconAction
@@ -206,24 +212,23 @@ export function InstallPanel({
                     >
                       <Information />
                     </IconAction>
-                    {canInstall && !result.installed && (
-                      <Button
-                        size="sm"
-                        variant={queued ? "secondary" : "default"}
-                        disabled={Boolean(starting) || queued}
-                        title={`${manager ?? "apt"} install ${result.name}`}
-                        onClick={() => void install(result.name)}
-                      >
-                        {starting === result.name ? (
-                          <Spinner className="size-4" />
-                        ) : queued ? (
-                          <Check className="size-4" />
-                        ) : (
+                    {canInstall &&
+                      !result.installed &&
+                      (queued ? (
+                        <Status verdict="ok" icon={Check} label="Started" className="px-2" />
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          pending={starting === result.name}
+                          disabled={Boolean(starting)}
+                          title={`${manager ?? "apt"} install ${result.name}`}
+                          onClick={() => void install(result.name)}
+                        >
                           <Download className="size-4" />
-                        )}
-                        {queued ? "Started" : "Install"}
-                      </Button>
-                    )}
+                          Install
+                        </Button>
+                      ))}
                   </div>
                 </li>
               )

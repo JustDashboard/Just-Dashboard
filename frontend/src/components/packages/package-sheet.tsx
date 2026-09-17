@@ -4,14 +4,10 @@ import { useCallback, useState } from "react"
 import Link from "next/link"
 import {
   ArrowCircleUp,
-  BookOpen,
   Copy,
   Download,
   External,
-  FileText,
-  Play,
   Puzzle,
-  SettingsGear,
   Terminal,
   Trash,
 } from "@/components/icons"
@@ -306,7 +302,7 @@ function CommandChip({ command }: { command: string }) {
       type="button"
       aria-label={`Copy ${command}`}
       onClick={() => void copyText(command, `Copied ${command}`)}
-      className="group inline-flex items-center gap-1.5 rounded-md border border-hairline bg-muted/40 px-2 py-1 font-mono text-xs transition-colors hover:bg-muted"
+      className="group inline-flex items-center gap-1.5 rounded-md border border-hairline bg-control px-2 py-1 font-mono text-xs transition-colors hover:bg-control-hover active:bg-control-active"
     >
       <Terminal className="size-3 text-muted-foreground" />
       {command}
@@ -315,23 +311,23 @@ function CommandChip({ command }: { command: string }) {
   )
 }
 
+/**
+ * One part of the answer, opened by its eyebrow alone. Each used to carry a
+ * glyph in front of the word — a terminal before "Commands", a book before
+ * "Manual" — which was the label twice (design-system §14).
+ */
 function UsageSection({
-  icon: Icon,
   title,
   hint,
   children,
 }: {
-  icon: React.ComponentType<{ className?: string }>
   title: string
   hint?: string
   children: React.ReactNode
 }) {
   return (
     <section className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        <Icon className="size-3.5 text-muted-foreground" />
-        <p className="eyebrow">{title}</p>
-      </div>
+      <p className="eyebrow">{title}</p>
       {hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>}
       {children}
     </section>
@@ -363,7 +359,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
     <div className="space-y-5">
       {usage.commands && usage.commands.length > 0 && (
         <UsageSection
-          icon={Terminal}
           title="Commands"
           hint="What this package actually put on your path — which is very often not its own name."
         >
@@ -377,7 +372,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
 
       {usage.services && usage.services.length > 0 && (
         <UsageSection
-          icon={Play}
           title="Services"
           hint="Installing a package rarely starts it. These are the units it registered."
         >
@@ -394,7 +388,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
 
       {usage.configFiles && usage.configFiles.length > 0 && (
         <UsageSection
-          icon={SettingsGear}
           title="Configuration"
           hint="What it put in /etc. Each opens in the file manager."
         >
@@ -414,7 +407,7 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
       )}
 
       {usage.docs && usage.docs.length > 0 && (
-        <UsageSection icon={FileText} title="Documentation on this machine">
+        <UsageSection title="Documentation on this machine">
           <ul className="space-y-0.5">
             {usage.docs.map((file) => (
               <li key={file}>
@@ -436,7 +429,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
 
       {usage.manual && (
         <UsageSection
-          icon={BookOpen}
           title={`Manual — ${usage.manualFor}`}
           hint={`The same page as \`man ${usage.manualFor}\`, rendered here so you do not have to open a shell to read it.`}
         >
@@ -456,7 +448,7 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
       )}
 
       {usage.manPages && usage.manPages.length > 1 && (
-        <UsageSection icon={BookOpen} title="Other manual pages">
+        <UsageSection title="Other manual pages">
           <div className="flex flex-wrap gap-1">
             {usage.manPages.map((page) => (
               <Tag key={page.path} mono title={page.path}>
