@@ -1,5 +1,6 @@
 "use client"
 
+import { useRef } from "react"
 import { cn } from "@/lib/utils"
 import {
   Dialog,
@@ -14,6 +15,11 @@ const WIDTHS = {
   md: "sm:max-w-lg",
   lg: "sm:max-w-2xl",
   xl: "sm:max-w-4xl",
+  // The whole viewport, for the one task that is looking at a thing rather
+  // than filling in a form: the file viewer. Still a dialog — it owns the
+  // keyboard and Escape closes it — with its title strip and footer intact,
+  // so a picture opens the same way a form does and closes the same way too.
+  full: "h-svh max-h-svh w-screen max-w-none rounded-none border-0 sm:max-w-none",
 } as const
 
 /**
@@ -43,7 +49,9 @@ export function Modal({
   title,
   description,
   size = "md",
+  actions,
   footer,
+  initialFocus = "first",
   bodyClassName,
   className,
   children,
@@ -54,11 +62,21 @@ export function Modal({
   /** Read to a screen reader, never drawn. See the note at the call site. */
   description?: React.ReactNode
   size?: keyof typeof WIDTHS
+  /** Controls that sit in the title strip, beside the close button. */
+  actions?: React.ReactNode
   footer?: React.ReactNode
+  /**
+   * Where the keyboard lands when the dialog opens. A form wants its first
+   * field; a viewer wants nothing in particular — its first control is an
+   * icon button whose tooltip would open with the dialog, and Escape would
+   * then close the tooltip rather than the viewer.
+   */
+  initialFocus?: "first" | "body"
   bodyClassName?: string
   className?: string
   children: React.ReactNode
 }) {
+  const body = useRef<HTMLDivElement>(null)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -67,9 +85,17 @@ export function Modal({
           WIDTHS[size],
           className,
         )}
+        onOpenAutoFocus={
+          initialFocus === "body"
+            ? (event) => {
+                event.preventDefault()
+                body.current?.focus({ preventScroll: true })
+              }
+            : undefined
+        }
       >
         <DialogHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12 text-left">
-          <div className="flex min-w-0 items-start">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="min-w-0 flex-1">
               <DialogTitle className="flex min-w-0 flex-wrap items-center gap-2 text-title leading-tight font-semibold">
                 {title}
@@ -83,10 +109,17 @@ export function Modal({
                 <DialogDescription className="sr-only">{description}</DialogDescription>
               )}
             </div>
+            {actions && (
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div>
+            )}
           </div>
         </DialogHeader>
 
-        <div className={cn("min-h-0 flex-1 overflow-y-auto", bodyClassName ?? "p-4")}>
+        <div
+          ref={body}
+          tabIndex={initialFocus === "body" ? -1 : undefined}
+          className={cn("min-h-0 flex-1 overflow-y-auto outline-none", bodyClassName ?? "p-4")}
+        >
           {children}
         </div>
 

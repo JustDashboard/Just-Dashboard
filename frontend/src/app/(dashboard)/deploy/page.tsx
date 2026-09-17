@@ -133,7 +133,7 @@ export default function DeployPage() {
   return (
     <Page>
       <PageHeader
-        eyebrow="Operations"
+        eyebrow="Apps"
         title="Deployments"
         actions={
           <>

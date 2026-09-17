@@ -16,9 +16,26 @@ import { cn } from "@/lib/utils"
  */
 export function RowList({ className, ...props }: React.ComponentProps<"ul">) {
   return (
-    <ul data-slot="row-list" className={cn("min-w-0 divide-y divide-hairline", className)} {...props} />
+    <ul
+      data-slot="row-list"
+      className={cn("min-w-0 divide-y divide-hairline", className)}
+      {...props}
+    />
   )
 }
+
+/**
+ * The bleed a row takes inside a plain panel.
+ *
+ * A plain panel's title sits on the page's own edge, so a row's text has to
+ * start there too — but its hover wash still wants to extend a step past the
+ * words on both sides, or it reads as a bar that begins exactly where the
+ * text does. `Row` applies this itself; a row laid out by hand (the containers
+ * list on a phone, a disk line, an event) takes the same three classes so it
+ * lines up with the rows it sits between.
+ */
+export const ROW_BLEED =
+  "group-data-[plain]/panel:-mx-3 group-data-[plain]/panel:rounded-md group-data-[plain]/panel:px-3"
 
 /**
  * One row: a leading mark, a title with an optional second line, and whatever
@@ -64,10 +81,7 @@ export function Row({
         <span className="block truncate text-body font-medium">{title}</span>
         {subtitle && (
           <span
-            className={cn(
-              "block truncate text-hint text-muted-foreground",
-              mono && "font-mono",
-            )}
+            className={cn("block truncate text-hint text-muted-foreground", mono && "font-mono")}
           >
             {subtitle}
           </span>
@@ -83,10 +97,15 @@ export function Row({
       {children}
     </>
   )
+  // No `w-full` on the pressable face: a block-level link or button with an
+  // explicit width and the plain bleed's negative margins keeps its width and
+  // drops the right-hand margin, so its wash stopped twelve pixels short of the
+  // row's right edge on every plain list in the product. With the width left
+  // auto the box stretches over both margins, which is what the bleed means.
   const face = cn(
     "flex min-w-0 items-center gap-3 px-5 py-3 text-left",
-    "group-data-[plain]/panel:-mx-3 group-data-[plain]/panel:rounded-md group-data-[plain]/panel:px-3",
-    pressable && "group w-full transition-colors focus-ring-inset hover:bg-row-hover",
+    ROW_BLEED,
+    pressable && "group focus-ring-inset transition-colors hover:bg-row-hover",
     className,
   )
 
@@ -97,7 +116,14 @@ export function Row({
           {inner}
         </Link>
       ) : onClick ? (
-        <button type="button" onClick={onClick} className={face}>
+        // A button's auto width is shrink-to-fit even as a flex container, so
+        // unlike the link it has to be told to span the row — and, under the
+        // plain bleed, to span both negative margins as well.
+        <button
+          type="button"
+          onClick={onClick}
+          className={cn(face, "w-full group-data-[plain]/panel:w-[calc(100%+1.5rem)]")}
+        >
           {inner}
         </button>
       ) : (

@@ -60,7 +60,7 @@ export default function BackupsPage() {
   return (
     <Page>
       <PageHeader
-        eyebrow="Operations"
+        eyebrow="Protection"
         title="Backups"
         actions={can("system.admin") && <JobDialog onDone={refresh} />}
       />

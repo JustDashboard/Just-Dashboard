@@ -129,17 +129,19 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
           })}
 
           <CommandSeparator />
-          <CommandGroup heading="You">
-            {PERSONAL_NAV.map((item) => (
-              <CommandItem
-                key={item.href}
-                value={`account ${item.title}`}
-                onSelect={() => run(() => router.push(item.href))}
-              >
-                <item.icon className="size-4" />
-                {item.title}
-              </CommandItem>
-            ))}
+          <CommandGroup heading="Account">
+            {PERSONAL_NAV.filter((item) => !item.capability || can(item.capability)).map(
+              (item) => (
+                <CommandItem
+                  key={item.href}
+                  value={`account ${item.title}`}
+                  onSelect={() => run(() => router.push(item.href))}
+                >
+                  <item.icon className="size-4" />
+                  {item.title}
+                </CommandItem>
+              ),
+            )}
             <CommandItem value="sign out logout" onSelect={() => run(() => void logout())}>
               <Logout className="size-4" />
               Sign out

@@ -158,27 +158,33 @@ export function StatGrid({
         // row draws no left edge and the first row draws no top one. Unframed,
         // the cell that starts a row also drops its left padding so the
         // column of names lines up with the page title above it.
+        //
+        // Each padding rule is written twice: once for a tile that sits
+        // inside the cell (a `StatLink`), once for a tile that *is* the cell.
+        // The descendant form alone never matched the second — the child is
+        // not its own descendant — so every grid of bare tiles started a
+        // step in from the title it was meant to line up with.
         "[&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0",
         !framed && "[&_[data-slot=stat-tile]]:pl-0",
         "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
         !framed &&
-          "sm:[&_[data-slot=stat-tile]]:pl-5 sm:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0",
+          "sm:[&_[data-slot=stat-tile]]:pl-5 sm:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0 sm:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-0",
         "grid-cols-1 sm:grid-cols-2",
         columns === 3 &&
           "lg:grid-cols-3 lg:[&>*]:border-l lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*:nth-child(2n+1)]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0",
         columns === 3 &&
           !framed &&
-          "lg:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 lg:[&>*:nth-child(3n+1)_[data-slot=stat-tile]]:pl-0",
+          "lg:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 lg:[&>*:nth-child(3n+1)_[data-slot=stat-tile]]:pl-0 lg:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-5 lg:[&>[data-slot=stat-tile]:nth-child(3n+1)]:pl-0",
         columns === 4 &&
           "xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0",
         columns === 4 &&
           !framed &&
-          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(4n+1)_[data-slot=stat-tile]]:pl-0",
+          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(4n+1)_[data-slot=stat-tile]]:pl-0 xl:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-5 xl:[&>[data-slot=stat-tile]:nth-child(4n+1)]:pl-0",
         columns === 5 &&
           "xl:grid-cols-5 xl:[&>*]:border-l xl:[&>*:nth-child(-n+5)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(5n+1)]:border-l-0",
         columns === 5 &&
           !framed &&
-          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(5n+1)_[data-slot=stat-tile]]:pl-0",
+          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(5n+1)_[data-slot=stat-tile]]:pl-0 xl:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-5 xl:[&>[data-slot=stat-tile]:nth-child(5n+1)]:pl-0",
         className,
       )}
       {...props}

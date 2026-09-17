@@ -1,6 +1,6 @@
 "use client"
 
-import { Copy } from "@/components/icons"
+import { Copy, Information } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 import type { Tone } from "@/components/tone"
@@ -8,6 +8,7 @@ import { Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
  * The form vocabulary for a task surface.
@@ -33,6 +34,7 @@ export function Field({
   label,
   htmlFor,
   hint,
+  info,
   error,
   trailing,
   className,
@@ -42,6 +44,13 @@ export function Field({
   htmlFor?: string
   /** What goes here, in one line. Replaced by the error while there is one. */
   hint?: React.ReactNode
+  /**
+   * The reasoning behind the setting, behind a ⓘ beside the label. The hint
+   * is what the reader needs while typing; this is the paragraph they want
+   * once and never again, and a form that printed it under every field was
+   * unreadable.
+   */
+  info?: React.ReactNode
   error?: React.ReactNode
   /** A control at the label's right edge: a null switch, a "leave blank" note. */
   trailing?: React.ReactNode
@@ -51,9 +60,14 @@ export function Field({
   return (
     <div className={cn("min-w-0 space-y-1.5", className)}>
       <div className="flex min-w-0 items-center justify-between gap-3">
-        <Label htmlFor={htmlFor} className="min-w-0 text-body font-medium">
-          {label}
-        </Label>
+        {/* The tip sits beside the label rather than inside it: a button is
+            a labelable element, and a label may not contain one. */}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Label htmlFor={htmlFor} className="min-w-0 text-body font-medium">
+            {label}
+          </Label>
+          {info && <InfoTip>{info}</InfoTip>}
+        </div>
         {trailing && <div className="flex shrink-0 items-center gap-2">{trailing}</div>}
       </div>
       {children}
@@ -65,6 +79,26 @@ export function Field({
         hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>
       )}
     </div>
+  )
+}
+
+/** The ⓘ a `Field` draws for its `info`, for a label a form lays out itself. */
+export function InfoTip({ children }: { children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="What this setting does"
+          className="text-muted-foreground/60 transition-colors hover:text-foreground"
+        >
+          <Information className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-xs leading-relaxed text-balance">
+        {children}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

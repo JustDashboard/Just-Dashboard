@@ -13,6 +13,7 @@ import {
   CloudUpload,
   CodeBracket,
   Database,
+  DesktopDevice,
   FirewallCheck,
   FolderOpen,
   GitHubMark,
@@ -21,6 +22,7 @@ import {
   GridSquare,
   Home,
   Inspect,
+  Key,
   Layers,
   Layout,
   LineChart,
@@ -48,12 +50,17 @@ import {
   UserSettings,
   Users,
   Wrench,
+  Servers,
+  Clock,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCommandPalette } from "@/components/command-palette"
 import { Logo, LogoMark } from "@/components/logo"
 import { UpdateNotice } from "@/components/update/update-notice"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
 import type { Capability } from "@/lib/types"
 import {
   Sidebar,
@@ -78,7 +85,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -101,12 +107,37 @@ type NavItem = {
   children?: NavChild[]
 }
 
+/**
+ * The rail, top to bottom, in the order a day on the server runs: is the
+ * machine well, what is running on it, the tools to work on it, what keeps it
+ * safe, and the housekeeping. Deployments open the second group because
+ * shipping something is the reason most visits happen; it used to sit fourth
+ * in a group called "Operations" between Packages and Backups, where nobody
+ * who did not already know looked for it.
+ */
 export const NAV: { label: string; items: NavItem[] }[] = [
   {
     label: "Server",
     items: [
       { title: "Overview", href: "/", icon: Home },
       { title: "Metrics", href: "/metrics", icon: LineChart },
+      {
+        title: "Processes",
+        href: "/processes",
+        icon: ListOrdered,
+        children: [
+          { title: "PM2", href: "/processes/pm2", icon: ChartActivity },
+          { title: "Services", href: "/processes/services", icon: Servers },
+          { title: "Scheduled", href: "/processes/scheduled", icon: Clock },
+        ],
+      },
+      { title: "Logs", href: "/logs", icon: Logs },
+    ],
+  },
+  {
+    label: "Apps",
+    items: [
+      { title: "Deployments", href: "/deploy", icon: CloudUpload },
       {
         title: "Docker",
         href: "/docker",
@@ -120,16 +151,6 @@ export const NAV: { label: string; items: NavItem[] }[] = [
           { title: "Events", href: "/docker/events", icon: Rss },
         ],
       },
-      { title: "Processes", href: "/processes", icon: ListOrdered },
-      { title: "Logs", href: "/logs", icon: Logs },
-    ],
-  },
-  {
-    label: "Access",
-    items: [
-      { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
-      { title: "Files", href: "/files", icon: FolderOpen },
-      { title: "Git", href: "/git", icon: GitHubMark },
       {
         title: "Databases",
         href: "/databases",
@@ -144,11 +165,6 @@ export const NAV: { label: string; items: NavItem[] }[] = [
           { title: "Connection", href: "/databases/connection", icon: Linked },
         ],
       },
-    ],
-  },
-  {
-    label: "Network",
-    items: [
       {
         title: "Proxy & TLS",
         href: "/proxy",
@@ -161,6 +177,19 @@ export const NAV: { label: string; items: NavItem[] }[] = [
           { title: "Ports", href: "/proxy/ports", icon: Router },
         ],
       },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
+      { title: "Files", href: "/files", icon: FolderOpen },
+      { title: "Git", href: "/git", icon: GitHubMark },
+    ],
+  },
+  {
+    label: "Protection",
+    items: [
       {
         title: "Security",
         href: "/security",
@@ -175,13 +204,19 @@ export const NAV: { label: string; items: NavItem[] }[] = [
           { title: "Tools", href: "/security/tools", icon: Wrench },
         ],
       },
+      { title: "Backups", href: "/backups", icon: Archive },
     ],
   },
   {
-    label: "Operations",
+    label: "System",
     items: [
+      { title: "Packages", href: "/packages", icon: Puzzle },
+      { title: "System users", href: "/system-users", icon: Users, capability: "system.admin" },
+      { title: "Audit log", href: "/audit", icon: Notes, capability: "system.admin" },
+      // "Settings", not "Dashboard": inside a product called Dashboard, an
+      // entry called Dashboard said nothing about where it went.
       {
-        title: "Dashboard",
+        title: "Settings",
         href: "/dashboard",
         icon: SettingsGear,
         children: [
@@ -193,17 +228,24 @@ export const NAV: { label: string; items: NavItem[] }[] = [
           },
         ],
       },
-      { title: "Packages", href: "/packages", icon: Puzzle },
-      { title: "Deployments", href: "/deploy", icon: CloudUpload },
-      { title: "Backups", href: "/backups", icon: Archive },
-      { title: "System users", href: "/system-users", icon: Users, capability: "system.admin" },
-      { title: "Audit log", href: "/audit", icon: Notes, capability: "system.admin" },
     ],
   },
 ]
 
-/** Entries that live in the footer menu rather than a nav group. */
-export const PERSONAL_NAV: NavItem[] = [{ title: "Account", href: "/account", icon: UserSettings }]
+/**
+ * The account's own pages. They live in the footer menu and the palette rather
+ * than in a nav group, because none of them is a place on the server — it is
+ * the same identity menu on every page. Every entry is a leaf, the first one
+ * being the section's root, so the menu, the palette and the breadcrumb each
+ * point at exactly one page.
+ */
+export const PERSONAL_NAV: NavChild[] = [
+  { title: "Profile", href: "/account", icon: UserSettings },
+  { title: "Security", href: "/account/security", icon: Shield },
+  { title: "Sessions", href: "/account/sessions", icon: DesktopDevice },
+  { title: "API keys", href: "/account/keys", icon: Key },
+  { title: "Users", href: "/account/users", icon: Users, capability: "system.admin" },
+]
 
 /** Whether a nav entry owns the given path. */
 export function navMatches(href: string, pathname: string) {
@@ -226,8 +268,8 @@ export function navLocation(
       if (navMatches(item.href, pathname)) return { group: group.label, title: item.title }
     }
   }
-  const personal = PERSONAL_NAV.find((i) => navMatches(i.href, pathname))
-  if (personal) return { group: "You", title: personal.title }
+  const personal = PERSONAL_NAV.find((i) => i.href === pathname)
+  if (personal) return { group: "Account", title: personal.title }
   return null
 }
 
@@ -444,32 +486,43 @@ function NavParent({ item, pathname }: { item: NavItem; pathname: string }) {
 
 /**
  * Who is signed in, and everything that belongs to them rather than to the
- * server: the account page, the palette, signing out.
+ * server: the account pages and signing out.
  *
- * A card at the foot of the rail rather than three more nav rows, because none
+ * A card at the foot of the rail rather than five more nav rows, because none
  * of it is a place in the product — it is the same identity menu on every
  * page, and mixing it into the nav made the nav look longer than it is.
+ *
+ * The menu opens with the same picture and name as the card, larger, with the
+ * sign-in name and role under them: the one place in the product that says
+ * plainly which account this is. What used to be a caption there — "two-factor
+ * not enrolled" — is now a `Status` on the Security row, where it is a reading
+ * beside the page that changes it.
  */
 function UserCard({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname()
-  const { status, logout } = useAuth()
+  const { status, logout, can } = useAuth()
   const user = status?.user
-  const initials = (user?.username ?? "?").slice(0, 2).toUpperCase()
+  const name = user ? displayNameOf(user) : "not signed in"
+  const twoFactor = Boolean(user?.totpEnabled)
+  const entries = PERSONAL_NAV.filter((item) => !item.capability || can(item.capability))
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          aria-label={`Account menu for ${name}`}
           className="flex w-full min-w-0 items-center gap-2.5 rounded-md p-1.5 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
         >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-primary text-hint font-semibold text-primary">
-            {initials}
-          </span>
-          <span className="grid min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-body leading-tight font-medium">
-              {user?.username ?? "not signed in"}
+          {user ? (
+            <UserAvatar user={user} size="sm" />
+          ) : (
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-hint font-semibold text-brand">
+              ?
             </span>
+          )}
+          <span className="grid min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-body leading-tight font-medium">{name}</span>
             <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
               {user?.role ?? "—"}
             </span>
@@ -480,29 +533,50 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
       <DropdownMenuContent
         side={collapsed ? "right" : "top"}
         align="start"
-        className="w-56"
+        className="w-64 p-0"
         sideOffset={8}
       >
-        <DropdownMenuLabel className="flex flex-col gap-0.5">
-          <span className="text-body">{user?.username}</span>
-          <span className="text-hint font-normal text-muted-foreground">
-            {user?.totpEnabled ? "Two-factor enabled" : "Two-factor not enrolled"}
-          </span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {PERSONAL_NAV.map((item) => (
-          <DropdownMenuItem key={item.href} asChild>
-            <Link href={item.href} data-active={navMatches(item.href, pathname) || undefined}>
-              <item.icon className="size-4" />
-              {item.title}
-            </Link>
+        {user && (
+          <div className="flex min-w-0 items-center gap-3 px-3 py-3">
+            <UserAvatar user={user} size="md" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-body leading-tight font-medium">{name}</p>
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint leading-tight text-muted-foreground">
+                <span className="truncate">@{user.username}</span>
+                <Tag>{user.role}</Tag>
+              </p>
+            </div>
+          </div>
+        )}
+        <DropdownMenuSeparator className="my-0" />
+        <div className="p-1">
+          {entries.map((item) => (
+            <DropdownMenuItem key={item.href} asChild>
+              <Link
+                href={item.href}
+                data-active={item.href === pathname || undefined}
+                className="data-[active]:bg-accent"
+              >
+                <item.icon className="size-4" />
+                <span className="flex-1">{item.title}</span>
+                {item.href === "/account/security" && (
+                  <Status
+                    tone={twoFactor ? "running" : "notice"}
+                    label={twoFactor ? "2FA on" : "2FA off"}
+                    className="text-hint"
+                  />
+                )}
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        </div>
+        <DropdownMenuSeparator className="my-0" />
+        <div className="p-1">
+          <DropdownMenuItem variant="destructive" onSelect={() => logout()}>
+            <Logout className="size-4" />
+            Sign out
           </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={() => logout()}>
-          <Logout className="size-4" />
-          Sign out
-        </DropdownMenuItem>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   )

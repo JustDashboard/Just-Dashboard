@@ -19,7 +19,9 @@ import { useCallback, useState, useSyncExternalStore } from "react"
  * dialog and a half-filled form are the question being asked right now, and
  * they are not — a page that restored yesterday's filter would show an empty
  * table with no obvious reason for it, which is the failure this store exists
- * to avoid rather than one to introduce from the other side.
+ * to avoid rather than one to introduce from the other side. The terminal's
+ * open session and window are the one selection kept: there the selection is
+ * the tab you had open, and a tab bar that forgot it would be broken.
  *
  * On the screen and not on the account, for the same reason the theme and the
  * terminal's font are: whether the file tree is worth a fifth of the window is

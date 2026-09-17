@@ -794,7 +794,7 @@ function UpdatesCard() {
   return (
     <ServiceTile
       icon={SettingsGear}
-      title="Dashboard"
+      title="Settings"
       href="/dashboard"
       loading={loading && !report}
       value={report ? (behind === 0 ? "Up to date" : `${behind} behind`) : undefined}

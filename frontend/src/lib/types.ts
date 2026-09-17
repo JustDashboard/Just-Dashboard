@@ -5,7 +5,12 @@ export type Role = "admin" | "limited" | "readonly"
 
 export type DashboardUser = {
   id: number
+  /** The sign-in key: lower case, one word, what the audit log names. */
   username: string
+  /** The name shown — the username as typed at creation until it is changed. */
+  displayName: string
+  /** When the picture was last set, or 0 for none; the avatar URL's cache key. */
+  avatarVersion: number
   role: Role
   totpEnabled: boolean
   disabled: boolean
@@ -68,6 +73,32 @@ export type Snapshot = {
   pressure: Pressure
   sockets: Sockets
   procs: ProcCounts
+  /** Live-only readings the recorder does not keep; absent on an older backend. */
+  files?: FileHandles
+  sensors?: SensorReading[] | null
+}
+
+/**
+ * Open file descriptions against the kernel's ceiling.
+ *
+ * `max` is 0 when the kernel reports no real limit — some container runtimes
+ * hand out the 64-bit maximum — so a page must not divide by it.
+ */
+export type FileHandles = {
+  open: number
+  max: number
+}
+
+/**
+ * One temperature the board reports. `high` and `critical` are the sensor's
+ * own thresholds, 0 where the driver has none: a CPU package idles where an
+ * NVMe drive throttles, and only the driver knows which this is.
+ */
+export type SensorReading = {
+  name: string
+  tempC: number
+  high: number
+  critical: number
 }
 
 /**
@@ -1150,6 +1181,51 @@ export type PM2Process = {
   nodeVersion: string
   user: string
   watching: boolean
+  interpreter?: string
+  version?: string
+  autorestart: boolean
+  maxMemoryRestart?: number
+  createdAtMs?: number
+}
+
+/** One account's PM2 daemon: whether what it runs would survive a reboot. */
+export type PM2Daemon = {
+  account: string
+  home: string
+  /** When `pm2 save` last wrote the resurrection list; absent when it never has. */
+  dumpSavedAt?: string
+  /** The systemd unit `pm2 startup` installed for this account, if any. */
+  startupUnit?: string
+}
+
+export type PM2Inventory = {
+  available: boolean
+  processes: PM2Process[] | null
+  daemons?: PM2Daemon[]
+}
+
+export type PM2StartRequest = {
+  account: string
+  script: string
+  name?: string
+  cwd?: string
+  interpreter?: string
+  /** 0 or 1 is one fork; 2+ is a cluster of that size; -1 is one per CPU. */
+  instances?: number
+  watch?: boolean
+  maxMemoryRestart?: string
+  args?: string[]
+}
+
+export type SystemdTimer = {
+  unit: string
+  activates: string
+  activeState: string
+  subState: string
+  unitFileState: string
+  enabled: boolean
+  next?: string
+  last?: string
 }
 
 export type SystemdUnit = {
@@ -1194,6 +1270,34 @@ export type ProcessRow = {
   state: "running" | "sleeping" | "blocked" | "stopped" | "zombie" | "other"
   manager: "pm2" | "systemd" | "container" | "session" | "kernel" | "unmanaged"
   managerName?: string
+  /** Detail only: what it listens on and how many connections it holds. */
+  listening?: ListeningPort[]
+  connections?: number
+  openFilesLimit?: number
+}
+
+export type ListeningPort = {
+  proto: string
+  address: string
+  port: number
+}
+
+/** A process as seen from another's detail: enough to recognise and open it. */
+export type ProcessLink = {
+  pid: number
+  name: string
+  cmdline: string
+  username: string
+  state: ProcessRow["state"]
+  cpuPercent: number
+  rss: number
+  createTime: string
+}
+
+export type ProcessTree = {
+  /** Outermost first, ending with the direct parent. */
+  ancestors: ProcessLink[]
+  children: ProcessLink[]
 }
 
 export type ProcessFacet = {
@@ -1523,6 +1627,8 @@ export type Certificate = {
   selfSigned: boolean
   source: string
   error?: string
+  /** The nginx sites whose ssl_certificate points at this file. */
+  usedBy: string[]
 }
 
 export type Listener = {
@@ -3171,24 +3277,45 @@ export type GitRepo = {
   name: string
   branch: string
   remote?: string
+  /** The branch this one tracks, e.g. origin/main. */
+  upstream?: string
   head?: string
   subject?: string
   author?: string
   commitAt?: string
   dirty: boolean
   changes: number
+  staged: number
+  untracked: number
+  conflicts: number
   ahead: number
   behind: number
   detached: boolean
-  untracked: number
+  /** The upstream is configured but no longer exists on the remote. */
+  gone?: boolean
+  /** No commits yet. */
+  empty?: boolean
 }
 
+/**
+ * One entry of `git status`. A file staged and then edited again is one
+ * entry with both `staged` and `unstaged` set, and is listed under both
+ * headings; `index` and `worktree` carry each side's status letter.
+ */
 export type GitFileChange = {
   path: string
   index: string
   worktree: string
   label: string
   staged: boolean
+  unstaged: boolean
+  /** The previous name of a renamed or copied path. */
+  from?: string
+}
+
+export type GitIdentity = {
+  name?: string
+  email?: string
 }
 
 export type GitStatus = {
@@ -3196,6 +3323,61 @@ export type GitStatus = {
   files: GitFileChange[]
   clean: boolean
   stashes: number
+  identity: GitIdentity
+  /** A merge, rebase, revert, cherry-pick or bisect a shell left half-finished. */
+  operation?: string
+}
+
+export type GitChangedFile = {
+  path: string
+  from?: string
+  status: string
+  insertions: number
+  deletions: number
+  binary?: boolean
+}
+
+/** One commit with its message and what it changed — the diff is fetched per file. */
+export type GitCommitDetail = GitCommit & {
+  body?: string
+  committer?: string
+  committedAt?: string
+  changes: GitChangedFile[]
+}
+
+export type GitTag = {
+  name: string
+  commit?: string
+  at?: string
+  message?: string
+  annotated: boolean
+  tagger?: string
+}
+
+export type GitStash = {
+  index: number
+  sha: string
+  at?: string
+  branch?: string
+  message: string
+}
+
+export type GitRemote = {
+  name: string
+  fetchUrl: string
+  pushUrl?: string
+}
+
+/** What merging `head` into `base` would bring. */
+export type GitComparison = {
+  base: string
+  head: string
+  ahead: number
+  behind: number
+  commits: GitCommit[]
+  files: number
+  insertions: number
+  deletions: number
 }
 
 export type GitCommit = {
@@ -3235,6 +3417,13 @@ export type GitBranch = {
   /** Another worktree that has this branch checked out; git refuses to delete
    *  or switch it even with -D. */
   worktree?: string
+  /** A local branch whose upstream no longer exists on the remote. */
+  gone?: boolean
+  /** Every commit is already reachable from HEAD: safe to delete. */
+  merged?: boolean
+  /** A remote-tracking branch's two halves: the remote, and the local name. */
+  remoteName?: string
+  local?: string
 }
 
 export type GitResult = {
@@ -3335,6 +3524,29 @@ export type GitPullRequest = {
   author?: string
   createdAt?: string
   comments: number
+  /** approved, changes_requested, review_required, or empty. */
+  review?: string
+  /** success, failure, pending, or empty where there are no checks. */
+  checks?: string
+  /** mergeable, conflicting, or unknown — only on the detail read. */
+  mergeable?: string
+  additions?: number
+  deletions?: number
+  files?: number
+  body?: string
+}
+
+export type GitHubWorkflowRun = {
+  id: number
+  name: string
+  workflow?: string
+  status: string
+  conclusion?: string
+  url: string
+  branch?: string
+  sha?: string
+  event?: string
+  createdAt?: string
 }
 
 /**
@@ -3508,12 +3720,36 @@ export type Exposure = {
   interfaces: string[]
   tailscaleIp?: string
   recommendation?: string
+  /** The address this browser is reaching the dashboard from — the one every lockout guard protects. */
+  client?: string
+}
+
+/** One address folded across the failed-login record: who is trying, and how hard. */
+export type Attacker = {
+  address: string
+  attempts: number
+  /** The account names tried from this address, most tried first. */
+  users: string[]
+  first: string
+  last: string
+}
+
+export type AttackSummary = {
+  attempts: number
+  addresses: number
+  windowHours: number
+  /** The sample ran out inside the window, so every figure is a floor. */
+  capped: boolean
+  attackers: Attacker[]
+  since?: string
 }
 
 /** One named, filed in-memory workspace containing one or more direct PTYs. */
 export type TerminalWorkspace = {
   id: string
   title: string
+  /** Whether the operator chose the title. A default one follows the shell. */
+  named?: boolean
   folder?: string
   favourite: boolean
   live: boolean
@@ -3524,7 +3760,44 @@ export type TerminalWorkspace = {
   user?: string
   shell?: string
   owner?: string
+  /** Whether any window has a program in the foreground. */
+  busy?: boolean
+  /** Whether any window is working, and when the last one finished (ms since the epoch). */
+  working?: boolean
+  finishedAt?: number
+  /** The window that stands for the session: the one last shown, else the newest. */
+  current?: TerminalWindowSummary
 }
+
+/**
+ * What a direct PTY is doing, as the backend reads it off the terminal: the
+ * title the foreground program set, whether anything but the prompt holds the
+ * terminal, and what that is. Polled with the window lists and pushed over
+ * the attach socket as a `state` frame whenever it changes.
+ */
+export type TerminalActivity = {
+  /** The OSC title, when it was set by whatever is in the foreground now. */
+  title?: string
+  /** A program has held the terminal for longer than a blink. */
+  busy: boolean
+  /** The foreground command, while busy. */
+  process?: string
+  /**
+   * Something is actually happening: output has been arriving for a second
+   * and still is, or the job is burning CPU. An editor or an agent waiting at
+   * its prompt is busy but not working.
+   */
+  working?: boolean
+  /** When the last stretch of work ended, in ms since the epoch, until work starts again. */
+  finishedAt?: number
+}
+
+export type TerminalWindowSummary = {
+  id: string
+  name: string
+  /** Whether the operator named the window rather than it carrying a default. */
+  named?: boolean
+} & Partial<TerminalActivity>
 
 /** A server-backed folder reconciled with live workspace membership. */
 export type TerminalFolder = {
@@ -3533,10 +3806,8 @@ export type TerminalFolder = {
 }
 
 /** An independent direct PTY shown as a window tab inside one session. */
-export type TerminalWindow = {
-  id: string
+export type TerminalWindow = TerminalWindowSummary & {
   index: number
-  name: string
   cwd?: string
 }
 
@@ -4112,6 +4383,8 @@ export type CertbotState = {
   /** Whether anything is scheduled to renew these, and what. */
   autoRenew: boolean
   renewSource?: string
+  /** A certbot timer systemd knows but is not running: the thing to turn on. */
+  renewUnit?: string
   raw?: string
   error?: string
 }
@@ -4154,12 +4427,19 @@ export type SiteSpec = {
   custom?: string
 }
 
+/**
+ * The server's own config test. `note` qualifies a verdict nginx could not
+ * actually give — a file outside its include tree passes `nginx -t` without
+ * being read.
+ */
+export type ProxyValidation = { valid: boolean; output: string; command: string; note?: string }
+
 export type SiteResult = {
   name: string
   path: string
   content: string
   warnings: string[]
-  validation?: { valid: boolean; output: string; command: string }
+  validation?: ProxyValidation
   enabled: boolean
   reloaded: boolean
   output?: string
@@ -4173,6 +4453,8 @@ export type DNSProvider = {
   installed: boolean
   credentials: string
   defaultWait: number
+  /** A token is saved for this provider. The token itself is never read back. */
+  hasCredentials: boolean
 }
 
 export type ImportResult = {

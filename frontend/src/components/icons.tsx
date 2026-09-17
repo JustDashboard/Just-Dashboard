@@ -129,6 +129,7 @@ import {
   StopCircleIcon,
   SunIcon,
   SwatchIcon,
+  TagIcon,
   TableCellsIcon,
   TrashIcon,
   UnderlineIcon,
@@ -369,6 +370,7 @@ export const GitCommit: Icon = adapt(HashtagIcon, "GitCommit")
 export const GitMerge: Icon = adapt(ArrowsPointingInIcon, "GitMerge")
 export const GitPullRequest: Icon = adapt(ChatBubbleLeftRightIcon, "GitPullRequest")
 export const BranchPlus: Icon = adapt(SquaresPlusIcon, "BranchPlus")
+export const GitTag: Icon = adapt(TagIcon, "GitTag")
 
 /* GitHub's own brand mark, drawn inline — no icon set ships brand logos, and
    a generic glyph beside the word "GitHub" reads as a different product. */
