@@ -1,11 +1,9 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
-import { Servers } from "@/components/icons"
-import { get } from "@/lib/api"
-import { cn } from "@/lib/utils"
-import { bytes, percent, rate } from "@/lib/format"
-import type { DirEntry, MetricEvent, Snapshot } from "@/lib/types"
+import { useMemo, useState } from "react"
+import { Download, Pause, Play } from "@/components/icons"
+import { bytes, duration, percent, rate } from "@/lib/format"
+import type { MetricEvent, MountStats, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
 import {
@@ -20,30 +18,43 @@ import {
   historyRows,
   liveRows,
   liveStorageRows,
+  rangeSpec,
   storageRows,
+  windowLabel,
   type ChartRow,
+  type MetricsWindow,
   type StorageSeriesMeta,
 } from "@/lib/metrics-range"
-import { Page, PageHeader, PageState, Metric, MetricStrip, Section } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Meter, utilisationTone } from "@/components/meter"
+import { downloadText, rowsToCsv } from "@/lib/metrics-export"
+import {
+  formatDelta,
+  relativeChange,
+  windowStat,
+  windowStatSum,
+  type WindowStat,
+} from "@/lib/metrics-summary"
+import { Page, PageHeader, PageState, Section } from "@/components/page"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { utilisationTone } from "@/components/meter"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
+import { NotableMoments } from "@/components/metrics/notable-moments"
+import { TopProcesses } from "@/components/metrics/top-processes"
+import {
+  InterfacesPanel,
+  MountsPanel,
+  PerCorePanel,
+  SensorsPanel,
+  sensorTone,
+} from "@/components/metrics/hardware-panels"
 import type { Series } from "@/components/metrics/metric-chart"
-import { EmptyState, ErrorState } from "@/components/state"
+import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 // Peaks share their series' colour: they are the same measurement seen at a
 // finer resolution, not a different quantity, and giving them a colour of
@@ -163,11 +174,12 @@ const PRESSURE_THRESHOLD = [{ value: 10, label: "stalling", tone: "warning" as c
 // Shared empties. A fresh `[]` each render is a new identity, which is exactly
 // the re-render these memos exist to avoid.
 const NO_ROWS: ChartRow[] = []
-const NO_STORAGE: { rows: Record<string, number | string | null>[]; series: StorageSeriesMeta[] } =
-  {
-    rows: [],
-    series: [],
-  }
+type StorageBundle = { rows: Record<string, number | string | null>[]; series: StorageSeriesMeta[] }
+const NO_STORAGE: StorageBundle = { rows: [], series: [] }
+
+// A window that fetches nothing, for the hook that reads the prior window
+// when there is no prior window to read.
+const NOTHING: MetricsWindow = { key: "live" }
 
 export default function MetricsPage() {
   // Two sources, deliberately kept apart. The live socket is owned by the
@@ -184,12 +196,23 @@ export default function MetricsPage() {
 
   const live = win.key === "live" && win.from === undefined
 
+  // The same span one window earlier, so each headline figure can say whether
+  // it is up or down on the last time this span was looked at.
+  const prior = useMemo(
+    () => priorWindow(win, live, recorded.history?.to),
+    [win, live, recorded.history?.to],
+  )
+  const priorHistory = useMetricsHistory(prior ?? NOTHING)
+
   const liveChartRows = useMemo(() => (live ? liveRows(history) : NO_ROWS), [live, history])
   const recordedChartRows = useMemo(
     () => (!live && recorded.history ? historyRows(recorded.history) : NO_ROWS),
     [live, recorded.history],
   )
-  const rows = live ? liveChartRows : recordedChartRows
+  const priorRows = useMemo(
+    () => (prior && priorHistory.history ? historyRows(priorHistory.history) : NO_ROWS),
+    [prior, priorHistory.history],
+  )
 
   const liveStorage = useMemo(
     () => (live ? liveStorageRows(history, snapshot?.mounts ?? []) : NO_STORAGE),
@@ -199,7 +222,22 @@ export default function MetricsPage() {
     () => (!live && recordedStorage.storage ? storageRows(recordedStorage.storage) : NO_STORAGE),
     [live, recordedStorage.storage],
   )
-  const storage = live ? liveStorage : recordedStorageRows
+
+  // Pausing the live feed holds the rows the charts were drawn from; the
+  // socket keeps filling the buffer behind it, so resuming catches up rather
+  // than restarting. Dropped the moment a recorded range is picked, where
+  // there is nothing moving to pause — by remembering which feed it was taken
+  // from rather than by an effect that clears it a render late.
+  const [frozen, setFrozen] = useState<{
+    live: boolean
+    rows: ChartRow[]
+    storage: StorageBundle
+  } | null>(null)
+  if (frozen && frozen.live !== live) setFrozen(null)
+  const paused = live && frozen !== null
+
+  const rows = paused ? frozen.rows : live ? liveChartRows : recordedChartRows
+  const storage = paused ? frozen.storage : live ? liveStorage : recordedStorageRows
 
   const storageSeries = useMemo<Series[]>(
     () => storage.series.map((m) => ({ key: m.key, label: m.mountpoint, color: m.color })),
@@ -210,6 +248,9 @@ export default function MetricsPage() {
     [storage.series],
   )
 
+  const stats = useMemo(() => summarise(rows), [rows])
+  const priorStats = useMemo(() => (prior ? summarise(priorRows) : null), [prior, priorRows])
+
   if (!snapshot || !host || (error && !snapshot)) {
     return (
       <PageState
@@ -218,6 +259,11 @@ export default function MetricsPage() {
         error={error && !snapshot ? new Error(error) : undefined}
         skeleton={
           <>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-24 rounded-xl" />
+              ))}
+            </div>
             <Skeleton className="h-64 rounded-xl" />
             <Skeleton className="h-64 rounded-xl" />
           </>
@@ -231,44 +277,111 @@ export default function MetricsPage() {
   const note = emptyChartNote(live, recorded)
   const zoom = controls.zoomTo
   const loadThreshold = coreThreshold(cores)
+  const sensors = snapshot.sensors ?? []
+
+  const exportCsv = () => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
+    downloadText(`${host.hostname}-metrics-${windowLabel(win)}-${stamp}.csv`, rowsToCsv(rows))
+  }
 
   return (
-    <Page>
+    <Page className="animate-rise">
       <PageHeader
         eyebrow="Server"
         title="Metrics"
         actions={
-          <div className="flex items-center gap-3">
-            {health && <HealthVerdict status={health.status} />}
+          <>
+            {live && (
+              <IconAction
+                label={paused ? "Resume live feed" : "Pause live feed"}
+                onClick={() =>
+                  setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
+                }
+              >
+                {paused ? <Play /> : <Pause />}
+              </IconAction>
+            )}
+            {/* Exactly the window and resolution on screen, peaks included —
+                the numbers a chart is the wrong way to hand to somebody. */}
+            <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
+              <Download />
+              Export CSV
+            </Button>
             <RangePicker controls={controls} />
-          </div>
+          </>
         }
       />
 
-      {/* The verdict in the header is one word, and on the page made entirely
-          of the numbers it was computed from, "Warning" with no way to ask why
-          is a dead end. Rendered only when there is something to say: a server
-          with nothing wrong loses no height to a panel saying so, because the
-          header already said it. */}
+      {/* What this machine is made of. The Overview's row says what it runs;
+          this one says what it runs on, because every figure below is a share
+          of something named here. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
+        <span className="truncate">{host.cpuModel || "Unknown processor"}</span>
+        <Dot />
+        <span className="numeric">
+          {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
+        </span>
+        <Dot />
+        <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
+        <Dot />
+        <span className="numeric">
+          {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
+        </span>
+        <Dot />
+        <span className="numeric">up {duration(snapshot.uptimeSeconds)}</span>
+        {host.virtualization && <Tag>{host.virtualization}</Tag>}
+        {recorded.disabled ? (
+          <Tag tone="warning">history off</Tag>
+        ) : (
+          recorded.history && (
+            <>
+              <Dot />
+              <span className="numeric">
+                sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
+                {duration(recorded.history.retentionSeconds)}
+              </span>
+            </>
+          )
+        )}
+        {health && <HealthVerdict status={health.status} />}
+      </div>
+
+      <Readings
+        snapshot={snapshot}
+        cores={cores}
+        stats={stats}
+        prior={priorStats}
+        priorLabel={prior ? rangeSpec(win.key).label : null}
+      />
+
+      {/* The verdict is already in the facts row, and on the page made
+          entirely of the numbers it was computed from, "Warning" with no way
+          to ask why is a dead end. Rendered only when there is something to
+          say: a server with nothing wrong loses no height to a list saying so. */}
       {health && health.findings.length > 0 && (
         <HealthPanel plain health={health} loading={healthLoading} />
       )}
 
+      <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        <NotableMoments rows={rows} events={events} cores={cores} onZoom={zoom} />
+        <TopProcesses />
+      </div>
+
       <Section title="Utilisation">
         {recorded.error && <ErrorState error={recorded.error} />}
 
-        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
           <ProcessorPanel
             rows={rows}
             events={events}
             onZoom={zoom}
             showPeaks={showPeaks}
             note={note}
-            model={host.cpuModel}
             now={snapshot}
           />
 
           <ChartPanel
+            plain
             title="Memory and swap"
             rows={rows}
             series={memSeries}
@@ -279,18 +392,11 @@ export default function MetricsPage() {
             showPeaks={showPeaks}
             note={note}
             height={190}
-            footer={
-              <MetricStrip className="[&>*]:flex-1">
-                <Metric label="Used" value={bytes(snapshot.memory.used)} />
-                <Metric label="Cached" value={bytes(snapshot.memory.cached)} />
-                <Metric label="Buffers" value={bytes(snapshot.memory.buffers)} />
-                <Metric label="Available" value={bytes(snapshot.memory.available)} />
-              </MetricStrip>
-            }
           />
         </div>
 
         <ChartPanel
+          plain
           title="Network throughput"
           rows={rows}
           series={netSeries}
@@ -303,12 +409,13 @@ export default function MetricsPage() {
           height={180}
         />
 
-        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
           {/* Two charts rather than one with two axes. A capacity percentage
               and a byte rate share no scale, and overlaying them on twin axes
               invites the reader to infer a relationship between two lines that
               have nothing to do with each other. */}
           <ChartPanel
+            plain
             title="Capacity"
             rows={storage.rows as { ts: number }[]}
             series={storageSeries}
@@ -323,6 +430,7 @@ export default function MetricsPage() {
             thresholds={DISK_THRESHOLD}
           />
           <ChartPanel
+            plain
             title="Disk throughput"
             rows={rows}
             series={ioSeries}
@@ -344,8 +452,9 @@ export default function MetricsPage() {
         look like they should be, and only the charts below can say so.
       */}
       <Section title="Saturation">
-        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
           <ChartPanel
+            plain
             title="Pressure"
             rows={rows}
             series={pressureSeries}
@@ -363,6 +472,7 @@ export default function MetricsPage() {
             }
           />
           <ChartPanel
+            plain
             title="Load average"
             rows={rows}
             series={loadSeries}
@@ -377,6 +487,7 @@ export default function MetricsPage() {
             }
           />
           <ChartPanel
+            plain
             title="Disk operations"
             rows={rows}
             series={iopsSeries}
@@ -388,6 +499,7 @@ export default function MetricsPage() {
             note={note}
           />
           <ChartPanel
+            plain
             title="Disk latency and busy time"
             rows={rows}
             series={latencySeries}
@@ -398,10 +510,8 @@ export default function MetricsPage() {
             height={165}
             note={note}
           />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
           <ChartPanel
+            plain
             title="Sockets"
             rows={rows}
             series={socketSeries}
@@ -423,28 +533,306 @@ export default function MetricsPage() {
       </Section>
 
       <Section title="Hardware">
-        {snapshot.cpu.perCore.length > 0 && (
-          <Panel>
-            <PanelHeader
-              title="Per-core utilisation"
-              actions={
-                <span className="numeric text-hint text-muted-foreground">
-                  {snapshot.cpu.perCore.length} cores
-                </span>
-              }
-            />
-            <PanelBody>
-              <PerCoreBars cores={snapshot.cpu.perCore} />
-            </PanelBody>
-          </Panel>
-        )}
-
-        <div className="grid items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+        <PerCorePanel cores={snapshot.cpu.perCore} />
+        <SensorsPanel sensors={sensors} />
+        <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
           <MountsPanel snapshot={snapshot} />
           <InterfacesPanel snapshot={snapshot} />
         </div>
       </Section>
     </Page>
+  )
+}
+
+function Dot() {
+  return <span className="text-muted-foreground/40">·</span>
+}
+
+/** The figures a tile compares between this window and the one before it. */
+type Summary = {
+  cpu: WindowStat | null
+  mem: WindowStat | null
+  load: WindowStat | null
+  net: WindowStat | null
+  disk: WindowStat | null
+  tcp: WindowStat | null
+}
+
+function summarise(rows: ChartRow[]): Summary {
+  return {
+    cpu: windowStat(rows, "cpu", "cpuPeak"),
+    mem: windowStat(rows, "mem", "memPeak"),
+    load: windowStat(rows, "load1"),
+    net: windowStatSum(rows, ["rx", "tx"]),
+    disk: windowStatSum(rows, ["diskRead", "diskWrite"]),
+    tcp: windowStat(rows, "tcp", "tcpPeak"),
+  }
+}
+
+/**
+ * The same span, one window earlier.
+ *
+ * Anchored to the recorded series' own end rather than to the instant of
+ * render, and rounded to a coarse tick: the from/to pair is the request's
+ * cache key, and a window that moved on every render would be re-fetched on
+ * every poll of the main series. Null for the live buffer and for a dragged
+ * span — the first has no "previous five minutes" on record, and the second is
+ * a question about one moment rather than a comparison.
+ */
+function priorWindow(win: MetricsWindow, live: boolean, anchor: string | undefined) {
+  if (live || win.from !== undefined || !anchor) return null
+  const end = new Date(anchor).getTime()
+  if (Number.isNaN(end)) return null
+  const spec = rangeSpec(win.key)
+  const step = Math.max(spec.refreshMs * 4, 60_000)
+  const width = spec.seconds * 1000
+  const to = Math.floor(end / step) * step - width
+  return { key: win.key, from: to - width, to }
+}
+
+/**
+ * The delta beside a headline figure: this window's mean against the prior
+ * window's, as "+12%". Uncoloured on purpose — more network is not bad and
+ * less CPU is not good, and a hue would claim to know which.
+ */
+function Delta({
+  now,
+  before,
+  label,
+}: {
+  now: WindowStat | null | undefined
+  before: WindowStat | null | undefined
+  label: string | null
+}) {
+  if (!now || !before || !label) return null
+  const delta = formatDelta(relativeChange(now.mean, before.mean))
+  if (!delta) return null
+  return (
+    <span className="numeric" title={`this ${label} against the ${label} before it, by mean`}>
+      {delta}
+    </span>
+  )
+}
+
+/**
+ * The headline readings: ten figures from the newest frame, each with the
+ * detail the figure hides and, on a recorded range, how it compares with the
+ * previous window. A run of tiles rather than a run of cards, per §15.
+ */
+function Readings({
+  snapshot,
+  cores,
+  stats,
+  prior,
+  priorLabel,
+}: {
+  snapshot: Snapshot
+  cores: number
+  stats: Summary
+  prior: Summary | null
+  priorLabel: string | null
+}) {
+  const modes = snapshot.cpu.modes
+  const rx = snapshot.net.reduce((sum, n) => sum + n.recvRate, 0)
+  const tx = snapshot.net.reduce((sum, n) => sum + n.sendRate, 0)
+  const up = snapshot.net.filter((n) => n.isUp).length
+  const disk = snapshot.mounts.reduce(
+    (acc, m) => ({
+      rate: acc.rate + m.readRate + m.writeRate,
+      reads: acc.reads + (m.readOps ?? 0),
+      writes: acc.writes + (m.writeOps ?? 0),
+      // The busiest device and the slowest request, not the mean: one
+      // saturated disk is the problem and three idle ones do not dilute it.
+      busy: Math.max(acc.busy, m.busyPercent ?? 0),
+      await: Math.max(acc.await, m.readLatencyMs ?? 0, m.writeLatencyMs ?? 0),
+    }),
+    { rate: 0, reads: 0, writes: 0, busy: 0, await: 0 },
+  )
+  const availPercent =
+    snapshot.memory.total > 0 ? (snapshot.memory.available / snapshot.memory.total) * 100 : 0
+  const fullest = snapshot.mounts.reduce<MountStats | undefined>(
+    (worst, m) => (!worst || m.usedPercent > worst.usedPercent ? m : worst),
+    undefined,
+  )
+  const psi = snapshot.pressure
+  const worstPressure = psi?.supported
+    ? [
+        { name: "CPU", value: psi.cpuSome },
+        { name: "memory", value: psi.memSome },
+        { name: "I/O", value: psi.ioSome },
+      ].reduce((worst, p) => (p.value > worst.value ? p : worst))
+    : null
+  const sockets = snapshot.sockets
+  const procs = snapshot.procs
+  const files = snapshot.files
+  const hottest = snapshot.sensors?.[0]
+  const filePercent = files && files.max > 0 ? (files.open / files.max) * 100 : null
+
+  return (
+    <StatGrid columns={5}>
+      <StatTile
+        label="CPU"
+        value={percent(snapshot.cpu.totalPercent)}
+        meter={snapshot.cpu.totalPercent}
+        tone={utilisationTone(snapshot.cpu.totalPercent)}
+        hint={
+          modes
+            ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
+            : `${cores} cores`
+        }
+        trailing={
+          modes && modes.steal >= 1 ? (
+            <span className="numeric font-medium text-destructive">
+              {percent(modes.steal, 0)} steal
+            </span>
+          ) : (
+            (prior && <Delta now={stats.cpu} before={prior.cpu} label={priorLabel} />) ||
+            `${cores} cores`
+          )
+        }
+      />
+      <StatTile
+        label="Memory"
+        value={bytes(snapshot.memory.available)}
+        meter={100 - availPercent}
+        tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
+        hint={`available · ${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
+        trailing={
+          (prior && <Delta now={stats.mem} before={prior.mem} label={priorLabel} />) || "available"
+        }
+      />
+      <StatTile
+        label="Load"
+        value={snapshot.cpu.loadAvg1.toFixed(2)}
+        meter={(snapshot.cpu.loadAvg1 / cores) * 100}
+        tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
+        hint={`${snapshot.cpu.loadAvg5.toFixed(2)} · ${snapshot.cpu.loadAvg15.toFixed(2)} over 5 and 15 min`}
+        trailing={
+          (prior && <Delta now={stats.load} before={prior.load} label={priorLabel} />) ||
+          `${(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core`
+        }
+      />
+      {/* Pressure is the figure utilisation cannot give: a host at 40% CPU
+          with 30% pressure is one where tasks spend a third of their time
+          waiting for a core. The worst of the three is the headline. */}
+      <StatTile
+        label="Pressure"
+        value={worstPressure ? percent(worstPressure.value, 1) : "—"}
+        meter={worstPressure ? Math.min(worstPressure.value, 100) : undefined}
+        tone={
+          !worstPressure
+            ? "default"
+            : worstPressure.value >= 30
+              ? "danger"
+              : worstPressure.value >= 10
+                ? "warning"
+                : "default"
+        }
+        hint={
+          psi?.supported
+            ? `cpu ${percent(psi.cpuSome, 1)} · mem ${percent(psi.memSome, 1)} · io ${percent(psi.ioSome, 1)}`
+            : "Kernel does not expose /proc/pressure"
+        }
+        trailing={worstPressure ? `${worstPressure.name} stalled` : "no PSI"}
+      />
+      <StatTile
+        label="Network"
+        value={rate(rx)}
+        hint={`in · ${rate(tx)} out · ${up} of ${snapshot.net.length} interface${snapshot.net.length === 1 ? "" : "s"} up`}
+        trailing={
+          (prior && <Delta now={stats.net} before={prior.net} label={priorLabel} />) || "in"
+        }
+      />
+      <StatTile
+        label="Disk I/O"
+        value={rate(disk.rate)}
+        meter={disk.busy}
+        tone={utilisationTone(disk.busy)}
+        hint={`${Math.round(disk.reads)}/s reads · ${Math.round(disk.writes)}/s writes · ${disk.await.toFixed(1)} ms`}
+        trailing={
+          (prior && <Delta now={stats.disk} before={prior.disk} label={priorLabel} />) ||
+          `${disk.busy.toFixed(0)}% busy`
+        }
+      />
+      {/* The fullest real filesystem, because that is the one that stops the
+          machine. */}
+      <StatTile
+        label="Storage"
+        value={fullest ? bytes(fullest.free) : "—"}
+        meter={fullest?.usedPercent}
+        tone={fullest ? utilisationTone(fullest.usedPercent) : "default"}
+        hint={
+          fullest
+            ? `${percent(fullest.usedPercent, 0)} used of ${bytes(fullest.total)} · ${snapshot.mounts.length} filesystem${snapshot.mounts.length === 1 ? "" : "s"}`
+            : "No filesystems reported"
+        }
+        trailing={fullest && <span className="truncate">free on {fullest.mountpoint}</span>}
+      />
+      <StatTile
+        label="Sockets"
+        value={(sockets?.tcpInUse ?? 0).toLocaleString()}
+        tone={(sockets?.tcpTimeWait ?? 0) >= 12_000 ? "warning" : "default"}
+        hint={`${(sockets?.tcpTimeWait ?? 0).toLocaleString()} TIME_WAIT · ${(sockets?.udpInUse ?? 0).toLocaleString()} UDP · ${(sockets?.tcpOrphan ?? 0).toLocaleString()} orphaned`}
+        trailing={
+          (prior && <Delta now={stats.tcp} before={prior.tcp} label={priorLabel} />) || "TCP"
+        }
+      />
+      {/* Blocked is the half of the story that turns high iowait from a
+          curiosity into a cause: processes queued behind a device. */}
+      <StatTile
+        label="Processes"
+        value={(procs?.total ?? 0).toLocaleString()}
+        tone={(procs?.blocked ?? 0) > 0 ? "warning" : "default"}
+        hint={`${procs?.running ?? 0} running · ${procs?.blocked ?? 0} blocked on I/O`}
+        trailing="total"
+      />
+      {/* The tenth tile is whichever of the two live-only hardware readings
+          this host can give: a temperature where the board reports one, and
+          the file handle count everywhere else. Neither exists on a chart. */}
+      {hottest ? (
+        <StatTile
+          label="Temperature"
+          value={`${hottest.tempC.toFixed(0)}°C`}
+          meter={
+            hottest.critical > 0
+              ? (hottest.tempC / hottest.critical) * 100
+              : hottest.high > 0
+                ? (hottest.tempC / hottest.high) * 100
+                : undefined
+          }
+          tone={sensorTone(hottest)}
+          hint={
+            hottest.critical > 0
+              ? `critical at ${hottest.critical.toFixed(0)}°C · ${snapshot.sensors?.length} sensor${snapshot.sensors?.length === 1 ? "" : "s"}`
+              : `${snapshot.sensors?.length} sensor${snapshot.sensors?.length === 1 ? "" : "s"} · no limit reported`
+          }
+          trailing={<span className="truncate">{hottest.name}</span>}
+        />
+      ) : (
+        <StatTile
+          label="Open files"
+          value={files ? files.open.toLocaleString() : "—"}
+          meter={filePercent ?? undefined}
+          tone={
+            filePercent === null
+              ? "default"
+              : filePercent >= 90
+                ? "danger"
+                : filePercent >= 80
+                  ? "warning"
+                  : "default"
+          }
+          hint={
+            !files
+              ? "Not reported by this backend"
+              : files.max > 0
+                ? `${percent(filePercent ?? 0, 0)} of ${files.max.toLocaleString()} the kernel will allocate`
+                : "Kernel reports no ceiling"
+          }
+          trailing="handles"
+        />
+      )}
+    </StatGrid>
   )
 }
 
@@ -468,7 +856,6 @@ function ProcessorPanel({
   onZoom: (from: number, to: number) => void
   showPeaks: boolean
   note: string
-  model: string
   now: Snapshot
 }) {
   // Total or the four modes. Somebody chasing steal on a VPS wants the
@@ -478,6 +865,7 @@ function ProcessorPanel({
 
   return (
     <ChartPanel
+      plain
       title="Processor"
       rows={rows}
       series={breakdown ? cpuModeSeries : cpuSeries}
@@ -535,6 +923,7 @@ function InodePanel({
 }) {
   return (
     <ChartPanel
+      plain
       title="Inodes"
       rows={rows}
       series={series}
@@ -582,224 +971,4 @@ function emptyChartNote(live: boolean, recorded: HistoryState): string {
   return every
     ? `Nothing recorded in this window yet — the server samples every ${every}s.`
     : "Nothing recorded in this window yet."
-}
-
-function PerCoreBars({ cores }: { cores: number[] }) {
-  if (cores.length === 0) return null
-  return (
-    // Four columns at most, not as many as fit. `auto-fit` put all eight cores
-    // of a typical VPS on one line, which left each bar about forty pixels
-    // wide — a track too short to tell 40% from 60% on, which is the only
-    // question this panel answers. Four wide bars over two rows beats eight
-    // slivers over one.
-    <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 md:grid-cols-3 xl:grid-cols-4">
-      {cores.map((value, i) => {
-        const tone = utilisationTone(value)
-        return (
-          <div key={i} className="flex min-w-0 items-center gap-2">
-            <span className="w-8 shrink-0 font-mono text-micro text-muted-foreground">cpu{i}</span>
-            <Meter value={value} tone={tone} size="thin" label={`cpu${i}`} className="flex-1" />
-            <span
-              className={cn(
-                "numeric w-8 shrink-0 text-right font-mono text-micro",
-                // The figure carries the same tone as its bar. A core pinned at
-                // 98% beside one idling at 4% should be findable by colour in a
-                // grid of sixty-four, not by reading every number.
-                tone === "danger"
-                  ? "text-destructive"
-                  : tone === "warning"
-                    ? "text-warning"
-                    : "text-muted-foreground",
-              )}
-            >
-              {value.toFixed(0)}%
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
-  const [scanning, setScanning] = useState<string | null>(null)
-  const [breakdown, setBreakdown] = useState<Record<string, DirEntry[]>>({})
-  const abortRef = useRef<AbortController>(null)
-
-  const scan = async (mountpoint: string) => {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    setScanning(mountpoint)
-    try {
-      const entries = await get<DirEntry[]>(
-        "/system/disk-usage",
-        { path: mountpoint, limit: 12 },
-        controller.signal,
-      )
-      setBreakdown((prev) => ({ ...prev, [mountpoint]: entries }))
-    } catch {
-      // A scan that times out or hits an unreadable tree is not worth a toast;
-      // the row simply stays un-expanded.
-    } finally {
-      setScanning(null)
-    }
-  }
-
-  return (
-    <Panel>
-      <PanelHeader title="Filesystems" />
-      <PanelBody className="divide-y divide-hairline [&>*]:pb-3 [&>*+*]:pt-3 [&>*:last-child]:pb-0">
-        {snapshot.mounts.map((mount) => {
-          const tone = utilisationTone(mount.usedPercent)
-          const inodes = mount.inodesTotal > 0 ? (mount.inodesUsed / mount.inodesTotal) * 100 : 0
-          const figure = cn(
-            tone === "danger"
-              ? "text-destructive"
-              : tone === "warning"
-                ? "text-warning"
-                : "text-foreground",
-          )
-          return (
-            // Three lines, in the order the question is asked: which volume and
-            // how full, the bar, then the detail. It was a two-column header of
-            // stacked pairs — mountpoint over device on the left, capacity over
-            // throughput on the right — which put the percentage, the one figure
-            // the row exists for, on a third line beside a button.
-            <div key={mount.mountpoint} className="min-w-0 space-y-1.5">
-              <div className="flex min-w-0 items-baseline justify-between gap-3">
-                <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate text-body font-medium">{mount.mountpoint}</span>
-                  <Tag>{mount.fstype}</Tag>
-                </span>
-                <span className="numeric shrink-0 text-hint text-muted-foreground">
-                  {bytes(mount.used)} / {bytes(mount.total)}
-                  <span className={cn("ml-2 text-body font-medium", figure)}>
-                    {mount.usedPercent.toFixed(0)}%
-                  </span>
-                </span>
-              </div>
-              <Meter value={mount.usedPercent} tone={tone} size="thin" label={mount.mountpoint} />
-              <div className="flex min-w-0 items-center justify-between gap-3 text-hint text-muted-foreground">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-mono">{mount.device}</span>
-                  <span className="numeric shrink-0">
-                    {rate(mount.readRate)} read · {rate(mount.writeRate)} write
-                  </span>
-                  {/* Inodes fill independently of bytes, so a volume the bar
-                      above calls two-thirds empty can still refuse to create a
-                      file. Said here, next to the bar that is about to be
-                      wrong, rather than only in the Inodes chart. */}
-                  {inodes >= 80 && (
-                    <span className="numeric shrink-0 font-medium text-warning">
-                      {inodes.toFixed(0)}% inodes
-                    </span>
-                  )}
-                </span>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="-my-1 shrink-0 text-muted-foreground"
-                  disabled={scanning !== null}
-                  onClick={() => scan(mount.mountpoint)}
-                >
-                  {scanning === mount.mountpoint ? "scanning…" : "scan"}
-                </Button>
-              </div>
-              {breakdown[mount.mountpoint] && (
-                <div className="space-y-1 rounded-lg border border-hairline bg-surface-sunken p-2">
-                  {breakdown[mount.mountpoint].map((entry) => (
-                    <div key={entry.path} className="flex justify-between gap-2 text-hint">
-                      <span className="truncate font-mono">{entry.name}</span>
-                      <span className="numeric shrink-0 text-muted-foreground">
-                        {bytes(entry.size)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        })}
-        {snapshot.mounts.length === 0 && (
-          <EmptyState title="No filesystems reported" icon={Servers} />
-        )}
-      </PanelBody>
-    </Panel>
-  )
-}
-
-function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
-  return (
-    <Panel>
-      <PanelHeader title="Interfaces" />
-      <PanelBody flush>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Interface</TableHead>
-              <TableHead className="text-right">In</TableHead>
-              <TableHead className="text-right">Out</TableHead>
-              {/* Drops next to errors: a link that is up, error-free and
-                  dropping packets is a queue that is too short, not a fault. */}
-              <TableHead className="text-right">Errors</TableHead>
-              <TableHead className="text-right">Drops</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {snapshot.net.map((iface) => (
-              <TableRow key={iface.interface}>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        iface.isUp ? "bg-success" : "bg-muted-foreground",
-                      )}
-                    />
-                    <span className="font-mono text-xs">{iface.interface}</span>
-                  </div>
-                  <p
-                    className="max-w-[14rem] truncate font-mono text-hint text-muted-foreground"
-                    title={iface.addrs.join(", ")}
-                  >
-                    {iface.addrs.join(", ") || "no address"}
-                  </p>
-                </TableCell>
-                <TableCell className="numeric text-right font-mono">
-                  {rate(iface.recvRate)}
-                </TableCell>
-                <TableCell className="numeric text-right font-mono">
-                  {rate(iface.sendRate)}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    "numeric text-right font-mono text-xs",
-                    iface.errIn + iface.errOut > 0 ? "text-warning" : "text-muted-foreground",
-                  )}
-                >
-                  {iface.errIn + iface.errOut}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    "numeric text-right font-mono text-xs",
-                    iface.dropIn + iface.dropOut > 0 ? "text-warning" : "text-muted-foreground",
-                  )}
-                >
-                  {iface.dropIn + iface.dropOut}
-                </TableCell>
-              </TableRow>
-            ))}
-            {snapshot.net.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="p-0">
-                  <EmptyState title="No interfaces reported" icon={Servers} />
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </PanelBody>
-    </Panel>
-  )
 }

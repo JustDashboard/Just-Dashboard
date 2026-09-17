@@ -99,6 +99,11 @@ const (
 	// Ephemeral ports are a real ceiling around 28k by default, and TIME_WAIT
 	// is what fills it.
 	timeWaitWarn = 12000
+
+	// Open file handles against the kernel's ceiling. A leak reaches this
+	// while every utilisation chart reads idle, and the failure mode past it
+	// is every new socket and log line refused at once.
+	fileHandleWarnPercent = 80
 )
 
 // Assess judges the host from a live snapshot and, where available, the
@@ -132,6 +137,7 @@ func (r *Recorder) Assess(ctx context.Context, snap *sysinfo.Snapshot) Health {
 	h.Findings = append(h.Findings, cpuFindings(snap, recent)...)
 	h.Findings = append(h.Findings, pressureFindings(snap, recent)...)
 	h.Findings = append(h.Findings, networkFindings(snap)...)
+	h.Findings = append(h.Findings, hardwareFindings(snap)...)
 
 	// Worst first: an operator reading only the top row should be reading the
 	// most urgent one.
@@ -356,6 +362,52 @@ func networkFindings(snap *sysinfo.Snapshot) []Finding {
 				Detail: fmt.Sprintf("%d dropped, %d errors since boot", drops, n.ErrIn+n.ErrOut),
 				Advice: "Counted since boot rather than recently, so an old incident looks the same as a current one. Worth correlating with the interface's throughput chart.",
 				Metric: "net", Value: float64(drops), Threshold: 1000,
+			})
+		}
+	}
+	return out
+}
+
+// hardwareFindings reads the two live-only figures the recorder does not
+// keep: the file handle count and whatever temperatures the board reports.
+//
+// A sensor is judged only against its own thresholds. There is no universal
+// "too hot": a CPU package idles at 60 °C where an NVMe drive at 60 °C is
+// throttling, and the driver is the one party that knows which this is.
+func hardwareFindings(snap *sysinfo.Snapshot) []Finding {
+	var out []Finding
+	if snap.Files.Max > 0 {
+		used := float64(snap.Files.Open) / float64(snap.Files.Max) * 100
+		if used >= fileHandleWarnPercent {
+			out = append(out, Finding{
+				ID:     "files",
+				Level:  "warning",
+				Title:  "The host is running out of file handles",
+				Detail: fmt.Sprintf("%d of %d open (%.0f%%)", snap.Files.Open, snap.Files.Max, used),
+				Advice: "Something is opening files or sockets faster than it closes them. Sort the process table by open files to find it; raising fs.file-max only postpones the same failure.",
+				Metric: "files", Value: used, Threshold: fileHandleWarnPercent,
+			})
+		}
+	}
+	for _, sensor := range snap.Sensors {
+		switch {
+		case sensor.Critical > 0 && sensor.TempC >= sensor.Critical:
+			out = append(out, Finding{
+				ID:     "temp:" + sensor.Name,
+				Level:  "critical",
+				Title:  fmt.Sprintf("%s is at its critical temperature", sensor.Name),
+				Detail: fmt.Sprintf("%.0f °C against a critical limit of %.0f °C", sensor.TempC, sensor.Critical),
+				Advice: "The hardware will throttle or shut itself down to survive this. Check airflow and fans before anything else.",
+				Metric: "temperature", Value: sensor.TempC, Threshold: sensor.Critical,
+			})
+		case sensor.High > 0 && sensor.TempC >= sensor.High:
+			out = append(out, Finding{
+				ID:     "temp:" + sensor.Name,
+				Level:  "warning",
+				Title:  fmt.Sprintf("%s is running hot", sensor.Name),
+				Detail: fmt.Sprintf("%.0f °C against a high-water mark of %.0f °C", sensor.TempC, sensor.High),
+				Advice: "Sustained heat costs clock speed first and hardware second. Worth a look at cooling if it stays here.",
+				Metric: "temperature", Value: sensor.TempC, Threshold: sensor.High,
 			})
 		}
 	}
