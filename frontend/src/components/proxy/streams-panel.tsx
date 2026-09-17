@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Connection, Plus, Trash, Warning } from "@/components/icons"
+import { useEffect, useMemo, useState } from "react"
+import { Connection, Pencil, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import type { SiteResult, StreamSpec, StreamStatus } from "@/lib/types"
@@ -9,16 +9,17 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { RowLink } from "@/components/page"
+import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import { Page, PageHeader, RowLink } from "@/components/page"
+import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { Button } from "@/components/ui/button"
-import { IconAction } from "@/components/icon-action"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { VerbActions, type Verb } from "@/components/verbs"
+import { DANGEROUS_PORTS } from "@/components/proxy/attention"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Table,
@@ -37,85 +38,175 @@ import {
  * single-server operator with one non-HTTP service has to leave the dashboard
  * and write nginx by hand.
  *
- * The one thing this panel has to be loud about is that nginx's stream block
+ * The one thing this page has to be loud about is that nginx's stream block
  * is a top-level context, not something a site file can reach. If nginx.conf
  * does not include this directory, the files are written and silently ignored
  * — which is the same failure as a drop-in the daemon never reads.
  */
-export function StreamsPanel() {
+export function StreamsPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<StreamSpec | null>(null)
-  const [formOpen, setFormOpen] = useState(false)
+  const [form, setForm] = useState({ open: false, session: 0 })
   const { data, error, loading, refresh } = usePoll<StreamStatus>(
     (signal) => get("/proxy/streams/", undefined, signal),
-    60000,
+    60_000,
   )
   const admin = can("system.admin")
 
-  if (loading) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
-  if (!data) return null
-
   const open = (spec: StreamSpec | null) => {
     setEditing(spec)
-    setFormOpen(true)
+    setForm((f) => ({ open: true, session: f.session + 1 }))
   }
 
-  return (
-    <>
-      <div className="flex min-w-0 flex-col gap-4">
-        {!data.included && (
-          <Notice tone="warning" icon={Warning} title="nginx is not reading these yet">
-            <div className="space-y-2">
-              <p>
-                A stream lives in nginx&rsquo;s top-level <code className="font-mono">stream</code>{" "}
-                block, which a site file cannot reach. Until{" "}
-                <code className="font-mono">nginx.conf</code> includes this directory, anything
-                configured here is written and ignored.
-              </p>
-              <pre className="overflow-x-auto rounded-lg border border-hairline bg-surface-sunken p-2.5 font-mono text-hint">
-                {data.snippet}
-              </pre>
-              <p>
-                Add that at the top level of nginx.conf — beside the{" "}
-                <code className="font-mono">http</code> block, not inside it. The dashboard does not
-                edit nginx.conf itself: every other configuration on the host depends on that file,
-                and a bad write there is a server that will not start.
-              </p>
-            </div>
-          </Notice>
-        )}
+  const counts = useMemo(() => {
+    const streams = data?.streams ?? []
+    return {
+      all: streams.length,
+      tcp: streams.filter((s) => s.protocol === "tcp").length,
+      udp: streams.filter((s) => s.protocol === "udp").length,
+      open: streams.filter((s) => s.allowFrom.length === 0).length,
+    }
+  }, [data])
 
-        <Panel>
-          <PanelHeader
-            title="Port forwarding"
-            actions={
-              admin && (
-                // Kept enabled when nginx is not reading the directory yet:
-                // staging the forward before editing nginx.conf is a
-                // reasonable order to work in. What it must not do is look
-                // like the thing that makes the port live, so it says which
-                // of the two it is.
-                <Button
-                  size="sm"
-                  variant={data.included ? "default" : "outline"}
-                  onClick={() => open(null)}
-                >
-                  <Plus className="size-4" />
-                  {data.included ? "New stream" : "Prepare a stream"}
-                </Button>
-              )
-            }
-          />
-          <PanelBody flush>
-            {data.streams.length === 0 ? (
-              <EmptyState
-                icon={Connection}
-                title="Nothing forwarded"
-                description="Point a port on this host at a service somewhere else — a database replica, a bastion, a game server. Anything TCP or UDP."
-              />
-            ) : (
+  const remove = (stream: StreamSpec) =>
+    confirm({
+      title: `Delete ${stream.name}`,
+      confirmLabel: "Delete and reload",
+      description: (
+        <p>
+          {data?.included
+            ? `Port ${stream.listen} stops being forwarded as soon as nginx reloads.`
+            : `nginx is not reading these yet, so port ${stream.listen} was never forwarded — this removes the file before it ever took effect.`}{" "}
+          The previous file is kept as <code className="font-mono">{stream.name}.conf.bak</code>.
+        </p>
+      ),
+      action: async () => {
+        await del(`/proxy/streams/${encodeURIComponent(stream.name)}`)
+        refresh()
+      },
+    })
+
+  const verbsFor = (stream: StreamSpec): Verb[] => [
+    {
+      key: "edit",
+      label: "Edit",
+      detail: "Change where the port goes, who may reach it, or the timeout.",
+      icon: Pencil,
+      inline: true,
+      run: () => open(stream),
+    },
+    {
+      key: "delete",
+      label: "Delete",
+      detail: "Remove the forward and reload. The previous file is kept as a .bak.",
+      icon: Trash,
+      danger: true,
+      run: () => remove(stream),
+    },
+  ]
+
+  const header = (
+    <PageHeader
+      eyebrow="Proxy"
+      title="Streams"
+      actions={
+        admin &&
+        data && (
+          // Kept enabled when nginx is not reading the directory yet:
+          // staging the forward before editing nginx.conf is a reasonable
+          // order to work in. What it must not do is look like the thing
+          // that makes the port live, so it says which of the two it is.
+          <Button
+            size="sm"
+            variant={data.included ? "default" : "outline"}
+            onClick={() => open(null)}
+          >
+            <Plus className="size-4" />
+            {data.included ? "New stream" : "Prepare a stream"}
+          </Button>
+        )
+      }
+    />
+  )
+
+  if (loading && !data) {
+    return (
+      <Page>
+        {header}
+        <LoadingPanel />
+      </Page>
+    )
+  }
+  if (error && !data) {
+    return (
+      <Page>
+        {header}
+        <ErrorState error={error} />
+      </Page>
+    )
+  }
+  if (!data) return null
+
+  return (
+    <Page className="animate-rise">
+      {header}
+
+      <StatGrid columns={4}>
+        <StatTile
+          label="Streams"
+          value={counts.all}
+          hint={
+            counts.all === 0
+              ? "nothing forwarded"
+              : data.included
+                ? "read by nginx"
+                : "not read by nginx"
+          }
+          tone={counts.all > 0 && !data.included ? "warning" : "default"}
+        />
+        <StatTile label="TCP" value={counts.tcp} hint="connection-oriented forwards" />
+        <StatTile label="UDP" value={counts.udp} hint="stateless, closed by silence" />
+        <StatTile
+          label="Open to anyone"
+          value={counts.open}
+          tone={counts.open > 0 ? "warning" : "default"}
+          hint={counts.open > 0 ? "no allow list on these" : "every stream restricted"}
+        />
+      </StatGrid>
+
+      {!data.included && (
+        <Notice tone="warning" icon={Warning} title="nginx is not reading these yet">
+          <div className="space-y-2">
+            <p>
+              A stream lives in nginx&rsquo;s top-level <code className="font-mono">stream</code>{" "}
+              block, which a site file cannot reach. Until{" "}
+              <code className="font-mono">nginx.conf</code> includes this directory, anything
+              configured here is written and ignored.
+            </p>
+            <Well className="whitespace-pre">{data.snippet}</Well>
+            <p>
+              Add that at the top level of nginx.conf — beside the{" "}
+              <code className="font-mono">http</code> block, not inside it. The dashboard does not
+              edit nginx.conf itself: every other configuration on the host depends on that file,
+              and a bad write there is a server that will not start.
+            </p>
+          </div>
+        </Notice>
+      )}
+
+      <Panel plain>
+        <PanelHeader title="Port forwarding" />
+        <PanelBody flush>
+          {data.streams.length === 0 ? (
+            <EmptyState
+              icon={Connection}
+              title="Nothing forwarded"
+              description="Point a port on this host at a service somewhere else — a database replica, a bastion, a game server. Anything TCP or UDP."
+              className="mt-2"
+            />
+          ) : (
+            <div className="-mx-4 min-w-0 animate-rise">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -128,12 +219,23 @@ export function StreamsPanel() {
                 </TableHeader>
                 <TableBody>
                   {data.streams.map((stream) => (
-                    <TableRow key={stream.name} className="group">
+                    <TableRow
+                      key={stream.name}
+                      className="group"
+                      onActivate={admin ? () => open(stream) : undefined}
+                    >
                       <TableCell>
-                        <RowLink onClick={() => open(stream)}>{stream.name}</RowLink>
+                        {admin ? (
+                          <RowLink onClick={() => open(stream)}>{stream.name}</RowLink>
+                        ) : (
+                          <span className="text-body font-medium">{stream.name}</span>
+                        )}
+                        {stream.proxyProtocol && (
+                          <p className="text-hint text-muted-foreground">sends the PROXY header</p>
+                        )}
                       </TableCell>
                       <TableCell className="font-mono">
-                        {stream.listen}
+                        <span className="numeric">{stream.listen}</span>
                         <span className="ml-1 text-muted-foreground uppercase">
                           {stream.protocol}
                         </span>
@@ -143,59 +245,33 @@ export function StreamsPanel() {
                         {stream.allowFrom.length > 0 ? (
                           <span className="font-mono text-hint">{stream.allowFrom.join(", ")}</span>
                         ) : (
-                          <Status verdict="critical" label="anyone" />
+                          <Status
+                            verdict={DANGEROUS_PORTS[stream.listen] ? "critical" : "warning"}
+                            label="anyone"
+                          />
                         )}
                       </TableCell>
-                      <TableCell>
-                        {admin && (
-                          <IconAction
-                            reveal
-                            label="Delete stream"
-                            className="text-destructive"
-                            onClick={() =>
-                              confirm({
-                                title: `Delete ${stream.name}`,
-                                confirmLabel: "Delete and reload",
-                                description: (
-                                  <p>
-                                    {data.included
-                                      ? `Port ${stream.listen} stops being forwarded as soon as nginx reloads.`
-                                      : `nginx is not reading these yet, so port ${stream.listen} was never forwarded — this removes the file before it ever took effect.`}{" "}
-                                    The previous file is kept as{" "}
-                                    <code className="font-mono">{stream.name}.conf.bak</code>.
-                                  </p>
-                                ),
-                                action: async () => {
-                                  await del(`/proxy/streams/${encodeURIComponent(stream.name)}`)
-                                  refresh()
-                                },
-                              })
-                            }
-                          >
-                            <Trash />
-                          </IconAction>
-                        )}
-                      </TableCell>
+                      <TableCell>{admin && <VerbActions dim verbs={verbsFor(stream)} />}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            )}
-          </PanelBody>
-        </Panel>
-      </div>
+            </div>
+          )}
+        </PanelBody>
+      </Panel>
 
       <StreamForm
-        key={editing?.name ?? "new"}
-        open={formOpen}
+        key={`${editing?.name ?? "new"}:${form.session}`}
+        open={form.open}
         spec={editing}
         included={data.included}
         snippet={data.snippet}
-        onOpenChange={setFormOpen}
+        onOpenChange={(open) => setForm((f) => ({ ...f, open }))}
         onSaved={refresh}
       />
       {dialog}
-    </>
+    </Page>
   )
 }
 
@@ -235,6 +311,7 @@ function StreamForm({
     ...spec,
     allowFrom: allow.split(/[\s,]+/).filter(Boolean),
   }
+  const service = DANGEROUS_PORTS[spec.listen]
 
   useEffect(() => {
     if (!open) return
@@ -250,9 +327,7 @@ function StreamForm({
         post<{ content: string }>(
           "/proxy/streams/preview",
           { spec: body },
-          {
-            signal: controller.signal,
-          },
+          { signal: controller.signal },
         )
           .then((r) => {
             setPreview(r.content)
@@ -332,7 +407,7 @@ function StreamForm({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         {!included && (
           <Notice tone="warning" icon={Warning} title="This will not forward anything yet">
             <div className="space-y-2">
@@ -342,14 +417,15 @@ function StreamForm({
                 the top level of nginx.conf — beside the <code className="font-mono">http</code>{" "}
                 block, not inside it — and this stream starts forwarding on the next reload.
               </p>
-              <pre className="overflow-x-auto rounded-lg border border-hairline bg-surface-sunken p-2.5 font-mono text-hint">
-                {snippet}
-              </pre>
+              <Well className="whitespace-pre">{snippet}</Well>
             </div>
           </Notice>
         )}
-        <div className="space-y-1.5">
-          <Label htmlFor="stream-name">Name</Label>
+        <Field
+          label="Name"
+          htmlFor="stream-name"
+          hint="Names the file. Lowercase, digits, dots and dashes."
+        >
           <Input
             id="stream-name"
             value={spec.name}
@@ -357,11 +433,18 @@ function StreamForm({
             placeholder="postgres-replica"
             className="font-mono text-xs"
           />
-        </div>
+        </Field>
 
-        <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-          <div className="space-y-1.5">
-            <Label htmlFor="stream-listen">Listen on</Label>
+        <FieldRow>
+          <Field
+            label="Listen on"
+            htmlFor="stream-listen"
+            hint={
+              service
+                ? `${service}'s usual port — restrict who may connect.`
+                : "The port on this host."
+            }
+          >
             <Input
               id="stream-listen"
               value={spec.listen || ""}
@@ -370,9 +453,8 @@ function StreamForm({
               placeholder="5432"
               className="font-mono text-xs"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Protocol</Label>
+          </Field>
+          <Field label="Protocol">
             <ToggleGroup
               type="single"
               value={spec.protocol}
@@ -390,11 +472,14 @@ function StreamForm({
                 UDP
               </ToggleGroupItem>
             </ToggleGroup>
-          </div>
-        </div>
+          </Field>
+        </FieldRow>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="stream-upstream">Forward to</Label>
+        <Field
+          label="Forward to"
+          htmlFor="stream-upstream"
+          hint="host:port of the service behind it."
+        >
           <Input
             id="stream-upstream"
             value={spec.upstream}
@@ -402,10 +487,13 @@ function StreamForm({
             placeholder="10.0.0.5:5432"
             className="font-mono text-xs"
           />
-        </div>
+        </Field>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="stream-allow">Allow only these</Label>
+        <Field
+          label="Allow only these"
+          htmlFor="stream-allow"
+          hint="A stream has no authentication of any kind — anything that reaches this port is through to the backend. Leave this empty only when the service behind it authenticates for itself."
+        >
           <Input
             id="stream-allow"
             value={allow}
@@ -413,55 +501,50 @@ function StreamForm({
             placeholder="10.0.0.0/8, 203.0.113.9"
             className="font-mono text-xs"
           />
-          <p className="text-hint leading-relaxed text-muted-foreground">
-            A stream has no authentication of any kind — anything that reaches this port is through
-            to the backend. Leave this empty only when the service behind it authenticates for
-            itself.
-          </p>
-        </div>
+        </Field>
 
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-0.5">
-            <Label className="font-normal">Send the PROXY header</Label>
-            <p className="text-hint leading-relaxed text-muted-foreground">
-              Lets the backend see the real client address. It has to be expecting the header, or it
-              reads it as the first bytes of the connection and fails in a way that looks like a
-              protocol mismatch.
-            </p>
-          </div>
-          <Switch
+        <OptionList>
+          <OptionRow
+            title="Send the PROXY header"
+            hint="Lets the backend see the real client address. It has to be expecting the header, or it reads it as the first bytes of the connection and fails in a way that looks like a protocol mismatch."
             checked={spec.proxyProtocol}
             onCheckedChange={(v) => setSpec((s) => ({ ...s, proxyProtocol: v }))}
-            className="mt-0.5 shrink-0"
           />
-        </div>
+        </OptionList>
+        {spec.protocol === "udp" && spec.proxyProtocol && (
+          <FormNote tone="warning">
+            The PROXY protocol is a TCP thing. nginx accepts the directive on a UDP listener and the
+            backend will not see the header.
+          </FormNote>
+        )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="stream-timeout">Timeout</Label>
+        <Field
+          label="Timeout"
+          htmlFor="stream-timeout"
+          hint="Seconds. Empty leaves nginx's default."
+        >
           <Input
             id="stream-timeout"
             value={spec.timeout || ""}
             inputMode="numeric"
             onChange={(e) => setSpec((s) => ({ ...s, timeout: Number(e.target.value) || 0 }))}
-            placeholder="seconds — empty leaves nginx's default"
-            className="w-56 font-mono text-xs"
+            placeholder="600"
+            className="w-40 font-mono text-xs"
           />
-        </div>
+        </Field>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-hairline bg-surface-sunken">
+      <Pane className="min-h-48 flex-1">
         {previewError ? (
-          <div className="flex h-full items-center justify-center p-6 text-center text-xs text-destructive">
-            {previewError}
-          </div>
+          <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>
         ) : preview ? (
           <CodeEditor className="h-full" language="ini" value={preview} readOnly />
         ) : (
-          <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+          <EmptyNote className="my-auto">
             Fill in a name, a port and an upstream, and the nginx appears here.
-          </div>
+          </EmptyNote>
         )}
-      </div>
+      </Pane>
     </SidePanel>
   )
 }

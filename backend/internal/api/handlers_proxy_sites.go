@@ -457,6 +457,16 @@ func (s *Server) handleDNSCredentials(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
+func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Request) error {
+	provider := chi.URLParam(r, "provider")
+	if err := proxysvc.RemoveDNSCredentials(provider); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "certificates.dns.credentials.remove", provider, nil)
+	httpx.NoContent(w)
+	return nil
+}
+
 type certImportRequest struct {
 	Name        string `json:"name"`
 	Certificate string `json:"certificate"`

@@ -40,6 +40,10 @@ type DNSProvider struct {
 	// generous on purpose: a challenge that fails because the record had not
 	// spread yet looks exactly like a wrong API token.
 	DefaultWait int `json:"defaultWait"`
+	// HasCredentials reports that a token is saved for this provider. The
+	// token itself is never read back; whether one exists is the whole of
+	// what the page shows, and the reason a "remove" control can exist.
+	HasCredentials bool `json:"hasCredentials"`
 }
 
 // dnsProviders is a closed set. Each entry is an argv this code is willing to
@@ -143,11 +147,31 @@ func HasDNSCredentials(key string) bool {
 	return err == nil && st.Size() > 0
 }
 
+// RemoveDNSCredentials deletes a provider's saved token. A token for a whole
+// DNS zone that is no longer wanted should not sit on disk because the page
+// had no way to say so; what it does not do is touch certbot's own renewal
+// configuration, which keeps naming the file until the certificate is
+// reissued another way.
+func RemoveDNSCredentials(key string) error {
+	provider, ok := DNSProviderFor(key)
+	if !ok {
+		return fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
+	}
+	if err := os.Remove(credentialsPath(key)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s has no saved credentials", provider.Name)
+		}
+		return err
+	}
+	return nil
+}
+
 // ListDNSProviders reports the closed set with per-host detail filled in.
 func (s *Service) ListDNSProviders() []DNSProvider {
 	out := make([]DNSProvider, 0, len(dnsProviders))
 	for _, p := range dnsProviders {
 		p.Installed = certbotPluginInstalled(p.Plugin)
+		p.HasCredentials = HasDNSCredentials(p.Key)
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool {

@@ -34,6 +34,7 @@ export default function ProxyLayout({ children }: { children: React.ReactNode })
         status: status.data,
         loading: status.loading,
         hasNginx: status.data?.nginx ?? false,
+        refresh: status.refresh,
       }}
     >
       <SectionNav tabs={TABS} />

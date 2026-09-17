@@ -45,8 +45,12 @@ type CertbotState struct {
 	// it is a renewal timer that stopped months ago and told nobody.
 	AutoRenew   bool   `json:"autoRenew"`
 	RenewSource string `json:"renewSource,omitempty"`
-	Raw         string `json:"raw,omitempty"`
-	Error       string `json:"error,omitempty"`
+	// RenewUnit is a certbot timer systemd knows about but is not running —
+	// the thing to turn on when AutoRenew is false. Empty when nothing is
+	// scheduled and there is no unit to enable either.
+	RenewUnit string `json:"renewUnit,omitempty"`
+	Raw       string `json:"raw,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
@@ -67,6 +71,9 @@ func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	state.Raw = out
 	state.Certs = ParseCertbotCertificates(out)
 	state.AutoRenew, state.RenewSource = renewalScheduled(ctx)
+	if !state.AutoRenew {
+		state.RenewUnit = renewalCandidate(ctx)
+	}
 	return state
 }
 
@@ -137,6 +144,30 @@ func parseDaysLeft(note string) int {
 	return 0
 }
 
+// certbotTimers are the units certbot's packages install, in the order the
+// distributions are likely to be met.
+var certbotTimers = []string{
+	"certbot.timer",            // Debian, Ubuntu, Arch
+	"certbot-renew.timer",      // Fedora, RHEL and the rest of the RPM world
+	"snap.certbot.renew.timer", // the snap
+}
+
+// renewalCandidate finds a certbot timer that is installed but not running,
+// so the page can offer to start it rather than only report that nothing
+// will renew. systemd answers "not-found" for a unit it has never seen and
+// "loaded" for one it could start.
+func renewalCandidate(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	for _, unit := range certbotTimers {
+		out, err := hostexec.CommandOnHost(ctx, "systemctl", "show", "-p", "LoadState", "--value", unit).Output()
+		if err == nil && strings.TrimSpace(string(out)) == "loaded" {
+			return unit
+		}
+	}
+	return ""
+}
+
 // renewalScheduled looks for whatever is meant to be renewing. certbot ships
 // as a systemd timer on most distributions and as a cron entry on the rest,
 // and a snap install has its own; all three are worth finding, because the
@@ -144,11 +175,7 @@ func parseDaysLeft(note string) int {
 func renewalScheduled(ctx context.Context) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	for _, unit := range []string{
-		"certbot.timer",            // Debian, Ubuntu, Arch
-		"certbot-renew.timer",      // Fedora, RHEL and the rest of the RPM world
-		"snap.certbot.renew.timer", // the snap
-	} {
+	for _, unit := range certbotTimers {
 		out, err := hostexec.CommandOnHost(ctx, "systemctl", "is-active", unit).Output()
 		if err == nil && strings.TrimSpace(string(out)) == "active" {
 			return true, unit
