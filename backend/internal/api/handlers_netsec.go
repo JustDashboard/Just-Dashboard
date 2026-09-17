@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -71,6 +72,7 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodGet, "/failed", s.handle(s.handleFailedLogins))
+			r.Method(http.MethodGet, "/attackers", s.handle(s.handleFailedLoginSummary))
 		})
 	})
 
@@ -122,6 +124,29 @@ func (s *Server) handleFailedLogins(w http.ResponseWriter, r *http.Request) erro
 			"the host keeps no failed-login record, or it could not be read")
 	}
 	httpx.JSON(w, http.StatusOK, records)
+	return nil
+}
+
+// handleFailedLoginSummary answers "who is trying", which the failed-login
+// listing cannot: five hundred lines of the same address are one attacker,
+// and the address that appears on every page of the listing is the one worth
+// a firewall rule. Behind system.admin for the reason the listing is — it is
+// folded from the same record.
+func (s *Server) handleFailedLoginSummary(w http.ResponseWriter, r *http.Request) error {
+	window := failedLoginWindow
+	if hours := atoiDefault(r.URL.Query().Get("hours"), 0); hours > 0 && hours <= 24*90 {
+		window = time.Duration(hours) * time.Hour
+	}
+	top := atoiDefault(r.URL.Query().Get("top"), 25)
+	if top < 1 || top > 100 {
+		top = 25
+	}
+	summary, err := s.modules.netsec.FailedLoginSummary(r.Context(), window, top)
+	if err != nil {
+		return httpx.Err(http.StatusServiceUnavailable, "login_history_unavailable",
+			"the host keeps no failed-login record, or it could not be read")
+	}
+	httpx.JSON(w, http.StatusOK, summary)
 	return nil
 }
 
@@ -312,6 +337,11 @@ func (s *Server) handleSSHSessions(w http.ResponseWriter, r *http.Request) error
 // it describes the running configuration and not an edited one that has yet to
 // be applied.
 func (s *Server) handleExposure(w http.ResponseWriter, r *http.Request) error {
-	httpx.JSON(w, http.StatusOK, netsec.DescribeExposure(s.Cfg.AllowedCIDRs))
+	exposure := netsec.DescribeExposure(s.Cfg.AllowedCIDRs)
+	// The address this request came from, so the pages can name the one
+	// address every lockout guard is protecting — and offer it to fail2ban's
+	// allowlist before somebody bans themselves.
+	exposure.Client = httpx.ClientIP(r)
+	httpx.JSON(w, http.StatusOK, exposure)
 	return nil
 }

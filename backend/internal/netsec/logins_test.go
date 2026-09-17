@@ -147,3 +147,74 @@ func TestCountWithinReportsACappedSample(t *testing.T) {
 		t.Error("reported a cap where the window ran out first")
 	}
 }
+
+// The listing answers what was tried; the summary answers who is trying, and
+// the arithmetic is what a test can pin: folded by address, the account names
+// most tried first, the console attempt counted but not listed, and a sample
+// that ran out inside the window reported as a floor.
+func TestSummariseFailedLoginsFoldsByAddress(t *testing.T) {
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	at := func(hoursAgo int) *time.Time {
+		v := now.Add(-time.Duration(hoursAgo) * time.Hour)
+		return &v
+	}
+	records := []LoginRecord{
+		{User: "root", From: "203.0.113.9", LoginTime: at(1)},
+		{User: "admin", From: "203.0.113.9", LoginTime: at(2)},
+		{User: "root", From: "203.0.113.9", LoginTime: at(3)},
+		{User: "deploy", From: "198.51.100.4", LoginTime: at(4)},
+		{User: "ubuntu", From: "", LoginTime: at(5)},
+		{User: "root", From: "192.0.2.77", LoginTime: at(24 * 9)},
+		{User: "root", From: "192.0.2.77", LoginTime: nil},
+	}
+	sum := SummariseFailedLogins(records, 7*24*time.Hour, now, 10)
+	if sum.Attempts != 5 {
+		t.Fatalf("attempts = %d, want 5 (the console attempt counts, the stale and unreadable ones do not)", sum.Attempts)
+	}
+	if sum.Addresses != 2 || len(sum.Attackers) != 2 {
+		t.Fatalf("addresses = %d, attackers = %+v", sum.Addresses, sum.Attackers)
+	}
+	first := sum.Attackers[0]
+	if first.Address != "203.0.113.9" || first.Attempts != 3 {
+		t.Errorf("most persistent first: got %+v", first)
+	}
+	if len(first.Users) != 2 || first.Users[0] != "root" || first.Users[1] != "admin" {
+		t.Errorf("users most tried first: got %v", first.Users)
+	}
+	if !first.First.Equal(*at(3)) || !first.Last.Equal(*at(1)) {
+		t.Errorf("first/last = %v/%v", first.First, first.Last)
+	}
+	if sum.Since == nil || !sum.Since.Equal(*at(5)) {
+		t.Errorf("since = %v, want the oldest record inside the window", sum.Since)
+	}
+	if sum.Capped {
+		t.Error("seven records is not a capped sample")
+	}
+	if sum.WindowHours != 168 {
+		t.Errorf("windowHours = %d", sum.WindowHours)
+	}
+
+	// Two attackers at the same count: the more recent one first.
+	tie := SummariseFailedLogins([]LoginRecord{
+		{User: "root", From: "10.0.0.1", LoginTime: at(6)},
+		{User: "root", From: "10.0.0.2", LoginTime: at(1)},
+	}, 24*time.Hour, now, 10)
+	if tie.Attackers[0].Address != "10.0.0.2" {
+		t.Errorf("tie broken by recency: got %v", tie.Attackers)
+	}
+
+	// topN trims the list, not the totals.
+	trimmed := SummariseFailedLogins(records, 7*24*time.Hour, now, 1)
+	if len(trimmed.Attackers) != 1 || trimmed.Addresses != 2 || trimmed.Attempts != 5 {
+		t.Errorf("topN must trim the list only: %+v", trimmed)
+	}
+
+	// A full sample with every record inside the window is a floor.
+	full := make([]LoginRecord, failedLoginSample)
+	for i := range full {
+		full[i] = LoginRecord{User: "root", From: "203.0.113.9", LoginTime: at(1)}
+	}
+	if !SummariseFailedLogins(full, 24*time.Hour, now, 10).Capped {
+		t.Error("a sample that ran out inside the window must be reported as capped")
+	}
+}

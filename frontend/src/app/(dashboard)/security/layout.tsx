@@ -2,7 +2,7 @@
 
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import type { FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
+import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { SectionNav } from "@/components/tabs"
@@ -14,11 +14,12 @@ import { SecurityProvider } from "@/components/security/security-context"
  * sidebar entry expands to them; this strip is the switcher for when it is
  * collapsed, and the faster target on a wide screen.
  *
- * The layout owns the two verdicts every sub-page reads (`posture`, `firewall`)
- * and the one action that must not be duplicated (`applyFix`, with its typed
- * confirmations). It does not gate the section: fail2ban absent, ufw absent and
- * an unreadable sshd are four independent absences, and each page reports its
- * own — an unavailable check is information here, not an error.
+ * The layout owns the three verdicts every sub-page reads (`posture`,
+ * `firewall`, `exposure`) and the one action that must not be duplicated
+ * (`applyFix`, with its typed confirmations). It does not gate the section:
+ * fail2ban absent, ufw absent and an unreadable sshd are independent absences,
+ * and each page reports its own — an unavailable check is information here,
+ * not an error.
  */
 const TABS = [
   { title: "Overview", href: "/security" },
@@ -36,6 +37,7 @@ export default function SecurityLayout({ children }: { children: React.ReactNode
 
   const posture = usePoll<Posture>((signal) => get("/security/posture", undefined, signal), 120_000)
   const firewall = usePoll<FirewallStatus>((signal) => get("/firewall/", undefined, signal), 20_000)
+  const exposure = usePoll<Exposure>((signal) => get("/exposure", undefined, signal), 60_000)
 
   /**
    * A finding's one-click remedy. The server names the action; this maps it to
@@ -101,6 +103,7 @@ export default function SecurityLayout({ children }: { children: React.ReactNode
         firewall: firewall.data,
         firewallLoading: firewall.loading,
         firewallError: firewall.error,
+        exposure: exposure.data,
         refreshPosture: posture.refresh,
         refreshFirewall: firewall.refresh,
         applyFix,

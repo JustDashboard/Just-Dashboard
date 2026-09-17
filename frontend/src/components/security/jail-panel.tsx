@@ -11,7 +11,6 @@ import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { SidePanel } from "@/components/side-panel"
 import { RowLink } from "@/components/page"
-import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
@@ -41,15 +40,19 @@ import {
 export function JailsPanel({
   jails,
   canManage,
+  clientIp,
   onChanged,
 }: {
   jails: Fail2banJail[]
   canManage: boolean
+  /** The address this browser arrived from, offered to the allowlist by name. */
+  clientIp?: string
   onChanged: () => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const [tuning, setTuning] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [banning, setBanning] = useState("")
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true)
@@ -66,97 +69,105 @@ export function JailsPanel({
 
   const selected = jails.find((j) => j.name === open)
 
+  // A ban by hand. The route has been on the server since the jail controls
+  // shipped and nothing on the page reached it — so the address that kept
+  // appearing in the log could be blocked forever at the firewall, or not at
+  // all, with no ten-minute answer in between.
+  const ban = () => {
+    if (!selected || !banning.trim()) return
+    const ip = banning.trim()
+    void act(async () => {
+      await post(`/fail2ban/${encodeURIComponent(selected.name)}/ban`, { ip })
+      setBanning("")
+    }, `${ip} banned in ${selected.name}`)
+  }
+
   return (
     <>
-      <Panel>
-        <PanelHeader
-          title="Jails"
-          actions={
-            <Status
-              verdict={jails.some((j) => j.currentlyBanned > 0) ? "notice" : "ok"}
-              label={`${jails.reduce((n, j) => n + j.currentlyBanned, 0)} banned now`}
-            />
-          }
-        />
+      <Panel plain>
+        <PanelHeader title="Jails" />
         <PanelBody flush>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Jail</TableHead>
-                <TableHead>Banned now</TableHead>
-                <TableHead>Failing now</TableHead>
-                <TableHead>Bans in total</TableHead>
-                <TableHead>Failures in total</TableHead>
-                <TableHead className="w-full">Watching</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {jails.map((jail) => (
-                <TableRow key={jail.name} className="group" onActivate={() => setOpen(jail.name)}>
-                  <TableCell>
-                    <RowLink onClick={() => setOpen(jail.name)}>{jail.name}</RowLink>
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={countClass(jail.currentlyBanned > 0)}
-                    >{`${jail.currentlyBanned}`}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={countClass(jail.currentlyFailed > 0)}
-                    >{`${jail.currentlyFailed}`}</span>
-                  </TableCell>
-                  <TableCell className="numeric text-muted-foreground">
-                    {jail.totalBanned}
-                  </TableCell>
-                  <TableCell className="numeric text-muted-foreground">
-                    {jail.totalFailed}
-                  </TableCell>
-                  <TableCell className="font-mono text-hint text-muted-foreground">
-                    {jail.fileList.join(", ") || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {canManage && (
-                      <RowActions className="justify-end">
-                        <IconAction
-                          label={`Tune ${jail.name}`}
-                          onClick={() => setTuning(jail.name)}
-                        >
-                          <SettingsSliders />
-                        </IconAction>
-                        <IconAction
-                          label={`Release every ban in ${jail.name}`}
-                          disabled={busy || jail.bannedIps.length === 0}
-                          onClick={() =>
-                            act(
-                              () =>
-                                post(`/fail2ban/${encodeURIComponent(jail.name)}/unban-all`, {}),
-                              `Released every ban in ${jail.name}`,
-                            )
-                          }
-                        >
-                          <LockOpen />
-                        </IconAction>
-                      </RowActions>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {jails.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="p-0">
-                    <EmptyState
-                      icon={Slash}
-                      title="No jails configured"
-                      description="A running fail2ban with no jails bans nobody. Enable at least the sshd jail."
-                      className="border-0"
-                    />
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          {jails.length === 0 ? (
+            <EmptyState
+              icon={Slash}
+              title="No jails configured"
+              description="A running fail2ban with no jails bans nobody. Enable at least the sshd jail."
+              className="mt-3"
+            />
+          ) : (
+            <div className="-mx-4 min-w-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Jail</TableHead>
+                    <TableHead>Banned now</TableHead>
+                    <TableHead className="hidden sm:table-cell">Failing now</TableHead>
+                    <TableHead className="hidden md:table-cell">Bans in total</TableHead>
+                    <TableHead className="hidden lg:table-cell">Failures in total</TableHead>
+                    <TableHead className="hidden w-full xl:table-cell">Watching</TableHead>
+                    <TableHead className="w-px" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {jails.map((jail) => (
+                    <TableRow
+                      key={jail.name}
+                      className="group"
+                      onActivate={() => setOpen(jail.name)}
+                    >
+                      <TableCell>
+                        <RowLink onClick={() => setOpen(jail.name)}>{jail.name}</RowLink>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={countClass(jail.currentlyBanned > 0)}
+                        >{`${jail.currentlyBanned}`}</span>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        <span
+                          className={countClass(jail.currentlyFailed > 0)}
+                        >{`${jail.currentlyFailed}`}</span>
+                      </TableCell>
+                      <TableCell className="numeric hidden text-muted-foreground md:table-cell">
+                        {jail.totalBanned}
+                      </TableCell>
+                      <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
+                        {jail.totalFailed}
+                      </TableCell>
+                      <TableCell className="hidden font-mono text-hint text-muted-foreground xl:table-cell">
+                        {jail.fileList.join(", ") || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {canManage && (
+                          <RowActions className="justify-end">
+                            <IconAction
+                              label={`Tune ${jail.name}`}
+                              onClick={() => setTuning(jail.name)}
+                            >
+                              <SettingsSliders />
+                            </IconAction>
+                            <IconAction
+                              label={`Release every ban in ${jail.name}`}
+                              disabled={busy || jail.bannedIps.length === 0}
+                              onClick={() =>
+                                act(
+                                  () =>
+                                    post(`/fail2ban/${encodeURIComponent(jail.name)}/unban-all`, {}),
+                                  `Released every ban in ${jail.name}`,
+                                )
+                              }
+                            >
+                              <LockOpen />
+                            </IconAction>
+                          </RowActions>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </PanelBody>
       </Panel>
 
@@ -195,62 +206,93 @@ export function JailsPanel({
           )
         }
       >
-        {selected && selected.bannedIps.length === 0 ? (
-          <p className="text-body leading-relaxed text-muted-foreground">
-            Nothing currently banned. Bans expire, so an empty list is not the same as a quiet night
-            — the ban activity on the page behind this is the record.
-          </p>
-        ) : (
-          <div className="divide-y divide-hairline">
-            {selected?.bannedIps.map((ip) => (
-              <div key={ip} className="flex items-center justify-between gap-2 py-1.5">
-                <span className="truncate font-mono text-xs">{ip}</span>
-                {/* Always visible, not revealed on hover: in a table the
-                    actions are an aside to the data, but this sheet was opened
-                    *to* release an address, so hiding the release button until
-                    the pointer finds the row hides the only thing here. */}
-                {canManage && (
-                  <span className="flex shrink-0 items-center gap-0.5">
-                    <IconAction
-                      label={`Unban ${ip}`}
-                      disabled={busy}
-                      onClick={() =>
-                        act(
-                          () =>
-                            post(`/fail2ban/${encodeURIComponent(selected.name)}/unban`, { ip }),
-                          `${ip} unbanned`,
-                        )
-                      }
-                    >
-                      <LockOpen />
-                    </IconAction>
-                    <IconAction
-                      label={`Never ban ${ip} again`}
-                      disabled={busy}
-                      onClick={() =>
-                        act(
-                          () =>
-                            post(`/fail2ban/${encodeURIComponent(selected.name)}/ignore`, {
-                              ip,
-                              add: true,
-                            }),
-                          `${ip} added to the allowlist`,
-                        )
-                      }
-                    >
-                      <Shield />
-                    </IconAction>
-                  </span>
-                )}
+        <div className="space-y-4">
+          {canManage && selected && (
+            <div className="space-y-1.5">
+              <Label htmlFor="jail-ban-address">Ban an address now</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="jail-ban-address"
+                  value={banning}
+                  onChange={(e) => setBanning(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && ban()}
+                  placeholder="203.0.113.9"
+                  className="font-mono text-xs"
+                />
+                <Button size="sm" variant="outline" onClick={ban} disabled={busy || !banning.trim()}>
+                  <Slash className="size-3.5" />
+                  Ban
+                </Button>
               </div>
-            ))}
+              <p className="text-hint leading-relaxed text-muted-foreground">
+                For this jail&rsquo;s ban time, the same as an earned ban. Your own address is
+                refused. A block that should outlive the ban is a firewall rule, from the offenders
+                list below.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <p className="eyebrow mb-1">Banned now</p>
+            {selected && selected.bannedIps.length === 0 ? (
+              <p className="text-body leading-relaxed text-muted-foreground">
+                Nothing currently banned. Bans expire, so an empty list is not the same as a quiet
+                night — the ban activity on the page behind this is the record.
+              </p>
+            ) : (
+              <div className="divide-y divide-hairline">
+                {selected?.bannedIps.map((ip) => (
+                  <div key={ip} className="flex items-center justify-between gap-2 py-1.5">
+                    <span className="truncate font-mono text-xs">{ip}</span>
+                    {/* Always visible, not revealed on hover: in a table the
+                        actions are an aside to the data, but this sheet was opened
+                        *to* release an address, so hiding the release button until
+                        the pointer finds the row hides the only thing here. */}
+                    {canManage && (
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        <IconAction
+                          label={`Unban ${ip}`}
+                          disabled={busy}
+                          onClick={() =>
+                            act(
+                              () =>
+                                post(`/fail2ban/${encodeURIComponent(selected.name)}/unban`, { ip }),
+                              `${ip} unbanned`,
+                            )
+                          }
+                        >
+                          <LockOpen />
+                        </IconAction>
+                        <IconAction
+                          label={`Never ban ${ip} again`}
+                          disabled={busy}
+                          onClick={() =>
+                            act(
+                              () =>
+                                post(`/fail2ban/${encodeURIComponent(selected.name)}/ignore`, {
+                                  ip,
+                                  add: true,
+                                }),
+                              `${ip} added to the allowlist`,
+                            )
+                          }
+                        >
+                          <Shield />
+                        </IconAction>
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </SidePanel>
 
       {tuning && (
         <JailTuning
           jail={tuning}
+          clientIp={clientIp}
           open
           onOpenChange={(o) => !o && setTuning(null)}
           onSaved={onChanged}
@@ -273,16 +315,18 @@ function countClass(active: boolean) {
  * button. How many failures, in what window, for how long is the whole policy,
  * and it lives in a file whose layout differs by distribution.
  * fail2ban-client can set them on the running server, which is both easier to
- * get right and honest about what is in force now rather than what a file
- * says.
+ * get right and honest about what is in force now; the same values are then
+ * written to a drop-in under jail.d so they survive a restart.
  */
 function JailTuning({
   jail,
+  clientIp,
   open,
   onOpenChange,
   onSaved,
 }: {
   jail: string
+  clientIp?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSaved: () => void
@@ -333,15 +377,17 @@ function JailTuning({
     }
   }
 
-  const addIgnore = async () => {
+  const allowlist = async (ip: string) => {
     try {
-      await post(`/fail2ban/${encodeURIComponent(jail)}/ignore`, { ip: ignore, add: true })
+      await post(`/fail2ban/${encodeURIComponent(jail)}/ignore`, { ip, add: true })
       setIgnore("")
       refresh()
     } catch (err) {
       notify.error("Could not allowlist", err)
     }
   }
+
+  const clientListed = Boolean(clientIp && data?.ignoreIp.includes(clientIp))
 
   return (
     <Modal
@@ -382,11 +428,24 @@ function JailTuning({
         </div>
 
         <div className="space-y-1.5">
-          <Label>Never ban</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label>Never ban</Label>
+            {/* The address this browser arrived from, by name. Banning
+                yourself is the commonest way to lose a server you were in the
+                middle of hardening, and the allowlist is the control that
+                stops it — so the one address it most needs is one press. */}
+            {clientIp && !clientListed && (
+              <Button size="xs" variant="outline" onClick={() => allowlist(clientIp)}>
+                <Shield className="size-3" />
+                Never ban my address
+              </Button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {data?.ignoreIp.map((ip) => (
               <Tag key={ip} mono>
                 {ip}
+                {ip === clientIp && <span className="text-muted-foreground/70">(you)</span>}
                 <button
                   type="button"
                   aria-label={`Stop allowlisting ${ip}`}
@@ -415,20 +474,26 @@ function JailTuning({
             <Input
               value={ignore}
               onChange={(e) => setIgnore(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && ignore && addIgnore()}
+              onKeyDown={(e) => e.key === "Enter" && ignore && allowlist(ignore)}
               placeholder="203.0.113.9 or 10.0.0.0/8"
+              aria-label="Address or range to never ban"
               className="font-mono text-xs"
             />
-            <Button size="sm" variant="outline" onClick={addIgnore} disabled={!ignore}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => allowlist(ignore)}
+              disabled={!ignore}
+            >
               Add
             </Button>
           </div>
         </div>
 
-        <Notice title="In force until fail2ban restarts">
-          The change is applied to the running server, not written to jail.local — that file&rsquo;s
-          layout differs by distribution, and getting it wrong disables intrusion prevention without
-          saying so. Tighten it here, then make it permanent in the file.
+        <Notice title="Applied now, and kept">
+          The change goes to the running fail2ban at once and is written to a drop-in under{" "}
+          <code className="font-mono">/etc/fail2ban/jail.d</code>, which fail2ban reads last — so it
+          survives a restart and the distribution&rsquo;s own jail.conf is left alone.
         </Notice>
       </div>
     </Modal>
@@ -449,7 +514,12 @@ function NumberField({
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
-      <Input value={value} inputMode="numeric" onChange={(e) => onChange(e.target.value)} />
+      <Input
+        value={value}
+        inputMode="numeric"
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value)}
+      />
       <p className="text-hint text-muted-foreground">{hint}</p>
     </div>
   )

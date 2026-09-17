@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { cn } from "@/lib/utils"
 
@@ -14,29 +15,36 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { ToolDef } from "./tool-defs"
-import { useToolRun } from "./use-tool-run"
+import { useToolRun, type ToolPrefill } from "./use-tool-run"
 import { ToolResult } from "./tool-result"
 
 /**
  * One network tool: its own inputs, its own run, its own answer.
  *
- * Panels share nothing — each mounts its own `useToolRun`, so a target typed
+ * Blocks share nothing — each mounts its own `useToolRun`, so a target typed
  * into DNS stays in DNS when the port check runs, and a slow traceroute never
- * disables another panel's Run button.
+ * disables another block's Run button.
  *
- * The form is one line. It was a labelled grid two rows tall, which with
- * twenty tools on the page meant a screen and a half of empty form fields
- * before the first answer — and three of the panels carried an identical
- * three-line warning paragraph, so the same sentence appeared on the page
- * three times. The label is the placeholder, the warning is a mark in the
- * header, and the page says the sentence once.
+ * The form is one line, and the block is plain: a title, a hairline, the line
+ * of inputs and — once there is one — the answer in the recessed well the rest
+ * of the product uses for command output. It was a framed card, and twenty
+ * framed cards on one page were twenty boxes with the same three inputs in
+ * them. The label is the placeholder, the warning is a mark in the header, and
+ * the page says the outward-only sentence once.
  */
-export function ToolPanel({ def }: { def: ToolDef }) {
-  const t = useToolRun(def)
+export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefill }) {
+  const t = useToolRun(def, prefill)
   const base = `tool-${def.key}`
+  const targetRef = useRef<HTMLInputElement>(null)
+
+  // A block that was arrived at from another page takes the focus, so the
+  // press that runs it is the next thing that happens.
+  useEffect(() => {
+    if (prefill?.target) targetRef.current?.focus()
+  }, [prefill?.target])
 
   return (
-    <Panel>
+    <Panel plain className={cn(prefill?.target && "animate-rise")}>
       <PanelHeader
         title={def.label}
         actions={
@@ -51,6 +59,7 @@ export function ToolPanel({ def }: { def: ToolDef }) {
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {def.needsTarget && (
             <Input
+              ref={targetRef}
               id={`${base}-target`}
               aria-label="Target"
               value={t.target}
@@ -120,7 +129,7 @@ export function ToolPanel({ def }: { def: ToolDef }) {
                 key={`${p.target}-${p.duration}`}
                 type="button"
                 onClick={() => t.restore(p)}
-                className="rounded-sm border border-hairline px-1.5 py-px font-mono text-micro text-muted-foreground transition-colors hover:border-rule-primary hover:text-foreground"
+                className="rounded-sm border border-hairline px-1.5 py-px font-mono text-micro text-muted-foreground transition-colors focus-ring hover:border-rule-primary hover:text-foreground"
               >
                 <span className={cn("mr-1", p.ok ? "text-success" : "text-destructive")}>
                   {p.ok ? "✓" : "✗"}

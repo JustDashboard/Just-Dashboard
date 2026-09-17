@@ -3,6 +3,7 @@ package netsec
 import (
 	"bufio"
 	"context"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -70,6 +71,14 @@ func (s *Service) BanHistory(ctx context.Context, limit int) ([]BanEvent, error)
 	return events, nil
 }
 
+// banLogTailBytes bounds how much of one log file is read. fail2ban writes a
+// "Found" line for every failed attempt, so on a host under a sustained
+// campaign the log runs to hundreds of megabytes — and the history panel, the
+// offenders panel and the posture check each read it every minute or two. The
+// tail holds the recent events, which are the ones every reader wants; the
+// head is history nobody scrolls back to. A variable so a test can shrink it.
+var banLogTailBytes int64 = 8 << 20
+
 func readBanLog(path string) ([]BanEvent, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -83,6 +92,13 @@ func readBanLog(path string) ([]BanEvent, error) {
 	// one; the default 64K limit would stop the scan there and silently
 	// truncate the history.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	if st, err := f.Stat(); err == nil && st.Size() > banLogTailBytes {
+		if _, err := f.Seek(st.Size()-banLogTailBytes, io.SeekStart); err == nil {
+			// The seek lands mid-line. The torn first line is dropped rather
+			// than parsed: half a timestamp is not an event.
+			scanner.Scan()
+		}
+	}
 	for scanner.Scan() {
 		if ev, ok := parseBanLine(scanner.Text()); ok {
 			events = append(events, ev)

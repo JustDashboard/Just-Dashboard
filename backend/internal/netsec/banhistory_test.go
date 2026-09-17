@@ -1,6 +1,10 @@
 package netsec
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -59,6 +63,57 @@ func TestParseBanLineIgnoresEverythingElse(t *testing.T) {
 	} {
 		if ev, ok := parseBanLine(line); ok {
 			t.Errorf("accepted a line it should have skipped: %q -> %+v", line, ev)
+		}
+	}
+}
+
+// A busy host's fail2ban.log runs to hundreds of megabytes, and three readers
+// each open it every minute or two. Only the tail is read past the cap, and the
+// line the seek tears in half is dropped rather than parsed.
+func TestBanHistoryReadsOnlyTheTailOfALargeLog(t *testing.T) {
+	previousCap, previousLogs := banLogTailBytes, fail2banLogs
+	t.Cleanup(func() { banLogTailBytes, fail2banLogs = previousCap, previousLogs })
+
+	line := func(n int) string {
+		return fmt.Sprintf("2026-09-%02d 03:15:22,123 fail2ban.actions [1234]: NOTICE  [sshd] Ban 203.0.113.%d\n", 1+n%28, n%250)
+	}
+	var b strings.Builder
+	lastTen := 0
+	for i := 0; i < 200; i++ {
+		b.WriteString(line(i))
+		if i >= 190 {
+			lastTen += len(line(i))
+		}
+	}
+	path := filepath.Join(t.TempDir(), "fail2ban.log")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fail2banLogs = []string{path}
+
+	// Everything fits: every line is an event.
+	banLogTailBytes = 1 << 20
+	all, err := (&Service{}).BanHistory(context.Background(), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 200 {
+		t.Fatalf("read %d events from an uncapped log, want 200", len(all))
+	}
+
+	// A cap smaller than the file: fewer events, all of them well-formed, and
+	// the torn first line contributes nothing.
+	banLogTailBytes = int64(lastTen + 7)
+	tail, err := (&Service{}).BanHistory(context.Background(), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail) != 10 {
+		t.Fatalf("read %d events from a capped log, want the 10 whole lines in the tail", len(tail))
+	}
+	for _, ev := range tail {
+		if ev.Jail != "sshd" || ev.Action != "ban" || !strings.HasPrefix(ev.IP, "203.0.113.") {
+			t.Errorf("a torn line was parsed as an event: %+v", ev)
 		}
 	}
 }

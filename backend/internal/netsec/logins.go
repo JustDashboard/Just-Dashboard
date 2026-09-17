@@ -3,6 +3,7 @@ package netsec
 import (
 	"bufio"
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -262,4 +263,132 @@ func dropParens(fields []string) []string {
 		return fields[:len(fields)-1]
 	}
 	return fields
+}
+
+// Attacker is one address folded across the failed-login record.
+//
+// The listing answers "what was tried"; this answers "who is trying". Five
+// hundred lines of the same address are one attacker, and the address on every
+// page of the listing is the one worth a firewall rule rather than another
+// ten-minute ban.
+type Attacker struct {
+	Address  string `json:"address"`
+	Attempts int    `json:"attempts"`
+	// Users are the account names tried from this address, most tried first.
+	// "root, admin, ubuntu" is a scanner working through a wordlist; a single
+	// real account name is somebody who knows the host.
+	Users []string  `json:"users"`
+	First time.Time `json:"first"`
+	Last  time.Time `json:"last"`
+}
+
+// AttackSummary is btmp turned into something to act on.
+type AttackSummary struct {
+	// Attempts counts every failed attempt inside the window, including the
+	// ones with no address to fold under — a console prompt records none.
+	Attempts  int `json:"attempts"`
+	Addresses int `json:"addresses"`
+	// WindowHours is how far back the count reaches.
+	WindowHours int `json:"windowHours"`
+	// Capped says the sample ran out before the window did, so every figure
+	// here is a floor rather than a total.
+	Capped    bool       `json:"capped"`
+	Attackers []Attacker `json:"attackers"`
+	// Since is the oldest record inside the window, so "attempts in the last
+	// week" can say how much of the week it actually saw.
+	Since *time.Time `json:"since,omitempty"`
+}
+
+// FailedLoginSummary folds the recent failed attempts by address.
+func (s *Service) FailedLoginSummary(ctx context.Context, window time.Duration, topN int) (*AttackSummary, error) {
+	records, err := s.FailedLogins(ctx, failedLoginSample)
+	if err != nil {
+		return nil, err
+	}
+	return SummariseFailedLogins(records, window, time.Now(), topN), nil
+}
+
+// attackerUserNames is how many of the tried account names an attacker row
+// carries. A scanner tries hundreds; the first few say what kind of scanner.
+const attackerUserNames = 5
+
+// SummariseFailedLogins is the folding itself, separated from the subprocess
+// so the arithmetic can be tested without a btmp.
+func SummariseFailedLogins(records []LoginRecord, window time.Duration, now time.Time, topN int) *AttackSummary {
+	if topN <= 0 {
+		topN = 25
+	}
+	sum := &AttackSummary{Attackers: []Attacker{}, WindowHours: int(window.Hours())}
+	cutoff := now.Add(-window)
+	byAddr := map[string]*Attacker{}
+	users := map[string]map[string]int{}
+	inWindow := 0
+	for _, r := range records {
+		if r.LoginTime == nil || r.LoginTime.Before(cutoff) {
+			continue
+		}
+		inWindow++
+		sum.Attempts++
+		if sum.Since == nil || r.LoginTime.Before(*sum.Since) {
+			at := *r.LoginTime
+			sum.Since = &at
+		}
+		if r.From == "" {
+			continue
+		}
+		a, ok := byAddr[r.From]
+		if !ok {
+			a = &Attacker{Address: r.From, Users: []string{}, First: *r.LoginTime, Last: *r.LoginTime}
+			byAddr[r.From] = a
+			users[r.From] = map[string]int{}
+		}
+		a.Attempts++
+		if r.LoginTime.Before(a.First) {
+			a.First = *r.LoginTime
+		}
+		if r.LoginTime.After(a.Last) {
+			a.Last = *r.LoginTime
+		}
+		if r.User != "" {
+			users[r.From][r.User]++
+		}
+	}
+	// The same cap arithmetic as countWithin: a sample that ran out while
+	// still inside the window is a floor, one that reached past it is not.
+	sum.Capped = len(records) >= failedLoginSample && inWindow == len(records)
+	for addr, a := range byAddr {
+		names := make([]string, 0, len(users[addr]))
+		for name := range users[addr] {
+			names = append(names, name)
+		}
+		counts := users[addr]
+		sort.Slice(names, func(i, j int) bool {
+			if counts[names[i]] != counts[names[j]] {
+				return counts[names[i]] > counts[names[j]]
+			}
+			return names[i] < names[j]
+		})
+		if len(names) > attackerUserNames {
+			names = names[:attackerUserNames]
+		}
+		a.Users = names
+		sum.Attackers = append(sum.Attackers, *a)
+	}
+	sum.Addresses = len(sum.Attackers)
+	// Most persistent first, then most recent, then by address so the order
+	// is stable between polls rather than map-random.
+	sort.Slice(sum.Attackers, func(i, j int) bool {
+		a, b := sum.Attackers[i], sum.Attackers[j]
+		if a.Attempts != b.Attempts {
+			return a.Attempts > b.Attempts
+		}
+		if !a.Last.Equal(b.Last) {
+			return a.Last.After(b.Last)
+		}
+		return a.Address < b.Address
+	})
+	if len(sum.Attackers) > topN {
+		sum.Attackers = sum.Attackers[:topN]
+	}
+	return sum
 }

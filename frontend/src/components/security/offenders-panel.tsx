@@ -1,8 +1,10 @@
 "use client"
 
-import { Crosshair, Shield } from "@/components/icons"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { Crosshair } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, ApiError } from "@/lib/api"
+import { get, ApiError } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import type { BanSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -11,9 +13,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { IconAction, RowActions } from "@/components/icon-action"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { Tag } from "@/components/tag"
+import { VerbActions } from "@/components/verbs"
+import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import {
   Table,
   TableBody,
@@ -35,6 +38,8 @@ import {
  */
 export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
   const { can } = useAuth()
+  const router = useRouter()
+  const [blocking, setBlocking] = useState<string | null>(null)
   const { data, error, loading, refresh } = usePoll<BanSummary>(
     (signal) => get("/fail2ban/offenders", { top: 15 }, signal),
     120000,
@@ -42,13 +47,9 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
   const unavailable = error instanceof ApiError && error.code === "fail2ban_unavailable"
 
   const block = async (ip: string) => {
+    setBlocking(ip)
     try {
-      await post("/firewall/rules", {
-        action: "deny",
-        direction: "in",
-        from: ip,
-        comment: "repeat offender",
-      })
+      await blockAddress(ip, "repeat offender")
       notify.success(`${ip} blocked at the firewall`, {
         description: "A firewall rule outlives a ban, which expires.",
       })
@@ -56,11 +57,13 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
       refresh()
     } catch (err) {
       notify.error("Could not add the rule", err)
+    } finally {
+      setBlocking(null)
     }
   }
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Repeat offenders" />
       {data && data.offenders.length > 0 && (
         <PanelToolbar className="gap-x-6">
@@ -91,74 +94,72 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
       )}
       <PanelBody flush>
         {unavailable ? (
-          <div className="p-4">
-            <Notice tone="default" title="No fail2ban log on this host">
-              fail2ban is not installed, or it logs only to the journal. There is no file to fold.
-            </Notice>
-          </div>
+          <Notice tone="default" title="No fail2ban log on this host" className="mt-3">
+            fail2ban is not installed, or it logs only to the journal. There is no file to fold.
+          </Notice>
         ) : error ? (
-          <div className="p-4">
-            <ErrorState error={error} />
-          </div>
+          <ErrorState error={error} className="mt-3" />
         ) : loading ? (
-          <LoadingPanel rows={4} />
+          <LoadingPanel rows={4} className="mt-3" />
         ) : !data?.offenders.length ? (
-          <EmptyState icon={Crosshair} title="Nothing has been banned yet" className="border-0" />
+          <EmptyState icon={Crosshair} title="Nothing has been banned yet" className="mt-3" />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Address</TableHead>
-                <TableHead>Bans</TableHead>
-                <TableHead>First seen</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead className="w-full">Jails</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.offenders.map((offender) => (
-                <TableRow key={offender.ip} className="group">
-                  <TableCell className="font-mono">{offender.ip}</TableCell>
-                  <TableCell>
-                    <span
-                      className={cn(
-                        "numeric text-xs font-medium",
-                        offender.bans >= 5 ? "text-destructive" : "text-muted-foreground",
-                      )}
-                    >
-                      {offender.bans}
-                    </span>
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {relativeTime(offender.first)}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {relativeTime(offender.last)}
-                  </TableCell>
-                  <TableCell>
-                    <span className="flex flex-wrap gap-1">
-                      {offender.jails.map((jail) => (
-                        <Tag key={jail}>{jail}</Tag>
-                      ))}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {can("system.admin") && (
-                      <RowActions className="justify-end">
-                        <IconAction
-                          label="Block this address at the firewall, permanently"
-                          onClick={() => block(offender.ip)}
-                        >
-                          <Shield />
-                        </IconAction>
-                      </RowActions>
-                    )}
-                  </TableCell>
+          <div className="-mx-4 min-w-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Bans</TableHead>
+                  <TableHead className="hidden md:table-cell">First seen</TableHead>
+                  <TableHead className="hidden sm:table-cell">Last seen</TableHead>
+                  <TableHead className="w-full">Jails</TableHead>
+                  <TableHead className="w-px" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {data.offenders.map((offender) => (
+                  <TableRow key={offender.ip} className="group">
+                    <TableCell className="font-mono">{offender.ip}</TableCell>
+                    <TableCell>
+                      <span
+                        className={cn(
+                          "numeric text-xs font-medium",
+                          offender.bans >= 5 ? "text-destructive" : "text-muted-foreground",
+                        )}
+                      >
+                        {offender.bans}
+                      </span>
+                    </TableCell>
+                    <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
+                      {relativeTime(offender.first)}
+                    </TableCell>
+                    <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
+                      {relativeTime(offender.last)}
+                    </TableCell>
+                    <TableCell>
+                      <span className="flex flex-wrap gap-1">
+                        {offender.jails.map((jail) => (
+                          <Tag key={jail}>{jail}</Tag>
+                        ))}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <VerbActions
+                        dim
+                        className="justify-end"
+                        verbs={addressVerbs({
+                          ip: offender.ip,
+                          block: can("system.admin") ? () => void block(offender.ip) : undefined,
+                          blocking: blocking === offender.ip,
+                          navigate: (href) => router.push(href),
+                        })}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </PanelBody>
     </Panel>

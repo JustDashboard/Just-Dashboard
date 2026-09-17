@@ -26,6 +26,12 @@ type Exposure struct {
 	TailscaleIP string `json:"tailscaleIp,omitempty"`
 	// Recommendation is non-empty when there is a better arrangement.
 	Recommendation string `json:"recommendation,omitempty"`
+	// Client is the address the request arrived from, filled in by the
+	// handler rather than here so DescribeExposure stays a pure function. It
+	// is the one address an operator must never block, ban or leave off an
+	// allowlist, and every guard on the Security pages compares against it —
+	// so the pages say what it is.
+	Client string `json:"client,omitempty"`
 }
 
 // The Tailscale CGNAT range. A dashboard allowlisted to this is reachable from

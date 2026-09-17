@@ -324,3 +324,73 @@ func TestUFWRecognisesForwardRules(t *testing.T) {
 		t.Error("a forwarding rule was counted as admitting inbound traffic")
 	}
 }
+
+// ufw stops at the first match, so a source-only deny appended after `allow
+// 22` never sees the SSH traffic it was written to refuse. The positions here
+// are ufw's own, checked with --dry-run: a v4 block goes in at 1, a v6 block
+// at one past the last v4 rule, and an empty family is appended to — ufw
+// refuses `insert 1` into nothing.
+func TestUFWBlockGoesInFrontOfTheAllows(t *testing.T) {
+	dualStack := `Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 22/tcp                     ALLOW IN    Anywhere
+[ 2] 80/tcp                     ALLOW IN    Anywhere
+[ 3] 22/tcp (v6)                ALLOW IN    Anywhere (v6)
+[ 4] 80/tcp (v6)                ALLOW IN    Anywhere (v6)
+`
+	v4Only := `Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 22/tcp                     ALLOW IN    Anywhere
+`
+	cases := []struct {
+		name    string
+		listing string
+		req     RuleRequest
+		want    string
+	}{
+		{"v4 block goes first", dualStack,
+			RuleRequest{Action: "deny", Direction: "in", From: "203.0.113.9", Comment: "repeat offender"},
+			"ufw insert 1 deny in from 203.0.113.9 comment repeat offender"},
+		{"reject is a block too", dualStack,
+			RuleRequest{Action: "reject", Direction: "in", From: "203.0.113.0/24"},
+			"ufw insert 1 reject in from 203.0.113.0/24"},
+		{"v6 block goes after the v4 rules", dualStack,
+			RuleRequest{Action: "deny", Direction: "in", From: "2001:db8::9"},
+			"ufw insert 3 deny in from 2001:db8::9"},
+		{"no v6 rules means append", v4Only,
+			RuleRequest{Action: "deny", Direction: "in", From: "2001:db8::9"},
+			"ufw deny in from 2001:db8::9"},
+		{"an empty list is appended to", "Status: active\n",
+			RuleRequest{Action: "deny", Direction: "in", From: "203.0.113.9"},
+			"ufw deny in from 203.0.113.9"},
+		{"a chosen position is kept", dualStack,
+			RuleRequest{Action: "deny", Direction: "in", From: "203.0.113.9", Position: 2},
+			"ufw insert 2 deny in from 203.0.113.9"},
+		{"a deny with a port is not a block", dualStack,
+			RuleRequest{Action: "deny", Direction: "in", From: "203.0.113.9", Port: "22", Protocol: "tcp"},
+			"ufw deny in from 203.0.113.9 to any port 22 proto tcp"},
+		{"an allow is never moved", dualStack,
+			RuleRequest{Action: "allow", Direction: "in", From: "203.0.113.9"},
+			"ufw allow in from 203.0.113.9"},
+	}
+	for _, tc := range cases {
+		f := &fakeUFW{listing: tc.listing, replies: map[string]string{}}
+		f.install(t)
+		if _, err := (ufwBackend{}).AddRule(context.Background(), tc.req); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var adds []string
+		for _, c := range f.calls {
+			if !strings.HasPrefix(c, "ufw status") {
+				adds = append(adds, c)
+			}
+		}
+		if len(adds) != 1 || adds[0] != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, adds, tc.want)
+		}
+	}
+}

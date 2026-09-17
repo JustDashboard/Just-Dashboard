@@ -125,7 +125,7 @@ export function SubnetTool() {
   }
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Subnet calc" />
       <PanelBody className="space-y-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">

@@ -7,9 +7,9 @@ import { timestamp } from "@/lib/format"
 import type { BanEvent, Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { SearchInput } from "@/components/page"
+import { PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { AreaFindings } from "@/components/security/posture-panel"
@@ -34,7 +34,7 @@ import {
  */
 export function IntrusionPanels() {
   const { can } = useAuth()
-  const { posture, applyFix } = useSecurity()
+  const { posture, exposure, applyFix } = useSecurity()
   const { data, error, loading, refresh } = usePoll(
     (signal) =>
       get<{ available: boolean; running: boolean; jails: Fail2banJail[]; error?: string }>(
@@ -45,62 +45,102 @@ export function IntrusionPanels() {
     20000,
   )
 
-  if (loading) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
-  if (!data?.available) {
-    return (
-      <EmptyState
-        icon={Slash}
-        title="fail2ban is not installed"
-        description="It turns an endless brute-force against a port that has to stay open into a few attempts and a ban, which is the one thing a firewall cannot do for SSH."
-      />
-    )
-  }
-  if (!data.running) {
-    return (
-      <EmptyState
-        icon={Slash}
-        title="fail2ban is installed but not responding"
-        description={
-          data.error ?? "Installed and stopped is the state that looks protected and is not."
-        }
-      />
-    )
-  }
-
-  const jails = data.jails
+  const jails = data?.jails ?? []
   const bannedNow = jails.reduce((n, j) => n + j.currentlyBanned, 0)
   const failingNow = jails.reduce((n, j) => n + j.currentlyFailed, 0)
   const bansTotal = jails.reduce((n, j) => n + j.totalBanned, 0)
 
+  const header = (
+    <PageHeader
+      eyebrow="Security"
+      title="Intrusion prevention"
+      actions={
+        data?.running && (
+          <Status
+            verdict={bannedNow > 0 ? "notice" : "ok"}
+            label={bannedNow > 0 ? `${bannedNow} banned now` : "nobody banned"}
+          />
+        )
+      }
+    />
+  )
+
+  if (loading && !data) {
+    return (
+      <>
+        {header}
+        <LoadingPanel />
+      </>
+    )
+  }
+  if (error && !data) {
+    return (
+      <>
+        {header}
+        <ErrorState error={error} />
+      </>
+    )
+  }
+  if (!data?.available) {
+    return (
+      <>
+        {header}
+        <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
+        <EmptyState
+          icon={Slash}
+          title="fail2ban is not installed"
+          description="It turns an endless brute-force against a port that has to stay open into a few attempts and a ban, which is the one thing a firewall cannot do for SSH."
+        />
+      </>
+    )
+  }
+  if (!data.running) {
+    return (
+      <>
+        {header}
+        <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
+        <EmptyState
+          icon={Slash}
+          title="fail2ban is installed but not responding"
+          description={
+            data.error ?? "Installed and stopped is the state that looks protected and is not."
+          }
+        />
+      </>
+    )
+  }
+
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
+    <>
+      {header}
 
       {/* The four numbers the rest of the page is an explanation of. They were
           a "·"-joined sentence in each jail's header, which meant comparing two
           jails was reading two sentences. */}
       <StatGrid columns={4}>
-        <StatTile label="Jails" value={jails.length} hint="Configured and running" />
+        <StatTile label="Jails" value={jails.length} hint="configured and running" />
         <StatTile
           label="Banned now"
           value={bannedNow}
           tone={bannedNow > 0 ? "warning" : "default"}
-          hint="Held this instant — bans expire"
+          hint="held this instant — bans expire"
         />
-        <StatTile
-          label="Failing now"
-          value={failingNow}
-          hint="Attempts inside the current window"
-        />
-        <StatTile label="Bans in total" value={bansTotal} hint="Since fail2ban last started" />
+        <StatTile label="Failing now" value={failingNow} hint="attempts inside the current window" />
+        <StatTile label="Bans in total" value={bansTotal} hint="since fail2ban last started" />
       </StatGrid>
 
-      <JailsPanel jails={jails} canManage={can("system.admin")} onChanged={refresh} />
+      <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
+
+      <JailsPanel
+        jails={jails}
+        canManage={can("system.admin")}
+        clientIp={exposure?.client}
+        onChanged={refresh}
+      />
 
       <OffendersPanel onBlocked={refresh} />
       <BanHistoryPanel />
-    </div>
+    </>
   )
 }
 
@@ -130,12 +170,12 @@ function BanHistoryPanel() {
   }, [data, kind, query])
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader
         title="Ban activity"
         actions={
           data && data.length > 0 ? (
-            <span className="numeric text-xs text-muted-foreground">
+            <span className="numeric text-hint text-muted-foreground">
               {data.length} recorded events
             </span>
           ) : undefined
@@ -174,52 +214,53 @@ function BanHistoryPanel() {
       )}
       <PanelBody flush>
         {unavailable ? (
-          <div className="p-4">
-            <Notice tone="default" title="No fail2ban log on this host">
-              fail2ban is not installed, or it logs only to the journal. There is no file to read
-              back.
-            </Notice>
-          </div>
+          <Notice tone="default" title="No fail2ban log on this host" className="mt-3">
+            fail2ban is not installed, or it logs only to the journal. There is no file to read
+            back.
+          </Notice>
         ) : error ? (
-          <div className="p-4">
-            <ErrorState error={error} />
-          </div>
+          <ErrorState error={error} className="mt-3" />
         ) : loading ? (
-          <LoadingPanel />
+          <LoadingPanel className="mt-3" />
         ) : shown.length === 0 ? (
           <EmptyState
             icon={ClockRewind}
             title={data?.length ? "Nothing matches" : "No ban activity recorded"}
-            className="border-0"
+            className="mt-3"
           />
         ) : (
-          <Table containerClassName="max-h-[24rem]">
-            <TableHeader className={stickyTableHeader}>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Address</TableHead>
-                <TableHead className="w-full">Jail</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shown.map((event, i) => (
-                <TableRow key={`${event.at}-${event.ip}-${i}`}>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {timestamp(event.at)}
-                  </TableCell>
-                  <TableCell>
-                    <Status
-                      state={event.action === "ban" ? "failed" : "exited"}
-                      label={event.action === "ban" ? "banned" : "released"}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono">{event.ip}</TableCell>
-                  <TableCell className="text-body text-muted-foreground">{event.jail}</TableCell>
+          <div className="-mx-4 min-w-0">
+            <Table containerClassName="max-h-[24rem]">
+              <TableHeader className={stickyTableHeader}>
+                <TableRow>
+                  <TableHead>When</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead className="w-full">Jail</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {shown.map((event, i) => (
+                  <TableRow key={`${event.at}-${event.ip}-${i}`}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {timestamp(event.at)}
+                    </TableCell>
+                    <TableCell>
+                      <Status
+                        state={event.action === "ban" ? "failed" : "exited"}
+                        label={event.action === "ban" ? "banned" : "released"}
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono">{event.ip}</TableCell>
+                    <TableCell className="text-body text-muted-foreground">{event.jail}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {!unavailable && !error && !loading && data?.length === 0 && shown.length === 0 && (
+          <EmptyNote className="sr-only">No ban activity recorded.</EmptyNote>
         )}
       </PanelBody>
     </Panel>

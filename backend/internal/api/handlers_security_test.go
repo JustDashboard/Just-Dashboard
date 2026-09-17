@@ -587,3 +587,32 @@ func TestSessionListAndDisconnectCoexist(t *testing.T) {
 		t.Fatal("the disconnect route is not mounted")
 	}
 }
+
+// The attackers summary is folded from btmp, which holds whatever was typed at
+// a login prompt, so it sits behind the same capability as the listing. An
+// admin gets either the summary or the honest "no record on this host".
+func TestFailedLoginSummaryIsAdminOnly(t *testing.T) {
+	s := testServer(t)
+	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "viewer", auth.RoleReadOnly)}
+	if w := viewer.do(http.MethodGet, "/api/v1/logins/attackers", "", nil); w.Code != http.StatusForbidden {
+		t.Fatalf("readonly read the attackers summary: %d %s", w.Code, w.Body.String())
+	}
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "admin", auth.RoleAdmin)}
+	w := admin.do(http.MethodGet, "/api/v1/logins/attackers?hours=24&top=5", "", nil)
+	switch w.Code {
+	case http.StatusOK:
+		var summary netsec.AttackSummary
+		if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil {
+			t.Fatal(err)
+		}
+		if summary.WindowHours != 24 || summary.Attackers == nil {
+			t.Errorf("summary shape: %+v", summary)
+		}
+	case http.StatusServiceUnavailable:
+		if !strings.Contains(w.Body.String(), "login_history_unavailable") {
+			t.Errorf("wrong code for a host without lastb: %s", w.Body.String())
+		}
+	default:
+		t.Fatalf("unexpected status %d: %s", w.Code, w.Body.String())
+	}
+}

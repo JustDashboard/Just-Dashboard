@@ -210,7 +210,7 @@ test("slow polling has only one request in flight", async ({ page }) => {
     await fulfill(route, path === "/auth/session" ? signedIn : [])
   })
   await page.goto("/audit")
-  await expect(page.getByText("INITIAL_RESULT", { exact: true })).toBeVisible()
+  await expect(page.getByRole("table").getByText("INITIAL_RESULT", { exact: true })).toBeVisible()
   await page.clock.runFor(15001)
   await expect.poll(() => pending.length).toBe(1)
   await page.clock.runFor(60000)
@@ -229,7 +229,7 @@ test("slow polling has only one request in flight", async ({ page }) => {
     ],
     total: 1,
   })
-  await expect(page.getByText("FRESH_RESULT", { exact: true })).toBeVisible()
+  await expect(page.getByRole("table").getByText("FRESH_RESULT", { exact: true })).toBeVisible()
 })
 
 test("a reset password is changed only after the account's second factor", async ({ page }) => {
@@ -418,18 +418,28 @@ test("resource filters keep focus while stale responses are discarded", async ({
     await fulfill(route, path === "/auth/session" ? signedIn : [])
   })
   await page.goto("/audit")
-  await expect(page.getByText("INITIAL_FILTER_RESULT", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("table").getByText("INITIAL_FILTER_RESULT", { exact: true }),
+  ).toBeVisible()
   const action = page.getByPlaceholder("Action, e.g. docker.container")
   await action.pressSequentially("docker", { delay: 30 })
   await expect(action).toHaveValue("docker")
   await expect(action).toBeFocused()
-  await expect(page.getByText("INITIAL_FILTER_RESULT", { exact: true })).toHaveCount(0)
+  await expect(
+    page.getByRole("table").getByText("INITIAL_FILTER_RESULT", { exact: true }),
+  ).toHaveCount(0)
   await expect.poll(() => pending.at(-1)?.request().url()).toContain("action=docker")
   await fulfill(pending.at(-1)!, entries("CURRENT_FILTER_RESULT"))
-  await expect(page.getByText("CURRENT_FILTER_RESULT", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("table").getByText("CURRENT_FILTER_RESULT", { exact: true }),
+  ).toBeVisible()
   await fulfill(pending[0], entries("STALE_FILTER_RESULT"))
-  await expect(page.getByText("CURRENT_FILTER_RESULT", { exact: true })).toBeVisible()
-  await expect(page.getByText("STALE_FILTER_RESULT", { exact: true })).toHaveCount(0)
+  await expect(
+    page.getByRole("table").getByText("CURRENT_FILTER_RESULT", { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("table").getByText("STALE_FILTER_RESULT", { exact: true }),
+  ).toHaveCount(0)
 })
 
 test("saving enrollment recovery codes advances to the required password change", async ({

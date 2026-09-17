@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils"
 import type { NetworkInfo } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { Detail, DetailList, Metric, MetricStrip } from "@/components/page"
+import { Detail, DetailList, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
 import { Reach } from "@/components/security/reach"
 import { Status } from "@/components/status-dot"
@@ -55,50 +56,90 @@ export function NetworkPanel() {
     return scope === "all" ? sorted : sorted.filter((i) => !VIRTUAL.includes(i.kind))
   }, [data?.interfaces, scope])
 
-  if (loading) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
-  if (!data) return null
+  const exposed = data?.interfaces.filter((i) => i.public && i.up) ?? []
+  const header = (
+    <PageHeader
+      eyebrow="Security"
+      title="Network"
+      actions={
+        data && (
+          <Status
+            verdict={exposed.length > 0 ? "warning" : "ok"}
+            label={
+              exposed.length > 0 ? `${exposed.length} on a public address` : "no public address"
+            }
+          />
+        )
+      }
+    />
+  )
+
+  if (loading && !data) {
+    return (
+      <>
+        {header}
+        <LoadingPanel />
+      </>
+    )
+  }
+  if (error && !data) {
+    return (
+      <>
+        {header}
+        <ErrorState error={error} />
+      </>
+    )
+  }
+  if (!data) return header
 
   const virtual = data.interfaces.filter((i) => VIRTUAL.includes(i.kind)).length
-  const exposed = data.interfaces.filter((i) => i.public && i.up)
   const defaultRoute = data.routes.find((r) => r.destination === "default")
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <Panel>
-        <PanelHeader
-          title="Interfaces"
-          actions={
-            <Status
-              verdict={exposed.length > 0 ? "warning" : "ok"}
-              label={
-                exposed.length > 0 ? `${exposed.length} on a public address` : "no public address"
-              }
-            />
+    <>
+      {header}
+
+      <StatGrid columns={4}>
+        <StatTile
+          label="Devices"
+          value={data.interfaces.length}
+          hint={virtual > 0 ? `${virtual} made by Docker` : "none made by Docker"}
+        />
+        <StatTile
+          label="Up"
+          value={data.interfaces.filter((i) => i.up).length}
+          hint={`${data.interfaces.filter((i) => !i.up).length} down`}
+        />
+        <StatTile
+          label="Default route"
+          value={defaultRoute?.interface ?? "—"}
+          hint={
+            defaultRoute?.gateway
+              ? `via ${defaultRoute.gateway}`
+              : "where the internet reaches this host"
           }
         />
-        <PanelToolbar className="gap-x-6">
-          <MetricStrip>
-            <Metric
-              label="devices"
-              value={data.interfaces.length}
-              hint={`${virtual} made by Docker`}
-            />
-            <Metric label="up" value={data.interfaces.filter((i) => i.up).length} />
-            <Metric
-              label="default route"
-              value={defaultRoute?.interface ?? "—"}
-              hint="where the internet reaches this host"
-            />
-          </MetricStrip>
-          <span className="flex-1" />
+        <StatTile
+          label="Public addresses"
+          value={exposed.length}
+          tone={exposed.length > 0 ? "warning" : "default"}
+          hint={
+            exposed.length > 0
+              ? exposed.map((i) => i.name).join(", ")
+              : "nothing faces the internet directly"
+          }
+        />
+      </StatGrid>
+
+      <Panel plain>
+        <PanelHeader title="Interfaces" />
+        <PanelToolbar>
           <ToggleGroup
             type="single"
             value={scope}
             onValueChange={(next) => next && setScope(next as "real" | "all")}
             variant="outline"
             size="sm"
-            className="self-end"
             aria-label="Which devices to show"
           >
             <ToggleGroupItem value="real" className="px-2.5 text-hint">
@@ -110,92 +151,105 @@ export function NetworkPanel() {
           </ToggleGroup>
         </PanelToolbar>
         <PanelBody flush>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Device</TableHead>
-                <TableHead>Reach</TableHead>
-                <TableHead>MTU</TableHead>
-                <TableHead>In / out</TableHead>
-                <TableHead className="w-full">Addresses</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {interfaces.map((ifc) => (
-                <TableRow key={ifc.name} className={cn(!ifc.up && "opacity-60")}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-medium">{ifc.name}</span>
-                      <Tag>{ifc.kind}</Tag>
-                      {!ifc.up && <Status state="stopped" label="down" />}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Reach scope={ifc.public ? "internet" : ifc.loopback ? "local" : "private"} />
-                  </TableCell>
-                  <TableCell className="numeric text-muted-foreground">{ifc.mtu}</TableCell>
-                  <TableCell className="numeric whitespace-nowrap text-muted-foreground">
-                    {bytes(ifc.bytesRecv)} / {bytes(ifc.bytesSent)}
-                  </TableCell>
-                  <TableCell className="font-mono text-hint">
-                    {ifc.addresses.join("  ") || "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {interfaces.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="p-0">
-                    <EmptyNote>No devices match.</EmptyNote>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          {interfaces.length === 0 ? (
+            <EmptyNote>No devices match.</EmptyNote>
+          ) : (
+            <div className="-mx-4 min-w-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Device</TableHead>
+                    <TableHead>Reach</TableHead>
+                    <TableHead className="hidden lg:table-cell">MTU</TableHead>
+                    <TableHead className="hidden md:table-cell">In / out</TableHead>
+                    <TableHead className="w-full">Addresses</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {interfaces.map((ifc) => (
+                    <TableRow key={ifc.name} className={cn(!ifc.up && "opacity-60")}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-medium">{ifc.name}</span>
+                          <Tag>{ifc.kind}</Tag>
+                          {!ifc.up && <Status state="stopped" label="down" />}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Reach
+                          scope={ifc.public ? "internet" : ifc.loopback ? "local" : "private"}
+                        />
+                      </TableCell>
+                      <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
+                        {ifc.mtu}
+                      </TableCell>
+                      <TableCell className="numeric hidden whitespace-nowrap text-muted-foreground md:table-cell">
+                        {bytes(ifc.bytesRecv)} / {bytes(ifc.bytesSent)}
+                      </TableCell>
+                      <TableCell className="font-mono text-hint whitespace-normal">
+                        {ifc.addresses.join("  ") || "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </PanelBody>
       </Panel>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr] [&>*]:min-w-0">
-        <Panel>
+      {/* Two plain blocks side by side; the gap between them is the separation. */}
+      <div className="grid items-start gap-x-8 gap-y-6 lg:grid-cols-[2fr_1fr] [&>*]:min-w-0">
+        <Panel plain>
           <PanelHeader title="Routes" />
           <PanelBody flush>
-            <Table containerClassName="max-h-[22rem]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Destination</TableHead>
-                  <TableHead>Via</TableHead>
-                  <TableHead>Device</TableHead>
-                  <TableHead>Metric</TableHead>
-                  <TableHead className="w-full" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.routes.map((route, i) => (
-                  <TableRow
-                    key={`${route.family}-${route.destination}-${i}`}
-                    className={cn(route.destination === "default" && "bg-row-hover/40")}
-                  >
-                    <TableCell className="font-mono">
-                      {route.destination}
-                      {route.destination === "default" && (
-                        <Tag className="ml-2">{route.family}</Tag>
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-hint text-muted-foreground">
-                      {route.gateway || "on-link"}
-                    </TableCell>
-                    <TableCell className="font-mono text-hint">{route.interface || "—"}</TableCell>
-                    <TableCell className="numeric text-hint text-muted-foreground">
-                      {route.metric || "—"}
-                    </TableCell>
-                    <TableCell />
+            <div className="-mx-4 min-w-0">
+              <Table containerClassName="max-h-[22rem]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Destination</TableHead>
+                    <TableHead>Via</TableHead>
+                    <TableHead>Device</TableHead>
+                    <TableHead className="hidden sm:table-cell">Metric</TableHead>
+                    <TableHead className="w-full" />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {data.routes.map((route, i) => (
+                    <TableRow
+                      key={`${route.family}-${route.destination}-${i}`}
+                      className={cn(route.destination === "default" && "bg-row-hover/40")}
+                    >
+                      <TableCell className="font-mono">
+                        {route.destination}
+                        {route.destination === "default" && (
+                          <Tag className="ml-2">{route.family}</Tag>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-hint text-muted-foreground">
+                        {route.gateway || "on-link"}
+                      </TableCell>
+                      <TableCell className="font-mono text-hint">{route.interface || "—"}</TableCell>
+                      <TableCell className="numeric hidden text-hint text-muted-foreground sm:table-cell">
+                        {route.metric || "—"}
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                  ))}
+                  {data.routes.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="p-0">
+                        <EmptyNote>No routes could be read.</EmptyNote>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </PanelBody>
         </Panel>
 
-        <Panel>
+        <Panel plain>
           <PanelHeader title="Resolvers" />
           <PanelBody className="space-y-3">
             <DetailList>
@@ -220,6 +274,6 @@ export function NetworkPanel() {
           </PanelBody>
         </Panel>
       </div>
-    </div>
+    </>
   )
 }
