@@ -151,16 +151,36 @@ feature; the installed table caps at 400 rendered rows with the count said plain
 `components/terminal/` is the session rail and window strip; `components/xterm-pane.tsx` is the emulator. The
 split matters — the pane is reused by the compose runner and knows nothing about sessions.
 
-- `session-rail.tsx` uses the same framed card, tinted header and hairlines as the Files/Git panel. Folder
-  headers are plain disclosure rows: chevron and explanatory name only, with no folder icon, count,
-  nested container or empty invitation. Sessions use neutral design-system states rather than assigned
-  colours. Pinning still sorts a session to the top of its folder.
+- The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
+  inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
+  edge and the tools column's left edge; they turn into top and bottom rules when the columns stack
+  below `lg`). Three framed panes with a gutter between them read as three boxes floating on the page;
+  the screen is one working surface. Immersive mode drops the wrapper's frame along with the page.
+- `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. Rows
+  carry no terminal glyph (every row is a terminal), the active one is `bg-accent` with no border, and
+  the filter box appears only once there are more than five sessions — a filter over one session is a
+  box with nothing to do. Folder headers are plain disclosure rows: chevron and explanatory name only,
+  with no folder icon, count, nested container or empty invitation. Pinning still sorts a session to
+  the top of its folder.
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
   toggles: sessions on the left and Files/Git on the right. The strip is embedded in the emulator's own
   title bar; there is no separate workspace bar or working-directory/shell title.
-  Window menus retain rename and close only; there are no split, layout or colour actions.
-  Every tab has a visible close button. Closing the last window closes its session through the session
-  endpoint; both paths explain the consequence in a confirmation.
+  A tab is its name: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
+  way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
+  layout or colour actions. Closing the last window closes its session through the session endpoint.
+- The control-key row under the emulator is a run of monospace words on the footer strip, not framed
+  keycaps.
+- `workspace-tools.tsx` is the Files/Git companion. Its header is two section tabs (`tabClasses`, the
+  brand underline, no glyphs) with the changed-file count beside "Git". Under that, the Files half is a
+  strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
+  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip, so the Files page's
+  rail gets the same one. The Git half (`git-tools.tsx`) is two strips before content: the repository's
+  reading (branch, `detached` tag, ahead/behind, the GitHub account) with **pull** and **push** inline
+  and fetch / stash / pop behind one menu where each verb carries a sentence (§13); then a `FilterChip`
+  row switching Changes / History / Branches, with a `+` for a new branch on the Branches view that
+  opens an inline create row rather than a permanent form. Changed-file rows colour only the status
+  letter; the list is all changes, so a tinted band on every row said nothing. Branches are grouped:
+  local first, remotes under their own label, no per-row glyph and no "remote" word on every line.
   The emulator toolbar keeps search, snippets, appearance and fullscreen visible, with copy, export,
   folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and

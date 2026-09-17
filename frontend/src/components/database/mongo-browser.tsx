@@ -45,6 +45,7 @@ import { ResultGrid } from "@/components/database/result-grid"
 import { ImportDialog } from "@/components/database/import-dialog"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
+import { FormNote } from "@/components/form"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 const PAGE = 100
@@ -252,8 +253,8 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                 className={cn(
                   "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
                   collection === c.name
-                    ? "bg-plot-primary font-medium text-foreground"
-                    : "hover:bg-accent",
+                    ? "bg-accent font-medium text-foreground"
+                    : "hover:bg-row-hover",
                 )}
               >
                 <span className="truncate text-body">{c.name}</span>
@@ -513,8 +514,16 @@ function DocumentDialog({
       onOpenChange={(o) => !o && onClose()}
       size="lg"
       title={title}
+      description="The document as JSON. It is checked as you type and replaced whole when saved."
       footer={
         <>
+          {parseError ? (
+            <FormNote tone="danger" className="mr-auto truncate">
+              {parseError}
+            </FormNote>
+          ) : (
+            <FormNote className="mr-auto">Valid JSON</FormNote>
+          )}
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
@@ -524,13 +533,14 @@ function DocumentDialog({
         </>
       }
     >
-      <div className="space-y-2">
-        <CodeEditor className="h-80" language="json" value={json} onChange={setJson} />
-        {parseError && <p className="text-xs text-destructive">{parseError}</p>}
-        <p className="text-xs text-muted-foreground">
+      <div className="grid gap-3">
+        <div className="overflow-hidden rounded-lg border border-hairline">
+          <CodeEditor className="h-80" language="json" value={json} onChange={setJson} />
+        </div>
+        <FormNote>
           The whole document is replaced. <span className="font-mono">_id</span> is immutable and is
           ignored if present.
-        </p>
+        </FormNote>
       </div>
     </Modal>
   )

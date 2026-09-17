@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Database, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import type { DbConnection, DbCredentialServer, DbDriverInfo, DbSyncResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -14,16 +14,10 @@ import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/stat
 import { Status } from "@/components/status-dot"
 import { TabLink } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { NewDatabaseDialog } from "@/components/database/new-database-dialog"
 import { ConnectionDialog } from "@/components/database/connection-dialog"
 import { HostConnectDialog } from "@/components/database/host-connect-dialog"
+import { ConnectionSwitcher } from "@/components/database/connection-switcher"
 import { DatabaseProvider, type SectionParams } from "@/components/database/db-context"
 
 /** Every tab, and which of them a non-SQL engine (Redis, Mongo) still has. */
@@ -80,6 +74,9 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       const table =
         next?.table === null ? "" : (next?.table ?? (switching ? "" : (params.get("table") ?? "")))
       if (table) q.set("table", table)
+      // A statement handed to the Query tab travels once and is not carried
+      // on to the next page: it is the question being asked, not the place.
+      if (next?.sql) q.set("sql", next.sql)
       const query = q.toString()
       return query ? `${target}?${query}` : target
     },
@@ -166,8 +163,9 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   const sqlOnlyRoute = Boolean(currentTab?.sqlOnly)
   const awaitingDrivers = sqlOnlyRoute && !drivers.data
   const blocked = sqlOnlyRoute && Boolean(drivers.data) && info != null && !info.sql
+  const admin = can("system.admin")
 
-  const dialogs = can("system.admin") && (
+  const dialogs = admin && (
     <>
       <NewDatabaseDialog
         open={newOpen}
@@ -175,7 +173,13 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
         onCreated={(name) => void landOn(name)}
         onConnectManually={() => setAddOpen(true)}
       />
-      <ConnectionDialog open={addOpen} onOpenChange={setAddOpen} onDone={connections.refresh} />
+      {addOpen && (
+        <ConnectionDialog
+          open
+          onOpenChange={(o) => !o && setAddOpen(false)}
+          onDone={connections.refresh}
+        />
+      )}
       {credentialsFor && (
         <HostConnectDialog
           key={`${credentialsFor.host}:${credentialsFor.port}`}
@@ -190,7 +194,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   if (connections.loading && !connections.data) {
     return (
       <Page>
-        <PageHeader eyebrow="Access" title="Databases" />
+        <PageHeader eyebrow="Apps" title="Databases" />
         <LoadingPanel />
       </Page>
     )
@@ -198,7 +202,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   if (connections.error) {
     return (
       <Page>
-        <PageHeader eyebrow="Access" title="Databases" />
+        <PageHeader eyebrow="Apps" title="Databases" />
         <ErrorState error={connections.error} />
       </Page>
     )
@@ -207,10 +211,10 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
     return (
       <Page>
         <PageHeader
-          eyebrow="Access"
+          eyebrow="Apps"
           title="Databases"
           actions={
-            can("system.admin") && (
+            admin && (
               <Button size="sm" onClick={() => setNewOpen(true)}>
                 <Plus className="size-4" />
                 New database
@@ -243,35 +247,60 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       }}
     >
       <div className="flex h-full min-h-0 flex-col">
-        <div className="shrink-0 border-b border-hairline bg-background/85 backdrop-blur-md">
+        {/* The section's own header band: what you are looking at, as the
+            title; what it is, as a row of facts; where you can go, as the
+            tab strip. Plain ground and one hairline, like every page header. */}
+        <div className="shrink-0 border-b border-hairline">
           <div className="mx-auto w-full max-w-[1440px] px-5 md:px-8">
-            <div className="flex flex-wrap items-center gap-2 pt-4 pb-3">
-              <Select
-                value={conn?.id.toString() ?? ""}
-                onValueChange={(v) => goto(pathname, { conn: Number(v) })}
-              >
-                <SelectTrigger size="sm" className="w-[20rem] max-w-full">
-                  <SelectValue placeholder="Select a connection" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(list ?? []).map((c) => (
-                    <SelectItem key={c.id} value={c.id.toString()}>
-                      {c.name} · {drivers.data?.find((d) => d.id === c.driver)?.label ?? c.driver}
-                      {c.host ? ` · ${c.host}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {conn && <ConnectionStatus id={conn.id} />}
-              <span className="flex-1" />
-              {can("system.admin") && (
-                <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
-                  <Plus className="size-4" />
-                  New database
-                </Button>
-              )}
+            <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3 pt-6 pb-3 md:pt-8">
+              <div className="min-w-0 space-y-1.5">
+                <p className="eyebrow">Access</p>
+                {conn && (
+                  <ConnectionSwitcher
+                    connections={list ?? []}
+                    drivers={drivers.data ?? []}
+                    current={conn}
+                    onSelect={(id) => goto(pathname, { conn: id })}
+                    onNew={admin ? () => setNewOpen(true) : undefined}
+                    onConnect={admin ? () => setAddOpen(true) : undefined}
+                  />
+                )}
+              </div>
+              <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3">
+                {conn && <ConnectionStatus id={conn.id} />}
+                {admin && (
+                  <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
+                    <Plus className="size-4" />
+                    New database
+                  </Button>
+                )}
+              </div>
             </div>
-            <nav className="-mx-3 -mb-px flex gap-1 overflow-x-auto">
+            {conn && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pb-3 text-body text-muted-foreground">
+                <span>{info?.label ?? conn.driver}</span>
+                <Dot />
+                <span className="font-mono text-xs">
+                  {conn.host || "this server"}
+                  {conn.port ? `:${conn.port}` : ""}
+                </span>
+                {conn.database && (
+                  <>
+                    <Dot />
+                    <span className="font-mono text-xs">{conn.database}</span>
+                  </>
+                )}
+                {conn.user && (
+                  <>
+                    <Dot />
+                    <span>as {conn.user}</span>
+                  </>
+                )}
+                <Dot />
+                <span>added {relativeTime(conn.createdAt)}</span>
+              </div>
+            )}
+            <nav aria-label="Database section" className="-mx-3 -mb-px flex gap-1 overflow-x-auto">
               {tabs.map((tab) => {
                 const active =
                   tab.href === "/databases"
@@ -315,6 +344,10 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       {dialogs}
     </DatabaseProvider>
   )
+}
+
+function Dot() {
+  return <span className="text-muted-foreground/40">·</span>
 }
 
 function ConnectionStatus({ id }: { id: number }) {

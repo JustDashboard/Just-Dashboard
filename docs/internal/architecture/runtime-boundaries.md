@@ -101,7 +101,7 @@ State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` blo
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`); backups
+`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,

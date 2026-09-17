@@ -52,6 +52,14 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   fires and nobody knows which table grew (row counts are the engine's estimate — counting forty tables
   exactly is a full scan to answer a question about *relative* size). `search.go` finds which table holds
   a value, bounded three ways at once; those bounds are what make it safe to point at production.
+- **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
+  connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
+  and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
+  read surface; saving and resetting need `service.control` (it is dashboard state, not database state,
+  so it is not in the destructive group) and are audited as `database.diagram.save` and
+  `database.diagram.reset`. The server checks only that the document is a JSON object under 512 KiB:
+  every field is a decision about a picture, and the diagram (`diagram/memory.ts`) is the only thing
+  that decodes it, with the browser's storage as a mirror for roles that cannot save.
 - **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
   the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
   learn a backup was never possible. `dump_sql.go` writes DDL then INSERTs over the open connection,

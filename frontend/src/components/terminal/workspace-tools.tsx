@@ -1,15 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import {
-  Code,
-  Cross,
-  FloppyDisk,
-  FolderOpen,
-  GitHubMark,
-  GitMerge,
-  SidebarRight,
-} from "@/components/icons"
+import { Cross, FloppyDisk, FolderOpen, GitMerge, SidebarRight } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -26,6 +18,7 @@ import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
 import { DiffView } from "@/components/files/diff-view"
 import { GitTools } from "@/components/terminal/git-tools"
 import { Tag } from "@/components/tag"
+import { ChipCount, tabClasses } from "@/components/tabs"
 import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay =
@@ -111,13 +104,19 @@ export function WorkspaceTools({
     status.refresh()
   }
 
+  const changed = status.data?.files.length ?? 0
+
   return (
-    <Pane className="relative flex-1">
-      <PaneHeader className="gap-0.5 px-1.5">
+    <Pane flush className="relative flex-1">
+      {/* The two halves are section tabs: the brand underline says which one
+          you are in, the way it does under the top bar. No glyph beside the
+          word — a folder in front of "Files" is the label twice — and the one
+          fact worth carrying across is the count of changed files, which is
+          what decides whether the git half needs a visit. */}
+      <PaneHeader className="gap-0 px-1 py-0">
         <TabButton
           active={tab === "files"}
           onClick={() => showTab("files")}
-          icon={FolderOpen}
           hint="The files under the shell's working directory"
         >
           Files
@@ -125,23 +124,10 @@ export function WorkspaceTools({
         <TabButton
           active={tab === "git"}
           onClick={() => showTab("git")}
-          icon={GitHubMark}
           hint="Stage, commit and push the repository the shell is in"
         >
           Git
-          {(status.data?.files.length ?? 0) > 0 && (
-            <span className="numeric ml-1 text-micro font-medium text-warning">
-              {status.data?.files.length}
-            </span>
-          )}
-          {detect.data?.inRoots && detect.data.repo && !status.data?.files.length && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="ml-1 size-1.5 rounded-full bg-success" />
-              </TooltipTrigger>
-              <TooltipContent>Working tree clean</TooltipContent>
-            </Tooltip>
-          )}
+          {changed > 0 && <ChipCount>{changed}</ChipCount>}
         </TabButton>
         <span className="flex-1" />
         {onClose && (
@@ -152,7 +138,7 @@ export function WorkspaceTools({
                 size="sm"
                 variant="ghost"
                 aria-label="Hide this panel"
-                className="size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                className="mr-1 size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
                 onClick={onClose}
               >
                 <SidebarRight className="size-3.5" />
@@ -243,13 +229,11 @@ export function WorkspaceTools({
 function TabButton({
   active,
   onClick,
-  icon: Icon,
   hint,
   children,
 }: {
   active: boolean
   onClick: () => void
-  icon: React.ComponentType<{ className?: string }>
   /** What the tab shows — the label is one word and the count beside it is
    *  the only other clue. */
   hint: string
@@ -259,13 +243,11 @@ function TabButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
+          aria-current={active ? "page" : undefined}
           onClick={onClick}
-          className={cn(
-            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            active ? "bg-plot-primary text-primary" : "text-muted-foreground hover:text-foreground",
-          )}
+          className={tabClasses(active, "h-9")}
         >
-          <Icon className="size-3.5" />
           {children}
         </button>
       </TooltipTrigger>
@@ -372,7 +354,6 @@ function InlineFile({
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-card">
       <PaneHeader className="gap-2">
-        <Code className="size-3.5 shrink-0 text-primary" />
         <span className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
           {path.split("/").pop()}
         </span>

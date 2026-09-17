@@ -77,6 +77,9 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/outline", s.handle(s.handleDBOutline))
 		r.Method(http.MethodGet, "/{id}/relations", s.handle(s.handleDBRelations))
 		r.Method(http.MethodGet, "/{id}/graph", s.handle(s.handleDBGraph))
+		// How the diagram of that graph was arranged. Reading it is part of
+		// reading the schema; only saving sits with the other writes below.
+		r.Method(http.MethodGet, "/{id}/diagram", s.handle(s.handleDBDiagramGet))
 		r.Method(http.MethodGet, "/{id}/activity", s.handle(s.handleDBActivity))
 		r.Method(http.MethodGet, "/{id}/search", s.handle(s.handleDBSearch))
 		r.Method(http.MethodGet, "/{id}/overview", s.handle(s.handleDBOverview))
@@ -100,6 +103,11 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPatch, "/{id}/rows", s.handle(s.handleDBRowUpdate))
 			r.Method(http.MethodPost, "/{id}/queries", s.handle(s.handleDBSavedCreate))
 			r.Method(http.MethodDelete, "/{id}/queries/{qid}", s.handle(s.handleDBSavedDelete))
+			// A saved diagram arrangement is dashboard state, not database state:
+			// resetting one loses nothing that a Tidy cannot redraw, so it sits
+			// with the saved queries rather than in the destructive group.
+			r.Method(http.MethodPut, "/{id}/diagram", s.handle(s.handleDBDiagramPut))
+			r.Method(http.MethodDelete, "/{id}/diagram", s.handle(s.handleDBDiagramDelete))
 			r.Method(http.MethodPost, "/{id}/import", s.handle(s.handleDBImport))
 			// Schema changes that only add: the same capability the query
 			// runner needs for the CREATE it classifies as medium risk, so the

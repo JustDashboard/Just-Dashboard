@@ -208,13 +208,25 @@ export function PanelFooter({ className, ...props }: React.ComponentProps<"div">
  * that owns its own scrolling. Kept as two names because call sites read
  * correctly that way and because the two headers are deliberately different
  * heights.
+ *
+ * `flush` drops the frame for a pane that is one column of a workbench — the
+ * terminal's rail, emulator and tools column sit inside a single frame with a
+ * hairline between them. Three framed panes with a gutter between them were
+ * three boxes floating on the page; one frame with two rules inside it is one
+ * working surface, which is what the screen is.
  */
-export function Pane({ className, ...props }: React.ComponentProps<"div">) {
+export function Pane({
+  flush,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & { flush?: boolean }) {
   return (
     <div
       data-slot="pane"
+      data-flush={flush ? "" : undefined}
       className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-card",
+        "flex min-h-0 min-w-0 flex-col overflow-hidden bg-card",
+        !flush && "rounded-xl border",
         className,
       )}
       {...props}

@@ -26,7 +26,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Detail, DetailList } from "@/components/page"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -110,7 +110,7 @@ function ActivityPanel({
   const slowest = sessions.reduce((m, s) => Math.max(m, s.seconds), 0)
 
   return (
-    <Panel>
+    <Panel plain className="animate-rise">
       <PanelHeader
         title="Running now"
         actions={
@@ -132,7 +132,7 @@ function ActivityPanel({
             description="The server reports no active sessions."
           />
         ) : (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="-mx-4 min-w-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -216,9 +216,9 @@ function ActivityPanel({
                                     connection will see it drop.
                                   </p>
                                   {s.query && (
-                                    <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted p-2 font-mono text-hint whitespace-pre-wrap">
+                                    <Well className="mt-2 max-h-32 text-hint whitespace-pre-wrap">
                                       {s.query}
-                                    </pre>
+                                    </Well>
                                   )}
                                 </>
                               ),
@@ -337,7 +337,7 @@ function SessionDialog({
         </>
       }
     >
-      <DetailList>
+      <DetailList className="gap-y-2">
         <Detail label="User">{session.user || "—"}</Detail>
         <Detail label="Database">{session.database || "—"}</Detail>
         <Detail label="State">{session.state || "—"}</Detail>
@@ -348,12 +348,14 @@ function SessionDialog({
       </DetailList>
 
       <div className="space-y-1.5">
-        <p className="text-hint font-medium tracking-wide text-muted-foreground uppercase">
-          Statement
-        </p>
-        <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-hint leading-relaxed whitespace-pre-wrap">
-          {session.query || "No statement reported — this session is idle."}
-        </pre>
+        <p className="eyebrow">Statement</p>
+        <Well className="max-h-72 text-hint whitespace-pre-wrap">
+          {session.query || (
+            <span className="text-muted-foreground italic">
+              No statement reported — this session is idle.
+            </span>
+          )}
+        </Well>
       </div>
     </Modal>
   )
@@ -467,11 +469,13 @@ function StoragePanel({
 
   const o = overview.data
   const shown = expanded ? o.tables : o.tables.slice(0, 10)
-  const largest = o.tables[0]?.bytes ?? 0
+  // The engine lists by size, but the bar is drawn against the largest table
+  // wherever it sits, so an engine that orders differently still compares.
+  const largest = o.tables.reduce((m, t) => Math.max(m, t.bytes), 0)
   const pool = o.pool
 
   return (
-    <Panel>
+    <Panel plain className="animate-rise">
       <PanelHeader
         title="Storage"
         actions={
@@ -487,7 +491,7 @@ function StoragePanel({
       />
       <PanelBody flush>
         {!o.sizesKnown && (
-          <Notice tone="default" className="m-3" title="Sizes unavailable on this engine">
+          <Notice tone="default" className="mb-3" title="Sizes unavailable on this engine">
             This build of the engine does not report per-table bytes, so only row counts are shown.
             They are still the fastest way to find the table that grew.
           </Notice>
@@ -495,7 +499,7 @@ function StoragePanel({
         {o.tables.length === 0 ? (
           <EmptyState icon={Database} title="No tables in this schema" />
         ) : (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="-mx-4 min-w-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

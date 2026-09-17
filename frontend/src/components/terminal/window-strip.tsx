@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Cross, Pencil, Plus, TerminalWindow } from "@/components/icons"
+import { Cross, Pencil, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalWindow as Window } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { IconAction } from "@/components/icon-action"
+import { IconAction, rowReveal } from "@/components/icon-action"
 
 /** Compact direct-PTY windows for the terminal title bar. */
 export function WindowStrip({
@@ -113,31 +113,30 @@ function WindowTab({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       className={cn(
-        "flex h-8 max-w-48 min-w-28 shrink-0 items-center rounded-md border px-1.5 transition-colors",
+        "group flex h-7 max-w-44 min-w-24 shrink-0 items-center rounded-md border border-transparent pr-0.5 pl-2.5 transition-colors",
         active
-          ? "border-hairline bg-accent text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-row-hover hover:text-foreground",
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
         inserting && "border-l-primary",
       )}
     >
       <button
         aria-current={active ? "page" : undefined}
         title={window.name}
-        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-sm focus-ring"
+        className="flex h-full min-w-0 flex-1 items-center rounded-sm focus-ring-inset"
         onClick={onSelect}
         onDoubleClick={onRename}
       >
-        <TerminalWindow className="size-3 shrink-0" />
         <span className="truncate text-xs font-medium">{window.name}</span>
       </button>
-      {/* Rename and close sit on the tab itself. A menu holding two items that
-          a browser tab exposes directly is a click of ceremony in front of the
-          two things anyone does to a tab. */}
+      {/* Rename and close sit on the tab itself rather than in a menu — but
+          they appear under the pointer, as a browser's do. Drawn on every tab
+          all the time, two glyphs beside a five-letter name were the tab. */}
       <Button
         size="icon-sm"
         variant="ghost"
         aria-label={`Rename window ${window.name}`}
-        className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+        className={cn("size-6 shrink-0 text-muted-foreground hover:text-foreground", rowReveal())}
         onClick={onRename}
       >
         <Pencil className="size-3" />
@@ -146,7 +145,10 @@ function WindowTab({
         size="icon-sm"
         variant="ghost"
         aria-label={`Close window ${window.name}`}
-        className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
+        className={cn(
+          "size-6 shrink-0 text-muted-foreground hover:text-destructive",
+          !active && rowReveal(),
+        )}
         onClick={onClose}
       >
         <Cross className="size-3" />
@@ -169,7 +171,7 @@ function WindowNameInput({
     <Input
       autoFocus
       value={draft}
-      className="h-8 w-36 shrink-0 text-xs"
+      className="h-7 w-36 shrink-0 text-xs"
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => onCommit(draft.trim())}
       onKeyDown={(event) => {

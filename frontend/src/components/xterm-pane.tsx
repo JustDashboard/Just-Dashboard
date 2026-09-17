@@ -218,10 +218,13 @@ export function XtermPane({
   fullscreenActive,
   terminalSessionId,
   active = true,
+  flush,
 }: {
   path: string
   query?: Query
   className?: string
+  /** No frame of its own: the pane is one column of a framed workbench. */
+  flush?: boolean
   onExit?: () => void
   /** Shown in the pane header instead of the socket path — e.g. who you are. */
   subtitle?: React.ReactNode
@@ -1130,11 +1133,11 @@ export function XtermPane({
     <Pane
       ref={frameRef}
       inert={!active}
+      // In fullscreen the pane is the whole screen, so the corners and border
+      // would draw a frame around nothing.
+      flush={flush || fullscreen}
       className={cn(
         "relative bg-surface-sunken",
-        // In fullscreen the pane is the whole screen, so the rounded-sm corners
-        // and border would draw a frame around nothing.
-        fullscreen && "rounded-none border-0",
         copyMode && "terminal-tmux",
         className,
         !active && "hidden",
@@ -1408,15 +1411,17 @@ export function XtermPane({
       {/* The control keys, as buttons. Ctrl+C is unremarkable on a keyboard and
           impossible on a phone, and this panel is reached from a phone more
           often than its author would like. */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-hairline bg-surface-header px-3 py-1.5">
-        <span className="mr-2 hidden text-hint text-muted-foreground sm:inline">Keys</span>
+      <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-t border-hairline bg-surface-header px-2 py-1">
+        {/* Words on a strip, not a row of framed keycaps: seven bordered boxes
+            under the emulator were the loudest line on the pane, and the
+            monospace label already says what each one is. */}
         {CONTROL_KEYS.map((key) => (
           <Tooltip key={key.label}>
             <TooltipTrigger asChild>
               <Button
                 size="xs"
                 variant="ghost"
-                className="h-7 shrink-0 rounded-md border border-hairline px-2 font-mono text-hint text-muted-foreground hover:text-foreground"
+                className="h-6 shrink-0 rounded-sm px-1.5 font-mono text-hint font-normal text-muted-foreground hover:text-foreground"
                 onClick={() => send(key.bytes)}
               >
                 {key.label}

@@ -6,12 +6,14 @@ import {
   Download,
   FolderOpen,
   FolderPlus,
+  MoreHorizontal,
   PlusSquareSmall,
   RefreshClockwise,
   Trash,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, downloadUrl, get, post } from "@/lib/api"
+import { truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { describeChange, gitLetter, gitStyle, gitTone } from "@/lib/git-status"
 import { FileIcon } from "@/components/files/file-icon"
@@ -19,10 +21,15 @@ import type { FileEntry, FileListing, GitFileChange } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/state"
 import { RowActions } from "@/components/icon-action"
-import { PaneHeader } from "@/components/panel"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /** What the inline confirm surface needs; the tools panel renders it. */
@@ -204,52 +211,76 @@ export function FileTree({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PaneHeader className="gap-1">
+      {/* The root, and what can be done at it. Two verbs inline — a new file
+          and a refresh are the ones pressed all day — and the rest behind one
+          menu with a word each: five icon buttons and a checkbox in a strip
+          336px wide was the strip. The path keeps its last segments, because
+          the leaf is the part that says where you are. */}
+      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-hairline pr-1.5 pl-3">
         <span
           className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground"
           title={root}
         >
-          {root}
+          {truncateMiddle(root, 36)}
         </span>
         {canWrite && (
-          <>
-            <TreeButton
-              label="New file in this folder"
-              onClick={() => {
-                setExpanded((s) => new Set(s).add(root))
-                setCreating({ parent: root, kind: "file" })
-              }}
-            >
-              <PlusSquareSmall className="size-3.5" />
-            </TreeButton>
-            <TreeButton
-              label="New folder here"
-              onClick={() => {
-                setExpanded((s) => new Set(s).add(root))
-                setCreating({ parent: root, kind: "folder" })
-              }}
-            >
-              <FolderPlus className="size-3.5" />
-            </TreeButton>
-          </>
-        )}
-        <label className="flex cursor-pointer items-center gap-1 px-1 text-micro text-muted-foreground">
-          <Checkbox
-            checked={showHidden}
-            onCheckedChange={(v) => setShowHidden(v === true)}
-            className="size-3"
-          />
-          Hidden
-        </label>
-        {onOpenInFiles && (
-          <TreeButton label="Reveal in the full file manager" onClick={() => onOpenInFiles(root)}>
-            <FolderOpen className="size-3.5" />
+          <TreeButton
+            label="New file in this folder"
+            onClick={() => {
+              setExpanded((s) => new Set(s).add(root))
+              setCreating({ parent: root, kind: "file" })
+            }}
+          >
+            <PlusSquareSmall className="size-3.5" />
           </TreeButton>
         )}
         <TreeButton label="Refresh" onClick={() => reload(root)}>
           <RefreshClockwise className="size-3.5" />
         </TreeButton>
-      </PaneHeader>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  aria-label="More for this folder"
+                  className="size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Hidden files, new folder, open in Files</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuCheckboxItem
+              className="text-xs"
+              checked={showHidden}
+              onCheckedChange={(v) => setShowHidden(v === true)}
+            >
+              Show hidden files
+            </DropdownMenuCheckboxItem>
+            {canWrite && (
+              <DropdownMenuItem
+                className="gap-2 text-xs"
+                onSelect={() => {
+                  setExpanded((s) => new Set(s).add(root))
+                  setCreating({ parent: root, kind: "folder" })
+                }}
+              >
+                <FolderPlus className="size-3.5" /> New folder here
+              </DropdownMenuItem>
+            )}
+            {onOpenInFiles && (
+              <DropdownMenuItem className="gap-2 text-xs" onSelect={() => onOpenInFiles(root)}>
+                <FolderOpen className="size-3.5" /> Open in Files
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-auto py-1">
         <TreeLevel

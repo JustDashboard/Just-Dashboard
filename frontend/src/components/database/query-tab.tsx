@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   AcronymJson,
   Clock,
@@ -34,7 +35,6 @@ import { CodeEditor } from "@/components/code-editor"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/panel"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -42,6 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ResultGrid } from "@/components/database/result-grid"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
+import { Field } from "@/components/form"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 
@@ -49,7 +50,10 @@ type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
  *  history and saved snippets, and a result you can export. */
 export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: ConfirmFn }) {
   const { can } = useAuth()
-  const [sql, setSql] = useState("SELECT 1;")
+  const params = useSearchParams()
+  // A statement handed over in the URL — the diagram's "query this table" —
+  // opens in the editor; it is not run until Run is pressed.
+  const [sql, setSql] = useState(() => params.get("sql") || "SELECT 1;")
   const [risk, setRisk] = useState<QueryRisk | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [plan, setPlan] = useState<QueryResult | null>(null)
@@ -377,6 +381,7 @@ function SaveDialog({
   onOpenChange: (o: boolean) => void
   onSave: (name: string) => Promise<void>
 }) {
+  const id = useId()
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const save = async () => {
@@ -397,24 +402,32 @@ function SaveDialog({
       onOpenChange={onOpenChange}
       size="sm"
       title="Save query"
+      description="Keeps the statement in the editor against this connection, under a name."
       footer={
         <>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
           <Button onClick={save} disabled={!name.trim() || busy} pending={busy}>
             Save
           </Button>
         </>
       }
     >
-      <div className="space-y-1.5">
-        <Label htmlFor="snippet-name">Name</Label>
+      <Field
+        label="Name"
+        htmlFor={`${id}-name`}
+        hint="Saved against this connection, for everyone who can open it."
+      >
         <Input
-          id="snippet-name"
+          id={`${id}-name`}
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && !busy && void save()}
           placeholder="Active users last 30 days"
           autoFocus
         />
-      </div>
+      </Field>
     </Modal>
   )
 }

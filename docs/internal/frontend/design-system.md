@@ -201,7 +201,7 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 | --- | --- | --- |
 | `Panel` | A block of content *on* the page: framed, header, hairline, body — or `plain`, the same anatomy with no frame | Not a working region |
 | `RowList` / `Row` | A list of rows with hairlines between them: a leading mark, a title, a second line, a trailing state | Not a table — nothing lines up in columns |
-| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console | Not a block in a page's flow |
+| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page) | Not a block in a page's flow |
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |

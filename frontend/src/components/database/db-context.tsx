@@ -34,6 +34,8 @@ export type SectionParams = {
   schema?: string
   /** `null` clears the table param. */
   table?: string | null
+  /** A statement for the Query tab to open with — from the diagram's "query this table". */
+  sql?: string
 }
 
 const DatabaseContext = createContext<DatabaseContextValue | null>(null)

@@ -3649,6 +3649,16 @@ export type DbSchemaGraph = {
   truncated: boolean
 }
 
+/**
+ * How the operator arranged one schema's diagram, as the server hands it back.
+ * The document itself is decoded by `components/database/diagram/memory.ts`;
+ * the server stores it whole and says only when it was last saved.
+ */
+export type DbDiagramLayoutResponse = {
+  layout: Record<string, unknown> | null
+  updatedAt?: string
+}
+
 // ---------------------------------------------------------------------------
 // The dashboard's own version, its changelog, and updating it in place.
 //

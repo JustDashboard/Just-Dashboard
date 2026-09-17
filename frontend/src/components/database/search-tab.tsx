@@ -62,7 +62,7 @@ export function SearchTab({
   }
 
   return (
-    <Panel>
+    <Panel plain className="animate-rise">
       <PanelHeader title="Find a value" />
       <PanelToolbar>
         <SearchInput
@@ -94,13 +94,13 @@ export function SearchTab({
         {result && (
           <>
             {result.truncated && (
-              <Notice tone="warning" className="m-3" title="Results are incomplete">
+              <Notice tone="warning" className="mb-3" title="Results are incomplete">
                 The scan stopped at its limit. Narrow the value or search a specific table from the
                 Browse tab&apos;s filter row for the full picture.
               </Notice>
             )}
             {result.tablesSkipped && result.tablesSkipped.length > 0 && (
-              <Notice tone="default" className="m-3" title="Some tables were skipped">
+              <Notice tone="default" className="mb-3" title="Some tables were skipped">
                 {result.tablesSkipped.join(", ")} could not be read — usually a permission on that
                 table. Everything else was searched.
               </Notice>
@@ -112,7 +112,7 @@ export function SearchTab({
                 description={`Searched ${plural(result.tablesScanned, "table")}.`}
               />
             ) : (
-              <div className="min-w-0 overflow-x-auto">
+              <div className="-mx-4 min-w-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>

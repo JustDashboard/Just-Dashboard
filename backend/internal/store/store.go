@@ -130,6 +130,21 @@ CREATE TABLE IF NOT EXISTS db_query_history (
 );
 CREATE INDEX IF NOT EXISTS idx_db_history_conn ON db_query_history(connection_id, ran_at DESC);
 
+-- How an operator arranged one schema's diagram: where each table sits, which
+-- are hidden, the notes and colours they added. One JSON document per
+-- (connection, schema) rather than a row per table, because the diagram reads
+-- and writes it as a whole and nothing else reads it at all. The server only
+-- checks that it is a JSON object under a size cap; every field in it is a
+-- decision about a picture, and the picture is the only thing that decodes it.
+-- Nothing in it is secret — it names tables the reader can already list.
+CREATE TABLE IF NOT EXISTS db_diagram_layouts (
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  schema_name   TEXT NOT NULL DEFAULT '',
+  layout        TEXT NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (connection_id, schema_name)
+);
+
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,

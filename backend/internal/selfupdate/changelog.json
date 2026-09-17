@@ -9,6 +9,26 @@
       "changes": [
         {
           "kind": "added",
+          "text": "The schema diagram remembers how you arranged it, and does a great deal more",
+          "detail": "Every arrangement — a table dragged into place, a lookup table hidden, a note, a colour, the level of detail, the viewport — is saved against the connection and schema and comes back on the next visit, in the next browser and for the next operator. A table on the canvas is a place to go from: its menu opens it in Browse, Structure or a ready-made query, focuses its neighbourhood, hides everything unrelated, colours or annotates it; the inspector beside the canvas reads its relations both ways; search pans to the match; the whole picture goes full screen and exports as PNG, SVG, Mermaid, DBML or JSON. Three levels of detail, two layout directions, compact or comfortable spacing, snap to grid, a lock for a finished diagram, and Tidy to lay it all out again."
+        },
+        {
+          "kind": "changed",
+          "text": "The database pages read as one product: the connection is the title, Browse and Structure are workbenches",
+          "detail": "The connection's name is the section's title and a switcher, with the engine, address and database as a row of facts under it. Browse and Structure share one table rail and each fill the window as a single working region — the grid takes every row the screen has room for, and Structure can pick a table without a detour through Browse. The connection page is readings, facts and maintenance rows that say what each verb does; Find, Monitor and Generate lost their frames; selections are the neutral fill everywhere rather than the primary tint."
+        },
+        {
+          "kind": "changed",
+          "text": "Every database dialog was rebuilt on one form vocabulary",
+          "detail": "Create table, add column, create index, rename, connect, new database, import and the row editor share labels, fields, hints, errors and options that read the same way. Create table has a column editor that grows with Enter, an id-key preset, duplicate-name checks and its CREATE TABLE beside the button; add column, create index and rename show their statement too. Connecting a database asks for host, port, user, password and database and renders the engine's connection string itself — a pasted string still works. Import takes a dropped file, counts the rows before sending them, and explains each option in a sentence."
+        },
+        {
+          "kind": "fixed",
+          "text": "A database found running on the host was offered under the literal title \"{server.driver}\"",
+          "detail": "The dialog for a server installed on the machine rather than in a container is titled with the engine's name again."
+        },
+        {
+          "kind": "added",
           "text": "Deploying is one screen now: pick a repository, check what was detected, press Deploy",
           "detail": "/deploy/new opens on three answers — a GitHub repository, a Docker image, a database — instead of eight outcome cards followed by a source mode, a clone URL and a credential id. Repositories are listed from the GitHub account this server is already signed in to, so a private project is picked from a list rather than transcribed, and its branches come from the same credential. Detection fills in the framework's build and start commands, the port and the public hostname; what is left is a name, an environment and one button, which saves the plan, applies the variables and starts the release. The five-step wizard has not gone anywhere — it is one link away at ?mode=advanced, it still owns Compose stacks, blueprints, game servers and adoption, and quick deploy hands it the draft it was working on."
         },

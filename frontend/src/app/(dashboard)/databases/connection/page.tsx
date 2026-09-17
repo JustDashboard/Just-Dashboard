@@ -5,18 +5,30 @@ import { ArrowRight, CloudDownload, Pencil, Trash, WarningFill } from "@/compone
 import Link from "next/link"
 import { notify } from "@/lib/toast"
 import { del, downloadUrl, get, post } from "@/lib/api"
-import { bytes, timestamp } from "@/lib/format"
-import type { DbConnection, DbTable } from "@/lib/types"
+import { bytes, relativeTime, timestamp } from "@/lib/format"
+import type { DbConnection, DbOverview, DbTable } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader, DetailList, Detail } from "@/components/page"
+import { Page, DetailList, Detail } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/state"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ConnectionDialog } from "@/components/database/connection-dialog"
 import { useDatabase } from "@/components/database/db-context"
 
+/**
+ * The connection itself: what it is, how big it is, and the three things done
+ * to it rarely enough that each deserves a sentence — a dump, forgetting it,
+ * and dropping the database it points at.
+ *
+ * Readings first, as tiles on the page's own edge; the facts as a plain list;
+ * the verbs as rows, each with the line of plain English that says what it
+ * does, because "Remove" and "Delete" side by side in a header were two words
+ * for two very different outcomes.
+ */
 export default function ConnectionPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -24,7 +36,7 @@ export default function ConnectionPage() {
   const [editing, setEditing] = useState(false)
 
   // Redis has no table catalogue — its browser lists keyspaces itself — so the
-  // count panel is only asked for where the endpoint means something.
+  // count is only asked for where the endpoint means something.
   const countable = info ? info.kind !== "keyvalue" : true
   const tables = usePoll<DbTable[]>(
     (signal) =>
@@ -35,102 +47,114 @@ export default function ConnectionPage() {
     [conn?.id, countable],
     { enabled: Boolean(conn) && countable },
   )
+  // Sizes come from the same breakdown the Monitor tab draws, and only for a
+  // SQL engine, which is the only kind that reports them.
+  const sql = Boolean(info?.sql)
+  const overview = usePoll<DbOverview>(
+    (signal) =>
+      conn && sql
+        ? get<DbOverview>(`/databases/${conn.id}/overview`, { schema: "" }, signal)
+        : Promise.reject(new Error("not a SQL engine")),
+    0,
+    [conn?.id, sql],
+    { enabled: Boolean(conn) && sql },
+  )
 
   if (!conn) return null
 
   const label = info?.label ?? conn.driver
   const objectWord =
     info?.kind === "keyvalue" ? "keyspace" : info?.kind === "document" ? "collection" : "table"
+  const objects = tables.data?.length
+  const o = overview.data
 
   return (
-    <Page>
-      <PageHeader
-        eyebrow="Databases"
-        title={conn.name}
-        actions={
-          <>
-            {can("service.control") && <BackupButton conn={conn} />}
-            {can("system.admin") && (
-              <>
-                <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-                  <Pencil className="size-4" />
+    <Page className="animate-rise">
+      <StatGrid columns={4}>
+        {countable ? (
+          <StatTile
+            label={objectWord === "collection" ? "Collections" : "Tables"}
+            value={
+              tables.loading && !tables.data ? (
+                <Skeleton className="h-6 w-12" />
+              ) : (
+                (objects ?? 0).toLocaleString()
+              )
+            }
+            hint={
+              objects && objects > 0 ? (
+                <Link href={hrefFor("/databases")} className="hover:text-foreground">
+                  Browse them <ArrowRight className="inline size-3" />
+                </Link>
+              ) : (
+                "none yet"
+              )
+            }
+          />
+        ) : (
+          <StatTile label="Engine" value={label} hint="key–value store" />
+        )}
+        {sql && (
+          <StatTile
+            label="Rows"
+            value={
+              overview.loading && !o ? (
+                <Skeleton className="h-6 w-16" />
+              ) : (
+                (o?.totalRows ?? 0).toLocaleString()
+              )
+            }
+            hint="the engine's estimate"
+          />
+        )}
+        {sql && (
+          <StatTile
+            label="Size"
+            value={
+              overview.loading && !o ? (
+                <Skeleton className="h-6 w-16" />
+              ) : o?.sizesKnown ? (
+                bytes(o.totalBytes)
+              ) : (
+                "—"
+              )
+            }
+            hint={o && !o.sizesKnown ? "not reported by this engine" : "data and indexes"}
+          />
+        )}
+        <StatTile
+          label="Added"
+          value={relativeTime(conn.createdAt)}
+          hint={timestamp(conn.createdAt)}
+        />
+      </StatGrid>
+
+      <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+        <Panel plain>
+          <PanelHeader
+            title="Details"
+            actions={
+              can("system.admin") && (
+                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                  <Pencil className="size-3.5" />
                   Edit
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    confirm({
-                      title: "Remove connection",
-                      confirmLabel: "Remove",
-                      description: (
-                        <p>
-                          Removes <b>{conn.name}</b> from the dashboard. The database itself is not
-                          touched.
-                        </p>
-                      ),
-                      action: async (c) => {
-                        await del(`/databases/${conn.id}`, { confirm: c })
-                        refreshConnections()
-                        goto("/databases")
-                      },
-                    })
-                  }
-                >
-                  <Trash className="size-4" />
-                  Remove
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive"
-                  onClick={() =>
-                    confirm({
-                      title: "Delete database",
-                      confirmLabel: "Delete for good",
-                      phrase: dropPhrase(conn),
-                      description: (
-                        <div className="space-y-2">
-                          <p>
-                            Deletes <b>{dropPhrase(conn)}</b> on {conn.host || "this server"}.{" "}
-                            {dropExplanation(conn)}
-                          </p>
-                          <p>
-                            Nothing here can bring it back — take a dump first if you might want it.
-                            If this database was started from this page, its container keeps
-                            running; remove that from Docker.
-                          </p>
-                        </div>
-                      ),
-                      action: async (c) => {
-                        const res = await del<{ connectionRemoved: boolean }>(
-                          `/databases/${conn.id}/database`,
-                          { confirm: c, body: {} },
-                        )
-                        refreshConnections()
-                        if (res.connectionRemoved) goto("/databases")
-                      },
-                    })
-                  }
-                >
-                  <WarningFill className="size-4" />
-                  Delete database
-                </Button>
-              </>
-            )}
-          </>
-        }
-      />
-
-      <div className="grid items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-        <Panel>
-          <PanelHeader title="Details" />
+              )
+            }
+          />
           <PanelBody>
-            <DetailList>
+            <DetailList className="gap-y-2.5">
+              <Detail label="Name">{conn.name}</Detail>
               <Detail label="Engine">{label}</Detail>
-              <Detail label="Host">{conn.host || "this server"}</Detail>
-              <Detail label="Port">{conn.port || "—"}</Detail>
-              <Detail label="User">{conn.user || "—"}</Detail>
+              <Detail label="Host">
+                <span className="font-mono">{conn.host || "this server"}</span>
+              </Detail>
+              <Detail label="Port">
+                <span className="font-mono">{conn.port || "—"}</span>
+              </Detail>
+              <Detail label="User">
+                <span className="font-mono">{conn.user || "—"}</span>
+              </Detail>
               <Detail label={info?.kind === "keyvalue" ? "Keyspace" : "Database"}>
                 <span className="font-mono">{conn.database || "—"}</span>
               </Detail>
@@ -139,40 +163,98 @@ export default function ConnectionPage() {
           </PanelBody>
         </Panel>
 
-        <Panel>
-          <PanelHeader
-            title={
-              objectWord === "collection"
-                ? "Collections"
-                : objectWord === "keyspace"
-                  ? "Keys"
-                  : "Tables"
-            }
-            actions={
-              <Link
-                href={hrefFor("/databases")}
-                className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-              >
-                Browse <ArrowRight className="size-3" />
-              </Link>
-            }
-          />
-          <PanelBody>
-            {!countable ? (
-              <p className="text-sm text-muted-foreground">
-                Open Browse to work through this keyspace.
-              </p>
-            ) : tables.loading && !tables.data ? (
-              <Spinner className="text-muted-foreground" />
-            ) : (
-              <p className="text-sm">
-                <span className="numeric text-lg font-semibold">{tables.data?.length ?? 0}</span>{" "}
-                <span className="text-muted-foreground">
-                  {(tables.data?.length ?? 0) === 1 ? objectWord : `${objectWord}s`}
-                </span>
-              </p>
+        <Panel plain>
+          <PanelHeader title="Maintenance" />
+          <RowList>
+            {can("service.control") && (
+              <Row
+                title="Dump and download"
+                subtitle="Written on the server, where a restore reads it, and downloaded here as it finishes."
+                trailing={<BackupButton conn={conn} />}
+              />
             )}
-          </PanelBody>
+            {can("system.admin") && (
+              <>
+                <Row
+                  title="Remove from the dashboard"
+                  subtitle="Forgets the connection and its saved queries. The database itself is not touched."
+                  trailing={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        confirm({
+                          title: "Remove connection",
+                          confirmLabel: "Remove",
+                          description: (
+                            <p>
+                              Removes <b>{conn.name}</b> from the dashboard. The database itself is
+                              not touched.
+                            </p>
+                          ),
+                          action: async (c) => {
+                            await del(`/databases/${conn.id}`, { confirm: c })
+                            refreshConnections()
+                            goto("/databases")
+                          },
+                        })
+                      }
+                    >
+                      <Trash className="size-3.5" />
+                      Remove
+                    </Button>
+                  }
+                />
+                <Row
+                  title="Delete the database"
+                  subtitle={dropExplanation(conn)}
+                  trailing={
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() =>
+                        confirm({
+                          title: "Delete database",
+                          confirmLabel: "Delete for good",
+                          phrase: dropPhrase(conn),
+                          description: (
+                            <div className="space-y-2">
+                              <p>
+                                Deletes <b>{dropPhrase(conn)}</b> on {conn.host || "this server"}.{" "}
+                                {dropExplanation(conn)}
+                              </p>
+                              <p>
+                                Nothing here can bring it back — take a dump first if you might want
+                                it. If this database was started from this page, its container keeps
+                                running; remove that from Docker.
+                              </p>
+                            </div>
+                          ),
+                          action: async (c) => {
+                            const res = await del<{ connectionRemoved: boolean }>(
+                              `/databases/${conn.id}/database`,
+                              { confirm: c, body: {} },
+                            )
+                            refreshConnections()
+                            if (res.connectionRemoved) goto("/databases")
+                          },
+                        })
+                      }
+                    >
+                      <WarningFill className="size-3.5" />
+                      Delete…
+                    </Button>
+                  }
+                />
+              </>
+            )}
+            {!can("service.control") && (
+              <Row
+                title="Nothing to do here"
+                subtitle="Your role can browse this connection but not dump, remove or delete it."
+              />
+            )}
+          </RowList>
         </Panel>
       </div>
 
@@ -225,8 +307,8 @@ function BackupButton({ conn }: { conn: DbConnection }) {
   }
   return (
     <Button size="sm" variant="outline" onClick={run} pending={busy}>
-      <CloudDownload className="size-4" />
-      Dump &amp; download
+      <CloudDownload className="size-3.5" />
+      Dump
     </Button>
   )
 }

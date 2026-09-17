@@ -8,7 +8,8 @@ import type { DbConnection, OrmTarget, OrmTargetInfo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { CodeEditor } from "@/components/code-editor"
 import { Button } from "@/components/ui/button"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { Pane, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { FilterChip } from "@/components/tabs"
 import { EmptyState, Notice, Spinner } from "@/components/state"
 import { copyText } from "@/lib/clipboard"
 
@@ -73,23 +74,25 @@ export function OrmTab({ conn, schema }: { conn: DbConnection; schema: string })
   }
 
   return (
-    <Panel>
+    <Panel plain className="animate-rise">
       <PanelHeader
         title="Generate from this schema"
         actions={
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1">
+            {/* The chosen generator is a selection, so it takes the neutral
+                fill every selection does — not the brand face, which is the
+                mark of the one command on a surface. */}
             {targets.data?.map((t) => (
-              <Button
+              <FilterChip
                 key={t.id}
-                size="sm"
-                variant={target === t.id ? "default" : "outline"}
+                selected={output !== null && target === t.id}
                 onClick={() => generate(t.id)}
                 disabled={busy}
                 title={t.description}
               >
-                {busy && target === t.id ? <Spinner /> : null}
+                {busy && target === t.id ? <Spinner className="size-3" /> : null}
                 {t.label}
-              </Button>
+              </FilterChip>
             ))}
           </div>
         }
@@ -103,17 +106,19 @@ export function OrmTab({ conn, schema }: { conn: DbConnection; schema: string })
           />
         )}
         {busy && !output && (
-          <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 p-10 text-body text-muted-foreground">
             <Spinner /> Introspecting {schema || "database"}…
           </div>
         )}
         {output && (
-          <CodeEditor
-            className="h-[calc(100svh-24rem)]"
-            language={output.filename.endsWith(".prisma") ? "prisma" : "typescript"}
-            value={output.schema}
-            readOnly
-          />
+          <Pane>
+            <CodeEditor
+              className="h-[calc(100svh-26rem)] min-h-64"
+              language={output.filename.endsWith(".prisma") ? "prisma" : "typescript"}
+              value={output.schema}
+              readOnly
+            />
+          </Pane>
         )}
       </PanelBody>
       {output && (

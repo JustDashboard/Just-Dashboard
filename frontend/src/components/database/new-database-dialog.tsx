@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Database, Linked } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { errorMessage, get, post } from "@/lib/api"
@@ -8,10 +8,10 @@ import type { DbConnection, DbProvisionOption } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/state"
 import { Modal } from "@/components/modal"
-import { ChoiceCard } from "@/components/choice-card"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { Field, FieldRow, FormNote, FormSection } from "@/components/form"
 
 /**
  * Making a database, which is the thing somebody on this page actually wants.
@@ -39,6 +39,7 @@ export function NewDatabaseDialog({
   /** Swap to the connection form for something this host cannot detect. */
   onConnectManually: () => void
 }) {
+  const id = useId()
   const options = usePoll(
     (signal) => get<DbProvisionOption[]>("/databases/provision/options", undefined, signal),
     0,
@@ -110,99 +111,107 @@ export function NewDatabaseDialog({
     <Modal
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
+      size="lg"
       title="New database"
+      description="Starts a database in a container on this server and connects it."
       footer={
         <>
           {/* The manual form has not gone away, it has stopped being the
               default: a managed Postgres or a database on another machine is
               not a container here and cannot be detected. */}
           <Button
-            variant="link"
+            variant="ghost"
             size="sm"
-            className="px-0 text-muted-foreground"
+            className="mr-auto text-muted-foreground"
             disabled={busy !== null}
             onClick={() => {
               onOpenChange(false)
               onConnectManually()
             }}
           >
-            <Linked className="size-3.5" />
+            <Linked />
             Connect one somewhere else instead
           </Button>
-          <div className="flex gap-2">
-            <Button variant="ghost" disabled={busy !== null} onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button disabled={!selected || busy !== null} onClick={create}>
-              <Database className="size-3.5" />
-              Create
-            </Button>
-          </div>
+          <Button variant="ghost" disabled={busy !== null} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button disabled={!selected || busy !== null} onClick={create} pending={busy !== null}>
+            <Database />
+            Create
+          </Button>
         </>
       }
     >
       {busy ? (
-        <div className="flex flex-col items-center gap-3 py-8 text-sm text-muted-foreground">
-          <Spinner className="size-6 text-primary" />
-          {busy}
-          <p className="text-hint">
+        <div className="flex flex-col items-center gap-3 py-10 text-center">
+          <Spinner className="size-5 text-muted-foreground" />
+          <p className="text-body font-medium">{busy}</p>
+          <FormNote className="max-w-sm">
             It connects itself when it is ready. This can take a minute the first time, while the
             image is pulled.
-          </p>
+          </FormNote>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            {options.data?.map((o) => (
-              <ChoiceCard
-                key={o.engine}
-                selected={engine === o.engine}
-                onClick={() => setEngine(o.engine)}
-                className="min-h-0 gap-0.5"
-              >
-                <span className="flex items-center gap-1.5 text-body font-medium">
-                  <Database className="size-3.5 text-muted-foreground" />
-                  {o.label}
-                </span>
-                <span className="truncate font-mono text-micro text-muted-foreground">
-                  {o.image}
-                </span>
-              </ChoiceCard>
-            ))}
-            {!options.data && <Spinner />}
-          </div>
-
-          {selected && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="newdb-name">Name</Label>
-                <Input
-                  id="newdb-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={`jd-${selected.engine}`}
-                  className="font-mono text-xs"
-                />
+        <div className="grid gap-5">
+          <FormSection title="Engine">
+            {!options.data ? (
+              <Spinner className="text-muted-foreground" />
+            ) : (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {options.data.map((o) => (
+                  <ChoiceCard
+                    key={o.engine}
+                    selected={engine === o.engine}
+                    onClick={() => setEngine(o.engine)}
+                    className="min-h-0 gap-0.5 px-2.5 py-2"
+                  >
+                    <ChoiceCardTitle className="truncate">{o.label}</ChoiceCardTitle>
+                    <ChoiceCardHint className="w-full truncate font-mono">{o.image}</ChoiceCardHint>
+                  </ChoiceCard>
+                ))}
               </div>
-              {selected.driver !== "redis" && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="newdb-database">Database</Label>
-                  <Input
-                    id="newdb-database"
-                    value={database}
-                    onChange={(e) => setDatabase(e.target.value)}
-                    placeholder="app"
-                    className="font-mono text-xs"
-                  />
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </FormSection>
 
-          <p className="text-hint leading-relaxed text-muted-foreground">
+          <FieldRow>
+            <Field
+              label="Name"
+              htmlFor={`${id}-name`}
+              hint="The container's name, and how it is listed here."
+            >
+              <Input
+                id={`${id}-name`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={selected ? `jd-${selected.engine}` : "jd-postgres"}
+                className="font-mono"
+                disabled={!selected}
+              />
+            </Field>
+            <Field
+              label="Database"
+              htmlFor={`${id}-database`}
+              hint={
+                selected?.driver === "redis"
+                  ? "Redis numbers its keyspaces itself."
+                  : "Created at first boot, empty."
+              }
+            >
+              <Input
+                id={`${id}-database`}
+                value={database}
+                onChange={(e) => setDatabase(e.target.value)}
+                placeholder="app"
+                className="font-mono"
+                disabled={!selected || selected.driver === "redis"}
+              />
+            </Field>
+          </FieldRow>
+
+          <FormNote>
             Runs on this server, published to localhost only, with a generated password you never
             have to type. It appears in the picker as soon as it answers.
-          </p>
+          </FormNote>
         </div>
       )}
     </Modal>

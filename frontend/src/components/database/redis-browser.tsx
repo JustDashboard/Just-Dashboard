@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import {
   Clock,
   Copy,
@@ -28,6 +28,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { EmptyNote, EmptyState, LoadingRows, Spinner } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
+import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
 import {
   Select,
   SelectContent,
@@ -230,8 +231,8 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                 className={cn(
                   "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
                   selected === k.key
-                    ? "bg-plot-primary font-medium text-foreground"
-                    : "hover:bg-accent",
+                    ? "bg-accent font-medium text-foreground"
+                    : "hover:bg-row-hover",
                 )}
               >
                 <span className="truncate font-mono text-xs">{k.key}</span>
@@ -334,6 +335,7 @@ function NewKeyDialog({
   onClose: () => void
   onCreate: (key: string, type: string, field: string, value: string, ttl: number) => Promise<void>
 }) {
+  const id = useId()
   const [key, setKey] = useState("")
   const [type, setType] = useState("string")
   const [field, setField] = useState("")
@@ -361,76 +363,90 @@ function NewKeyDialog({
       open
       onOpenChange={onClose}
       title="New key"
+      description="Creates one key of the chosen type. Redis fixes a key's type when it is created."
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button disabled={!key.trim() || busy} onClick={submit} pending={busy}>
-            <Plus className="size-3.5" />
+            <Plus />
             Create
           </Button>
         </>
       }
     >
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="redis-new-key">Key</Label>
+      <div className="grid gap-5">
+        <Field
+          label="Key"
+          htmlFor={`${id}-key`}
+          hint="Colons are a naming convention, not a structure — app:session:1 is one key."
+        >
           <Input
-            id="redis-new-key"
+            id={`${id}-key`}
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            className="font-mono text-xs"
+            className="font-mono"
             placeholder="app:session:1"
+            autoFocus
           />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>Type</Label>
+        </Field>
+        <FieldRow>
+          <Field label="Type" hint="Fixed once the key exists.">
             <Select value={type} onValueChange={setType}>
-              <SelectTrigger size="sm">
+              <SelectTrigger className="w-full font-mono" aria-label="Type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {["string", "list", "set", "zset", "hash"].map((t) => (
-                  <SelectItem key={t} value={t}>
+                  <SelectItem key={t} value={t} className="font-mono">
                     {t}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="redis-new-ttl">TTL seconds</Label>
+          </Field>
+          <Field
+            label="Expiry"
+            htmlFor={`${id}-ttl`}
+            hint="Seconds until the key is deleted. -1 keeps it until something removes it."
+          >
             <Input
-              id="redis-new-ttl"
+              id={`${id}-ttl`}
               value={ttl}
               onChange={(e) => setTtl(e.target.value)}
-              className="font-mono text-xs"
+              className="font-mono"
+              inputMode="numeric"
             />
-          </div>
-        </div>
+          </Field>
+        </FieldRow>
         {needsField && (
-          <div className="space-y-1.5">
-            <Label htmlFor="redis-new-field">{type === "zset" ? "Score" : "Field"}</Label>
+          <Field
+            label={type === "zset" ? "Score" : "Field"}
+            htmlFor={`${id}-field`}
+            hint={
+              type === "zset"
+                ? "The number the member is sorted by."
+                : "The first field of the hash; more can be added afterwards."
+            }
+          >
             <Input
-              id="redis-new-field"
+              id={`${id}-field`}
               value={field}
               onChange={(e) => setField(e.target.value)}
-              className="font-mono text-xs"
+              className="font-mono"
               placeholder={type === "zset" ? "100" : "name"}
             />
-          </div>
+          </Field>
         )}
-        <div className="space-y-1.5">
-          <Label htmlFor="redis-new-value">{type === "zset" ? "Member" : "Value"}</Label>
+        <Field label={type === "zset" ? "Member" : "Value"} htmlFor={`${id}-value`}>
           <Textarea
-            id="redis-new-value"
+            id={`${id}-value`}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             className="min-h-24 font-mono text-xs"
           />
-        </div>
+        </Field>
       </div>
     </Modal>
   )
@@ -445,8 +461,10 @@ function RenameKeyDialog({
   onClose: () => void
   onRename: (to: string) => Promise<void>
 }) {
+  const id = useId()
   const [to, setTo] = useState(from)
   const [busy, setBusy] = useState(false)
+  const valid = to.trim() !== "" && to.trim() !== from
 
   const submit = async () => {
     setBusy(true)
@@ -463,31 +481,41 @@ function RenameKeyDialog({
     <Modal
       open
       onOpenChange={onClose}
+      size="sm"
       title="Rename key"
+      description={`Renames ${from} in place.`}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button disabled={!to.trim() || to === from || busy} onClick={submit} pending={busy}>
-            <FloppyDisk className="size-3.5" />
+          <Button disabled={!valid || busy} onClick={submit} pending={busy}>
+            <FloppyDisk />
             Rename
           </Button>
         </>
       }
     >
-      <div className="space-y-1.5">
-        <Label htmlFor="redis-rename">New name</Label>
-        <Input
-          id="redis-rename"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && to.trim() && to !== from && submit()}
-          className="font-mono text-xs"
-        />
-        <p className="text-hint text-muted-foreground">
-          Redis renames in place. An existing key of that name is overwritten.
-        </p>
+      <div className="grid gap-5">
+        <FormFacts>
+          <FormFact label="Key" mono>
+            {from}
+          </FormFact>
+        </FormFacts>
+        <Field
+          label="New name"
+          htmlFor={`${id}-to`}
+          hint="Redis renames in place. An existing key of that name is overwritten."
+        >
+          <Input
+            id={`${id}-to`}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && valid && !busy && void submit()}
+            className="font-mono"
+            autoFocus
+          />
+        </Field>
       </div>
     </Modal>
   )
@@ -851,14 +879,21 @@ function MemberDialog({
   onClose: () => void
   onSave: (field: string, value: string) => Promise<void>
 }) {
+  const id = useId()
   const [field, setField] = useState(initialField)
   const [member, setMember] = useState(initialValue)
   const [busy, setBusy] = useState(false)
 
   const fieldLabel: Record<string, string> = {
     hash: "Field name",
-    list: isNew ? "Position (blank to append)" : "Position",
+    list: isNew ? "Position" : "Position",
     zset: "Score",
+    set: "",
+  }
+  const fieldHint: Record<string, string> = {
+    hash: "",
+    list: isNew ? "Blank appends to the end." : "Fixed — a list edits in place.",
+    zset: "The number the member is sorted by.",
     set: "",
   }
   const label = fieldLabel[type] ?? ""
@@ -882,10 +917,9 @@ function MemberDialog({
       open
       onOpenChange={(o) => !o && onClose()}
       size="sm"
-      title={
-        <>
-          {isNew ? "Add" : "Edit"} {type} member
-        </>
+      title={`${isNew ? "Add" : "Edit"} ${type} member`}
+      description={
+        isNew ? `Adds one member to this ${type}.` : `Changes one member of this ${type}.`
       }
       footer={
         <>
@@ -898,33 +932,33 @@ function MemberDialog({
         </>
       }
     >
-      <div className="grid gap-3">
+      <div className="grid gap-5">
         {label && (
-          <div className="space-y-1.5">
-            <Label>{label}</Label>
+          <Field label={label} htmlFor={`${id}-field`} hint={fieldHint[type] || undefined}>
             <Input
+              id={`${id}-field`}
               value={field}
               onChange={(e) => setField(e.target.value)}
-              className="font-mono text-xs"
+              className="font-mono"
               disabled={type === "list" && !isNew}
               autoFocus={isNew}
             />
-          </div>
+          </Field>
         )}
-        <div className="space-y-1.5">
-          <Label>Value</Label>
+        <Field label="Value" htmlFor={`${id}-value`}>
           <Textarea
+            id={`${id}-value`}
             value={member}
             onChange={(e) => setMember(e.target.value)}
             className="min-h-24 font-mono text-xs"
             autoFocus={!isNew}
           />
-        </div>
+        </Field>
         {type === "set" && !isNew && (
-          <p className="text-xs text-muted-foreground">
+          <FormNote>
             A set has no positions, so editing a member adds the new value; remove the old one if
             you meant to replace it.
-          </p>
+          </FormNote>
         )}
       </div>
     </Modal>

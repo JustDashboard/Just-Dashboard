@@ -428,16 +428,21 @@ export default function TerminalPage() {
           that exists.
         </Notice>
       )}
+      {/* One frame around the whole workbench. The rail, the emulator and the
+          tools column are separated by a hairline each rather than by a gutter
+          and three borders: three framed panes with gaps between them read as
+          three boxes floating on the page, and the screen is one working
+          surface. */}
       <div
         ref={workspaceRef}
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col gap-3 lg:flex-row",
-          immersive && "fixed inset-0 z-50 gap-2 overflow-hidden bg-background p-2",
+          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card lg:flex-row",
+          immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background",
         )}
       >
         {showRail && (
-          <div className="relative flex min-h-[16rem] shrink-0 lg:min-h-0 lg:w-(--jd-rail)">
+          <div className="relative flex min-h-[16rem] shrink-0 border-b border-hairline lg:min-h-0 lg:w-(--jd-rail) lg:border-r lg:border-b-0">
             <SessionRail
               sessions={sessions}
               folders={data.folders}
@@ -476,6 +481,7 @@ export default function TerminalPage() {
           {openWindows.map((window) => (
             <XtermPane
               key={window.id}
+              flush
               path={`/terminal/${window.id}/attach`}
               terminalSessionId={window.id}
               active={window.id === activeWindow?.id}
@@ -494,7 +500,7 @@ export default function TerminalPage() {
           ))}
           {!activeWindow && active && <LoadingPanel rows={4} />}
           {!activeWindow && !active && (
-            <Pane className="flex-1">
+            <Pane flush className="flex-1">
               <PaneHeader className="gap-1">{terminalHeader}</PaneHeader>
               <EmptyState
                 className="flex-1"
@@ -513,7 +519,7 @@ export default function TerminalPage() {
         </div>
 
         {showTools && (
-          <div className="relative flex min-h-[16rem] shrink-0 flex-col lg:min-h-0 lg:w-(--jd-tools)">
+          <div className="relative flex min-h-[16rem] shrink-0 flex-col border-t border-hairline lg:min-h-0 lg:w-(--jd-tools) lg:border-t-0 lg:border-l">
             <ResizeHandle
               side="right"
               label="Files and git panel width"
@@ -562,7 +568,7 @@ function WorkspaceToggle({
           aria-label={label}
           aria-pressed={active}
           className={cn(
-            "size-8 shrink-0 rounded-md p-0",
+            "size-7 shrink-0 rounded-md p-0",
             active ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
           )}
           onClick={onClick}

@@ -162,7 +162,7 @@ test("database selections cannot follow a different sort or a loading table", as
   await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).not.toBeChecked()
   await expect(page.getByRole("button", { name: "Delete 1", exact: true })).toHaveCount(0)
   await page.getByRole("checkbox", { name: "Select row 1", exact: true }).click()
-  await page.getByRole("button", { name: "other table", exact: false }).click()
+  await page.getByRole("button", { name: /^other\b/ }).click()
   await expect(page).toHaveURL(/table=other/)
   await expect.poll(() => held.length).toBeGreaterThan(0)
   await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).toHaveCount(0)

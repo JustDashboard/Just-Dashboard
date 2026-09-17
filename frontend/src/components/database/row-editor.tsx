@@ -2,17 +2,23 @@
 
 import { useMemo, useState } from "react"
 import { notify } from "@/lib/toast"
-import { cn, ringSafeScroll } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { errorMessage } from "@/lib/api"
 import { coerceDbValue } from "@/lib/db-values"
 import type { DbColumn } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Modal } from "@/components/modal"
+import { FormFact, FormFacts, FormNote } from "@/components/form"
 
 type FieldState = { value: string; isNull: boolean }
 
@@ -22,13 +28,18 @@ type FieldState = { value: string; isNull: boolean }
  * existing row, and whether the submit carries a primary key to scope the
  * update. Exact integers and decimals travel as strings so the browser never
  * rounds them; finite ordinary numbers and booleans follow their column type.
- * NULL is kept distinct from the
- * empty string through an explicit toggle rather than guessed from a blank box.
+ * NULL is kept distinct from the empty string through an explicit switch
+ * rather than guessed from a blank box.
+ *
+ * Each column is one line: its name and type on the left, the value on the
+ * right, the null switch at the edge — so a row of twenty columns reads down
+ * as the table it came from rather than as twenty stacked forms.
  */
 export function RowEditor({
   open,
   onOpenChange,
   mode,
+  table,
   columns,
   primaryKey,
   initial,
@@ -37,6 +48,7 @@ export function RowEditor({
   open: boolean
   onOpenChange: (open: boolean) => void
   mode: "insert" | "edit"
+  table?: string
   columns: DbColumn[]
   primaryKey: string[]
   initial?: Record<string, unknown>
@@ -85,11 +97,19 @@ export function RowEditor({
     }
   }
 
+  const keyFacts = mode === "edit" ? primaryKey.map((pk) => `${pk} = ${String(initial?.[pk])}`) : []
+
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
+      size="lg"
       title={mode === "insert" ? "Insert row" : "Edit row"}
+      description={
+        mode === "insert"
+          ? `A new row in ${table ?? "the table"}. Empty fields take the column's default.`
+          : `Changes are scoped to the row's primary key.`
+      }
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
@@ -101,54 +121,109 @@ export function RowEditor({
         </>
       }
     >
-      <div className={cn("grid max-h-[60vh] gap-3 overflow-y-auto", ringSafeScroll)}>
-        {columns.map((c) => {
-          const f = fields[c.name] ?? { value: "", isNull: false }
-          const isPk = primaryKey.includes(c.name)
-          const long = /text|json|xml|blob|bytea/i.test(c.type)
-          return (
-            <div key={c.name} className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor={`f-${c.name}`} className="font-mono text-xs">
-                  {c.name}
-                  <span className="ml-1.5 font-sans font-normal text-muted-foreground">
+      <div className="grid gap-4">
+        <FormFacts>
+          {table && (
+            <FormFact label="Table" mono>
+              {table}
+            </FormFact>
+          )}
+          {keyFacts.length > 0 && (
+            <FormFact label="Row" mono>
+              {keyFacts.join(", ")}
+            </FormFact>
+          )}
+        </FormFacts>
+
+        <div className="min-w-0 divide-y divide-hairline">
+          {columns.map((c) => {
+            const f = fields[c.name] ?? { value: "", isNull: false }
+            const isPk = primaryKey.includes(c.name)
+            const long = /text|json|xml|blob|bytea|clob/i.test(c.type)
+            const bool = /^bool/i.test(c.type)
+            const fieldId = `f-${c.name}`
+            return (
+              <div
+                key={c.name}
+                className="grid gap-x-4 gap-y-1.5 py-2.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_auto] sm:items-start"
+              >
+                <label htmlFor={fieldId} className="min-w-0 sm:pt-2">
+                  <span className="block truncate font-mono text-xs font-medium">{c.name}</span>
+                  <span className="block truncate text-hint text-muted-foreground">
                     {c.type.toLowerCase()}
                     {isPk && " · pk"}
-                    {!c.nullable && " · required"}
+                    {!c.nullable && !isPk && " · required"}
                   </span>
-                </Label>
-                {c.nullable && (
-                  <label className="flex items-center gap-1.5 text-hint text-muted-foreground">
-                    <Checkbox
-                      checked={f.isNull}
-                      onCheckedChange={(v) => set(c.name, { isNull: Boolean(v) })}
+                </label>
+                <div className="min-w-0">
+                  {bool ? (
+                    <Select
+                      value={f.isNull ? "null" : f.value === "" ? "default" : f.value}
+                      onValueChange={(v) => {
+                        if (v === "null") set(c.name, { isNull: true })
+                        else set(c.name, { isNull: false, value: v === "default" ? "" : v })
+                      }}
+                    >
+                      <SelectTrigger id={fieldId} className="w-full font-mono" disabled={f.isNull}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {mode === "insert" && <SelectItem value="default">default</SelectItem>}
+                        <SelectItem value="true" className="font-mono">
+                          true
+                        </SelectItem>
+                        <SelectItem value="false" className="font-mono">
+                          false
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : long ? (
+                    <Textarea
+                      id={fieldId}
+                      value={f.isNull ? "" : f.value}
+                      disabled={f.isNull}
+                      onChange={(e) => set(c.name, { value: e.target.value })}
+                      className="max-h-48 min-h-16 font-mono text-xs"
+                      placeholder={
+                        f.isNull ? "null" : c.default || (mode === "insert" ? "default" : "")
+                      }
                     />
-                    null
-                  </label>
-                )}
+                  ) : (
+                    <Input
+                      id={fieldId}
+                      value={f.isNull ? "" : f.value}
+                      disabled={f.isNull}
+                      onChange={(e) => set(c.name, { value: e.target.value })}
+                      className={cn("font-mono", f.isNull && "italic")}
+                      placeholder={
+                        f.isNull ? "null" : c.default || (mode === "insert" ? "default" : "")
+                      }
+                    />
+                  )}
+                </div>
+                <div className="flex h-full items-center sm:justify-end sm:pt-2">
+                  {c.nullable && (
+                    <label className="flex items-center gap-2 text-hint text-muted-foreground">
+                      <Switch
+                        size="sm"
+                        checked={f.isNull}
+                        onCheckedChange={(v) => set(c.name, { isNull: v })}
+                        aria-label={`${c.name} is null`}
+                      />
+                      null
+                    </label>
+                  )}
+                </div>
               </div>
-              {long ? (
-                <Textarea
-                  id={`f-${c.name}`}
-                  value={f.isNull ? "" : f.value}
-                  disabled={f.isNull}
-                  onChange={(e) => set(c.name, { value: e.target.value })}
-                  className="min-h-20 font-mono text-xs"
-                  placeholder={f.isNull ? "null" : c.default || ""}
-                />
-              ) : (
-                <Input
-                  id={`f-${c.name}`}
-                  value={f.isNull ? "" : f.value}
-                  disabled={f.isNull}
-                  onChange={(e) => set(c.name, { value: e.target.value })}
-                  className="font-mono text-xs"
-                  placeholder={f.isNull ? "null" : c.default || ""}
-                />
-              )}
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
+        {mode === "insert" && (
+          <FormNote>
+            Leave a field empty to let the column&apos;s default decide it. Numbers and booleans are
+            sent as their column type; everything else as text.
+          </FormNote>
+        )}
       </div>
     </Modal>
   )

@@ -10,7 +10,6 @@ import {
   Pencil,
   Pin,
   Plus,
-  Terminal,
   Trash,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -116,9 +115,8 @@ export function SessionRail({
   }
 
   return (
-    <Pane aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
-      <PaneHeader className="gap-1">
-        <Terminal className="size-3.5 text-muted-foreground" />
+    <Pane flush aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
+      <PaneHeader className="gap-1 pl-3">
         <span className="text-xs font-medium">Sessions</span>
         <span className="flex-1" />
         <IconAction label="New folder" className="size-7" onClick={() => setCreatingFolder(true)}>
@@ -128,17 +126,22 @@ export function SessionRail({
           <Plus />
         </IconAction>
       </PaneHeader>
-      <div className="border-b border-hairline p-2">
-        <SearchInput
-          dense
-          value={filter}
-          spellCheck={false}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder="Filter sessions"
-          containerClassName="sm:w-full"
-        />
-      </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+      {/* A filter over one session is a box with nothing to do. It appears
+          once the list is long enough that scanning it stops being faster
+          than typing. */}
+      {(sessions.length > 5 || filter) && (
+        <div className="border-b border-hairline px-2 py-1.5">
+          <SearchInput
+            dense
+            value={filter}
+            spellCheck={false}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Filter sessions"
+            containerClassName="sm:w-full"
+          />
+        </div>
+      )}
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-1.5">
         {creatingFolder && (
           <InlineEdit
             placeholder="Folder name"
@@ -165,9 +168,9 @@ export function SessionRail({
           />
         ))}
         {groups.unfiled.length > 0 && (
-          <div className="space-y-1" data-folder="">
+          <div className="space-y-0.5" data-folder="">
             {folders.length > 0 && (
-              <p className="px-1 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="px-2 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
                 Unfiled
               </p>
             )}
@@ -269,7 +272,7 @@ function FolderGroup({
         </span>
       </div>
       {!collapsed && items.length > 0 && (
-        <div className="mt-0.5 space-y-1 pl-3">
+        <div className="mt-0.5 space-y-0.5 pl-3">
           {items.map((session) => (
             <SessionRow key={session.id} session={session} {...rows} />
           ))}
@@ -309,15 +312,16 @@ function SessionRow({
       data-session={session.id}
       data-active={active || undefined}
       className={cn(
-        "group flex min-w-0 items-center gap-1 rounded-lg border border-transparent py-1 pr-1 pl-2 transition-colors",
-        active ? "border-hairline bg-accent" : "hover:bg-row-hover",
+        "group flex min-w-0 items-center gap-1 rounded-md py-1 pr-1 pl-2.5 transition-colors",
+        active ? "bg-accent" : "hover:bg-row-hover",
       )}
     >
+      {/* No terminal glyph on the row: every row in this list is a terminal,
+          so the icon said nothing the column had not already said. */}
       <button
         onClick={() => onSelect(session)}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2 text-left focus-ring-inset"
       >
-        <Terminal className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
             {session.favourite && <Pin className="size-2.5 shrink-0 text-muted-foreground" />}
@@ -326,7 +330,7 @@ function SessionRow({
             </span>
           </span>
           <span className="block truncate font-mono text-micro leading-tight text-muted-foreground">
-            {session.cwd ? truncateMiddle(session.cwd, 26) : relativeTime(session.createdAt)}
+            {session.cwd ? truncateMiddle(session.cwd, 30) : relativeTime(session.createdAt)}
           </span>
         </span>
       </button>
