@@ -740,7 +740,7 @@ if [ "${KEEP_ENV:-0}" -eq 0 ]; then
 	if [ "${GENERATED_PW:-0}" -eq 1 ]; then
 		say "    password  ${BOLD}$ADMIN_PW${RESET}"
 		say ""
-		warn "Save that password now — it is shown once, and you must change it at first login."
+		warn "Save that password now — it is shown once. Change it from Account → Security whenever you like."
 	else
 		say "    password  ${DIM}(the one you chose)${RESET}"
 	fi

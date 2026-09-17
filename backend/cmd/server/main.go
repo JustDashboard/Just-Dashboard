@@ -314,10 +314,13 @@ func janitor(ctx context.Context, svc *auth.Service, log *slog.Logger) {
 	}
 }
 
-// bootstrapAdmin creates the first admin on an empty database. The generated
-// password is printed once to the process log and must be changed at first
-// login; two-factor enrollment is then forced before the account can do
-// anything at all.
+// bootstrapAdmin creates the first admin on an empty database.
+//
+// A password nobody chose — one this process generated and printed to its own
+// log — must be changed at first login. A password the operator set through
+// the installer is theirs already, and asking for a new one thirty seconds
+// after they typed it is a demand with nothing behind it. Two-factor
+// enrollment is a separate matter, decided by JD_REQUIRE_2FA.
 func bootstrapAdmin(ctx context.Context, svc *auth.Service, st *store.Store, log *slog.Logger) error {
 	users, err := svc.ListUsers(ctx)
 	if err != nil {
@@ -335,7 +338,7 @@ func bootstrapAdmin(ctx context.Context, svc *auth.Service, st *store.Store, log
 	if generated {
 		password = auth.RandomToken(18)
 	}
-	if _, err := svc.CreateUser(ctx, username, password, auth.RoleAdmin, true); err != nil {
+	if _, err := svc.CreateUser(ctx, username, password, auth.RoleAdmin, generated); err != nil {
 		return fmt.Errorf("bootstrap admin: %w", err)
 	}
 	if generated {

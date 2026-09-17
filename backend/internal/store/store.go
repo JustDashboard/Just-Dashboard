@@ -38,7 +38,11 @@ CREATE TABLE IF NOT EXISTS users (
   failed_count   INTEGER NOT NULL DEFAULT 0,
   locked_until   INTEGER NOT NULL DEFAULT 0,
   last_login_at  INTEGER NOT NULL DEFAULT 0,
-  created_at     INTEGER NOT NULL
+  created_at     INTEGER NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  avatar         BLOB NOT NULL DEFAULT x'',
+  avatar_type    TEXT NOT NULL DEFAULT '',
+  avatar_at      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS recovery_codes (
@@ -978,6 +982,13 @@ END;
 // one strands whichever installs stopped at that version.
 var addedColumns = []struct{ table, column, spec string }{
 	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
+	// An account gained a name to show and a picture beside it. The sign-in
+	// name stays the lower-cased key it always was; the display name is what
+	// the operator typed, case and all.
+	{"users", "display_name", "TEXT NOT NULL DEFAULT ''"},
+	{"users", "avatar", "BLOB NOT NULL DEFAULT x''"},
+	{"users", "avatar_type", "TEXT NOT NULL DEFAULT ''"},
+	{"users", "avatar_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_runs", "manifest_json", "TEXT NOT NULL DEFAULT '{}'"},
 	{"backup_jobs", "recovery_json", "TEXT NOT NULL DEFAULT 'null'"},
 	{"backup_jobs", "sqlite_paths", "TEXT NOT NULL DEFAULT '[]'"},

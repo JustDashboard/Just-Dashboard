@@ -52,14 +52,23 @@ func NewService(st *store.Store, sealer *Sealer, sessionTTL, idleTTL time.Durati
 func (s *Service) Require2FA() bool { return s.require2FA }
 
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	// DisplayName is the name the account shows as. It is the username as it
+	// was typed when the account was made — case kept — until somebody sets
+	// it; the sign-in key underneath stays lower case so a login is never
+	// refused over a capital letter.
+	DisplayName  string    `json:"displayName"`
 	Role         Role      `json:"role"`
 	TOTPEnabled  bool      `json:"totpEnabled"`
 	Disabled     bool      `json:"disabled"`
 	MustChangePW bool      `json:"mustChangePassword"`
 	LastLoginAt  time.Time `json:"lastLoginAt"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// AvatarVersion is when the picture was last set, or zero for none. It is
+	// the cache key a client appends to the avatar URL, so a new upload shows
+	// at once and an unchanged one is not fetched again.
+	AvatarVersion int64 `json:"avatarVersion"`
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, int64, error) {
@@ -76,9 +85,12 @@ func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, 
 		lastLogin  int64
 		created    int64
 	)
-	err := row.Scan(&u.ID, &u.Username, &pwHash, &role, &totpSecret, &totpOK, &disabled, &mustChange, &failed, &locked, &lastLogin, &created)
+	err := row.Scan(&u.ID, &u.Username, &pwHash, &role, &totpSecret, &totpOK, &disabled, &mustChange, &failed, &locked, &lastLogin, &created, &u.DisplayName, &u.AvatarVersion)
 	if err != nil {
 		return nil, "", "", 0, 0, err
+	}
+	if u.DisplayName == "" {
+		u.DisplayName = u.Username
 	}
 	u.Role = Role(role)
 	u.TOTPEnabled = totpOK == 1
@@ -91,7 +103,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, 
 	return &u, pwHash, totpSecret, failed, locked, nil
 }
 
-const userCols = `id, username, password_hash, role, totp_secret, totp_enabled, disabled, must_change_pw, failed_count, locked_until, last_login_at, created_at`
+const userCols = `id, username, password_hash, role, totp_secret, totp_enabled, disabled, must_change_pw, failed_count, locked_until, last_login_at, created_at, display_name, avatar_at`
 
 func (s *Service) UserByID(ctx context.Context, id int64) (*User, error) {
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id)
@@ -120,9 +132,15 @@ func (s *Service) ListUsers(ctx context.Context) ([]*User, error) {
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password string, role Role, mustChange bool) (*User, error) {
-	username = strings.TrimSpace(strings.ToLower(username))
-	if username == "" {
-		return nil, errors.New("username required")
+	// The name as typed is the one the account shows as; the lower-cased
+	// form is only the key it signs in with.
+	displayName, err := normaliseDisplayName(username)
+	if err != nil {
+		return nil, err
+	}
+	username, err = normaliseUsername(username)
+	if err != nil {
+		return nil, err
 	}
 	if !role.Valid() {
 		return nil, fmt.Errorf("unknown role %q", role)
@@ -139,8 +157,8 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 		mc = 1
 	}
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO users(username, password_hash, role, must_change_pw, created_at) VALUES(?,?,?,?,?)`,
-		username, hash, string(role), mc, time.Now().Unix())
+		`INSERT INTO users(username, password_hash, role, must_change_pw, created_at, display_name) VALUES(?,?,?,?,?,?)`,
+		username, hash, string(role), mc, time.Now().Unix(), displayName)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, fmt.Errorf("user %q already exists", username)
@@ -149,6 +167,129 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 	}
 	id, _ := res.LastInsertId()
 	return s.UserByID(ctx, id)
+}
+
+const maxNameLen = 64
+
+// normaliseUsername is the sign-in key: trimmed, lower-cased, one word. The
+// rule is deliberately loose about characters — every username that already
+// exists must keep working — and strict only about the two things that would
+// make a name unusable as a key: whitespace inside it, and nothing at all.
+func normaliseUsername(raw string) (string, error) {
+	name := strings.TrimSpace(strings.ToLower(raw))
+	if name == "" {
+		return "", errors.New("username required")
+	}
+	if len(name) > maxNameLen {
+		return "", fmt.Errorf("username must be at most %d characters", maxNameLen)
+	}
+	for _, r := range name {
+		if r < 0x21 || r == 0x7f {
+			return "", errors.New("username cannot contain spaces or control characters")
+		}
+	}
+	return name, nil
+}
+
+// normaliseDisplayName is the name shown: trimmed, one line, case kept.
+func normaliseDisplayName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", errors.New("name required")
+	}
+	if len(name) > maxNameLen {
+		return "", fmt.Errorf("name must be at most %d characters", maxNameLen)
+	}
+	if strings.ContainsAny(name, "\r\n\t") {
+		return "", errors.New("name must be one line")
+	}
+	return name, nil
+}
+
+// Profile is the part of an account its holder can rewrite: the sign-in name
+// and the name shown. A nil field is left alone.
+type Profile struct {
+	Username    *string
+	DisplayName *string
+}
+
+// SetProfile renames an account. The sign-in name is unique across the
+// dashboard and lower-cased like every lookup; a rename that collides with
+// another account is refused rather than silently adjusted.
+func (s *Service) SetProfile(ctx context.Context, userID int64, p Profile) error {
+	if p.Username != nil {
+		name, err := normaliseUsername(*p.Username)
+		if err != nil {
+			return err
+		}
+		if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET username = ? WHERE id = ?`, name, userID); err != nil {
+			if strings.Contains(err.Error(), "UNIQUE") {
+				return fmt.Errorf("user %q already exists", name)
+			}
+			return err
+		}
+	}
+	if p.DisplayName != nil {
+		name, err := normaliseDisplayName(*p.DisplayName)
+		if err != nil {
+			return err
+		}
+		if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET display_name = ? WHERE id = ?`, name, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MaxAvatarBytes bounds a stored picture. The client resizes to a small
+// square before upload, so anything near this is not a photo of a face.
+const MaxAvatarBytes = 512 << 10
+
+// SetAvatar stores an account's picture. The bytes are stored as sent — the
+// caller has already decoded them to prove they are an image of the declared
+// type — and the version stamp changes so every cached copy is replaced.
+func (s *Service) SetAvatar(ctx context.Context, userID int64, data []byte, mimeType string) error {
+	if len(data) == 0 {
+		return errors.New("empty image")
+	}
+	if len(data) > MaxAvatarBytes {
+		return fmt.Errorf("image must be at most %d KB", MaxAvatarBytes>>10)
+	}
+	res, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET avatar = ?, avatar_type = ?, avatar_at = ? WHERE id = ?`,
+		data, mimeType, time.Now().Unix(), userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearAvatar removes the picture; the account falls back to its initials.
+func (s *Service) ClearAvatar(ctx context.Context, userID int64) error {
+	_, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET avatar = x'', avatar_type = '', avatar_at = 0 WHERE id = ?`, userID)
+	return err
+}
+
+// Avatar is the stored picture and its type, or ErrNotFound when the account
+// has none — an absence, not a failure, which is why it is the same error a
+// missing account returns.
+func (s *Service) Avatar(ctx context.Context, userID int64) ([]byte, string, error) {
+	var (
+		data     []byte
+		mimeType string
+	)
+	err := s.st.DB.QueryRowContext(ctx, `SELECT avatar, avatar_type FROM users WHERE id = ?`, userID).Scan(&data, &mimeType)
+	if err == sql.ErrNoRows || (err == nil && len(data) == 0) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return data, mimeType, nil
 }
 
 func ValidatePasswordStrength(pw string) error {

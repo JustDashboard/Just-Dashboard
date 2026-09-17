@@ -317,9 +317,10 @@ func (s *Server) handleRevokeOwnSession(w http.ResponseWriter, r *http.Request) 
 // --- dashboard account administration ---
 
 type createUserRequest struct {
-	Username string    `json:"username"`
-	Password string    `json:"password"`
-	Role     auth.Role `json:"role"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"displayName"`
+	Password    string    `json:"password"`
+	Role        auth.Role `json:"role"`
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) error {
@@ -340,15 +341,25 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	if req.DisplayName != "" {
+		if err := s.Auth.SetProfile(r.Context(), u.ID, auth.Profile{DisplayName: &req.DisplayName}); err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+		if u, err = s.Auth.UserByID(r.Context(), u.ID); err != nil {
+			return httpx.Internal(err)
+		}
+	}
 	httpx.SetAudit(r, "dashboard.user.create", u.Username, map[string]any{"role": u.Role})
 	httpx.JSON(w, http.StatusCreated, u)
 	return nil
 }
 
 type updateUserRequest struct {
-	Role     *auth.Role `json:"role,omitempty"`
-	Disabled *bool      `json:"disabled,omitempty"`
-	Password *string    `json:"password,omitempty"`
+	Role        *auth.Role `json:"role,omitempty"`
+	Disabled    *bool      `json:"disabled,omitempty"`
+	Password    *string    `json:"password,omitempty"`
+	Username    *string    `json:"username,omitempty"`
+	DisplayName *string    `json:"displayName,omitempty"`
 }
 
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error {
@@ -363,6 +374,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error 
 	target, err := s.Auth.UserByID(r.Context(), id)
 	if err != nil {
 		return httpx.ErrNotFound
+	}
+	if req.Username != nil || req.DisplayName != nil {
+		if err := s.Auth.SetProfile(r.Context(), id, auth.Profile{
+			Username: req.Username, DisplayName: req.DisplayName,
+		}); err != nil {
+			return httpx.BadRequest("%v", err)
+		}
 	}
 	if req.Role != nil {
 		if err := s.Auth.SetRole(r.Context(), id, *req.Role); err != nil {
@@ -395,6 +413,12 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error 
 	}
 	if req.Disabled != nil {
 		detail["disabled"] = *req.Disabled
+	}
+	if req.Username != nil && updated.Username != target.Username {
+		detail["renamedTo"] = updated.Username
+	}
+	if req.DisplayName != nil {
+		detail["displayName"] = updated.DisplayName
 	}
 	httpx.SetAudit(r, "dashboard.user.update", target.Username, detail)
 	httpx.JSON(w, http.StatusOK, updated)

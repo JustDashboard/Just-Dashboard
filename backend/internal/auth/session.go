@@ -147,6 +147,19 @@ func (s *Service) RevokeAllSessions(ctx context.Context, userID int64) error {
 	return err
 }
 
+// RevokeOtherSessions signs an account out everywhere but the session it is
+// asking from: the lever for "I left myself signed in somewhere" that does not
+// also cost the operator the session they are holding.
+func (s *Service) RevokeOtherSessions(ctx context.Context, userID int64, keepID string) (int64, error) {
+	res, err := s.st.DB.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND id != ?`, userID, keepID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // PurgeExpired drops sessions past their absolute deadline. Idle expiry is
 // enforced on read; this only keeps the table from growing without bound.
 func (s *Service) PurgeExpired(ctx context.Context) error {
