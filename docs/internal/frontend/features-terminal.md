@@ -74,13 +74,17 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
-- `stacks-tab.tsx` is the stack list, as rows in one panel rather than a grid of bordered cards: each row
-  carries the stack's state, its services (dot, name, ports, health) and the one action that belongs
-  there — deploy when the application is down. It opens with the same search box and state chips as the
-  containers page, because "which of these is down" is the same question asked of the same server. The
-  detail panel follows the same rule as a container: the compose verbs that are pressed daily (deploy,
-  restart) sit inline, and the rest are behind one overflow menu where each gets its word and its
-  sentence. Its services tab is a single fenced list the eye reads down, not a stack of bordered rows.
+- `stacks-tab.tsx` is the stack list, as rows in one plain panel rather than a grid of bordered cards:
+  each row carries the stack's state, its services (dot, name, ports, health) and the one action that
+  belongs there — deploy when the application is down. It opens with the same search box and state
+  chips as the containers page, because "which of these is down" is the same question asked of the same
+  server. The detail panel follows the same rule as a container: the compose verbs that are pressed
+  daily (deploy, restart) sit inline, and the rest are behind one overflow menu where each gets its word
+  and its sentence — the menu item's word-and-sentence body is `MenuItemBody` in
+  `container-actions.tsx`, shared with the container menu. Its services tab, the deploy preview's
+  service rows and the deployment history are hairline lists the eye reads down, not stacks of bordered
+  rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
+  the section keeps, and a diff or a captured compose file sits in a `Well`.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
   place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
   tagged by service, links to Files, git and a shell in the stack's directory. `container-detail.tsx` adds
@@ -118,25 +122,49 @@ piece of advice no error message can give afterwards. `site-form.tsx` shows the 
 beside the form (same renderer that writes the file, so the form is not a black box), with `DNSCheck`
 under the domain field because "the name does not point here yet" causes most certificate failures and
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
-protocol row. `ConnectionsPanel` and `OffendersPanel` both offer a one-click firewall deny — the join that
-makes the pages one product, since the address the ban log keeps naming deserves a rule outliving the ban.
+protocol row.
 
-The security section is eight pages of the same three shapes, and the rules it follows are the ones the
-[design system](shell-design.md#the-design-system) already states:
+The security section is eight pages of one shape, the host Overview's: a page header carrying the
+area's verdict, a run of `StatTile` readings on the page's own ground, the findings about that area
+under them (`AreaFindings`, plain), then the detail as plain tables that bleed to the page edge. The
+overview opens on how this browser reaches the panel — the exposure grade, the allowlist, the tunnel
+interfaces and **the address you arrived from** (`Exposure.client`) as a row of facts — then five
+tiles, one per area with a figure, each a `StatLink` to its page, and the whole posture as one findings
+list. There is no second list of the areas: the section strip already names every page, and the tiles
+carry the verdicts that used to sit beside seven links. The rules it follows are the ones the
+[design system](design-system.md) states, plus four of its own:
 
-- **A finding is content, not a floating line.** `AreaFindings` renders inside a `Panel` with the rest of
-  the page rather than dropping a bare accordion onto the page ground, where the most urgent sentence on
-  screen was also the least contained thing on it.
+- **An address is the same thing on every page.** A remote peer on Connections, a repeat offender in
+  the ban log and an attacker in the failed-login record all take the verbs in `address-verbs.tsx`:
+  *block at the firewall* inline (a source-only deny the server puts in front of every allow, omitted
+  for a role that cannot write rules and for a private peer), and behind the menu the three lookups —
+  who owns it, reverse lookup, trace the route — each of which opens the Tools page narrowed to that
+  probe with the address filled in (`?tool=asn&target=…`). Arriving never runs the probe; a probe is
+  traffic this server sends to an address, and the run stays a press.
+- **The jail sheet can ban, and the tuning dialog knows who you are.** `POST /fail2ban/{jail}/ban`
+  existed since the jail controls shipped and nothing on the page reached it; the sheet has the input
+  now, with the server refusing the caller's own address. The tuning dialog's allowlist offers "Never
+  ban my address" — the exposure's `client` — because banning yourself is the commonest way to lose a
+  server you were in the middle of hardening, and its notice says what actually happens: applied to the
+  running fail2ban and written to `jail.d/99-just-dashboard.local`, not "lost at the next restart".
+- **Logins folds btmp into attackers.** Five hundred lines of the same three addresses answer nothing;
+  `GET /logins/attackers` (admin, like the listing it is folded from) gives each address its attempts,
+  the account names it tried most — "root, admin, ubuntu" is a scanner, one real name is somebody who
+  knows the host — and the block beside it.
 - **A standing fact is not a banner.** Text that never changes — the firewall's lockout guard, "a probe
   answers outward, not inward" — is stated *once*, in the footer of the thing it qualifies or at the top
-  of the page it applies to, never repeated per card. Only a `Notice` that explains why the control under
-  it will refuse (sshd with no key on the host) stays above the control.
-- **Repeated things are rows, not cards.** `JailsPanel` is one table of jails with the addresses each is
-  holding behind a `SidePanel`, and `ToolsPanel` filters twenty one-line probe forms by group and by
-  name. Both were grids of same-sized cards whose content was nothing like the same size.
-- **The slack in a table belongs to the widest column.** `w-full` goes on the comment, the process list,
-  the watched paths — never on the short first column, which is what put eight hundred pixels of nothing
-  between an address and the number beside it.
+  of the page it applies to, never repeated per block. Only a `Notice` that explains why the control
+  under it will refuse (sshd with no key on the host) stays above the control, and it sits under the
+  readings rather than above them. The firewall's defaults are readings in tiles and, where the backend
+  can take an instruction, controls in one plain "Defaults" block — a read-only host gets the tiles and
+  no row of dead controls under them.
+
+`tests/browser/security-ui.spec.ts` drives all eight pages against a mocked API: the readings each
+page draws from the shapes the backend sends, the joins above (the block a row sends, the ban the sheet
+sends, the allowlist the tuning offers, the prefill Tools arrives with), that no block on any page is
+framed, that every icon-only control is named, that row controls are reachable without a pointer, and
+that nothing scrolls sideways on a phone. Set `JD_SECURITY_SHOTS` to a directory to have it write
+review screenshots of every page at 1280 and 1720 wide.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
@@ -144,7 +172,11 @@ terminal instead of a package page is that they do not know the name (`postgresq
 wrong is a form you use once. Install is one press on the row — there was a tray, and it cost a click and
 a concept on every single-package install while protecting against an interruption a job survives anyway.
 The command each button runs is its `title`. `package-sheet.tsx`'s second tab is the whole point of the
-feature; the installed table caps at 400 rendered rows with the count said plainly underneath.
+feature; the installed table caps at 400 rendered rows with the count said plainly underneath. The page
+is drawn per design-system §15: the search is a plain panel of hand-laid rows (`ROW_BLEED`) whose
+install verb is an outline button — sixty orange faces in a result list would be sixty commands — and
+a started install is a `Status`, not a disabled button; the sheet's usage sections open with an eyebrow
+alone, and its copyable commands sit on the control ground.
 
 ## The terminal panel
 
@@ -156,35 +188,77 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   edge and the tools column's left edge; they turn into top and bottom rules when the columns stack
   below `lg`). Three framed panes with a gutter between them read as three boxes floating on the page;
   the screen is one working surface. Immersive mode drops the wrapper's frame along with the page.
-- `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. Rows
-  carry no terminal glyph (every row is a terminal), the active one is `bg-accent` with no border, and
-  the filter box appears only once there are more than five sessions — a filter over one session is a
-  box with nothing to do. Folder headers are plain disclosure rows: chevron and explanatory name only,
-  with no folder icon, count, nested container or empty invitation. Pinning still sorts a session to
-  the top of its folder.
+- `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. A row
+  is one line — the session's label and, at the end, the activity mark (below). Rows carry no terminal
+  glyph (every row is a terminal) and no directory line under the title (the label carries the
+  directory at a prompt). Rows are separated by hairlines and each list is fenced top and bottom, so
+  ten sessions read as ten rows rather than a column of words; the active one is `bg-accent` with the
+  brand bar on its left edge, the same mark the section tabs use for "where you are". The filter box
+  appears only once there are more than five sessions — a filter over one session is a box with
+  nothing to do. Folder headers are plain disclosure rows: chevron and explanatory name only, with no
+  folder icon, count, nested container or empty invitation. Pinning still sorts a session to the top
+  of its folder.
+- **Names follow the shell.** An unnamed session or window is "Terminal" (numbered from 2 when that is
+  taken), and that default is only a fallback. A tab is labelled the way a desktop terminal's title
+  bar is: the title the foreground program set through OSC 0/2, the program's name when it set none,
+  and the directory at a prompt (the bundled prompts set that title). A session is labelled after its
+  *current* window — the one last on screen in any browser (the pane sends a `focus` frame), or
+  failing that the newest. A name the operator typed, for a session or a window, is shown as typed
+  (`named` in the API), so renaming still works as it did. `lib/terminal-activity.ts` holds the rule
+  once for the strip and the rail. The state arrives two ways: polled with the window list and the
+  session listing (every five seconds), and pushed over each visited window's attach socket as a
+  `state` frame the moment it changes, which is what makes a tab's mark and title move with the
+  shell rather than with the poll. The server side is in
+  [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).
+- **The activity mark** (`activity-mark.tsx`) says what is happening in a window, and it is the
+  product's own vocabulary rather than a spinner: a breathing `StatusDot` — "this is live" — while the
+  window is *working*, and a check once it has finished. Working is the server's word for "output has
+  been arriving for a second and still is, or the job is burning CPU": an agent streaming an answer,
+  a build, a test run. A program that is merely open — an editor, Claude Code or Codex waiting for
+  the next message — holds the terminal and gets no mark, because nothing is happening; that is
+  exactly when an agent's own title glyph goes still, and the tab follows the same signal. Nothing
+  is announced for a command over in a blink (`ls`), so the label never flickers. The finished check
+  is a notification: `useFinished` keeps it on a tab or row you are not looking at until you go
+  there, and shows it for four seconds on the one you are, after which that finish counts as seen
+  (`terminal.viewed` in `view-state`, keyed by session or `session/window`, pruned with the sessions).
+- **The page remembers where you were.** Which session was open, and within each session which
+  window, live in `view-state` (`terminal.session`, `terminal.windows`) rather than in component
+  state, so leaving for another page and coming back lands on the same window rather than on the
+  first session's first one. It is the one selection that store keeps: a terminal's selection is the
+  tab you had open, which is furniture. Entries for sessions that have ended are dropped as the
+  listing arrives.
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
   toggles: sessions on the left and Files/Git on the right. The strip is embedded in the emulator's own
   title bar; there is no separate workspace bar or working-directory/shell title.
-  A tab is its name: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
-  way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
+  A tab is its label, with the activity mark in front of it while the window is working or has just
+  finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the way a
+  browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
   layout or colour actions. Closing the last window closes its session through the session endpoint.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.
 - `workspace-tools.tsx` is the Files/Git companion. Its header is two section tabs (`tabClasses`, the
   brand underline, no glyphs) with the changed-file count beside "Git". Under that, the Files half is a
   strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
-  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip, so the Files page's
-  rail gets the same one. The Git half (`git-tools.tsx`) is two strips before content: the repository's
+  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip; the Files page's sidebar
+  drops it (`chrome={false}`) and draws its own place switcher above the same tree, which there also
+  reveals the folder being browsed, reloads its open folders on `refreshTick`, and takes drops. The Git half (`git-tools.tsx`) is two strips before content: the repository's
   reading (branch, `detached` tag, ahead/behind, the GitHub account) with **pull** and **push** inline
   and fetch / stash / pop behind one menu where each verb carries a sentence (§13); then a `FilterChip`
   row switching Changes / History / Branches, with a `+` for a new branch on the Branches view that
   opens an inline create row rather than a permanent form. Changed-file rows colour only the status
-  letter; the list is all changes, so a tinted band on every row said nothing. Branches are grouped:
-  local first, remotes under their own label, no per-row glyph and no "remote" word on every line.
+  letter; the list is all changes, so a tinted band on every row said nothing. A file staged and then
+  edited again is listed under both headings with the letter for each side (`lib/git-status.ts` takes
+  the side), and discarding an untracked file deletes it and says so. Clicking a changed
+  file shows its diff, untracked files included — the server diffs those against nothing, so a new
+  file reads as the addition it is, and the file viewer's Diff toggle does the same. Branches are
+  grouped: local first, remotes under their own label, no per-row glyph and no "remote" word on every
+  line.
   The emulator toolbar keeps search, snippets, appearance and fullscreen visible, with copy, export,
   folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and
-  Zsh startup files install a compact directory/chevron prompt and native Tab completion in new windows.
+  Zsh startup files install a compact directory/chevron prompt — which also sets the window title to
+  the directory (`\W`, `%1~`), the title the tab shows at a prompt — and native Tab completion in new
+  windows.
   The Zsh startup also loads the host's `zsh-syntax-highlighting` and `zsh-autosuggestions` packages
   when present (Debian's `/usr/share/<plugin>` or Arch's `/usr/share/zsh/plugins/<plugin>`), guarded so
   an account rc that already loaded one is not wrapped twice, and sets a history file, `HISTSIZE` and
@@ -289,6 +363,8 @@ window/session switching, screen preservation, input routing and cleanup when wi
 **Open-shell links are consumed once.** The page removes `cwd` and `folder` from the current history
 entry before creating the session, preserving other query parameters and the hash. A refresh cannot
 replay a launch or recreate a closed session; a later explicit Open shell link can still launch anew.
+The link gives the session no title: the prompt names the directory, and a title would have pinned the
+row to the folder the shell started in.
 
 **The page has no separate header or workspace bar.** A terminal is the one screen whose content *is* the
 viewport. "New session" sits in the rail beside "New folder"; the emulator title bar contains the two

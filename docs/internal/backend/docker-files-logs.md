@@ -120,6 +120,27 @@ ACL read or preservation errors fail before replacing it. Move replaces final fi
 symlinks as entries; directory destinations are resolved and contained before appending the source
 basename. A copy error leaves an existing regular destination intact.
 
+**Nothing clobbers unless told to.** `Move` and `Copy` take an `overwrite` flag (the `/files/move` and
+`/files/copy` bodies carry it) and answer an occupied destination with `fs.ErrExist` — a 409
+`already_exists` — without it; rename(2) used to replace silently, which was how "move a.txt here" ate
+the a.txt already there. `Move` also refuses a directory into its own subtree with a sentence rather
+than rename's EINVAL, and treats a move onto itself as a no-op. `Touch` and `Mkdir` are the "New file"
+and "New folder" verbs and refuse an existing path the same way (`Mkdir` still creates missing
+parents). Uploads go through `Upload`, which writes to a temporary sibling and renames into place the
+way `Write` does: an interrupted transfer never leaves a truncated file, an existing file keeps its
+owner and mode across the replacement (which is what lets the image editor save over a picture the
+web server owns), and `?overwrite=true` is what permits the replacement at all. The handler sends one
+request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
+`too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
+fields are 400s rather than "the first root", which is what an empty path resolves to.
+
+`ResolveArchive` checks an archive download before a header goes out — the base directory, and each
+member through `ResolveEntry` so that a selected symlink is archived as the link it is — and refuses a
+member that is not under the base. Resolving members through `Resolve` used to put a link's *target*
+into the archive under a name computed from wherever the target lived, which for a link out of the base
+was an entry beginning `../`: an archive this server writes must never carry the traversal its own
+extractor refuses. `Compress` then streams what was resolved and checks nothing itself.
+
 `internal/files` used to be a listing, a reader and a writer, with a page that answered every click by
 loading the file into Monaco — right for a config file, wrong for a picture, a tarball, a video and a
 two-gigabyte log.
@@ -136,7 +157,10 @@ two-gigabyte log.
   on it and must not be**: served inline it runs as this dashboard. The route tightens CSP to `sandbox`
   (which neuters a directly opened SVG) and is the one route with a short `Cache-Control` instead of
   `no-store` — forty thumbnails otherwise re-read every JPEG on every scroll; callers append mtime so a
-  saved image is a new URL.
+  saved image is a new URL. The page's `media.ts` mirrors the allowlist by extension: a name not on it
+  never gets a thumbnail or a viewer, because the request would be refused. A video thumbnail is the
+  browser's own first frame, fetched with the range requests `http.ServeContent` honours, so a poster
+  for a two-gigabyte recording costs a few hundred kilobytes.
 - **`find.go`** is the fuzzy finder (`search.go` is the literal/regex one, optionally grepping contents).
   Subsequence matching scored so the basename beats directories, a run beats scattered characters, a
   boundary beats mid-word and a shallow path beats a deep one; terms ANDed; positions as **UTF-16
@@ -158,18 +182,40 @@ matters is a fact about the server and should be there from a phone. Recent fold
 stay in `useViewState`. The bookmark list is saved whole, so an add, a removal and a reorder cannot
 disagree about order; every path is resolved before storing.
 
-Frontend `components/files/`: `file-icon.tsx` is the vocabulary (~200 extensions, the files with none —
+Frontend `components/files/`: the page is **one framed workbench** — a sidebar, the listing and an
+inspector as three flush columns with a hairline between each, resizable through `panel-size.ts`. The
+sidebar (`files-sidebar.tsx`) is a single scrolling column, not the places list over a tree it used to
+be: the tree is folders only (the listing beside it has the files) and is rooted at the *place* the
+browsed folder belongs to (`placeFor` in the page — home when under home, otherwise the longest
+configured root or notable directory above it), starred folders sit above it, and every other place, the roots, the accounts and the recent folders are behind one menu
+(`places-menu.tsx`). `file-icon.tsx` is the vocabulary (~200 extensions, the files with none —
 Dockerfile, authorized_keys, lockfiles — and the folders whose name says more than "folder") mapped to
 eight **categories** rather than languages, in the shared semantic `--tag-*` hues, drawn from Material
 Design Icons (`@mdi/js`); every other glyph in the product comes from the Heroicons vocabulary in
-`components/icons.tsx`. `file-actions.tsx` is
-the one menu both the row and the tile use, or an action ends up in one view only. Two layout rules are
-easy to undo: **the panel body does not scroll** (a sticky table header sticks to its nearest scrolling
-ancestor, and the header rode away with the rows), and **the rail's tree waits for `/files/places`**
-before mounting, since it caches and would keep showing the refusal from listing "/". The image editor
-commits each operation to a **new canvas** rather than a live parameter pipeline — that is what makes
-undo a stack of bitmaps and why "rotate, crop, rotate again" behaves the way it looks; saving goes
-through the ordinary upload route so owner and mode survive.
+`components/icons.tsx`. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
+row and a tile alike (images lazily, a video only once it scrolls into view, and playing muted under the
+pointer on a tile). `file-actions.tsx` declares every verb **once, as data**, and renders it into the
+row's overflow button, the tile's, and the right-click menu (`ui/context-menu.tsx`, one root over the
+listing that reads the row from `data-entry-path`); the space between rows gets the folder's verbs.
+`dnd.ts` makes folder rows, tree nodes, crumbs and starred folders drop targets for paths dragged from
+the listing (Ctrl or Alt copies) and for files from the desktop. `uploads.tsx` is the queue — one
+`XMLHttpRequest` per file for progress, three at a time, folders walked through the entries API so a
+dropped folder is its contents rather than an empty file named after it — and `conflict-dialog.tsx`
+asks once per operation (replace, keep both, skip) before an upload, move or paste touches a name that
+is taken; "keep both" is `photo (2).jpg` for a transfer and `photo copy.jpg` for a duplicate.
+`media-viewer.tsx` is the full-screen look (a `Modal` at `size="full"`): pictures fit or 1:1, video,
+audio, PDF through a blob, and the same head or archive listing the inspector shows for anything else;
+Space in the listing opens it, the arrows walk the folder's files. The editor gains a full-screen toggle
+and a diff review of the draft against the disk (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few
+million cells) drawn by the git page's `DiffView`. The listing polls every twenty seconds and refetches
+hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
+delete that includes a folder is typed for like a single one. Two layout rules are easy to undo: **the
+listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
+**the sidebar's tree waits for `/files/places`** before mounting, since it caches and would keep showing
+the refusal from listing a root it cannot. The image editor commits each operation to a **new canvas**
+rather than a live parameter pipeline — that is what makes undo a stack of bitmaps and why "rotate, crop,
+rotate again" behaves the way it looks; saving goes through the ordinary upload route with
+`overwrite=true`, so owner and mode survive.
 
 ## Logs
 
@@ -212,14 +258,24 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   `2026-08-28T23:03:24.804642+02:00` and filed the line an hour wrong outside UTC. `Filter.Highlights`
   returns **UTF-16** offsets, because Go counts bytes and the browser slices by code unit.
 
-Frontend `components/logs/`: `filter-bar.tsx` holds the one filter and the Live/History switch, because
-"these errors are scrolling past, when did they start" is one thought. Live applies as you type
-(debounced; the socket restarts, which is what makes the prefill meaningful); History runs on Enter,
-because a keystroke-triggered full scan would queue a pass over gigabytes per character.
-`log-console.tsx` uses `content-visibility` rather than a virtualiser — off-screen rows skip layout while
-the scrollbar stays honest, wrapped rows keep real heights, and the browser's own find still works.
-**Pausing holds incoming lines instead of dropping them.** `histogram.tsx` is matches by level over time;
-clicking a column narrows the window to it.
+Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
+(`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
+`log-workspace.tsx`, a hairline between them. The workspace is one pane: a strip naming the source with
+its kind, path, size and state and the Live/History tabs; `filter-bar.tsx` under it with the one filter,
+the window and the journal unit inline and the exclusion, context, archives and boot behind "More";
+the histogram; the lines; a footer carrying the stream's state, the line and error counts, the search's
+notes and the retention verdict. One filter, because "these errors are scrolling past, when did they
+start" is one thought. Live applies as you type (debounced; the socket restarts, which is what makes the
+prefill meaningful); History runs on Enter, because a keystroke-triggered full scan would queue a pass
+over gigabytes per character. `log-console.tsx` draws each line as columns — a level edge, the line
+number, the clock, a small-caps level mark coloured by tone (`LEVEL_MARK`/`LEVEL_TONE` in
+`lib/log-filter.ts`), the journal unit, then the message in ink with only critical red and debug muted —
+and uses `content-visibility` rather than a virtualiser: off-screen rows skip layout while the scrollbar
+stays honest, wrapped rows keep real heights, and the browser's own find still works. The level chips on
+the strip above the lines carry the on-screen counts and share their swatches (`LEVEL_DOT`) with the
+level column and the histogram. **Pausing holds incoming lines instead of dropping them.**
+`histogram.tsx` is matches by level over time; clicking a column narrows the window to it. The
+deployment pages embed the same workspace framed on its own.
 
 Logs accepts `source`, `since` and `until` URL parameters for deployment handoffs. Time bounds must be
 explicit ISO instants with a timezone; they select History and remain exact through search and reload,

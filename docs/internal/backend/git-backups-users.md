@@ -3,27 +3,66 @@
 ## Git working copies
 
 `internal/gitx` discovers repositories at most five levels below `JD_GIT_ROOTS`, skips generated and
-hidden trees, and stops descending once it finds `.git`. `Resolve` cleans and symlink-resolves every
-repository path, checks the configured roots, and verifies either a normal `.git` directory or worktree
-file. Remote URLs are scrubbed before they are returned because credentials embedded in HTTPS remotes
-must not reach the list page.
+hidden trees, and stops descending once it finds `.git` — a `.git` *file* counts as much as a directory,
+because that is what a linked worktree and a submodule checkout carry. Summaries are read four at a time,
+so a server with thirty checkouts answers the list inside its poll interval. `Resolve` cleans and
+symlink-resolves every repository path, checks the configured roots, and verifies either a normal `.git`
+directory or worktree file; `ResolveDir` is the containment half alone, for a clone's parent or an
+`init` target that is not a repository yet. Remote URLs are scrubbed before they are returned because
+credentials embedded in HTTPS remotes must not reach the list page.
 
-The read surface reports repository summary/status, commit history, local and remote branches, diffs, and
-a bounded topological graph whose lane layout spans branches and tags. The terminal uses `/git/detect` to
-find the checkout containing its current directory while keeping “not a repository” and “outside the
-configured roots” as honest non-error states.
+The read surface reports repository summary/status, commit history, local and remote branches, tags,
+stashes, remotes, one commit's detail, a two-branch comparison, diffs, and a bounded topological graph
+whose lane layout spans branches and tags. Status is read from `git status --porcelain=v1 -z`: the
+NUL-separated form is the one whose paths are literal, and without it a file named `café.txt` arrived
+quoted and octal-escaped, which the page showed verbatim and then could not stage. A file changed on both
+sides — staged, then edited again — is one entry with both `staged` and `unstaged` set, and the two
+change lists draw it once each with the letter for that side; the unmerged codes that carry no `U` (`AA`,
+`DD`) are read as conflicts rather than as additions ready to commit. The summary names the branch
+through `symbolic-ref`, so a fresh `git init` reads as `main` with no commits rather than as no branch,
+and carries the upstream, whether it is gone, and the staged/untracked/conflict breakdown. Status also
+reports the committer identity git resolves here and any merge, rebase, revert, cherry-pick or bisect a
+shell left half-finished. History takes a limit and a skip for paging, a literal case-insensitive search
+over messages (`--grep` inside one argument, so a dashed term is a term), an author filter, and a single
+path followed across renames. `Show` reads one commit's record, body and changed files (status letters
+and line counts from two NUL-separated `diff-tree` reads against the first parent, or the empty tree
+for a root commit); `Compare` counts what `head` has that `base` lacks and the merge-base diffstat. A
+commit's diff is its first-parent diff with no header, for a merge as much as for an ordinary commit,
+and is truncated at a line boundary. A diff of an untracked path shows it as the addition it will be:
+`git diff` has nothing to say about a file with no earlier version, so `Diff` lists the path with
+`ls-files --others` (a directory becomes the files in it) and runs `diff --no-index` against `/dev/null`
+for each, accepting the exit status of 1 that means "these differ". The terminal uses `/git/detect` to
+find the checkout containing its current directory while keeping "not a repository" and "outside the
+configured roots" as honest non-error states.
 
 All Git subprocesses receive explicit argv and run as the checkout owner through `hostexec.AsOwner`, so a
-web operation does not leave root-owned files. Refs reject leading dashes, traversal-like `..`, invalid
-characters, and `.lock` suffixes; file arguments reject absolute/traversing/option-shaped values and follow
-an explicit `--`. Pull is fast-forward-only, push never forces and establishes a missing upstream, checkout
-never forces, branch deletion defaults to Git's merged-only mode, and stash includes untracked files.
+web operation does not leave root-owned files. They run with `GIT_OPTIONAL_LOCKS=0`, so a page polling
+`status` never takes `.git/index.lock` from under a commit typed in a terminal, and with `GIT_EDITOR=true`,
+so no operation can open an editor the request cannot drive. Refs reject leading dashes, traversal-like
+`..`, invalid characters, and `.lock` suffixes (`~` and `^` are allowed, for `HEAD~1`); a working-tree
+path is judged by segment, so `v1..v2.diff` is an ordinary file, and rejects absolute, traversing and
+option-shaped values behind an explicit `--`. A stash is addressed by integer index and the `stash@{N}`
+form is built server-side, because the braces are exactly what the ref validator refuses. Remote URLs
+accept `https://`, `http://`, `ssh://`, `git://` and the scp-like `user@host:path` and nothing that could be
+a local path or an option; a clone's directory name is one path segment that is neither hidden nor
+option-shaped. Pull is fast-forward-only; push never forces and establishes a missing upstream on the
+branch's own remote; checkout never forces, and a remote branch is checked out as a new local branch
+that tracks it; merge, revert and cherry-pick run their own `--abort` on failure, so a conflict leaves the
+tree exactly as it was and git's own message says which files clashed; branch deletion defaults to Git's
+merged-only mode; stash includes untracked files; discard restores a tracked path from the index and
+deletes an untracked one (`clean -fd`); a hard reset may also clean untracked files; an identity is
+written into the repository's own config; a clone lands only in a new directory under a root, as the
+root's owner, and `init` starts an existing directory on `main`.
 
-Route capabilities reflect recoverability: reads require `read`; fetch/pull/push/checkout/branch/stash,
-stage/unstage/commit require `service.control`; discard, reset, and branch deletion pass through
-`s.destructive`. Discard and hard reset require typed confirmation because they overwrite uncommitted work;
-branch deletion uses ordinary confirmation because Git preserves the commits in reflogs/remotes. GitHub
-authentication and pull requests are detailed in
+Route capabilities reflect recoverability: reads require `read`; fetch/pull/push (and pushing tags),
+checkout, branch create/rename, merge, revert, cherry-pick, tag create, stash push/pop/apply,
+stage/unstage/commit, identity, adding a remote, clone and init require `service.control`; discard, reset,
+stash drop, and deleting a branch, a remote branch, a tag or a remote pass through `s.destructive`.
+Discard, hard reset and stash drop require typed confirmation because they overwrite or throw away
+uncommitted work; the deletions use ordinary confirmation because Git preserves the commits in
+reflogs/remotes. Every mutation lands in the audit log as `git.<verb>` with the repository it touched.
+`api/handlers_git_test.go` drives the routes against a real repository and pins the phrase policy and the
+capability tiers. GitHub authentication, pull requests and workflow runs are detailed in
 [`processes-terminal-github.md`](processes-terminal-github.md#github-sign-in).
 
 ## Backups

@@ -19,7 +19,9 @@ A change that weakens any of these has to say so explicitly.
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
    those are pipelines an admin stored for their own project, not anything supplied per request. Do not add
-   a second request-defined shell, and do not "fix" that one into an argv. Terminal startup also uses
+   a second request-defined shell, and do not "fix" that one into an argv. A git clone's parent and an
+   `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
+   clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. `dockerx` invokes the `docker` binary in three places
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
    explicitly.
@@ -88,7 +90,7 @@ is what `s.destructive` marks) but **"how often does somebody do this, and can t
 truncates first, dropping a Mongo collection, a Mongo pipeline with `$out`/`$merge`, a `critical` statement
 in the query runner, restoring a database or backup over live data, `compose down`, removing a Docker
 volume, a prune that also sweeps volumes, deleting a dashboard or Linux account, a recursive directory
-delete, `git discard` and `git reset --hard`, toggling the firewall, resetting it, switching the inbound
+delete, `git discard`, `git reset --hard` and dropping a git stash, toggling the firewall, resetting it, switching the inbound
 default to deny, changing sshd's configuration, revoking a certificate, applying package updates,
 **purging** a package (removing it *and* deleting its /etc configuration), and installing a new version of
 the dashboard itself.
@@ -104,7 +106,7 @@ forgetting a connection; stopping a database session; stopping/restarting/killin
 container; removing an image or network; any prune that spares volumes; deleting one file; signalling a
 process; ending an SSH session; stopping or restarting a service; revoking a token or SSH key; deleting a
 backup job or deploy project; rolling back a deploy; disabling **or deleting** a vhost; deleting an nginx
-stream or htpasswd file; deleting a git branch; adding, **editing** or deleting a firewall rule; tuning a
+stream, htpasswd file or saved DNS-provider credential (pasted again in a minute); deleting a git branch, a branch on the remote, a tag or a remote; adding, **editing** or deleting a firewall rule; tuning a
 fail2ban jail; unbanning an address; stopping a running job; closing a terminal session, window or pane;
 and **removing a package without purging it** — undone by installing it again, where the /etc files
 somebody spent an afternoon on have no path back at all.
@@ -121,7 +123,8 @@ and ending an SSH session (a SIGHUP the operator reconnects past). All keep `s.d
 confirm dialog. `compose down` was reviewed and **kept** — it is the one compose action that removes rather
 than stops containers, and on a host running several stacks typing the name guards against `down`-ing the
 wrong one. `git discard` and `git reset --hard` were kept too: they overwrite uncommitted work, which the
-reflog does not cover.
+reflog does not cover — and dropping a stash joined them for the same reason, since the work in it
+exists nowhere else.
 
 Several routes decide by content, and the narrowing lives at the call site: `handleDBQuery` types only for
 `critical`, `handleFileDelete` only when `recursive`, `handleGitReset` only when `--hard`, `handleDBImport`

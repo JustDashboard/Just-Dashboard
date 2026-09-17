@@ -24,10 +24,32 @@ a failed detection.
   PID. Signals remain destructive and confirmed; changing `nice` is reversible, audited, and
   `system.admin`. PID 1 and the dashboard's own process remain refused in the backend.
 - The detail sheet exposes identity, cwd/executable links, resource counters and controls without returning
-  environment variables (process environments routinely contain secrets). PM2 can gracefully reload and
+  environment variables (process environments routinely contain secrets). `Detail` also reads what the
+  process listens on and how many connections it holds (`sockets` in `detail.go`, from gopsutil's
+  per-process connection list) and its soft `NOFILE` limit, so an open-file count is a warning rather
+  than a number; a snapshot leaves those empty because reading every process's sockets on each poll
+  costs more than the table. `GET /processes/{pid}/tree` returns the parent chain (outermost first)
+  and direct children from one pass over the table, because the remedy for a runaway worker is
+  usually its supervisor. Signals are the existing `POST /processes/{pid}/signal`; the page offers
+  SIGTERM, SIGKILL, SIGSTOP/SIGCONT and SIGHUP as words with a sentence each. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use.
+- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written and whether a
+  `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page states
+  both, because a daemon with three online applications and no saved list restores nothing. The
+  per-process verbs grew `reset` (restart counters, `service.control`) and `flush` (truncates the log
+  files, destructive); `POST /pm2/{name}/scale` (`{instances}`) runs `pm2 scale <name> <n>` and
+  refuses a fork-mode application; `POST /pm2/daemons/{user}/{start|reload}` and, destructive,
+  `/{restart|stop}` run the verb with `all` against one account's daemon. Flush is addressed by name
+  because every PM2 release matches a flush target by name and cluster instances share their files;
+  everything else is addressed by numeric id as before. `POST /pm2/start` (`PM2StartRequest`) runs
+  `pm2 start` with one argv element per field — script, `--name`, `--cwd`, `--interpreter`, `-i`,
+  `--watch`, `--max-memory-restart`, then `--` and the arguments — and hands an ecosystem file
+  (`*.config.js`, `*.json`, `*.yml`) to PM2 whole with at most `--only <name>`. It requires
+  `system.admin`: it runs an operator-named file as a host account, which is code execution rather
+  than service control. Paths must be absolute, the interpreter a known runtime or an absolute path,
+  and every value is validated before it becomes an argument (`pm2StartArgs`, tested without a daemon).
 - PM2 discovery uses host `/etc/passwd` accounts and their mounted homes. Numeric version ordering
   selects the newest nvm installation. `hostexec.CommandOnHostAsUser` enters the host namespaces,
   then uses `setpriv` to switch UID/GID and supplementary groups before loading the account's PM2
@@ -39,7 +61,20 @@ a failed detection.
 - PM2 log filenames cannot grant access outside `JD_LOG_ROOTS`. An administrator must explicitly
   configure custom log directories; the source list and stream errors explain this requirement. Unified
   log source ids carry account, numeric id and name, while unique legacy name-only ids remain accepted.
-- User cron inventory and edits run the host's `crontab` through `hostexec.CommandOnHost`. Writes use
+- systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
+  and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
+  and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
+  microsecond timestamps; `left` and `passed` are ignored because across systemd versions they have
+  been a string, a duration and — on some 257 builds — a copy of `next`. Timer control reuses the
+  unit routes, and "run now" is `start` on the service the timer activates. The unit sheet offers
+  reload only when `systemctl show` reports `CanReload=yes`.
+- User cron inventory and edits run the host's `crontab` through `hostexec.CommandOnHost`.
+  Per-job enable, disable, edit, add and remove are edits to the crontab's text made in the browser
+  (`lib/crontab.ts`: only the job's own line and the comment the parser attached to it change) and
+  written back through the same wholesale `PUT`, so the row controls and the text editor are two
+  views of one file. Schedules are described and their next runs computed in `lib/cron.ts`, in the
+  browser's clock; the page says so. There is no "run now" for a cron line: a crontab command is a
+  shell string, and running it would mean a request-built `sh -c`, which invariant 4 forbids. Writes use
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
 
 ## The terminal
@@ -71,9 +106,52 @@ validated, a stale directory can only send the new window home, never kill it.
 Folders remain the dashboard's ordered record (`handlers_terminal_folders.go`, settings key
 `terminal.folders`), while membership stays on each workspace. There is no session/window colour model.
 Renaming a folder moves every matching workspace in one request. Window routes use opaque PTY ids and
-support create, rename, reorder and close. Selecting a window is client state: the page keeps each visited
-window's emulator and socket alive while hidden, preserving the complete terminal stream. A new browser
-attachment still receives only the bounded best-effort history, not an independent screen snapshot.
+support create, rename, reorder and close. Selecting a window is client state, remembered per browser:
+the page keeps each visited window's emulator and socket alive while hidden, preserving the complete
+terminal stream, and tells the server which window it is showing with a `focus` control frame — the
+socket itself stays open while a window is hidden, so attaching says nothing about what is on screen.
+A new browser attachment still receives only the bounded best-effort history, not an independent screen
+snapshot. Unnamed sessions and windows are "Terminal", numbered from 2 when that is taken (`freeName`);
+`SessionMeta.Named` and the window's `named` record whether the operator chose the name, because a chosen
+name is shown as given while a default gives way to what the window is doing.
+
+**What a window is doing is read off the PTY, not asked of the shell** (`activity.go`). Two facts, both
+available without touching the account's shell configuration. The title is parsed out of the byte stream
+by the read loop as OSC 0/2 — BEL- or ST-terminated, across chunk boundaries, capped at 512 bytes, other
+OSC kinds skipped. Whether anything is running is `TIOCGPGRP` on the PTY master: the process group holding
+the terminal is the shell's own at a prompt and the job's while one runs, which is the fact job control is
+built on, and Linux answers it for a master precisely so a terminal program can ask. The group's leader is
+read from `/proc` and judged — a shell with nothing to run (no script, no `-c`) is a prompt, anything
+else is a program, and wrappers such as `sudo -i` are looked through to their innermost descendant so a
+root shell at a prompt is idle. When the leader has already exited (`cat big | less`) the job is whichever
+of the shell's children still carries the group. The program's name is what the operator typed:
+interpreters (`node`, `python3`, `bash -c`) and wrappers (`sudo`, `timeout`) are looked through, a script
+loses its path and extension, and a tool run from `node_modules` answers with its package, so
+`node /usr/local/bin/claude` is "claude". A title counts only while the group that set it still holds the
+terminal, which lets a program that names itself win, one that does not fall back to its process name, and
+the prompt's directory title return the moment the job ends — the bundled prompts set that title (`\W`,
+`%1~`).
+
+Holding the terminal is not working, and the difference is what the marks are for. A job is announced
+(`busy`) only once it has lasted a second (`holdOff`): `ls` holds the terminal for milliseconds, and a
+tab that switched its name for every one of those would flicker all day. `working` is true only while
+something is actually happening — output has been arriving for a second (`sustain`) and the last of it
+is less than 2.5 s old (`quietAfter`), or the job is using at least 5% of a core over a tick (its leader,
+its reaped children and its live descendants, from `/proc/<pid>/stat`). Output within 150 ms of a
+keystroke (`echoWindow`) is its echo, or an editor redrawing its input line, and does not count. An
+editor or an agent waiting at its prompt is therefore busy and not working; an agent streaming an
+answer, a build or a test run is working, and a compiler that prints nothing is caught by its CPU.
+`finishedAt` stamps the end of a stretch of work and is kept until work starts again; the browser
+decides how long to show it. The read loop observes at most every 100 ms during output and once more
+350 ms after it stops, because the echo of the Enter that starts a command arrives before the shell has
+handed over the terminal; while a job is in the foreground, or output has just gone quiet, a 500 ms tick
+keeps looking, so a silent job's CPU and the end of a run are noticed without output; the listing and
+window endpoints observe on request. Every change reaches attached browsers as a `state` control frame
+(`{title, busy, process, working, finishedAt}`), sent once after the replay and then on change, over a
+per-subscriber event channel beside the output channel so the byte stream is never interleaved with it.
+`GET /terminal/` carries `named`, `busy` and `working` (any window), `finishedAt` (the latest) and
+`current` (the window last focused, else the newest) per workspace; `GET /terminal/{id}/windows` carries
+`named`, `title`, `busy`, `process`, `working` and `finishedAt` per window.
 
 The create request carries a provisional size because the emulator does not exist yet. The
 attach WebSocket carries xterm's measured `rows`/`cols` in its query. The handler subscribes first, then
@@ -117,5 +195,12 @@ session.
 - **Pull requests are the one thing git has no verb for.** `CreatePull` shells to `gh pr create` and the
   handler pushes the branch first, since gh refuses an unseen branch and its remedy is an interactive
   prompt. That is also why `gitx.Push` sets the upstream itself rather than repeating git's advice.
+  `ListPulls` takes a state (open, closed, merged, all) and folds each request's review decision and
+  status-check rollup into one word each — one failing check outranks any number of passes, one pending
+  outranks passes — so the row can say "checks failed" without a second call; `ViewPull` adds what
+  GitHub computes lazily (mergeable, additions, deletions, changed files, body). `MergePull` runs
+  `gh pr merge` with merge, squash or rebase and an optional `--delete-branch`; `CheckoutPull` runs
+  `gh pr checkout`; `ListRuns` reads `gh run list` for a branch. Merging and checking out sit under
+  `service.control` like every other recoverable git write, and each is audited with the request number.
   `gitConfigured` answers "would a commit and push from this page be this account's" with one dot, and
   knows an **ssh** remote never consults a credential helper.

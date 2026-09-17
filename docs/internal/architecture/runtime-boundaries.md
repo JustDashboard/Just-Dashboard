@@ -94,8 +94,24 @@ clears the counter with the account update.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
+The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
+`must_change_pw` is set only when the password was *generated* there and printed to the log — a
+password the operator chose in the installer is theirs and is not demanded again at first sign-in.
 `auth.Sealer` (from the 64-hex `JD_MASTER_KEY`) encrypts every stored secret — TOTP seeds, connection
 strings, deploy env, backup credentials.
+
+An account has two names. `username` is the sign-in key and the actor every audit entry and
+deployment record names: trimmed, lower-cased, one word, unique. `display_name` is what the account
+shows as — the username as typed at creation, case kept, until it is changed. Both are renamed by the
+holder (`PATCH /account/profile`, session-only) or by a `system.admin` (`PATCH /dashboard-users/{id}`);
+a rename is audited with both spellings, and earlier entries keep the old one. The picture
+(`avatar`, `avatar_type`, `avatar_at`, additive columns in 0.6.8) is uploaded as multipart to
+`POST /account/avatar`, bounded by `auth.MaxAvatarBytes`, and stored only after `image.DecodeConfig`
+has proven it a PNG or JPEG of at most 1024px a side under a type sniffed from the bytes — the
+declared type is ignored, and the stored type is the one served. `GET /account/avatar` and the admin
+group's `GET /dashboard-users/{id}/avatar` serve it with a long private cache life, since the version
+stamp `avatarVersion` rides on the URL. `POST /account/sessions/revoke-others` drops every session of
+the caller but the one asking.
 
 State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` block in
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`

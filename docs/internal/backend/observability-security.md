@@ -38,10 +38,18 @@ disk saturated by small random writes moves almost no bytes); socket totals from
 (enumerating connections is thousands of lines a sample); `load.Misc.Blocked`; and inodes per mount,
 where a build server hits the ceiling first on a filesystem every capacity chart calls half empty.
 
+Two **live-only hardware readings** ride on the snapshot and are never recorded: `files` is
+`/proc/sys/fs/file-nr` (open handles against the kernel's ceiling, with `max` reported as 0 where a
+container runtime hands out the 64-bit maximum, so nothing divides by it), and `sensors` is every hwmon
+or thermal-zone temperature gopsutil can read, hottest first, each with the driver's own high and critical
+marks. A VPS usually reports no sensors, and the UI shows none rather than a cold machine.
+
 `metrics.Assess` (`GET /system/health`) turns those into findings — measured / means / do — ranked
 worst-first. It runs on the server because the thresholds are a claim the product makes, and because
 each check reads an hour of history to tell a spike from a trend. **Memory is judged on available, never
-on "used"**: Linux counts page cache there and judging by it is a permanent meaningless warning.
+on "used"**: Linux counts page cache there and judging by it is a permanent meaningless warning. File
+handles are judged only against a real ceiling (80% of `max`), and a sensor only against its own
+thresholds — critical past `critical`, warning past `high`, nothing where the driver reports neither.
 
 `metrics.Events` (`GET /system/metrics/events`) is the annotation layer, answered from `deploy_runs`,
 `backup_runs` and `audit_log` — this dashboard *is* the thing that ran the deploy. Reboots need no
@@ -53,11 +61,24 @@ restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot
 `netsec` reads records the host already keeps rather than polling: wtmp (`GET /logins`), btmp
 (`/logins/failed`, behind `system.admin` — it holds whatever was typed at a login prompt, sometimes a
 password in the username field) and fail2ban's log (`/fail2ban/history`). Polling a jail would invent
-events between samples and miss every ban shorter than the interval.
+events between samples and miss every ban shorter than the interval. `GET /logins/attackers` (admin,
+for the same reason as the listing) folds the same btmp sample by address — `SummariseFailedLogins`
+is a pure function over `LoginRecord`s: attempts, the account names tried most, first and last seen,
+most persistent first, with `Capped` reported by the arithmetic `countWithin` uses so a sample that
+ran out inside the window is a floor rather than a total. A console attempt has no address; it is
+counted and not listed.
 
 `netsec.Exposure` grades who can reach this panel (`tailscale`, `tunnel`, `private`, `public`, `open`)
 from the allowlist and the host's interfaces. The setting lives in an env file nobody re-reads after
-install day, which is exactly why it belongs on screen.
+install day, which is exactly why it belongs on screen. The handler adds `Client`, the address the
+request arrived from — `DescribeExposure` stays pure — because every lockout guard on the Security
+pages compares against that address and the pages should say what it is; the jail tuning offers it to
+fail2ban's allowlist by name.
+
+`BanHistory` reads at most the last `banLogTailBytes` (8 MB) of each fail2ban log and drops the line
+the seek tears in half. fail2ban writes a "Found" line per failed attempt, so a host under a campaign
+has a log of hundreds of megabytes, and three panels plus the posture check each read it every minute
+or two; the tail holds the events every reader wants.
 
 `netsec.Assess` (`GET /security/posture`) is to security what `metrics.Assess` is to load: every panel
 in this class shows facts and leaves the reading to somebody who already knows how; the ones that take a
@@ -162,10 +183,17 @@ ufw's grammar has shapes that are accepted and mean something else, checked agai
   `AddRule` reports `errRuleExists`, and only when *nothing* was written (a v4 accepted with its v6 twin
   skipped is a real add).
 - `AddRule` has `insert` because ufw stops at the first match — a deny added after a broad allow does
-  nothing at all, which looks exactly like a deny that works.
+  nothing at all, which looks exactly like a deny that works. **A source-only deny or reject with no
+  position goes in front on its own** (`blocksASource`, `frontPosition`): that is what "block this
+  address" from the Connections, Intrusion and Logins pages writes, and appended after `allow 22` it
+  never saw the SSH traffic it was written to refuse. The positions are ufw's, checked with
+  `--dry-run` against a real dual-stack host: an IPv4 block at 1, an IPv6 block at one past the last
+  IPv4 rule (ufw numbers the v6 rules after the v4 ones and refuses an insert outside the family's own
+  range), and an empty family appended to, because ufw refuses `insert 1` into nothing. An explicit
+  `position` is kept.
 - **A ban is a deny rule wearing another name**: `netsec.Ban` refuses the caller's own address, the same
-  guard the firewall route has. `IgnoreIP` writes through to the jail.d drop-in — `addignoreip` changes
-  only the running server.
+  guard the firewall route has, and the jail sheet now reaches it. `IgnoreIP` writes through to the
+  jail.d drop-in — `addignoreip` changes only the running server.
 
 firewalld differs in ways that are the work: no rule numbers (a zone holds services, ports and rich
 rules, each removed by handing back exactly what was added — numbers are positional from
@@ -178,7 +206,12 @@ only, since resolving several hundred would be a subprocess each — which is wh
 **iptables is read-only on purpose**: it has no persistence of its own, so a rule added here works until
 reboot and leaves a page saying protected in front of a host that is not. `FirewallCapabilities` lets
 each backend declare what it can do and `ReadOnlyReason` explains the absence — a greyed-out button with
-no reason is worse than one that is not there.
+no reason is worse than one that is not there. Its chain verdict arrives in the shared words
+(`iptablesPolicyWord`: ACCEPT → allow, DROP → deny, REJECT → reject; `Default` keeps the verdict
+verbatim). The structured policy is compared against `"allow"` by the posture rules, the exposed-port
+grading and `guardSSHPort`, and `"accept"` matched none of them: an iptables host with an ACCEPT
+policy was never told its inbound default was allow, had every exposed database graded as though a
+firewall were refusing it, and was refused an SSH port move as a lockout the policy could not cause.
 
 Cross-cutting:
 

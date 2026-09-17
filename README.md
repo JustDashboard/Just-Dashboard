@@ -232,14 +232,22 @@ and points the terminal at it: commands are coloured as you type, and the grey t
 finishes a command from history is accepted with the right arrow. Your `ssh` login shell is
 not changed; blank `JD_TERMINAL_SHELL` in `.env` if you want the terminal to follow `chsh`.
 
-Each session groups independent shell windows. Name a session, file it in a folder, drag it
-somewhere else, filter the list, and pin the sessions you use most. Windows appear along the
-top, with rename, reorder and close controls. Closing one window stops that shell; closing a
-session stops all its windows, with confirmation first.
+Each session groups independent shell windows. Windows appear along the top, with rename,
+reorder and close controls, and each is named after what it is doing, the way a desktop
+terminal's title bar is: the directory while the shell waits at its prompt, the program while
+one runs, and whatever title the program sets for itself if it sets one. A breathing dot marks a
+window, and its session, while something is actually happening in it — an agent answering, a
+build running — and a check appears when that stops, staying on a window you are not looking at
+until you do. A program that is merely open and waiting gets no mark, and a command that is over
+in a blink is never announced. A session takes the name of the window you were last in; name a
+session or a window yourself and that name stays. File a session in a folder, drag it somewhere
+else, filter the list, and pin the sessions you use most.
+Closing one window stops that shell; closing a session stops all its windows.
 
 Visited windows keep their terminal screen and connection while you switch windows or
 sessions, so full-screen tools retain their state and background output keeps arriving.
-Leaving the page disconnects the browser; returning uses bounded, best-effort output replay.
+Leaving the page disconnects the browser; returning uses bounded, best-effort output replay
+and lands on the session and window you left, not the first one.
 Shells and session organization live in the dashboard process and end when it restarts.
 
 Moving between sessions and windows has a key for each, and every binding is yours to
@@ -255,8 +263,18 @@ viewport. Opening and closing a session is recorded in the audit log.
 
 ![The file manager](docs/files.png)
 
-Monaco for editing, with the mode editable next to the save button. Upload, download, chmod,
-chown, search by name or by content, archive and extract.
+One workbench: a sidebar that is a folder tree rooted at your home (or at whichever root or
+system directory you have browsed into, with `/etc`, `/var/www`, the other accounts and your
+starred folders one menu away), the listing beside it, and an inspector that shows what a file
+is the moment you click it. Pictures and videos are drawn as themselves in the listing; Space
+opens anything full screen and the arrow keys walk the folder. Drag rows onto folders, onto the
+tree or onto a breadcrumb to move them; drop files or whole folders from your desktop to upload
+them with a progress bar each; a name that is already taken is asked about — replace, keep both
+or skip — never overwritten quietly. Right-click for the verbs, Ctrl and Shift to select,
+F2 to rename, Delete to delete. Monaco for editing, full screen if you want it, with a diff of
+your changes to read before you save and the mode editable next to the save button. Crop, rotate
+and resize pictures in the browser. Download, chmod, chown, search by name or by content,
+archive and extract, and how much of the disk is left in the footer.
 
 Every client-supplied path goes through one resolver that checks the cleaned path *and* the
 symlink-resolved path against `JD_FILE_ROOTS`, including the paths that do not look like file
@@ -269,8 +287,19 @@ destination.
 ![A repository, with a working-tree diff open beside its history](docs/git.png)
 
 Every repository under the configured roots, found by walking them rather than by being
-registered. Branch, ahead/behind, working tree, history with diffs and per-commit line
-counts, branches, and fetch, pull, push and stash.
+registered — and, with **Add repository**, cloned into one of them or started from an empty
+folder. The list opens on four readings: how many checkouts, how many carry uncommitted
+work, how many are behind their remote, how many have commits waiting to push.
+
+A repository is one working surface: the file tree, a Changes / History / Branches / GitHub
+column and whatever you last clicked beside it. Stage, unstage, commit (amend included, with
+who the commit is recorded as beside the button), commit and push, stash and bring stashes
+back, discard — an untracked file is deleted, and it says so. History is searchable and paged;
+a commit opens as its message and the files it touched, each a click from its own diff, with
+branch, tag, cherry-pick, revert and undo one menu away. Branches say which are merged and
+which have lost their remote; switch, check a remote branch out as a tracking branch, merge
+(a conflict abandons the merge cleanly rather than leaving it half done), compare, rename,
+delete here or on the remote; tags are listed, made and pushed.
 
 Each command runs as the account that owns the repository, so a pull on a repo owned by
 `deploy` does not leave root-owned files behind for you to find later.
@@ -279,17 +308,19 @@ Sign in to GitHub from the page itself: the same device-code flow `gh auth login
 rendered as a screen rather than a series of prompts. The token is stored where `gh` keeps
 its own — under the home of the account that owns the checkout, which is the account that
 pushes — so commits are recorded as you, pushes are authenticated, and pull requests can be
-opened from the branch you are on without leaving for a browser tab.
+opened from the branch you are on without leaving for a browser tab: with what they would
+carry counted first, their review and check state on the row, merge and check-out one menu
+away, and the Actions runs on your branch underneath.
 
 ### And the rest
 
 | | |
 | --- | --- |
-| **Processes** | PM2 apps with merged output tailing, systemd units with journal streaming, and an htop-style table sortable by CPU **or** memory, because a leaking service sits at 0% CPU holding gigabytes. Kill is guarded. Crontab editor included. |
+| **Processes** | Four pages. Live: an htop-style table with owner, user and state filters and an automatic focus (CPU, memory or disk I/O, and it says why), a detail sheet with listening ports, connections, open-file limit, parent chain and children, and terminate, kill, pause, hang-up and priority as words with a sentence each. PM2: every account's daemon, whether it would come back after a reboot, start/reload/restart/stop, scale, reset counters, flush logs, delete, merged live output, daemon-wide verbs, and a dialog that starts a new application and shows the `pm2 start` it will run. Services: systemd units with failed ones first, journal streaming, enable/disable, clear-failed, reload where supported, and `daemon-reload`. Scheduled: cron jobs as rows with the schedule in words and its next run, enable/disable/edit/add/remove, systemd timers with run-now, and the system cron files. |
 | **Logs** | One viewer over files, container output, PM2 and the journal. Grep and level filters are applied on the server, before the lines are sent. |
-| **Proxy & TLS** | A form that puts a domain in front of a port and writes the nginx for you — TLS, HTTP/2, HSTS, WebSockets, upload limits, IP allow lists, basic auth and extra paths sent somewhere else — /api to a backend while everything else goes to a static build — rendered on the server and shown live next to the form, so the file it produces is ordinary nginx you can commit and edit by hand. Password files managed here too, so the basic-auth option has something to point at. Streams forward the services that do not speak HTTP. Certificates issued, renewed and revoked through certbot in a live console rather than a request that hangs, including wildcards over a DNS challenge with eight provider plugins, and certificates you bought imported with the key checked against them first. A live TLS report grading what a visitor actually gets. |
+| **Proxy & TLS** | A form that puts a domain in front of a port and writes the nginx for you — TLS, HTTP/2, HSTS, WebSockets, upload limits, IP allow lists, basic auth and extra paths sent somewhere else — /api to a backend while everything else goes to a static build — rendered on the server and shown live next to the form, so the file it produces is ordinary nginx you can commit and edit by hand. Password files managed here too, so the basic-auth option has something to point at. Streams forward the services that do not speak HTTP. Certificates issued, renewed and revoked through certbot in a live console rather than a request that hangs, including wildcards over a DNS challenge with eight provider plugins, and certificates you bought imported with the key checked against them first. A live TLS report grading what a visitor actually gets, opened from any site or certificate. The overview says whether the engine is running and tests, reloads or restarts it; every site has its verbs as words — open, TLS report, access log, duplicate, enable, disable, delete — and every certificate says which site uses it, with a stopped renewal timer switched back on from the page and saved DNS-provider credentials removable as well as saved. |
 | **Databases** | Eight engines: PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis — all on pure-Go drivers, so the image still needs no CGO. A data grid that edits rows through forms (always scoped to a primary key), server-side sort and filtering, schema editing with the statement shown before it runs, CSV/JSON import inside one transaction, a structure view, an entity diagram that remembers how you arranged it — drag, hide, colour and annotate tables, read a table's relations both ways in its inspector, jump from any table to its rows, structure or a query, go full screen, and export the picture as PNG, SVG, Mermaid or DBML — a query runner that classifies a statement as destructive before it runs with schema-aware completion, history and saved snippets, CSV/JSON export, one-click Prisma, Drizzle, TypeScript or Zod generation from the live database, and a value search that finds which table an id lives in without knowing where to look. A Monitor tab lists what the server is running right now — with the blocking session named — and stops a stuck query, next to a per-table size breakdown for when the disk alert fires. Any row copies out as JSON or as a runnable INSERT in that engine's own syntax, or duplicates into a pre-filled form. MongoDB gets document editing, an aggregation runner, and its own export and import; Redis gets a SCAN-based key browser with full collection editing. Plus a dump that downloads to the browser as it is written, restores, and a typed-confirmation delete of the database itself, for every one of the eight — the three with a client-side tool use it, the rest are dumped over the connection the dashboard already has, so no engine's backup depends on a binary that may not be installed. Passwords never appear in argv. Optional live tests exercise configured engines and skip unavailable servers. |
-| **Security** | A verdict on the host, not just its settings: exposure, firewall, sshd, intrusion prevention, open ports, certificates and pending security patches, each finding carrying what was measured, what it means, what to do, and where the dashboard can do it, a button. Firewall rules on ufw **or firewalld**, with a named-service catalogue that warns before you open Redis to the world, default policies, logging, ordering, editing (the replacement goes in before the original comes out, so the port is never briefly unprotected) and outbound rules. sshd's own settings — root login, passwords, keys, port, account lists — applied through its parser and rolled back if it objects, refused outright when the change would leave nobody a way in, and streamed step by step so "it said it worked" and "the daemon came back" are not the same claim. fail2ban jails tuned in place and kept across a restart, folded into the one question a ban list cannot answer: who keeps coming back. Live connections by peer, interfaces and routes, the host's login record with the ability to end a session, and ping, DNS, traceroute and port checks on the page the question came from. |
+| **Security** | A verdict on the host, not just its settings: exposure, firewall, sshd, intrusion prevention, open ports, certificates and pending security patches, each finding carrying what was measured, what it means, what to do, and where the dashboard can do it, a button. Firewall rules on ufw **or firewalld**, with a named-service catalogue that warns before you open Redis to the world, default policies, logging, ordering, editing (the replacement goes in before the original comes out, so the port is never briefly unprotected) and outbound rules. sshd's own settings — root login, passwords, keys, port, account lists — applied through its parser and rolled back if it objects, refused outright when the change would leave nobody a way in, and streamed step by step so "it said it worked" and "the daemon came back" are not the same claim. fail2ban jails tuned in place and kept across a restart, folded into the one question a ban list cannot answer: who keeps coming back. Live connections by peer, interfaces and routes, the host's login record with the ability to end a session and the failed attempts folded into who is attacking and with which account names, and ping, DNS, traceroute and port checks on the page the question came from. Any address in any of those lists is one press from a firewall block that goes in front of every allow, a ban by hand, or a lookup of who owns it — and the jail's allowlist offers your own address by name, so hardening never locks you out. |
 | **Updates** | Two things that can be behind. The dashboard itself — with the release notes for every version between yours and the newest, and a one-click pull-rebuild-restart that runs in its own container so it survives replacing the dashboard. And the host's packages: what is behind, which of it is security, and whether a reboot is due, on apt, dnf, yum, zypper, pacman or apk. Alpine and Arch publish no advisory data, so they say so rather than reporting zero security updates. Upgrades run as a job with its output streamed, so closing the tab does not abandon a half-finished run. Upgrades only — it never installs or removes packages. |
 | **Deployments** | Browse projects in a searchable grid or list. Import a connected GitHub repository or any HTTPS/SSH Git URL, configure environment variables, and create or connect a database before deploying. Follow numbered, searchable build logs and open the finished URL; each project opens on a website preview, release details, recent deployments and measured usage, with separate settings for configuration. A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, or an existing container; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Automatic production Git deployments, plus signed provider hooks, scheduled actions, PR previews, and notifications to Discord, Slack, Telegram, e-mail or a signed webhook for every started, succeeded, failed or cancelled run. Runs report their state to GitHub commits, a failed health check shows the application's own last output next to the failure, runtime settings cap memory, CPU and processes, and a Console tab opens a shell inside the live container. Notifications that fail are retried with backoff, and the Deployments tab shows delivery figures computed from the run history: success rate, deploys per week, median release time, recovery time and the current failure streak, each with its basis. |
 | **Blueprints** | Seventeen reviewed, versioned definitions with a browsable catalogue and deterministic previews. PostgreSQL, MariaDB, MongoDB, Redis, MinIO, Adminer, Dozzle, Grafana, n8n, Uptime Kuma, Vaultwarden and the static nginx site deploy in one click as immutable image releases: the image is pinned to a digest at inspection, inputs become variables, declared passwords are generated on the server and only ever revealed on demand, data volumes are managed storage, and the definition's readiness checks and memory limit gate activation. Blueprints that install configuration files or download artifacts, and game servers, stay preview-only and say exactly why. |
@@ -458,7 +489,7 @@ preventing it. Give `readonly` to someone you would let read the disk, and narro
 | --- | :---: | :---: | :---: |
 | View everything | ✅ | ✅ | ✅ |
 | Start / stop / restart services | | ✅ | ✅ |
-| Git fetch / pull / push / checkout | | ✅ | ✅ |
+| Git fetch / pull / push / checkout / merge / tag / clone | | ✅ | ✅ |
 | Edit files | | ✅ | ✅ |
 | Terminal and container shells | | | ✅ |
 | Delete, prune, kill, restore, git reset | | | ✅ |
@@ -544,7 +575,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `JD_BOOTSTRAP_USER` | `admin` | Account created on an empty database. |
-| `JD_BOOTSTRAP_PASSWORD` | none | Leave empty for a generated one, logged once. |
+| `JD_BOOTSTRAP_PASSWORD` | none | Leave empty for a generated one, logged once and replaced at first sign-in. A password set here is kept as is. |
 
 Durations take a unit (`12h`, `60m`, and the metrics settings also accept `7d`); booleans
 take `true` or `false`. A value that cannot be parsed stops the dashboard at startup rather
@@ -594,7 +625,7 @@ quotes and backslashes. It rejects line breaks in a single value.
 
 <br>
 
-**API tokens.** Create one under **Account → API tokens**:
+**API tokens.** Create one under **Account → API keys**:
 
 ```bash
 curl -H "Authorization: Bearer vpsd_…" https://localhost:8443/api/v1/system/metrics

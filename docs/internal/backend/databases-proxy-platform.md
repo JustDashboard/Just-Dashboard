@@ -176,6 +176,38 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
   the credential form empty.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
+- **The editor's read route is not a password reader.** `ReadConfig` refuses the dashboard's own
+  `jd-auth` directory and any `.ht*`/`htpasswd` file with `ErrProtectedFile` (403 `protected_file`):
+  `GET /proxy/config` is held by every signed-in account and a list of bcrypt hashes is not
+  configuration. `Validate` now carries a `Note` when the file is outside nginx's include tree —
+  no `sites-enabled` link, a `conf.d` file without `.conf`, a stream with no include — because
+  `nginx -t` passes a file it never reads, and a dry run that says "valid" about a disabled site is
+  a false reassurance. `POST /proxy/test` runs the engine's own test against what is on disk without
+  staging or reloading anything (admin, audited as `proxy.config.test`); the overview's Test config
+  button and the reload/restart/start/stop verbs sit beside it, the last four through the existing
+  `/systemd/{unit}` routes so the two pages never disagree about the unit.
+- **`ParseSiteSpec` reads what hand-written files actually look like.** A line holding a whole
+  block — `location / { proxy_pass http://x; }` — is split into statements before it is read
+  (`splitInline`, quote-aware, since a Content-Security-Policy value carries semicolons of its
+  own); the line reader used to take the opener and drop everything after the brace, so the site
+  came back with no upstream. `listen` is read as nginx reads it — the address's port and an `ssl`
+  parameter — where `4430` and `127.0.0.1:8443` used to count as TLS, and the pre-1.25
+  `listen 443 ssl http2` reads back as HTTP/2 on. A file with no `access_log` directive is logging
+  to nginx's default, so an unmanaged file round-trips with logging on rather than the first save
+  writing `access_log off;`.
+- **`SetVHostEnabled` replaces a stale link.** Enabling a site whose `sites-enabled` entry already
+  existed but pointed elsewhere returned success and changed nothing; it goes through `linkEnabled`
+  now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
+  only top-level blocks are site addresses — `handle`, `header` and `tls` blocks were listed as
+  server names.
+- **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
+  onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
+  its `live/` path are one entry; `certificateName` names a file in a generic directory
+  (`/etc/nginx/ssl/site.crt`) after itself rather than after "ssl". `CertbotState.RenewUnit` is a
+  certbot timer systemd knows but is not running, which the Certificates page enables and starts
+  through `/systemd/{unit}/enable` and `/start`. `DNSProvider.HasCredentials` reports a saved
+  token without reading it, and `DELETE /certificates/dns-credentials/{provider}` removes one
+  (destructive, ordinary confirmation, audited as `certificates.dns.credentials.remove`).
 - **Two layouts, and files that are not sites.** `nginxVHosts` reads sites-available where it exists and
   conf.d where it does not (every RPM distro, Alpine, Arch — most of the servers this runs on); the
   difference reaches the UI as an empty `EnabledPath`, because conf.d has no symlink and a switch that can

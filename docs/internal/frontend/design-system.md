@@ -47,15 +47,48 @@ taking a frame:
 
 - a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
   first column starts on the page's own edge, in line with the title (`framed` restores the box for
-  the one case a run sits inside another surface). The Overview's Services row is one of these too:
+  the one case a run sits inside another surface). The first-column rule is written twice, for a tile
+  inside a `StatLink` and for a tile that *is* the cell: the descendant form alone never matched the
+  second, so until the Security pass every grid of bare tiles started a step in from the title it was
+  meant to line up with. The Overview's Services row is one of these too:
   a module's headline figure is a reading, and eight framed cards under a page that had just stopped
   drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
-  activity and the last-hour sparklines on the Overview, the idle containers and compose projects on the Docker overview, the
-  areas list on the Security overview, "Needs attention" on the proxy overview and on every security
-  area page, health findings, the runtime-health bar, the Overview's last-hour sparklines, and the
-  deployment pages' lists, overview facts, run summary and create flow are plain;
+  activity and the last-hour sparklines on the Overview, every chart, list and hardware reading on the
+  metrics page, every block on the Docker pages (the
+  overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
+  volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
+  images; the attention and storage blocks inside a container's detail panel), the
+  whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
+  every area page the readings, the findings under them, the tables and the twenty probe blocks on
+  Tools), every block on the proxy pages (the overview's engine facts, attention list and sites; the
+  sites, certificates, streams and ports tables with their toolbars; the TLS report's readings,
+  findings, protocol, certificate, chain and HTTP rows; the password files and DNS provider lists),
+  health findings, the runtime-health bar, the Overview's last-hour sparklines, and the
+  deployment pages' lists, overview facts, run summary and create flow are plain, and so are the
+  databases section's connection facts and maintenance rows, its find, monitor and generate panels,
+  and every block on the four Processes pages — the live table, the PM2 applications, the systemd
+  units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
+  a hairline under four `StatTile` readings, with a detail sheet built from plain panels — and the
+  two System pages follow the same shape: the accounts table on System users under four readings
+  (accounts, who can sign in, who is locked, the last sign-in), with its SSH-keys sheet a plain list
+  of rows and a plain form, and the audit log's table under its filters, where a request's outcome
+  is a `Status` dot and the code rather than a wash across the row; and
+  both of the dashboard's own pages — the update in flight and the version history on Settings,
+  and the two forms, the restart record and the switches (an `OptionList`) on Configuration, whose
+  install paths moved out of a framed drawer into a row of facts under the title; and the three views on
+  Packages — the installed and updates tables and the software search, under one underlined strip
+  (`tabClasses`) rather than a filled tab list — each a toolbar, a hairline and rows on the page's own
+  edge, with what needs acting on (security updates waiting, a reboot owed, a stale index) said as a
+  `Notice` that carries its own button rather than as a framed block with a header and nothing in it, and the Git page's repository list under its four readings (its workspace is one framed
+  workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
+  drawn);
+  its Browse, Structure and Diagram tabs are each one `Pane` — a working region sized to the window,
+  a rail or an inspector beside a grid or a canvas, with a hairline between the columns. A table
+  inside a plain panel bleeds by its cells' own padding (`-mx-4` around the `Table`) so its first
+  column starts where the title does; a row laid out by hand takes `ROW_BLEED` from `row-list.tsx`,
+  which is the same three classes `Row` applies to itself;
 - a panel's header — it is no longer a tinted strip. The title sits on the panel's own ground with a
   hairline under it. `--surface-header` survives at a fainter mix for the two places a strip is still
   chrome: a `Pane`'s header and footer.
@@ -201,7 +234,7 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 | --- | --- | --- |
 | `Panel` | A block of content *on* the page: framed, header, hairline, body — or `plain`, the same anatomy with no frame | Not a working region |
 | `RowList` / `Row` | A list of rows with hairlines between them: a leading mark, a title, a second line, a trailing state | Not a table — nothing lines up in columns |
-| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page) | Not a block in a page's flow |
+| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, and the files page's sidebar, listing and inspector) | Not a block in a page's flow |
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
@@ -211,6 +244,16 @@ Before these existed, fourteen pages read as fourteen products.
 
 `Modal`, `PaletteModal` and `SidePanel` are the only assemblers of raw `Dialog` and `Sheet`, and
 `no-restricted-imports` enforces it. A page never opens one itself.
+
+**What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
+a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
+three side by side; `FormSection` opens a part of a longer form with an eyebrow and a hairline;
+`OptionRow` is a switch with its sentence, because "Stop on error" as a checkbox label asks the reader
+to guess what an error stops; `FormFacts` states what the form operates on as data under the title;
+and `Statement` shows the SQL a schema-editing form is about to run, nearest the button that runs it.
+The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
+`space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
+beside the field that caused it.
 
 ## 8. Type
 
@@ -369,7 +412,13 @@ The rule that fell out of the Docker pass, and which generalises:
 - **The verbs themselves are declared once**, as data, and a surface decides only how many it has
   room to draw. `components/docker/container-actions.tsx` is the pattern: three surfaces used to hold
   three different answers to "what can I do to this container", and they disagreed about which
-  capability each needed.
+  capability each needed. `components/verbs.tsx` is that pattern made shareable — a `Verb`, drawn
+  by `VerbActions` in a row (inline icons and one menu), `VerbBar` in a sheet (named buttons and
+  the same menu) and `VerbMenu` alone in a header — and the process, PM2, unit, timer and cron rows
+  all draw theirs through it, so four kinds of row did not arrive at four menus. A process row keeps
+  nothing inline: the daily verb on a process table is reading it, and a stop glyph beside four
+  hundred rows is four hundred invitations to end something by mis-click, so Terminate and Kill are
+  named buttons in the sheet and words in the row's menu.
 
 A control that changes state should also **say that it is changing**. A Docker stop takes ten seconds
 to honour while the socket keeps reporting the old state, so the row answers the press by sitting

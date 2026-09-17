@@ -16,8 +16,23 @@ redirect to `/login` is convenience, not a control; every API call behind it is 
 lets a page ask for the remaining height (`<Page fill>`) instead of growing past the viewport.
 
 `components/app-sidebar.tsx` exports the nav registry (`NAV`, `PERSONAL_NAV`) so `command-palette.tsx`
-offers the same destinations without a second list — 43 entries plus the two personal ones. Items may
+offers the same destinations without a second list — 43 entries plus the five account pages. Items may
 carry a `capability`, and the sidebar hides what the role cannot use. ⌘K covers every page.
+
+The groups run in the order a day on the server runs, and a page's header eyebrow is its group's
+label: **Server** (Overview, Metrics, Processes, Logs), **Apps** (Deployments first, then Docker,
+Databases, Proxy & TLS), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups) and
+**System** (Packages, System users, Audit log, Settings). Deployments open the second group because
+shipping something is the reason most visits happen; until 0.6.8 it sat fourth in a group called
+Operations, between Packages and Backups.
+
+`PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
+`system.admin`, Users — drawn three times from the one array: the account layout's `SectionNav`, the
+palette's Account group, and the menu on the rail's foot. That menu opens with the account's picture,
+display name, sign-in name and role, then the five pages (Security carries a `Status` for two-factor)
+and Sign out. The picture is `components/account/user-avatar.tsx`: the stored image when there is
+one, otherwise the display name's initials on the brand plot, square with the control radius rather
+than a circle, because a filled circle holding two letters is the pill §4 forbids.
 
 ## The design system
 
@@ -42,7 +57,9 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
 - `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
   input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
   `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only
-  part that scrolls, a footer strip. Their `description` is rendered `sr-only` — Radix wants an
+  part that scrolls, a footer strip. Both take `actions` in the title strip; `Modal`'s
+  `size="full"` is the whole viewport with that anatomy intact, for the one task that is looking
+  at a thing rather than filling in a form (the file viewer). Their `description` is rendered `sr-only` — Radix wants an
   accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
   components** — a page or a feature panel never opens one itself.
 - `components/tabs.tsx` — every switcher: `SectionNav` (the sticky strip under the top bar), `TabLink`,
@@ -118,7 +135,9 @@ you are*, and a filter borrowing either reads as the page's main action.
 
 `components/ui/*` is generated shadcn/ui (new-york, zinc) with its icons rewired to
 the Heroicons vocabulary in `components/icons.tsx` — compose rather than
-edit. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `files/`, `git/`, `logs/`,
+edit. `ui/context-menu.tsx` is the right-click menu, drawn with the dropdown's classes so the two
+read as one menu; a feature that needs both (the file listing) renders one verb list into whichever
+opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `files/`, `git/`, `logs/`,
 `metrics/`, `packages/`, `procs/`, `proxy/`, `security/`, `terminal/`, `update/`.
 
 ## The editor is served from here, not from a CDN
