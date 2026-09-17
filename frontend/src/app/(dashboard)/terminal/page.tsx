@@ -5,7 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Plus, ShieldOff, SidebarLeft, SidebarRight, TerminalWindow } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
-import type { TerminalFolder, TerminalWindow as Window, TerminalWorkspace } from "@/lib/types"
+import type {
+  TerminalActivity,
+  TerminalFolder,
+  TerminalWindow as Window,
+  TerminalWorkspace,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import {
   actionFor,
@@ -43,8 +48,24 @@ const TERMINAL_MIN = 360
 export default function TerminalPage() {
   const { confirm, dialog } = useConfirm()
   const router = useRouter()
-  const [picked, setPicked] = useState<string | null>(null)
-  const [pickedWindow, setPickedWindow] = useState<string | null>(null)
+  // Which session, and within each session which window, was on screen. Kept
+  // in the browser rather than in component state, so leaving for another
+  // page and coming back lands where you were instead of on the first
+  // session's first window. `view-state` draws its line at "how the page is
+  // arranged" and a selection is normally on the other side of it; a terminal
+  // is the exception, because here the selection *is* the arrangement — it is
+  // the tab you had open, and a tab bar that forgot it would be broken.
+  const [remembered, setRemembered] = useViewState<string>("terminal.session", "")
+  const [rememberedWindows, setRememberedWindows] = useViewState<Record<string, string>>(
+    "terminal.windows",
+    {},
+  )
+  // Which finishes have been seen, keyed by session or `session/window` (see
+  // `useFinished`); held here only to be pruned with the sessions.
+  const [viewed, setViewed] = useViewState<Record<string, number>>("terminal.viewed", {})
+  // What each visited window's socket last said it was doing — newer than any
+  // poll, and dropped when the socket closes so the polled fields take over.
+  const [activity, setActivity] = useState<Record<string, TerminalActivity>>({})
   const [windowLists, setWindowLists] = useState<Record<string, Window[]>>({})
   const [visitedWindows, setVisitedWindows] = useState<{ id: string; sessionId: string }[]>([])
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
@@ -61,29 +82,49 @@ export default function TerminalPage() {
   const requestedCwd = params.get("cwd")
   const requestedFolder = params.get("folder") ?? undefined
   const launched = useRef(false)
-  const { data, error, loading, refresh } = usePoll(
-    (signal) => get<TerminalList>("/terminal/", undefined, signal),
-    10000,
-  )
+  // Five seconds rather than ten: the listing now carries whether each session
+  // is working, and that is worth seeing sooner. The remembered windows of
+  // sessions that no longer exist are dropped as each listing arrives, so the
+  // store does not fill with the ids of shells that ended weeks ago.
+  const { data, error, loading, refresh } = usePoll(async (signal) => {
+    const list = await get<TerminalList>("/terminal/", undefined, signal)
+    if (!signal.aborted) {
+      const live = new Set(list.sessions.map((session) => session.id))
+      if (Object.keys(rememberedWindows).some((id) => !live.has(id))) {
+        setRememberedWindows((windows) =>
+          Object.fromEntries(Object.entries(windows).filter(([id]) => live.has(id))),
+        )
+      }
+      const owner = (key: string) => key.split("/")[0]
+      if (Object.keys(viewed).some((key) => !live.has(owner(key)))) {
+        setViewed((seen) =>
+          Object.fromEntries(Object.entries(seen).filter(([key]) => live.has(owner(key)))),
+        )
+      }
+    }
+    return list
+  }, 5000)
 
   const openSession = useCallback(
     async (cwd?: string, folder?: string) => {
       try {
+        // No title, even for a shell opened in a chosen directory: the rail
+        // follows the shell, whose prompt names the directory it is in, and a
+        // title given here would pin the row to the folder it started in.
         const session = await post<{ id: string; windowId: string }>("/terminal/", {
           rows: 30,
           cols: 110,
           cwd,
           folder,
-          title: cwd ? cwd.split("/").filter(Boolean).pop() : undefined,
         })
         await refresh()
-        setPicked(session.id)
-        setPickedWindow(session.windowId)
+        setRemembered(session.id)
+        setRememberedWindows((windows) => ({ ...windows, [session.id]: session.windowId }))
       } catch (err) {
         notify.error("Could not open a terminal", err)
       }
     },
-    [refresh],
+    [refresh, setRemembered, setRememberedWindows],
   )
 
   useEffect(() => {
@@ -118,8 +159,8 @@ export default function TerminalPage() {
   }, [])
 
   const sessions = data?.sessions ?? []
-  const active = sessions.some((session) => session.id === picked)
-    ? picked
+  const active = sessions.some((session) => session.id === remembered)
+    ? remembered
     : (sessions[0]?.id ?? null)
   const activeSession = sessions.find((session) => session.id === active)
   const windows = usePoll<Window[]>(
@@ -148,7 +189,8 @@ export default function TerminalPage() {
     { enabled: Boolean(active) },
   )
   const windowList = windowLists[active ?? ""] ?? []
-  const activeWindow = windowList.find((window) => window.id === pickedWindow) ?? windowList[0]
+  const activeWindow =
+    windowList.find((window) => window.id === rememberedWindows[active ?? ""]) ?? windowList[0]
 
   // A PTY's bounded byte history cannot reconstruct a TUI screen. Keep every
   // visited emulator consuming its stream until its window or session closes.
@@ -189,9 +231,11 @@ export default function TerminalPage() {
   )
 
   const select = (session: TerminalWorkspace) => {
-    setPicked(session.id)
-    setPickedWindow(null)
+    setRemembered(session.id)
     focusPaneRef.current?.()
+  }
+  const showWindow = (id: string) => {
+    if (active) setRememberedWindows((windows) => ({ ...windows, [active]: id }))
   }
   const setMeta = (id: string, next: Record<string, unknown>) =>
     act(() => patch(`/terminal/${encodeURIComponent(id)}`, next), "Could not update that session")
@@ -203,10 +247,7 @@ export default function TerminalPage() {
   const closeSession = (session: TerminalWorkspace) =>
     act(async () => {
       await del(`/terminal/${encodeURIComponent(session.id)}`)
-      if (active === session.id) {
-        setPicked(null)
-        setPickedWindow(null)
-      }
+      if (active === session.id) setRemembered("")
     }, "Could not close that session")
 
   const deleteFolder = (folder: TerminalFolder) =>
@@ -242,7 +283,7 @@ export default function TerminalPage() {
       )
       await windows.refresh()
       await refresh()
-      setPickedWindow(created.id)
+      showWindow(created.id)
       focusPaneRef.current?.()
     } catch (err) {
       notify.error("Could not open a window", err)
@@ -267,8 +308,10 @@ export default function TerminalPage() {
     void act(
       async () => {
         await del(`/terminal/${encodeURIComponent(active)}/windows/${encodeURIComponent(id)}`)
-        if (activeWindow?.id === id)
-          setPickedWindow(windowList.find((item) => item.id !== id)?.id ?? null)
+        if (activeWindow?.id === id) {
+          const sibling = windowList.find((item) => item.id !== id)
+          if (sibling) showWindow(sibling.id)
+        }
       },
       "Could not close that window",
       true,
@@ -314,7 +357,7 @@ export default function TerminalPage() {
         windowList.findIndex((item) => item.id === activeWindow?.id),
         1,
       )
-      if (next) setPickedWindow(next.id)
+      if (next) showWindow(next.id)
     },
     "window.prev": () => {
       const previous = step(
@@ -322,7 +365,7 @@ export default function TerminalPage() {
         windowList.findIndex((item) => item.id === activeWindow?.id),
         -1,
       )
-      if (previous) setPickedWindow(previous.id)
+      if (previous) showWindow(previous.id)
     },
     "window.close": () => activeWindow && closeWindow(activeWindow.id),
     "workspace.rail": () => setShowRail((value) => !value),
@@ -330,7 +373,7 @@ export default function TerminalPage() {
   }
   for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
     navigation[`session.${n}`] = () => sessions[n - 1] && select(sessions[n - 1])
-    navigation[`window.${n}`] = () => windowList[n - 1] && setPickedWindow(windowList[n - 1].id)
+    navigation[`window.${n}`] = () => windowList[n - 1] && showWindow(windowList[n - 1].id)
   }
   useEffect(() => {
     navigationRef.current = navigation
@@ -394,10 +437,12 @@ export default function TerminalPage() {
       />
       {active ? (
         <WindowStrip
+          sessionId={active}
           windows={windowList}
           activeId={activeWindow?.id ?? null}
+          activity={activity}
           onSelect={(id) => {
-            setPickedWindow(id)
+            showWindow(id)
             focusPaneRef.current?.()
           }}
           onRename={(id, name) => updateWindow(id, { name }, "Could not rename that window")}
@@ -447,6 +492,7 @@ export default function TerminalPage() {
               sessions={sessions}
               folders={data.folders}
               activeId={active}
+              activity={activity}
               onSelect={select}
               onRename={(session, title) => setMeta(session.id, { title })}
               onTogglePinned={(session) => setMeta(session.id, { favourite: !session.favourite })}
@@ -490,7 +536,14 @@ export default function TerminalPage() {
               onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
               focusRef={focusPaneRef}
               className="min-h-0 flex-1"
+              onActivity={(state) => setActivity((prev) => ({ ...prev, [window.id]: state }))}
               onExit={() => {
+                setActivity((prev) => {
+                  if (!(window.id in prev)) return prev
+                  const next = { ...prev }
+                  delete next[window.id]
+                  return next
+                })
                 void windows.refresh()
                 void refresh()
               }}

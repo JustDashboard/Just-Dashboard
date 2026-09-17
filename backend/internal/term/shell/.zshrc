@@ -28,7 +28,8 @@ __jd_plugin() {
 __jd_plugin zsh-syntax-highlighting _zsh_highlight
 __jd_plugin zsh-autosuggestions _zsh_autosuggest_start
 unfunction __jd_plugin
-__jd_prompt() { PROMPT=$'%F{cyan}%~%f\n%F{cyan}>%f '; RPROMPT=''; }
+# The title escape names the tab after the directory — see bashrc.
+__jd_prompt() { PROMPT=$'%{\e]0;%1~\a%}%F{cyan}%~%f\n%F{cyan}>%f '; RPROMPT=''; }
 precmd_functions+=(__jd_prompt)
 __jd_prompt
 unset __jd_config_dir __jd_user_dir

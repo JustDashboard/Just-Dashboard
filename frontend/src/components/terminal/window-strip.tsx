@@ -3,23 +3,31 @@
 import { useEffect, useRef, useState } from "react"
 import { Cross, Pencil, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { TerminalWindow as Window } from "@/lib/types"
+import type { TerminalActivity, TerminalWindow as Window } from "@/lib/types"
+import { useFinished, windowActivity, windowLabel } from "@/lib/terminal-activity"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { IconAction, rowReveal } from "@/components/icon-action"
+import { ActivityMark } from "@/components/terminal/activity-mark"
 
 /** Compact direct-PTY windows for the terminal title bar. */
 export function WindowStrip({
+  sessionId,
   windows,
   activeId,
+  activity,
   onSelect,
   onRename,
   onNew,
   onClose,
   onReorder,
 }: {
+  /** The session the windows belong to, which keys what has been seen. */
+  sessionId: string
   windows: Window[]
   activeId: string | null
+  /** The state each window's own socket last pushed, keyed by window id. */
+  activity: Record<string, TerminalActivity>
   onSelect: (id: string) => void
   onRename: (id: string, name: string) => void
   onNew: () => void
@@ -47,7 +55,9 @@ export function WindowStrip({
         ) : (
           <WindowTab
             key={window.id}
+            sessionId={sessionId}
             window={window}
+            live={activity[window.id]}
             active={window.id === activeId}
             inserting={dropAt === position}
             onSelect={() => onSelect(window.id)}
@@ -75,7 +85,9 @@ export function WindowStrip({
 }
 
 function WindowTab({
+  sessionId,
   window,
+  live,
   active,
   inserting,
   onSelect,
@@ -85,7 +97,9 @@ function WindowTab({
   onDrop,
   onDragEnd,
 }: {
+  sessionId: string
   window: Window
+  live?: TerminalActivity
   active: boolean
   inserting: boolean
   onSelect: () => void
@@ -99,12 +113,31 @@ function WindowTab({
   useEffect(() => {
     if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
   }, [active])
+  // The tab reads like a desktop terminal's title bar: the program's own
+  // title while one runs, the directory at the prompt, and a name the operator
+  // typed over both. The mark in front says whether anything is happening in
+  // it right now, or has just stopped — the reason to glance at a tab you are
+  // not in.
+  const label = windowLabel(window, live)
+  const state = windowActivity(window, live)
+  const working = Boolean(state.working)
+  const finished = useFinished(`${sessionId}/${window.id}`, active, state.finishedAt)
+  const hint = working
+    ? `${label} — working`
+    : finished
+      ? `${label} — finished`
+      : state.busy && state.process
+        ? `${label} — running ${state.process}`
+        : label
   return (
     <div
       ref={ref}
       draggable
       data-window={window.id}
       data-active={active}
+      data-busy={state.busy || undefined}
+      data-working={working || undefined}
+      data-finished={finished || undefined}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move"
         event.dataTransfer.setData("application/x-jd-terminal-window", window.id)
@@ -122,12 +155,13 @@ function WindowTab({
     >
       <button
         aria-current={active ? "page" : undefined}
-        title={window.name}
-        className="flex h-full min-w-0 flex-1 items-center rounded-sm focus-ring-inset"
+        title={hint}
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-sm focus-ring-inset"
         onClick={onSelect}
         onDoubleClick={onRename}
       >
-        <span className="truncate text-xs font-medium">{window.name}</span>
+        <ActivityMark working={working} finished={finished} />
+        <span className="truncate text-xs font-medium">{label}</span>
       </button>
       {/* Rename and close sit on the tab itself rather than in a menu — but
           they appear under the pointer, as a browser's do. Drawn on every tab
@@ -135,7 +169,7 @@ function WindowTab({
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label={`Rename window ${window.name}`}
+        aria-label={`Rename window ${label}`}
         className={cn("size-6 shrink-0 text-muted-foreground hover:text-foreground", rowReveal())}
         onClick={onRename}
       >
@@ -144,7 +178,7 @@ function WindowTab({
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label={`Close window ${window.name}`}
+        aria-label={`Close window ${label}`}
         className={cn(
           "size-6 shrink-0 text-muted-foreground hover:text-destructive",
           !active && rowReveal(),

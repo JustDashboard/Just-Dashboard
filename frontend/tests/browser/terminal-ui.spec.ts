@@ -5,6 +5,8 @@ type Connection = {
   closed: boolean
   input: string[]
   sizes: { rows: number; cols: number }[]
+  /** How many times the page said this window was the one on screen. */
+  focus: number
 }
 
 async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
@@ -45,6 +47,7 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
             live: true,
             windows: items.length,
             createdAt: "2026-09-01T00:00:00Z",
+            current: { id: items[0], name: items[0] },
           })),
         },
       })
@@ -79,7 +82,7 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
   await page.routeWebSocket("**/api/v1/**", (socket) => {
     const id = new URL(socket.url()).pathname.match(/\/terminal\/([^/]+)\/attach$/)?.[1]
     if (!id) return
-    const connection: Connection = { socket, closed: false, input: [], sizes: [] }
+    const connection: Connection = { socket, closed: false, input: [], sizes: [], focus: 0 }
     connections.set(id, [...(connections.get(id) ?? []), connection])
     socket.onClose(() => {
       connection.closed = true
@@ -88,6 +91,7 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
       if (typeof message === "string") {
         const control = JSON.parse(message)
         if (control.type === "resize") connection.sizes.push(control)
+        if (control.type === "focus") connection.focus++
       } else {
         connection.input.push(Buffer.from(message).toString("utf8"))
       }
@@ -106,7 +110,10 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
     renderer,
   )
   await expect.poll(() => connections.get("window-a")?.[0].input.length).toBeGreaterThan(0)
-  return { connections, errors }
+  // Window tabs live in the strip. An unnamed session's rail row carries its
+  // current window's label as well, so a page-wide lookup by name finds both.
+  const strip = page.getByLabel("Terminal windows")
+  return { connections, errors, strip }
 }
 
 async function scrollback(page: Page) {
@@ -128,11 +135,11 @@ async function scrollback(page: Page) {
 for (const renderer of ["dom", "webgl"] as const) {
   test(`preserves busy terminal windows and sessions with ${renderer}`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
-    const { connections, errors } = await terminalFixture(page, renderer)
+    const { connections, errors, strip } = await terminalFixture(page, renderer)
     const first = connections.get("window-a")![0]
     const originalSize = first.sizes.at(-1)
     first.socket.send(Buffer.from("\x1b[5;1H\x1b[38;2;"))
-    await page.getByRole("button", { name: "window-b", exact: true }).click()
+    await strip.getByRole("button", { name: "window-b", exact: true }).click()
     await expect(page.locator(".xterm-screen")).toHaveCount(2)
     await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()
     expect(first.closed).toBe(false)
@@ -151,7 +158,7 @@ for (const renderer of ["dom", "webgl"] as const) {
       .not.toBe(originalSize?.cols)
     expect(first.sizes.at(-1)).toEqual(originalSize)
 
-    await page.getByRole("button", { name: "window-a", exact: true }).click()
+    await strip.getByRole("button", { name: "window-a", exact: true }).click()
     await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()
     await expect.poll(() => first.sizes.at(-1)?.cols).not.toBe(originalSize?.cols)
     expect(connections.get("window-a")).toHaveLength(1)
@@ -183,7 +190,7 @@ for (const renderer of ["dom", "webgl"] as const) {
     await expect.poll(async () => (await screen.screenshot()).equals(before)).toBe(true)
 
     // Background panes keep their sockets until their window/session is closed.
-    await page.getByRole("button", { name: "Close window window-b", exact: true }).click()
+    await strip.getByRole("button", { name: "Close window window-b", exact: true }).click()
     await expect(page.locator(".xterm-screen")).toHaveCount(2)
     await expect.poll(() => connections.get("window-b")![0].closed).toBe(true)
     await page.locator('[data-session="session-b"]').getByRole("button", { name: /close/i }).click()
@@ -199,3 +206,68 @@ for (const renderer of ["dom", "webgl"] as const) {
     expect(errors).toEqual([])
   })
 }
+
+// A tab is named after what its shell is doing and marked while something
+// runs; the rail names a session after the window it is on. And the page
+// remembers which session and window were on screen across a navigation.
+test("names windows after their work and remembers where you were", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { connections, errors, strip } = await terminalFixture(page, "dom")
+  const first = connections.get("window-a")![0]
+  const tabA = page.locator('[data-window="window-a"]')
+  const rowA = page.locator('[data-session="session-a"]')
+  const state = (data: Record<string, unknown>) =>
+    first.socket.send(JSON.stringify({ type: "state", data }))
+
+  // A program that set no title, open but doing nothing: the tab and the rail
+  // show its name and mark nothing.
+  state({ busy: true, process: "claude" })
+  await expect(tabA).toHaveAttribute("data-busy", "true")
+  await expect(tabA.getByRole("button", { name: "claude", exact: true })).toBeVisible()
+  await expect(rowA).toContainText("claude")
+  await expect(tabA).not.toHaveAttribute("data-working", "true")
+  await expect(rowA).not.toHaveAttribute("data-working", "true")
+  // It names itself and starts working: the title wins over the process, and
+  // the tab and the row are marked.
+  state({ busy: true, process: "claude", title: "✳ Claude Code", working: true })
+  // The mark's label joins the button's accessible name, which is what a
+  // screen reader should hear.
+  await expect(
+    tabA.getByRole("button", { name: "Working ✳ Claude Code", exact: true }),
+  ).toBeVisible()
+  await expect(tabA).toHaveAttribute("data-working", "true")
+  await expect(rowA).toHaveAttribute("data-working", "true")
+  await expect(tabA.getByRole("img", { name: "Working" })).toBeVisible()
+  // It stops: the finish is marked on the tab and the row.
+  state({ busy: true, process: "claude", title: "✳ Claude Code", finishedAt: Date.now() })
+  await expect(tabA).not.toHaveAttribute("data-working", "true")
+  await expect(tabA).toHaveAttribute("data-finished", "true")
+  await expect(rowA).toHaveAttribute("data-finished", "true")
+  await expect(tabA.getByRole("img", { name: "Finished" })).toBeVisible()
+  // Back at the prompt, which titles the window after its directory.
+  state({ busy: false, title: "~" })
+  await expect(tabA).not.toHaveAttribute("data-busy", "true")
+  await expect(tabA.getByRole("button", { name: "~", exact: true })).toBeVisible()
+  await expect(rowA).toContainText("~")
+
+  // Pick window-b, leave the page, come back: window-b is still the one on
+  // screen, and the server was told which window that was.
+  await strip.getByRole("button", { name: "window-b", exact: true }).click()
+  await expect(page.locator('[data-window="window-b"]')).toHaveAttribute("data-active", "true")
+  await expect.poll(() => connections.get("window-b")?.[0].focus).toBeGreaterThan(0)
+  await page.getByRole("link", { name: "Overview", exact: true }).click()
+  await expect(page.locator(".xterm-screen")).toHaveCount(0)
+  await page.getByRole("link", { name: "Terminal", exact: true }).click()
+  await expect(page.locator('[data-window="window-b"]')).toHaveAttribute("data-active", "true")
+  await expect(page.locator(".xterm-helper-textarea:visible")).toBeFocused()
+
+  // Same for the session.
+  await page.locator('[data-session="session-b"]').getByRole("button").first().click()
+  await expect(page.locator('[data-session="session-b"]')).toHaveAttribute("data-active", "true")
+  await page.getByRole("link", { name: "Overview", exact: true }).click()
+  await expect(page.locator(".xterm-screen")).toHaveCount(0)
+  await page.getByRole("link", { name: "Terminal", exact: true }).click()
+  await expect(page.locator('[data-session="session-b"]')).toHaveAttribute("data-active", "true")
+  await expect(page.locator('[data-window="window-c"]')).toHaveAttribute("data-active", "true")
+  expect(errors).toEqual([])
+})

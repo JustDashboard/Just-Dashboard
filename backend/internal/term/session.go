@@ -68,10 +68,39 @@ type Session struct {
 	pty         *os.File
 	cmd         *exec.Cmd
 	subscribers map[int64]chan []byte
-	nextSub     atomic.Int64
-	scrollback  *ringBuffer
-	closed      bool
-	lastActive  time.Time
+	// events carries activity changes to the subscribers that asked for them,
+	// beside their output channel rather than inside it: the output stream is
+	// bytes whose order is sacred, and a state frame is not part of it.
+	events     map[int64]chan Activity
+	nextSub    atomic.Int64
+	scrollback *ringBuffer
+	closed     bool
+	lastActive time.Time
+
+	// What the window is doing — see activity.go. titles is fed only by the
+	// read loop; the rest is read under mu.
+	titles     oscScanner
+	title      string
+	titleOwner int
+	activity   Activity
+	observed   time.Time
+	tick       *time.Timer
+	focusedAt  time.Time
+	// The raw material of Working: the job as last seen, when output last
+	// arrived and when the current run of it began, when the operator last
+	// typed (so an echo is not mistaken for work), the last CPU reading, and
+	// when the last stretch of work ended.
+	job         jobState
+	lastOutput  time.Time
+	activeSince time.Time
+	lastInput   time.Time
+	cpu         cpuSample
+	finishedAt  time.Time
+	// named is whether the operator titled the workspace; windowNamed whether
+	// they named this window. A name somebody chose is shown as given; a
+	// default follows whatever the shell is doing.
+	named       bool
+	windowNamed bool
 }
 
 func (s *Session) Attached() int {
@@ -107,7 +136,9 @@ func (s *Session) isClosed() bool {
 func (s *Session) Meta() SessionMeta {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return SessionMeta{Title: s.Title, Folder: s.folder, Favourite: s.favourite, Colour: s.colour}
+	return SessionMeta{
+		Title: s.Title, Named: s.named, Folder: s.folder, Favourite: s.favourite, Colour: s.colour,
+	}
 }
 
 // setMeta records the operator's choice on the live session. Callers write
@@ -119,6 +150,7 @@ func (s *Session) setMeta(meta SessionMeta) {
 	if meta.Title != "" {
 		s.Title = meta.Title
 	}
+	s.named = meta.Named
 	s.folder, s.favourite, s.colour = meta.Folder, meta.Favourite, meta.Colour
 }
 
@@ -145,6 +177,7 @@ func (s *Session) Unsubscribe(id int64) {
 		delete(s.subscribers, id)
 		close(ch)
 	}
+	s.dropEventsLocked(id)
 }
 
 func (s *Session) Write(p []byte) (int, error) {
@@ -154,6 +187,7 @@ func (s *Session) Write(p []byte) (int, error) {
 		return 0, ErrNotFound
 	}
 	s.lastActive = time.Now()
+	s.lastInput = s.lastActive
 	f := s.pty
 	s.mu.Unlock()
 	return f.Write(p)
@@ -264,6 +298,7 @@ func (s *Session) broadcast(chunk []byte) {
 			// finish; Unsubscribe on the way out is then a no-op.
 			delete(s.subscribers, id)
 			close(ch)
+			s.dropEventsLocked(id)
 			continue
 		}
 		select {
@@ -273,6 +308,7 @@ func (s *Session) broadcast(chunk []byte) {
 			// can only mean it is not reading. Same answer as above.
 			delete(s.subscribers, id)
 			close(ch)
+			s.dropEventsLocked(id)
 		}
 	}
 }
@@ -285,6 +321,7 @@ func (s *Session) readLoop(onExit func()) {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
 			s.broadcast(chunk)
+			s.noteOutput(chunk)
 		}
 		if err != nil {
 			onExit()
@@ -306,6 +343,11 @@ func (s *Session) Close() error {
 	for id, ch := range s.subscribers {
 		delete(s.subscribers, id)
 		close(ch)
+		s.dropEventsLocked(id)
+	}
+	if s.tick != nil {
+		s.tick.Stop()
+		s.tick = nil
 	}
 	f, cmd := s.pty, s.cmd
 	s.mu.Unlock()

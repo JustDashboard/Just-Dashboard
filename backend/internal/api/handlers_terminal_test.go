@@ -581,3 +581,70 @@ func fetchWindows(t *testing.T, api apiCall, base string) []testWindow {
 	}
 	return out
 }
+
+// Nothing is called "shell": an unnamed session and its windows are numbered
+// "Terminal", and the listing says which names the operator chose so the page
+// knows which ones may follow what the shell is doing.
+func TestUnnamedSessionsAndWindowsAreCalledTerminal(t *testing.T) {
+	_, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	rec := api.ok(http.MethodPost, "/terminal/", map[string]any{"rows": 24, "cols": 80}, "")
+	var first struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Title != "Terminal" {
+		t.Fatalf("first session is called %q, want Terminal", first.Title)
+	}
+	rec = api.ok(http.MethodPost, "/terminal/", map[string]any{"rows": 24, "cols": 80}, "")
+	var second struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Title != "Terminal 2" {
+		t.Fatalf("second session is called %q, want Terminal 2", second.Title)
+	}
+
+	base := "/terminal/" + first.ID
+	api.ok(http.MethodPost, base+"/windows", nil, "")
+	api.ok(http.MethodPost, base+"/windows", map[string]any{"name": "logs"}, "")
+	rec = api.ok(http.MethodGet, base+"/windows", nil, "")
+	var windows []struct {
+		Name  string `json:"name"`
+		Named bool   `json:"named"`
+		Busy  bool   `json:"busy"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &windows); err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 3 {
+		t.Fatalf("windows = %+v, want 3", windows)
+	}
+	if windows[0].Name != "Terminal" || windows[0].Named {
+		t.Errorf("first window = %+v, want an unnamed Terminal", windows[0])
+	}
+	if windows[1].Name != "Terminal 2" || windows[1].Named {
+		t.Errorf("second window = %+v, want an unnamed Terminal 2", windows[1])
+	}
+	if windows[2].Name != "logs" || !windows[2].Named {
+		t.Errorf("third window = %+v, want a named logs", windows[2])
+	}
+
+	listing := api.list()
+	ws := listing.session(t, "Terminal")
+	if ws.Named {
+		t.Error("a default title counts as chosen")
+	}
+	if ws.Current == nil {
+		t.Fatal("the listing names no current window")
+	}
+	api.ok(http.MethodPatch, base, map[string]any{"title": "build box"}, "")
+	if ws := api.list().session(t, "build box"); !ws.Named {
+		t.Error("a typed title does not count as chosen")
+	}
+}

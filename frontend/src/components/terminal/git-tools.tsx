@@ -20,7 +20,7 @@ import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { describeChange, gitLetter, gitStyle, gitTone } from "@/lib/git-status"
+import { describeChange, gitLetter, gitStyle, gitTone, type GitSide } from "@/lib/git-status"
 import { useViewState } from "@/lib/view-state"
 import type {
   GitBranch,
@@ -472,15 +472,24 @@ function ChangesView({
 
   const discard = (file: GitFileChange) =>
     onConfirm({
-      title: `Discard changes to ${file.path.split("/").pop()}`,
+      title:
+        file.label === "untracked"
+          ? `Delete ${file.path.split("/").pop()}`
+          : `Discard changes to ${file.path.split("/").pop()}`,
       danger: true,
-      confirmLabel: "Discard",
-      body: (
-        <>
-          <span className="font-mono break-all">{file.path}</span> is restored to its committed
-          state. The current contents are not recoverable.
-        </>
-      ),
+      confirmLabel: file.label === "untracked" ? "Delete" : "Discard",
+      body:
+        file.label === "untracked" ? (
+          <>
+            <span className="font-mono break-all">{file.path}</span> has never been committed, so
+            discarding it deletes it. It is not recoverable.
+          </>
+        ) : (
+          <>
+            <span className="font-mono break-all">{file.path}</span> is restored to its committed
+            state. The current contents are not recoverable.
+          </>
+        ),
       run: async () => {
         await post("/git/discard", { file: file.path }, { confirm: "discard changes", query: q })
         notify.success("Discarded", { description: file.path })
@@ -492,8 +501,10 @@ function ChangesView({
   if (status.loading && !status.data) return <LoadingRows className="p-3" rows={4} />
 
   const files = status.data?.files ?? []
+  // A file staged and then edited again is on both sides, and is listed
+  // under both headings with the letter for each — see lib/git-status.
   const staged = files.filter((f) => f.staged)
-  const unstaged = files.filter((f) => !f.staged)
+  const unstaged = files.filter((f) => f.unstaged)
   const canCommit = !busy && (Boolean(message.trim()) || amend) && staged.length > 0
 
   return (
@@ -525,6 +536,7 @@ function ChangesView({
                   <FileRow
                     key={"s" + f.path}
                     file={f}
+                    side="staged"
                     onDiff={() => showDiff(f.path, true)}
                     action={
                       canControl && (
@@ -590,12 +602,13 @@ function ChangesView({
                   <FileRow
                     key={"u" + f.path}
                     file={f}
+                    side="unstaged"
                     onDiff={() => showDiff(f.path, false)}
                     action={
                       <>
-                        {canDestruct && f.label !== "untracked" && (
+                        {canDestruct && f.label !== "conflicted" && (
                           <RowButton
-                            label="Discard"
+                            label={f.label === "untracked" ? "Delete" : "Discard"}
                             className="text-destructive"
                             disabled={!!busy}
                             onClick={() => discard(f)}
@@ -643,6 +656,7 @@ function ChangesView({
               <Checkbox
                 checked={amend}
                 onCheckedChange={(v) => setAmend(Boolean(v))}
+                aria-label="Amend the previous commit"
                 className="size-3.5"
               />
               Amend
@@ -945,14 +959,16 @@ function FileGroup({
  */
 function FileRow({
   file,
+  side,
   onDiff,
   action,
 }: {
   file: GitFileChange
+  side: GitSide
   onDiff: () => void
   action?: React.ReactNode
 }) {
-  const tone = gitTone(file)
+  const tone = gitTone(file, side)
   return (
     <div
       className="group flex min-w-0 items-center gap-2 py-1 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
@@ -961,10 +977,10 @@ function FileRow({
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="w-3 shrink-0 text-center font-mono text-micro font-medium text-(--git-colour)">
-            {gitLetter(file)}
+            {gitLetter(file, side)}
           </span>
         </TooltipTrigger>
-        <TooltipContent>{describeChange(file)}</TooltipContent>
+        <TooltipContent>{describeChange(file, side)}</TooltipContent>
       </Tooltip>
       {/* No tooltip on the name. The row is a list of paths and clicking one
           to see its diff is the only thing it does — a hint that repeats the

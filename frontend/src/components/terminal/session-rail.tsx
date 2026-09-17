@@ -13,10 +13,11 @@ import {
   Trash,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { relativeTime, truncateMiddle } from "@/lib/format"
-import type { TerminalFolder, TerminalWorkspace } from "@/lib/types"
+import type { TerminalActivity, TerminalFolder, TerminalWorkspace } from "@/lib/types"
+import { sessionActivity, sessionLabel, useFinished } from "@/lib/terminal-activity"
 import { useViewState } from "@/lib/view-state"
 import { SearchInput } from "@/components/page"
+import { ActivityMark } from "@/components/terminal/activity-mark"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -35,6 +36,8 @@ import { Pane, PaneHeader } from "@/components/panel"
 type RowHandlers = {
   activeId: string | null
   folders: TerminalFolder[]
+  /** What each visited window's socket last said it was doing, by window id. */
+  activity: Record<string, TerminalActivity>
   onSelect: (session: TerminalWorkspace) => void
   onRename: (session: TerminalWorkspace, title: string) => void
   onTogglePinned: (session: TerminalWorkspace) => void
@@ -47,6 +50,7 @@ export function SessionRail({
   sessions,
   folders,
   activeId,
+  activity,
   onSelect,
   onRename,
   onTogglePinned,
@@ -61,6 +65,7 @@ export function SessionRail({
   sessions: TerminalWorkspace[]
   folders: TerminalFolder[]
   activeId: string | null
+  activity: Record<string, TerminalActivity>
   onSelect: (session: TerminalWorkspace) => void
   onRename: (session: TerminalWorkspace, title: string) => void
   onTogglePinned: (session: TerminalWorkspace) => void
@@ -82,11 +87,11 @@ export function SessionRail({
     const needle = filter.trim().toLowerCase()
     if (!needle) return sessions
     return sessions.filter((session) =>
-      [session.title, session.cwd, session.folder].some((value) =>
+      [sessionLabel(session, activity), session.title, session.cwd, session.folder].some((value) =>
         value?.toLowerCase().includes(needle),
       ),
     )
-  }, [sessions, filter])
+  }, [sessions, filter, activity])
   const groups = useMemo(() => {
     const byFolder = new Map<string, TerminalWorkspace[]>()
     for (const session of matches) {
@@ -106,6 +111,7 @@ export function SessionRail({
   const rows = {
     activeId,
     folders,
+    activity,
     onSelect,
     onRename,
     onTogglePinned,
@@ -168,15 +174,17 @@ export function SessionRail({
           />
         ))}
         {groups.unfiled.length > 0 && (
-          <div className="space-y-0.5" data-folder="">
+          <div data-folder="">
             {folders.length > 0 && (
               <p className="px-2 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
                 Unfiled
               </p>
             )}
-            {groups.unfiled.map((session) => (
-              <SessionRow key={session.id} session={session} {...rows} />
-            ))}
+            <div className="divide-y divide-hairline border-y border-hairline">
+              {groups.unfiled.map((session) => (
+                <SessionRow key={session.id} session={session} {...rows} />
+              ))}
+            </div>
           </div>
         )}
         {matches.length === 0 && filter && (
@@ -272,7 +280,7 @@ function FolderGroup({
         </span>
       </div>
       {!collapsed && items.length > 0 && (
-        <div className="mt-0.5 space-y-0.5 pl-3">
+        <div className="mt-0.5 divide-y divide-hairline border-y border-hairline pl-3">
           {items.map((session) => (
             <SessionRow key={session.id} session={session} {...rows} />
           ))}
@@ -286,6 +294,7 @@ function SessionRow({
   session,
   activeId,
   folders,
+  activity,
   onSelect,
   onRename,
   onTogglePinned,
@@ -294,11 +303,20 @@ function SessionRow({
 }: RowHandlers & { session: TerminalWorkspace }) {
   const [renaming, setRenaming] = useState(false)
   const active = activeId === session.id
+  // One line: what the session is called, which — unless somebody named it —
+  // is what its current window is doing. The directory used to sit under the
+  // title, but the title now carries it while the shell is at a prompt, and
+  // while a program runs its name is the more useful line. The mark at the
+  // end says a window in here is still working, or has just stopped — the
+  // reason to look at a row you are not in.
+  const label = sessionLabel(session, activity)
+  const { working, finishedAt } = sessionActivity(session, activity)
+  const finished = useFinished(session.id, active, finishedAt)
   if (renaming)
     return (
       <InlineEdit
         placeholder="Name this session"
-        value={session.title}
+        value={session.named ? session.title : label}
         onCommit={(value) => {
           if (value) onRename(session, value)
           setRenaming(false)
@@ -311,28 +329,27 @@ function SessionRow({
     <div
       data-session={session.id}
       data-active={active || undefined}
+      data-working={working || undefined}
+      data-finished={finished || undefined}
       className={cn(
-        "group flex min-w-0 items-center gap-1 rounded-md py-1 pr-1 pl-2.5 transition-colors",
-        active ? "bg-accent" : "hover:bg-row-hover",
+        "group flex min-w-0 items-center gap-1 border-l-2 py-1.5 pr-1 pl-2 transition-colors",
+        active ? "border-l-brand bg-accent" : "border-l-transparent hover:bg-row-hover",
       )}
     >
       {/* No terminal glyph on the row: every row in this list is a terminal,
           so the icon said nothing the column had not already said. */}
       <button
         onClick={() => onSelect(session)}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left focus-ring-inset"
+        title={session.cwd}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-ring-inset"
       >
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1">
-            {session.favourite && <Pin className="size-2.5 shrink-0 text-muted-foreground" />}
-            <span className={cn("truncate text-body leading-tight", active && "font-medium")}>
-              {session.title}
-            </span>
-          </span>
-          <span className="block truncate font-mono text-micro leading-tight text-muted-foreground">
-            {session.cwd ? truncateMiddle(session.cwd, 30) : relativeTime(session.createdAt)}
-          </span>
+        {session.favourite && <Pin className="size-2.5 shrink-0 text-muted-foreground" />}
+        <span
+          className={cn("min-w-0 flex-1 truncate text-body leading-tight", active && "font-medium")}
+        >
+          {label}
         </span>
+        <ActivityMark working={working} finished={finished} className="pr-1" />
       </button>
       {/* Closing is the one thing done often enough to earn its own control,
           so it sits on the card rather than two clicks into the menu. The
@@ -340,7 +357,7 @@ function SessionRow({
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label={`Close ${session.title}`}
+        aria-label={`Close ${label}`}
         className={cn("size-6 shrink-0 text-muted-foreground hover:text-destructive", rowReveal())}
         onClick={() => onClose(session)}
       >
@@ -351,7 +368,7 @@ function SessionRow({
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label={`More for ${session.title}`}
+            aria-label={`More for ${label}`}
             className={cn("size-6 shrink-0", rowReveal())}
           >
             <MoreHorizontal />

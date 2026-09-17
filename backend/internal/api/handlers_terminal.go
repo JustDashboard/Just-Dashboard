@@ -95,8 +95,11 @@ func mapTermError(err error) error {
 // workspace is one terminal as the operator thinks of it: a named, filed group
 // of direct PTYs. Every workspace in the response is live and process-local.
 type workspace struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Named is whether the operator chose Title. A default title gives way in
+	// the rail to what the session is doing, a chosen one does not.
+	Named     bool      `json:"named"`
 	Folder    string    `json:"folder,omitempty"`
 	Favourite bool      `json:"favourite"`
 	Live      bool      `json:"live"`
@@ -107,10 +110,40 @@ type workspace struct {
 	User      string    `json:"user,omitempty"`
 	Shell     string    `json:"shell,omitempty"`
 	Owner     string    `json:"owner,omitempty"`
+	// Busy is whether any window has a program in the foreground, and Current
+	// is the window that stands for the session — the one a browser last
+	// showed, or failing that the one opened most recently — so the rail can
+	// name a session after what is going on inside it.
+	Busy bool `json:"busy"`
+	// Working and FinishedAt aggregate the windows the same way: something in
+	// the session is working, or the most recent thing in it to finish.
+	Working    bool           `json:"working"`
+	FinishedAt int64          `json:"finishedAt,omitempty"`
+	Current    *sessionWindow `json:"current,omitempty"`
+}
+
+// sessionWindow is one direct PTY as the rail and the window strip see it: its
+// name, whether that name was chosen, and what it is doing right now.
+type sessionWindow struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Named bool   `json:"named"`
+	term.Activity
+}
+
+// windowView adds what the strip needs beyond the name: position and directory.
+type windowView struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+	Named bool   `json:"named"`
+	CWD   string `json:"cwd,omitempty"`
+	term.Activity
 }
 
 func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) error {
 	byID := map[string]*workspace{}
+	focused := map[string]time.Time{}
 	out := []*workspace{}
 	for _, sess := range s.modules.term.List() {
 		// Persistent tmux sessions are no longer part of the product. Existing
@@ -127,9 +160,9 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 		if ws == nil {
 			meta := sess.Meta()
 			ws = &workspace{
-				ID: id, Title: meta.Title, Folder: meta.Folder, Favourite: meta.Favourite,
-				Live: true, CreatedAt: sess.CreatedAt, User: sess.User, Shell: sess.Shell,
-				Owner: sess.Owner,
+				ID: id, Title: meta.Title, Named: meta.Named, Folder: meta.Folder,
+				Favourite: meta.Favourite, Live: true, CreatedAt: sess.CreatedAt,
+				User: sess.User, Shell: sess.Shell, Owner: sess.Owner,
 			}
 			byID[id] = ws
 			out = append(out, ws)
@@ -138,6 +171,18 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 		ws.Attached += sess.Attached()
 		if ws.CWD == "" {
 			ws.CWD = sess.CWD()
+		}
+		window := sessionWindow{
+			ID: sess.ID, Name: sess.WindowName, Named: sess.WindowNamed(), Activity: sess.Activity(),
+		}
+		ws.Busy = ws.Busy || window.Busy
+		ws.Working = ws.Working || window.Working
+		if window.FinishedAt > ws.FinishedAt {
+			ws.FinishedAt = window.FinishedAt
+		}
+		if at := sess.FocusedAt(); ws.Current == nil || at.After(focused[id]) {
+			ws.Current = &window
+			focused[id] = at
 		}
 	}
 
@@ -277,14 +322,36 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 			return nil
 		}
 	}
+	// What the window is doing, stated once on arrival and then whenever it
+	// changes, so a tab can be titled and marked busy without waiting for the
+	// next listing poll.
+	if err := conn.Send("state", sess.Activity()); err != nil {
+		return nil
+	}
+	events := sess.Events(subID)
 	go func() {
-		for chunk := range out {
-			if err := conn.WriteBinary(chunk); err != nil {
-				cancel()
-				return
+		for {
+			select {
+			case chunk, ok := <-out:
+				if !ok {
+					cancel()
+					return
+				}
+				if err := conn.WriteBinary(chunk); err != nil {
+					cancel()
+					return
+				}
+			case activity, ok := <-events:
+				if !ok {
+					events = nil
+					continue
+				}
+				if err := conn.Send("state", activity); err != nil {
+					cancel()
+					return
+				}
 			}
 		}
-		cancel()
 	}()
 
 	for {
@@ -308,6 +375,13 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 					continue
 				case "input":
 					sess.Write([]byte(ctrl.Data))
+					continue
+				case "focus":
+					// The browser is showing this window. Which window a
+					// session is "on" is otherwise unknowable here: a visited
+					// window keeps its socket while hidden, so attaching says
+					// nothing about what is on screen.
+					sess.MarkFocused()
 					continue
 				case "ping":
 					continue
@@ -489,6 +563,11 @@ func (s *Server) handleTerminalMeta(w http.ResponseWriter, r *http.Request) erro
 	}
 	if req.Title != nil {
 		meta.Title = *req.Title
+		// A title somebody typed is theirs from now on: the rail stops
+		// following the shell for this session and shows what they wrote.
+		if strings.TrimSpace(*req.Title) != "" {
+			meta.Named = true
+		}
 	}
 	if req.Folder != nil {
 		meta.Folder = *req.Folder
@@ -512,10 +591,11 @@ func (s *Server) handleTerminalWindows(w http.ResponseWriter, r *http.Request) e
 	if len(sessions) == 0 {
 		return httpx.ErrNotFound
 	}
-	windows := make([]map[string]any, 0, len(sessions))
+	windows := make([]windowView, 0, len(sessions))
 	for index, sess := range sessions {
-		windows = append(windows, map[string]any{
-			"id": sess.ID, "index": index, "name": sess.WindowName, "cwd": sess.CWD(),
+		windows = append(windows, windowView{
+			ID: sess.ID, Index: index, Name: sess.WindowName, Named: sess.WindowNamed(),
+			CWD: sess.CWD(), Activity: sess.Activity(),
 		})
 	}
 	httpx.JSON(w, http.StatusOK, windows)

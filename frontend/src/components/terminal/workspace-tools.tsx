@@ -306,11 +306,11 @@ function InlineFile({
     return () => controller.abort()
   }, [path])
 
-  // A file that git knows nothing about has nothing to compare against, and
-  // one that is only staged has its change in the index rather than the
-  // working tree — asking for the wrong one of those returns an empty diff and
-  // reads as "no changes" for a file the list says is modified.
-  const diffable = Boolean(change && repoPath && change.label !== "untracked")
+  // A file that is only staged has its change in the index rather than the
+  // working tree — asking for the wrong one returns an empty diff and reads
+  // as "no changes" for a file the list says is modified. An untracked file
+  // diffs too: the server shows it against nothing, as the addition it is.
+  const diffable = Boolean(change && repoPath)
   const staged = Boolean(change?.staged && !change?.worktree)
 
   // Re-read on every entry to the diff, and after every save: the point of
@@ -376,10 +376,10 @@ function InlineFile({
             <TooltipContent>
               {showDiff
                 ? "Back to the file"
-                : !diffable
-                  ? "Untracked — there is no earlier version to compare against"
-                  : staged
-                    ? "Show what is staged for the next commit"
+                : staged
+                  ? "Show what is staged for the next commit"
+                  : change?.label === "untracked"
+                    ? "Show the whole file as the addition it will be"
                     : "Show what changed since the last commit"}
             </TooltipContent>
           </Tooltip>
@@ -412,17 +412,7 @@ function InlineFile({
       </PaneHeader>
       <div className="min-h-0 flex-1">
         {showDiff ? (
-          // An untracked file is not a failed diff, and saying so beats a
-          // disabled button: a control that cannot be pressed also cannot be
-          // hovered, so the one place with room for the explanation is the
-          // place the explanation would have gone.
-          !diffable ? (
-            <div className="p-4 text-xs text-muted-foreground">
-              git is not tracking this file yet, so there is no earlier version to compare it
-              against — every line in it is new. Stage it from the Git tab and the diff appears
-              here.
-            </div>
-          ) : current?.error ? (
+          current?.error ? (
             <ErrorState error={current.error} className="m-3" />
           ) : current?.body === undefined ? (
             <LoadingRows className="p-3" rows={6} />

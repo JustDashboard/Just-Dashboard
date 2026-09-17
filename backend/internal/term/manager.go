@@ -150,16 +150,20 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 		Rows:        opts.Rows,
 		Cols:        opts.Cols,
 		subscribers: map[int64]chan []byte{},
+		events:      map[int64]chan Activity{},
 		scrollback:  newRingBuffer(scrollbackKB * 1024),
 		lastActive:  time.Now(),
+		focusedAt:   time.Now(),
 		folder:      sanitiseField(opts.Folder),
 		colour:      normaliseColour(opts.Colour),
+		named:       opts.Title != "",
+		windowNamed: opts.WindowName != "",
 	}
 	if sess.WorkspaceID == "" {
 		sess.WorkspaceID = id
 	}
 	if sess.WindowName == "" {
-		sess.WindowName = "shell"
+		sess.WindowName = m.defaultWindowName(sess.WorkspaceID)
 	}
 	// Where the session should start. Empty unless the caller asked for one
 	// and it is a real directory on the host, so everything below can treat a
@@ -317,14 +321,19 @@ func hostDir(ctx context.Context, dir string) string {
 	return dir
 }
 
+// defaultName is what a session or window is called until somebody names it
+// or the shell says what it is doing. "Terminal" rather than "shell": it is
+// the word on the page's own navigation, and the one a person uses.
+const defaultName = "Terminal"
+
 // defaultTitle names a session the operator did not name.
 //
 // Numbered, and that is the whole point: the rail exists because five sessions
-// called `vpsd-3f2a91c4` are indistinguishable, and five called `shell` are no
-// better. The number is the lowest one free across everything this dashboard
-// knows about — live sessions and the ones only tmux is holding — so closing
-// "shell 2" and opening another gives back "shell 2" rather than counting
-// forever upward.
+// called `vpsd-3f2a91c4` are indistinguishable, and five called `Terminal` are
+// no better. The number is the lowest one free across everything this dashboard
+// knows about, so closing "Terminal 2" and opening another gives back
+// "Terminal 2" rather than counting forever upward. The default only shows
+// while the window has nothing better to say for itself — see activity.go.
 func (m *Manager) defaultTitle(t string) string {
 	if t != "" {
 		if len(t) > 64 {
@@ -332,21 +341,20 @@ func (m *Manager) defaultTitle(t string) string {
 		}
 		return t
 	}
-	const base = "shell"
 	taken := map[string]bool{}
 	for _, meta := range m.WorkspaceMeta() {
 		taken[meta.Title] = true
 	}
-	if !taken[base] {
-		return base
+	return freeName(defaultName, taken)
+}
+
+// defaultWindowName numbers windows the same way, within their session.
+func (m *Manager) defaultWindowName(workspaceID string) string {
+	taken := map[string]bool{}
+	for _, sess := range m.Workspace(workspaceID) {
+		taken[sess.WindowName] = true
 	}
-	for n := 2; n < 1000; n++ {
-		candidate := base + " " + strconv.Itoa(n)
-		if !taken[candidate] {
-			return candidate
-		}
-	}
-	return base
+	return freeName(defaultName, taken)
 }
 
 func (m *Manager) Get(id string) (*Session, error) {
@@ -433,6 +441,9 @@ func (m *Manager) RenameDirectWindow(workspaceID, windowID, name string) error {
 		return ErrNotFound
 	}
 	sess.WindowName = name
+	sess.mu.Lock()
+	sess.windowNamed = true
+	sess.mu.Unlock()
 	return nil
 }
 
@@ -833,8 +844,10 @@ func (m *Manager) Reattach(ctx context.Context, tmuxName, owner string, rows, co
 		Rows:        rows,
 		Cols:        cols,
 		subscribers: map[int64]chan []byte{},
+		events:      map[int64]chan Activity{},
 		scrollback:  newRingBuffer(scrollbackKB * 1024),
 		lastActive:  time.Now(),
+		focusedAt:   time.Now(),
 	}
 	// The display options are set on the way in as well as at creation, so a
 	// session made before they existed — or by an older build — is fixed by

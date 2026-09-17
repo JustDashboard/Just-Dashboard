@@ -73,7 +73,11 @@ func normaliseColour(v string) string {
 // SessionMeta is everything about a session that is the operator's choice
 // rather than the shell's state.
 type SessionMeta struct {
-	Title     string `json:"title"`
+	Title string `json:"title"`
+	// Named is whether Title was the operator's choice rather than the
+	// dashboard's default. A chosen name is shown as given; a default gives
+	// way to whatever the session is doing.
+	Named     bool   `json:"named"`
 	Folder    string `json:"folder"`
 	Favourite bool   `json:"favourite"`
 	Colour    string `json:"colour"`
@@ -89,6 +93,7 @@ var ErrNoPersistence = errors.New("this session is not tmux-backed, so it has no
 func (m *Manager) SetMeta(ctx context.Context, tmuxName string, meta SessionMeta) error {
 	clean := SessionMeta{
 		Title:     sanitiseField(meta.Title),
+		Named:     meta.Named,
 		Folder:    sanitiseField(meta.Folder),
 		Favourite: meta.Favourite,
 		Colour:    normaliseColour(meta.Colour),

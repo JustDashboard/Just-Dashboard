@@ -27,6 +27,7 @@ import {
 import { notify } from "@/lib/toast"
 import { wsUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import type { TerminalActivity } from "@/lib/types"
 import { actionFor, formatChord, useKeymap } from "@/lib/terminal-keymap"
 import {
   chooseDroppedImage,
@@ -219,6 +220,7 @@ export function XtermPane({
   terminalSessionId,
   active = true,
   flush,
+  onActivity,
 }: {
   path: string
   query?: Query
@@ -226,6 +228,13 @@ export function XtermPane({
   /** No frame of its own: the pane is one column of a framed workbench. */
   flush?: boolean
   onExit?: () => void
+  /**
+   * What the window is doing, as the server reads it off the PTY: the title
+   * the foreground program set, whether anything is running, and what. Sent
+   * once on attach and again whenever it changes, so the tab that owns this
+   * pane can be titled and marked busy without waiting for a poll.
+   */
+  onActivity?: (activity: TerminalActivity) => void
   /** Shown in the pane header instead of the socket path — e.g. who you are. */
   subtitle?: React.ReactNode
   /** Session/window controls embedded in the terminal title bar. */
@@ -271,7 +280,13 @@ export function XtermPane({
    */
   onToggleFullscreen?: () => void
   fullscreenActive?: boolean
-  /** Enables session-scoped image paste/drop on the real terminal page only. */
+  /**
+   * Marks the pane as one of the terminal page's own windows, which enables
+   * session-scoped image paste/drop and the `focus` frame that tells the
+   * server this window is the one on screen. Left unset by the compose
+   * runner, whose socket writes every frame it does not recognise into the
+   * container's stdin.
+   */
   terminalSessionId?: string
   /** Hidden windows keep parsing output at their last visible grid size. */
   active?: boolean
@@ -394,6 +409,12 @@ export function XtermPane({
   useEffect(() => {
     onToggleFullscreenRef.current = onToggleFullscreen
   }, [onToggleFullscreen])
+  // The state callback is read from the socket handler, which is installed
+  // once with the connection.
+  const onActivityRef = useRef(onActivity)
+  useEffect(() => {
+    onActivityRef.current = onActivity
+  }, [onActivity])
 
   useEffect(() => {
     const host = hostRef.current
@@ -661,6 +682,11 @@ export function XtermPane({
         sendResize()
         if (terminalDebug) console.debug("terminal WebSocket connected")
         if (activeRef.current) term.focus()
+        // The window on screen says so, and only a terminal-page window: the
+        // compose runner's socket would type the frame into the container.
+        if (activeRef.current && terminalSessionId) {
+          socket.send(JSON.stringify({ type: "focus" }))
+        }
         // The session may have been left scrolled back by whoever was here
         // before — copy mode outlives the socket the way everything else in a
         // tmux session does — and a pane that is in a mode reads as a pane
@@ -681,6 +707,8 @@ export function XtermPane({
               term.writeln(`\r\n\x1b[31m${msg.error}\x1b[0m`)
             } else if (msg.type === "scrollback") {
               replaying = true
+            } else if (msg.type === "state") {
+              onActivityRef.current?.(msg.data as TerminalActivity)
             } else if (msg.type === "copy-mode") {
               // The server is the only authority on whether tmux is still
               // scrolled away from the prompt — the browser forwards the wheel
@@ -943,10 +971,17 @@ export function XtermPane({
     if (focusRef) focusRef.current = focus
     fitRef.current?.fit()
     focus()
+    // Switching to a window whose socket is already up: the server learns
+    // which window is on screen from this, since the socket itself stays open
+    // while the window is hidden and says nothing.
+    const socket = socketRef.current
+    if (terminalSessionId && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "focus" }))
+    }
     return () => {
       if (focusRef?.current === focus) focusRef.current = null
     }
-  }, [active, focusRef])
+  }, [active, focusRef, terminalSessionId])
 
   // Clipboard images and dragged images take an authenticated HTTP path to
   // the server, then only the returned filename goes through the PTY socket.
