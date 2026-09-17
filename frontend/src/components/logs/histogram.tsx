@@ -4,17 +4,13 @@ import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { clock, timestamp } from "@/lib/format"
 import type { LogBucket } from "@/lib/types"
+import { LEVEL_DOT, LEVEL_LABEL, LOG_LEVELS } from "@/lib/log-filter"
 
 // Worst last, so the alarming colours sit at the top of a stacked column where
-// the eye lands, rather than being buried under a block of debug.
-const STACK: { level: string; label: string; className: string }[] = [
-  { level: "unknown", label: "other", className: "bg-muted-foreground/35" },
-  { level: "debug", label: "debug", className: "bg-muted-foreground/50" },
-  { level: "info", label: "info", className: "bg-primary/60" },
-  { level: "warn", label: "warn", className: "bg-warning" },
-  { level: "error", label: "error", className: "bg-destructive/80" },
-  { level: "critical", label: "critical", className: "bg-destructive" },
-]
+// the eye lands, rather than being buried under a block of debug. The swatches
+// are the ones the level chips and the level column use, so a red column here
+// is the same red as the lines it counts.
+const STACK = [...LOG_LEVELS].reverse()
 
 function widthLabel(seconds: number) {
   if (seconds < 60) return `${seconds}s`
@@ -34,15 +30,20 @@ function widthLabel(seconds: number) {
  *
  * Clicking a column narrows the search to it, which is the fast path from a
  * spike on the chart to the lines inside it.
+ *
+ * It is a row of the workspace, not a box in it: the hairline under it is the
+ * only edge, and the columns sit on the same ground as the lines they count.
  */
 export function Histogram({
   buckets,
   bucketSeconds,
   onZoom,
+  className,
 }: {
   buckets: LogBucket[]
   bucketSeconds: number
   onZoom: (since: Date, until: Date) => void
+  className?: string
 }) {
   const [hover, setHover] = useState<number | null>(null)
   if (buckets.length === 0) return null
@@ -57,7 +58,7 @@ export function Histogram({
   const edge = (iso: string) => (sameDay ? clock(iso) : timestamp(iso))
 
   return (
-    <div className="rounded-lg border border-hairline bg-surface-sunken px-3 py-2">
+    <div className={cn("shrink-0 border-b border-hairline px-3 pt-2 pb-1.5", className)}>
       <div className="mb-1.5 flex items-baseline justify-between gap-3 text-hint">
         <span className="eyebrow">
           Matches over time · one column is {widthLabel(bucketSeconds)}
@@ -69,7 +70,7 @@ export function Histogram({
         </span>
       </div>
       <div
-        className="flex h-16 items-end gap-px"
+        className="flex h-14 items-end gap-px"
         onMouseLeave={() => setHover(null)}
         role="group"
         aria-label="Matches over time"
@@ -82,19 +83,19 @@ export function Histogram({
               const start = new Date(bucket.start)
               onZoom(start, new Date(start.getTime() + bucketSeconds * 1000))
             }}
-            title={`${timestamp(bucket.start)} — ${bucket.total} lines`}
+            aria-label={`${timestamp(bucket.start)}, ${bucket.total} lines — narrow to this column`}
             className={cn(
-              "flex h-full min-w-[3px] flex-1 flex-col justify-end rounded-sm transition-colors",
-              hover === i ? "bg-foreground/10" : "hover:bg-foreground/10",
+              "flex h-full min-w-[3px] flex-1 flex-col justify-end rounded-sm focus-ring-inset transition-colors",
+              hover === i ? "bg-row-hover" : "hover:bg-row-hover",
             )}
           >
-            {STACK.map(({ level, className }) => {
+            {STACK.map((level) => {
               const count = bucket.counts[level] ?? 0
               if (count === 0) return null
               return (
                 <span
                   key={level}
-                  className={cn("w-full", className)}
+                  className={cn("w-full", LEVEL_DOT[level])}
                   style={{ height: `${Math.max((count / peak) * 100, 1.5)}%` }}
                 />
               )
@@ -105,14 +106,14 @@ export function Histogram({
       <div className="mt-1 flex items-center justify-between gap-3 text-micro text-muted-foreground">
         <span className="numeric">{edge(buckets[0].start)}</span>
         <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          {STACK.filter((s) => buckets.some((b) => (b.counts[s.level] ?? 0) > 0))
-            .reverse()
-            .map((s) => (
-              <span key={s.level} className="flex items-center gap-1">
-                <span className={cn("size-2 rounded-[2px]", s.className)} />
-                {s.label}
+          {LOG_LEVELS.filter((level) => buckets.some((b) => (b.counts[level] ?? 0) > 0)).map(
+            (level) => (
+              <span key={level} className="flex items-center gap-1">
+                <span className={cn("size-1.5 rounded-full", LEVEL_DOT[level])} />
+                {LEVEL_LABEL[level]}
               </span>
-            ))}
+            ),
+          )}
         </span>
         <span className="numeric">{edge(buckets[buckets.length - 1].start)}</span>
       </div>

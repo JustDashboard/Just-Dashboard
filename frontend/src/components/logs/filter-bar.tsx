@@ -5,9 +5,7 @@ import {
   Check,
   ChevronDown,
   Cross,
-  LoaderCircle,
   MagnifyingGlass,
-  Rss,
   SettingsSliders,
   SlashForward,
   TextUppercase,
@@ -16,6 +14,7 @@ import { cn } from "@/lib/utils"
 import { bytes } from "@/lib/format"
 import type { LogJournalUnit, LogSource } from "@/lib/types"
 import {
+  LEVEL_DOT,
   LEVEL_HINT,
   LEVEL_LABEL,
   LOG_LEVELS,
@@ -24,8 +23,8 @@ import {
   type LogLevel,
 } from "@/lib/log-filter"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
-import { Panel, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/page"
+import { ChipCount, FilterChip } from "@/components/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -60,15 +59,19 @@ const CONTEXT_CHOICES = [0, 2, 5, 10]
  * filter here, it means the same thing in both modes, and switching modes keeps
  * it — because "these errors are scrolling past, when did they start" is one
  * thought, not two forms.
+ *
+ * It is a row of the workspace pane rather than a panel above it. The window
+ * and the unit sit in the row itself, because they are the two narrowings
+ * somebody reaches for on every visit; what is left behind "More" is the
+ * exclusion, the context lines, the archives and the boot — used, but not
+ * daily.
  */
 export function FilterBar({
   mode,
-  onModeChange,
   filter,
   onFilterChange,
   onSubmit,
   searching,
-  counts,
   source,
   units,
   unit,
@@ -87,12 +90,10 @@ export function FilterBar({
   onBootChange,
 }: {
   mode: LogMode
-  onModeChange: (mode: LogMode) => void
   filter: LogFilterState
   onFilterChange: (filter: LogFilterState) => void
   onSubmit: () => void
   searching: boolean
-  counts: Record<string, number>
   source: LogSource | null
   units: LogJournalUnit[]
   unit: string
@@ -134,32 +135,13 @@ export function FilterBar({
   const hasArchives = (source?.archives ?? 0) > 0
   const advancedCount =
     (filter.exclude ? 1 : 0) +
-    (mode === "search" && range !== "24h" ? 1 : 0) +
     (context > 0 ? 1 : 0) +
     (archives && hasArchives ? 1 : 0) +
-    (boot && isJournal ? 1 : 0) +
-    (unit ? 1 : 0)
+    (boot && isJournal ? 1 : 0)
 
   return (
-    <Panel className="shrink-0">
-      <PanelToolbar className="border-b-0">
-        <ToggleGroup
-          type="single"
-          value={mode}
-          onValueChange={(v) => v && onModeChange(v as LogMode)}
-          variant="outline"
-          size="sm"
-        >
-          <ToggleGroupItem value="live" className="gap-1.5 px-2.5 text-xs">
-            <Rss className="size-3.5" />
-            Live
-          </ToggleGroupItem>
-          <ToggleGroupItem value="search" className="gap-1.5 px-2.5 text-xs">
-            <MagnifyingGlass className="size-3.5" />
-            History
-          </ToggleGroupItem>
-        </ToggleGroup>
-
+    <>
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-3 py-2">
         <form
           className="relative flex min-w-56 flex-1 items-center"
           onSubmit={(e) => {
@@ -171,12 +153,13 @@ export function FilterBar({
             ref={queryRef}
             value={filter.q}
             onChange={(e) => set({ q: e.target.value })}
+            aria-label={mode === "live" ? "Filter the stream" : "Search this log's history"}
             placeholder={
               mode === "live"
                 ? "Filter the stream — matched on the server, press / to focus"
                 : "Search this log's history — press Enter"
             }
-            className="pr-[4.5rem]"
+            className="pr-18"
             containerClassName="sm:w-full"
             trailing={
               <>
@@ -209,153 +192,103 @@ export function FilterBar({
           />
         </form>
 
+        {isJournal && <UnitPicker units={units} value={unit} onChange={onUnitChange} />}
+
         {mode === "search" && (
-          <Button size="sm" onClick={onSubmit} disabled={searching} className="h-8">
-            {searching ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
+          <>
+            <Select value={range} onValueChange={(v) => onRangeChange(v as LogTimeRange)}>
+              <SelectTrigger size="sm" className="w-40" aria-label="Window">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIME_RANGES.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" onClick={onSubmit} pending={searching} className="h-8">
               <MagnifyingGlass className="size-3.5" />
-            )}
-            Search
-          </Button>
+              Search
+            </Button>
+          </>
         )}
 
         <Button
           size="sm"
           variant={open || advancedCount > 0 ? "secondary" : "ghost"}
           className="h-8 gap-1.5"
+          aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
           <SettingsSliders className="size-3.5" />
           More
-          {advancedCount > 0 && <span className="numeric text-micro">{advancedCount}</span>}
+          {advancedCount > 0 && <ChipCount>{advancedCount}</ChipCount>}
           <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
         </Button>
-      </PanelToolbar>
+      </div>
 
-      <PanelToolbar className="border-b-0 pt-0">
-        <span className="eyebrow">Levels</span>
-        <ToggleGroup
-          type="multiple"
-          value={filter.levels}
-          onValueChange={(v) => set({ levels: v as LogLevel[] })}
-          variant="outline"
-          size="sm"
-        >
-          {LOG_LEVELS.map((level) => (
-            <Tooltip key={level}>
-              <TooltipTrigger asChild>
-                <ToggleGroupItem value={level} className="gap-1 px-2 text-hint">
-                  {LEVEL_LABEL[level]}
-                  {counts[level] > 0 && (
-                    <span className="numeric opacity-60">{counts[level].toLocaleString()}</span>
-                  )}
-                </ToggleGroupItem>
-              </TooltipTrigger>
-              <TooltipContent>{LEVEL_HINT[level]}</TooltipContent>
-            </Tooltip>
-          ))}
-        </ToggleGroup>
-        {filter.levels.length > 0 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs"
-            onClick={() => set({ levels: [] })}
-          >
-            Show every level
-          </Button>
-        )}
-      </PanelToolbar>
-
-      {open && (
-        <PanelToolbar className="border-b-0 pt-0">
-          <Field label="Hide lines containing">
-            <Input
-              value={filter.exclude}
-              onChange={(e) => set({ exclude: e.target.value })}
-              placeholder="e.g. /healthz"
-              className="h-8 w-48 text-body"
-            />
-          </Field>
-
-          {isJournal && (
+      {(open || range === "custom") && (
+        <div className="flex shrink-0 animate-rise flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline px-3 py-2">
+          {mode === "search" && range === "custom" && (
             <>
-              <Field label="Unit">
-                <UnitPicker units={units} value={unit} onChange={onUnitChange} />
+              <Field label="From">
+                <Input
+                  type="datetime-local"
+                  value={logTimeInput(since)}
+                  step="0.001"
+                  aria-label="From"
+                  onChange={(e) => onSinceChange(e.target.value)}
+                  className="h-8 w-52 text-body"
+                />
               </Field>
-              <label className="flex items-center gap-2 text-xs">
-                <Switch checked={boot} onCheckedChange={onBootChange} />
-                <span>
-                  This boot only
-                  <span className="text-muted-foreground">
-                    {" "}
-                    — everything since the machine came up
-                  </span>
-                </span>
-              </label>
+              <Field label="To">
+                <Input
+                  type="datetime-local"
+                  value={logTimeInput(until)}
+                  step="0.001"
+                  aria-label="To"
+                  onChange={(e) => onUntilChange(e.target.value)}
+                  className="h-8 w-52 text-body"
+                />
+              </Field>
             </>
           )}
 
-          {mode === "search" && (
+          {open && (
             <>
-              <Field label="Window">
-                <Select value={range} onValueChange={(v) => onRangeChange(v as LogTimeRange)}>
-                  <SelectTrigger size="sm" className="w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TIME_RANGES.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <Field label="Hide lines containing">
+                <Input
+                  value={filter.exclude}
+                  onChange={(e) => set({ exclude: e.target.value })}
+                  placeholder="e.g. /healthz"
+                  aria-label="Hide lines containing"
+                  className="h-8 w-44 text-body"
+                />
               </Field>
 
-              {range === "custom" && (
-                <>
-                  <Field label="From">
-                    <Input
-                      type="datetime-local"
-                      value={logTimeInput(since)}
-                      step="0.001"
-                      onChange={(e) => onSinceChange(e.target.value)}
-                      className="h-8 w-52 text-body"
-                    />
-                  </Field>
-                  <Field label="To">
-                    <Input
-                      type="datetime-local"
-                      value={logTimeInput(until)}
-                      step="0.001"
-                      onChange={(e) => onUntilChange(e.target.value)}
-                      className="h-8 w-52 text-body"
-                    />
-                  </Field>
-                </>
+              {mode === "search" && (
+                <Field label="Context lines">
+                  <ToggleGroup
+                    type="single"
+                    value={String(context)}
+                    onValueChange={(v) => v && onContextChange(Number(v))}
+                    variant="outline"
+                    size="sm"
+                  >
+                    {CONTEXT_CHOICES.map((n) => (
+                      <ToggleGroupItem key={n} value={String(n)} className="px-2 text-hint">
+                        {n === 0 ? "none" : `±${n}`}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </Field>
               )}
 
-              <Field label="Context lines">
-                <ToggleGroup
-                  type="single"
-                  value={String(context)}
-                  onValueChange={(v) => v && onContextChange(Number(v))}
-                  variant="outline"
-                  size="sm"
-                >
-                  {CONTEXT_CHOICES.map((n) => (
-                    <ToggleGroupItem key={n} value={String(n)} className="px-2 text-hint">
-                      {n === 0 ? "none" : `±${n}`}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </Field>
-
-              {hasArchives && (
+              {mode === "search" && hasArchives && (
                 <label className="flex items-center gap-2 text-xs">
-                  <Switch checked={archives} onCheckedChange={onArchivesChange} />
+                  <Switch size="sm" checked={archives} onCheckedChange={onArchivesChange} />
                   <span>
                     Include {source?.archives} rotated{" "}
                     {source?.archives === 1 ? "archive" : "archives"}
@@ -363,11 +296,81 @@ export function FilterBar({
                   </span>
                 </label>
               )}
+
+              {isJournal && (
+                <label className="flex items-center gap-2 text-xs">
+                  <Switch size="sm" checked={boot} onCheckedChange={onBootChange} />
+                  <span>
+                    This boot only
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — everything since the machine came up
+                    </span>
+                  </span>
+                </label>
+              )}
             </>
           )}
-        </PanelToolbar>
+        </div>
       )}
-    </Panel>
+    </>
+  )
+}
+
+/**
+ * Which levels are shown, with how many of each are on screen.
+ *
+ * The chips carry the counts, so one row answers both "what am I looking at"
+ * and "show me only the bad ones". They sit on the strip directly above the
+ * lines, beside the view toggles, because that is the row the eye is on while
+ * reading — the level column in the lines below uses the same dot colours.
+ */
+export function LevelChips({
+  filter,
+  onFilterChange,
+  counts,
+}: {
+  filter: LogFilterState
+  onFilterChange: (filter: LogFilterState) => void
+  counts: Record<string, number>
+}) {
+  const toggle = (level: LogLevel) =>
+    onFilterChange({
+      ...filter,
+      levels: filter.levels.includes(level)
+        ? filter.levels.filter((l) => l !== level)
+        : [...filter.levels, level],
+    })
+
+  return (
+    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Levels">
+      {LOG_LEVELS.map((level) => (
+        <Tooltip key={level}>
+          <TooltipTrigger asChild>
+            <FilterChip
+              selected={filter.levels.includes(level)}
+              onClick={() => toggle(level)}
+              className="px-2"
+            >
+              <span aria-hidden className={cn("size-1.5 rounded-full", LEVEL_DOT[level])} />
+              {LEVEL_LABEL[level]}
+              {counts[level] > 0 && <ChipCount>{counts[level].toLocaleString()}</ChipCount>}
+            </FilterChip>
+          </TooltipTrigger>
+          <TooltipContent>{LEVEL_HINT[level]}</TooltipContent>
+        </Tooltip>
+      ))}
+      {filter.levels.length > 0 && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 shrink-0 px-2 text-hint"
+          onClick={() => onFilterChange({ ...filter, levels: [] })}
+        >
+          Every level
+        </Button>
+      )}
+    </div>
   )
 }
 
@@ -429,7 +432,12 @@ function UnitPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 w-56 justify-between font-normal">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 w-48 justify-between font-normal"
+          aria-label="Unit"
+        >
           <span className="truncate">{value || "Every unit"}</span>
           <ChevronDown className="size-3 opacity-60" />
         </Button>

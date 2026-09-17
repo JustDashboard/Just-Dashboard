@@ -7,6 +7,7 @@ import {
   MagnifyingGlass,
   MagnifyingGlassMinus,
 } from "@/components/icons"
+import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type {
@@ -24,12 +25,13 @@ import { usePoll } from "@/hooks/use-poll"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { FilterBar } from "@/components/logs/filter-bar"
+import { FilterBar, LevelChips } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
 import { LogConsole } from "@/components/logs/log-console"
 import { RetentionNote } from "@/components/logs/retention-note"
 import { Tag } from "@/components/tag"
-import { PaneFooter } from "@/components/panel"
+import { tabClasses } from "@/components/tabs"
+import { Pane } from "@/components/panel"
 
 /** How many lines the live pane holds before the oldest fall off the top. */
 const LIVE_BUFFER = 4000
@@ -66,8 +68,26 @@ type WorkspaceProps = {
   onArchivesChange: (value: boolean) => void
   boot: boolean
   onBootChange: (value: boolean) => void
+  /** One column of a workbench that draws the frame: no frame of its own. */
+  flush?: boolean
+  /** What sits before the source's name in the top strip — the rail toggle. */
+  leading?: React.ReactNode
+  /** The source's facts, beside its name: its kind, path, size, state. */
+  facts?: React.ReactNode
+  className?: string
 }
 
+/**
+ * One source, read two ways.
+ *
+ * A single pane: a strip naming the source and switching between the stream
+ * and its history, the filter under it, the histogram when there is one, and
+ * the lines. It used to be three framed surfaces stacked with gutters between
+ * them — a filter panel, a histogram box, a console pane — which was three
+ * boxes for one question. The hairlines between the rows are the only edges
+ * now, and the whole thing takes one frame (or none, when it is a column of
+ * the logs page's workbench).
+ */
 export function LogWorkspace(props: WorkspaceProps) {
   const { source, sourceId, mode, filter, onFilterChange, onModeChange } = props
 
@@ -117,22 +137,52 @@ export function LogWorkspace(props: WorkspaceProps) {
     { enabled: Boolean(source.path) || source.kind === "pm2" },
   )
 
+  const switchMode = (next: LogMode) => {
+    if (next === mode) return
+    onModeChange(next)
+    if (next === "search") search.run()
+  }
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+    <Pane flush={props.flush} className={cn("min-h-0 flex-1", props.className)}>
+      {/* The strip names what is being read and which question is being
+          asked of it. The tabs are the section-tab underline because Live and
+          History are two places within the source, not two commands. */}
+      <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 py-1.5">
+          {props.leading}
+          <span className="truncate text-body font-medium">{source.label}</span>
+          {props.facts}
+        </div>
+        <nav aria-label="Log mode" className="flex shrink-0 items-stretch">
+          <button
+            type="button"
+            aria-pressed={mode === "live"}
+            className={tabClasses(mode === "live", "h-10")}
+            onClick={() => switchMode("live")}
+          >
+            Live
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === "search"}
+            className={tabClasses(mode === "search", "h-10")}
+            onClick={() => switchMode("search")}
+          >
+            History
+          </button>
+        </nav>
+      </div>
+
       <FilterBar
         mode={mode}
-        onModeChange={(next) => {
-          onModeChange(next)
-          if (next === "search") search.run()
-        }}
         filter={filter}
         onFilterChange={onFilterChange}
         onSubmit={() => {
           if (mode === "search") search.run()
-          else onModeChange("search")
+          else switchMode("search")
         }}
         searching={search.loading}
-        counts={counts}
         source={source}
         units={props.units}
         unit={props.unit}
@@ -165,6 +215,8 @@ export function LogWorkspace(props: WorkspaceProps) {
 
       {mode === "search" && (search.result?.histogram.length ?? 0) > 0 && (
         <Histogram
+          key={search.runId}
+          className="animate-rise"
           buckets={search.result!.histogram}
           bucketSeconds={search.result!.bucketSeconds ?? 60}
           onZoom={(from, to) => {
@@ -175,9 +227,9 @@ export function LogWorkspace(props: WorkspaceProps) {
       )}
 
       <LogConsole
-        className="min-h-0 flex-1"
         lines={lines}
         filter={applied}
+        leading={<LevelChips filter={filter} onFilterChange={onFilterChange} counts={counts} />}
         showLineNumbers={mode === "search"}
         // A file's "source" is the file already chosen in the rail, repeated
         // on every line. The journal's is which unit spoke, which is the point.
@@ -189,36 +241,42 @@ export function LogWorkspace(props: WorkspaceProps) {
         onClear={mode === "live" ? live.clear : undefined}
         status={
           mode === "live" ? (
-            <Status
-              state={
-                live.state === "open"
-                  ? "running"
-                  : live.state === "connecting"
-                    ? "restarting"
-                    : "stopped"
-              }
-              label={
-                live.state === "open"
-                  ? "Live"
-                  : live.state === "connecting"
-                    ? "Connecting"
-                    : "Disconnected"
-              }
-              className="text-hint"
-            />
+            <>
+              <Status
+                state={
+                  live.state === "open"
+                    ? "running"
+                    : live.state === "connecting"
+                      ? "restarting"
+                      : "stopped"
+                }
+                label={
+                  live.state === "open"
+                    ? "Live"
+                    : live.state === "connecting"
+                      ? "Connecting"
+                      : "Disconnected"
+                }
+                live={live.state === "open"}
+                className="text-hint"
+              />
+              {live.meta?.prefill && !live.meta.prefill.complete && (
+                <Tag title={live.meta.note}>partial history</Tag>
+              )}
+            </>
           ) : (
             <SearchSummary result={search.result} loading={search.loading} />
           )
         }
-        actions={
-          mode === "live" && live.meta?.prefill && !live.meta.prefill.complete ? (
-            <Tag title={live.meta.note}>partial history</Tag>
-          ) : undefined
-        }
         footer={
           <>
-            {mode === "search" && search.result && <SearchFooter result={search.result} />}
-            {retention.data && <RetentionNote retention={retention.data} />}
+            <LevelSummary counts={counts} />
+            {mode === "search" && search.result && <SearchNotes result={search.result} />}
+            {retention.data && (
+              <span className="ml-auto flex max-w-full min-w-0">
+                <RetentionNote retention={retention.data} />
+              </span>
+            )}
           </>
         }
         empty={
@@ -227,10 +285,7 @@ export function LogWorkspace(props: WorkspaceProps) {
               state={live.state}
               error={live.error}
               filter={applied}
-              onSearchHistory={() => {
-                onModeChange("search")
-                search.run()
-              }}
+              onSearchHistory={() => switchMode("search")}
               onClearFilter={() => onFilterChange(EMPTY_FILTER)}
             />
           ) : (
@@ -249,7 +304,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           )
         }
       />
-    </div>
+    </Pane>
   )
 }
 
@@ -382,6 +437,9 @@ function useHistorySearch(props: WorkspaceProps) {
   const [result, setResult] = useState<LogSearchResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Which run the result on screen came from, so the histogram can rise once
+  // per answer rather than once per mount.
+  const [runId, setRunId] = useState(0)
   const abort = useRef<AbortController | null>(null)
   // Which answer is still wanted. A sequence number rather than the abort
   // signal, because "this request was superseded" and "this request was
@@ -437,6 +495,7 @@ function useHistorySearch(props: WorkspaceProps) {
         )
         if (id !== seq.current) return
         setResult(res)
+        setRunId(id)
       } catch (err) {
         if (id !== seq.current) return
         setError(errorMessage(err))
@@ -448,7 +507,7 @@ function useHistorySearch(props: WorkspaceProps) {
     [],
   )
 
-  return { result, loading, error, run }
+  return { result, loading, error, run, runId }
 }
 
 function SearchSummary({ result, loading }: { result: LogSearchResult | null; loading: boolean }) {
@@ -465,11 +524,31 @@ function SearchSummary({ result, loading }: { result: LogSearchResult | null; lo
 }
 
 /**
+ * How many of what is on screen needs attention. Two figures, each a reading
+ * in its own colour, and nothing when there is nothing to say.
+ */
+function LevelSummary({ counts }: { counts: Record<string, number> }) {
+  const errors = (counts.critical ?? 0) + (counts.error ?? 0)
+  const warnings = counts.warn ?? 0
+  if (errors === 0 && warnings === 0) return null
+  return (
+    <span className="flex items-center gap-x-2">
+      {errors > 0 && (
+        <span className="numeric font-medium text-destructive">{plural(errors, "error")}</span>
+      )}
+      {warnings > 0 && (
+        <span className="numeric font-medium text-warning">{plural(warnings, "warning")}</span>
+      )}
+    </span>
+  )
+}
+
+/**
  * What was actually read. A search that spans a rotated set and finds
  * everything in yesterday's file is saying something a merged total hides, and
  * a truncated answer that does not admit it is worse than no answer.
  */
-function SearchFooter({ result }: { result: LogSearchResult }) {
+function SearchNotes({ result }: { result: LogSearchResult }) {
   const notes: string[] = []
   if (result.truncated) {
     notes.push(
@@ -483,7 +562,7 @@ function SearchFooter({ result }: { result: LogSearchResult }) {
   if (notes.length === 0 && files.length <= 1) return null
 
   return (
-    <PaneFooter className="gap-x-3 gap-y-1 px-3 text-hint text-muted-foreground">
+    <>
       {notes.map((note) => (
         <span key={note}>{note}</span>
       ))}
@@ -495,7 +574,7 @@ function SearchFooter({ result }: { result: LogSearchResult }) {
             {file.error ?? `${file.matched.toLocaleString()} matched`}
           </span>
         ))}
-    </PaneFooter>
+    </>
   )
 }
 
