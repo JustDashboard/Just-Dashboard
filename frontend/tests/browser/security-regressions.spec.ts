@@ -290,6 +290,7 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
     if (path === "/pm2/")
       body = {
         available: true,
+        daemons: ["alice", "bob"].map((account) => ({ account, home: `/home/${account}` })),
         processes: ["alice", "bob"].map((daemonId) => ({
           daemonId,
           logsAvailable: daemonId === "bob",
@@ -323,25 +324,28 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
     }
     await fulfill(route, body)
   })
-  await page.goto("/processes")
-  await page.getByRole("tab", { name: "PM2", exact: true }).click()
-  const row = page.getByRole("row").filter({ hasText: "bob #0" })
+  // Two daemons, so each row names its account: the name alone is ambiguous
+  // by design here, and the account is what the row must key its verbs on.
+  await page.goto("/processes/pm2")
+  const row = page.getByRole("row").filter({ hasText: "bob" })
   await expect(row).toBeVisible()
+  await row.hover()
   await row.getByRole("button", { name: "Start", exact: true }).click()
   await expect.poll(() => actions.length).toBe(1)
   expect(actions[0].searchParams.get("user")).toBe("bob")
   expect(actions[0].searchParams.get("id")).toBe("0")
   await row.getByRole("button", { name: "same-name", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("bob #0")
+  await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => sockets.length).toBe(1)
   expect(sockets[0].searchParams.get("user")).toBe("bob")
   expect(sockets[0].searchParams.get("id")).toBe("0")
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toHaveCount(0)
-  await page
-    .getByRole("row")
-    .filter({ hasText: "alice #0" })
-    .getByRole("button", { name: "same-name", exact: true })
-    .click()
+  const alice = page.getByRole("row").filter({ hasText: "alice" })
+  await alice.getByRole("button", { name: "same-name", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("alice #0")
+  await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect(
     page.getByText("Add this daemon's log directory to JD_LOG_ROOTS.", { exact: true }),
   ).toBeVisible()
