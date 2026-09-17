@@ -40,7 +40,13 @@ type Process struct {
 	State       string    `json:"state"`
 	Manager     string    `json:"manager"`
 	ManagerName string    `json:"managerName,omitempty"`
-	ioRateReady bool
+	// Detail-only readings. A snapshot leaves them empty: reading every
+	// process's sockets and limits on each poll would cost more than the
+	// table itself, and the table asks "what is heavy", not "what is on 3000".
+	Listening      []ListeningPort `json:"listening,omitempty"`
+	Connections    int             `json:"connections,omitempty"`
+	OpenFilesLimit uint64          `json:"openFilesLimit,omitempty"`
+	ioRateReady    bool
 }
 
 type ioSample struct {
@@ -341,6 +347,8 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 	}
 	row.State = processState(row.Status)
 	row.Manager, row.ManagerName = processManager(row.PID, row.Cmdline)
+	row.Listening, row.Connections = sockets(ctx, p)
+	row.OpenFilesLimit = openFilesLimit(ctx, p)
 	return row, nil
 }
 

@@ -221,6 +221,9 @@ const (
 	UnitReload  UnitAction = "reload"
 	UnitEnable  UnitAction = "enable"
 	UnitDisable UnitAction = "disable"
+	// ResetFailed clears a unit's failed state without starting it, so a
+	// service that was fixed by hand stops being counted as broken.
+	UnitResetFailed UnitAction = "reset-failed"
 )
 
 func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (*CommandResult, error) {
@@ -228,11 +231,21 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 		return nil, err
 	}
 	switch action {
-	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable:
+	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable, UnitResetFailed:
 	default:
 		return nil, fmt.Errorf("unknown systemd action %q", action)
 	}
 	return run(ctx, 90*time.Second, "systemctl", string(action), name)
+}
+
+// DaemonReload asks systemd to re-read its unit files. It is the step after
+// editing a unit in the file manager that nobody remembers, and until it runs
+// the unit page keeps describing the old file.
+func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
+	if !s.Available() {
+		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	}
+	return run(ctx, 90*time.Second, "systemctl", "daemon-reload")
 }
 
 // JournalEntry is one record from journalctl's JSON output. The interesting

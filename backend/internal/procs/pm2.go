@@ -35,6 +35,13 @@ type PM2Process struct {
 	ErrLogPath            string  `json:"errLogPath"`
 	User                  string  `json:"user"`
 	Watching              bool    `json:"watching"`
+	// The settings PM2 was given for this process, so the detail sheet can
+	// say how it is run without a second `pm2 describe` round trip.
+	Interpreter      string `json:"interpreter,omitempty"`
+	Version          string `json:"version,omitempty"`
+	Autorestart      bool   `json:"autorestart"`
+	MaxMemoryRestart int64  `json:"maxMemoryRestart,omitempty"`
+	CreatedAtMS      int64  `json:"createdAtMs,omitempty"`
 }
 
 // pm2Raw mirrors the subset of `pm2 jlist` output we consume. PM2's schema is
@@ -62,6 +69,11 @@ type pm2Raw struct {
 		PMErrLogPath     string `json:"pm_err_log_path"`
 		Username         string `json:"username"`
 		Watch            any    `json:"watch"`
+		ExecInterpreter  string `json:"exec_interpreter"`
+		Version          string `json:"version"`
+		Autorestart      any    `json:"autorestart"`
+		MaxMemoryRestart any    `json:"max_memory_restart"`
+		CreatedAt        int64  `json:"created_at"`
 	} `json:"pm2_env"`
 }
 
@@ -162,12 +174,18 @@ func parsePM2List(data []byte, nowMilli int64, fallbackUser string) ([]PM2Proces
 			CWD: r.PM2Env.PMCwd, NodeVersion: r.PM2Env.NodeVersion,
 			OutLogPath: r.PM2Env.PMOutLogPath, ErrLogPath: r.PM2Env.PMErrLogPath,
 			User: fallbackUser, DaemonID: fallbackUser,
+			Interpreter: r.PM2Env.ExecInterpreter, Version: r.PM2Env.Version,
+			CreatedAtMS: r.PM2Env.CreatedAt,
 		}
 		if r.PM2Env.Status == "online" && r.PM2Env.PMUptime > 0 {
 			proc.UptimeMS = nowMilli - r.PM2Env.PMUptime
 		}
 		proc.Instances = coerceInt(r.PM2Env.Instances)
 		proc.Watching = coerceBool(r.PM2Env.Watch)
+		// PM2 defaults autorestart to on and only writes the key when set, so
+		// an absent value is "yes" rather than "no".
+		proc.Autorestart = r.PM2Env.Autorestart == nil || coerceBool(r.PM2Env.Autorestart)
+		proc.MaxMemoryRestart = int64(coerceInt(r.PM2Env.MaxMemoryRestart))
 		out = append(out, proc)
 	}
 	return out, nil
@@ -205,6 +223,11 @@ const (
 	PM2Restart PM2Action = "restart"
 	PM2Reload  PM2Action = "reload"
 	PM2Delete  PM2Action = "delete"
+	// Reset zeroes the restart counters, which is how "it restarted 40 times
+	// last week" stops masking "it restarted once today".
+	PM2Reset PM2Action = "reset"
+	// Flush truncates the process's stdout and stderr files in place.
+	PM2Flush PM2Action = "flush"
 )
 
 func (p *PM2) Control(ctx context.Context, name string, action PM2Action) (*CommandResult, error) {
@@ -216,7 +239,7 @@ func (p *PM2) ControlTarget(ctx context.Context, name, daemon string, id int, ac
 		return nil, err
 	}
 	switch action {
-	case PM2Start, PM2Stop, PM2Restart, PM2Reload, PM2Delete:
+	case PM2Start, PM2Stop, PM2Restart, PM2Reload, PM2Delete, PM2Reset, PM2Flush:
 	default:
 		return nil, fmt.Errorf("unknown pm2 action %q", action)
 	}
@@ -234,7 +257,14 @@ func (p *PM2) ControlTarget(ctx context.Context, name, daemon string, id int, ac
 		if err != nil || account.Username != proc.DaemonID {
 			continue
 		}
-		result, err := runPM2Host(ctx, home, 60*time.Second, string(action), strconv.Itoa(proc.ID))
+		// Flush is addressed by name: every PM2 release matches a flush
+		// target by name, while matching by id arrived later, and the
+		// cluster instances a name covers share their log files anyway.
+		target := strconv.Itoa(proc.ID)
+		if action == PM2Flush {
+			target = proc.Name
+		}
+		result, err := runPM2Host(ctx, home, 60*time.Second, string(action), target)
 		if err == nil {
 			p.mu.Lock()
 			p.cachedAt = time.Time{}

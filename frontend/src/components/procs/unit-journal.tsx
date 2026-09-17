@@ -1,18 +1,23 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import type { JournalEntry, LogLine, SystemdUnitDetail } from "@/lib/types"
+import Link from "next/link"
+import type { JournalEntry, LogLine, SystemdUnit, SystemdUnitDetail } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { useConfirm } from "@/components/confirm-dialog"
 import { LogViewer } from "@/components/log-viewer"
 import { Detail, DetailList } from "@/components/page"
-import { PaneHeader, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { VerbBar } from "@/components/verbs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useUnitControl, useUnitVerbs } from "@/components/procs/unit-actions"
 
 const LOG_LIMIT = 5000
 
@@ -25,109 +30,172 @@ function levelFor(priority: number): string {
   return "debug"
 }
 
-export function UnitJournalSheet({
+/**
+ * One unit, opened: its state, how it runs, and its journal. The verbs sit in
+ * the header, and here — where `systemctl show` has said whether the unit
+ * takes a reload — the reload verb is offered too.
+ */
+export function UnitJournalSheet(props: {
+  unit: string | null
+  initialTab?: string
+  onOpenChange: (open: boolean) => void
+  onChanged?: () => void
+}) {
+  // Remounted per unit and per requested tab, so "Journal" from a row lands
+  // on the journal even when the sheet was already open on the overview.
+  return <UnitSheet key={`${props.unit ?? "none"}:${props.initialTab ?? ""}`} {...props} />
+}
+
+function UnitSheet({
   unit,
+  initialTab,
   onOpenChange,
+  onChanged,
 }: {
   unit: string | null
+  initialTab?: string
   onOpenChange: (open: boolean) => void
+  onChanged?: () => void
 }) {
+  const { confirm, dialog } = useConfirm()
+  const [tab, setTab] = useState(initialTab ?? "overview")
+  const detail = usePoll(
+    (signal) =>
+      get<SystemdUnitDetail>(`/systemd/${encodeURIComponent(unit ?? "")}`, undefined, signal),
+    5000,
+    [unit],
+    { enabled: unit !== null },
+  )
+  const { pending, act } = useUnitControl(() => {
+    detail.refresh()
+    onChanged?.()
+  })
+  const service = detail.data?.unit
+  const busy = service ? pending[service.name] : undefined
+
   return (
     <SidePanel
       open={unit !== null}
       onOpenChange={onOpenChange}
       title={unit ?? "Unit"}
       description="Service state, configuration and live journal"
-      bodyClassName="flex min-h-0 flex-1 flex-col"
+      actions={
+        service && (
+          <UnitSheetActions
+            unit={service}
+            canReload={detail.data?.properties.CanReload === "yes"}
+            busy={busy}
+            confirm={confirm}
+            act={act}
+          />
+        )
+      }
+      bodyClassName="flex min-h-0 flex-1 flex-col p-4"
     >
       {unit && (
-        <Tabs defaultValue="overview" className="min-h-0 flex-1 gap-0">
-          <PaneHeader className="px-4">
-            <TabsList>
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="journal">Journal</TabsTrigger>
-            </TabsList>
-          </PaneHeader>
-          <TabsContent value="overview" className="min-h-0 overflow-y-auto p-4">
-            <UnitOverview unit={unit} />
+        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
+          <TabsList className="w-fit shrink-0">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="journal">Journal</TabsTrigger>
+          </TabsList>
+          <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto">
+            {detail.loading && !detail.data && <LoadingRows rows={6} />}
+            {detail.error && !detail.data && <ErrorState error={detail.error} />}
+            {detail.data && <UnitOverview detail={detail.data} />}
           </TabsContent>
-          <TabsContent value="journal" className="min-h-0 flex-1 p-4">
+          <TabsContent value="journal" className="flex min-h-0 flex-1 flex-col">
             {/* Keyed on the unit so switching units starts a clean buffer. */}
             <JournalStream key={unit} unit={unit} />
           </TabsContent>
         </Tabs>
       )}
+      {dialog}
     </SidePanel>
   )
 }
 
-function UnitOverview({ unit }: { unit: string }) {
-  const detail = usePoll(
-    (signal) => get<SystemdUnitDetail>(`/systemd/${encodeURIComponent(unit)}`, undefined, signal),
-    5000,
-    [unit],
+function UnitSheetActions({
+  unit,
+  canReload,
+  busy,
+  confirm,
+  act,
+}: {
+  unit: SystemdUnit
+  canReload: boolean
+  busy?: string
+  confirm: Parameters<typeof useUnitVerbs>[0]["confirm"]
+  act: Parameters<typeof useUnitVerbs>[0]["act"]
+}) {
+  const verbs = useUnitVerbs({ unit, confirm, act, canReload })
+  return (
+    <>
+      <Status
+        state={busy ? "activating" : unit.activeState}
+        label={busy ? `${busy}…` : `${unit.activeState} (${unit.subState})`}
+      />
+      <VerbBar verbs={verbs} />
+    </>
   )
-  if (detail.loading) return <LoadingPanel />
-  if (detail.error) return <ErrorState error={detail.error} />
-  if (!detail.data) return null
+}
 
-  const { unit: service, properties } = detail.data
+function UnitOverview({ detail }: { detail: SystemdUnitDetail }) {
+  const { unit: service, properties } = detail
   const started = service.activeSince
     ? new Date(service.activeSince * 1000).toISOString()
     : undefined
+  const startup = startupSummary(service.unitFileState)
+  const restart = restartSummary(properties.Restart)
   return (
-    <div className="flex flex-col gap-4">
-      <Panel>
-        <PanelHeader
-          title="Service"
-          actions={
-            <Status
-              state={service.activeState}
-              label={`${service.activeState} (${service.subState})`}
-            />
-          }
-        />
-        <PanelBody className="space-y-5">
-          <section className="min-w-0 space-y-2">
-            <p className="eyebrow">State</p>
-            <DetailList>
-              <Detail label="Startup">
-                {startupSummary(service.unitFileState).label}
-                <span className="block text-hint text-muted-foreground">
-                  {startupSummary(service.unitFileState).hint}
-                </span>
-              </Detail>
-              <Detail label="Active since">
-                {started ? (
-                  <>
-                    {relativeTime(started)}
-                    <span className="block text-hint text-muted-foreground">
-                      {timestamp(started)}
-                    </span>
-                  </>
-                ) : (
-                  "—"
-                )}
-              </Detail>
-              <Detail label="Last result">{service.result || "—"}</Detail>
-              <Detail label="Restarts">{service.restarts ?? 0}</Detail>
-            </DetailList>
-          </section>
-          <section className="min-w-0 space-y-2">
-            <p className="eyebrow">Footprint</p>
-            <DetailList>
-              <Detail label="Main PID" className="font-mono">
-                {service.mainPid || "—"}
-              </Detail>
-              <Detail label="Memory">{bytes(service.memoryBytes)}</Detail>
-              <Detail label="Tasks">{service.tasks ?? "—"}</Detail>
-            </DetailList>
-          </section>
+    <div className="flex animate-rise flex-col gap-6">
+      {service.description && (
+        <p className="text-body text-muted-foreground">{service.description}</p>
+      )}
+
+      <Panel plain>
+        <PanelHeader title="State" />
+        <PanelBody>
+          <DetailList>
+            <Detail label="Startup">
+              <Tag>{startup.label}</Tag>
+              <span className="block text-hint text-muted-foreground">{startup.hint}</span>
+            </Detail>
+            <Detail label="Active since">
+              {started ? (
+                <>
+                  {relativeTime(started)}
+                  <span className="block text-hint text-muted-foreground">
+                    {timestamp(started)}
+                  </span>
+                </>
+              ) : (
+                "—"
+              )}
+            </Detail>
+            <Detail label="Last result">{service.result || "—"}</Detail>
+            <Detail label="Restarts" className="numeric">
+              {service.restarts ?? 0}
+            </Detail>
+            <Detail label="Main PID" className="font-mono">
+              {service.mainPid ? (
+                <Link href={`/processes?pid=${service.mainPid}`} className="hover:underline">
+                  {service.mainPid}
+                </Link>
+              ) : (
+                "—"
+              )}
+            </Detail>
+            <Detail label="Memory">{bytes(service.memoryBytes)}</Detail>
+            <Detail label="Tasks" className="numeric">
+              {service.tasks ?? "—"}
+            </Detail>
+          </DetailList>
         </PanelBody>
       </Panel>
-      <Panel>
+
+      <Panel plain>
         <PanelHeader title="How it runs" />
-        <PanelBody className="space-y-2">
+        <PanelBody className="space-y-4">
           <DetailList>
             <Detail label="Runs as">
               <span className="font-mono">{properties.User || "root"}</span>
@@ -137,10 +205,13 @@ function UnitOverview({ unit }: { unit: string }) {
               {properties.WorkingDirectory || "Not set"}
             </Detail>
             <Detail label="Restart policy">
-              {restartSummary(properties.Restart).label}
-              <span className="block text-hint text-muted-foreground">
-                {restartSummary(properties.Restart).hint}
-              </span>
+              {restart.label}
+              <span className="block text-hint text-muted-foreground">{restart.hint}</span>
+            </Detail>
+            <Detail label="Reload">
+              {properties.CanReload === "yes"
+                ? "Re-reads its configuration without stopping"
+                : "Not supported — a restart is the only way to apply changes"}
             </Detail>
             <Detail label="Memory limit">
               {properties.MemoryMax && properties.MemoryMax !== "infinity"
@@ -148,13 +219,23 @@ function UnitOverview({ unit }: { unit: string }) {
                 : "No limit"}
             </Detail>
             <Detail label="Task limit">{properties.TasksMax || "No limit"}</Detail>
+            <Detail label="Unit file" className="font-mono break-all">
+              {service.fragmentPath ? (
+                <Link
+                  href={`/files?path=${encodeURIComponent(service.fragmentPath)}`}
+                  className="hover:underline"
+                >
+                  {service.fragmentPath}
+                </Link>
+              ) : (
+                "—"
+              )}
+            </Detail>
           </DetailList>
           {properties.ExecStart && (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <p className="eyebrow">Command</p>
-              <Well className="max-h-36 font-mono text-xs whitespace-pre-wrap">
-                {properties.ExecStart}
-              </Well>
+              <Well className="max-h-36 whitespace-pre-wrap">{properties.ExecStart}</Well>
             </div>
           )}
         </PanelBody>
@@ -236,6 +317,13 @@ function JournalStream({ unit }: { unit: string }) {
       className="h-full min-h-80"
       lines={lines}
       onClear={() => setLines([])}
+      toolbar={
+        <Status
+          state={state}
+          live={state === "open"}
+          label={state === "open" ? "Live" : state === "connecting" ? "Connecting" : "Reconnecting"}
+        />
+      }
       emptyMessage={
         state === "open"
           ? `No journal entries for ${unit} yet — a quiet unit logs nothing.`
