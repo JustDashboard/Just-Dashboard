@@ -23,3 +23,6 @@ data/
 frontend/shot*.mjs
 frontend/playwright-report/
 frontend/test-results/
+
+# Linked worktrees Claude Code creates for parallel branches.
+.claude/worktrees/

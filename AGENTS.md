@@ -15,6 +15,9 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 - A request to *redesign a page with the design system* means running the ordered passes in
   [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md) §15 against
   that page, with the host Overview as the reference. Read §15 before touching any UI for that request.
+- Do not add or change CI: no GitHub Actions workflows, no `.github/` automation, no hosted checks of
+  any kind, unless the operator asks for them by name. Verification happens locally with the commands
+  below; a red check on GitHub that nobody asked for is confusion, not safety.
 - Use **Bun only** in `frontend/`. Keep `bun.lock`; never create `package-lock.json` or `yarn.lock`.
 - Match project style: Go uses standard formatting; TS/TSX uses Prettier with no semicolons, double
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.
