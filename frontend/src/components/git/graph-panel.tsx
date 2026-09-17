@@ -3,10 +3,11 @@
 import { useMemo } from "react"
 import { BranchPlus, Cross } from "@/components/icons"
 import { get } from "@/lib/api"
-import { relativeTime, timestamp } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import type { GitGraph, GitGraphCommit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { GitPreview } from "@/components/git/preview-panel"
+import { RefTags } from "@/components/git/ref-tags"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
@@ -55,29 +56,15 @@ const y = (row: number) => row * ROW + ROW / 2
 export function GraphPanel({
   repoPath,
   onClose,
-  onSelectDiff,
+  onSelect,
 }: {
   repoPath: string
   onClose: () => void
-  onSelectDiff: (p: GitPreview) => void
+  onSelect: (p: GitPreview) => void
 }) {
-  // A commit opens as a diff in the same column, replacing the graph — the same
-  // move the history list makes, and the graph is one button away again.
-  const show = async (c: GitGraphCommit) => {
-    const subtitle = `${c.short} · ${c.author} · ${timestamp(c.at)}`
-    onSelectDiff({
-      kind: "diff",
-      title: c.subject,
-      subtitle: `${c.short} · loading…`,
-      body: "Loading…",
-    })
-    try {
-      const res = await get<{ diff: string }>("/git/diff", { path: repoPath, ref: c.sha })
-      onSelectDiff({ kind: "diff", title: c.subject, subtitle, body: res.diff })
-    } catch (err) {
-      onSelectDiff({ kind: "diff", title: c.subject, subtitle: c.short, body: String(err) })
-    }
-  }
+  // A commit opens in the same column, replacing the graph — the same move
+  // the history list makes, and the graph is one button away again.
+  const show = (c: GitGraphCommit) => onSelect({ kind: "commit", sha: c.sha, subject: c.subject })
 
   const graph = usePoll(
     (signal) => get<GitGraph>("/git/graph", { path: repoPath, limit: 250 }, signal),
@@ -123,7 +110,6 @@ export function GraphPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PaneHeader className="gap-2 px-3">
-        <BranchPlus className="size-3.5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-body font-medium">Branch graph</p>
           <p className="truncate text-hint text-muted-foreground">
@@ -193,28 +179,14 @@ export function GraphPanel({
 }
 
 function GraphRow({ commit, onClick }: { commit: GitGraphCommit; onClick: () => void }) {
-  const refs = parseRefs(commit.refs)
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2 pr-3 text-left hover:bg-row-hover"
+      className="flex w-full items-center gap-2 pr-3 text-left focus-ring-inset transition-colors hover:bg-row-hover"
       style={{ height: ROW }}
     >
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        {refs.map((r) => (
-          <span
-            key={r.label}
-            className={
-              r.kind === "tag"
-                ? "shrink-0 rounded-sm bg-plot-warning px-1 text-micro font-medium text-warning"
-                : r.kind === "head"
-                  ? "shrink-0 rounded-sm bg-plot-success px-1 text-micro font-medium text-success"
-                  : "shrink-0 rounded-sm bg-wash-primary px-1 text-micro font-medium text-primary"
-            }
-          >
-            {r.label}
-          </span>
-        ))}
+        <RefTags refs={commit.refs} className="flex shrink-0 items-center gap-1" />
         <span className="truncate text-body">{commit.subject}</span>
       </span>
       <span className="shrink-0 font-mono text-hint text-muted-foreground">{commit.short}</span>
@@ -223,30 +195,4 @@ function GraphRow({ commit, onClick }: { commit: GitGraphCommit; onClick: () => 
       </span>
     </button>
   )
-}
-
-type Ref = { label: string; kind: "head" | "tag" | "branch" }
-
-// git's %D reads "HEAD -> main, origin/main, tag: v1.0". The arrow marks the
-// checked-out branch; "tag:" marks a tag; everything else is a branch tip.
-function parseRefs(refs?: string): Ref[] {
-  if (!refs) return []
-  const out: Ref[] = []
-  for (const raw of refs.split(", ")) {
-    const entry = raw.trim()
-    if (!entry) continue
-    // origin/HEAD rides along with origin/main on the same commit — a symref,
-    // not a branch worth its own chip.
-    if (entry.endsWith("/HEAD")) continue
-    if (entry.startsWith("HEAD -> ")) {
-      out.unshift({ label: entry.slice("HEAD -> ".length), kind: "head" })
-    } else if (entry === "HEAD") {
-      out.unshift({ label: "HEAD", kind: "head" })
-    } else if (entry.startsWith("tag: ")) {
-      out.push({ label: entry.slice("tag: ".length), kind: "tag" })
-    } else {
-      out.push({ label: entry, kind: "branch" })
-    }
-  }
-  return out
 }

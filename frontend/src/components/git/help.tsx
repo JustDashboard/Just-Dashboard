@@ -53,7 +53,7 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   stash: {
     title: "Stash",
-    body: "Set your uncommitted changes aside so you have a clean slate — to switch branches, say — then bring them back later with Pop. Nothing is lost; it is just parked.",
+    body: "Set your uncommitted changes aside so you have a clean slate — to switch branches, say — then bring them back later with Pop or Apply. Nothing is lost; it is just parked, and the parked sets are listed at the top of Changes.",
   },
   remote: {
     title: "Remote (origin)",
@@ -65,11 +65,35 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
   discard: {
     title: "Discard",
-    body: "Throw away the uncommitted edits to a file and put it back the way it was at the last commit. There is no undo — the current contents are gone — which is why it always asks first.",
+    body: "Throw away the uncommitted edits to a file and put it back the way it was at the last commit — or, for a file git has never seen, delete it. There is no undo, which is why it always asks first.",
   },
   head: {
     title: "HEAD",
     body: 'Shorthand for the commit you are currently on — normally the tip of the current branch. "Reset to HEAD" means "put everything back to the last commit".',
+  },
+  tag: {
+    title: "Tag",
+    body: "A name pinned to one commit that never moves — v1.2.0, say. A branch moves as you commit; a tag marks a point you want to find again, which is what a release is. Tags are local until they are pushed.",
+  },
+  merge: {
+    title: "Merge",
+    body: "Bring another branch's commits into the one you are on. Where both sides changed the same lines git cannot decide, and this page gives up cleanly rather than leaving the mess for you: nothing changes, and it tells you which files clashed.",
+  },
+  revert: {
+    title: "Revert",
+    body: "Undo a commit by recording a new one that does the opposite. History keeps both, so this is the safe undo for anything already pushed — nobody else's copy is rewritten.",
+  },
+  cherryPick: {
+    title: "Cherry-pick",
+    body: "Copy one commit from another branch onto the one you are on, without bringing the rest of that branch with it.",
+  },
+  conflict: {
+    title: "Conflict",
+    body: "Two changes to the same lines that git cannot combine on its own. A file in this state will not commit until it is edited by hand and the markers are gone; this page never creates one, but a shell can leave one behind.",
+  },
+  identity: {
+    title: "Who commits",
+    body: "Every commit records a name and an email address. git refuses to commit until it knows both; setting them here writes them into this repository's own configuration.",
   },
 }
 
@@ -117,14 +141,10 @@ export function GitExplain({ name, className }: { name: string; className?: stri
 }
 
 const STEPS = [
-  { n: 1, title: "Stage", body: "Tick the changed files you want to save together." },
-  { n: 2, title: "Describe", body: "Write a short message saying what you changed." },
-  { n: 3, title: "Commit", body: "Save them as one point in this repository's history." },
-  {
-    n: 4,
-    title: "Push",
-    body: "Send your commits to the shared copy so they are safe and shared.",
-  },
+  { title: "Stage", body: "Tick the changed files you want to save together." },
+  { title: "Describe", body: "Write a short message saying what you changed." },
+  { title: "Commit", body: "Save them as one point in this repository's history." },
+  { title: "Push", body: "Send your commits to the shared copy so they are safe and shared." },
 ]
 
 /** The "new to git?" button: the four-step flow plus the words behind it. */
@@ -144,11 +164,14 @@ export function GitHelp() {
             The same four moves every time. You never have to touch the command line.
           </p>
         </div>
+        {/* A numbered list, numbered by its numerals: the filled circle each
+            step used to sit in was a pill with a digit in it, which is the
+            shape this product draws nothing in. */}
         <ol className="space-y-2">
-          {STEPS.map((s) => (
-            <li key={s.n} className="flex gap-2.5">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-plot-primary text-hint font-semibold text-primary">
-                {s.n}
+          {STEPS.map((s, i) => (
+            <li key={s.title} className="flex gap-2.5">
+              <span className="numeric w-4 shrink-0 text-right text-hint font-semibold text-brand">
+                {i + 1}
               </span>
               <div className="min-w-0">
                 <p className="text-body leading-tight font-medium">{s.title}</p>
@@ -158,15 +181,15 @@ export function GitHelp() {
           ))}
         </ol>
         <div className="space-y-1.5 border-t border-hairline pt-2.5 text-xs">
-          <p className="text-hint font-medium text-muted-foreground uppercase">
-            Words you will see
-          </p>
-          {(["branch", "stash", "fetch", "pull", "aheadBehind"] as const).map((k) => (
-            <p key={k} className="leading-snug">
-              <span className="font-medium">{GIT_GLOSSARY[k].title}</span>{" "}
-              <span className="text-muted-foreground">— {GIT_GLOSSARY[k].body}</span>
-            </p>
-          ))}
+          <p className="eyebrow">Words you will see</p>
+          {(["branch", "stash", "fetch", "pull", "aheadBehind", "tag", "merge"] as const).map(
+            (k) => (
+              <p key={k} className="leading-snug">
+                <span className="font-medium">{GIT_GLOSSARY[k].title}</span>{" "}
+                <span className="text-muted-foreground">— {GIT_GLOSSARY[k].body}</span>
+              </p>
+            ),
+          )}
         </div>
       </PopoverContent>
     </Popover>

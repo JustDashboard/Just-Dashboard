@@ -24,7 +24,7 @@ import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field } from "@/components/form"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -105,9 +105,9 @@ export function GitHubAccountControl({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 text-hint text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
             <GitHubMark className="size-3.5" />
-            unavailable
+            <Tag>no gh</Tag>
           </span>
         </TooltipTrigger>
         <TooltipContent>
@@ -465,7 +465,7 @@ function SignInDialog({
       ) : stage.kind === "code" ? (
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Your one-time code</Label>
+            <p className="eyebrow">Your one-time code</p>
             <div className="flex items-center justify-center rounded-lg border border-hairline bg-surface-sunken py-3">
               <code className="font-mono text-2xl tracking-[0.35em]">{stage.start.userCode}</code>
             </div>
@@ -516,8 +516,17 @@ function SignInDialog({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="gh-token">Personal access token</Label>
+          <Field
+            label="Personal access token"
+            htmlFor="gh-token"
+            hint={
+              <>
+                Needs the <span className="font-mono">repo</span> scope, and{" "}
+                <span className="font-mono">workflow</span> to push changes under{" "}
+                <span className="font-mono">.github/workflows</span>.
+              </>
+            }
+          >
             <Input
               id="gh-token"
               type="password"
@@ -528,14 +537,8 @@ function SignInDialog({
               placeholder="ghp_…"
               className="font-mono"
             />
-            <p className="text-hint text-muted-foreground">
-              Needs the <span className="font-mono">repo</span> scope, and{" "}
-              <span className="font-mono">workflow</span> to push changes under{" "}
-              <span className="font-mono">.github/workflows</span>.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="gh-host">Host</Label>
+          </Field>
+          <Field label="Host" htmlFor="gh-host" hint="github.com, or a GitHub Enterprise host.">
             <Input
               id="gh-host"
               value={host}
@@ -543,7 +546,7 @@ function SignInDialog({
               placeholder="github.com"
               className="font-mono"
             />
-          </div>
+          </Field>
           <div className="flex gap-2">
             <Button
               className="flex-1"
