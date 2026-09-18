@@ -273,7 +273,12 @@ only renderer/executor/validation authority for their feature.
 - Deployment-owned nginx cutover is serialized and snapshots the prior bytes, mode and exact symlink
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation
-  evidence carries its digest, not the configuration bytes.
+  evidence carries its digest, not the configuration bytes. The rendered nginx route proxies each
+  request over a fresh upstream connection (no `upstream` block, so no upstream keepalive): under
+  sustained traffic in the high hundreds of requests a second the proxy's side of every closed
+  connection sits in TIME_WAIT, its ephemeral ports run out after roughly half a minute, and every
+  proxied request answers 502 until they drain. The cutover continuity test throttles its own
+  clients to stay under that ceiling; the ceiling itself is a known limit, not a cutover defect.
 - Stop uses the configured signal and a bounded grace period before Docker escalation; predecessor drain
   and activation/cancellation compensation use bounded contexts detached from request cancellation. A
   stop-first failure restarts the predecessor from its exact immutable runtime spec. Cancellation between
