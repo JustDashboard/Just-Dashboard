@@ -57,7 +57,7 @@ func TestGitPolicyAPIAndSignedHooksUseCompleteDiffAndPinRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.enqueueNormalizedDeploymentAtSource(ctx, project, environmentID, deploy.OperationDeploy, 0, deploy.TriggerManual, "operator", "first", nil, a, 1); err != nil {
+	if _, err := s.enqueueNormalizedDeploymentAtSource(ctx, project, environmentID, deploy.OperationDeploy, 0, deploy.TriggerManual, "operator", "first", nil, a, "", 1); err != nil {
 		t.Fatal(err)
 	}
 	created := admin.do(http.MethodPost, base+"/triggers", `{"name":"GitHub","kind":"github","enabled":true,"config":{"repository":"acme/app","ref":"main","events":["push"]}}`, nil)
@@ -79,15 +79,21 @@ func TestGitPolicyAPIAndSignedHooksUseCompleteDiffAndPinRevision(t *testing.T) {
 	if code, body := deliver("relevant", c, "docs/claimed.md"); code != http.StatusAccepted || !strings.Contains(body, `"accepted":true`) {
 		t.Fatalf("relevant hook=%d %s", code, body)
 	}
-	var revision string
-	if err := s.Store.DB.QueryRow(`SELECT source_revision FROM deploy_runs WHERE project_id=? ORDER BY id DESC LIMIT 1`, projectID).Scan(&revision); err != nil || revision != c {
+	var revision, metadata string
+	if err := s.Store.DB.QueryRow(`SELECT source_revision, metadata_json FROM deploy_runs WHERE project_id=? ORDER BY id DESC LIMIT 1`, projectID).Scan(&revision, &metadata); err != nil || revision != c {
 		t.Fatalf("pinned revision=%s, %v", revision, err)
+	}
+	// The run's metadata carries the watcher's complete diff (from the
+	// configured watch filter), not just the payload's own claimed path, so a
+	// later automatic run's supersession check has something real to compare.
+	if !strings.Contains(metadata, `"changedPaths":["app/actual.go"]`) {
+		t.Fatalf("run metadata = %s, want the resolved changed paths", metadata)
 	}
 	policy, err := s.modules.deployRuns.GitDeploymentPolicy(ctx, projectID, environmentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.dispatchGitDeployment(ctx, deploy.GitWatchTarget{ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: 1, Source: source, PolicyKey: policy.Key()}, c, "same-commit-poll"); err != nil {
+	if _, err := s.dispatchGitDeployment(ctx, deploy.GitWatchTarget{ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: 1, Source: source, PolicyKey: policy.Key()}, c, "same-commit-poll", nil); err != nil {
 		t.Fatal(err)
 	}
 	var count int

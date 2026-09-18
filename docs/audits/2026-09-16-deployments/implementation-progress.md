@@ -130,3 +130,121 @@ Not verified in this pass: real Discord/Slack/Telegram/SMTP delivery, a real Git
 public TLS, `pg_dump`/`mysqldump`/`mongodump` binaries (the live dump used the built-in driver dump
 because the tools are not installed on this host; the native path is exercised by `dbx`'s own live
 tests). The operator's running dashboard was not rebuilt by this pass.
+
+## Fourth pass (2026-09-17)
+
+Re-read the subsystem against a fresh backend capability audit (source audit's "Lifecycle" and "Gaps
+and rough edges" sections) and executed its nine findings (B1–B9) and eight small features (F13–F20,
+continuing the numbering above; F20 is the git-ref/commit override the third pass's inventory had
+already scoped and left for this one). Evidence below is from this checkout; earlier ledgers are
+unchanged.
+
+| Item | Outcome | Evidence |
+| --- | --- | --- |
+| B1 archive left schedules firing | Done | `Store.Archive` disables the project's schedules directly (git watch already excluded an archived project); `TestArchiveDisablesSchedulesAndUnarchiveLeavesThemDisabled` |
+| B2 remove-managed collapsed to `500` | Done | `deploy.RemovalFailure`/`deploy.Unavailable` classify a remover error as `409 removal_failed` or `503`, carrying its exact sentence and the partial `execution`; `TestRemoveManagedKeepsEarlierSuccessesWhenALaterTargetInTheSameBatchFails`, `TestRemoveManagedReportsAnUnavailableOwnerWithThePartialExecution` |
+| B3 failed candidate release stuck at `candidate` | Done | `TransitionRun` moves the run's candidate release to `failed` on `failed`/`failed_activation`/`rolled_back`/`cancelled`; `TestFailedRunFailsItsCandidateReleaseAndRetentionKeepsItSevenDays` exercises the retention planner's seven-day branch directly |
+| B4 non-deterministic hostname suggestion | Done | `Sealer.DeriveHMAC` seeds a per-install, per-name suffix with a collision counter; `TestHostnameSlugIsALegalStableLabel`, `TestSuggestHostnameSlugIsDeterministicAndAvoidsTakenDomains` |
+| B5 draft detect unknown `selectedId` | Done | Error message now names the id; `TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying` |
+| B6 variable reveal `400` for unknown name | Done | New `ErrVariableNotFound` → `404 variable_not_found`; `TestDeploymentVariableRevealAnswersNotFoundForAnUnknownName` |
+| B7 draft `404` hid forbidden/expired | Done | Split into `403 draft_forbidden` / `410 draft_expired` / `404 draft_not_found`; `TestDeploymentDraftRoutesRequireSessionsAndDistinguishForbiddenExpiredAndMissing` |
+| B8 `PlanConfiguration.Validate` had no field pointer | Done | Typed `ValidationError{Field,Message}` for ports/mounts/dependencies/domains/variables/checks/release tasks, plus the wrong "ports 1-65535" message; `TestPlanConfigurationValidateAttachesAFieldPointerToCommonRefusals`, `TestDeploymentConfigurationSaveReportsAFieldForAnInvalidPort` |
+| B9 supersession compared always-empty `changedPaths` | Done (contract: let an unscoped schedule not cancel a scoped push) | Git watcher and provider webhooks now record resolved changed paths in run metadata; `TestScheduleQueuedBehindAPushDoesNotSupersedeIt`, `TestGitPolicyAPIAndSignedHooksUseCompleteDiffAndPinRevision` |
+| F13 unarchive | Done | `Store.Unarchive`, `POST /deploy/{id}/unarchive`; `TestUnarchiveRefusesATakenName`, `TestDeploymentUnarchiveRestoresNameAndRefusesATakenOne` |
+| F14 pin/unpin a release | Done | `SetReleasePinned`, `PUT .../releases/{release}/pin`; `TestSetReleasePinnedSurvivesAPrunePlan`, `TestDeploymentReleasePinRoute` |
+| F15 run history filters and pagination | Done | `ProjectRunsFiltered`/`RunListFilter`, byte-compatible default; `TestProjectRunsFilteredNarrowsAndPaginates`, `TestDeploymentRunsEngineViewFiltersAndRejectsAnUnknownState` |
+| F16 trigger delivery log and secret rotation | Done | `TriggerDeliveries`, `RotateTriggerSecret`; `TestTriggerDeliveriesAndSecretRotation`, `TestTriggerDeliveriesAndRotateSecretRoutes` |
+| F17 reject a preview approval | Done | `RejectPreview`, `POST .../approvals/{approval}/reject`; `TestRejectPreviewClosesTheApprovalUntilANewEvent`, `TestPreviewApprovalRejectRoute` |
+| F18 list the caller's drafts | Done | `PlanningStore.ListDrafts`, `GET /deploy/drafts`; `TestListDraftsReturnsOnlyTheOwnersUncommittedUnexpiredDrafts`, `TestDeploymentDraftListReturnsOnlyTheCallersOwnDrafts` |
+| F19 Compose service count in the fleet summary | Done | `DeploymentSummary.serviceCount` folded into the existing `liveReleaseFacts` batched read, no added statement; `TestFleetSummaryReportsServiceCountFromTheRuntimeSnapshot`; `TestFleetReadModelStatementCountDoesNotGrowWithTheFleet` still passes unchanged |
+| F20 deploy a specific Git ref or commit | Done | `deploymentRunCreateRequest.SourceRevision`/`Ref`, `HostSourceAnalyzer.ResolveGitRef`; `TestResolveGitRefDistinguishesNotFoundFromUnavailable`, `TestDeploymentRunCreateAcceptsAnExplicitSourceRevision`, `TestDeploymentRunCreateResolvesAndRecordsAnExplicitRef`, `TestDeploymentRunCreateRefusesARefOverrideOnAnImageProject`, `TestDeploymentRunCreateRefusesBothSourceRevisionAndRefTogether`, `TestDeploymentRunCreateRefusesARefOverrideOnALegacyComposeProject`, `TestDeploymentRunCreateWithAnExplicitRevisionDoesNotAdvanceTheGitWatchCursor` |
+| F21 manage Git/registry credentials | Done | `deploy_credentials` CRUD under `/deploy/credentials` (`CreateCredential`/`UpdateCredential`/`DeleteCredential`/`ListCredentials`/`GetCredential`), sealed with the existing `auth.Sealer`; `gitEnvironment` gained a `git_ssh` path (sealed key to a private 0600 file, `GIT_SSH_COMMAND` isolated from the operator's real `~/.ssh`) alongside the existing bearer path; `POST .../test` probes through the same adapter isolation; `TestCreateCredentialValidatesShapePerKindAndSealsTheSecret`, `TestUpdateCredentialKeepsTheStoredSecretWhenOmitted`, `TestCredentialUsageCountingAndDeleteRefusesWhileInUse`, `TestCredentialExistsFailsFastForADraftSourceStep`, `TestGitSSHEnvironmentWritesAPrivateKeyFileAndPointsGitAtItExclusively`, `TestGitBearerEnvironmentScopesTheHeaderToTheExactRemoteAndCleansUp`, `TestGitEnvironmentAgainstARealLocalRepositoryStaysUsableWithoutACredential`, `TestTestCredentialRunsAGitProbeAndReportsFailureWithoutTheSecret`, `TestTestCredentialResolvesARegistryManifestAndReportsFailureWithoutTheSecret`, `TestDeploymentCredentialsCRUDJourneyNeverLeaksTheSecret`, `TestDeploymentCredentialCreateValidatesKindShapeAndInUseDelete`, `TestDeploymentCredentialRoutesRequireSystemAdmin` |
+| F22 change a committed project's source | Done | `PlanningStore.SaveEnvironmentSource`, `PUT /deploy/{id}/environments/{env}/source`; no watcher/pending-state change needed since both already key off the source's own digest; `TestSaveEnvironmentSourceRefusesAChangedKindAndAStaleRevision`, `TestSaveEnvironmentSourceRefusesAnUnknownCredential`, `TestSaveEnvironmentSourceChangeIsPickedUpByPendingStateAsASourceChange`, `TestGitWatcherReportsBranchChangedAfterASourceUpdateEvenWithTheSameResolvedRevision`, `TestDeploymentSourceUpdateChangesSubdirectoryAndRefusesAKindChange`, `TestDeploymentSourceUpdateReResolvesTheImageDigest` |
+| F23 duplicate a project into a draft | Done | `PlanningStore.Duplicate` (drops domains, flattens variables to a blank required declaration, re-derives managed volume names via `blueprintVolumePrefix`), `POST /deploy/{id}/duplicate`; `TestDuplicateDropsDomainsFlattensVariablesAndRederivesManagedVolumes`, `TestDuplicateCommitsIntoAnIndependentProject`, `TestDuplicateRefusesAnUnknownProjectAndAnInvalidName`, `TestDeploymentDuplicateCreatesAResumableDraft`, `TestDeploymentDuplicateRefusesAnUnknownProjectAndRequiresSystemAdmin` |
+
+Gates run after the changes: `gofmt -l` clean on `internal/deploy`, `internal/api`, `internal/store`;
+`go build ./...` and `go vet ./internal/deploy/... ./internal/api/... ./internal/store/...` clean;
+`go test ./internal/deploy/... ./internal/store/... -count=1` and `go test ./internal/api/... -run
+'Deploy|Deployment|Draft|Preview|Trigger|Hostname|Archive|Release' -count=1` pass; a full `go build
+./...`, `go vet ./...` and `go test ./... -count=1` across all 33 packages also passes.
+
+Not verified in this pass: `go test -race`, the frontend gate (`bun run lint`/`build`/`test:browser`) —
+this pass touched only `backend/internal/{deploy,api,store,httpx,auth}` and the docs above, per the
+brief's scope — real Docker/Git-remote/notification endpoints, hosted CI. The operator's running
+dashboard was not rebuilt by this pass.
+
+## Fourth pass, continued: credentials, source change, duplicate (2026-09-17)
+
+F21–F23 above (credentials CRUD and test route with SSH/bearer plumbing, `PUT .../environments/{env}/source`,
+`POST .../duplicate`) were added in a second sub-pass over the same "Fourth pass" scope. No schema change was
+needed: `target`/`username`/`lastUsedAt` live in `deploy_credentials.config_json`, which already existed.
+`registryAuth`'s decoder was widened from a private anonymous struct to the shared `credentialConfig` type so
+that additive field (`target`, `lastUsedAt`) does not trip its `DisallowUnknownFields` the first time a
+registry credential is used after this change — caught by writing the usage-counting test before assuming the
+existing decoder would tolerate it.
+
+Gates run for this sub-pass: `gofmt -l` clean on `internal/deploy`, `internal/api`, `internal/store`;
+`go build ./...` and `go vet ./internal/deploy/... ./internal/api/... ./internal/store/...` clean;
+`go test ./internal/deploy/... ./internal/store/... -count=1` and `go test ./internal/api/... -run
+'Deploy|Deployment|Credential|Source|Duplicate|Draft' -count=1` pass.
+
+Not verified in this sub-pass, for the same reason the brief itself calls out: a real Git remote over
+HTTPS/SSH and a real image registry are not reachable from this sandbox. Bearer/SSH plumbing (temp file
+permissions and content, `GIT_SSH_COMMAND` construction, environment sanitization) is proven against a real
+local bare repository over the file transport and against a real refused TCP connection; the one thing this
+cannot show is a remote actually accepting the credential. `go test -race` and the frontend gate were not run,
+matching the prior sub-pass's own scope note.
+
+## Fifth pass (2026-09-18): detect the project and have everything ready
+
+Brief: map the deployment system end to end against Coolify, Dokploy, CapRover, Dokku and Vercel, and
+close the gaps that make an ordinary first deployment manual — automated defaults first, every
+detected value still an editable setting. The largest remaining gap after the fourth pass was breadth
+of detection (B05 absent, B04 partial, S09 partial): a Remix or React Router app was read as a Vite
+static site, an Astro or Nuxt starter needed a hand-typed start command, every Python project needed a
+pinned lockfile and an explicit ASGI/WSGI command, and Rust, Java, .NET and Deno had no recipe at all.
+
+| Item | Outcome | Evidence |
+| --- | --- | --- |
+| F24 Node framework catalogue | Done | `frameworks_node.go`: ordered catalogue (meta-frameworks before Vite), serving mode, port, entry check, runtime env (`HOST=0.0.0.0` for Astro node), `start:prod` for Nest, `angular.json` output resolution, VitePress docs directory, main-entry fallback with HTTP-library labels; `TestNodeFrameworkCatalogueDetectsServingDefaults` (29 starters), `TestNodeFrameworkDefaultsFollowTheLockfileRunner`, `TestSchemaStepChainsBeforeAFrameworkDefaultStart`, `TestAngularOutputReadsTheWorkspace` |
+| F25 Procfile | Done | `web:` outranks start scripts and framework defaults, never turns a site into a server; `TestProcfileWebProcessOutranksGuessesButNotStaticOutput`, `TestProcfileAndVitepressHelpers` |
+| F26 Single-page fallback | Done | additive `build.spaFallback`, nginx `try_files` written by `staticServerLines`, on by default for Vite/CRA/Vue CLI/Ember/Parcel/Angular, switch on the configure form and Build settings; `TestRecipesRenderFrameworkEnvironmentsEntriesAndFallbacks`, `TestPlanValidationBoundsTheNewBuildFields`, browser `deploy-settings-a` |
+| F27 Python zero-config | Done | `frameworks_python.go` (Django with migrate/collectstatic, FastAPI, Flask incl. factories, Streamlit, Gradio; entry files shallowest first, tests excluded), `build_python.go` (interpreter from `.python-version`/`runtime.txt`/`requires-python`, catalogue 3.10–3.13, uv/Poetry/requirements/bare-pyproject installs, undeclared gunicorn/uvicorn pinned and installed into the same environment), unpinned requirements accepted + `dependencies_unpinned` warning; `TestPythonFrameworkCatalogueDetectsServingDefaults` (14 layouts), `TestPythonVersionSelection`, `TestPythonDependencyReading`, `TestPythonEntriesStayUnderTheirOwnRoot`, `TestPreflightWarnsAboutUnpinnedDependencies` |
+| F28 Environment discovery and database suggestions | Done | `env_discovery.go`: `.env.example`-family templates (examples kept unless credential-shaped), a committed `.env` for names only, code references in JS/TS/Python/Go/Ruby/PHP under a separate 400-file/3 MiB budget, ranked ordering (own template, `.env`, repository-level template, code by name), engines from dependencies/Prisma provider/variable names with the right variable; candidate `variables`/`databases` validated in `validateDetectionResult`; `TestEnvironmentDiscoveryReadsTemplatesAndCode`, `TestEnvironmentDiscoveryFollowsRoots`, `TestDatabaseSuggestionsFromDependenciesSchemasAndNames`, `TestEnvironmentDiscoveryStopsQuietlyAtItsBudget`, `TestEnvTemplateFileNamesAndExampleValues` |
+| F29 Rust, Java, .NET, Deno recipes | Done | `frameworks_rust.go` (Cargo manifest reader, framework ports, toolchain pin, static musl build), `frameworks_java.go` (Maven/Gradle, release 11/17/21/25, jar selection, `MaxRAMPercentage`), `frameworks_dotnet.go` (csproj choice, net8–10, `ASPNETCORE_HTTP_PORTS` bridge), `frameworks_deno.go` (JSONC, tasks, entry files, `deno install --frozen`); `validRecipe` extended; `TestRustDetectionAndRecipe`, `TestJavaDetectionAndRecipe`, `TestDotnetDetectionAndRecipe`, `TestDenoDetectionAndRecipe`, `TestCompiledLanguagesCoexistAsSeparateRoots` |
+| F30 Configure form and Build settings | Done | framework labels (`frameworkLabel`), discovered rows with placeholders and sources merged across re-detection without losing typed values, unset-row count, database buttons opening the sheet on the engine and variable, Python version field, single-page switch, Language select for seven recipes; `deployment-defaults.test.js` (+6), browser `deploy-new.spec.ts` "a detected site opens with its variables, its database and its single-page fallback ready", `deploy-settings-a.spec.ts` "static output offers the single-page fallback and Python shows its version" |
+| F31 Deploy link | Done | `/deploy/new?repo=<clone url>&ref=<branch>` prefills the Git tab; only `https://`, `ssh://` and `git@` URLs are accepted; browser "a deploy link arrives on the Git tab with its clone URL and branch filled in" |
+| Live fixtures | Done | `TestLiveDetectedFrameworkBuildAndServing` gained Astro 7, Nuxt 4, React Router 8, FastAPI, Flask, Django, axum, Maven, ASP.NET Core and Deno; all seventeen fixtures build and serve on this host's Docker daemon (original seven re-run after the change) |
+
+Not done, deliberately: PHP and Ruby recipes (Laravel needs `APP_KEY`, extensions and a public root the
+form cannot yet ask for; Rails ships its own Dockerfile), a GitHub App with PR comments (R11), multi-server
+and teams (R14/R15), S3 backup targets, deployment protection (a password in front of a route). Each is
+listed in the fifth-pass comparison in the deployment map.
+
+Gates run: `gofmt -l` clean; `go build ./... && go vet ./... && go test ./... -count=1` (all packages);
+`JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing` for the ten new
+fixtures and again for the original seven; `bun run lint`, `bunx tsc --noEmit`, `bun test src` (70 tests),
+`bun run build`, and the browser suite against that build. Not verified: a real GitHub push through the
+new detection, PHP/Ruby repositories, Gradle/Streamlit/Gradio live builds (rendered Dockerfiles only).
+
+## Sixth pass (2026-09-18): ahead, not behind
+
+Brief: everything the fifth pass listed as still behind, except teams and multi-server — a PHP/Laravel
+recipe, a GitHub App with pull request comments, S3 backup targets, password protection on routes,
+catalogue breadth, live Gradle/Streamlit/Gradio fixtures and a public ACME test journey — each one
+tested and shippable.
+
+| Item | Outcome | Evidence |
+| --- | --- | --- |
+| F32 PHP recipe | Done | `frameworks_php.go`: Composer version constraints (caret, tilde, ranges, unions; 8.2–8.4, `^7.4` refused), `ext-*` through `install-php-extensions`, Laravel/Symfony/Slim detection, FrankenPHP image with a Composer stage and an optional Vite/Encore asset stage, migrations in the start command; `TestPHPDetectionAndRecipe`, `TestLaravelDatabaseSuggestionFollowsDBConnection`; live `laravel` and `php` fixtures; the form mints `APP_KEY` (`deployment-defaults.test.js`, browser `deploy-new`) |
+| F33 Password protection | Done | `domain_protection.go` (seal once at the boundary, validate, canonicalise), `PlannedDomain.Protection`, route rendering for Caddy (`basic_auth`) and nginx (`auth_basic` + htpasswd), previews inherit; `domain_protection_test.go`, `TestDeploymentRoutePasswordProtectionOnBothProxies`, live isolated Caddy 401/200; Domains settings and public-address step; browser `deploy-settings-b`, `deploy-new` |
+| F34 Catalogue breadth | Done | 36 definitions with registry-verified tags; `image.command`; paced readiness budgets; secondary direct ports published (`runtime.ports[]`, `PublishedPort`); three stale pins repointed and MinIO's missing command fixed; `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` (48 deployable definitions pass; five wrong paths/settings fixed from its first run); `TestSecondaryDirectPortsArePublishedNextToTheRoutedPort`, `TestRuntimePortMappingsPublishTheRoutedAndPinnedPorts`, `TestPublishedPortsMakeAPlanStopFirstOnly` |
+| F35 GitHub App | Done | `internal/githubapp` (RS256 JWT, installation tokens, listings, statuses, comment upsert, manifest exchange, sealed store, service), `github_app` table, `github_app` credential kind minting on open, `TriggerConfig.delivery`, `TriggersForAppDelivery`, `PullRequestCommenter`, `dispatchAutomationEvent` shared by both webhook doors, routes and the public `/hooks/github-app`; `githubapp_test.go`, `github_app_credentials_test.go`, `github_comments_test.go`, `TestAppDeliveryTriggersAreFoundByRepository`, `TestGitHubAppRoutesConnectRouteDeliveriesAndDisconnect`; Credentials page card, import picker, webhook form |
+| F36 S3 backup targets | Done (were present) | `objectstore.go` already carried S3/B2; `TestLiveObjectStorageBackupUploadsPrunesAndRestores` proves target test, upload, retention and restore against MinIO |
+| F37 ACME directory and public-certificate journey | Done | `acme_directory.go` (`JD_ACME_DIRECTORY`, `JD_ACME_CA_ROOT`), Caddy issuer block and root install, verification against configured roots, certbot `--server`; `TestConfiguredACMEDirectoryReachesCaddyAndCertbot`; `TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory` against Pebble |
+| F38 Gradle, Streamlit, Gradio live | Done | fixtures under `testdata/app-fixtures/{gradle,streamlit,gradio}`; the live suite checks Streamlit's health endpoint and static file and Gradio's embedded config; all three pass |
+
+Not done, deliberately: teams and multi-server placement (an architectural decision the brief excluded).
+Not verified: GitHub itself (the App is exercised against a fake GitHub; a real App is the first thing to
+connect on a public dashboard), Let's Encrypt itself (Pebble stands in, validating nothing), and a real
+S3 or B2 account (MinIO stands in for the same API).

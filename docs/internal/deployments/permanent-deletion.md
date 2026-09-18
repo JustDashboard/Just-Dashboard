@@ -1,8 +1,14 @@
 # Decision: permanent deletion of archived deployment records
 
-The archive contract remains unchanged: `DELETE /deploy/{id}` and `POST /deploy/{id}/archive`
-disable automation and retain deployment history and resource ownership. The workspace calls this
-**Archive deployment**. An archive is not a permanent delete.
+The archive contract is otherwise unchanged: `DELETE /deploy/{id}` and `POST /deploy/{id}/archive`
+disable automation — triggers and, since the project's schedules used to keep firing against an
+archived project and fail every occurrence at `environment_not_found`, the project's schedules too —
+and retain deployment history and resource ownership. The workspace calls this **Archive deployment**.
+An archive is not a permanent delete, and it is reversible: `POST /deploy/{id}/unarchive`
+(`system.admin`, session) restores the display name from `archived_name` (`409 name_taken` if another
+active project has since taken it) and clears `archived_at`, but leaves triggers and schedules exactly
+as disabled as Archive left them — the operator turns automation back on deliberately, rather than it
+resuming because the project came back.
 
 A separate `DELETE /deploy/{id}/permanent` operation removes the dashboard records of an already
 archived project. It runs behind `s.destructive`, uses ordinary confirmation (the existing deploy

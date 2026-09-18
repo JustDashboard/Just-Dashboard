@@ -61,7 +61,7 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	run EngineRun,
 	claimToken string,
 ) (json.RawMessage, error) {
-	if e == nil || e.store == nil || e.runtime == nil || run.Operation == OperationRestart {
+	if e == nil || e.store == nil || e.runtime == nil || operationTargetsLiveRelease(run.Operation) {
 		return mustJSON(map[string]any{"completed": true, "reason": "no candidate runtime cleanup required"}), nil
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 11*time.Minute)
@@ -315,8 +315,13 @@ func (e *NormalizedStepExecutor) startCandidate(
 	if e.runtime == nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "runtime_unavailable", ErrorMessage: "Docker runtime activation is unavailable"}
 	}
-	if execution.Run.Operation == OperationRestart {
+	switch execution.Run.Operation {
+	case OperationRestart:
 		return e.restartLiveRuntime(ctx, execution)
+	case OperationStop:
+		return e.stopLiveRuntime(ctx, execution)
+	case OperationStart:
+		return e.startLiveRuntime(ctx, execution)
 	}
 	release, snapshot, err := e.releaseSnapshotForExecution(ctx, execution.Run)
 	if err != nil {
@@ -412,7 +417,7 @@ func validateRuntimeActivationStrategy(snapshot runtimeReleaseSnapshot) error {
 	if plan.Strategy != StrategyBlueGreen {
 		return nil
 	}
-	if snapshot.Compose != nil || plan.HostPort != 0 || plan.HostNetwork {
+	if snapshot.Compose != nil || plan.HostPort != 0 || len(plan.Ports) != 0 || plan.HostNetwork {
 		return fmt.Errorf("%w: this runtime is not eligible for concurrent candidate activation", ErrInvalidPlan)
 	}
 	for _, mount := range plan.Mounts {
@@ -478,7 +483,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		}
 	}
 	if len(selected) == 0 {
-		if phase == "readiness" && execution.Run.Operation != OperationRestart {
+		if phase == "readiness" && !operationTargetsLiveRelease(execution.Run.Operation) {
 			_ = e.store.SetRuntimeState(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID, "ready")
 		}
 		return StepResult{State: StepSkipped, Evidence: mustJSON(checkStepEvidence{
@@ -502,11 +507,8 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		// removes it. This is the difference between "could not connect" and
 		// "Error: DATABASE_URL is not set".
 		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime)
-		message := checkFailureMessage(phase, outcome, checks...)
-		if diagnostics != nil && diagnostics.Lines > 0 {
-			message += "; the application's last output is in the build log"
-		}
-		if execution.Run.Operation == OperationRestart {
+		message := checkFailureMessage(phase, outcome, checks...) + diagnosticsSuffix(diagnostics)
+		if operationTargetsLiveRelease(execution.Run.Operation) {
 			state, code := StepFailed, "health_gate_failed"
 			if ctx.Err() != nil {
 				state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
@@ -522,7 +524,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		return StepResult{State: state, ErrorCode: code, ErrorMessage: message,
 			Evidence: mustJSON(map[string]any{"health": evidence, "recovery": recovery, "diagnostics": diagnostics})}
 	}
-	if phase == "readiness" && execution.Run.Operation != OperationRestart {
+	if phase == "readiness" && !operationTargetsLiveRelease(execution.Run.Operation) {
 		if err := e.store.SetRuntimeState(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID, "ready"); err != nil {
 			return normalizedStepFailure(err)
 		}
@@ -646,14 +648,22 @@ func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeA
 func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, port int) proxysvc.DeploymentRoute {
 	names := make([]string, 0, len(domains))
 	tls := false
+	// A protected domain protects the deployment's whole route: the proxy
+	// serves every domain from one site, so the credentials are its union.
+	var users []proxysvc.BasicAuthUser
+	seen := map[string]bool{}
 	for _, domain := range domains {
 		names = append(names, strings.ToLower(domain.Hostname))
 		tls = tls || domain.HTTPS
+		if domain.Protection != nil && !seen[domain.Protection.Username] {
+			seen[domain.Protection.Username] = true
+			users = append(users, proxysvc.BasicAuthUser{Username: domain.Protection.Username, Hash: domain.Protection.Hash})
+		}
 	}
 	return proxysvc.DeploymentRoute{
 		Name: deploymentRouteName(environmentID), Domains: names,
 		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
-		TLS:      tls, ForceHTTPS: tls,
+		TLS:      tls, ForceHTTPS: tls, BasicAuth: users,
 	}
 }
 
@@ -872,7 +882,7 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution StepExecution) StepResult {
 	var release *ReleaseWithArtifacts
 	var err error
-	if execution.Run.Operation == OperationRestart {
+	if operationTargetsLiveRelease(execution.Run.Operation) {
 		targetReleaseID, targetErr := operationTargetReleaseID(execution.Run)
 		if targetErr != nil {
 			return normalizedStepFailure(targetErr)
@@ -884,7 +894,7 @@ func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution St
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	if execution.Run.Operation == OperationRestart {
+	if operationTargetsLiveRelease(execution.Run.Operation) {
 		if err := e.store.LinkRunToLiveRelease(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID); err != nil {
 			return normalizedStepFailure(err)
 		}
@@ -893,9 +903,15 @@ func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution St
 	if err != nil || live.Release.ID != release.Release.ID || release.Release.State != "live" {
 		return StepResult{State: StepFailed, ErrorCode: "release_pointer_mismatch", ErrorMessage: "the immutable release and live environment pointer do not agree"}
 	}
+	// Stop is the one operation that leaves its own runtime stopped on
+	// success; every other operation that reaches this step demands live.
+	wantRuntimeState := "live"
+	if execution.Run.Operation == OperationStop {
+		wantRuntimeState = "stopped"
+	}
 	runtime, err := e.store.RuntimeForRelease(ctx, release.Release.ID)
-	if err != nil || runtime.State != "live" {
-		return StepResult{State: StepFailed, ErrorCode: "runtime_pointer_mismatch", ErrorMessage: "the live release runtime is not recorded as active"}
+	if err != nil || runtime.State != wantRuntimeState {
+		return StepResult{State: StepFailed, ErrorCode: "runtime_pointer_mismatch", ErrorMessage: "the release runtime is not recorded as " + wantRuntimeState}
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
 		"releaseId": release.Release.ID, "releaseNumber": release.Release.Number,
@@ -907,7 +923,7 @@ func (e *NormalizedStepExecutor) releaseSnapshotForExecution(
 	ctx context.Context,
 	run EngineRun,
 ) (*ReleaseWithArtifacts, runtimeReleaseSnapshot, error) {
-	if run.Operation != OperationRestart {
+	if !operationTargetsLiveRelease(run.Operation) {
 		return e.releaseSnapshotForRun(ctx, run.ID)
 	}
 	targetReleaseID, err := operationTargetReleaseID(run)
@@ -977,6 +993,20 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 	return runtimeReleaseSnapshot{}, fmt.Errorf("%w: release runtime artifact is unavailable", ErrArtifactMissing)
 }
 
+// operationTargetsLiveRelease is true for the operations that act on the
+// environment's current live release instead of a candidate release of their
+// own: restart cycles it, stop and start move only its runtime state. All
+// three resolve their target through operationTargetReleaseID rather than
+// ReleaseForRun, and link the run to the live release in record_release.
+func operationTargetsLiveRelease(op Operation) bool {
+	switch op {
+	case OperationRestart, OperationStop, OperationStart:
+		return true
+	default:
+		return false
+	}
+}
+
 func operationTargetReleaseID(run EngineRun) (int64, error) {
 	var metadata struct {
 		TargetReleaseID int64 `json:"targetReleaseId"`
@@ -1034,6 +1064,83 @@ func (e *NormalizedStepExecutor) restartLiveRuntime(ctx context.Context, executi
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
 		"releaseId": releaseID, "runtimeId": runtime.RuntimeID, "stop": stop,
+	})}
+}
+
+// stopLiveRuntime is start_candidate for a stop run: it stops the live
+// release's runtime in place, without removing it, and leaves the release
+// pointer untouched. Nothing is restarted; that is the start operation's job.
+func (e *NormalizedStepExecutor) stopLiveRuntime(ctx context.Context, execution StepExecution) StepResult {
+	releaseID, err := operationTargetReleaseID(execution.Run)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	release, snapshot, err := e.releaseSnapshot(ctx, releaseID)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	live, err := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
+	if err != nil || live.Release.ID != release.Release.ID {
+		return StepResult{State: StepFailed, ErrorCode: "stop_target_changed", ErrorMessage: "the selected release is no longer live"}
+	}
+	runtime, err := e.store.RuntimeForRelease(ctx, releaseID)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	variables, err := e.runtimeVariablesForRelease(ctx, releaseID, *runtime)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	stop, err := e.runtime.Stop(ctx, *runtime, snapshot.Plan, variables, false,
+		func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) })
+	if err != nil {
+		return runtimeStepFailure(err, "stop_failed", "the live runtime could not be stopped", nil)
+	}
+	if err := e.store.SetRuntimeState(ctx, execution.Run.ID, execution.ClaimToken, releaseID, "stopped"); err != nil {
+		return normalizedStepFailure(err)
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+		"releaseId": releaseID, "runtimeId": runtime.RuntimeID, "stop": stop,
+	})}
+}
+
+// startLiveRuntime is start_candidate for a start run: it starts a runtime
+// this environment already recorded as stopped. There is no fresh candidate
+// and, on failure, no compensation to attempt — the runtime is left exactly
+// as stopped as it was found.
+func (e *NormalizedStepExecutor) startLiveRuntime(ctx context.Context, execution StepExecution) StepResult {
+	releaseID, err := operationTargetReleaseID(execution.Run)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	release, _, err := e.releaseSnapshot(ctx, releaseID)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	live, err := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
+	if err != nil || live.Release.ID != release.Release.ID {
+		return StepResult{State: StepFailed, ErrorCode: "start_target_changed", ErrorMessage: "the selected release is no longer live"}
+	}
+	runtime, err := e.store.RuntimeForRelease(ctx, releaseID)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	if runtime.State != "stopped" {
+		return StepResult{State: StepFailed, ErrorCode: "runtime_not_stopped", ErrorMessage: "the live runtime is already running"}
+	}
+	variables, err := e.runtimeVariablesForRelease(ctx, releaseID, *runtime)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	if err := e.runtime.StartExisting(ctx, *runtime, variables,
+		func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) }); err != nil {
+		return runtimeStepFailure(err, "start_failed", "the live runtime did not start", nil)
+	}
+	if err := e.store.SetRuntimeState(ctx, execution.Run.ID, execution.ClaimToken, releaseID, "live"); err != nil {
+		return normalizedStepFailure(err)
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+		"releaseId": releaseID, "runtimeId": runtime.RuntimeID,
 	})}
 }
 
@@ -1104,6 +1211,7 @@ type runtimeDiagnosticsEvidence struct {
 	Error      string                        `json:"error,omitempty"`
 	Lines      int                           `json:"lines"`
 	Containers []runtimeContainerDiagnostics `json:"containers,omitempty"`
+	Cause      *OutputCause                  `json:"cause,omitempty"`
 }
 
 type runtimeContainerDiagnostics struct {
@@ -1160,6 +1268,11 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	}
 	if evidence.Lines == 0 {
 		_ = stepLog(execution, "status", "The application printed no output before the check failed.")
+	}
+	if cause := applicationOutputCause(result.Containers); cause != nil {
+		cause.Table = redact.sanitize(cause.Table)
+		evidence.Cause = cause
+		_ = stepLog(execution, "status", "Diagnosis: "+cause.sentence())
 	}
 	return evidence
 }

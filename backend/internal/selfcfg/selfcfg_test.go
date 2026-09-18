@@ -204,6 +204,39 @@ func TestDiffNamesOnlyWhatMoved(t *testing.T) {
 	}
 }
 
+// The process reports its durations as time.Duration renders them ("12h0m0s")
+// while the file holds what the operator typed ("12h"). That is the same
+// setting, and a warning that .env has drifted on every page load because of
+// it would teach operators to ignore the warning.
+func TestDriftIgnoresHowADurationIsSpelled(t *testing.T) {
+	onDisk := defaults()
+	onDisk.SessionTTL = "12h"
+	onDisk.IdleTTL = "60m"
+	onDisk.AllowedCIDRs = "127.0.0.1/8"
+	s := &Service{observed: func() Observed {
+		return Observed{
+			Site:            onDisk.Site,
+			TLS:             onDisk.TLS,
+			BackendPort:     onDisk.BackendPort,
+			AllowedCIDRs:    onDisk.AllowedCIDRs,
+			TerminalEnabled: onDisk.TerminalEnabled,
+			Require2FA:      onDisk.Require2FA,
+			SessionTTL:      (12 * time.Hour).String(),
+			IdleTTL:         (60 * time.Minute).String(),
+			UpdateCheck:     onDisk.UpdateCheck,
+		}
+	}}
+	if drift := s.drift(onDisk); len(drift) != 0 {
+		t.Fatalf("drift = %+v, want none", drift)
+	}
+
+	onDisk.IdleTTL = "45m"
+	drift := s.drift(onDisk)
+	if len(drift) != 1 || drift[0].Key != keyIdleTTL || drift[0].From != "1h0m0s" || drift[0].To != "45m0s" {
+		t.Fatalf("drift = %+v, want only the idle timeout, from 1h0m0s to 45m0s", drift)
+	}
+}
+
 // Every way this feature can fail in a way an operator cannot recover from is
 // a wrong flag here, and this is the only check on it that needs no Docker.
 func TestSiblingArgv(t *testing.T) {

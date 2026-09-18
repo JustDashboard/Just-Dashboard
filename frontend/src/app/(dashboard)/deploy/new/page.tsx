@@ -1,24 +1,26 @@
 import { Suspense } from "react"
 import { Page, PageHeader } from "@/components/page"
 import { LoadingPanel } from "@/components/state"
-import { DeploymentWizard } from "@/components/deploy/deployment-wizard"
-import { QuickDeploy } from "@/components/deploy/quick-deploy"
+import { NewProject } from "@/components/deploy/new-project"
+
+function first(value: string | string[] | undefined) {
+  return typeof value === "string" ? value : undefined
+}
 
 /**
- * Quick deploy is the default and the wizard is the escape hatch.
- *
- * The wizard is reached by asking for it — `?mode=advanced` — or by already
- * being in the middle of one, which is what a `draft` in the URL means: a
- * reload, a bookmark, or quick deploy handing its own draft over for the
- * settings it does not show.
+ * One page now, not a quick path and a five-step escape hatch: `NewProject`
+ * draws both of its states itself. `?mode=advanced` opens Configure with
+ * Advanced expanded and `?draft=` resumes a server draft into it; `?source=`
+ * and the legacy `?profile=` preselect a tab; `?repo=` (with an optional `?ref=`)
+ * arrives on the Git tab with that clone URL filled in, which is what a
+ * "deploy to your server" link in a README points at.
  */
-export default async function NewDeploymentPage({
+export default async function NewProjectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string; draft?: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { mode, draft } = await searchParams
-  const advanced = mode === "advanced" || Boolean(draft)
+  const params = await searchParams
   return (
     <Suspense
       fallback={
@@ -28,7 +30,14 @@ export default async function NewDeploymentPage({
         </Page>
       }
     >
-      {advanced ? <DeploymentWizard /> : <QuickDeploy />}
+      <NewProject
+        source={first(params.source)}
+        profile={first(params.profile)}
+        mode={first(params.mode)}
+        draftId={first(params.draft)}
+        repo={first(params.repo)}
+        repoRef={first(params.ref)}
+      />
     </Suspense>
   )
 }

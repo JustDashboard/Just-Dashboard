@@ -35,6 +35,12 @@ export type ApiErrorBody = {
     /** The subsystem's own error, for the expandable details. Never the headline. */
     raw?: string
     retryable?: boolean
+    /**
+     * The field a validation refusal is about, as a dotted path into the
+     * request body (`runtime.internalPort`, `checks.2.config.path`), so a
+     * form can attach the message to the control that caused it.
+     */
+    field?: string
   }
 }
 
@@ -78,13 +84,16 @@ export class ApiError extends Error {
   reason?: string
   raw?: string
   retryable?: boolean
+  field?: string
 
   constructor(
     status: number,
     code: string,
     message: string,
     phrase?: string,
-    detail?: Partial<Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable">>,
+    detail?: Partial<
+      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field">
+    >,
   ) {
     super(message)
     this.name = "ApiError"
@@ -109,6 +118,18 @@ export class ApiError extends Error {
   get needsTotp() {
     return this.code === "totp_required" || this.code === "totp_enrollment_required"
   }
+}
+
+/**
+ * The array index a validation refusal names, when `ApiError.field` points
+ * into `arrayName` — `checks[2]` or `checks.2`, with or without a deeper
+ * suffix — so a settings form can mark the refused row rather than toast.
+ */
+export function refusedIndex(field: string | undefined, arrayName: string) {
+  if (!field) return undefined
+  const match = new RegExp(`^${arrayName}(?:\\[(\\d+)\\]|\\.(\\d+))`).exec(field)
+  if (!match) return undefined
+  return Number(match[1] ?? match[2])
 }
 
 type RequestOptions = {
@@ -189,6 +210,7 @@ async function readResponse<T>(res: Response): Promise<T> {
         reason: body?.error?.reason,
         raw: body?.error?.raw,
         retryable: body?.error?.retryable,
+        field: body?.error?.field,
       },
     )
   }

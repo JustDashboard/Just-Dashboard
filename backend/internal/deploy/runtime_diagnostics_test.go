@@ -125,6 +125,70 @@ func TestFailedReadinessCapturesRedactedCandidateOutputBeforeCompensation(t *tes
 	}
 }
 
+func TestFailedReadinessNamesMissingSchemaFromCandidateOutput(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, BindAddress: "127.0.0.1", Strategy: StrategyBlueGreen,
+		Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("d", 40), plan)
+	run, lease := fixture.claimedRun(t, 1)
+	check := PlannedCheck{
+		Name: "HTTP readiness", Kind: string(CheckCommand), Phase: "readiness", Required: true,
+		Config: json.RawMessage(`{"command":["app","check"],"attempts":1,"timeoutSeconds":1}`),
+	}
+	release := createRuntimeCandidateWithDomains(t, fixture, *run, lease, plan, "schema-v1", []PlannedCheck{check}, nil)
+	owner := &diagnosingRuntimeOwner{
+		orderingRuntimeOwner: &orderingRuntimeOwner{running: map[string]bool{}, allowConcurrent: true},
+		diagnostics: RuntimeDiagnostics{Containers: []ContainerDiagnostics{{
+			ID: "abc", Name: fmt.Sprintf("candidate-%d", release.Release.ID), State: "running",
+			Lines: []RuntimeLogLine{
+				{Stream: "stdout", Text: "prisma:error Invalid `prisma.product.findMany()` invocation:"},
+				{Stream: "stdout", Text: "The table `public.products` does not exist in the current database."},
+			},
+		}}},
+	}
+	output := &recordingStepOutput{}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, variables: fixture.variables, runtime: owner,
+		checks: NewCheckRunner(&checkBackendFake{exitCode: 1, err: errors.New("fixture failure")}),
+		proxy:  &countingActivationProxy{},
+	}
+	execution := StepExecution{Run: *run, ClaimToken: lease.Token, Output: output}
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *run)); result.State != StepPassed {
+		t.Fatalf("start candidate = %#v", result)
+	}
+	result := executor.verifyChecks(context.Background(), execution, mustExecutionPlan(t, fixture, *run), "readiness")
+	if result.State != StepFailed || result.ErrorCode != "health_gate_failed" {
+		t.Fatalf("readiness result = %#v", result)
+	}
+	for _, want := range []string{
+		"table public.products does not exist in its database",
+		"prisma migrate deploy",
+		"last output is in the build log",
+	} {
+		if !strings.Contains(result.ErrorMessage, want) {
+			t.Fatalf("error message lacks %q: %q", want, result.ErrorMessage)
+		}
+	}
+	if !strings.Contains(output.joined(), "Diagnosis: the application reports that table public.products does not exist") {
+		t.Fatalf("transcript lacks the diagnosis:\n%s", output.joined())
+	}
+	var evidence struct {
+		Diagnostics *runtimeDiagnosticsEvidence `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Diagnostics == nil || evidence.Diagnostics.Cause == nil || *evidence.Diagnostics.Cause != (OutputCause{Code: "schema_missing", Table: "public.products"}) {
+		t.Fatalf("diagnostics evidence = %+v", evidence.Diagnostics)
+	}
+	if strings.Contains(string(result.Evidence), "findMany") {
+		t.Fatalf("evidence must carry the cause, not output: %s", result.Evidence)
+	}
+}
+
 func TestFailedReadinessReportsUnreadableDiagnostics(t *testing.T) {
 	t.Parallel()
 	fixture := newReleaseStoreFixture(t)

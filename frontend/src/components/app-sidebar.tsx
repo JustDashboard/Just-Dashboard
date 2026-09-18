@@ -3,56 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  Archive,
-  ArrowLeftRight,
-  ArrowUpDown,
-  Box,
-  ChartActivity,
-  ChevronRight,
-  CloudUpload,
-  CodeBracket,
-  Database,
-  DesktopDevice,
-  FirewallCheck,
-  FolderOpen,
-  GitHubMark,
-  Globe,
-  GridMasonry,
-  GridSquare,
-  Home,
-  Inspect,
-  Key,
-  Layers,
-  Layout,
-  LineChart,
-  Linked,
-  ListOrdered,
-  LockClosed,
-  Logout,
-  Logs,
-  MagnifyingGlass,
-  NetworkDevice,
-  Notes,
-  Puzzle,
-  Route,
-  Router,
-  Rss,
-  SecureConnection,
-  SettingsGear,
-  SettingsSliders,
-  Shield,
-  ShieldOff,
-  SignIn,
-  Sparkles,
-  Table,
-  Terminal,
-  UserSettings,
-  Users,
-  Wrench,
-  Servers,
-  Clock,
-} from "@/components/icons"
+import { ArrowUpDown, ChevronLeft, ChevronRight, Logout, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCommandPalette } from "@/components/command-palette"
@@ -61,7 +12,16 @@ import { UpdateNotice } from "@/components/update/update-notice"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
-import type { Capability } from "@/lib/types"
+import {
+  NAV,
+  PERSONAL_NAV,
+  PROJECT_NAV,
+  PROJECT_SETTINGS_NAV,
+  navMatches,
+  sectionFor,
+  type NavItem,
+} from "@/components/nav"
+import { useNavScopeValue, type NavScope, type NavScopeEntry } from "@/components/nav-scope"
 import {
   Sidebar,
   SidebarContent,
@@ -73,14 +33,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
   SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,188 +47,128 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-type NavChild = {
-  title: string
-  href: string
-  icon: React.ComponentType<{ className?: string }>
-  /** Hidden unless the signed-in role holds this capability. */
-  capability?: Capability
+/**
+ * The rail, and everything it can become.
+ *
+ * It used to be one list with four of its rows able to unfold into a second
+ * list underneath. Six sections unfolded to between two and eight pages each,
+ * so a rail with Docker and Security open was thirty rows deep and the thing
+ * you were actually looking at sat somewhere in the middle of it; and because
+ * the rail could not be trusted to show a section's pages, every one of those
+ * sections also carried a strip of tabs across the top of its pages saying the
+ * same thing a second time.
+ *
+ * Now the rail goes *in*. Opening Docker replaces the list of everything with
+ * the list of Docker, under Docker's own name and a way back. One list at a
+ * time, always the list for where you are, and the tab strips are gone — a
+ * page is a page, and the only thing that says which one you are on is the
+ * rail.
+ *
+ * Which panel is showing is read off the route, not remembered, so a link
+ * pasted into a browser opens with the rail already inside the right section.
+ * The one piece of state is the step back out, which shows the level above
+ * without leaving the page you are on, and is dropped the moment you navigate.
+ */
+
+/** One drawn row: a page to go to, or a section to go into. */
+type Row = NavScopeEntry & { section?: boolean }
+
+type Panel = {
+  key: string
+  /** Absent on the top-level list, and on a panel whose subject has not loaded. */
+  title?: string
+  caption?: string
+  /** The top-level list is never titled and has nothing to go back to. */
+  root?: boolean
+  groups: { label?: string; pending?: boolean; items: Row[] }[]
 }
 
-type NavItem = {
-  title: string
-  href: string
-  icon: React.ComponentType<{ className?: string }>
-  /** Hidden unless the signed-in role holds this capability. */
-  capability?: Capability
-  /** A feature large enough to be several pages — the row expands to show them. */
-  children?: NavChild[]
+const ROOT: Panel = {
+  key: "root",
+  root: true,
+  groups: NAV.map((group) => ({
+    label: group.label,
+    items: group.items.map((item) => ({
+      title: item.title,
+      href: item.href,
+      icon: item.icon,
+      capability: item.capability,
+      section: Boolean(item.children),
+    })),
+  })),
 }
 
-/**
- * The rail, top to bottom, in the order a day on the server runs: is the
- * machine well, what is running on it, the tools to work on it, what keeps it
- * safe, and the housekeeping. Deployments open the second group because
- * shipping something is the reason most visits happen; it used to sit fourth
- * in a group called "Operations" between Packages and Backups, where nobody
- * who did not already know looked for it.
- */
-export const NAV: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Server",
-    items: [
-      { title: "Overview", href: "/", icon: Home },
-      { title: "Metrics", href: "/metrics", icon: LineChart },
-      {
-        title: "Processes",
-        href: "/processes",
-        icon: ListOrdered,
-        children: [
-          { title: "PM2", href: "/processes/pm2", icon: ChartActivity },
-          { title: "Services", href: "/processes/services", icon: Servers },
-          { title: "Scheduled", href: "/processes/scheduled", icon: Clock },
-        ],
-      },
-      { title: "Logs", href: "/logs", icon: Logs },
-    ],
-  },
-  {
-    label: "Apps",
-    items: [
-      { title: "Deployments", href: "/deploy", icon: CloudUpload },
-      {
-        title: "Docker",
-        href: "/docker",
-        icon: Box,
-        children: [
-          { title: "Containers", href: "/docker/containers", icon: Box },
-          { title: "Stacks", href: "/docker/stacks", icon: GridMasonry },
-          { title: "Images", href: "/docker/images", icon: Layers },
-          { title: "Volumes", href: "/docker/volumes", icon: Database },
-          { title: "Networks", href: "/docker/networks", icon: NetworkDevice },
-          { title: "Events", href: "/docker/events", icon: Rss },
-        ],
-      },
-      {
-        title: "Databases",
-        href: "/databases",
-        icon: Database,
-        children: [
-          { title: "Structure", href: "/databases/structure", icon: Table },
-          { title: "Diagram", href: "/databases/diagram", icon: Layout },
-          { title: "Query", href: "/databases/query", icon: CodeBracket },
-          { title: "Find", href: "/databases/find", icon: MagnifyingGlass },
-          { title: "Monitor", href: "/databases/monitor", icon: ChartActivity },
-          { title: "Generate", href: "/databases/generate", icon: Sparkles },
-          { title: "Connection", href: "/databases/connection", icon: Linked },
-        ],
-      },
-      {
-        title: "Proxy & TLS",
-        href: "/proxy",
-        icon: Globe,
-        children: [
-          { title: "Sites", href: "/proxy/sites", icon: Globe },
-          { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
-          { title: "TLS report", href: "/proxy/tls", icon: Inspect },
-          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
-          { title: "Ports", href: "/proxy/ports", icon: Router },
-        ],
-      },
-    ],
-  },
-  {
-    label: "Workspace",
-    items: [
-      { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
-      { title: "Files", href: "/files", icon: FolderOpen },
-      { title: "Git", href: "/git", icon: GitHubMark },
-    ],
-  },
-  {
-    label: "Protection",
-    items: [
-      {
-        title: "Security",
-        href: "/security",
-        icon: Shield,
-        children: [
-          { title: "Firewall", href: "/security/firewall", icon: FirewallCheck },
-          { title: "SSH", href: "/security/ssh", icon: SecureConnection },
-          { title: "Intrusion", href: "/security/intrusion", icon: ShieldOff },
-          { title: "Connections", href: "/security/connections", icon: NetworkDevice },
-          { title: "Logins", href: "/security/logins", icon: SignIn },
-          { title: "Network", href: "/security/network", icon: Route },
-          { title: "Tools", href: "/security/tools", icon: Wrench },
-        ],
-      },
-      { title: "Backups", href: "/backups", icon: Archive },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { title: "Packages", href: "/packages", icon: Puzzle },
-      { title: "System users", href: "/system-users", icon: Users, capability: "system.admin" },
-      { title: "Audit log", href: "/audit", icon: Notes, capability: "system.admin" },
-      // "Settings", not "Dashboard": inside a product called Dashboard, an
-      // entry called Dashboard said nothing about where it went.
-      {
-        title: "Settings",
-        href: "/dashboard",
-        icon: SettingsGear,
-        children: [
-          {
-            title: "Configuration",
-            href: "/dashboard/configuration",
-            icon: SettingsSliders,
-            capability: "system.admin",
-          },
-        ],
-      },
-    ],
-  },
-]
-
-/**
- * The account's own pages. They live in the footer menu and the palette rather
- * than in a nav group, because none of them is a place on the server — it is
- * the same identity menu on every page. Every entry is a leaf, the first one
- * being the section's root, so the menu, the palette and the breadcrumb each
- * point at exactly one page.
- */
-export const PERSONAL_NAV: NavChild[] = [
-  { title: "Profile", href: "/account", icon: UserSettings },
-  { title: "Security", href: "/account/security", icon: Shield },
-  { title: "Sessions", href: "/account/sessions", icon: DesktopDevice },
-  { title: "API keys", href: "/account/keys", icon: Key },
-  { title: "Users", href: "/account/users", icon: Users, capability: "system.admin" },
-]
-
-/** Whether a nav entry owns the given path. */
-export function navMatches(href: string, pathname: string) {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`)
-}
-
-/**
- * The group, page and — for a nested feature like Docker — the parent it
- * belongs to, for the breadcrumb in the top bar. A child's exact path wins
- * over the parent's prefix match, so `/docker/images` reads as "Images", not
- * "Docker".
- */
-export function navLocation(
-  pathname: string,
-): { group?: string; parent?: string; title: string } | null {
-  for (const group of NAV) {
-    for (const item of group.items) {
-      const child = item.children?.find((c) => c.href === pathname && c.href !== item.href)
-      if (child) return { group: group.label, parent: item.title, title: child.title }
-      if (navMatches(item.href, pathname)) return { group: group.label, title: item.title }
-    }
+function fromSection(section: NavItem): Panel {
+  return {
+    key: `section:${section.href}`,
+    title: section.title,
+    groups: [{ items: section.children ?? [] }],
   }
-  const personal = PERSONAL_NAV.find((i) => i.href === pathname)
-  if (personal) return { group: "Account", title: personal.title }
-  return null
+}
+
+function fromScope(scope: NavScope): Panel {
+  return {
+    key: `scope:${scope.path}`,
+    title: scope.title,
+    caption: scope.caption,
+    groups: scope.groups,
+  }
+}
+
+/**
+ * A project's pages drawn from the route alone, for the paint before the
+ * project's own read lands and registers the real panel. Same rows in the same
+ * order, so what arrives is the name and the two game pages rather than a
+ * different shape of list — a rail that reflows on every project you open is
+ * worse than one that takes a moment to say which project it is.
+ */
+function projectPlaceholder(id: number): Panel {
+  const base = `/deploy/${id}`
+  return {
+    key: `scope:${base}`,
+    groups: [
+      {
+        items: PROJECT_NAV.filter((entry) => !entry.game).map((entry) => ({
+          title: entry.title,
+          href: `${base}${entry.path}`,
+          icon: entry.icon,
+        })),
+      },
+      {
+        label: "Settings",
+        items: PROJECT_SETTINGS_NAV.map((entry) => ({
+          title: entry.title,
+          href: `${base}${entry.path}`,
+          icon: entry.icon,
+        })),
+      },
+    ],
+  }
+}
+
+/** The project a path belongs to, or `null`. A run is its own destination. */
+function projectIdFrom(pathname: string): number | null {
+  const match = /^\/deploy\/(\d+)(?:\/(?!runs\/).*)?$/.exec(pathname)
+  return match ? Number(match[1]) : null
+}
+
+/**
+ * Every panel between the top-level list and where you are, outermost first.
+ * The last of them is what the rail draws unless you have stepped back.
+ */
+function levelsFor(pathname: string, scope: NavScope | null): Panel[] {
+  const levels: Panel[] = [ROOT]
+  const section = sectionFor(pathname)
+  if (section) levels.push(fromSection(section))
+
+  const live = scope && navMatches(scope.path, pathname) ? scope : null
+  if (live?.replaces) levels[levels.length - 1] = fromScope(live)
+  else if (live) levels.push(fromScope(live))
+  else {
+    const project = projectIdFrom(pathname)
+    if (project !== null) levels.push(projectPlaceholder(project))
+  }
+  return levels
 }
 
 export function AppSidebar() {
@@ -279,8 +177,35 @@ export function AppSidebar() {
   const palette = useCommandPalette()
   const { state } = useSidebar()
   const collapsed = state === "collapsed"
+  const scope = useNavScopeValue()
 
-  const isActive = (href: string) => navMatches(href, pathname)
+  const levels = levelsFor(pathname, scope)
+  const deepest = levels.length - 1
+  const here = deepest > 0 ? sectionFor(pathname) : null
+
+  // Stepping back out is the one thing here the route does not decide, and it
+  // survives exactly until the next navigation: you go up to find something,
+  // and finding it puts the rail wherever that something lives.
+  const [back, setBack] = useState<number | null>(null)
+  const [seenPath, setSeenPath] = useState(pathname)
+  if (pathname !== seenPath) {
+    setSeenPath(pathname)
+    setBack(null)
+  }
+
+  const depth = Math.min(back ?? deepest, deepest)
+  const panel = levels[depth]
+  const parent = depth > 0 ? levels[depth - 1] : null
+
+  // Which way the panel came from. Going in arrives from the right, coming
+  // back out from the left, which is the only part of this that says a level
+  // was crossed rather than a page changed.
+  const [lastDepth, setLastDepth] = useState(depth)
+  const [inward, setInward] = useState(true)
+  if (depth !== lastDepth) {
+    setInward(depth > lastDepth)
+    setLastDepth(depth)
+  }
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -311,9 +236,11 @@ export function AppSidebar() {
           <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
         </div>
 
-        {/* The palette is the fastest route to any of fifteen pages, so it gets
-            a permanent affordance rather than only a shortcut nobody
-            discovers. Collapsed, it keeps its place in the rail as an icon. */}
+        {/* The palette is the fastest route to any of fifty pages, and the one
+            thing that still sees them all at once now that the rail shows one
+            section at a time, so it gets a permanent affordance rather than
+            only a shortcut nobody discovers. Collapsed, it keeps its place in
+            the rail as an icon. */}
         <button
           type="button"
           onClick={palette.open}
@@ -331,39 +258,65 @@ export function AppSidebar() {
         </button>
       </SidebarHeader>
 
-      <SidebarContent className="gap-0 px-2">
-        {NAV.map((group) => {
-          const items = group.items.filter((item) => !item.capability || can(item.capability))
-          if (items.length === 0) return null
-          return (
-            <SidebarGroup key={group.label} className="px-0 py-1.5">
-              <SidebarGroupLabel className="eyebrow h-6 px-2">{group.label}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu className="gap-0.5">
-                  {items.map((item) =>
-                    item.children ? (
-                      <NavParent key={item.href} item={item} pathname={pathname} />
-                    ) : (
-                      <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isActive(item.href)}
-                          tooltip={item.title}
-                          className="h-8 text-body"
-                        >
-                          <Link href={item.href}>
-                            <item.icon className="size-4" />
-                            <span>{item.title}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ),
-                  )}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )
-        })}
+      {/* `overflow-x-hidden` is what makes the slide a slide: the panel arrives
+          from ten pixels outside the rail, and without it those ten pixels are
+          a horizontal scrollbar for the length of the animation. */}
+      <SidebarContent className="gap-0 overflow-x-hidden px-2">
+        {/* The rail is the product's navigation and had no landmark: a screen
+            reader met fifty links with nothing saying what list they were. One
+            name for every panel, since the panel that is showing says its own
+            name in the heading below. */}
+        <nav
+          aria-label="Sidebar"
+          key={panel.key}
+          className={cn("animate-drill", inward ? "[--drill-from:10px]" : "[--drill-from:-10px]")}
+        >
+          {parent && <PanelHead panel={panel} parent={parent} onBack={() => setBack(depth - 1)} />}
+          {panel.groups.map((group, index) => {
+            const items = group.items.filter((item) => !item.capability || can(item.capability))
+            if (items.length === 0) return null
+            return (
+              <SidebarGroup key={group.label ?? index} className="px-0 py-1.5">
+                {group.label && (
+                  <SidebarGroupLabel className="eyebrow h-6 gap-1.5 px-2">
+                    {group.label}
+                    {group.pending && (
+                      <span
+                        role="img"
+                        aria-label="Changes pending"
+                        className="size-1.5 shrink-0 rounded-full bg-warning"
+                      />
+                    )}
+                  </SidebarGroupLabel>
+                )}
+                <SidebarGroupContent>
+                  <SidebarMenu className="gap-0.5">
+                    {items.map((item) => (
+                      <NavRow
+                        key={item.href}
+                        item={item}
+                        // A section's own landing page is the first row in its
+                        // panel and shares the section's href, so a prefix
+                        // match would light it up on every page of the section.
+                        // Inside a panel a row is where you are or it is not.
+                        active={
+                          panel.root ? navMatches(item.href, pathname) : isCurrent(item, pathname)
+                        }
+                        // Stepping out to look at the whole list and then
+                        // pressing the section you are already in means "put it
+                        // back", not "throw away the page I was on and open the
+                        // section's front door".
+                        reenter={
+                          depth === 0 && item.href === here?.href ? () => setBack(null) : undefined
+                        }
+                      />
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )
+          })}
+        </nav>
       </SidebarContent>
 
       <SidebarFooter className="gap-2 p-2">
@@ -382,105 +335,133 @@ export function AppSidebar() {
 }
 
 /**
- * A nav row for a feature that spans several pages — Docker, Databases, Proxy,
- * Security. The row itself is *only* a disclosure toggle; it navigates nowhere.
- * The feature's landing page is the first child, "Overview", so every
- * destination in the section is a leaf in the list and "where am I" always
- * points at exactly one row.
+ * Whether a row inside a section panel is the page being looked at.
  *
- * Collapsed to the icon rail there is no room for a child list, so the row
- * falls back to a plain link to the Overview with the section's tooltip.
- *
- * Open state is a single `useState` seeded from the route and forced back open
- * whenever navigation lands anywhere in the section, so the active child is
- * never hidden. Leaving the section keeps the last state rather than snapping
- * shut, now that the collapse is animated.
+ * An exact match, with one exception: a row whose href carries the section's
+ * own state in the query string (the databases panel puts the connection
+ * there) is the same page whatever that state says.
  */
-function NavParent({ item, pathname }: { item: NavItem; pathname: string }) {
+function isCurrent(item: Row, pathname: string) {
+  const path = item.href.split("?")[0]
+  return path === pathname
+}
+
+/**
+ * What a section panel says above its pages: the way back out, and what you
+ * are inside.
+ *
+ * The back control names the level above rather than saying "Back", because
+ * the rail has three of them — the top-level list, a section, one deployment
+ * — and "back to Deployments" and "back to everything" are different answers.
+ * Collapsed to the icon rail the name has nowhere to go, so it becomes the
+ * button's tooltip and its accessible name.
+ */
+function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onBack: () => void }) {
   const { state } = useSidebar()
-  const { can } = useAuth()
-  const inSection = navMatches(item.href, pathname)
-  const [open, setOpen] = useState(inSection)
+  const collapsed = state === "collapsed"
+  const label = parent.title ?? "All pages"
 
-  const [seenPath, setSeenPath] = useState(pathname)
-  if (pathname !== seenPath) {
-    setSeenPath(pathname)
-    if (inSection) setOpen(true)
-  }
-
-  if (state === "collapsed") {
-    return (
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          asChild
-          isActive={inSection}
-          tooltip={item.title}
-          className="h-8 text-body"
-        >
-          <Link href={item.href}>
-            <item.icon className="size-4" />
-            <span>{item.title}</span>
-          </Link>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    )
-  }
-
-  const children: NavChild[] = [
-    { title: "Overview", href: item.href, icon: GridSquare },
-    // A sub-page can be privileged even where its parent is not: the
-    // dashboard's own settings describe this install's perimeter, which is not
-    // something a read-only operator needs on screen.
-    ...(item.children ?? []).filter((child) => !child.capability || can(child.capability)),
-  ]
+  const back = (
+    <button
+      type="button"
+      onClick={onBack}
+      aria-label={`Back to ${label}`}
+      // The same height, inset, icon size and type as the rows under it: it
+      // is a row in the list, one that goes out instead of in. Muted rather
+      // than the rows' foreground so it does not compete with the page you
+      // are on for "where am I".
+      className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+    >
+      <ChevronLeft className="size-4 shrink-0" />
+      <span className="truncate group-data-[collapsible=icon]:hidden">{label}</span>
+    </button>
+  )
 
   return (
-    <Collapsible asChild open={open} onOpenChange={setOpen}>
-      <SidebarMenuItem>
-        <CollapsibleTrigger asChild>
-          {/* No `tooltip` prop: its content is hidden unless the rail is
-              collapsed, and this branch only renders when it is not — passing
-              it would wrap the button in <Tooltip>, which swallows the
-              trigger's click. The chevron rotates off the button's own
-              `data-state`, which the trigger always carries. */}
-          <SidebarMenuButton
-            aria-label={`${open ? "Collapse" : "Expand"} ${item.title}`}
-            className={cn(
-              "h-8 text-body [&>svg:last-child]:transition-transform [&>svg:last-child]:duration-200",
-              "data-[state=open]:[&>svg:last-child]:rotate-90",
-              // Somewhere in this section: quiet accent tint and a
-              // primary-coloured icon, so the row reads as "you are in here"
-              // without competing with the solid pill on the active child.
-              inSection && "bg-sidebar-accent/60 [&>svg:first-child]:text-primary",
-            )}
-          >
-            <item.icon className="size-4" />
-            <span className="flex-1 truncate">{item.title}</span>
-            {/* No explicit colour — inherits the row's, so it follows the
-                hover and in-section states instead of staying one flat grey. */}
+    <div className="flex flex-col gap-0.5 pt-1.5 group-data-[collapsible=icon]:items-center">
+      {collapsed ? (
+        // Expanded the button says where it goes, so a tooltip repeating it is
+        // noise; in the icon rail the words are gone and it is the only label.
+        <Tooltip>
+          <TooltipTrigger asChild>{back}</TooltipTrigger>
+          <TooltipContent side="right">
+            Back to {label}
+            {panel.title ? ` · ${panel.title}` : ""}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        back
+      )}
+
+      {/* Where you are, as a heading rather than a link: the panel under it is
+          the section, so a control here would only ever go where you already
+          are. Drawn as an eyebrow — the rail's label voice, the one "Settings"
+          above a group speaks in — and not as icon-plus-name in the row slot,
+          which is exactly what a row looks like and so read as a button that
+          did nothing when pressed. Collapsed, the icon rail is too narrow for
+          it and the section is named by the back button's tooltip instead. */}
+      <div className="min-w-0 px-2 pt-2.5 pb-1 group-data-[collapsible=icon]:hidden">
+        {panel.title ? (
+          <p className="eyebrow truncate leading-tight">{panel.title}</p>
+        ) : (
+          <Skeleton className="h-2.5 w-24" />
+        )}
+        {panel.caption && (
+          <p className="mt-1 truncate text-hint leading-tight text-muted-foreground">
+            {panel.caption}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A row in whichever panel is showing. A page, or — on the top-level list — a
+ * section, which is the same row with a chevron saying the rail goes in rather
+ * than the page changes.
+ */
+function NavRow({
+  item,
+  active,
+  reenter,
+}: {
+  item: Row
+  active: boolean
+  /** Given only to the section row you are standing inside; see the call site. */
+  reenter?: () => void
+}) {
+  const Icon = item.icon
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={active} tooltip={item.title} className="h-8 text-body">
+        <Link
+          href={item.href}
+          onClick={
+            reenter &&
+            ((event) => {
+              event.preventDefault()
+              reenter()
+            })
+          }
+        >
+          <Icon className="size-4" />
+          <span className="flex-1 truncate">{item.title}</span>
+          {item.pending && (
+            <span
+              role="img"
+              aria-label="Changes pending"
+              className="size-1.5 shrink-0 rounded-full bg-warning"
+            />
+          )}
+          {item.section && (
+            // No explicit colour — inherits the row's, so it follows the hover
+            // and active states instead of staying one flat grey.
             <ChevronRight className="size-4 shrink-0 opacity-70" />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
-          <SidebarMenuSub className="mr-0 gap-0.5">
-            {children.map((child) => (
-              <SidebarMenuSubItem key={child.href}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={pathname === child.href}
-                  className="transition-colors"
-                >
-                  <Link href={child.href}>
-                    <child.icon className="size-4" />
-                    <span>{child.title}</span>
-                  </Link>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </SidebarMenuItem>
-    </Collapsible>
+          )}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   )
 }
 
@@ -490,7 +471,10 @@ function NavParent({ item, pathname }: { item: NavItem; pathname: string }) {
  *
  * A card at the foot of the rail rather than five more nav rows, because none
  * of it is a place in the product — it is the same identity menu on every
- * page, and mixing it into the nav made the nav look longer than it is.
+ * page, and mixing it into the nav made the nav look longer than it is. Once
+ * you are inside one of those pages the rail does drill into them, the way it
+ * does for any other section, so the menu is how you get in and not how you
+ * move around.
  *
  * The menu opens with the same picture and name as the card, larger, with the
  * sign-in name and role under them: the one place in the product that says

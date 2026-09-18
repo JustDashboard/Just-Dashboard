@@ -403,6 +403,18 @@ func normalizeCIDRs(raw string) string {
 	return strings.Join(parts, ",")
 }
 
+// normalizeDuration renders a duration the way time.Duration.String does, so
+// the "12h" an operator wrote and the "12h0m0s" the process reports for it
+// compare equal. Anything unparseable is returned as it was, for the same
+// reason normalizeCIDRs does.
+func normalizeDuration(raw string) string {
+	d, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return d.String()
+}
+
 func containsLoopback(nets []*net.IPNet) bool {
 	return containsIP(nets, net.ParseIP("127.0.0.1"))
 }

@@ -5,8 +5,8 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  *
  * Four claims the redesign rests on, each of which a type check cannot make:
  *
- *   the sidebar is one column, rooted at home, and the system directories are
- *   a menu away rather than a permanent list above the tree;
+ *   the sidebar is a fixed list of places, starred and recent folders that
+ *   stays put while the listing walks into folders;
  *
  *   a picture is visible as itself in the listing, and Space opens it full
  *   screen with the folder's other files an arrow away;
@@ -177,23 +177,28 @@ async function openFiles(page: Page) {
   await page.locator("tr[data-entry-path]").first().waitFor()
 }
 
-test("the sidebar is one tree rooted at home, with the system a menu away", async ({ page }) => {
+test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
   await mockFiles(page)
   await openFiles(page)
 
-  // The strip names the place the tree is rooted at.
-  const places = page.getByRole("button", { name: "Places" })
-  await expect(places).toContainText("Home")
-  // The tree lists home's folders; starred folders sit above it in the same column.
-  await expect(page.getByText("Starred")).toBeVisible()
-  await expect(page.locator(`button[title='${home}/site']`)).toBeVisible()
-  // The system directories are not on the page…
-  await expect(page.getByText("/var/log")).toHaveCount(0)
-  // …but they are one click away.
-  await places.click()
-  await expect(page.getByRole("menuitem", { name: /\/var\/log/ })).toBeVisible()
-  await expect(page.getByRole("menuitem", { name: /\/etc/ })).toBeVisible()
-  await page.keyboard.press("Escape")
+  // The places, the starred folder and the system directories are all on the page.
+  const sidebar = page.locator("div:has(> [data-slot='pane-header'])").first()
+  const homeRow = sidebar.locator(`button[title='${home}']`)
+  await expect(homeRow).toContainText("Home")
+  await expect(homeRow).toHaveAttribute("aria-current", "location")
+  await expect(sidebar.locator(`button[title='${home}/photos']`)).toBeVisible()
+  await expect(sidebar.locator("button[title='/var/log']")).toBeVisible()
+  await expect(sidebar.locator("button[title='/etc']")).toBeVisible()
+  // Home's folders are the listing's business, not the sidebar's.
+  await expect(sidebar.locator(`button[title='${home}/site']`)).toHaveCount(0)
+
+  // Walking into a folder changes the listing and marks the row, not the list.
+  await sidebar.locator("button[title='/etc']").click()
+  await expect(page.getByRole("button", { name: "Folders in /etc" })).toBeVisible()
+  await expect(sidebar.locator("button[title='/etc']")).toHaveAttribute("aria-current", "location")
+  await expect(homeRow).not.toHaveAttribute("aria-current", "location")
+  await expect(sidebar.locator(`button[title='${home}/photos']`)).toBeVisible()
+  await expect(sidebar.locator("button[title='/var/log']")).toBeVisible()
 })
 
 test("pictures are visible in the listing and Space opens the viewer", async ({ page }) => {

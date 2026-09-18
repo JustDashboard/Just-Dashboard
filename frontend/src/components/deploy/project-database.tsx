@@ -2,11 +2,10 @@
 
 import { useState } from "react"
 import { Database, Plus } from "@/components/icons"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Field } from "@/components/form"
 import { SidePanel } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -15,24 +14,37 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { Status } from "@/components/status-dot"
 import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import type { DbConnection } from "@/lib/types"
 
+/**
+ * The trigger and sheet that link a database into a deployment's environment.
+ *
+ * Used to draw its own "Database" panel with a running list of what it had
+ * linked so far — redundant now that the linked variable is a row the
+ * environment editor already shows, and its only caller is that editor. What
+ * is linked is the row itself; this is just the button that opens the sheet.
+ */
 export function ProjectDatabase({
   onConnect,
   target = "container",
+  label = "Add database",
+  initialEngine,
+  initialVariable = "DATABASE_URL",
 }: {
   target?: "host" | "container"
   onConnect: (connection: DbConnection, url: string, variable: string) => void
+  /** The trigger's text; a detected database names its engine here. */
+  label?: string
+  initialEngine?: string
+  initialVariable?: string
 }) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<"create" | "existing">("create")
   const [selected, setSelected] = useState("")
-  const [variable, setVariable] = useState("DATABASE_URL")
-  const [linked, setLinked] = useState<string[]>([])
+  const [variable, setVariable] = useState(initialVariable)
   const [started, setStarted] = useState<{ container: string; engine: string }>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
@@ -45,8 +57,9 @@ export function ProjectDatabase({
   const valid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(variable)
   const connect = (connection: DbConnection, url: string) => {
     onConnect(connection, url, variable)
-    setLinked((current) => [...new Set([...current, `${connection.name} → ${variable}`])])
     setOpen(false)
+    // Cleared so a second database started from this same sheet does not
+    // silently resume the first one's already-connected container.
     setStarted(undefined)
   }
   const useExisting = async () => {
@@ -57,9 +70,7 @@ export function ProjectDatabase({
     try {
       const result = await get<{ url: string; reference?: string }>(
         `/databases/${connection.id}/url`,
-        {
-          target,
-        },
+        { target },
       )
       connect(connection, result.reference || result.url)
     } catch (caught) {
@@ -70,33 +81,16 @@ export function ProjectDatabase({
   }
   return (
     <>
-      <Panel plain>
-        <PanelHeader
-          title="Database"
-          actions={
-            <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-              <Plus className="size-3.5" /> Add database
-            </Button>
-          }
-        />
-        <PanelBody>
-          {linked.length ? (
-            <ul className="space-y-2">
-              {linked.map((name) => (
-                <li key={name}>
-                  <Status verdict="ok" label={name} />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {started
-                ? `Database ${started.container} has started. Open Add database to finish connecting it.`
-                : "Need a database? Create one or connect an existing database. A saved connection reference keeps its application address stable across container replacement."}
-            </p>
-          )}
-        </PanelBody>
-      </Panel>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Plus className="size-3.5" /> {label}
+        </Button>
+        {started && (
+          <p className="text-hint text-muted-foreground">
+            Database {started.container} has started. Open Add database to finish connecting it.
+          </p>
+        )}
+      </div>
       <SidePanel
         open={open}
         onOpenChange={setOpen}
@@ -105,8 +99,16 @@ export function ProjectDatabase({
         width="md"
       >
         <div className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="database-variable">Environment variable</Label>
+          <Field
+            label="Environment variable"
+            htmlFor="database-variable"
+            hint="Use DATABASE_URL, REDIS_URL, or the key your application expects."
+            error={
+              valid
+                ? undefined
+                : "Use a letter or underscore first, then letters, numbers or underscores."
+            }
+          >
             <Input
               id="database-variable"
               value={variable}
@@ -114,23 +116,17 @@ export function ProjectDatabase({
               aria-invalid={!valid}
               className="font-mono"
             />
-            <p className="text-xs text-muted-foreground">
-              Use DATABASE_URL, REDIS_URL, or the key your application expects.
-            </p>
-            {!valid && (
-              <p role="alert" className="text-xs text-destructive">
-                Use a letter or underscore first, then letters, numbers or underscores.
-              </p>
-            )}
-          </div>
+          </Field>
           <div role="group" aria-label="Database source" className="flex gap-2">
             <Button
+              type="button"
               variant={mode === "create" ? "secondary" : "ghost"}
               onClick={() => setMode("create")}
             >
               Create new
             </Button>
             <Button
+              type="button"
               variant={mode === "existing" ? "secondary" : "ghost"}
               onClick={() => {
                 setMode("existing")
@@ -147,6 +143,7 @@ export function ProjectDatabase({
               onConnect={connect}
               resume={started}
               onStarted={setStarted}
+              initialEngine={initialEngine}
             />
           ) : (
             <div className="space-y-4">

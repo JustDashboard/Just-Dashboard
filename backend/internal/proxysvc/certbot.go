@@ -307,6 +307,7 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 	if req.Staging {
 		args = append(args, "--staging")
 	}
+	args = append(args, acmeDirectory().certbotArgs(req.Staging)...)
 	for _, d := range req.Domains {
 		args = append(args, "-d", d)
 	}

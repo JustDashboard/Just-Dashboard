@@ -238,6 +238,20 @@ func (c *dockerCaddy) attach(ctx context.Context) error {
 	return nil
 }
 
+// installACMERoots copies a private authority's trust bundle into the
+// container, where the route's issuer block names it. Nothing to copy for
+// the default authority.
+func (c *dockerCaddy) installACMERoots(ctx context.Context, directory ACMEDirectory) error {
+	if !directory.private() {
+		return nil
+	}
+	raw, err := os.ReadFile(directory.CARoot)
+	if err != nil {
+		return fmt.Errorf("JD_ACME_CA_ROOT: %w", err)
+	}
+	return c.write(ctx, dockerCaddyACMERoot, string(raw))
+}
+
 func dockerCaddyRoutePath(name string) (string, error) {
 	if !strings.HasPrefix(name, "just-dashboard-") || filepath.Base(name) != name || strings.ContainsAny(name, "\x00\r\n") {
 		return "", ErrUnsafePath
@@ -276,7 +290,23 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		}
 		tlsDirective = "  tls " + strconv.Quote(certPath) + " " + strconv.Quote(keyPath) + "\n"
 	}
-	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + "  " + directive + "\n}\n", nil
+	if route.TLS && tlsDirective == "" {
+		// Caddy issues and renews this one itself; the configured authority,
+		// if any, is where it asks.
+		tlsDirective = acmeDirectory().caddyIssuer()
+	}
+	authDirective := ""
+	if len(route.BasicAuth) > 0 {
+		lines := make([]string, 0, len(route.BasicAuth))
+		for _, user := range route.BasicAuth {
+			if !authUserRe.MatchString(user.Username) || !bcryptHashRe.MatchString(user.Hash) {
+				return "", errors.New("invalid deployment route credentials")
+			}
+			lines = append(lines, "    "+user.Username+" "+user.Hash)
+		}
+		authDirective = "  basic_auth {\n" + strings.Join(lines, "\n") + "\n  }\n"
+	}
+	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + authDirective + "  " + directive + "\n}\n", nil
 }
 
 func (c *dockerCaddy) snapshot(ctx context.Context, name string) (DeploymentRouteSnapshot, error) {
@@ -494,6 +524,11 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	if _, err := c.connectTarget(ctx, target); err != nil {
 		return result, err
 	}
+	if route.TLS {
+		if err := c.installACMERoots(ctx, acmeDirectory()); err != nil {
+			return result, err
+		}
+	}
 	if err = c.write(ctx, snapshot.Path, content); err == nil {
 		err = c.reload(ctx)
 	}
@@ -521,15 +556,35 @@ func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCad
 	if len(names) != 1 {
 		return DeploymentCertificate{}, errors.New("automatic Caddy ingress currently requires one hostname per deployment")
 	}
-	if err := validateDeploymentHTTPDomains(ctx, names, net.DefaultResolver.LookupIPAddr); err != nil {
+	directory := acmeDirectory()
+	if err := directory.validate(); err != nil {
 		return DeploymentCertificate{}, err
+	}
+	roots, err := directory.roots()
+	if err != nil {
+		return DeploymentCertificate{}, err
+	}
+	// A private authority validates however it was set up to; public DNS
+	// says nothing about it. Let's Encrypt and its staging twin still need
+	// the name to resolve here before an order is worth placing.
+	if !directory.private() {
+		if err := validateDeploymentHTTPDomains(ctx, names, net.DefaultResolver.LookupIPAddr); err != nil {
+			return DeploymentCertificate{}, err
+		}
 	}
 	// Caddy owns issuance and renewal on the public listener. Imported bytes are
 	// release evidence; traffic continues using Caddy's actively renewed storage.
+	//
+	// "Not issued yet" and "issued but the import failed" are different
+	// answers: the first is waited on, the second is reported at once, so a
+	// directory this process cannot write never reads as an authority that
+	// never answered.
+	errNotIssued := errors.New("Caddy has not issued the requested certificate yet")
 	read := func(ctx context.Context) (*ImportResult, error) {
+		// The certificates directory itself appears with the first issuance.
 		raw, err := c.command(ctx, "", "find", "/data/caddy/certificates", "-type", "f", "-name", "*.crt")
 		if err != nil {
-			return nil, err
+			return nil, errNotIssued
 		}
 		for _, path := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 			if !strings.HasPrefix(path, "/data/caddy/certificates/") {
@@ -556,16 +611,20 @@ func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCad
 					intermediates.AddCert(parsed)
 				}
 			}
-			if _, err := leaf.Verify(x509.VerifyOptions{DNSName: names[0], Intermediates: intermediates}); err != nil {
+			if _, err := leaf.Verify(x509.VerifyOptions{DNSName: names[0], Intermediates: intermediates, Roots: roots}); err != nil {
 				continue
 			}
 			key, _, err := c.read(ctx, strings.TrimSuffix(path, ".crt")+".key")
 			if err != nil {
 				continue
 			}
-			return ImportCertificate("caddy-"+strings.TrimPrefix(routeDigest(names[0]), "sha256:")[:24], certificate, key)
+			imported, err := ImportCertificate("caddy-"+strings.TrimPrefix(routeDigest(names[0]), "sha256:")[:24], certificate, key)
+			if err != nil {
+				return nil, fmt.Errorf("Caddy issued the certificate for %s but it could not be kept as release evidence: %w", names[0], err)
+			}
+			return imported, nil
 		}
-		return nil, errors.New("Caddy has not issued the requested certificate yet")
+		return nil, errNotIssued
 	}
 	result := func(imported *ImportResult, outcome CertificateOutcome) DeploymentCertificate {
 		return DeploymentCertificate{Outcome: outcome, CertPath: imported.CertPath, KeyPath: imported.KeyPath, Name: imported.Name, Method: "caddy", Domains: names}
@@ -612,6 +671,9 @@ func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCad
 	if err = c.attach(ctx); err != nil {
 		return DeploymentCertificate{}, err
 	}
+	if err = c.installACMERoots(ctx, directory); err != nil {
+		return DeploymentCertificate{}, err
+	}
 	if err = c.write(ctx, snapshot.Path, content); err == nil {
 		err = c.reload(ctx)
 	}
@@ -626,11 +688,15 @@ func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCad
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		if imported, err := read(issueCtx); err == nil {
+		imported, err := read(issueCtx)
+		if err == nil {
 			if err := cleanup(); err != nil {
 				return DeploymentCertificate{}, err
 			}
 			return result(imported, CertificateIssued), nil
+		}
+		if !errors.Is(err, errNotIssued) && issueCtx.Err() == nil {
+			return DeploymentCertificate{}, errors.Join(err, cleanup())
 		}
 		select {
 		case <-issueCtx.Done():

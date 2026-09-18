@@ -2,12 +2,30 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
 type managedRemovalFake struct{ removed []RemovalTarget }
 
 func (f *managedRemovalFake) RemoveManagedResource(_ context.Context, target RemovalTarget) error {
+	f.removed = append(f.removed, target)
+	return nil
+}
+
+// failingRemovalFake succeeds for every target except one kind, so a test can
+// see both what already succeeded and what the remover said about the one
+// that did not.
+type failingRemovalFake struct {
+	removed  []RemovalTarget
+	failKind string
+	err      error
+}
+
+func (f *failingRemovalFake) RemoveManagedResource(_ context.Context, target RemovalTarget) error {
+	if target.Kind == f.failKind {
+		return f.err
+	}
 	f.removed = append(f.removed, target)
 	return nil
 }
@@ -107,5 +125,110 @@ func TestArchivePreservesResourcesAndRemovalPlanNamesOnlyManagedTargets(t *testi
 	}
 	if len(execution.Removed) != 1 || len(remover.removed) != 1 || len(execution.Remaining) != 1 {
 		t.Fatalf("removal execution = %#v, calls=%#v", execution, remover.removed)
+	}
+
+	// The first removal changed the plan (one fewer target); re-read it for a
+	// current digest before removing more.
+	plan, err = fixture.plans.RemovalPlan(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A remover failure must not collapse to a bare internal error: its own
+	// sentence travels with the failure, and whatever already succeeded stays
+	// visible in the partial execution instead of being lost.
+	failing := &failingRemovalFake{failKind: "docker_volume", err: errors.New("Docker is unavailable")}
+	execution, err = fixture.plans.RemoveManaged(ctx, projectID, "operator", RemoveManagedRequest{
+		PlanDigest: plan.Digest, TargetIDs: []string{volume.ID},
+	}, failing)
+	var failure *RemovalFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("RemoveManaged error = %v (%T), want *RemovalFailure", err, err)
+	}
+	if failure.Error() != "Docker is unavailable" {
+		t.Fatalf("failure message = %q, want the remover's own sentence verbatim", failure.Error())
+	}
+	if failure.Unavailable {
+		t.Fatal("a plain remover error was classified Unavailable")
+	}
+	if len(execution.Removed) != 0 {
+		t.Fatalf("execution.Removed = %#v, want nothing removed before the only target failed", execution.Removed)
+	}
+	if len(execution.Remaining) != 1 || execution.Remaining[0].Kind != "docker_volume" {
+		t.Fatalf("execution.Remaining = %#v, want the volume that failed still listed", execution.Remaining)
+	}
+
+	// A missing owner (Docker not configured on this host, say) is a
+	// different situation from the resource itself refusing removal.
+	unavailable := &failingRemovalFake{failKind: "docker_volume", err: Unavailable(errors.New("Docker is unavailable"))}
+	if _, err = fixture.plans.RemoveManaged(ctx, projectID, "operator", RemoveManagedRequest{
+		PlanDigest: plan.Digest, TargetIDs: []string{volume.ID},
+	}, unavailable); !errors.As(err, &failure) || !failure.Unavailable {
+		t.Fatalf("owner-unavailable error = %v, want *RemovalFailure{Unavailable: true}", err)
+	}
+}
+
+// A removal batch that fails partway through must keep everything the
+// earlier targets in the same batch already removed — the response is not
+// all-or-nothing, and the caller needs to know exactly what still needs
+// attention.
+func TestRemoveManagedKeepsEarlierSuccessesWhenALaterTargetInTheSameBatchFails(t *testing.T) {
+	ctx := context.Background()
+	fixture := newPlanningStoreFixture(t)
+	projectID, environmentID := insertConfigurationFixture(t, fixture)
+	config, err := fixture.plans.EnvironmentConfiguration(ctx, projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.plans.SaveEnvironmentConfiguration(ctx, projectID, environmentID, ConfigurationWriteRequest{
+		Revision: config.Revision, Build: config.Build,
+		Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, Mounts: []RuntimeMount{
+			{Source: "batch-data", Target: "/data", Ownership: OwnershipManaged},
+		}},
+		Domains: []PlannedDomain{{Hostname: "batch.example.test", Ownership: OwnershipManaged}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := NewStore(fixture.store, fixture.sealer, []string{t.TempDir()})
+	if _, err := legacy.Archive(ctx, projectID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := fixture.plans.RemovalPlan(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var route, volume *RemovalTarget
+	for index := range plan.Targets {
+		target := &plan.Targets[index]
+		switch target.Kind {
+		case "proxy_site":
+			route = target
+		case "docker_volume":
+			volume = target
+		}
+	}
+	if route == nil || volume == nil {
+		t.Fatalf("removal plan = %#v", plan)
+	}
+	failing := &failingRemovalFake{failKind: "docker_volume", err: errors.New("Docker is unavailable")}
+	execution, err := fixture.plans.RemoveManaged(ctx, projectID, "operator", RemoveManagedRequest{
+		PlanDigest: plan.Digest, TargetIDs: []string{route.ID, volume.ID},
+	}, failing)
+	var failure *RemovalFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("RemoveManaged error = %v, want *RemovalFailure", err)
+	}
+	if len(execution.Removed) != 1 || execution.Removed[0].Kind != "proxy_site" {
+		t.Fatalf("execution.Removed = %#v, want the route that succeeded before the volume failed", execution.Removed)
+	}
+	if len(execution.Remaining) != 1 || execution.Remaining[0].Kind != "docker_volume" {
+		t.Fatalf("execution.Remaining = %#v, want the volume that failed still listed", execution.Remaining)
+	}
+	var removedRows int
+	if err := fixture.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_resource_removals WHERE project_id=?`, projectID).Scan(&removedRows); err != nil {
+		t.Fatal(err)
+	}
+	if removedRows != 1 {
+		t.Fatalf("recorded removals = %d, want exactly the route that succeeded", removedRows)
 	}
 }

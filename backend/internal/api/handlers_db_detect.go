@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -241,11 +242,43 @@ func (s *Server) handleDBAdopt(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if have, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-		conn, err := s.connectionByName(r.Context(), have)
+		conn, stored, err := s.connectionByName(r.Context(), have)
 		if err != nil {
 			return err
 		}
-		httpx.SkipAudit(r)
+		if stored == dsn {
+			httpx.SkipAudit(r)
+			httpx.JSON(w, http.StatusOK, conn)
+			return nil
+		}
+		// Same address, different credentials. One process listens on a port,
+		// so whatever this row used to reach is gone and the container standing
+		// there now is what the row has to mean — which is exactly what happens
+		// when a database is removed and created again under the same name:
+		// it takes the same loopback port back, with a password generated a
+		// moment ago. Handing back the old row as it stood made the caller poll
+		// a server that would refuse the stored password for as long as anyone
+		// waited, with nothing in the log to say so. Refreshing the row keeps
+		// its name and everything linked to it — a deployment's ${{database.N}}
+		// reference resolves to a URL that works again.
+		sealed, err := s.Sealer.Seal(dsn)
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		if _, err := s.Store.DB.ExecContext(r.Context(),
+			`UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, conn.ID); err != nil {
+			return httpx.BadRequest("could not update connection: %v", err)
+		}
+		// The pool, if any, was dialled with the old DSN and would keep failing.
+		s.modules.dbs.Close(conn.ID)
+		conn, _, err = s.dbConnRow(r.Context(), conn.ID)
+		if err != nil {
+			return err
+		}
+		httpx.SetAudit(r, "database.connection.refresh", conn.Name, map[string]any{
+			"container": cand.Container, "image": cand.Image, "driver": cand.Driver,
+			"host": conn.Host, "user": conn.User,
+		})
 		httpx.JSON(w, http.StatusOK, conn)
 		return nil
 	}
@@ -323,7 +356,7 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if have, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-		conn, err := s.connectionByName(ctx, have)
+		conn, _, err := s.connectionByName(ctx, have)
 		if err != nil {
 			return err
 		}
@@ -763,6 +796,26 @@ type provisionRequest struct {
 	Engine   string `json:"engine"`
 	Name     string `json:"name"`
 	Database string `json:"database"`
+	// Exposure is where the new server is reachable from: "public" publishes
+	// its port on every interface and opens the firewall, "local" keeps it to
+	// this server. Empty means public.
+	Exposure dbExposure `json:"exposure"`
+}
+
+// provisionBinding turns the requested exposure into the host address the
+// port is published on. The default is every interface: a database made from
+// the Databases page exists to be handed to somebody, and a default that has
+// to be undone under Maintenance before the connection string works from a
+// laptop is a default nobody wanted. Deployment quick setup asks for "local"
+// explicitly, because its database is reached over the deployment network.
+func provisionBinding(exposure dbExposure) (dbExposure, string, error) {
+	switch exposure {
+	case "", exposurePublic:
+		return exposurePublic, "0.0.0.0", nil
+	case exposureLocal:
+		return exposureLocal, "127.0.0.1", nil
+	}
+	return "", "", fmt.Errorf("exposure must be local or public")
 }
 
 // Redis does not read REDIS_PASSWORD itself. A private configuration keeps the
@@ -777,10 +830,12 @@ const redisProvisionBootstrap = `set -eu; umask 077; printf 'requirepass %s\n' "
 // fields". It can always be read back from the container by an admin, and the
 // dashboard's own copy is sealed like every other stored DSN.
 //
-// It publishes to loopback only. A database this dashboard started should not
-// become reachable from the internet because a default was convenient, and an
-// operator who wants otherwise can change the port binding on the Docker page,
-// where that decision is visible.
+// The port is published on every interface unless the request asks for this
+// server only, and the firewall is opened for it the way the connection page's
+// Open to the internet switch does — so the string under "From anywhere" works
+// the moment the engine answers. The binding and what the firewall did are
+// audited, and the saved connection still dials loopback: hostAddress maps a
+// 0.0.0.0 binding to 127.0.0.1, which is the address this process can reach.
 func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error {
 	var req provisionRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -789,6 +844,10 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	tmpl, ok := provisionTemplates[req.Engine]
 	if !ok {
 		return httpx.BadRequest("unknown engine %q", req.Engine)
+	}
+	exposure, hostIP, err := provisionBinding(req.Exposure)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
 	}
 	if s.modules.docker == nil {
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable",
@@ -818,7 +877,23 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
 	defer cancel()
 
-	port, err := freeHostPort(tmpl.port)
+	// The data volume is named after the container, and a volume outlives the
+	// container that made it. Starting a fresh server on a leftover one is the
+	// worst kind of failure: the image sees a populated data directory, skips
+	// its own initialisation, and the password generated a moment ago is never
+	// set — so the engine comes up, answers, and refuses every sign-in from the
+	// dashboard for as long as anybody waits. Refusing here names the volume
+	// and the two ways out, instead of three minutes of "not reachable".
+	volume := name + "-data"
+	if exists, err := s.modules.docker.VolumeExists(ctx, volume); err != nil {
+		return httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
+	} else if exists {
+		return httpx.Err(http.StatusConflict, "volume_exists", fmt.Sprintf(
+			"a data volume named %s is left over from an earlier %s server, and a new one would reuse its data and its old password; remove that volume on the Docker page to start fresh, or choose another name",
+			volume, tmpl.label))
+	}
+
+	port, err := freeHostPort(tmpl.port, hostIP)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
@@ -832,10 +907,10 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		RestartPolicy: "unless-stopped",
 		Env:           tmpl.env(password, database),
 		Ports: []dockerx.PortMapping{
-			{HostIP: "127.0.0.1", HostPort: port, ContainerPort: tmpl.port, Protocol: "tcp"},
+			{HostIP: hostIP, HostPort: port, ContainerPort: tmpl.port, Protocol: "tcp"},
 		},
 		Mounts: []dockerx.MountSpec{
-			{Type: "volume", Source: name + "-data", Target: tmpl.dataPath},
+			{Type: "volume", Source: volume, Target: tmpl.dataPath},
 		},
 	}
 	if req.Engine == "redis" {
@@ -847,32 +922,54 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return httpx.BadRequest("could not start %s: %v", tmpl.label, err)
 	}
+	// Docker lists the v6 twin of a 0.0.0.0 binding beside it; the v4 one is
+	// the one the saved connection string dials.
 	for _, binding := range created.Ports {
-		if binding.ContainerPort == tmpl.port && binding.Protocol == "tcp" && binding.HostIP == "127.0.0.1" {
+		if binding.ContainerPort == tmpl.port && binding.Protocol == "tcp" && !strings.Contains(binding.HostIP, ":") {
 			port = binding.HostPort
 			break
 		}
 	}
-	httpx.SetAudit(r, "database.server.provision", name,
-		map[string]any{"engine": req.Engine, "image": tmpl.image, "port": port})
+	detail := map[string]any{
+		"engine": req.Engine, "image": tmpl.image, "port": port, "exposure": exposure,
+	}
+	// The container is up before the engine is, but the firewall rule can go
+	// in now: nothing answers on the port until the engine does, and the
+	// connection string handed out afterwards has to work the first time.
+	firewall := "none"
+	var ferr error
+	if exposure == exposurePublic {
+		firewall, ferr = s.setDBFirewall(ctx, r, port, true)
+		detail["firewall"] = firewall
+		if ferr != nil {
+			detail["firewallError"] = ferr.Error()
+		}
+	}
+	httpx.SetAudit(r, "database.server.provision", name, detail)
 
 	// The container exists; whether the engine inside it is ready to be talked
 	// to is a separate question, and the answer takes seconds to a minute. The
 	// client polls for that rather than this request hanging: a POST that
 	// blocks for a minute is indistinguishable from a broken dashboard, which
 	// is the same reason the compose runner streams.
-	httpx.JSON(w, http.StatusAccepted, map[string]any{
+	resp := map[string]any{
 		"container": name, "engine": req.Engine, "driver": tmpl.driver,
 		"host": "127.0.0.1", "port": port, "database": database,
-	})
+		"exposure": exposure, "firewall": firewall,
+	}
+	if ferr != nil {
+		resp["firewallError"] = ferr.Error()
+	}
+	httpx.JSON(w, http.StatusAccepted, resp)
 	return nil
 }
 
 // freeHostPort returns the engine's own port when nothing holds it, and the
 // next free one above it otherwise — so a second Postgres does not fail to
-// start with a message about a port collision.
-func freeHostPort(preferred int) (int, error) {
-	return portalloc.Select(preferred, 1024, nil, func(port int) error { return portalloc.Available("127.0.0.1", "tcp", port) })
+// start with a message about a port collision. The probe binds the address
+// the container will, since a port free on loopback can be held on 0.0.0.0.
+func freeHostPort(preferred int, hostIP string) (int, error) {
+	return portalloc.Select(preferred, 1024, nil, func(port int) error { return portalloc.Available(hostIP, "tcp", port) })
 }
 
 // generatePassword makes one nobody has to remember. It is URL-safe because it
@@ -888,14 +985,13 @@ func generatePassword() (string, error) {
 
 // connectionByName resolves the row a previous adopt created, so a repeat can
 // be answered with it rather than with a constraint violation.
-func (s *Server) connectionByName(ctx context.Context, name string) (*dbConnection, error) {
+func (s *Server) connectionByName(ctx context.Context, name string) (*dbConnection, string, error) {
 	var id int64
 	if err := s.Store.DB.QueryRowContext(ctx,
 		`SELECT id FROM db_connections WHERE name = ?`, name).Scan(&id); err != nil {
-		return nil, httpx.Internal(err)
+		return nil, "", httpx.Internal(err)
 	}
-	conn, _, err := s.dbConnRow(ctx, id)
-	return conn, err
+	return s.dbConnRow(ctx, id)
 }
 
 // containerIPs is every address this container answers on, for the fallback in

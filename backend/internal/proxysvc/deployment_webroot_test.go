@@ -57,7 +57,7 @@ func TestDeploymentChallengePreservesBindScope(t *testing.T) {
 }
 
 func TestDeploymentACMEWebrootSurvivesSiteEditing(t *testing.T) {
-	spec := deploymentSiteSpec(DeploymentRoute{Name: "app.conf", Domains: []string{"app.example.test"}, Upstream: "http://127.0.0.1:3000", TLS: true, ForceHTTPS: true, CertPath: "/etc/ssl/cert.pem", KeyPath: "/etc/ssl/key.pem"})
+	spec := deploymentSiteSpec(DeploymentRoute{Name: "app.conf", Domains: []string{"app.example.test"}, Upstream: "http://127.0.0.1:3000", TLS: true, ForceHTTPS: true, CertPath: "/etc/ssl/cert.pem", KeyPath: "/etc/ssl/key.pem"}, "")
 	out, err := RenderNginx(spec)
 	if err != nil {
 		t.Fatal(err)

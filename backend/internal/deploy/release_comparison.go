@@ -125,6 +125,7 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("command", strings.Join(fromSnapshot.Plan.Command, " "), strings.Join(toSnapshot.Plan.Command, " "))
 	field("internal port", portLabel(fromSnapshot.Plan.InternalPort), portLabel(toSnapshot.Plan.InternalPort))
 	field("host port", portLabel(fromSnapshot.Plan.HostPort), portLabel(toSnapshot.Plan.HostPort))
+	field("published ports", publishedPortsLabel(fromSnapshot.Plan.Ports), publishedPortsLabel(toSnapshot.Plan.Ports))
 	field("strategy", string(fromSnapshot.Plan.Strategy), string(toSnapshot.Plan.Strategy))
 	field("stop signal", fromSnapshot.Plan.StopSignal, toSnapshot.Plan.StopSignal)
 	field("grace period", secondsLabel(fromSnapshot.Plan.GracePeriodSeconds), secondsLabel(toSnapshot.Plan.GracePeriodSeconds))
@@ -257,6 +258,17 @@ func mountsLabel(mounts []RuntimeMount) string {
 	sort.Strings(labels)
 	if len(labels) == 0 {
 		return "none"
+	}
+	return strings.Join(labels, ", ")
+}
+
+func publishedPortsLabel(ports []PublishedPort) string {
+	if len(ports) == 0 {
+		return "none"
+	}
+	labels := make([]string, 0, len(ports))
+	for _, port := range ports {
+		labels = append(labels, fmt.Sprintf("%d/%s → %d", port.HostPort, port.effectiveProtocol(), port.ContainerPort))
 	}
 	return strings.Join(labels, ", ")
 }

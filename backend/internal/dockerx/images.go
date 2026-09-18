@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
+	"github.com/docker/docker/errdefs"
 )
 
 type Image struct {
@@ -239,6 +240,21 @@ func (c *Client) InspectVolume(ctx context.Context, name string) (volume.Volume,
 		return volume.Volume{}, err
 	}
 	return cli.VolumeInspect(ctx, name)
+}
+
+// VolumeExists reports whether a named volume is already on this host, so a
+// caller about to mount one by name can tell "fresh" from "leftover" before
+// Docker silently reuses whatever is in it.
+func (c *Client) VolumeExists(ctx context.Context, name string) (bool, error) {
+	cli, err := c.api()
+	if err != nil {
+		return false, err
+	}
+	_, err = cli.VolumeInspect(ctx, name)
+	if errdefs.IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (c *Client) RemoveVolume(ctx context.Context, name string, force bool) error {

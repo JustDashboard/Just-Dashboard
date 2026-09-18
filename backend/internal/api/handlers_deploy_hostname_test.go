@@ -1,15 +1,17 @@
 package api
 
 import (
+	"context"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The generated label is the deployment's public identity, so it has to be a
-// legal DNS label whatever the operator called the deployment — and it has to
-// differ between two deployments that were called the same thing.
-func TestHostnameSlugIsALegalUniqueLabel(t *testing.T) {
+// legal DNS label whatever the operator called the deployment, and it has to
+// be stable: a screen that re-fetches the same name must see the same label.
+func TestHostnameSlugIsALegalStableLabel(t *testing.T) {
 	label := regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	for _, name := range []string{
 		"api-production", "We Smoke Fish", "  ", "Ünïcodé", "----",
@@ -19,9 +21,47 @@ func TestHostnameSlugIsALegalUniqueLabel(t *testing.T) {
 		if !label.MatchString(slug) {
 			t.Fatalf("hostnameSlug(%q) = %q, which is not a DNS label", name, slug)
 		}
-		if slug == hostnameSlug(name) {
-			t.Fatalf("hostnameSlug(%q) repeated itself; two deployments would collide", name)
+		if slug != hostnameSlug(name) {
+			t.Fatalf("hostnameSlug(%q) is not stable across calls: %q then %q", name, slug, hostnameSlug(name))
 		}
+	}
+}
+
+// suggestHostnameSlug must propose the same hostname every time it is asked
+// about the same name, and must count past a suggestion another project has
+// already claimed as a real managed domain instead of reusing it.
+func TestSuggestHostnameSlugIsDeterministicAndAvoidsTakenDomains(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	const domainSuffix = "1-2-3-4.sslip.io"
+
+	first := s.suggestHostnameSlug(ctx, "api-production", domainSuffix)
+	second := s.suggestHostnameSlug(ctx, "api-production", domainSuffix)
+	if first != second {
+		t.Fatalf("suggestHostnameSlug is not deterministic: %q then %q", first, second)
+	}
+	wantFirst := hostnameSlug("api-production") + "-" + s.hostnameSuffix("api-production", 0)
+	if first != wantFirst {
+		t.Fatalf("suggestHostnameSlug = %q, want %q", first, wantFirst)
+	}
+
+	// Register the suggested hostname as a real managed domain of an active
+	// project, the way committing a draft that kept it would.
+	_, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	if _, err := s.Store.DB.Exec(`
+		INSERT INTO deploy_dependencies(environment_id, release_id, kind, ownership, resource_kind, resource_id, config_json, created_at)
+		VALUES(?, 0, 'domain', 'managed', 'proxy_site', ?, '{}', ?)`,
+		environmentID, first+"."+domainSuffix, time.Now().UTC().Unix()); err != nil {
+		t.Fatal(err)
+	}
+
+	third := s.suggestHostnameSlug(ctx, "api-production", domainSuffix)
+	if third == first {
+		t.Fatalf("suggestHostnameSlug reused a hostname already claimed by another project")
+	}
+	wantThird := hostnameSlug("api-production") + "-" + s.hostnameSuffix("api-production", 1)
+	if third != wantThird {
+		t.Fatalf("suggestHostnameSlug = %q, want %q (the next deterministic attempt)", third, wantThird)
 	}
 }
 

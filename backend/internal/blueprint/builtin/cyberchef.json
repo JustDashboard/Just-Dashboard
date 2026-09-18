@@ -1,0 +1,76 @@
+{
+  "id": "cyberchef",
+  "version": "1.0.0",
+  "name": "CyberChef",
+  "category": "tool",
+  "profile": "tool",
+  "description": "GCHQ's data-transformation workbench: encode, decode, compress, hash and parse, entirely in the browser. Served from here so the page loads on a private network.",
+  "iconId": "bolt",
+  "docsUrl": "https://gchq.github.io/CyberChef/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/gchq/CyberChef",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ghcr.io/gchq/cyberchef:11.4.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The workbench",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:230954869193f77fa1478898d468932e34d1567d84de9f169374920ed03c8b8a"
+    }
+  ]
+}

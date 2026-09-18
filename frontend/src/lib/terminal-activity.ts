@@ -22,7 +22,19 @@ import { useViewState } from "@/lib/view-state"
 export function windowLabel(window: TerminalWindowSummary, live?: TerminalActivity): string {
   if (window.named) return window.name
   const activity = live ?? window
-  return activity.title || (activity.busy && activity.process) || window.name
+  return plainTitle(activity.title) || (activity.busy && activity.process) || window.name
+}
+
+/**
+ * A program's title without the glyph it animates in front of its name.
+ * Claude Code and Codex spin an asterisk or a half-moon through their title
+ * as their own "I am working"; here that is the activity mark's job, and a
+ * label that carried both said it twice — in two vocabularies. Only the
+ * leading symbols go; `~`, a path or a word is the title itself.
+ */
+export function plainTitle(title: string | undefined): string {
+  if (!title) return ""
+  return title.replace(/^(?:[\p{So}\u00B7\u2022\u2219\u22C5]\s*)+/u, "") || title
 }
 
 /** The window's state, from its socket when it has one here and the poll otherwise. */

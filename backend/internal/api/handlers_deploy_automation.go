@@ -91,6 +91,48 @@ func (s *Server) handleDeploymentTriggerDelete(w http.ResponseWriter, r *http.Re
 	httpx.NoContent(w)
 	return nil
 }
+
+// handleDeploymentTriggerDeliveries answers a trigger's recent webhook
+// delivery log: what arrived, and what this host decided to do with it.
+func (s *Server) handleDeploymentTriggerDeliveries(w http.ResponseWriter, r *http.Request) error {
+	projectID, environmentID, err := deploymentEnvironmentIDs(r)
+	if err != nil {
+		return err
+	}
+	triggerID, err := automationParam(r, "trigger")
+	if err != nil {
+		return err
+	}
+	items, err := s.modules.deployAutomation.TriggerDeliveries(r.Context(), projectID, environmentID, triggerID, 50)
+	if err != nil {
+		return mapAutomationError(err)
+	}
+	httpx.JSON(w, http.StatusOK, items)
+	return nil
+}
+
+// handleDeploymentTriggerRotateSecret issues a new HMAC secret for a trigger,
+// shown once, exactly like the legacy project secret rotation.
+func (s *Server) handleDeploymentTriggerRotateSecret(w http.ResponseWriter, r *http.Request) error {
+	projectID, environmentID, err := deploymentEnvironmentIDs(r)
+	if err != nil {
+		return err
+	}
+	triggerID, err := automationParam(r, "trigger")
+	if err != nil {
+		return err
+	}
+	secret, err := s.modules.deployAutomation.RotateTriggerSecret(r.Context(), projectID, environmentID, triggerID)
+	if err != nil {
+		return mapAutomationError(err)
+	}
+	httpx.SetAudit(r, "deploy.trigger.rotate_secret", fmt.Sprint(triggerID), map[string]any{
+		"deploymentId": projectID, "environmentId": environmentID,
+	})
+	httpx.JSON(w, http.StatusOK, map[string]string{"secret": secret})
+	return nil
+}
+
 func (s *Server) handleDeploymentTriggerTest(w http.ResponseWriter, r *http.Request) error {
 	projectID, environmentID, err := deploymentEnvironmentIDs(r)
 	if err != nil {
@@ -427,26 +469,51 @@ func (s *Server) handleAutomationWebhook(w http.ResponseWriter, r *http.Request,
 			err = deploy.ErrBadHookSignature
 		}
 	}
-	if err == nil {
-		err = validateAutomationEvent(trigger, event)
-	}
-	if err == nil && event.PreviewNumber > 0 && !event.PreviewClosed && !deploy.MatchWatchPaths(event.ChangedPaths, trigger.Config.WatchInclude, trigger.Config.WatchExclude) {
-		err = deploy.ErrWatchPathsIgnored
-	}
 	if err != nil {
 		_ = s.modules.deployAutomation.RecordDelivery(r.Context(), trigger, event, body, "rejected", automationReason(err), 0)
 		return mapAutomationError(err)
 	}
+	outcome, err := s.dispatchAutomationEvent(r.Context(), trigger, event, body)
+	if err != nil {
+		return err
+	}
+	httpx.SetAudit(r, outcome.audit, trigger.Name, outcome.detail)
+	httpx.JSON(w, http.StatusAccepted, outcome.payload)
+	return nil
+}
+
+// automationOutcome is one accepted delivery's answer: the JSON a hook
+// receives and the audit line it leaves.
+type automationOutcome struct {
+	payload map[string]any
+	audit   string
+	detail  map[string]any
+}
+
+// dispatchAutomationEvent is the whole decision for one verified delivery
+// reaching one trigger: the trigger's own filters, the delivery reservation,
+// the environment's policy, preview creation and queue admission. The
+// per-trigger hooks and the GitHub App's shared webhook both end here, so a
+// delivery means the same thing whichever door it came through.
+func (s *Server) dispatchAutomationEvent(ctx context.Context, trigger *deploy.Trigger, event deploy.ProviderEvent, body []byte) (automationOutcome, error) {
+	err := validateAutomationEvent(trigger, event)
+	if err == nil && event.PreviewNumber > 0 && !event.PreviewClosed && !deploy.MatchWatchPaths(event.ChangedPaths, trigger.Config.WatchInclude, trigger.Config.WatchExclude) {
+		err = deploy.ErrWatchPathsIgnored
+	}
+	if err != nil {
+		_ = s.modules.deployAutomation.RecordDelivery(ctx, trigger, event, body, "rejected", automationReason(err), 0)
+		return automationOutcome{}, mapAutomationError(err)
+	}
 	// Reserve the provider delivery before preview or queue side effects. This
 	// unique row is the replay fence even when two identical requests arrive
 	// concurrently.
-	if err = s.modules.deployAutomation.RecordDelivery(r.Context(), trigger, event, body, "processing", "", 0); err != nil {
-		return mapAutomationError(err)
+	if err = s.modules.deployAutomation.RecordDelivery(ctx, trigger, event, body, "processing", "", 0); err != nil {
+		return automationOutcome{}, mapAutomationError(err)
 	}
 	var decision *deploy.GitDeploymentDecision
 	policyKey := ""
 	if event.PreviewNumber == 0 {
-		policy, policyErr := s.modules.deployRuns.GitDeploymentPolicy(r.Context(), trigger.ProjectID, trigger.EnvironmentID)
+		policy, policyErr := s.modules.deployRuns.GitDeploymentPolicy(ctx, trigger.ProjectID, trigger.EnvironmentID)
 		if policyErr == nil && !policy.Automatic {
 			policyErr = deploy.ErrGitManualOnly
 		}
@@ -455,55 +522,59 @@ func (s *Server) handleAutomationWebhook(w http.ResponseWriter, r *http.Request,
 		}
 		if policyErr == nil {
 			policyKey = policy.Key()
-			decision, policyErr = s.modules.deployGit.EvaluateWebhook(r.Context(), trigger.ProjectID, trigger.EnvironmentID, event)
+			decision, policyErr = s.modules.deployGit.EvaluateWebhook(ctx, trigger.ProjectID, trigger.EnvironmentID, event)
 		}
 		if policyErr == nil && decision == nil && !deploy.MatchWatchPaths(event.ChangedPaths, policy.WatchInclude, policy.WatchExclude) {
 			policyErr = deploy.ErrWatchPathsIgnored
 		}
 		if policyErr != nil {
-			_ = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "rejected", automationReason(policyErr), 0)
-			return mapAutomationError(policyErr)
+			_ = s.modules.deployAutomation.FinishDelivery(ctx, trigger, event.DeliveryID, "rejected", automationReason(policyErr), 0)
+			return automationOutcome{}, mapAutomationError(policyErr)
 		}
 		if decision != nil && !decision.Allowed {
-			if err := s.modules.deployGit.RecordDecision(r.Context(), decision, nil); err != nil {
-				return httpx.Internal(err)
+			if err := s.modules.deployGit.RecordDecision(ctx, decision, nil); err != nil {
+				return automationOutcome{}, httpx.Internal(err)
 			}
-			if err := s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "suppressed", decision.Reason, decision.RunID); err != nil {
-				return httpx.Internal(err)
+			if err := s.modules.deployAutomation.FinishDelivery(ctx, trigger, event.DeliveryID, "suppressed", decision.Reason, decision.RunID); err != nil {
+				return automationOutcome{}, httpx.Internal(err)
 			}
-			httpx.SetAudit(r, "deploy.provider.delivery", trigger.Name, map[string]any{"deliveryId": event.DeliveryID, "reason": decision.Reason, "revision": decision.Revision})
-			httpx.JSON(w, http.StatusAccepted, map[string]any{"accepted": false, "reason": decision.Reason, "runId": decision.RunID})
-			return nil
+			return automationOutcome{
+				payload: map[string]any{"accepted": false, "reason": decision.Reason, "runId": decision.RunID},
+				audit:   "deploy.provider.delivery",
+				detail:  map[string]any{"deliveryId": event.DeliveryID, "reason": decision.Reason, "revision": decision.Revision},
+			}, nil
 		}
 	}
-	project, err := s.modules.deployStore.Get(r.Context(), trigger.ProjectID)
+	project, err := s.modules.deployStore.Get(ctx, trigger.ProjectID)
 	if err != nil {
-		return mapDeployError(err)
+		return automationOutcome{}, mapDeployError(err)
 	}
 	environmentID, operation, runTrigger := trigger.EnvironmentID, deploy.OperationDeploy, trigger.Kind
 	if trigger.Config.Preview && event.PreviewNumber > 0 {
-		preview, created, previewErr := s.modules.deployAutomation.EnsurePreview(r.Context(), trigger, event)
+		preview, created, previewErr := s.modules.deployAutomation.EnsurePreview(ctx, trigger, event)
 		if previewErr != nil {
 			if errors.Is(previewErr, deploy.ErrPreviewApproval) || (event.PreviewClosed && errors.Is(previewErr, deploy.ErrWrongEvent)) {
 				status, reason := "pending", "preview_approval_required"
 				if event.PreviewClosed {
 					status, reason = "accepted", "preview_closed"
 				}
-				if err := s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, status, reason, 0); err != nil {
-					return mapAutomationError(err)
+				if err := s.modules.deployAutomation.FinishDelivery(ctx, trigger, event.DeliveryID, status, reason, 0); err != nil {
+					return automationOutcome{}, mapAutomationError(err)
 				}
-				httpx.SetAudit(r, "deploy.preview.review", trigger.Name, map[string]any{"deliveryId": event.DeliveryID, "revision": event.Revision, "state": status})
-				httpx.JSON(w, http.StatusAccepted, map[string]any{"accepted": true, "approvalRequired": !event.PreviewClosed})
-				return nil
+				return automationOutcome{
+					payload: map[string]any{"accepted": true, "approvalRequired": !event.PreviewClosed},
+					audit:   "deploy.preview.review",
+					detail:  map[string]any{"deliveryId": event.DeliveryID, "revision": event.Revision, "state": status},
+				}, nil
 			}
-			_ = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "rejected", automationReason(previewErr), 0)
-			return mapAutomationError(previewErr)
+			_ = s.modules.deployAutomation.FinishDelivery(ctx, trigger, event.DeliveryID, "rejected", automationReason(previewErr), 0)
+			return automationOutcome{}, mapAutomationError(previewErr)
 		}
 		environmentID, runTrigger = preview.EnvironmentID, deploy.TriggerPreview
 		if event.PreviewClosed {
 			operation = deploy.OperationPreviewRemove
-			if err := s.modules.deployRuns.CancelPreviewWork(r.Context(), environmentID); err != nil {
-				return mapDeployError(err)
+			if err := s.modules.deployRuns.CancelPreviewWork(ctx, environmentID); err != nil {
+				return automationOutcome{}, mapDeployError(err)
 			}
 		} else if created {
 			operation = deploy.OperationPreviewCreate
@@ -518,29 +589,45 @@ func (s *Server) handleAutomationWebhook(w http.ResponseWriter, r *http.Request,
 	if decision != nil {
 		sourceRevision, expectedPlanRevision, policyKey = decision.Revision, decision.Target.PlanRevision, decision.Target.PolicyKey
 	}
-	run, err := s.enqueueNormalizedDeploymentAtSource(r.Context(), project, environmentID, operation, 0, runTrigger, "webhook", trigger.HookID+":"+event.DeliveryID, nil, sourceRevision, expectedPlanRevision, policyKey)
+	// Only the watcher's own complete tree diff against the deployed baseline
+	// (decision.ChangedPaths, computed when a watch-path filter is configured)
+	// is safe to record here: supersedeCoveredRuns treats a later run's
+	// changedPaths as a superset of an earlier one's, which is only true for a
+	// baseline diff. The provider payload's own per-push commit list has no
+	// such guarantee — two disjoint pushes each have a non-empty, non-covering
+	// list — so it stays scoped to MatchWatchPaths above and never reaches run
+	// metadata. Leaving it unset here (the common unfiltered case, and every
+	// preview push, which never evaluates a decision) reads as "unscoped",
+	// which a real push still correctly supersedes.
+	var runMetadata map[string]any
+	if decision != nil && len(decision.ChangedPaths) > 0 {
+		runMetadata = map[string]any{"changedPaths": decision.ChangedPaths}
+	}
+	run, err := s.enqueueNormalizedDeploymentAtSource(ctx, project, environmentID, operation, 0, runTrigger, "webhook", trigger.HookID+":"+event.DeliveryID, runMetadata, sourceRevision, "", expectedPlanRevision, policyKey)
 	if decision != nil {
 		if run != nil {
 			decision.RunID = run.ID
 		}
-		if recordErr := s.modules.deployGit.RecordDecision(r.Context(), decision, err); recordErr != nil && err == nil {
+		if recordErr := s.modules.deployGit.RecordDecision(ctx, decision, err); recordErr != nil && err == nil {
 			err = recordErr
 		}
 	}
 	if err != nil {
-		_ = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "rejected", "enqueue_failed", 0)
-		return mapDeployError(err)
+		_ = s.modules.deployAutomation.FinishDelivery(ctx, trigger, event.DeliveryID, "rejected", "enqueue_failed", 0)
+		return automationOutcome{}, mapDeployError(err)
 	}
 	reason := "hook_requested"
 	if decision != nil {
 		reason = decision.Reason
 	}
-	if err = s.modules.deployAutomation.FinishDelivery(r.Context(), trigger, event.DeliveryID, "accepted", reason, run.ID); err != nil {
-		return mapAutomationError(err)
+	if err = s.modules.deployAutomation.FinishDelivery(ctx, trigger, event.DeliveryID, "accepted", reason, run.ID); err != nil {
+		return automationOutcome{}, mapAutomationError(err)
 	}
-	httpx.SetAudit(r, "deploy.provider.delivery", trigger.Name, map[string]any{"provider": trigger.Provider, "deliveryId": event.DeliveryID, "runId": run.ID})
-	httpx.JSON(w, http.StatusAccepted, map[string]any{"accepted": true, "runId": run.ID, "state": run.State})
-	return nil
+	return automationOutcome{
+		payload: map[string]any{"accepted": true, "runId": run.ID, "state": run.State},
+		audit:   "deploy.provider.delivery",
+		detail:  map[string]any{"provider": trigger.Provider, "deliveryId": event.DeliveryID, "runId": run.ID},
+	}, nil
 }
 
 func validateAutomationEvent(t *deploy.Trigger, e deploy.ProviderEvent) error {

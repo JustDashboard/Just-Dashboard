@@ -1,0 +1,85 @@
+{
+  "id": "actual",
+  "version": "1.0.0",
+  "name": "Actual Budget",
+  "category": "http",
+  "profile": "web",
+  "description": "A local-first personal finance tool. The server only syncs the encrypted budget files between devices; the data volume is what a backup has to carry.",
+  "iconId": "globe",
+  "docsUrl": "https://actualbudget.org/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/actualbudget/actual",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "actualbudget/actual-server:26.9.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5006,
+      "protocol": "tcp",
+      "purpose": "The web app and sync API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "Budget files and the server's own database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "App answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Server and app versions move together; update the browser app by reloading.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:6d4ec861dc148fc60926dd57e99188a1e53670aee630a4ab765f4edabaebdc0f"
+    }
+  ]
+}

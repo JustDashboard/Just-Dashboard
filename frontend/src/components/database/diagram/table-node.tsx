@@ -40,7 +40,7 @@ export type TableNodeData = {
  * edges land on the header instead.
  *
  * It does not lift: a node is a step of ground with a border, like every other
- * surface, and the one thing that marks it is its border — the brand orange
+ * surface, and the one thing that marks it is its border — the brand blue
  * for the table being read, because that is what the hue is for. A colour the
  * operator chose is a bar down the left edge, in the same eight fixed hues the
  * terminal's tags use, so "the red ones are billing" is a label that stays put.

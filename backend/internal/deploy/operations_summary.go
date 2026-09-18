@@ -62,6 +62,7 @@ type DomainRoute struct {
 	Route               string        `json:"route"`
 	ServedBy            string        `json:"servedBy,omitempty"`
 	Certificate         string        `json:"certificate"`
+	Protected           bool          `json:"protected,omitempty"`
 	CertificateName     string        `json:"certificateName,omitempty"`
 	CertificateDaysLeft int           `json:"certificateDaysLeft,omitempty"`
 	DeepLink            string        `json:"deepLink,omitempty"`
@@ -376,7 +377,7 @@ func observeDomainRoutes(
 		result.Reason = "The Proxy module is unavailable, so no route or certificate evidence exists for these domains."
 		for _, domain := range domains {
 			result.Domains = append(result.Domains, DomainRoute{
-				Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: domain.Ownership,
+				Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: domain.Ownership, Protected: domain.Protection != nil,
 				Route: statusUnavailable, Certificate: statusUnavailable,
 			})
 		}
@@ -403,7 +404,7 @@ func observeDomainRoutes(
 	for _, domain := range domains {
 		hostname := strings.ToLower(strings.TrimSpace(domain.Hostname))
 		row := DomainRoute{
-			Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: domain.Ownership,
+			Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: domain.Ownership, Protected: domain.Protection != nil,
 			Route: "missing", Certificate: statusUnavailable,
 		}
 		owned, foreign := "", ""

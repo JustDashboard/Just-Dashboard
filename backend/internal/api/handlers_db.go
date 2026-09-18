@@ -55,8 +55,14 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDBConnUpdate))
 			r.Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
+			// Where the server is reachable from. Reading it lists containers
+			// and the firewall; changing it recreates the container with a
+			// different port binding, which is the Docker page's Recreate
+			// under another name and sits in the same group.
+			r.Method(http.MethodGet, "/{id}/access", s.handle(s.handleDBAccess))
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
+				r.Method(http.MethodPut, "/{id}/access", s.handle(s.handleDBAccessUpdate))
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.

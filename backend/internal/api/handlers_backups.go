@@ -4,7 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +21,10 @@ import (
 func (s *Server) mountBackupRoutes(r chi.Router) {
 	r.Route("/backups", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleBackupJobList))
+		// What the other modules hold that a job could protect, and which
+		// jobs already do. Listed here rather than on each module's page so
+		// "what is not backed up" has one answer.
+		r.Method(http.MethodGet, "/resources", s.handle(s.handleBackupResources))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleBackupJobGet))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleBackupRuns))
 		r.Method(http.MethodGet, "/runs/{runID}/contents", s.handle(s.handleBackupContents))
@@ -26,8 +33,13 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/", s.handle(s.handleBackupJobCreate))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleBackupJobUpdate))
+			r.Method(http.MethodPost, "/{id}/enabled", s.handle(s.handleBackupJobEnabled))
 			r.Method(http.MethodPost, "/{id}/test", s.handle(s.handleBackupTestTarget))
 			r.Method(http.MethodPost, "/runs/{runID}/verify-restore", s.handle(s.handleBackupVerifyRestore))
+			// An archive is the whole of what it covers — dumps, secrets,
+			// configuration — so taking one off the server is an
+			// administrator's act, not a reader's.
+			r.Method(http.MethodGet, "/runs/{runID}/download", s.handle(s.handleBackupDownload))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
@@ -51,11 +63,13 @@ type jobRequest struct {
 	Target                 backups.TargetConfig   `json:"target"`
 	Schedule               string                 `json:"schedule"`
 	Retention              int                    `json:"retention"`
+	RetentionDays          int                    `json:"retentionDays"`
 	Enabled                bool                   `json:"enabled"`
 	Secrets                *backups.TargetSecrets `json:"secrets,omitempty"`
 	Recovery               *backups.RecoveryPlan  `json:"recovery,omitempty"`
 	SQLitePaths            []string               `json:"sqlitePaths,omitempty"`
 	DatabaseDumps          []int64                `json:"databaseDumps,omitempty"`
+	PauseContainers        []string               `json:"pauseContainers,omitempty"`
 	ExpectedRecoveryOutput *string                `json:"expectedRecoveryOutput,omitempty"`
 }
 
@@ -67,8 +81,9 @@ func (req *jobRequest) toJob() *backups.Job {
 	return &backups.Job{
 		Name: req.Name, Sources: req.Sources, Excludes: req.Excludes,
 		TargetKind: req.TargetKind, Target: req.Target,
-		Schedule: req.Schedule, Retention: req.Retention, Enabled: req.Enabled,
+		Schedule: req.Schedule, Retention: req.Retention, RetentionDays: req.RetentionDays, Enabled: req.Enabled,
 		Recovery: req.Recovery, SQLitePaths: req.SQLitePaths, DatabaseDumps: req.DatabaseDumps,
+		PauseContainers: req.PauseContainers,
 	}
 }
 
@@ -109,10 +124,90 @@ func (s *Server) handleBackupJobList(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return httpx.Internal(err)
 	}
+	now := time.Now()
 	for _, j := range jobs {
 		j.NextRun = s.modules.backupSched.NextRun(j.ID)
+		j.Overdue = j.IsOverdue(now)
 	}
 	httpx.JSON(w, http.StatusOK, jobs)
+	return nil
+}
+
+func (s *Server) handleBackupResources(w http.ResponseWriter, r *http.Request) error {
+	jobs, err := s.modules.backupStore.List(r.Context())
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	// Discovery walks the Git roots and asks Docker; a slow host must not
+	// hold the page for longer than it takes to read the answer.
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, s.backupResources(ctx, jobs))
+	return nil
+}
+
+type enabledRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleBackupJobEnabled pauses or resumes a schedule. It is its own route
+// rather than an edit so that pausing a job never re-sends its definition —
+// and so the audit log says "paused" rather than "updated".
+func (s *Server) handleBackupJobEnabled(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	var req enabledRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	job, err := s.modules.backupStore.SetEnabled(r.Context(), id, req.Enabled)
+	if err != nil {
+		return mapBackupError(err)
+	}
+	if err := s.modules.backupSched.Reload(r.Context()); err != nil {
+		s.Log.Warn("backup schedule reload failed", "err", err)
+	}
+	job.NextRun = s.modules.backupSched.NextRun(id)
+	action := "backup.job.pause"
+	if req.Enabled {
+		action = "backup.job.resume"
+	}
+	httpx.SetAudit(r, action, job.Name, nil)
+	httpx.JSON(w, http.StatusOK, job)
+	return nil
+}
+
+// handleBackupDownload streams one run's verified artifact to the browser.
+// A remote artifact is fetched into private staging first, so the checksum
+// is proven before a byte leaves — the same path a restore takes.
+func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) error {
+	runID, err := strconv.ParseInt(chi.URLParam(r, "runID"), 10, 64)
+	if err != nil || runID <= 0 {
+		return httpx.BadRequest("invalid run id")
+	}
+	ctx, cancel := timeoutCtx(r, 6*time.Hour)
+	defer cancel()
+	run, path, cleanup, err := s.modules.backupRunner.OpenArtifact(ctx, runID)
+	if err != nil {
+		return mapBackupError(err)
+	}
+	defer cleanup()
+	f, err := os.Open(path)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "backup.download", strconv.FormatInt(runID, 10), map[string]any{"artifact": run.Artifact, "bytes": st.Size()})
+	name := filepath.Base(run.Artifact)
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	http.ServeContent(w, r, name, st.ModTime(), f)
 	return nil
 }
 
@@ -126,9 +221,7 @@ func (s *Server) handleBackupJobGet(w http.ResponseWriter, r *http.Request) erro
 		return mapBackupError(err)
 	}
 	job.NextRun = s.modules.backupSched.NextRun(id)
-	if last, err := s.modules.backupStore.LastRun(r.Context(), id); err == nil {
-		job.LastRun = last
-	}
+	job.Overdue = job.IsOverdue(time.Now())
 	httpx.JSON(w, http.StatusOK, job)
 	return nil
 }
@@ -289,7 +382,16 @@ func (s *Server) handleBackupContents(w http.ResponseWriter, r *http.Request) er
 
 type restoreRequest struct {
 	Destination string `json:"destination"`
+	// InPlace writes every recorded source back over the path it came from.
+	// The typed phrase is then the literal words, because there is no single
+	// destination to read back.
+	InPlace bool `json:"inPlace"`
+	// Paths narrows the restore to these archive entries and what is under
+	// them — one file, one directory — rather than the whole run.
+	Paths []string `json:"paths"`
 }
+
+const restoreInPlacePhrase = "restore in place"
 
 type restoreDatabaseRequest struct {
 	ConnectionID int64  `json:"connectionId"`
@@ -348,6 +450,24 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) err
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	opts := backups.RestoreOptions{Paths: req.Paths}
+	if req.InPlace {
+		if err := httpx.RequireTypedConfirmation(w, r, restoreInPlacePhrase); err != nil {
+			return err
+		}
+		ctx, cancel := timeoutCtx(r, 6*time.Hour)
+		defer cancel()
+		res, err := s.modules.backupRunner.RestoreInPlace(ctx, runID, opts)
+		if err != nil {
+			httpx.SetAudit(r, "backup.restore", strconv.FormatInt(runID, 10),
+				map[string]any{"inPlace": true, "paths": len(req.Paths), "error": err.Error()})
+			return mapBackupError(err)
+		}
+		httpx.SetAudit(r, "backup.restore", strconv.FormatInt(runID, 10),
+			map[string]any{"inPlace": true, "targets": res.Targets, "paths": len(req.Paths), "entries": res.Entries, "bytes": res.Bytes})
+		httpx.JSON(w, http.StatusOK, res)
+		return nil
+	}
 	if req.Destination == "" {
 		return httpx.BadRequest("destination is required")
 	}
@@ -366,14 +486,14 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) err
 	}
 	ctx, cancel := timeoutCtx(r, 6*time.Hour)
 	defer cancel()
-	res, err := s.modules.backupRunner.Restore(ctx, runID, dest)
+	res, err := s.modules.backupRunner.Restore(ctx, runID, dest, opts)
 	if err != nil {
 		httpx.SetAudit(r, "backup.restore", strconv.FormatInt(runID, 10),
-			map[string]any{"destination": req.Destination, "error": err.Error()})
+			map[string]any{"destination": req.Destination, "paths": len(req.Paths), "error": err.Error()})
 		return mapBackupError(err)
 	}
 	httpx.SetAudit(r, "backup.restore", strconv.FormatInt(runID, 10),
-		map[string]any{"destination": res.Destination, "entries": res.Entries, "bytes": res.Bytes})
+		map[string]any{"destination": res.Destination, "paths": len(req.Paths), "entries": res.Entries, "bytes": res.Bytes})
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }

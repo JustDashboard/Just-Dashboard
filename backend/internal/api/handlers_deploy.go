@@ -24,8 +24,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 	r.Route("/deploy", func(r chi.Router) {
 		s.mountBlueprintRoutes(r)
 		s.mountGameRoutes(r)
+		s.mountGitHubAppRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
+			r.Method(http.MethodGet, "/drafts", s.handle(s.handleDeploymentDraftList))
 			r.Method(http.MethodGet, "/drafts/{draft}", s.handle(s.handleDeploymentDraftGet))
 			r.Method(http.MethodPut, "/drafts/{draft}", s.handle(s.handleDeploymentDraftSave))
 			r.Method(http.MethodPost, "/drafts/{draft}/detect", s.handle(s.handleDeploymentDraftDetect))
@@ -76,6 +78,11 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
 				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
+				r.Method(http.MethodPost, "/{id}/unarchive", s.handle(s.handleDeploymentUnarchive))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/releases/{release}/pin", s.handle(s.handleDeploymentReleasePin))
+				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/reject", s.handle(s.handleDeploymentPreviewReject))
+				r.Method(http.MethodGet, "/{id}/environments/{env}/triggers/{trigger}/deliveries", s.handle(s.handleDeploymentTriggerDeliveries))
+				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers/{trigger}/rotate-secret", s.handle(s.handleDeploymentTriggerRotateSecret))
 				r.Method(http.MethodGet, "/{id}/environments/{env}/variables/{name}/reveal", s.handle(s.handleDeploymentVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariableDelete))
@@ -83,9 +90,15 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/generate", s.handle(s.handleDeploymentVariableGenerate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/rotate", s.handle(s.handleDeploymentVariableRotate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/source", s.handle(s.handleDeploymentSourceUpdate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
+				r.Method(http.MethodPost, "/{id}/duplicate", s.handle(s.handleDeploymentDuplicate))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
+				r.Method(http.MethodGet, "/credentials", s.handle(s.handleDeploymentCredentials))
+				r.Method(http.MethodPost, "/credentials", s.handle(s.handleDeploymentCredentialCreate))
+				r.Method(http.MethodPut, "/credentials/{id}", s.handle(s.handleDeploymentCredentialUpdate))
+				r.Method(http.MethodPost, "/credentials/{id}/test", s.handle(s.handleDeploymentCredentialTest))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggerCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/triggers/{trigger}", s.handle(s.handleDeploymentTriggerUpdate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers/{trigger}/test", s.handle(s.handleDeploymentTriggerTest))
@@ -115,6 +128,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/remove-managed", s.handle(s.handleDeploymentRemoveManaged))
 			r.Method(http.MethodPost, "/{id}/rollback", s.handle(s.handleDeployRollback))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback", s.handle(s.handleDeploymentReleaseRollback))
+			// A saved credential is routine and recoverable exactly like a
+			// saved DNS-provider credential: destructive, but never a typed
+			// phrase, since the secret is pasted again in a minute.
+			r.Method(http.MethodDelete, "/credentials/{id}", s.handle(s.handleDeploymentCredentialDelete))
 		})
 	})
 }
@@ -129,6 +146,10 @@ func mapDeployError(err error) error {
 		return httpx.ErrNotFound
 	case errors.Is(err, deploy.ErrAlreadyDeploying):
 		return httpx.Err(http.StatusConflict, "already_running", err.Error())
+	case errors.Is(err, deploy.ErrAlreadyStopped):
+		return httpx.Err(http.StatusConflict, "already_stopped", err.Error())
+	case errors.Is(err, deploy.ErrNotStopped):
+		return httpx.Err(http.StatusConflict, "not_stopped", err.Error())
 	case errors.Is(err, deploy.ErrDisabled):
 		return httpx.Err(http.StatusForbidden, "hook_disabled", err.Error())
 	case errors.Is(err, deploy.ErrBadSignature):
@@ -149,6 +170,16 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusConflict, "run_not_retryable", err.Error())
 	case errors.Is(err, deploy.ErrInvalidPlan), errors.Is(err, deploy.ErrArtifactMissing):
 		return httpx.Err(http.StatusUnprocessableEntity, "invalid_release", err.Error())
+	case errors.Is(err, deploy.ErrNameTaken):
+		return httpx.Err(http.StatusConflict, "name_taken", err.Error())
+	case errors.Is(err, deploy.ErrProjectArchived):
+		return httpx.Err(http.StatusConflict, "project_archived", err.Error())
+	case errors.Is(err, deploy.ErrRefNotApplicable):
+		return httpx.Err(http.StatusBadRequest, "ref_not_applicable", err.Error())
+	case errors.Is(err, deploy.ErrRefNotFound):
+		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.Is(err, deploy.ErrSourceUnavailable):
+		return httpx.Err(http.StatusBadGateway, "source_unavailable", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}
@@ -264,14 +295,79 @@ func (s *Server) handleDeployCreate(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
+// deployProjectUpdateRequest distinguishes an omitted field from an explicit
+// zero value, which deployProjectRequest cannot: every field there decodes to
+// "" or false when the client leaves it out. PUT /deploy/{id} needs that
+// distinction so a `{"name": "..."}` body renames a normalized project
+// without blanking the legacy fields a full legacy body replaces.
+type deployProjectUpdateRequest struct {
+	Name        *string `json:"name"`
+	RepoPath    *string `json:"repoPath"`
+	Branch      *string `json:"branch"`
+	ComposeFile *string `json:"composeFile"`
+	PreCommand  *string `json:"preCommand"`
+	PostCommand *string `json:"postCommand"`
+	Enabled     *bool   `json:"enabled"`
+}
+
+// renameOnly reports whether the body named only "name", which is the one
+// partial shape this route accepts. Anything else — full or partial in some
+// other combination — goes through the legacy full-replace path, unchanged.
+func (req *deployProjectUpdateRequest) renameOnly() (string, bool) {
+	if req.Name == nil || req.RepoPath != nil || req.Branch != nil || req.ComposeFile != nil ||
+		req.PreCommand != nil || req.PostCommand != nil || req.Enabled != nil {
+		return "", false
+	}
+	return *req.Name, true
+}
+
+// toProject reproduces deployProjectRequest.toProject's zero-value defaulting
+// for every field the body left out, so a full legacy body behaves exactly as
+// it did before this type existed.
+func (req *deployProjectUpdateRequest) toProject() *deploy.Project {
+	p := &deploy.Project{}
+	if req.Name != nil {
+		p.Name = *req.Name
+	}
+	if req.RepoPath != nil {
+		p.RepoPath = *req.RepoPath
+	}
+	if req.Branch != nil {
+		p.Branch = *req.Branch
+	}
+	if req.ComposeFile != nil {
+		p.ComposeFile = *req.ComposeFile
+	}
+	if req.PreCommand != nil {
+		p.PreCommand = *req.PreCommand
+	}
+	if req.PostCommand != nil {
+		p.PostCommand = *req.PostCommand
+	}
+	if req.Enabled != nil {
+		p.Enabled = *req.Enabled
+	}
+	return p
+}
+
 func (s *Server) handleDeployUpdate(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	var req deployProjectRequest
+	var req deployProjectUpdateRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
+	}
+	if name, ok := req.renameOnly(); ok {
+		project, err := s.modules.deployStore.Rename(r.Context(), id, name)
+		if err != nil {
+			return mapDeployError(err)
+		}
+		s.enrichProject(r, project)
+		httpx.SetAudit(r, "deploy.project.update", project.Name, req)
+		httpx.JSON(w, http.StatusOK, project)
+		return nil
 	}
 	project, err := s.modules.deployStore.Update(r.Context(), id, req.toProject())
 	if err != nil {
@@ -296,7 +392,7 @@ func (s *Server) handleDeployDelete(w http.ResponseWriter, r *http.Request) erro
 	// are the same safe archive as POST /archive. Runtime and data are removed
 	// only by the separately previewed remove-managed operation.
 	httpx.SetAudit(r, "deploy.archive", project.Name, map[string]any{
-		"deploymentId": id, "legacyMethod": true, "resourcesRemoved": false,
+		"deploymentId": id, "legacyMethod": true, "resourcesRemoved": false, "schedulesDisabled": true,
 	})
 	httpx.NoContent(w)
 	return nil
@@ -399,7 +495,33 @@ func (s *Server) handleDeployRuns(w http.ResponseWriter, r *http.Request) error 
 	}
 	limit := atoiDefault(r.URL.Query().Get("limit"), 30)
 	if r.URL.Query().Get("view") == "engine" {
-		runs, err := s.modules.deployRuns.ProjectRuns(r.Context(), id, limit)
+		query := r.URL.Query()
+		filter := deploy.RunListFilter{Limit: limit}
+		if raw := query.Get("environment"); raw != "" {
+			filter.Environment, err = strconv.ParseInt(raw, 10, 64)
+			if err != nil || filter.Environment <= 0 {
+				return httpx.BadRequest("environment must be a positive integer")
+			}
+		}
+		if raw := query.Get("operation"); raw != "" {
+			if !deploy.ValidOperation(deploy.Operation(raw)) {
+				return httpx.BadRequest("operation must be a supported deployment action")
+			}
+			filter.Operation = deploy.Operation(raw)
+		}
+		if raw := query.Get("state"); raw != "" {
+			if raw != "terminal" && raw != "active" && !deploy.ValidRunState(deploy.RunState(raw)) {
+				return httpx.BadRequest("state must be a run state, \"terminal\" or \"active\"")
+			}
+			filter.State = raw
+		}
+		if raw := query.Get("before"); raw != "" {
+			filter.Before, err = strconv.ParseInt(raw, 10, 64)
+			if err != nil || filter.Before <= 0 {
+				return httpx.BadRequest("before must be a positive run id")
+			}
+		}
+		runs, nextBefore, err := s.modules.deployRuns.ProjectRunsFiltered(r.Context(), id, filter)
 		if err != nil {
 			return httpx.Internal(err)
 		}
@@ -407,7 +529,11 @@ func (s *Server) handleDeployRuns(w http.ResponseWriter, r *http.Request) error 
 		if activeErr != nil {
 			return httpx.Internal(activeErr)
 		}
-		httpx.JSON(w, http.StatusOK, map[string]any{"runs": runs, "running": running})
+		body := map[string]any{"runs": runs, "running": running}
+		if nextBefore != 0 {
+			body["nextBefore"] = nextBefore
+		}
+		httpx.JSON(w, http.StatusOK, body)
 		return nil
 	}
 	runs, err := s.modules.deployStore.Runs(r.Context(), id, limit)
@@ -428,6 +554,12 @@ func (s *Server) handleDeployRuns(w http.ResponseWriter, r *http.Request) error 
 type deploymentRunCreateRequest struct {
 	Operation deploy.Operation `json:"operation"`
 	ReleaseID int64            `json:"releaseId,omitempty"`
+	// SourceRevision and Ref target a manual deploy or force_build at a
+	// specific Git commit or branch/tag, instead of the environment's
+	// configured branch head. At most one may be set, and both are refused
+	// for anything but a normalized deploy from a remote Git source.
+	SourceRevision string `json:"sourceRevision,omitempty"`
+	Ref            string `json:"ref,omitempty"`
 }
 
 type deploymentRollbackRequest struct {
@@ -507,9 +639,35 @@ func (s *Server) handleDeploymentRunCreate(w http.ResponseWriter, r *http.Reques
 	// routes and observers. Accepting them here let a service.control
 	// principal run the release path under a lifecycle label.
 	switch req.Operation {
-	case deploy.OperationDeploy, deploy.OperationRedeploy, deploy.OperationRestart, deploy.OperationForceBuild:
+	case deploy.OperationDeploy, deploy.OperationRedeploy, deploy.OperationRestart, deploy.OperationForceBuild,
+		deploy.OperationStop, deploy.OperationStart:
 	default:
 		return httpx.BadRequest("operation %q cannot be requested manually", req.Operation)
+	}
+	p := httpx.MustPrincipal(r)
+	// Stop and restart interrupt the live runtime exactly like
+	// POST /docker/containers/{id}/stop|restart, so they carry the same
+	// destructive capability and shared rate budget on top of the
+	// service.control this whole route otherwise requires; deploy, redeploy,
+	// force_build and start are unaffected. The route can't sit behind
+	// s.destructive wholesale because the answer depends on the request body,
+	// so the handler checks by hand and fails closed — the same shape
+	// handleDBQuery uses once it has classified a statement as destructive.
+	if req.Operation == deploy.OperationStop || req.Operation == deploy.OperationRestart {
+		if !p.Can(auth.CapDestructive) {
+			return httpx.Err(http.StatusForbidden, "forbidden",
+				"your role does not permit this action ("+string(auth.CapDestructive)+")")
+		}
+		if !s.destrLim.Allow(p.Username()) {
+			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+		}
+	}
+	if req.SourceRevision != "" && req.Ref != "" {
+		return httpx.BadRequest("sourceRevision and ref cannot both be set")
+	}
+	if (req.SourceRevision != "" || req.Ref != "") &&
+		req.Operation != deploy.OperationDeploy && req.Operation != deploy.OperationForceBuild {
+		return httpx.BadRequest("sourceRevision and ref are accepted only by deploy and force_build")
 	}
 	project, err := s.modules.deployStore.Get(r.Context(), projectID)
 	if err != nil {
@@ -519,10 +677,14 @@ func (s *Server) handleDeploymentRunCreate(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return mapDeployError(err)
 	}
-	p := httpx.MustPrincipal(r)
+	// Preview environments have their own create/update/remove lifecycle;
+	// stopping or starting their runtime by hand does not fit it.
+	if (req.Operation == deploy.OperationStop || req.Operation == deploy.OperationStart) && target.Kind == deploy.EnvironmentPreview {
+		return httpx.BadRequest("operation %q is not available for a preview environment", req.Operation)
+	}
 	var run *deploy.EngineRun
 	if target.BuildMethod == deploy.BuildLegacyCompose {
-		if req.Operation != deploy.OperationDeploy || req.ReleaseID != 0 {
+		if req.Operation != deploy.OperationDeploy || req.ReleaseID != 0 || req.SourceRevision != "" || req.Ref != "" {
 			return httpx.BadRequest("operation %q is not available for a legacy deployment", req.Operation)
 		}
 		productionID, _, productionErr := s.modules.deployRuns.ProductionEnvironment(r.Context(), projectID)
@@ -538,8 +700,9 @@ func (s *Server) handleDeploymentRunCreate(w http.ResponseWriter, r *http.Reques
 		if req.ReleaseID != 0 {
 			return httpx.BadRequest("releaseId is accepted only by rollback")
 		}
-		run, err = s.enqueueNormalizedDeployment(r.Context(), project, environmentID,
-			req.Operation, 0, deploy.TriggerManual, p.Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")))
+		run, err = s.enqueueNormalizedDeploymentAtSource(r.Context(), project, environmentID,
+			req.Operation, 0, deploy.TriggerManual, p.Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+			nil, req.SourceRevision, req.Ref, 0)
 	}
 	if err != nil {
 		return mapDeployError(err)
@@ -575,7 +738,7 @@ func (s *Server) enqueueNormalizedDeploymentWithMetadata(
 	extraMetadata map[string]any,
 ) (*deploy.EngineRun, error) {
 	return s.enqueueNormalizedDeploymentAtSource(ctx, project, environmentID, operation,
-		targetReleaseID, trigger, actor, idempotencyKey, extraMetadata, "", 0)
+		targetReleaseID, trigger, actor, idempotencyKey, extraMetadata, "", "", 0)
 }
 
 func (s *Server) enqueueNormalizedDeploymentAtSource(
@@ -588,6 +751,7 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	actor, idempotencyKey string,
 	extraMetadata map[string]any,
 	sourceRevision string,
+	requestedRef string,
 	expectedPlanRevision int,
 	expectedGitPolicy ...string,
 ) (*deploy.EngineRun, error) {
@@ -619,6 +783,23 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 		if targetReleaseID == 0 || targetReleaseID != target.LiveReleaseID {
 			return nil, fmt.Errorf("%w: this operation requires the current live release", deploy.ErrInvalidPlan)
 		}
+	case deploy.OperationStop, deploy.OperationStart:
+		if targetReleaseID == 0 {
+			targetReleaseID = target.LiveReleaseID
+		}
+		if targetReleaseID == 0 || targetReleaseID != target.LiveReleaseID {
+			return nil, fmt.Errorf("%w: this operation requires the current live release", deploy.ErrInvalidPlan)
+		}
+		runtime, runtimeErr := s.modules.deployRuns.RuntimeForRelease(ctx, targetReleaseID)
+		if runtimeErr != nil {
+			return nil, runtimeErr
+		}
+		if operation == deploy.OperationStop && runtime.State == "stopped" {
+			return nil, deploy.ErrAlreadyStopped
+		}
+		if operation == deploy.OperationStart && runtime.State != "stopped" {
+			return nil, deploy.ErrNotStopped
+		}
 	case deploy.OperationRollback:
 		if targetReleaseID <= 0 || targetReleaseID == target.LiveReleaseID {
 			return nil, fmt.Errorf("%w: rollback requires a retained, non-live release", deploy.ErrInvalidPlan)
@@ -637,7 +818,8 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 		if operation == deploy.OperationRollback && selected.Release.State != "retained" {
 			return nil, fmt.Errorf("%w: rollback target is not retained", deploy.ErrInvalidPlan)
 		}
-		if (operation == deploy.OperationRedeploy || operation == deploy.OperationRestart) && selected.Release.State != "live" {
+		if (operation == deploy.OperationRedeploy || operation == deploy.OperationRestart ||
+			operation == deploy.OperationStop || operation == deploy.OperationStart) && selected.Release.State != "live" {
 			return nil, fmt.Errorf("%w: operation target is no longer live", deploy.ErrInvalidPlan)
 		}
 		planRevision = selected.Release.PlanRevision
@@ -647,10 +829,29 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	if err != nil {
 		return nil, err
 	}
+	// A manual sourceRevision/ref override only makes sense against a remote
+	// Git source: an image, Compose, blueprint or import project has no ref to
+	// resolve, and neither does a local Git checkout (nothing to fetch it
+	// from). Every other caller of this function — the git watcher, provider
+	// hooks, preview approvals — passes its own pre-resolved sourceRevision
+	// under a non-manual trigger, so this refusal never reaches them.
+	manualOverride := trigger == deploy.TriggerManual && (sourceRevision != "" || requestedRef != "")
+	if manualOverride && !(source.Kind == deploy.SourceGit && deploy.IsRemoteGitSource(source)) {
+		return nil, deploy.ErrRefNotApplicable
+	}
 	if deploy.IsRemoteGitSource(source) {
-		if selected != nil {
+		switch {
+		case selected != nil:
 			sourceRevision = selected.Release.SourceRevision
-		} else if sourceRevision == "" && operation != deploy.OperationPreviewRemove {
+		case sourceRevision != "":
+			// An explicit object id from the caller — normalizeRunRequest
+			// validates its shape; nothing to resolve here.
+		case requestedRef != "":
+			sourceRevision, err = s.modules.deploySources.ResolveGitRef(ctx, source, requestedRef)
+			if err != nil {
+				return nil, err
+			}
+		case operation != deploy.OperationPreviewRemove:
 			if target.Kind == deploy.EnvironmentPreview {
 				sourceRevision, err = s.modules.deployAutomation.ApprovedPreviewRevision(ctx, environmentID, planRevision)
 			} else {
@@ -665,6 +866,12 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	}
 	metadataValues := map[string]any{
 		"compatibility": false, "targetReleaseId": targetReleaseID, "changedPaths": []string{},
+	}
+	if manualOverride {
+		metadataValues["requestedRevision"] = sourceRevision
+		if requestedRef != "" {
+			metadataValues["requestedRef"] = requestedRef
+		}
 	}
 	for key, value := range extraMetadata {
 		metadataValues[key] = value
@@ -684,11 +891,16 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 			deploy.StepActivate, deploy.StepRetirePrevious, deploy.StepRecordRelease,
 			deploy.StepNotify,
 		}
-	case deploy.OperationRestart:
+	case deploy.OperationRestart, deploy.OperationStart:
+		// Start verifies readiness/smoke against the live release exactly as
+		// restart does, so a start that comes up broken is still reported.
 		steps = []deploy.StepKey{
 			deploy.StepStartCandidate, deploy.StepVerifyReadiness, deploy.StepVerifySmoke,
 			deploy.StepRecordRelease, deploy.StepNotify,
 		}
+		slot = deploy.SlotLight
+	case deploy.OperationStop:
+		steps = []deploy.StepKey{deploy.StepStartCandidate, deploy.StepRecordRelease, deploy.StepNotify}
 		slot = deploy.SlotLight
 	case deploy.OperationPreviewRemove:
 		steps = []deploy.StepKey{deploy.StepRetirePrevious, deploy.StepNotify}

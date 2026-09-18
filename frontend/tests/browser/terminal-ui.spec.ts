@@ -227,23 +227,28 @@ test("names windows after their work and remembers where you were", async ({ pag
   await expect(rowA).toContainText("claude")
   await expect(tabA).not.toHaveAttribute("data-working", "true")
   await expect(rowA).not.toHaveAttribute("data-working", "true")
-  // It names itself and starts working: the title wins over the process, and
-  // the tab and the row are marked.
+  // It names itself and starts working: the title wins over the process, the
+  // glyph the agent spins in front of its name is dropped — the mark says
+  // that — and the tab and the row are marked.
   state({ busy: true, process: "claude", title: "✳ Claude Code", working: true })
   // The mark's label joins the button's accessible name, which is what a
   // screen reader should hear.
-  await expect(
-    tabA.getByRole("button", { name: "Working ✳ Claude Code", exact: true }),
-  ).toBeVisible()
+  await expect(tabA.getByRole("button", { name: "Working Claude Code", exact: true })).toBeVisible()
+  await expect(tabA).not.toContainText("✳")
+  await expect(rowA).toContainText("Claude Code")
+  await expect(rowA).not.toContainText("✳")
   await expect(tabA).toHaveAttribute("data-working", "true")
   await expect(rowA).toHaveAttribute("data-working", "true")
   await expect(tabA.getByRole("img", { name: "Working" })).toBeVisible()
-  // It stops: the finish is marked on the tab and the row.
+  // It stops: the finish is marked on the tab and the row, and the tab does
+  // not change width as the dot becomes a check.
+  const workingWidth = (await tabA.boundingBox())!.width
   state({ busy: true, process: "claude", title: "✳ Claude Code", finishedAt: Date.now() })
   await expect(tabA).not.toHaveAttribute("data-working", "true")
   await expect(tabA).toHaveAttribute("data-finished", "true")
   await expect(rowA).toHaveAttribute("data-finished", "true")
   await expect(tabA.getByRole("img", { name: "Finished" })).toBeVisible()
+  expect((await tabA.boundingBox())!.width).toBe(workingWidth)
   // Back at the prompt, which titles the window after its directory.
   state({ busy: false, title: "~" })
   await expect(tabA).not.toHaveAttribute("data-busy", "true")

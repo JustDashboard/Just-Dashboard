@@ -69,7 +69,7 @@
   opacity and were the tallest thing on screen.
 
 Panel headers carry no icon plot. A tinted square in front of every title is chrome repeated once per
-panel, and on a page that is eight stacked panels it reads as a column of orange marks rather than as
+panel, and on a page that is eight stacked panels it reads as a column of brand marks rather than as
 eight headings. It started here and now holds product-wide — the prop is gone from `PanelHeader`,
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
@@ -130,8 +130,8 @@ under them (`AreaFindings`, plain), then the detail as plain tables that bleed t
 overview opens on how this browser reaches the panel — the exposure grade, the allowlist, the tunnel
 interfaces and **the address you arrived from** (`Exposure.client`) as a row of facts — then five
 tiles, one per area with a figure, each a `StatLink` to its page, and the whole posture as one findings
-list. There is no second list of the areas: the section strip already names every page, and the tiles
-carry the verdicts that used to sit beside seven links. The rules it follows are the ones the
+list. There is no second list of the areas: the rail's Security panel already names every page, and the
+tiles carry the verdicts that used to sit beside seven links. The rules it follows are the ones the
 [design system](design-system.md) states, plus four of its own:
 
 - **An address is the same thing on every page.** A remote peer on Connections, a repeat offender in
@@ -174,7 +174,7 @@ a concept on every single-package install while protecting against an interrupti
 The command each button runs is its `title`. `package-sheet.tsx`'s second tab is the whole point of the
 feature; the installed table caps at 400 rendered rows with the count said plainly underneath. The page
 is drawn per design-system §15: the search is a plain panel of hand-laid rows (`ROW_BLEED`) whose
-install verb is an outline button — sixty orange faces in a result list would be sixty commands — and
+install verb is an outline button — sixty brand faces in a result list would be sixty commands — and
 a started install is a `Status`, not a disabled button; the sheet's usage sections open with an eyebrow
 alone, and its copyable commands sit on the control ground.
 
@@ -191,9 +191,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. A row
   is one line — the session's label and, at the end, the activity mark (below). Rows carry no terminal
   glyph (every row is a terminal) and no directory line under the title (the label carries the
-  directory at a prompt). Rows are separated by hairlines and each list is fenced top and bottom, so
-  ten sessions read as ten rows rather than a column of words; the active one is `bg-accent` with the
-  brand bar on its left edge, the same mark the section tabs use for "where you are". The filter box
+  directory at a prompt). Rows are plain rounded rows with no fence or divider between them; the
+  active one is `bg-accent` and the others take the row hover, and that is the whole difference —
+  no brand bar or other colour on the active row. The filter box
   appears only once there are more than five sessions — a filter over one session is a box with
   nothing to do. Folder headers are plain disclosure rows: chevron and explanatory name only, with no
   folder icon, count, nested container or empty invitation. Pinning still sorts a session to the top
@@ -201,7 +201,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - **Names follow the shell.** An unnamed session or window is "Terminal" (numbered from 2 when that is
   taken), and that default is only a fallback. A tab is labelled the way a desktop terminal's title
   bar is: the title the foreground program set through OSC 0/2, the program's name when it set none,
-  and the directory at a prompt (the bundled prompts set that title). A session is labelled after its
+  and the directory at a prompt (the bundled prompts set that title). The glyph an agent animates in
+  front of its title — Claude Code's asterisk, Codex's half-moon — is dropped from the label
+  (`plainTitle`): saying "working" is the activity mark's job, and a label that carried both said it
+  twice. A session is labelled after its
   *current* window — the one last on screen in any browser (the pane sends a `focus` frame), or
   failing that the newest. A name the operator typed, for a session or a window, is shown as typed
   (`named` in the API), so renaming still works as it did. `lib/terminal-activity.ts` holds the rule
@@ -212,7 +215,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).
 - **The activity mark** (`activity-mark.tsx`) says what is happening in a window, and it is the
   product's own vocabulary rather than a spinner: a breathing `StatusDot` — "this is live" — while the
-  window is *working*, and a check once it has finished. Working is the server's word for "output has
+  window is *working*, and a check once it has finished. It is drawn on every window tab and, for
+  the session, on its row in the rail. The mark's box is one fixed size whatever it holds and is
+  present even when empty, so a tab sized to its label does not grow and shrink as a dot becomes a
+  check or a mark appears. Working is the server's word for "output has
   been arriving for a second and still is, or the job is burning CPU": an agent streaming an answer,
   a build, a test run. A program that is merely open — an editor, Claude Code or Codex waiting for
   the next message — holds the terminal and gets no mark, because nothing is happening; that is
@@ -230,9 +236,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
   toggles: sessions on the left and Files/Git on the right. The strip is embedded in the emulator's own
   title bar; there is no separate workspace bar or working-directory/shell title.
-  A tab is its label, with the activity mark in front of it while the window is working or has just
-  finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the way a
-  browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
+  A tab is its label with the activity mark's slot in front of it, lit while the window is working or
+  has just finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
+  way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
   layout or colour actions. Closing the last window closes its session through the session endpoint.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.

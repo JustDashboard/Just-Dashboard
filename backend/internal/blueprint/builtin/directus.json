@@ -1,0 +1,143 @@
+{
+  "id": "directus",
+  "version": "1.0.0",
+  "name": "Directus",
+  "category": "http",
+  "profile": "web",
+  "description": "A headless CMS and data platform over a database, with a full admin app and REST and GraphQL APIs. Runs on SQLite here; link a PostgreSQL database later for anything larger.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.directus.io/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "BUSL-1.1",
+    "upstreamUrl": "https://github.com/directus/directus",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "directus/directus:12.3.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Public links and the admin app's own URL."
+    },
+    {
+      "name": "admin-email",
+      "kind": "text",
+      "label": "Admin e-mail",
+      "variable": "ADMIN_EMAIL",
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "description": "The first administrator's sign-in."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8055,
+      "protocol": "tcp",
+      "purpose": "The admin app and APIs",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "database",
+      "target": "/directus/database",
+      "purpose": "The SQLite database",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "uploads",
+      "target": "/directus/uploads",
+      "purpose": "Uploaded files",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "extensions",
+      "target": "/directus/extensions",
+      "purpose": "Installed extensions",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Ping answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/server/ping",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "PUBLIC_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "DB_CLIENT",
+        "value": "sqlite3"
+      },
+      {
+        "kind": "set_variable",
+        "name": "DB_FILENAME",
+        "value": "/directus/database/data.db"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Reviewed under the Business Source License: free for most uses, with a revenue threshold for production use. Directus migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "cms.example.test",
+        "admin-email": "admin@example.com"
+      },
+      "digest": "sha256:e6107e962f1746cc15e333783a0f2763d17309b7a8e2d5040fc726045c5972cf"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "secret",
+      "variable": "SECRET",
+      "label": "Application secret",
+      "length": 48
+    },
+    {
+      "name": "admin-password",
+      "variable": "ADMIN_PASSWORD",
+      "label": "Admin password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in the first time."
+    }
+  ]
+}

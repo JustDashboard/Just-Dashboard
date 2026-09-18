@@ -2,9 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Logout } from "@/components/icons"
+import { CloudUpload, Logout, Plus } from "@/components/icons"
+import { get } from "@/lib/api"
+import type { DeploymentFleet } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { NAV, PERSONAL_NAV } from "@/components/app-sidebar"
+import { usePoll } from "@/hooks/use-poll"
+import { NAV, PERSONAL_NAV } from "@/components/nav"
 import { PaletteModal } from "@/components/modal"
 import {
   Command,
@@ -67,6 +70,16 @@ export function useCommandPalette() {
 function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const router = useRouter()
   const { can, logout } = useAuth()
+  // Projects are the one destination the nav cannot list ahead of time. Read
+  // when the palette opens, not before: a closed palette has no business
+  // polling the fleet.
+  const fleet = usePoll(
+    (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
+    0,
+    [],
+    { enabled: open },
+  )
+  const projects = fleet.data?.deployments ?? []
 
   const run = useCallback(
     (action: () => void) => {
@@ -128,26 +141,52 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
             )
           })}
 
+          {(projects.length > 0 || can("system.admin")) && (
+            <CommandGroup heading="Projects">
+              {projects.map((project) => (
+                <CommandItem
+                  key={project.id}
+                  value={`project ${project.name} ${project.endpoint ?? ""}`}
+                  onSelect={() => run(() => router.push(`/deploy/${project.id}`))}
+                >
+                  <CloudUpload className="size-4" />
+                  {project.name}
+                  {project.endpoint && (
+                    <span className="truncate text-muted-foreground">
+                      {project.endpoint.replace(/^https?:\/\//, "")}
+                    </span>
+                  )}
+                </CommandItem>
+              ))}
+              {can("system.admin") && (
+                <CommandItem
+                  value="project new deploy create"
+                  onSelect={() => run(() => router.push("/deploy/new"))}
+                >
+                  <Plus className="size-4" />
+                  New project
+                </CommandItem>
+              )}
+            </CommandGroup>
+          )}
+
           <CommandSeparator />
           <CommandGroup heading="Account">
-            {PERSONAL_NAV.filter((item) => !item.capability || can(item.capability)).map(
-              (item) => (
-                <CommandItem
-                  key={item.href}
-                  value={`account ${item.title}`}
-                  onSelect={() => run(() => router.push(item.href))}
-                >
-                  <item.icon className="size-4" />
-                  {item.title}
-                </CommandItem>
-              ),
-            )}
+            {PERSONAL_NAV.filter((item) => !item.capability || can(item.capability)).map((item) => (
+              <CommandItem
+                key={item.href}
+                value={`account ${item.title}`}
+                onSelect={() => run(() => router.push(item.href))}
+              >
+                <item.icon className="size-4" />
+                {item.title}
+              </CommandItem>
+            ))}
             <CommandItem value="sign out logout" onSelect={() => run(() => void logout())}>
               <Logout className="size-4" />
               Sign out
             </CommandItem>
           </CommandGroup>
-
         </CommandList>
       </Command>
     </PaletteModal>

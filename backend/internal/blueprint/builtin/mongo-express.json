@@ -1,0 +1,111 @@
+{
+  "id": "mongo-express",
+  "version": "1.0.0",
+  "name": "Mongo Express",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A web administration interface for MongoDB. Give it the connection string of the database it should manage, and a password of its own.",
+  "iconId": "database",
+  "docsUrl": "https://github.com/mongo-express/mongo-express#readme",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/mongo-express/mongo-express",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "mongo-express:1.0.2-20-alpine3.19",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "mongodb-url",
+      "kind": "text",
+      "label": "MongoDB connection string",
+      "variable": "ME_CONFIG_MONGODB_URL",
+      "required": true,
+      "pattern": "^mongodb(\\+srv)?://.{1,512}$",
+      "description": "The database's own connection string, for example from the MongoDB blueprint's Variables tab."
+    },
+    {
+      "name": "admin-user",
+      "kind": "text",
+      "label": "Sign-in user",
+      "variable": "ME_CONFIG_BASICAUTH_USERNAME",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8081,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Server listens",
+      "kind": "tcp",
+      "phase": "readiness",
+      "required": true,
+      "timeoutSeconds": 60,
+      "port": "http"
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "ME_CONFIG_BASICAUTH",
+        "value": "true"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "mongodb-url": "mongodb://db-1.jd.internal:27017/app"
+      },
+      "digest": "sha256:df9c877808a952c8ef8de85b0250f855aca77779d5d8a045a69a7fd6c51c9bba"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "ME_CONFIG_BASICAUTH_PASSWORD",
+      "label": "Sign-in password",
+      "length": 24
+    }
+  ]
+}

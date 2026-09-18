@@ -1,8 +1,3 @@
-"use client"
-
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-
 import { cn } from "@/lib/utils"
 
 /**
@@ -25,69 +20,39 @@ import { cn } from "@/lib/utils"
  *
  * These lived under `components/docker/` while Docker was the only section with
  * a switcher inside a panel. Five other sections had since grown one each, so
- * they are here instead and the section strip they all hand-rolled is here too.
+ * they are here instead.
+ *
+ * What is *not* here any more is the strip that switched between the pages of
+ * a section. Six of them existed, one per section layout, and each said the
+ * same thing the sidebar was saying two hundred pixels to the left. The rail
+ * drills into a section now and lists its pages there, so a page is a page:
+ * everything left in this file switches between views of one page, never
+ * between pages.
  */
 
 /**
- * The underlined-tab look, shared by the three things that wear it: the sticky
- * section strip, a tab inside a panel, and the anchor form of that tab. Written
- * once so "which one am I on" is the same mark at every level.
+ * The underlined-tab look, for a switcher between views of the page you are
+ * already on — the log console's live feed against its search, the packages
+ * page's installed against its updates. Written once so "which one am I on" is
+ * the same mark wherever it is asked.
  */
 export function tabClasses(selected: boolean | undefined, height: string) {
   return cn(
-    // 12px, not 13. A section strip is chrome — it names the pages of a section
-    // and then gets out of the way — and at body size it was competing with the
-    // page title directly above it and with the panel titles directly below,
-    // three ranks of text set within two pixels of each other. Dropping a step
-    // puts the strip where it belongs in the ladder: quieter than the content
-    // it switches between, still comfortably above the 11px hint row.
+    // 12px, not 13. A strip of views is chrome — it names them and then gets
+    // out of the way — and at body size it was competing with the page title
+    // above it and with the panel titles below, three ranks of text set within
+    // two pixels of each other. Dropping a step puts the strip where it belongs
+    // in the ladder: quieter than the content it switches between, still
+    // comfortably above the 11px hint row.
     "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap transition-colors",
     height,
     "focus-ring-inset",
-    // The underline is the brand orange: a section tab says where you are,
-    // which is what the hue is for. The label stays ink — it is not a command.
+    // The underline is the brand blue: the tab says which view you are
+    // looking at, which is what the hue is for. The label stays ink — it is not
+    // a command.
     selected
       ? "border-brand text-foreground"
       : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
-  )
-}
-
-export type SectionTab = { title: string; href: string }
-
-/**
- * The strip under the top bar that switches between the pages of one section —
- * Docker's seven, Security's eight, the proxy's six.
- *
- * It existed five times, once per section layout, and had drifted: three of the
- * five had lost the focus ring, two had lost the hover border, and the active
- * rule was written two different ways. The exact-match rule for the section
- * root is the one piece of logic in here, and it was the same copy in all five.
- */
-export function SectionNav({ tabs, root }: { tabs: SectionTab[]; root?: string }) {
-  const pathname = usePathname()
-  const base = root ?? tabs[0]?.href
-
-  return (
-    <div className="sticky top-0 z-10 border-b border-hairline bg-background/85 backdrop-blur-md">
-      <nav
-        aria-label="Section"
-        className="mx-auto flex w-full max-w-[1440px] gap-1 overflow-x-auto px-2 md:px-5"
-      >
-        {tabs.map((tab) => {
-          const active = tab.href === base ? pathname === base : pathname.startsWith(tab.href)
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              aria-current={active ? "page" : undefined}
-              className={tabClasses(active, "h-11")}
-            >
-              {tab.title}
-            </Link>
-          )
-        })}
-      </nav>
-    </div>
   )
 }
 
@@ -121,26 +86,6 @@ export function FilterChip({
           : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
         className,
       )}
-      {...props}
-    />
-  )
-}
-
-/**
- * The section strip at panel height, for the switchers whose tabs are routes
- * but which sit inside a page header rather than under the top bar — the
- * databases section, whose strip has to carry the selected connection in the
- * query string and so cannot use `SectionNav`'s plain hrefs.
- */
-export function TabLink({
-  selected,
-  className,
-  ...props
-}: React.ComponentProps<typeof Link> & { selected?: boolean }) {
-  return (
-    <Link
-      aria-current={selected ? "page" : undefined}
-      className={cn(tabClasses(selected, "h-8"), className)}
       {...props}
     />
   )

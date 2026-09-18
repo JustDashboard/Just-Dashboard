@@ -34,11 +34,15 @@ func gitWatchFixture(t *testing.T) (*releaseStoreFixture, *gitRevisionFake, *Git
 		t.Fatal(err)
 	}
 	resolver := &gitRevisionFake{revision: identity.Revision}
-	watcher := NewGitWatcher(f.runs, resolver, func(ctx context.Context, target GitWatchTarget, revision, key string) (*EngineRun, error) {
+	watcher := NewGitWatcher(f.runs, resolver, func(ctx context.Context, target GitWatchTarget, revision, key string, changedPaths []string) (*EngineRun, error) {
+		metadata := map[string]any{"changedPaths": []string{}}
+		if len(changedPaths) > 0 {
+			metadata["changedPaths"] = changedPaths
+		}
 		run, _, err := f.runs.Enqueue(ctx, RunRequest{ProjectID: target.ProjectID, EnvironmentID: target.EnvironmentID,
 			Operation: OperationDeploy, Trigger: TriggerGitPush, Actor: "git-monitor", IdempotencyKey: key,
 			RequestDigest: fmt.Sprint(target.PlanRevision), PlanRevision: target.PlanRevision,
-			ExpectedPlanRevision: target.PlanRevision, SourceRevision: revision})
+			ExpectedPlanRevision: target.PlanRevision, SourceRevision: revision, Metadata: mustJSON(metadata)})
 		return run, err
 	})
 	return f, resolver, watcher
@@ -191,8 +195,8 @@ func TestGitWatcherRecoversEnqueueBeforeCursorWrite(t *testing.T) {
 	enqueueGitFixture(t, f, strings.Repeat("a", 40), TriggerManual)
 	resolver.revision = strings.Repeat("b", 40)
 	dispatch := watcher.dispatch
-	watcher.dispatch = func(ctx context.Context, target GitWatchTarget, revision, key string) (*EngineRun, error) {
-		run, err := dispatch(ctx, target, revision, key)
+	watcher.dispatch = func(ctx context.Context, target GitWatchTarget, revision, key string, changedPaths []string) (*EngineRun, error) {
+		run, err := dispatch(ctx, target, revision, key, changedPaths)
 		if err != nil {
 			return nil, err
 		}
@@ -229,5 +233,93 @@ func TestResolveGitRevisionOnlyReadsExactBranch(t *testing.T) {
 	source.Ref = "--upload-pack=bad"
 	if _, err := analyzer.ResolveGitRevision(context.Background(), source); err == nil {
 		t.Fatal("accepted an option as a ref")
+	}
+}
+
+// A manual deploy's requested ref/tag needs a different remote observation
+// error split than the configured-branch path: git ls-remote --exit-code
+// exits 2 specifically for "talked to the remote fine, found no such ref",
+// which must become ref_not_found (400) rather than source_unavailable (502).
+func TestResolveGitRefDistinguishesNotFoundFromUnavailable(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"[ \"$1\" = ls-remote ] || exit 1\n" +
+		"case \"$5\" in\n" +
+		"  refs/heads/v1.4.2) printf '%s\\t%s\\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/heads/v1.4.2 ;;\n" +
+		"  refs/heads/missing) exit 2 ;;\n" +
+		"  *) exit 128 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), nil, nil)
+	source := DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://github.com/acme/app.git", Ref: "main"}
+
+	revision, err := analyzer.ResolveGitRef(context.Background(), source, "v1.4.2")
+	if err != nil || revision != strings.Repeat("b", 40) {
+		t.Fatalf("resolved tag = %s, %v", revision, err)
+	}
+	if _, err := analyzer.ResolveGitRef(context.Background(), source, "missing"); !errors.Is(err, ErrRefNotFound) {
+		t.Fatalf("missing ref error = %v, want ErrRefNotFound", err)
+	}
+	if _, err := analyzer.ResolveGitRef(context.Background(), source, "network-down"); !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("unreachable remote error = %v, want ErrSourceUnavailable", err)
+	}
+}
+
+// While the live runtime is stopped, an observed branch change is recorded
+// but never dispatched. Starting the runtime back up does not retroactively
+// deploy the commit that was already observed and suppressed — the same
+// caching behaviour an ignored watch path already relies on — but a further
+// branch change is eligible again.
+func TestGitWatcherSuppressesAutomaticDeploymentWhileTheLiveRuntimeIsStopped(t *testing.T) {
+	f, resolver, watcher := gitWatchFixture(t)
+	ctx := context.Background()
+	run, lease := f.claimedRun(t, 1)
+	release := f.candidate(t, *run, lease, fakeContentDigest("git-watch-stop"))
+	if _, err := f.base.DB.Exec(`
+		INSERT INTO deploy_release_runtimes(
+		  release_id, environment_id, kind, runtime_id, name, working_directory,
+		  host, port, state, metadata_json, created_at, updated_at)
+		VALUES(?, ?, 'container', 'git-watch-runtime', '', '', '127.0.0.1', 31999, 'live', '{}', ?, ?)`,
+		release.Release.ID, f.envID, f.now.Unix(), f.now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	f.finishCandidate(t, release.Release.ID, run.ID, lease.Token)
+	if _, err := f.base.DB.Exec(
+		`UPDATE deploy_release_runtimes SET state='stopped' WHERE release_id=?`, release.Release.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver.revision = strings.Repeat("b", 40)
+	if err := watcher.poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertGitRunCount(t, f, 1)
+	status, err := f.runs.GitWatchStatus(ctx, f.projectID, f.envID)
+	if err != nil || status.Reason != "stopped" || status.Revision != resolver.revision {
+		t.Fatalf("status while stopped = %+v, err = %v", status, err)
+	}
+
+	if _, err := f.base.DB.Exec(
+		`UPDATE deploy_release_runtimes SET state='live' WHERE release_id=?`, release.Release.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := watcher.poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertGitRunCount(t, f, 1)
+
+	resolver.revision = strings.Repeat("c", 40)
+	if err := watcher.poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertGitRunCount(t, f, 2)
+	status, err = f.runs.GitWatchStatus(ctx, f.projectID, f.envID)
+	if err != nil || status.Status != "watching" || status.Revision != resolver.revision {
+		t.Fatalf("status after restart = %+v, err = %v", status, err)
 	}
 }

@@ -75,8 +75,16 @@ job/run IDs plus randomness. Artifact creation and publication refuse collisions
 an existing archive.
 
 `internal/backups` stores job definitions and run history in SQLite. A job has source paths, exclusion
-globs, a local/S3/Backblaze-B2 destination, a five-field cron schedule, an enabled flag, and a retention
-count. Displayable target configuration is separate from access keys; credentials are sealed by
+globs, a local/S3/Backblaze-B2 destination, a five-field cron schedule (validated by `Job.Validate`, so no
+caller can store an expression that never fires), an enabled flag, a retention count, a retention age in
+days (`retention_days`, additive), and the containers to pause for the archive step (`pause_containers`,
+additive; names are trimmed and refused when option-shaped). `POST /backups/{id}/enabled` pauses or
+resumes the schedule alone — audited as `backup.job.pause`/`backup.job.resume`, and never re-sending the
+definition or touching sealed keys. The list and single-job reads carry the figures the page draws:
+`stored` (retained successful artifacts and their bytes), `lastSuccessAt`, and `overdue`, which
+`Job.IsOverdue` sets when an enabled, scheduled job has gone two schedule intervals
+(`ScheduleInterval`) without a successful run — one missed firing is a transient, two is a job nobody
+would notice had stopped. Displayable target configuration is separate from access keys; credentials are sealed by
 `auth.Sealer` and never returned by the API. The target-test route checks local writability or object-store
 bucket access before the operator depends on a schedule.
 
@@ -84,7 +92,15 @@ bucket access before the operator depends on a schedule.
 and scheduled runs share `Runner.Execute`; a per-job running set prevents overlap. Execution records a run,
 streams a gzip-compressed tar archive to a `0600` staging file, fails on unreadable or changing files,
 applies exclusions to both full paths and basenames, then moves locally or uploads through the
-AWS S3 multipart client. B2 uses the same client with its endpoint and path-style addressing. Run logs are
+AWS S3 multipart client. A source may contain the staging directory only when an exclusion covers it —
+the dashboard's own data directory is the one source where that is legitimate, and the suggested job
+excludes `staging` and `deployment-workspaces`. Database dumps are taken first, while the engines can
+still answer; then the job's containers are paused through `ContainerPauser` (the Docker owner's
+`Lifecycle` pause/unpause, wired in `modules.go`) for exactly the filesystem walk, and resumed with a
+context that cannot be cancelled, whatever the walk did. A stopped container needs no pause and is
+logged as skipped; one already paused is left paused; any other refusal fails the run before a byte is
+archived, and a job naming containers with no Docker owner fails with `ErrPauseUnavailable` rather than
+archiving a volume it promised would be quiet. The manifest records `pausedContainers`. B2 uses the same client with its endpoint and path-style addressing. Run logs are
 bounded before persistence.
 
 New runs persist an immutable manifest of resolved sources, exclusions, destination and SHA-256 artifact
@@ -110,15 +126,39 @@ destination restores retain destructive/typed confirmation. See
 [`../deployments/restore-verification.md`](../deployments/restore-verification.md) for the checker contract
 and supported consistency protocols.
 
-Retention deletes the oldest successful artifacts and their run rows, but skips an artifact while archive
-listing or restore holds a read reference; deletion reserves an exclusive lease against new readers.
+Retention deletes the artifacts beyond the keep count or older than the keep age (`pruneCandidates`)
+and their run rows, but never the newest successful artifact — a job whose schedule quietly stopped
+firing must not age its last good backup away — and skips an artifact while archive listing or restore
+holds a read reference; deletion reserves an exclusive lease against new readers.
 Active or cleanup-pending recovery records also block pruning and job deletion. Cross-device local moves
 fall back from rename to copy. Deleting a job deliberately leaves its existing artifacts alone.
 
 Archive listing is bounded and does not extract. Restore requires a successful artifact, downloads remote
 objects into private staging, refuses `/`, and is typed-confirmed with the destination. The API resolves the
 destination through `files.Resolve`; extraction uses `safepath` for every directory, regular file, and
-symlink, refusing traversal and unsafe link targets. Backup-before-deploy behavior and restore-evidence
+symlink, refusing traversal and unsafe link targets. `restoreRequest` also takes `paths` — archive
+entries (`source-0001/etc`, one file) that narrow the restore to themselves and what lies under them —
+and `inPlace`, which `Runner.RestoreInPlace` answers by mapping each recorded `source-NNNN` root back
+onto the path the manifest says it came from, resolving every original path through `files.Resolve`
+again so a root restriction added since the backup still holds; it needs a complete manifest, so a
+legacy archive can only be restored into a directory, and its typed phrase is the literal
+`restore in place` because there is no single destination to read back. Database dumps are never
+written to disk by an in-place restore; they go back through the Databases owner as before.
+`GET /backups/runs/{runID}/download` streams the verified artifact (`Runner.OpenArtifact`: the local
+file, or a private download of a remote one, checksum proven first) as an attachment; it sits with the
+administrator routes, because an archive is the whole of what it covers, and is audited as
+`backup.download`.
+
+`GET /backups/resources` (`backup_resources.go`) is the coverage report: what the other owners hold that
+a job could protect — the dashboard's data directory (with its SQLite file as a snapshot suggestion),
+the nginx directory and the Caddyfile's directory when they exist, local Docker volumes with the
+containers mounting them, compose stacks by working directory with their running containers, deployment
+checkouts, discovered Git repositories, and saved database connections (a SQLite connection also as its
+file). Each carries the job it suggests (name, sources, excludes, SQLite paths, native dumps, containers
+to pause) and the jobs that already cover it: a file resource is covered when every path sits under a
+job source, a database when a job dumps it or, for SQLite, snapshots its file; only an enabled covering
+job counts as protection. Owners that cannot answer are named in `unavailable` rather than read as
+empty, and unprotected resources sort first. Backup-before-deploy behavior and restore-evidence
 limits are covered in [`../deployments/implementation.md`](../deployments/implementation.md).
 
 ## Host users and SSH keys

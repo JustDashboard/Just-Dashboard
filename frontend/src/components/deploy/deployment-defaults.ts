@@ -8,6 +8,49 @@ import type {
   NodePackageManager,
   WorkloadProfile,
 } from "@/lib/types"
+import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
+
+export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
+
+/**
+ * The variables an application issues to itself — a session or signing
+ * secret, an encryption key — as opposed to one a third party hands out. A
+ * value for these is any long random string, so the form can mint one; an
+ * API key from a provider it cannot.
+ */
+export const SELF_ISSUED_SECRET =
+  /(^|_)(APP_KEY|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT)$/
+
+export function canGenerateSecret(name: string) {
+  return SELF_ISSUED_SECRET.test(name)
+}
+
+/**
+ * A fresh secret in the shape the variable's own framework expects: Laravel
+ * reads a base64 32-byte key with its `base64:` prefix, Rails wants a long
+ * hex string, and everything else takes 32 random bytes as hex.
+ */
+export type RandomBytes = (length: number) => Uint8Array<ArrayBuffer>
+
+export function generateSecretValue(name: string, random: RandomBytes = randomBytes) {
+  if (name === "APP_KEY") return `base64:${toBase64(random(32))}`
+  if (name.endsWith("SECRET_KEY_BASE")) return toHex(random(64))
+  return toHex(random(32))
+}
+
+function randomBytes(length: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(length)
+  globalThis.crypto.getRandomValues(bytes)
+  return bytes
+}
+
+function toHex(bytes: Uint8Array<ArrayBuffer>) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+function toBase64(bytes: Uint8Array<ArrayBuffer>) {
+  return btoa(String.fromCharCode(...bytes))
+}
 
 /**
  * The defaults and validation both deployment flows start from.
@@ -168,9 +211,35 @@ export function blueprintAcceptances(source?: DeploymentDraftSource): string[] {
  * Only the plain `<manager> run <script>` form is rewritten; anything else is
  * the operator's own command.
  */
+const EXEC_RUNNER: Record<NodePackageManager, string> = {
+  npm: "npx",
+  pnpm: "pnpm exec",
+  yarn: "yarn",
+  bun: "bunx",
+}
+
+/**
+ * Moves a detected command to another package manager: each `&&` segment
+ * that is a plain `<manager> run <script>` or a dependency binary run through
+ * the manager (`npx prisma migrate deploy`) follows the choice; anything else
+ * is the operator's own command and is left alone. A bare `yarn <thing>` is
+ * only a binary run when it is chained, because on its own it is just as
+ * likely a script shorthand.
+ */
 export function withPackageManagerRunner(command: string, manager?: NodePackageManager) {
-  const match = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(command.trim())
-  return manager && match ? `${manager} run ${match[1]}` : command
+  if (!manager) return command
+  const segments = command.trim().split(/\s+&&\s+/)
+  return segments
+    .map((segment) => {
+      const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(segment)
+      if (script) return `${manager} run ${script[1]}`
+      const binary = /^(?:npx|bunx|pnpm exec) (.+)$/.exec(segment)
+      if (binary) return `${EXEC_RUNNER[manager]} ${binary[1]}`
+      const yarnBinary = segments.length > 1 ? /^yarn (?!run )(.+)$/.exec(segment) : null
+      if (yarnBinary) return `${EXEC_RUNNER[manager]} ${yarnBinary[1]}`
+      return segment
+    })
+    .join(" && ")
 }
 
 export function defaultConfiguration(
@@ -199,6 +268,8 @@ export function defaultConfiguration(
       startCommand: candidate?.startCommand,
       outputDirectory: candidate?.outputDirectory,
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
+      pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
+      spaFallback: packagedStatic && candidate?.spaFallback ? true : undefined,
       noCache: false,
       secrets: [],
       releaseTasks: [],
@@ -256,11 +327,18 @@ function defaultChecks(profile: WorkloadProfile, port: number): DeploymentConfig
   if (profile === "game")
     return [
       {
-        name: "Minecraft handshake",
-        kind: "game_handshake",
+        // "game_handshake" is a closed check kind the backend's planning
+        // model already accepts, but `validateCheckConfiguration` (checks.go)
+        // refuses it any port/host/url/command — no protocol handshake is
+        // wired in yet, so a plan saved with that kind and a port was
+        // rejected outright. "tcp" is a real, executable check and a
+        // reasonable readiness signal for a game server: the process is
+        // listening on its own port.
+        name: "Game port reachable",
+        kind: "tcp",
         phase: "readiness",
         required: true,
-        config: { port: 25565 },
+        config: { port },
       },
     ]
   if ((profile === "web" || profile === "static") && port > 0)
@@ -276,12 +354,54 @@ function defaultChecks(profile: WorkloadProfile, port: number): DeploymentConfig
   return []
 }
 
+/**
+ * The environment rows a detected candidate opens with: every variable the
+ * source was seen reading, with its example as the placeholder and where it
+ * was read as the hint. Values stay empty — the operator types them — and a
+ * row left empty is skipped at submit rather than set to nothing.
+ */
+export function discoveredEnvironmentRows(
+  candidate?: DeploymentDetectionCandidate,
+  random?: RandomBytes,
+): EnvironmentRow[] {
+  const rows = (candidate?.variables ?? []).map((variable): EnvironmentRow => {
+    // Laravel cannot answer a single request without its application key,
+    // and the key is nothing but 32 random bytes — so the row arrives with
+    // one, the way `php artisan key:generate` would have written it.
+    const generated = candidate?.framework === "laravel" && variable.name === "APP_KEY"
+    return {
+      name: variable.name,
+      value: generated ? generateSecretValue(variable.name, random) : "",
+      example: variable.example,
+      source: variable.sources[0],
+      detected: true,
+      ...(generated ? { generated: true } : {}),
+    }
+  })
+  return rows.length ? rows : [{ name: "", value: "" }]
+}
+
+/**
+ * Folds a re-detection's variables into rows the operator may already have
+ * typed into: nothing typed is lost, and a name already present is not
+ * listed twice. A lone blank row gives way to the detected ones.
+ */
+export function mergeDiscoveredRows(current: EnvironmentRow[], discovered: EnvironmentRow[]) {
+  const names = new Set(current.map((row) => row.name).filter(Boolean))
+  const additions = discovered.filter((row) => row.detected && !names.has(row.name))
+  if (!additions.length) return current
+  const kept = current.filter((row) => row.name || row.value)
+  return [...kept, ...additions]
+}
+
 export function validateConfiguration(
   configuration: DeploymentConfiguration,
   profile: WorkloadProfile,
 ) {
   const errors: WizardErrors = {}
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
+  if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
+    errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
   for (const [name, value] of [
     ["internalPort", configuration.runtime.internalPort ?? 0],
     ["hostPort", configuration.runtime.hostPort ?? 0],

@@ -140,12 +140,19 @@ func blueprintConfiguration(
 			}
 		case "direct":
 			direct = true
-			if port.Primary || configuration.Runtime.HostPort == 0 {
+			if port.Primary || (configuration.Runtime.HostPort == 0 && configuration.Runtime.InternalPort == 0) {
 				configuration.Runtime.InternalPort = port.Internal
 				configuration.Runtime.Protocol = port.Protocol
 				configuration.Runtime.HostPort = port.Internal
 				configuration.Runtime.BindAddress = "0.0.0.0"
+				continue
 			}
+			// Gitea's SSH next to its web port, Syncthing's sync protocol next
+			// to its GUI: the proxy carries the primary port and this one is
+			// published on its own number, as the definition promised.
+			configuration.Runtime.Ports = append(configuration.Runtime.Ports, PublishedPort{
+				HostPort: port.Internal, ContainerPort: port.Internal, Protocol: port.Protocol,
+			})
 		case "internal":
 			if configuration.Runtime.InternalPort == 0 {
 				configuration.Runtime.InternalPort = port.Internal
@@ -212,15 +219,20 @@ func blueprintConfiguration(
 			config["command"] = check.Command
 		}
 		if check.TimeoutSeconds > 0 {
-			if check.TimeoutSeconds <= 60 {
-				config["timeoutSeconds"] = check.TimeoutSeconds
-			} else {
-				// A startup budget becomes bounded retries, not one invalid
-				// request timeout. Required unsupported check owners still fail.
-				config["timeoutSeconds"] = 10
-				config["attempts"] = min(60, (check.TimeoutSeconds+9)/10)
-				config["intervalSeconds"] = 10
+			// A definition's timeout is a startup budget: how long the image
+			// may take before its first honest answer. The runner knows only
+			// attempts and pauses, so the budget becomes paced retries — a
+			// single long request timeout would ask once and give up, and
+			// retries without a pause would spend the whole budget in the
+			// first few milliseconds, before the process has even bound its
+			// port.
+			interval := 2
+			if check.TimeoutSeconds > 120 {
+				interval = 10
 			}
+			config["timeoutSeconds"] = min(10, check.TimeoutSeconds)
+			config["attempts"] = min(60, (check.TimeoutSeconds+interval-1)/interval)
+			config["intervalSeconds"] = interval
 		}
 		planned.Config = mustJSON(config)
 		configuration.Checks = append(configuration.Checks, planned)

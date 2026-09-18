@@ -29,7 +29,7 @@ const PALETTE = {
   text: "#f4f4f5",
   muted: "#a1a1aa",
   faint: "#71717a",
-  brand: "#E05623",
+  brand: "#CAE9FF",
   key: "#6f9ff7",
   note: "#c4c4cc",
 }

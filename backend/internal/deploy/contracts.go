@@ -75,6 +75,8 @@ const (
 	OperationDeploy        Operation = "deploy"
 	OperationRedeploy      Operation = "redeploy"
 	OperationRestart       Operation = "restart"
+	OperationStop          Operation = "stop"
+	OperationStart         Operation = "start"
 	OperationForceBuild    Operation = "force_build"
 	OperationRollback      Operation = "rollback"
 	OperationPreviewCreate Operation = "preview_create"
@@ -150,6 +152,29 @@ func (s RunState) Terminal() bool {
 		return false
 	}
 }
+
+// ValidRunState reports whether s is one of the closed run-state vocabulary,
+// for callers (a run-history filter, for instance) that accept one from a
+// client and must reject anything else rather than silently matching nothing.
+func ValidRunState(s RunState) bool {
+	for _, state := range allRunStates {
+		if s == state {
+			return true
+		}
+	}
+	return false
+}
+
+// candidateFailureStates are the run states after which a run's candidate
+// release can never become live. render_runtime leaves a fresh release row at
+// state "candidate"; TransitionRun moves it to "failed" the moment the run
+// reaches one of these, so ArtifactRetentionPlan's seven-day diagnostic
+// window can apply and the releases list stops showing it as still in
+// progress. failed_activation is included even though it is not itself
+// terminal: activation has already failed by then, independent of whether
+// the run goes on to roll the predecessor back successfully or fails doing
+// that too, so the candidate is already dead when this state is reached.
+var candidateFailureStates = stateSet(RunFailed, RunFailedActivation, RunRolledBack, RunCancelled)
 
 func CanTransitionRun(from, to RunState) bool {
 	_, ok := runTransitions[from][to]
@@ -312,10 +337,14 @@ func stateSet[T ~string](states ...T) map[T]struct{} {
 	return out
 }
 
-func validOperation(value Operation) bool {
+// ValidOperation reports whether value is one of the closed operation
+// vocabulary, for callers (a run-history filter, for instance) that accept
+// one from a client and must reject anything else rather than silently
+// matching nothing.
+func ValidOperation(value Operation) bool {
 	switch value {
-	case OperationDeploy, OperationRedeploy, OperationRestart, OperationForceBuild,
-		OperationRollback, OperationPreviewCreate, OperationPreviewUpdate,
+	case OperationDeploy, OperationRedeploy, OperationRestart, OperationStop, OperationStart,
+		OperationForceBuild, OperationRollback, OperationPreviewCreate, OperationPreviewUpdate,
 		OperationPreviewRemove, OperationScheduled, OperationImportAdopt,
 		OperationRemoveManaged:
 		return true

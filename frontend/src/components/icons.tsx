@@ -303,7 +303,39 @@ export const Code: Icon = adapt(CodeBracketSquareIcon, "Code")
  * `components/status-dot.tsx`, which is the dot *and* its label; the two names
  * collided in every file that wanted both. `Slash` is prohibition, the
  * circle-with-a-line, for "not available on this host". */
-export const LoaderCircle: Icon = adapt(ArrowPathIcon, "LoaderCircle")
+
+/* The busy indicator, drawn inline rather than adapted from the set. Every
+   other icon here is a static glyph; this is the one always in motion, and an
+   arrow-path — two arrowheads chasing each other — turns into a pinwheel at
+   14px rather than reading as a rotation. A third of the ring drawn bright
+   over the faint whole stays one moving thing at the 14px most rows spin it
+   at — a shorter head thins out and stops reading — and it leaves
+   `RefreshClockwise` as the only two-arrow glyph, where the arrows mean the
+   action rather than the wait. Callers supply the turn with `animate-spin`;
+   the drawing is centred in its box so it spins on its own axis. */
+export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
+  { size = 16, ...props }: Omit<IconProps, "ref">,
+  ref: Ref<SVGSVGElement>,
+) {
+  return (
+    <svg
+      ref={ref}
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.25}
+      strokeLinecap="round"
+      aria-hidden
+      {...props}
+    >
+      <circle cx="12" cy="12" r="9" opacity={0.3} />
+      <path d="M21 12A9 9 0 0 0 7.5 4.2" />
+    </svg>
+  )
+})
+
 export const CheckCircle: Icon = adapt(CheckCircleIcon, "CheckCircle")
 export const CrossCircle: Icon = adapt(XCircleIcon, "CrossCircle")
 export const DotMark: Icon = adapt(MinusSmallIcon, "DotMark")

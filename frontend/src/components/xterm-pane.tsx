@@ -148,9 +148,9 @@ function resolveTerminalTheme(): XtermTheme {
   const red = token("--destructive", fb.red!)
   const green = token("--success", fb.green!)
   const yellow = token("--warning", fb.yellow!)
-  // ANSI blue follows the blue token, not the first chart slot: --chart-1 is
-  // the brand hue, which is orange, and a terminal whose `ls` paints
-  // directories orange is one nobody can read.
+  // ANSI blue follows the chart-2 token, not the first chart slot: --chart-1 is
+  // the brand hue, a pale tint, and a terminal whose `ls` paints directories
+  // in it is one nobody can read.
   const blue = token("--chart-2", fb.blue!)
   const magenta = token("--chart-4", fb.magenta!)
   const cyan = token("--chart-5", fb.cyan!)

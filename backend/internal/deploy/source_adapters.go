@@ -619,11 +619,26 @@ func (a *HostSourceAnalyzer) gitEnvironment(
 	if err != nil {
 		return nil, func() {}, err
 	}
+	defer a.markCredentialUsed(credentialID)
+	switch credential.Kind {
+	case CredentialProviderToken, CredentialGitBearer:
+		return a.gitBearerEnvironment(environment, cacheRoot, remote, credential)
+	case CredentialGitSSH:
+		return a.gitSSHEnvironment(environment, cacheRoot, remote, credential)
+	default:
+		return nil, func() {}, fmt.Errorf("%w: %w: credential kind is not valid for Git", ErrSourceUnavailable, ErrGitUnavailable)
+	}
+}
+
+// gitBearerEnvironment scopes an HTTPS bearer token to the exact remote being
+// fetched through a private, per-call git config file — never the operator's
+// own ~/.gitconfig — so the header cannot leak onto an unrelated host even if
+// a redirect changed the remote mid-fetch.
+func (a *HostSourceAnalyzer) gitBearerEnvironment(
+	environment []string, cacheRoot, remote string, credential CredentialMaterial,
+) ([]string, func(), error) {
 	if !validGitBearerToken(credential.Secret) {
 		return nil, func() {}, fmt.Errorf("%w: %w: Git credential is empty or malformed", ErrSourceUnavailable, ErrGitUnavailable)
-	}
-	if credential.Kind != "provider_token" && credential.Kind != "git_bearer" {
-		return nil, func() {}, fmt.Errorf("%w: %w: credential kind is not valid for Git", ErrSourceUnavailable, ErrGitUnavailable)
 	}
 	parsedRemote, err := url.Parse(remote)
 	if err != nil || parsedRemote.Scheme != "https" || parsedRemote.User != nil {
@@ -647,6 +662,65 @@ func (a *HostSourceAnalyzer) gitEnvironment(
 		return nil, func() {}, err
 	}
 	return append(environment, "GIT_CONFIG_GLOBAL="+path), cleanup, nil
+}
+
+// gitSSHEnvironment writes the sealed private key to a private 0600 file for
+// the lifetime of this one Git invocation and points GIT_SSH_COMMAND at it
+// exclusively. -F /dev/null and both known-hosts files pointed at /dev/null
+// keep the connection from ever reading or writing the operator's real
+// ~/.ssh: no config aliases, no persisted host keys, no identity but the one
+// just written. SSH_AUTH_SOCK is already stripped by
+// cleanPlanningGitEnvironment, so an agent identity cannot be tried either.
+func (a *HostSourceAnalyzer) gitSSHEnvironment(
+	environment []string, cacheRoot, remote string, credential CredentialMaterial,
+) ([]string, func(), error) {
+	if err := validateCredentialSecret(CredentialGitSSH, credential.Secret); err != nil {
+		return nil, func() {}, fmt.Errorf("%w: %w: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
+	}
+	if !strings.HasPrefix(remote, "git@") && !strings.HasPrefix(remote, "ssh://") {
+		return nil, func() {}, fmt.Errorf("%w: %w: an SSH key credential requires an SSH remote", ErrSourceUnavailable, ErrGitUnavailable)
+	}
+	file, err := os.CreateTemp(cacheRoot, "git-ssh-key-*")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	path := file.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := file.WriteString(credential.Secret); err != nil {
+		_ = file.Close()
+		cleanup()
+		return nil, func() {}, err
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	command := "ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=" + shellQuote(path) +
+		" -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+	return append(environment, "GIT_SSH_COMMAND="+command), cleanup, nil
+}
+
+// shellQuote single-quotes value for embedding in GIT_SSH_COMMAND, which Git
+// hands to "sh -c". value is always a path this process just created under
+// its own cache root, never request-supplied text, but the quoting is cheap
+// insurance against a data directory whose path itself needs it.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// markCredentialUsed best-effort records that a credential's material was
+// just opened for a real Git operation. HostSourceAnalyzer only holds the
+// narrow CredentialReader interface, so this reaches past it to the concrete
+// PlanningStore when that is what was wired in; any other reader (a test
+// double, for instance) simply does not get usage tracking.
+func (a *HostSourceAnalyzer) markCredentialUsed(credentialID int64) {
+	if store, ok := a.credentials.(*PlanningStore); ok {
+		store.recordCredentialUsed(context.Background(), credentialID)
+	}
 }
 
 func escapeGitConfigSection(value string) string {
@@ -699,11 +773,13 @@ func (a *HostSourceAnalyzer) registryAuth(ctx context.Context, credentialID int6
 	if err != nil {
 		return "", err
 	}
-	var config struct {
-		Username      string `json:"username"`
-		ServerAddress string `json:"serverAddress"`
-		IdentityToken bool   `json:"identityToken"`
-	}
+	defer a.markCredentialUsed(credentialID)
+	// Decodes into the same credentialConfig the CRUD routes write, not a
+	// private anonymous shape: recordCredentialUsed additively sets
+	// lastUsedAt on this exact JSON blob after every open, and a decoder
+	// that did not know that field would start refusing every registry
+	// credential the moment it was used once.
+	var config credentialConfig
 	decoder := json.NewDecoder(bytes.NewReader(credential.Config))
 	decoder.DisallowUnknownFields()
 	if credential.Kind != "registry" || len(credential.Config) == 0 || decoder.Decode(&config) != nil ||
@@ -724,6 +800,109 @@ func (a *HostSourceAnalyzer) registryAuth(ctx context.Context, credentialID int6
 	}
 	encoded, _ := json.Marshal(payload)
 	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+// TestCredential exercises a saved credential the same way a real deployment
+// would: a Git-shaped credential runs git ls-remote through the exact
+// gitEnvironment isolation detection and materialization already use, and a
+// registry credential resolves a manifest through the exact registryAuth
+// path analyzeImage uses. It never returns the secret — only whether the
+// attempt worked and a safe description of what happened.
+func (a *HostSourceAnalyzer) TestCredential(ctx context.Context, credentialID int64, repository string) (bool, string, error) {
+	if a.credentials == nil {
+		return false, "", fmt.Errorf("%w: credential store is unavailable", ErrSourceUnavailable)
+	}
+	credential, err := a.credentials.OpenCredential(ctx, credentialID)
+	if err != nil {
+		return false, "", err
+	}
+	var config credentialConfig
+	// Best effort: a malformed or absent config_json just leaves target
+	// blank, which the git branch below already treats as "no saved host".
+	_ = json.Unmarshal(credential.Config, &config)
+	repository = strings.TrimSpace(repository)
+	switch credential.Kind {
+	case CredentialGitBearer, CredentialGitSSH, CredentialProviderToken:
+		return a.testGitCredential(ctx, credentialID, credential.Kind, config.Target, repository)
+	case CredentialRegistry:
+		return a.testRegistryCredential(ctx, credentialID, repository)
+	default:
+		return false, "", fmt.Errorf("%w: unsupported credential kind %q", ErrInvalidCredential, credential.Kind)
+	}
+}
+
+func (a *HostSourceAnalyzer) testGitCredential(ctx context.Context, credentialID int64, kind, target, repository string) (bool, string, error) {
+	remote, err := gitTestRemote(kind, target, repository)
+	if err != nil {
+		return false, "", err
+	}
+	cacheRoot, cleanupCache, err := a.planningCacheRoot()
+	if err != nil {
+		return false, "", err
+	}
+	defer cleanupCache()
+	environment, cleanupCredential, err := a.gitEnvironment(ctx, cacheRoot, remote, credentialID)
+	if err != nil {
+		return false, err.Error(), nil
+	}
+	defer cleanupCredential()
+	testCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	safeRemote := scrubSourceRemote(remote)
+	if _, err := runPlanningGit(testCtx, "", environment, "ls-remote", "--exit-code", remote); err != nil {
+		return false, "could not read " + safeRemote + ": " + err.Error(), nil
+	}
+	return true, "read " + safeRemote + " successfully", nil
+}
+
+// gitTestRemote builds a concrete remote to test from the caller's
+// repository — a full Git URL, or an owner/name path combined with the
+// credential's own saved target host — so testing a saved credential does
+// not require retyping a full URL for the common case.
+func gitTestRemote(kind, target, repository string) (string, error) {
+	if repository == "" {
+		return "", fmt.Errorf("%w: repository is required to test a Git credential", ErrInvalidCredential)
+	}
+	if remote, _, err := normalizeGitRemote(repository); err == nil {
+		return remote, nil
+	}
+	if !validRepositoryPath(repository) {
+		return "", fmt.Errorf("%w: repository must be a Git URL or an owner/name path", ErrInvalidCredential)
+	}
+	if target == "" {
+		return "", fmt.Errorf("%w: this credential has no saved target host; send a full repository URL", ErrInvalidCredential)
+	}
+	if kind == CredentialGitSSH {
+		return "git@" + target + ":" + repository + ".git", nil
+	}
+	return "https://" + target + "/" + repository + ".git", nil
+}
+
+func (a *HostSourceAnalyzer) testRegistryCredential(ctx context.Context, credentialID int64, repository string) (bool, string, error) {
+	if repository == "" {
+		return false, "", fmt.Errorf("%w: repository is required to test a registry credential", ErrInvalidCredential)
+	}
+	normalized, err := normalizeImageReference(repository)
+	if err != nil {
+		return false, "", fmt.Errorf("%w: repository must be a valid image reference", ErrInvalidCredential)
+	}
+	if a.docker == nil {
+		return false, "Docker is unavailable on this host", nil
+	}
+	auth, err := a.registryAuth(ctx, credentialID, normalized)
+	if err != nil {
+		return false, err.Error(), nil
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resolved, err := a.docker.ResolveDistributionImage(testCtx, normalized, auth)
+	if err != nil {
+		return false, "could not resolve " + normalized + ": " + err.Error(), nil
+	}
+	if resolved == nil || resolved.Digest == "" {
+		return false, "registry returned no image digest for " + normalized, nil
+	}
+	return true, "resolved " + normalized + " to " + resolved.Digest, nil
 }
 
 func imageRegistryDomain(imageReference string) (string, error) {

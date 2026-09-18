@@ -33,6 +33,7 @@ type Runner struct {
 	recovery       RecoveryChecker
 	sqliteSnapshot SQLiteSnapshotter
 	databases      DatabaseDumper
+	pauser         ContainerPauser
 }
 
 func NewRunner(store *Store, stageDir string, log *slog.Logger) *Runner {
@@ -137,8 +138,11 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 	}
 	manifest := newManifest(job)
 	for _, source := range job.Sources {
-		if relative, err := filepath.Rel(source, r.stage); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return "", 0, manifest, errors.New("backup staging must be outside every source directory")
+		// A source that contains the staging directory would archive the
+		// archive being written. The dashboard's own data directory is the
+		// one source where that is legitimate — and it is excluded there.
+		if relative, err := filepath.Rel(source, r.stage); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !excluded(r.stage, job.Excludes) {
+			return "", 0, manifest, fmt.Errorf("backup staging %s must be outside every source directory, or excluded", r.stage)
 		}
 	}
 	if err := os.MkdirAll(r.stage, 0o700); err != nil {
@@ -162,8 +166,17 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 	name := artifactName(job, runID, time.Now())
 	local := filepath.Join(stage, name)
 
+	// Dumps come first, while the engines can still answer; the pause covers
+	// only the filesystem walk, which is the one step a writing container
+	// can corrupt.
+	resume, err := r.pauseContainers(ctx, job, logBuf)
+	if err != nil {
+		return "", 0, manifest, err
+	}
+	manifest.PausedContainers = append([]string{}, job.PauseContainers...)
 	fmt.Fprintf(logBuf, "archiving %d source(s) and %d database dump(s) into %s\n", len(job.Sources), len(dumps), name)
 	size, count, err := r.archiveWithSnapshots(ctx, job, local, logBuf, snapshots, dumps...)
+	resume()
 	if err != nil {
 		return "", 0, manifest, err
 	}
@@ -386,17 +399,18 @@ func excluded(path string, patterns []string) bool {
 	return false
 }
 
-// prune enforces retention, deleting the oldest artifacts beyond the keep
-// count from both the destination and the run history.
+// prune enforces retention, deleting the artifacts beyond the keep count or
+// older than the keep age from both the destination and the run history.
 func (r *Runner) prune(ctx context.Context, job *Job) error {
-	if job.Retention <= 0 {
+	if job.Retention <= 0 && job.RetentionDays <= 0 {
 		return nil
 	}
 	runs, err := r.store.SuccessfulRuns(ctx, job.ID)
 	if err != nil {
 		return err
 	}
-	if len(runs) <= job.Retention {
+	expired := pruneCandidates(runs, job.Retention, job.RetentionDays, time.Now())
+	if len(expired) == 0 {
 		return nil
 	}
 	var secrets *TargetSecrets
@@ -405,7 +419,7 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 			return err
 		}
 	}
-	for _, old := range runs[job.Retention:] {
+	for _, old := range expired {
 		if !r.artifactMu.TryLock() {
 			// It will be pruned by the next run. Deleting an artifact out
 			// from under a restore in progress buys nothing and costs the
@@ -450,6 +464,27 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 		}
 	}
 	return nil
+}
+
+// pruneCandidates picks, from runs sorted newest first, the ones retention
+// no longer keeps: everything past the count, and everything older than the
+// age. The newest successful artifact survives both rules — a job whose
+// schedule quietly stopped firing must not age its last good backup away.
+func pruneCandidates(runs []*Run, keep, keepDays int, now time.Time) []*Run {
+	var out []*Run
+	cutoff := time.Time{}
+	if keepDays > 0 {
+		cutoff = now.Add(-time.Duration(keepDays) * 24 * time.Hour)
+	}
+	for i, run := range runs {
+		if i == 0 {
+			continue
+		}
+		if (keep > 0 && i >= keep) || (keepDays > 0 && run.StartedAt.Before(cutoff)) {
+			out = append(out, run)
+		}
+	}
+	return out
 }
 
 // Publishing must never replace an existing artifact. A hard link is atomic

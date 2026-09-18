@@ -123,7 +123,7 @@ export function SessionRail({
   return (
     <Pane flush aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
       <PaneHeader className="gap-1 pl-3">
-        <span className="text-xs font-medium">Sessions</span>
+        <span className="text-body font-medium">Sessions</span>
         <span className="flex-1" />
         <IconAction label="New folder" className="size-7" onClick={() => setCreatingFolder(true)}>
           <FolderPlus />
@@ -176,11 +176,11 @@ export function SessionRail({
         {groups.unfiled.length > 0 && (
           <div data-folder="">
             {folders.length > 0 && (
-              <p className="px-2 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
-                Unfiled
+              <p className="px-2 py-1 text-hint font-medium tracking-wide text-muted-foreground uppercase">
+                All sessions
               </p>
             )}
-            <div className="divide-y divide-hairline border-y border-hairline">
+            <div className="space-y-0.5">
               {groups.unfiled.map((session) => (
                 <SessionRow key={session.id} session={session} {...rows} />
               ))}
@@ -280,7 +280,7 @@ function FolderGroup({
         </span>
       </div>
       {!collapsed && items.length > 0 && (
-        <div className="mt-0.5 divide-y divide-hairline border-y border-hairline pl-3">
+        <div className="mt-0.5 space-y-0.5 pl-3">
           {items.map((session) => (
             <SessionRow key={session.id} session={session} {...rows} />
           ))}
@@ -332,8 +332,8 @@ function SessionRow({
       data-working={working || undefined}
       data-finished={finished || undefined}
       className={cn(
-        "group flex min-w-0 items-center gap-1 border-l-2 py-1.5 pr-1 pl-2 transition-colors",
-        active ? "border-l-brand bg-accent" : "border-l-transparent hover:bg-row-hover",
+        "group flex min-w-0 items-center gap-1 rounded-md py-2 pr-1 pl-3 transition-colors",
+        active ? "bg-accent" : "hover:bg-row-hover",
       )}
     >
       {/* No terminal glyph on the row: every row in this list is a terminal,
@@ -387,7 +387,7 @@ function SessionRow({
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-44">
               <DropdownMenuItem className="text-xs" onSelect={() => onSetFolder(session.id, "")}>
-                Unfiled
+                All sessions
               </DropdownMenuItem>
               {folders.map((folder) => (
                 <DropdownMenuItem

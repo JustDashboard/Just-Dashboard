@@ -58,6 +58,46 @@ func (s *Server) handleDeploymentOperations(w http.ResponseWriter, r *http.Reque
 	return nil
 }
 
+// handleDeploymentReleasePin marks a release pinned or unpinned. A pinned
+// release survives ArtifactRetentionPlan's prune eligibility regardless of
+// its age or rank among the environment's other releases.
+func (s *Server) handleDeploymentReleasePin(w http.ResponseWriter, r *http.Request) error {
+	projectID, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	environmentID, err := strconv.ParseInt(chi.URLParam(r, "env"), 10, 64)
+	if err != nil || environmentID <= 0 {
+		return httpx.BadRequest("environment id must be a positive integer")
+	}
+	releaseID, err := strconv.ParseInt(chi.URLParam(r, "release"), 10, 64)
+	if err != nil || releaseID <= 0 {
+		return httpx.BadRequest("release id must be a positive integer")
+	}
+	var request struct {
+		Pinned bool `json:"pinned"`
+	}
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		return err
+	}
+	release, err := s.modules.deployRuns.Release(r.Context(), releaseID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	if release.Release.ProjectID != projectID || release.Release.EnvironmentID != environmentID {
+		return httpx.ErrNotFound
+	}
+	updated, err := s.modules.deployRuns.SetReleasePinned(r.Context(), projectID, environmentID, releaseID, request.Pinned)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	httpx.SetAudit(r, "deploy.release.pin", strconv.FormatInt(releaseID, 10), map[string]any{
+		"deploymentId": projectID, "environmentId": environmentID, "pinned": request.Pinned,
+	})
+	httpx.JSON(w, http.StatusOK, updated)
+	return nil
+}
+
 func (s *Server) handleDeploymentReleaseComparison(w http.ResponseWriter, r *http.Request) error {
 	projectID, err := parseID(r)
 	if err != nil {

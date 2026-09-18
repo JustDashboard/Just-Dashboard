@@ -1,0 +1,76 @@
+{
+  "id": "drawio",
+  "version": "1.0.0",
+  "name": "draw.io",
+  "category": "tool",
+  "profile": "tool",
+  "description": "The diagram editor, served from this host so a diagram never has to leave it. Files are saved by the browser, not by this server.",
+  "iconId": "bolt",
+  "docsUrl": "https://www.drawio.com/doc/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/jgraph/docker-drawio",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "jgraph/drawio:31.4.6",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The editor",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Editor answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:54066f620cc06f432c40a187927e95de08893fb1eef4848152fcf4f7533d4e31"
+    }
+  ]
+}

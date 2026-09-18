@@ -1,0 +1,13 @@
+{
+  "name": "jd-acceptance-astro",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-check.cjs && astro build",
+    "postinstall": "node install-check.cjs"
+  },
+  "dependencies": {
+    "astro": "7.3.3"
+  }
+}

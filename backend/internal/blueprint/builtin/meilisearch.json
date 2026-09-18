@@ -1,0 +1,100 @@
+{
+  "id": "meilisearch",
+  "version": "1.0.0",
+  "name": "Meilisearch",
+  "category": "database",
+  "profile": "web",
+  "description": "A search engine for applications: fast, typo-tolerant, with an API applications call directly. The master key is generated here; derive per-app keys from it inside Meilisearch.",
+  "iconId": "database",
+  "docsUrl": "https://www.meilisearch.com/docs",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/meilisearch/meilisearch",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "getmeili/meilisearch:v1.53.2",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; applications on this host reach it over the Docker network without one."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 7700,
+      "protocol": "tcp",
+      "purpose": "The search API and dashboard",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/meili_data",
+      "purpose": "Indexes and documents",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "MEILI_ENV",
+        "value": "production"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Meilisearch's index format changes between minor versions and needs a dump-and-restore across them.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:7e52cc44f595ea99d71c6d14df9b6cf706d3a4afdb84603f3138967cb6d28e86"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "master-key",
+      "variable": "MEILI_MASTER_KEY",
+      "label": "Master key",
+      "length": 32
+    }
+  ]
+}

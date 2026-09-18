@@ -8,11 +8,10 @@ import type { DbConnection, DbProvisionOption } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
 import { ChoiceCard } from "@/components/choice-card"
-import { Label } from "@/components/ui/label"
+import { Field } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCopy } from "@/hooks/use-copy"
-import { QuickField } from "@/components/deploy/quick-deploy"
 
 export function DatabaseQuickDeploy({
   target = "host",
@@ -20,12 +19,15 @@ export function DatabaseQuickDeploy({
   onConnect,
   resume,
   onStarted,
+  initialEngine,
 }: {
   target?: "host" | "container"
   canConnect?: boolean
   resume?: { container: string; engine: string }
   onStarted?: (started: { container: string; engine: string }) => void
   onConnect?: (connection: DbConnection, url: string) => void
+  /** The engine detection found the source connecting to, preselected. */
+  initialEngine?: string
 }) {
   const alive = useRef(true)
   const provisioning = useRef(false)
@@ -33,7 +35,7 @@ export function DatabaseQuickDeploy({
   const [revealed, setRevealed] = useState(false)
   const { copy } = useCopy()
   const [options, setOptions] = useState<DbProvisionOption[]>()
-  const [engine, setEngine] = useState(resume?.engine ?? "")
+  const [engine, setEngine] = useState(resume?.engine ?? initialEngine ?? "")
   const [name, setName] = useState("")
   const [database, setDatabase] = useState("")
   const [progress, setProgress] = useState("")
@@ -71,6 +73,9 @@ export function DatabaseQuickDeploy({
             engine: selected.engine,
             name: name.trim() || undefined,
             database: database.trim() || undefined,
+            // The application reaches it over the deployment network; nothing
+            // outside this server needs the port.
+            exposure: "local",
           })
       onStarted?.({ container: started.container, engine: selected.engine })
       if (!alive.current) return
@@ -88,8 +93,14 @@ export function DatabaseQuickDeploy({
           connection = await post<DbConnection>("/databases/adopt", {
             container: started.container,
           })
-          const health = await get<{ ok: boolean }>(`/databases/${connection.id}/ping`)
-          if (!health.ok) throw new Error("not accepting connections yet")
+          const health = await get<{ ok: boolean; error?: string }>(
+            `/databases/${connection.id}/ping`,
+          )
+          // The engine's own refusal, when there is one: "password
+          // authentication failed" is a different problem from "not up yet",
+          // and hiding it behind the same sentence sent people looking at
+          // the wrong thing for three minutes.
+          if (!health.ok) throw new Error(health.error || "not accepting connections yet")
           break
         } catch (error) {
           if (Date.now() > deadline) {
@@ -127,37 +138,41 @@ export function DatabaseQuickDeploy({
       <Panel>
         <PanelHeader title={`${created.connection.name} is ready`} />
         <PanelBody className="space-y-4">
-          <Label htmlFor="database-connection-string">Connection string</Label>
-          <div className="flex gap-2">
-            <Input
-              id="database-connection-string"
-              type={revealed ? "text" : "password"}
-              readOnly
-              value={created.url}
-              className="font-mono"
-            />
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={revealed ? "Hide connection string" : "Reveal connection string"}
-              onClick={() => setRevealed(!revealed)}
-            >
-              {revealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label="Copy connection string"
-              onClick={() => copy(created.url, "Connection string copied")}
-            >
-              <Copy className="size-4" />
-            </Button>
-          </div>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {target === "container"
-              ? "This private address is reachable by applications on Docker's default bridge. Reconnect the database if its container is replaced."
-              : "This address is for processes on the host. Use Add database during project setup to get the address for an application container."}
-          </p>
+          <Field
+            label="Connection string"
+            htmlFor="database-connection-string"
+            hint={
+              target === "container"
+                ? "This private address is reachable by applications on Docker's default bridge. Reconnect the database if its container is replaced."
+                : "This address is for processes on the host. Use Add database during project setup to get the address for an application container."
+            }
+          >
+            <div className="flex gap-2">
+              <Input
+                id="database-connection-string"
+                type={revealed ? "text" : "password"}
+                readOnly
+                value={created.url}
+                className="font-mono"
+              />
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label={revealed ? "Hide connection string" : "Reveal connection string"}
+                onClick={() => setRevealed(!revealed)}
+              >
+                {revealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Copy connection string"
+                onClick={() => copy(created.url, "Connection string copied")}
+              >
+                <Copy className="size-4" />
+              </Button>
+            </div>
+          </Field>
         </PanelBody>
         <PanelFooter className="justify-between">
           <Button variant="outline" asChild>
@@ -232,7 +247,7 @@ export function DatabaseQuickDeploy({
             </div>
             {selected && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <QuickField id="db-name" label="Container name" hint={`Defaults to jd-${engine}.`}>
+                <Field label="Container name" htmlFor="db-name" hint={`Defaults to jd-${engine}.`}>
                   <Input
                     id="db-name"
                     value={name}
@@ -241,8 +256,8 @@ export function DatabaseQuickDeploy({
                     placeholder={`jd-${engine}`}
                     className="font-mono"
                   />
-                </QuickField>
-                <QuickField id="db-database" label="Database name" hint="Defaults to app.">
+                </Field>
+                <Field label="Database name" htmlFor="db-database" hint="Defaults to app.">
                   <Input
                     id="db-database"
                     value={database}
@@ -251,7 +266,7 @@ export function DatabaseQuickDeploy({
                     placeholder="app"
                     className="font-mono"
                   />
-                </QuickField>
+                </Field>
               </div>
             )}
           </>

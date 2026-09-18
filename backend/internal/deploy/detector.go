@@ -57,6 +57,64 @@ type detectedMarkers struct {
 	goVersionFile     []byte
 	pythonFiles       map[string][]byte
 	staticFile        string
+	angularJSON       []byte
+	procfile          []byte
+	managePy          bool
+	pythonVersionFile []byte
+	runtimeTxt        []byte
+	cargoToml         []byte
+	cargoLock         bool
+	rustToolchain     []byte
+	pomXML            []byte
+	gradleBuild       []byte
+	gradleBuildPath   string
+	gradlew           bool
+	javaVersionFile   []byte
+	csprojs           map[string][]byte
+	denoJSON          []byte
+	denoJSONPath      string
+	denoLock          bool
+	denoEntries       map[string]bool
+	composerJSON      []byte
+	composerLock      bool
+	phpIndex          bool
+	phpPublicIndex    bool
+}
+
+// phpOwnsAssets says the PHP recipe builds this root's package.json itself:
+// a Laravel or Symfony application's Vite or Encore bundle is a stage of the
+// PHP image, not a site of its own.
+func (m *detectedMarkers) phpOwnsAssets() bool {
+	manifest, ok := parseComposerManifest(m.composerJSON)
+	if !ok {
+		return false
+	}
+	for _, framework := range phpFrameworks {
+		if manifest.has(framework.pkg) {
+			return true
+		}
+	}
+	return false
+}
+
+// denoEntryNames are the files a Deno service is conventionally run from
+// when deno.json declares no start task.
+var denoEntryNames = map[string]bool{"main.ts": true, "server.ts": true, "mod.ts": true, "main.js": true, "server.js": true}
+
+// pythonEntryDirsSkipped are the directories an application object is never
+// looked for in, so a test's fixture app cannot become the served one.
+var pythonEntryDirsSkipped = map[string]bool{"tests": true, "test": true, "migrations": true, "examples": true, "example": true}
+
+func pythonEntryCandidate(rel, name string, depth int) bool {
+	if !pythonEntryNames[name] || name == "manage.py" || depth > 4 || (name == "__init__.py" && depth > 3) {
+		return false
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/") {
+		if pythonEntryDirsSkipped[segment] {
+			return false
+		}
+	}
+	return true
 }
 
 func (d Detector) DetectPath(ctx context.Context, root string, identity SourceIdentity) (DetectionResult, error) {
@@ -75,6 +133,12 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	gitModulesPath := ""
 	lfsAttributesPath := ""
 	cgoPaths := []string{}
+	schemaPaths := []string{}
+	schemaPathCounts := map[string]int{}
+	pythonEntries := []pythonEntry{}
+	denoEntryPaths := []string{}
+	scanner := newEnvScanner()
+	prismaProviders := map[string]string{}
 	skip := map[string]bool{
 		".just-dashboard": true,
 		".git":            true, "node_modules": true, "vendor": true, ".next": true,
@@ -115,6 +179,52 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return stop
 		}
 		name := strings.ToLower(entry.Name())
+		// Presence is all a schema marker proves, so a repository with a
+		// thousand migrations records a handful of them. The bound is per
+		// name: migrations sort before the schema they belong to, and an
+		// overall cap would have let them crowd it out.
+		if schemaMarkerFile(name) {
+			if schemaPathCounts[name] < 16 {
+				schemaPathCounts[name]++
+				schemaPaths = append(schemaPaths, filepath.ToSlash(rel))
+			}
+			if strings.HasSuffix(name, ".prisma") && scanner.budget(64<<10) {
+				if content, _, err := readDetectionFile(path, 64<<10); err == nil {
+					if provider := prismaProvider(content); provider != "" {
+						prismaProviders[filepath.ToSlash(rel)] = provider
+					}
+				}
+			}
+			return nil
+		}
+		if envTemplateFile(name) {
+			if scanner.budget(64 << 10) {
+				if content, _, err := readDetectionFile(path, 64<<10); err == nil {
+					scanner.scanTemplate(filepath.ToSlash(rel), content, name == ".env")
+				}
+			}
+			return nil
+		}
+		if pythonEntryCandidate(filepath.ToSlash(rel), name, depth) {
+			// Bounded like the schema markers: a few dozen conventional files
+			// are enough to find an application object, and a repository of
+			// packages must not turn detection into a source scan.
+			if len(pythonEntries) < 64 {
+				content, n, err := readDetectionFile(path, 64<<10)
+				result.ScannedBytes += n
+				if result.ScannedBytes > limits.MaxReadBytes {
+					result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+					return stop
+				}
+				if err == nil {
+					pythonEntries = append(pythonEntries, pythonEntry{path: filepath.ToSlash(rel), content: content})
+					if scanner.scannable(filepath.ToSlash(rel), name) && scanner.budget(n) {
+						scanner.scanSource(filepath.ToSlash(rel), content)
+					}
+				}
+			}
+			return nil
+		}
 		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
 			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
@@ -125,6 +235,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			if err == nil && sourceUsesCGO(content) {
 				cgoPaths = append(cgoPaths, rel)
 			}
+			if err == nil && scanner.scannable(filepath.ToSlash(rel), name) && scanner.budget(n) {
+				scanner.scanSource(filepath.ToSlash(rel), content)
+			}
 			return nil
 		}
 		interesting := name == "package.json" || name == "go.mod" || name == "dockerfile" ||
@@ -134,8 +247,28 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			name == "index.html" || name == ".gitmodules" || name == ".gitattributes" ||
 			name == "bun.lock" || name == "bun.lockb" || name == "package-lock.json" ||
 			name == "pnpm-lock.yaml" || name == "yarn.lock" || name == "requirements.txt" ||
-			name == "uv.lock" || name == "poetry.lock" || name == "pyproject.toml"
+			name == "uv.lock" || name == "poetry.lock" || name == "pyproject.toml" ||
+			name == "angular.json" || name == "procfile" || name == "manage.py" ||
+			name == "runtime.txt" || name == ".python-version" ||
+			name == "cargo.toml" || name == "cargo.lock" || name == "rust-toolchain" || name == "rust-toolchain.toml" ||
+			name == "pom.xml" || name == "build.gradle" || name == "build.gradle.kts" || name == "gradlew" ||
+			name == ".java-version" || strings.HasSuffix(name, ".csproj") ||
+			name == "deno.json" || name == "deno.jsonc" || name == "deno.lock" ||
+			name == "composer.json" || name == "composer.lock" || name == "index.php"
+		if denoEntryNames[name] && len(denoEntryPaths) < 64 {
+			denoEntryPaths = append(denoEntryPaths, filepath.ToSlash(rel))
+		}
 		if !interesting {
+			if scanner.scannable(filepath.ToSlash(rel), name) {
+				// Application code is read under the scanner's own budget, apart
+				// from detection's limits: the names an application reads are a
+				// convenience for the form, never a reason to call a scan truncated.
+				if info, err := entry.Info(); err == nil && scanner.budget(info.Size()) {
+					if content, _, err := readDetectionFile(path, envScanMaxFile); err == nil {
+						scanner.scanSource(filepath.ToSlash(rel), content)
+					}
+				}
+			}
 			return nil
 		}
 		if name == ".gitmodules" {
@@ -159,10 +292,33 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		if parent == "." {
 			parent = ""
 		}
+		if name == "index.php" {
+			// A root's own index.php, or the one under its public/ directory,
+			// names a PHP application; one deeper (a theme, a plugin) does not.
+			switch {
+			case parent == "":
+			case filepath.Base(parent) == "public":
+				parent = filepath.Dir(parent)
+				if parent == "." {
+					parent = ""
+				}
+			default:
+				return nil
+			}
+		}
 		marker := markers[parent]
 		if marker == nil {
-			marker = &detectedMarkers{root: parent, pythonFiles: map[string][]byte{}}
+			marker = &detectedMarkers{root: parent, pythonFiles: map[string][]byte{}, csprojs: map[string][]byte{}}
 			markers[parent] = marker
+		}
+		readMarker := func(limit int64) ([]byte, bool) {
+			content, n, err := readDetectionFile(path, limit)
+			result.ScannedBytes += n
+			if result.ScannedBytes > limits.MaxReadBytes {
+				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+				return nil, false
+			}
+			return content, err == nil
 		}
 		switch name {
 		case "dockerfile", "containerfile":
@@ -194,8 +350,83 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			}
 		case "bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock":
 			marker.lockfiles = append(marker.lockfiles, rel)
+		case "manage.py":
+			marker.managePy = true
+		case "cargo.lock":
+			marker.cargoLock = true
+		case "gradlew":
+			marker.gradlew = true
+		case "deno.lock":
+			marker.denoLock = true
+		case "composer.lock":
+			marker.composerLock = true
+		case "index.php":
+			if filepath.Base(filepath.Dir(rel)) == "public" {
+				marker.phpPublicIndex = true
+			} else {
+				marker.phpIndex = true
+			}
+		case "composer.json":
+			content, ok := readMarker(limits.MaxFileBytes)
+			if result.Truncated {
+				return stop
+			}
+			if ok {
+				marker.composerJSON = content
+			}
+		case "cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "deno.json", "deno.jsonc":
+			content, ok := readMarker(limits.MaxFileBytes)
+			if result.Truncated {
+				return stop
+			}
+			if !ok {
+				break
+			}
+			switch name {
+			case "cargo.toml":
+				marker.cargoToml = content
+			case "pom.xml":
+				marker.pomXML = content
+			case "deno.json", "deno.jsonc":
+				marker.denoJSON, marker.denoJSONPath = content, entry.Name()
+			default:
+				// The Kotlin script wins when both are present, as Gradle's own resolution does.
+				if marker.gradleBuild == nil || name == "build.gradle.kts" {
+					marker.gradleBuild, marker.gradleBuildPath = content, entry.Name()
+				}
+			}
+		case "rust-toolchain", "rust-toolchain.toml", ".java-version":
+			content, ok := readMarker(4096)
+			if result.Truncated {
+				return stop
+			}
+			if ok && name == ".java-version" {
+				marker.javaVersionFile = content
+			} else if ok {
+				marker.rustToolchain = content
+			}
 		case "uv.lock", "poetry.lock":
+			// The lock's package names say which framework is installed; a
+			// lock too large to read still proves the install is frozen.
 			marker.pythonFiles[name] = []byte("locked")
+			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
+				marker.pythonFiles[name] = content
+			} else if result.ScannedBytes > limits.MaxReadBytes {
+				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+				return stop
+			}
+		case "runtime.txt", ".python-version":
+			content, n, err := readDetectionFile(path, 4096)
+			result.ScannedBytes += n
+			if err == nil {
+				if name == "runtime.txt" {
+					marker.runtimeTxt = content
+				} else {
+					marker.pythonVersionFile = content
+				}
+			}
 		case "requirements.txt", "pyproject.toml":
 			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
@@ -208,6 +439,19 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			}
 		case "index.html":
 			marker.staticFile = rel
+		case "angular.json", "procfile":
+			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
+				if name == "procfile" {
+					marker.procfile = content
+				} else {
+					marker.angularJSON = content
+				}
+			} else if result.ScannedBytes > limits.MaxReadBytes {
+				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+				return stop
+			}
 		case "package.json":
 			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
@@ -217,6 +461,15 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				result.Truncated = true
 				result.TruncatedReason = "read-byte limit reached"
 				return stop
+			}
+		}
+		if strings.HasSuffix(name, ".csproj") && len(marker.csprojs) < 8 {
+			content, ok := readMarker(limits.MaxFileBytes)
+			if result.Truncated {
+				return stop
+			}
+			if ok {
+				marker.csprojs[entry.Name()] = content
 			}
 		}
 		if result.ScannedBytes > limits.MaxReadBytes {
@@ -230,13 +483,38 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	}
 
 	roots := make([]string, 0, len(markers))
-	for candidateRoot := range markers {
+	packageRoots := []string{}
+	pythonRoots := []string{}
+	for candidateRoot, marker := range markers {
 		roots = append(roots, candidateRoot)
+		if len(marker.packageJSON) > 0 {
+			packageRoots = append(packageRoots, filepath.ToSlash(candidateRoot))
+		}
+		if marker.hasPythonManifest() {
+			pythonRoots = append(pythonRoots, filepath.ToSlash(candidateRoot))
+		}
 	}
 	sort.Strings(roots)
+	allRoots := make([]string, 0, len(roots))
+	for _, candidateRoot := range roots {
+		allRoots = append(allRoots, filepath.ToSlash(candidateRoot))
+	}
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
-		result.Candidates = append(result.Candidates, candidatesForMarkers(marker)...)
+		root := filepath.ToSlash(marker.root)
+		marker.denoEntries = map[string]bool{}
+		for _, entry := range pathsUnderRoot(denoEntryPaths, root, allRoots) {
+			marker.denoEntries[entry] = true
+		}
+		candidates := candidatesForMarkers(marker,
+			pathsUnderRoot(schemaPaths, root, packageRoots), pythonEntriesUnderRoot(pythonEntries, root, pythonRoots))
+		variables := scanner.variables(root, allRoots)
+		databases := detectDatabases(marker, variables, prismaProviders)
+		for index := range candidates {
+			candidates[index].Variables = variables
+			candidates[index].Databases = databases
+		}
+		result.Candidates = append(result.Candidates, candidates...)
 	}
 	sort.Slice(result.Candidates, func(i, j int) bool {
 		if result.Candidates[i].Root != result.Candidates[j].Root {
@@ -294,7 +572,33 @@ func readDetectionFile(path string, max int64) ([]byte, int64, error) {
 	return content, int64(len(content)), nil
 }
 
-func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
+func (m *detectedMarkers) hasPythonManifest() bool {
+	for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
+		if _, ok := m.pythonFiles[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// pythonEntriesUnderRoot keeps the entries that belong to one Python root,
+// re-based on it, leaving out those a nested Python root owns.
+func pythonEntriesUnderRoot(entries []pythonEntry, root string, pythonRoots []string) []pythonEntry {
+	paths := make([]string, 0, len(entries))
+	byPath := map[string][]byte{}
+	for _, entry := range entries {
+		paths = append(paths, entry.path)
+		byPath[entry.path] = entry.content
+	}
+	prefix := rootPrefix(root)
+	result := []pythonEntry{}
+	for _, relative := range pathsUnderRoot(paths, root, pythonRoots) {
+		result = append(result, pythonEntry{path: relative, content: byPath[prefix+relative]})
+	}
+	return result
+}
+
+func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonEntries []pythonEntry) []DetectedCandidate {
 	var result []DetectedCandidate
 	rootLabel := marker.root
 	if rootLabel == "" {
@@ -321,8 +625,8 @@ func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
 			NeedsDecision: []string{"review services, storage, ports, and unsupported fields"},
 		}))
 	}
-	if len(marker.packageJSON) > 0 {
-		result = append(result, packageCandidate(marker)...)
+	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() {
+		result = append(result, packageCandidate(marker, schemaPaths)...)
 	}
 	if marker.goMod != "" {
 		candidate := DetectedCandidate{
@@ -340,13 +644,23 @@ func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
 		}
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, candidate))
 	}
-	if pythonLock, ok := detectedPythonLock(marker.pythonFiles); ok {
-		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, DetectedCandidate{
-			Name: "Python service in " + rootLabel, Profile: ProfileService, Confidence: ConfidenceMedium,
-			Framework: "python", Recipe: "python",
-			Evidence:      []DetectionEvidence{{Path: filepath.ToSlash(filepath.Join(marker.root, pythonLock)), Reason: "locked Python dependency input"}},
-			NeedsDecision: []string{"confirm ASGI/WSGI start command, port, and readiness check"},
-		}))
+	if marker.hasPythonManifest() {
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, pythonCandidate(marker, pythonEntries, rootLabel)))
+	}
+	if len(marker.cargoToml) > 0 {
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, rustCandidate(marker, rootLabel)))
+	}
+	if len(marker.pomXML) > 0 || len(marker.gradleBuild) > 0 {
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, javaCandidate(marker, rootLabel)))
+	}
+	if len(marker.csprojs) > 0 {
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, dotnetCandidate(marker, rootLabel)))
+	}
+	if len(marker.denoJSON) > 0 {
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, denoCandidate(marker, rootLabel)))
+	}
+	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex {
+		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
 	if marker.staticFile != "" && len(marker.packageJSON) == 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildStatic, DetectedCandidate{
@@ -359,13 +673,8 @@ func candidatesForMarkers(marker *detectedMarkers) []DetectedCandidate {
 	return result
 }
 
-func packageCandidate(marker *detectedMarkers) []DetectedCandidate {
-	var manifest struct {
-		Name            string            `json:"name"`
-		Scripts         map[string]string `json:"scripts"`
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
-	}
+func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedCandidate {
+	var manifest nodeManifest
 	if json.Unmarshal(marker.packageJSON, &manifest) != nil {
 		return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, DetectedCandidate{
 			Name: "JavaScript project", Profile: ProfileWorker, Confidence: ConfidenceLow,
@@ -426,78 +735,145 @@ func packageCandidate(marker *detectedMarkers) []DetectedCandidate {
 	if runner == "" {
 		runner = "npm"
 	}
-	if command := manifest.Scripts["build"]; command != "" {
-		candidate.BuildCommand = runner + " run build"
-		candidate.Evidence = append(candidate.Evidence,
-			DetectionEvidence{Path: marker.packagePath, Reason: "build script: " + boundedEvidence(command)})
+	framework := matchNodeFramework(manifest)
+	var resolution nodeFrameworkResolution
+	if framework != nil {
+		resolution = framework.resolve(manifest, nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile}, runner)
 	}
-	if command := manifest.Scripts["start"]; command != "" {
-		candidate.StartCommand = runner + " run start"
-		candidate.Profile = ProfileWeb
-		candidate.Port = 3000
-		candidate.Evidence = append(candidate.Evidence,
-			DetectionEvidence{Path: marker.packagePath, Reason: "start script: " + boundedEvidence(command)})
-	} else {
-		candidate.NeedsDecision = append(candidate.NeedsDecision, "choose a start command or static output")
+	buildScript := "build"
+	if resolution.BuildScript != "" {
+		buildScript = resolution.BuildScript
 	}
-	switch {
-	case dependencies["next"] != "":
-		candidate.Framework, candidate.Profile = "nextjs", ProfileWeb
-		candidate.Confidence, candidate.Port = ConfidenceHigh, 3000
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: marker.packagePath, Reason: "next dependency " + boundedEvidence(dependencies["next"]),
-		})
-	case dependencies["@sveltejs/kit"] != "":
-		candidate.Framework, candidate.Profile = "sveltekit", ProfileWeb
-		candidate.Confidence, candidate.Port = ConfidenceHigh, 3000
+	if command := manifest.Scripts[buildScript]; command != "" {
+		candidate.BuildCommand = runner + " run " + buildScript
+		candidate.Evidence = append(candidate.Evidence,
+			DetectionEvidence{Path: marker.packagePath, Reason: buildScript + " script: " + boundedEvidence(command)})
+	}
+	// A Procfile is the one place a repository declares how it is served
+	// rather than leaving it to be inferred, so it outranks a start script
+	// and a framework default alike. It is only ever a server command: a
+	// site framework's build is still served by nginx.
+	procfileWeb := procfileProcess(marker.procfile, "web")
+	if procfileWeb != "" && rejectPlanSecretLiteral("Procfile web process", procfileWeb) != nil {
+		procfileWeb = ""
+	}
+	if framework == nil {
+		candidate.Framework = matchNodeServerLibrary(manifest)
+		entry := nodeMainEntry(manifest)
 		switch {
-		case dependencies["@sveltejs/adapter-node"] != "" && dependencies["@sveltejs/adapter-static"] == "":
-			candidate.StartCommand = "node build"
-			if runner == "bun" {
-				candidate.StartCommand = "bun ./build/index.js"
+		case procfileWeb != "":
+			candidate.StartCommand = procfileWeb
+			candidate.Profile, candidate.Port = ProfileWeb, 3000
+			candidate.Evidence = append(candidate.Evidence,
+				DetectionEvidence{Path: filepath.ToSlash(filepath.Join(marker.root, "Procfile")), Reason: "web process: " + boundedEvidence(procfileWeb)})
+		case manifest.Scripts["start"] != "":
+			candidate.StartCommand = runner + " run start"
+			candidate.Profile, candidate.Port = ProfileWeb, 3000
+			candidate.Evidence = append(candidate.Evidence,
+				DetectionEvidence{Path: marker.packagePath, Reason: "start script: " + boundedEvidence(manifest.Scripts["start"])})
+		case entry != "":
+			candidate.StartCommand = nodeEntryCommand(runner, entry)
+			candidate.Evidence = append(candidate.Evidence,
+				DetectionEvidence{Path: marker.packagePath, Reason: "main entry: " + entry})
+			// A main file says how the package runs, not whether anything
+			// listens; an HTTP library in its manifest does.
+			if candidate.Framework != "" {
+				candidate.Profile, candidate.Port = ProfileWeb, 3000
+			} else {
+				candidate.Confidence = ConfidenceLow
+				candidate.NeedsDecision = append(candidate.NeedsDecision, "confirm whether this package serves HTTP (web application) or runs as a worker")
 			}
-		case dependencies["@sveltejs/adapter-static"] != "" && dependencies["@sveltejs/adapter-node"] == "":
-			candidate.Profile, candidate.OutputDirectory, candidate.Port, candidate.StartCommand = ProfileStatic, "build", 80, ""
 		default:
-			candidate.Confidence = ConfidenceLow
-			candidate.NeedsDecision = append(candidate.NeedsDecision, "select adapter-node or adapter-static for this server; adapter-auto and provider adapters require a Dockerfile")
+			candidate.NeedsDecision = append(candidate.NeedsDecision, "choose a start command or static output")
 		}
-	case dependencies["vite"] != "":
-		candidate.Framework, candidate.Profile = "vite", ProfileStatic
-		candidate.Confidence, candidate.OutputDirectory, candidate.Port, candidate.StartCommand = ConfidenceHigh, "dist", 80, ""
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: marker.packagePath, Reason: "vite dependency " + boundedEvidence(dependencies["vite"]),
-		})
+	} else {
+		candidate.Framework = framework.Name
+		candidate.Confidence = ConfidenceHigh
+		if resolution.Confidence != "" {
+			candidate.Confidence = resolution.Confidence
+		}
+		for _, dependency := range framework.Dependencies {
+			if manifest.has(dependency) {
+				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
+					Path: marker.packagePath, Reason: framework.Label + " dependency " + boundedEvidence(manifest.version(dependency)),
+				})
+				break
+			}
+		}
+		candidate.NeedsDecision = append(candidate.NeedsDecision, resolution.Decisions...)
+		if resolution.Output != "" {
+			candidate.Profile, candidate.OutputDirectory, candidate.Port = ProfileStatic, resolution.Output, 80
+			candidate.SPAFallback = resolution.SPA
+		} else {
+			candidate.Profile, candidate.Port = ProfileWeb, resolution.Port
+			switch {
+			case procfileWeb != "":
+				candidate.StartCommand = procfileWeb
+				candidate.Evidence = append(candidate.Evidence,
+					DetectionEvidence{Path: filepath.ToSlash(filepath.Join(marker.root, "Procfile")), Reason: "web process: " + boundedEvidence(procfileWeb)})
+			default:
+				candidate.StartCommand = resolution.Start
+				for _, script := range resolution.StartScripts {
+					if command := manifest.Scripts[script]; command != "" {
+						candidate.StartCommand = runner + " run " + script
+						candidate.Evidence = append(candidate.Evidence,
+							DetectionEvidence{Path: marker.packagePath, Reason: script + " script: " + boundedEvidence(command)})
+						break
+					}
+				}
+			}
+		}
+		if candidate.BuildCommand == "" && (resolution.Output != "" || resolution.Entry != "") {
+			candidate.Confidence = ConfidenceLow
+			candidate.NeedsDecision = append(candidate.NeedsDecision, "add a "+buildScript+" script that runs the "+framework.Label+" build")
+		}
 	}
-	if _, err := validateNodeRecipeContent(marker.packageJSON, BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {
+	if tool := detectSchemaTool(dependencies, schemaPaths); tool != nil {
+		candidate.SchemaTool = tool.Tool.Name
+		candidate.Evidence = append(candidate.Evidence, tool.Evidence)
+		switch {
+		case tool.Tool.applied(manifest.Scripts["start"]) || tool.Tool.applied(candidate.StartCommand):
+			candidate.SchemaInStart = true
+			candidate.Evidence[len(candidate.Evidence)-1].Reason = tool.Tool.Label + " schema applied by the package's own start script"
+		case tool.Command == "":
+			candidate.NeedsDecision = append(candidate.NeedsDecision, "choose how "+tool.Tool.Label+" migrations run before the database is used")
+		default:
+			candidate.SchemaCommand = tool.Command
+			if candidate.StartCommand != "" && candidate.OutputDirectory == "" {
+				candidate.StartCommand = nodeExecRunner(runner) + " " + tool.Command + " && " + candidate.StartCommand
+			}
+		}
+	}
+	if _, err := validateNodeRecipeContent(marker.packageJSON, nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile},
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: manager, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {
 		candidate.RecipeIssue = err.Error()
 	}
 	return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, candidate)}
 }
 
-func detectedPythonLock(files map[string][]byte) (string, bool) {
-	if _, ok := files["uv.lock"]; ok {
-		return "uv.lock", true
-	}
-	if _, ok := files["poetry.lock"]; ok {
-		return "poetry.lock", true
-	}
-	requirements, ok := files["requirements.txt"]
-	if !ok {
-		return "", false
-	}
-	seen := false
-	for _, raw := range strings.Split(string(requirements), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "--") {
+// nodeMainEntry is the file package.json says the package runs from, when it
+// is a source file inside the package.
+func nodeMainEntry(manifest nodeManifest) string {
+	for _, entry := range []string{manifest.Main, manifest.Module} {
+		entry = strings.TrimPrefix(strings.TrimSpace(entry), "./")
+		if entry == "" || !safeRelativePath(entry) {
 			continue
 		}
-		seen = true
-		if !strings.Contains(line, "==") && !strings.Contains(line, "@") {
-			return "", false
+		switch strings.ToLower(filepath.Ext(entry)) {
+		case ".js", ".mjs", ".cjs", ".ts", ".mts":
+			return filepath.ToSlash(entry)
 		}
 	}
-	return "requirements.txt", seen
+	return ""
+}
+
+// nodeEntryCommand runs a main file through the runtime the lockfile locks
+// to: Bun executes TypeScript itself, and Node 22 strips erasable types.
+func nodeEntryCommand(runner, entry string) string {
+	if runner == "bun" {
+		return "bun " + entry
+	}
+	return "node " + entry
 }
 
 func newDetectedCandidate(root string, method BuildMethod, candidate DetectedCandidate) DetectedCandidate {

@@ -33,7 +33,7 @@ func TestAutomaticGitDeploymentsAreDefaultAuditedAndFenced(t *testing.T) {
 		t.Fatalf("status=%d %s", response.Code, response.Body.String())
 	}
 	target := deploy.GitWatchTarget{ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: 1, Source: source}
-	run, err := s.dispatchGitDeployment(ctx, target, strings.Repeat("b", 40), "automatic-first")
+	run, err := s.dispatchGitDeployment(ctx, target, strings.Repeat("b", 40), "automatic-first", nil)
 	if err != nil || run.SourceRevision != strings.Repeat("b", 40) || run.Trigger != deploy.TriggerGitPush {
 		t.Fatalf("run=%+v, %v", run, err)
 	}
@@ -42,14 +42,14 @@ func TestAutomaticGitDeploymentsAreDefaultAuditedAndFenced(t *testing.T) {
 		t.Fatalf("audit count=%d, %v", audited, err)
 	}
 	target.PlanRevision = 2
-	if _, err := s.dispatchGitDeployment(ctx, target, strings.Repeat("c", 40), "stale-plan"); !errors.Is(err, deploy.ErrRevisionConflict) {
+	if _, err := s.dispatchGitDeployment(ctx, target, strings.Repeat("c", 40), "stale-plan", nil); !errors.Is(err, deploy.ErrRevisionConflict) {
 		t.Fatalf("stale source observation=%v", err)
 	}
 	target.PlanRevision = 1
 	if _, err := s.modules.deployStore.Archive(ctx, projectID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.dispatchGitDeployment(ctx, target, strings.Repeat("c", 40), "archived-project"); !errors.Is(err, deploy.ErrEnvironmentNotFound) {
+	if _, err := s.dispatchGitDeployment(ctx, target, strings.Repeat("c", 40), "archived-project", nil); !errors.Is(err, deploy.ErrEnvironmentNotFound) {
 		t.Fatalf("archived project enqueue=%v", err)
 	}
 	var count int

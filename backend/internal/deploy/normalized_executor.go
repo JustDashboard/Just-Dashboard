@@ -176,12 +176,7 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 			"sourceDigest": plan.SourceDigest,
 		})}
 	case StepAcquireSource:
-		source, err := e.sources.Materialize(ctx, plan.SourceConfig, plan.SourceIdentity, execution.Run.ID, e.workspaceRoot)
-		if err != nil {
-			return normalizedStepFailure(err)
-		}
-		_ = stepLog(execution, "status", "Materialized the recorded source in a private release workspace")
-		return StepResult{State: StepPassed, Evidence: mustJSON(source)}
+		return e.acquireSource(ctx, execution, plan)
 	case StepAnalyzePlan:
 		if err := validateStoredExecutionPlan(plan); err != nil {
 			return normalizedStepFailure(err)
@@ -222,6 +217,36 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 			ErrorMessage: fmt.Sprintf("normalized runtime step %s is not implemented yet", execution.Step.Key),
 		}
 	}
+}
+
+// acquireSource materializes the frozen source identity into a private
+// workspace and, for a Git source, records the commit it resolved to on the
+// run's metadata — the same subject/author/date a Vercel-style history would
+// show next to the sha the run already carries. Reading that commit is
+// best-effort: an unreadable history logs a transcript line and the step
+// still passes, since acquiring the source itself already succeeded.
+func (e *NormalizedStepExecutor) acquireSource(
+	ctx context.Context,
+	execution StepExecution,
+	plan *StoredExecutionPlan,
+) StepResult {
+	source, err := e.sources.Materialize(ctx, plan.SourceConfig, plan.SourceIdentity, execution.Run.ID, e.workspaceRoot)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	_ = stepLog(execution, "status", "Materialized the recorded source in a private release workspace")
+	if gitSourceMode(plan.SourceConfig.Mode) {
+		if source.Commit != nil {
+			if _, mergeErr := e.store.MergeRunMetadata(ctx, execution.Run.ID,
+				map[string]any{"commit": source.Commit}); mergeErr != nil {
+				_ = stepLog(execution, "warning", "Could not record commit metadata: "+mergeErr.Error())
+			}
+		} else {
+			_ = stepLog(execution, "warning",
+				"Could not read commit metadata for the recorded source; continuing without it")
+		}
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(source)}
 }
 
 func (e *NormalizedStepExecutor) notify(ctx context.Context, execution StepExecution) StepResult {
@@ -704,8 +729,9 @@ func decodeStoredPlanInputs(
 			continue
 		}
 		var config struct {
-			Hostname string `json:"hostname"`
-			HTTPS    bool   `json:"https"`
+			Hostname   string            `json:"hostname"`
+			HTTPS      bool              `json:"https"`
+			Protection *DomainProtection `json:"protection"`
 		}
 		if stored.ResourceKind != "proxy_site" || json.Unmarshal(stored.Config, &config) != nil ||
 			!strings.EqualFold(strings.TrimSpace(config.Hostname), strings.TrimSpace(stored.ResourceID)) {
@@ -713,6 +739,7 @@ func decodeStoredPlanInputs(
 		}
 		domains = append(domains, PlannedDomain{
 			Hostname: config.Hostname, HTTPS: config.HTTPS, Ownership: stored.Ownership,
+			Protection: canonicalDomainProtection(config.Protection),
 		})
 	}
 	checks := make([]PlannedCheck, 0, len(plan.Checks))

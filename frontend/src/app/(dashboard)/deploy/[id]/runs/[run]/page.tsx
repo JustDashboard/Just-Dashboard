@@ -1,5 +1,5 @@
-import { DeploymentRunWorkspace } from "@/components/deploy/deployment-run-workspace"
+import { RunPage } from "@/components/deploy/run-page"
 
 export default function DeploymentRunPage() {
-  return <DeploymentRunWorkspace />
+  return <RunPage />
 }

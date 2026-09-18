@@ -1,0 +1,76 @@
+{
+  "id": "it-tools",
+  "version": "1.0.0",
+  "name": "IT-Tools",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A collection of small developer utilities in one page — token generators, hash and encoding tools, converters, a JWT decoder — with nothing sent anywhere.",
+  "iconId": "bolt",
+  "docsUrl": "https://it-tools.tech/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/CorentinTh/it-tools",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "corentinth/it-tools:2024.10.22-7ca5933",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The tools page",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless; tags are dated builds rather than semantic versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:34686c7dca5710d5bdd36dad12fda096c0ca2d5701fae56d4d7ec06819391621"
+    }
+  ]
+}

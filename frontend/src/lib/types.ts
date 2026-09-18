@@ -2084,15 +2084,73 @@ export type BackupJob = {
   }
   schedule: string
   retention: number
+  /** Prunes artifacts older than this many days; 0 keeps by count alone. */
+  retentionDays: number
   enabled: boolean
   createdAt: string
   hasCredentials: boolean
   lastRun?: BackupRun
   nextRun?: string
+  /** When the newest successful artifact was taken. */
+  lastSuccessAt?: string
+  /** A scheduled job that has gone two intervals without a successful run. */
+  overdue: boolean
+  /** The retained artifacts and what they add up to. */
+  stored: { runs: number; bytes: number }
   sqlitePaths?: string[]
   // Saved database connections whose native dump every run captures.
   databaseDumps?: number[]
+  /** Containers frozen for the archive step, so their volumes are quiet. */
+  pauseContainers?: string[]
   recovery?: BackupRecoveryPlan
+}
+
+export type BackupResourceKind =
+  "dashboard" | "proxy" | "volume" | "stack" | "deployment" | "repository" | "database"
+
+/**
+ * One thing the dashboard already knows about that a backup could protect,
+ * with the job it would write for it and the jobs that already cover it.
+ */
+export type BackupResource = {
+  kind: BackupResourceKind
+  id: string
+  name: string
+  detail?: string
+  paths?: string[]
+  connectionId?: number
+  suggest: {
+    name: string
+    sources: string[]
+    excludes?: string[]
+    sqlitePaths?: string[]
+    databaseDumps?: number[]
+    pauseContainers?: string[]
+  }
+  coveredBy: { jobId: number; jobName: string; enabled: boolean }[]
+  protected: boolean
+  lastBackupAt?: string
+}
+
+export type BackupResourceReport = {
+  resources: BackupResource[]
+  unavailable: Record<string, string>
+}
+
+export type BackupArchiveEntry = {
+  name: string
+  size: number
+  mode: string
+  isDir: boolean
+}
+
+export type BackupRestoreResult = {
+  runId: number
+  destination: string
+  entries: number
+  bytes: number
+  skipped?: string[]
+  targets?: string[]
 }
 
 export type BackupDatabaseDump = {
@@ -2111,7 +2169,9 @@ export type BackupManifest = {
   version: number
   artifactDigest: string
   complete: boolean
+  sources?: { path: string; archivePath: string }[]
   databaseDumps?: BackupDatabaseDump[]
+  pausedContainers?: string[]
 }
 
 export type BackupRecoveryPlan = {
@@ -2558,6 +2618,7 @@ export type DeploymentDomainRoute = {
   certificateDaysLeft?: number
   deepLink?: string
   certificateLink?: string
+  protected?: boolean
 }
 
 export type DeploymentStorageMount = {
@@ -2702,9 +2763,70 @@ export type DeploymentSummary = {
   hostPort?: number
   health: string
   pendingChanges: boolean
+  /** The live release's runtime was stopped on purpose and waits for Start. */
+  stopped?: boolean
+  /** Services in the live release's runtime: one, or a Compose stack's count. */
+  serviceCount?: number
   lastRun?: DeploymentEngineRun
   activeRun?: DeploymentEngineRun
   updatedAt: string
+}
+
+/** The commit a Git run built, recorded in the run's metadata under `commit`. */
+export type DeploymentCommit = {
+  sha: string
+  subject?: string
+  author?: string
+  authoredAt?: string
+}
+
+export type DeploymentGitPolicy = {
+  automatic: boolean
+  watchInclude: string[]
+  watchExclude: string[]
+  commitStatuses?: boolean
+  revision: number
+  inherited?: boolean
+  conflict?: boolean
+}
+
+export type DeploymentGitWatch = {
+  automatic: boolean
+  branch?: string
+  status: string
+  checkedAt?: string
+  intervalSeconds: number
+  reason?: string
+  policy?: DeploymentGitPolicy
+}
+
+/** One page of a project's run history, newest first. */
+export type DeploymentRunsPage = {
+  runs: DeploymentEngineRun[]
+  running: boolean
+  /** The cursor for the next page, present only when older runs exist. */
+  nextBefore?: number
+}
+
+/** A provider or generic hook delivery the trigger received. */
+export type DeploymentTriggerDelivery = {
+  deliveryId: string
+  event: string
+  ref?: string
+  decision: string
+  reason?: string
+  runId?: number
+  receivedAt: string
+}
+
+/** An unfinished project setup the caller can resume from `/deploy/new?draft=`. */
+export type DeploymentDraftSummary = {
+  id: string
+  name?: string
+  source?: string
+  currentStep: DeploymentDraft["currentStep"]
+  updatedAt: string
+  expiresAt: string
 }
 
 export type DeploymentInsights = {
@@ -2772,11 +2894,63 @@ export type DeploymentTrigger = {
     preview?: boolean
     previewQuota?: number
     previewDomain?: string
+    /** "app" when the dashboard's GitHub App delivers this trigger's events. */
+    delivery?: "app"
   }
   hookId?: string
   enabled: boolean
   lastDeliveryAt?: string
   lastStatus?: string
+}
+
+/** One account that installed the dashboard's GitHub App. */
+export type GitHubAppInstallation = {
+  id: number
+  account: string
+  accountType: string
+  htmlUrl: string
+  repositorySelection: string
+  /** The deploy credential that mints this installation's tokens for clones. */
+  credentialId?: number
+}
+
+export type GitHubAppStatus = {
+  configured: boolean
+  app?: {
+    id: number
+    slug: string
+    name: string
+    owner: string
+    htmlUrl: string
+    createdAt: string
+  }
+  installations: GitHubAppInstallation[]
+  installUrl?: string
+  webhookUrl?: string
+  /** A GitHub-side problem beside a configured App: a deleted App, a revoked key. */
+  error?: string
+}
+
+/** A repository one of the App's installations grants. */
+export type GitHubAppRepository = {
+  installationId: number
+  account: string
+  nameWithOwner: string
+  name: string
+  description?: string
+  language?: string
+  private: boolean
+  defaultBranch: string
+  cloneUrl: string
+  htmlUrl: string
+  credentialId?: number
+}
+
+/** What the page posts to GitHub to create the App, and the state GitHub sends back. */
+export type GitHubAppManifestStart = {
+  action: string
+  state: string
+  manifest: Record<string, unknown>
 }
 
 export type DeploymentSchedule = {
@@ -2811,7 +2985,7 @@ export type DeploymentPreviewApproval = {
   repository: string
   headRepository: string
   author: string
-  state: "pending" | "approved" | "superseded" | "closed"
+  state: "pending" | "approved" | "rejected" | "superseded" | "closed"
   approvedBy?: string
   updatedAt: string
 }
@@ -2882,6 +3056,25 @@ export type DeploymentDraftSource = {
 
 export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
 
+/** The automatic recipes the backend can build; `validRecipe` is its closed set. */
+export type DeploymentRecipe =
+  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
+
+/** An environment variable detection found the source reading. */
+export type DeploymentDetectedVariable = {
+  name: string
+  /** The example file's own value, when it had one and it was not credential-shaped. */
+  example?: string
+  sources: string[]
+}
+
+/** A database engine detection found the source connecting to. */
+export type DeploymentDetectedDatabase = {
+  engine: string
+  variable: string
+  evidence: string
+}
+
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
   goVersion?: string
@@ -2895,11 +3088,19 @@ export type DeploymentDetectionCandidate = {
   buildMethod: DeploymentBuildMethod
   confidence: "high" | "medium" | "low"
   framework?: string
-  recipe?: "node" | "go" | "python"
+  recipe?: DeploymentRecipe
   buildCommand?: string
   startCommand?: string
   outputDirectory?: string
   port?: number
+  schemaTool?: string
+  schemaCommand?: string
+  schemaInStart?: boolean
+  spaFallback?: boolean
+  pythonVersion?: string
+  unpinnedDependencies?: boolean
+  variables?: DeploymentDetectedVariable[]
+  databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
 }
@@ -2952,6 +3153,14 @@ export type DeploymentBuildMethod =
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
+/** A container port published on the host next to the routed one: Gitea's SSH, Syncthing's sync protocol. */
+export type DeploymentPublishedPort = {
+  hostPort: number
+  containerPort: number
+  protocol?: "tcp" | "udp"
+  bindAddress?: string
+}
+
 export type DeploymentRestartPolicy = "unless-stopped" | "always" | "on-failure" | "no"
 
 export type NotificationChannelKind = "webhook" | "discord" | "slack" | "telegram" | "email"
@@ -2999,14 +3208,16 @@ export type NotificationDelivery = {
 export type DeploymentConfiguration = {
   build: {
     method: DeploymentBuildMethod
-    recipe?: "node" | "go" | "python"
+    recipe?: DeploymentRecipe
     goVersion?: string
+    pythonVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string
     buildCommand?: string
     startCommand?: string
     outputDirectory?: string
+    spaFallback?: boolean
     targetPlatform?: string
     noCache?: boolean
     secrets?: { variable: string; step: "install" | "build" }[]
@@ -3024,6 +3235,7 @@ export type DeploymentConfiguration = {
     command?: string[]
     internalPort?: number
     hostPort?: number
+    ports?: DeploymentPublishedPort[]
     bindAddress?: string
     strategy: "blue_green" | "stop_first"
     privileged?: boolean
@@ -3066,7 +3278,21 @@ export type DeploymentConfiguration = {
     required: boolean
     config?: Record<string, unknown>
   }[]
-  domains: { hostname: string; https: boolean; ownership: "managed" | "linked" }[]
+  domains: DeploymentPlannedDomain[]
+}
+
+/** A password in front of the route: the hash is what the plan keeps, the password is write-only. */
+export type DeploymentDomainProtection = {
+  username: string
+  password?: string
+  hash?: string
+}
+
+export type DeploymentPlannedDomain = {
+  hostname: string
+  https: boolean
+  ownership: "managed" | "linked"
+  protection?: DeploymentDomainProtection
 }
 
 export type DeploymentVariable = {
@@ -3104,6 +3330,9 @@ export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "
   revision: number
   variables: DeploymentVariable[]
   pending: DeploymentPendingState
+  /** Present once the backend fills it in; until then the Source card falls back to the summary. */
+  source?: DeploymentDraftSource
+  identity?: SourceIdentity
 }
 
 export type DeploymentRemovalTarget = {
@@ -3220,6 +3449,45 @@ export type DeployCommit = {
   author: string
   date: string
   subject: string
+}
+
+/** A token or key the server holds so it can reach a private repository or registry. */
+export type DeploymentCredentialKind =
+  "git_bearer" | "git_ssh" | "registry" | "provider_token" | "github_app"
+
+export type DeploymentCredential = {
+  id: number
+  name: string
+  kind: DeploymentCredentialKind
+  /** A host, e.g. "github.com" or "ghcr.io" — empty when the kind has none. */
+  target: string
+  username?: string
+  createdAt: string
+  updatedAt: string
+  lastUsedAt?: string
+  /** How many non-archived projects' current source uses it — 0 means safe to remove. */
+  usedBy: number
+}
+
+/**
+ * What a source actually resolved to the last time it was validated — the
+ * adapter's own facts, not what was typed. Same shape as `DeploymentDetection`'s
+ * `source`, which the same resolution path already produces.
+ */
+export type SourceIdentity = {
+  kind: DeploymentSourceKind
+  remote?: string
+  repository?: string
+  ref?: string
+  revision?: string
+  digest?: string
+  os?: string
+  architecture?: string
+  platforms?: string[]
+  localPath?: string
+  dirty?: boolean
+  composeFiles?: string[]
+  services?: string[]
 }
 
 export type EnvVar = {
@@ -3835,6 +4103,39 @@ export type DbDetectedServer = {
 }
 
 export type DbDetected = { servers: DbDetectedServer[] }
+
+/**
+ * Where a connection's server can be reached from, as GET /databases/{id}/access
+ * reads it off the container's port binding and the host's firewall.
+ *
+ * `detected` is the fact the Remove row keys off: a server the sync would
+ * connect again on the next page load is not worth a button that forgets it.
+ * `managed` is whether the binding can be changed from here — a container on
+ * this host that is not compose-owned and publishes the engine's port.
+ */
+export type DbAccess = {
+  detected: boolean
+  container?: string
+  composeProject?: string
+  managed: boolean
+  exposure: "local" | "public" | "private" | "remote"
+  port?: number
+  publicAddresses: string[]
+  firewall: {
+    backend?: string
+    active: boolean
+    open: boolean
+    editable: boolean
+  }
+}
+
+/** What PUT /databases/{id}/access did, and the reading afterwards. */
+export type DbAccessChange = {
+  access: DbAccess
+  /** opened, closed, already, none, inactive, read-only or failed. */
+  firewall: string
+  firewallError?: string
+}
 
 /**
  * What POST /databases/sync did.

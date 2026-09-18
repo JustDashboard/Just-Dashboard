@@ -1,0 +1,92 @@
+{
+  "id": "filebrowser",
+  "version": "1.0.0",
+  "name": "File Browser",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A web file manager over one directory: upload, download, share links and editing, with its own users. The first admin password is printed in the container's logs on first start.",
+  "iconId": "logs",
+  "docsUrl": "https://filebrowser.org/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/filebrowser/filebrowser",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "filebrowser/filebrowser:v2.63.23",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The file manager",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "files",
+      "target": "/srv",
+      "purpose": "The files it manages",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "database",
+      "target": "/database",
+      "purpose": "Users and share links",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "File Browser migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:e9bddef41ef9b50da82dd081e80e7b608aca74615fc3ff9583e8bff38d1fb348"
+    }
+  ]
+}

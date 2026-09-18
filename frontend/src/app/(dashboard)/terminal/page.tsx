@@ -253,7 +253,8 @@ export default function TerminalPage() {
   const deleteFolder = (folder: TerminalFolder) =>
     confirm({
       title: `Delete ${folder.name}?`,
-      description: "Sessions in this folder will move to Unfiled. No terminal will close.",
+      description:
+        "Sessions in this folder will move back to All sessions. No terminal will close.",
       confirmLabel: "Delete folder",
       action: () => del(`/terminal/folders/${encodeURIComponent(folder.name)}`).then(refresh),
     })

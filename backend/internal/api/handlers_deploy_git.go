@@ -42,14 +42,18 @@ func (s *Server) handleDeploymentGitPolicyPut(w http.ResponseWriter, r *http.Req
 	return nil
 }
 
-func (s *Server) dispatchGitDeployment(ctx context.Context, target deploy.GitWatchTarget, revision, key string) (*deploy.EngineRun, error) {
+func (s *Server) dispatchGitDeployment(ctx context.Context, target deploy.GitWatchTarget, revision, key string, changedPaths []string) (*deploy.EngineRun, error) {
 	project, err := s.modules.deployStore.Get(ctx, target.ProjectID)
 	if err != nil {
 		return nil, err
 	}
+	metadata := map[string]any{"automatic": true, "gitPolicy": target.PolicyKey}
+	if len(changedPaths) > 0 {
+		metadata["changedPaths"] = changedPaths
+	}
 	run, err := s.enqueueNormalizedDeploymentAtSource(ctx, project, target.EnvironmentID,
 		deploy.OperationDeploy, 0, deploy.TriggerGitPush, "git-monitor", key,
-		map[string]any{"automatic": true, "gitPolicy": target.PolicyKey}, revision, target.PlanRevision, target.PolicyKey)
+		metadata, revision, "", target.PlanRevision, target.PolicyKey)
 	detail := map[string]any{"environmentId": target.EnvironmentID, "sourceRevision": revision}
 	if run != nil {
 		detail["runId"] = run.ID

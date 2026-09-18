@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,7 +22,20 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	client := liveC4Docker(t)
 	builder := NewArtifactBuilder(NewDockerArtifactBackend(client))
 	owner := NewDockerRuntimeOwner(client)
-	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go"} {
+	// The catalogue fixtures are each framework's own starter layout: Astro
+	// static, Nuxt 4 and React Router 8 servers, and three Python shapes — a
+	// FastAPI app on an unpinned requirements.txt with no server declared, a
+	// Flask factory on a bare pyproject, and a Django project whose migrations
+	// must run before its first request can be answered.
+	// The compiled fixtures are an axum service, a plain Maven jar and a plain
+	// Gradle jar (their ports confirmed the way the form would), an ASP.NET
+	// Core minimal API and a Deno server, each read for its toolchain and
+	// served from its own image. Streamlit and Gradio are the two data-app
+	// shapes: a script the framework's own server runs, answering on the
+	// framework's port with the framework's own page.
+	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
+		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
+		"streamlit", "gradio"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -57,6 +71,9 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				config.GoVersion, config.BuildCommand, config.StartCommand = "1.26.8", "go generate ./... && go build -o /out/app .", "/app custom-start"
 				candidate.Port = 8080
 			}
+			if name == "java" || name == "gradle" {
+				candidate.Port = 8080
+			}
 			variables := map[string]string{}
 			secret := fmt.Sprintf("jd-framework-install-%d", time.Now().UnixNano())
 			if config.Method == BuildRecipe {
@@ -77,8 +94,15 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			}
 			run := EngineRun{ID: stamp, EnvironmentID: stamp}
 			release := Release{ID: stamp, EnvironmentID: stamp, RunID: stamp, Number: 1}
+			runtimeVariables := map[string]string{}
+			if name == "laravel" {
+				// What the configure form generates for a Laravel import: the
+				// application key, and file-backed sessions since the fixture
+				// ships no sessions table.
+				runtimeVariables = map[string]string{"APP_KEY": "base64:" + base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), "SESSION_DRIVER": "file", "CACHE_STORE": "file"}
+			}
 			started, err := owner.StartCandidate(ctx, CandidateRuntimeRequest{Run: run, Release: release,
-				Snapshot: runtimeReleaseSnapshot{Version: 1, Plan: plan, Image: result.Image}, Host: "127.0.0.1", Port: liveC5LoopbackPort(t)}, nil)
+				Snapshot: runtimeReleaseSnapshot{Version: 1, Plan: plan, Image: result.Image}, RuntimeVariables: runtimeVariables, Host: "127.0.0.1", Port: liveC5LoopbackPort(t)}, nil)
 			t.Cleanup(func() {
 				_, _ = liveDockerOutput(context.Background(), "rm", "--force", "--volumes", fmt.Sprintf("jd-e%d-r1", stamp))
 			})
@@ -106,7 +130,24 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			}
 			html := fetch("/")
 			content := html
+			// Gradio's page embeds the whole application config, the
+			// configured value included, and declares a manifest script it
+			// serves only to an installed app; the shell alone is the proof.
+			walkAssets := name != "gradio"
+			if name == "streamlit" {
+				// Streamlit renders its page over a websocket, so the shell
+				// alone proves nothing about the script: the static file the
+				// script's own configuration serves, and the health endpoint
+				// the framework answers once the script loaded, do.
+				if health := strings.TrimSpace(fetch("/_stcore/health")); health != "ok" {
+					t.Fatalf("Streamlit health = %q", health)
+				}
+				content += fetch("/app/static/value.txt")
+			}
 			for _, match := range regexp.MustCompile(`(?:src|href)="([^"?#]+\.js)(?:[^" ]*)"`).FindAllStringSubmatch(html, -1) {
+				if !walkAssets {
+					break
+				}
 				path := strings.TrimPrefix(match[1], "./")
 				if !strings.HasPrefix(path, "/") {
 					path = "/" + path
@@ -121,6 +162,24 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			}
 			if name == "go" && (!strings.Contains(content, "custom-start go1.26.8") || result.Prepared.GoVersion != "1.26.8") {
 				t.Fatalf("Go override/version behavior missing: %q", content)
+			}
+			if candidate.Recipe == "python" && result.Prepared.PythonVersion != "3.13" {
+				t.Fatalf("Python version not recorded: %+v", result.Prepared)
+			}
+			if name == "django" && !strings.Contains(content, "users=0") {
+				t.Fatalf("Django did not answer through its migrated database: %q", content)
+			}
+			if name == "astro" && candidate.Profile != ProfileStatic || name == "nuxt" && candidate.Port != 3000 || name == "react-router" && candidate.Framework != "react-router" ||
+				name == "rust" && (candidate.Framework != "axum" || result.Prepared.Toolchain != "rust 1") ||
+				name == "java" && result.Prepared.Toolchain != "java 21 (maven)" ||
+				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle)" ||
+				name == "streamlit" && (candidate.Framework != "streamlit" || candidate.Port != 8501) ||
+				name == "gradio" && (candidate.Framework != "gradio" || candidate.Port != 7860) ||
+				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 8.0") ||
+				name == "deno" && candidate.Port != 8000 ||
+				name == "laravel" && (candidate.Framework != "laravel" || result.Prepared.Toolchain != "php 8.4") ||
+				name == "php" && candidate.Framework != "php" {
+				t.Fatalf("catalogue defaults for %s: %+v / %+v", name, candidate, result.Prepared)
 			}
 			if strings.Contains(content, secret) {
 				t.Fatal("install credential escaped into served assets")

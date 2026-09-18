@@ -25,6 +25,9 @@ type Manifest struct {
 	Complete        bool             `json:"complete"`
 	SQLiteSnapshots []SQLiteSnapshot `json:"sqliteSnapshots,omitempty"`
 	DatabaseDumps   []DatabaseDump   `json:"databaseDumps,omitempty"`
+	// PausedContainers records which containers were frozen for the archive
+	// step, so the evidence of a quiet capture travels with the artifact.
+	PausedContainers []string `json:"pausedContainers,omitempty"`
 }
 
 type ManifestSource struct {

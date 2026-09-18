@@ -76,8 +76,9 @@ func (p *CommitStatusPublisher) publish(ctx context.Context, run EngineRun, stat
 	if p == nil || p.poster == nil || p.runs == nil {
 		return
 	}
-	if run.Operation == OperationRestart || run.Operation == OperationPreviewRemove {
-		// Neither changes which commit is deployed.
+	if run.Operation == OperationRestart || run.Operation == OperationPreviewRemove ||
+		run.Operation == OperationStop || run.Operation == OperationStart {
+		// None of these change which commit is deployed.
 		return
 	}
 	target, ok := p.target(ctx, run)

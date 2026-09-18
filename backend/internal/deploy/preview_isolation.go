@@ -125,6 +125,26 @@ func (s *AutomationStore) ApprovePreview(ctx context.Context, projectID, approva
 	return scanPreviewApproval(s.db.QueryRowContext(ctx, `SELECT `+previewApprovalColumns+` FROM deploy_preview_approvals a WHERE a.id=?`, approvalID))
 }
 
+// RejectPreview refuses a pending or previously approved revision. It only
+// ever moves a row out of the active set ('pending'/'approved'), so
+// ApprovePreview's own WHERE clause already refuses a rejected revision
+// without needing to know about the new state; the trigger's next event for
+// this pull request inserts a fresh row at the new revision, independent of
+// this one's fate.
+func (s *AutomationStore) RejectPreview(ctx context.Context, projectID, approvalID int64, revision, actor string) (*PreviewApproval, error) {
+	if !gitObjectIDRE.MatchString(revision) || strings.TrimSpace(actor) == "" {
+		return nil, ErrPreviewApproval
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE deploy_preview_approvals SET state='rejected',approved_by=?,updated_at=? WHERE id=? AND revision=? AND state IN ('pending','approved') AND trigger_id IN (SELECT t.id FROM deploy_triggers t JOIN deploy_environments e ON e.id=t.environment_id JOIN deploy_projects p ON p.id=e.project_id WHERE e.project_id=? AND e.archived_at=0 AND p.archived_at=0 AND t.enabled=1)`, actor, s.now().UTC().Unix(), approvalID, revision, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return nil, ErrPreviewApproval
+	}
+	return scanPreviewApproval(s.db.QueryRowContext(ctx, `SELECT `+previewApprovalColumns+` FROM deploy_preview_approvals a WHERE a.id=?`, approvalID))
+}
+
 func previewVolumeName(environmentID int64, target string) string {
 	digest := sha256.Sum256([]byte(target))
 	return fmt.Sprintf("jd-preview-e%d-%s", environmentID, hex.EncodeToString(digest[:8]))
@@ -161,7 +181,7 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 		}
 	}
 	build.ReleaseTasks, build.Secrets = nil, nil
-	runtime.PreviewIsolation, runtime.HostPort, runtime.BindAddress = true, 0, "127.0.0.1"
+	runtime.PreviewIsolation, runtime.HostPort, runtime.Ports, runtime.BindAddress = true, 0, nil, "127.0.0.1"
 	for index := range runtime.Mounts {
 		mount := &runtime.Mounts[index]
 		mount.Source, mount.Ownership = previewVolumeName(environmentID, mount.Target), OwnershipManaged
@@ -230,7 +250,7 @@ func copyPreviewChecksTx(ctx context.Context, tx *sql.Tx, sourceID, environmentI
 
 func validatePreviewPlan(environmentID int64, build BuildPlanConfig, runtime RuntimePlanConfig) error {
 	if !runtime.PreviewIsolation || build.Method == BuildCompose || len(build.ReleaseTasks) > 0 ||
-		runtime.Privileged || runtime.HostNetwork || len(runtime.Devices) > 0 || len(runtime.Capabilities) > 0 || runtime.HostPort != 0 || runtime.BindAddress != "127.0.0.1" {
+		runtime.Privileged || runtime.HostNetwork || len(runtime.Devices) > 0 || len(runtime.Capabilities) > 0 || runtime.HostPort != 0 || len(runtime.Ports) != 0 || runtime.BindAddress != "127.0.0.1" {
 		return ErrPreviewIsolation
 	}
 	for _, mount := range runtime.Mounts {

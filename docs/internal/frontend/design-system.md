@@ -77,7 +77,9 @@ taking a frame:
   is a `Status` dot and the code rather than a wash across the row; and
   both of the dashboard's own pages — the update in flight and the version history on Settings,
   and the two forms, the restart record and the switches (an `OptionList`) on Configuration, whose
-  install paths moved out of a framed drawer into a row of facts under the title; and the three views on
+  install paths moved out of a framed drawer into a row of facts under the title; the Backups page —
+  four readings, an attention list, the jobs as a plain table under a hairline and the coverage list
+  under its filter chips, with a job's sheet built from a fact list and plain panels; and the three views on
   Packages — the installed and updates tables and the software search, under one underlined strip
   (`tabClasses`) rather than a filled tab list — each a toolbar, a hairline and rows on the page's own
   edge, with what needs acting on (security updates waiting, a reboot owed, a stale index) said as a
@@ -97,13 +99,13 @@ A panel that is also a destination takes `interactive`: its border steps up to `
 under the pointer, and nothing else moves.
 
 Press feedback is colour. A control with a face takes its own `active:` step — `active:bg-control-active`
-for the neutral faces, `active:bg-brand-active` for the orange command; a ghost or link button has no
+for the neutral faces, `active:bg-brand-active` for the brand command; a ghost or link button has no
 face to move and borrows the accent wash. Nothing translates, and nothing casts a shadow to say it was
 pressed.
 
-## 3. One orange, three jobs
+## 3. One blue, three jobs
 
-The product has one colour, and it is asked to do three things. The brand orange is the face of a
+The product has one colour, and it is asked to do three things. The brand blue is the face of a
 command *and* the mark of where you are; the lit step is attention. What keeps the first two from
 reading as each other is form rather than hue — a command is a filled face you press, a location is a
 tint, a glyph or a fill behind a word — and what keeps all three apart is that only the lit step is
@@ -111,32 +113,31 @@ never at rest.
 
 | Role | Token | Spent on |
 | --- | --- | --- |
-| Command | `--brand` (`#E05623`) | The face of the one action on a surface: `bg-brand` at rest, `bg-brand-hover` under the pointer, `bg-brand-active` on press. Never a state, never a selection. |
-| Location | `--brand` (`#E05623`, oklch 0.629/0.183/39°) | The mark, the current nav entry, a module tile's mark on the overview, the active section tab, `--chart-1`. |
-| Attention | `--signal` (the same orange lit, L 0.72) | The focus ring, a search hit in the log console, the terminal bell. |
+| Command | `--brand` (`#CAE9FF`), black `--brand-foreground` | The face of the one action on a surface: `bg-brand` at rest, `bg-brand-hover` under the pointer, `bg-brand-active` on press. Never a state, never a selection. |
+| Location | `--brand` (`#CAE9FF`, oklch 0.919/0.044/239°) | The mark, the current nav entry, a module tile's mark on the overview, the active section tab, `--chart-1`. |
+| Attention | `--signal` (the same blue saturated, L 0.78 C 0.13) | The focus ring, a search hit in the log console, the terminal bell. |
 
 White is still a fill, but it is no longer the command face. `--primary` is the neutral ink a
 *reading* draws as a solid mark — the checked state of a checkbox or a switch, a meter's bar — so a
 filled state can never be mistaken for the one thing you press.
 
-The two orange tokens are one hue, because the product has a mark and the mark is one colour:
-`#E05623`, the orange the J in `components/logo.tsx` is drawn in. The palette carried a blue in the
-attention role until 0.6.7 — a second identity nobody chose, reading as chrome borrowed from
-elsewhere next to a logo that is emphatically not blue. **What separates the two is lightness, not
-hue**: `--brand` is the logo's own value, the colour at rest; `--signal` is that orange a step
-brighter, and the brightest thing on this ground, so what is happening *now* is found before what is
-always there.
+The two blue tokens are one hue, because the product has a mark and the mark is one colour:
+`#CAE9FF`, the pale blue the J in `public/LOGO.svg` (inlined in `components/logo.tsx`) is drawn in.
+**What separates the two is chroma, not lightness**: `--brand` is the logo's own value, the colour at
+rest, and at L 0.92 it is already among the lightest things on this ground, so there is no brighter
+step left for attention to take. `--signal` is the same blue saturated instead — a step deeper and
+far more vivid — so what is happening *now* is still found before what is always there. Because the
+brand face is pale, its label is black: `--brand-foreground` is the darkest value on the ground, and
+the text and icon inside a command button are black, never white.
 
-Orange sits at 39°, not at the 78° the amber status hue occupies, so the identity hue cannot be read
-as a warning and `--warning` stays where every operator already expects amber. The cost of the move
-is at the other end: 39° is close enough to `--destructive` (25°) that the two are no longer the
-arm's-length pair they were, which is why the brand hue is never spent on a *state* — a red that
-means failure always arrives attached to a status word, a dot or a toast, and orange never does.
+Blue sits at 239°, a long way from the 78° amber and the 25° red the status hues occupy, so the
+identity hue can never be read as a warning or a failure. The brand hue is still never spent on a
+*state* — failure always arrives attached to a status word, a dot or a toast.
 
 **Nothing reads a hue by its old name.** The terminal's ANSI blue is `--chart-2`, which is a literal
-blue rather than a reference to any role token, or `ls` paints directories orange. `--chart-3` is a
-magenta, not the red it was: with `--chart-1` now at the warm-red end of the ramp, a red slot three
-put two indistinguishable lines on the same load chart.
+blue rather than a reference to any role token, or `ls` paints directories in the pale brand tint.
+`--chart-1` is the brand and `--chart-2` is a blue too; they are told apart on a chart by lightness
+and chroma rather than by hue. `--chart-3` is a magenta.
 
 Status keeps its own three hues (`--success`, `--warning`, `--destructive`) and they are never
 borrowed for anything that is not a reading of state.
@@ -282,11 +283,14 @@ finds without reading.
 Weight carries hierarchy where size cannot. The sidebar is the one surface dense enough to need
 three: group labels in the eyebrow's small caps, resting entries `font-normal` so the column reads as
 a list rather than as forty-nine headings, and the current entry `font-medium` alongside its accent
-fill and brand-orange icon.
+fill and brand-blue icon.
 
-A **section tab strip** is `text-body`. It was `text-xs` while the page title was 20px and the strip
-sat within two pixels of both the title and the panel titles; with the title at 24 the strip has a
-rank of its own again, and 12px chrome under a 24px title read as an afterthought.
+A **view strip** — the underlined tabs that switch between two readings of the *same* page — is
+`text-body`. It was `text-xs` while the page title was 20px and the strip sat within two pixels of both
+the title and the panel titles; with the title at 24 the strip has a rank of its own again, and 12px
+chrome under a 24px title read as an afterthought. There is no route-level strip to size: since 0.6.7
+the sidebar drills into a section and lists its pages, and a tab that changes the URL is not a thing
+this product has.
 
 A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to
@@ -335,18 +339,20 @@ rather than assembling its own recharts tree — adding a measurement should mea
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
 
-## 11. Motion says one of three things
+## 11. Motion says one of four things
 
 Before 0.6.7 the only shared motion in the product was whatever Radix and `tw-animate-css` happened
 to ship: a `transition-colors` here, an `animate-pulse` there, and no answer to "what should this
-look like while it is happening". Three names in `@theme`, because three is what the interface
-actually has to say:
+look like while it is happening". Four names in `@theme`, and no more — three of them are about a
+reading, and the fourth exists because 0.6.7 gave the product one navigation that moves between
+levels rather than between pages:
 
 | Token | Says | Spent on |
 | --- | --- | --- |
 | `animate-breathe` | this reading is live | A halo breathing out of a `StatusDot`, at an amplitude low enough to read as "still arriving" and never as an alarm. |
 | `animate-rise` | this was not here a moment ago | Opacity and four pixels, once, on arrival: a panel that appears, a disclosure that opens, a sparkline whose data landed. |
 | `animate-sweep` | this is working, and cannot say how far along | An indeterminate bar for a pull or a prune, where a spinner in the corner of a wide panel is too small to be the answer. |
+| `animate-drill` | you crossed a level | `rise` turned sideways, for the one place where a list is replaced by a list: the sidebar going into a section and back out. The direction *is* the message — in arrives from the right, out from the left — so the distance is `--drill-from` at the call site, not in the keyframe, and a panel that merely re-rendered does not move at all. |
 
 **`rise` is expected wherever a fetch settles**, not reserved for special occasions. The Overview is
 the reference: the page rises once when its first snapshot lands; each sparkline when its hour of
@@ -397,6 +403,14 @@ the menu button nested inside it — as one control's name. The row's title is a
 surrounding click handler is a convenience for the pointer that skips any press landing on a control
 of its own, exactly as `TableRow`'s `onActivate` does.
 
+**A title column caps its width, and the title binds itself to that cap.** `truncate` on the title
+is not enough on its own: a `<button>` is inline-block, so it sizes to its text and a process whose
+name is the whole of a headless Chrome's argv paints across Owner, State and CPU rather than
+ellipsing. `RowLink` carries `max-w-full min-w-0` for that reason — the first binds it to the
+`max-w-[Nrem] min-w-0` wrapper every title cell is built from, the second lets it shrink where the
+title is laid out with flex beside a tag. Anything else that sizes to its content in a capped cell
+needs the same pair.
+
 ## 13. A verb is a word
 
 An icon-only control is legible when its shape is universal and it is pressed constantly — play,
@@ -420,6 +434,12 @@ The rule that fell out of the Docker pass, and which generalises:
   hundred rows is four hundred invitations to end something by mis-click, so Terminate and Kill are
   named buttons in the sheet and words in the row's menu.
 
+A choice **closes the menu**. `VerbMenu` lets Radix's default close run from 0.6.7: the item's
+`preventDefault`, copied from the Docker actions menu, had kept every menu drawn through it open after
+a choice, so the verb ran behind a menu that was still asking. Where a surface draws more than one
+menu — a sheet with its own verbs above a table of rows that each have theirs — `menuLabel` names
+each ellipsis after its row, so a screen reader and a test can tell them apart.
+
 A control that changes state should also **say that it is changing**. A Docker stop takes ten seconds
 to honour while the socket keeps reporting the old state, so the row answers the press by sitting
 still and then jumping — indistinguishable from a button that did not work, and the reason anybody
@@ -430,7 +450,7 @@ presses restart twice. The row carries the present participle (`Stopping…`) un
 **A surface's header carries its name and its actions. It does not carry a picture of itself.**
 
 Every `PanelHeader`, `Modal`, `SidePanel` and `Section` used to open with a 28px brand-tinted plot
-and a glyph inside it. On a page of six panels that is six orange marks down the left edge, each one
+and a glyph inside it. On a page of six panels that is six brand marks down the left edge, each one
 the same weight as the one control the reader is actually meant to press — and none of them said
 anything the word beside them did not. `Servers` in front of "Filesystems", `Cpu` in front of
 "Processor", `ShieldOff` in front of "Health": a glyph is a guess at a word the header has already
@@ -466,7 +486,7 @@ host Overview (`app/(dashboard)/page.tsx`) in 0.6.7, and that page is the refere
 the page being redesigned and make the second one read like the first.
 
 **The look in one sentence: readings on the page, not boxes on the page.** One dark ground. A hairline
-where two things meet. Type doing the hierarchy. One orange. Motion only to say something arrived.
+where two things meet. Type doing the hierarchy. One blue. Motion only to say something arrived.
 "Modern and clean" here means *fewer edges*, never more decoration — no gradients, no glow, no glass,
 no shadows, no icon plates, no badges, no rounded cards floating over the ground.
 
@@ -493,11 +513,11 @@ The passes, in order. Each one is a diff you can review on its own.
    `Notice`, an `EmptyState`, a verb on a button.
 5. **Type on the ladder.** Page 24 → section 16 → surface 15 → body 13 → hint 11 → micro 10, and a
    headline figure 24. Anything in between is deleted, not rounded to the nearest.
-6. **Colour by role.** Brand orange is a command's face or a location mark. Amber, red and green arrive
+6. **Colour by role.** Brand blue is a command's face or a location mark. Amber, red and green arrive
    only attached to a reading — a figure's `tone`, a `Status` dot and word, a `Notice`. Selection is
    `bg-accent`; hover is `bg-row-hover` on a row or tile and a border step on a framed destination;
    never both, never movement.
-7. **Motion says one of three things** (§11). Add `animate-rise` where a fetch settles: the page once,
+7. **Motion says one of four things** (§11). Add `animate-rise` where a fetch settles: the page once,
    each block once, a figure once (swap its `key`). `transition-colors` on hover. Nothing else moves.
 8. **Data, not captions.** No sentence under a title (§5). What the reader needs is a `Tag`, a
    `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —

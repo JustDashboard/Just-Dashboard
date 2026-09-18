@@ -212,6 +212,152 @@ func TestScheduleClaimAdvancesBeforeDispatch(t *testing.T) {
 	}
 }
 
+// Archiving a project must stop its schedules from firing: ClaimDueSchedules
+// only excludes an archived environment, not an archived project, so without
+// Store.Archive disabling them directly every occurrence would keep enqueuing
+// and failing at environment_not_found. Unarchive restores the project but
+// deliberately leaves the schedule disabled — the operator turns it back on.
+func TestArchiveDisablesSchedulesAndUnarchiveLeavesThemDisabled(t *testing.T) {
+	ctx := context.Background()
+	f := newAutomationFixture(t)
+	schedule, err := f.automation.CreateSchedule(ctx, f.projectID, f.environmentID, ScheduleWrite{
+		Name: "nightly", Expression: "0 2 * * *", Timezone: "UTC", Enabled: true,
+		Steps: []ScheduleStep{{Action: "restart", Config: json.RawMessage(`{}`), Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !schedule.Enabled {
+		t.Fatalf("schedule not enabled before archive: %#v", schedule)
+	}
+	sealer, err := auth.NewSealer(strings.Repeat("a7", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := NewStore(f.store, sealer, []string{t.TempDir()})
+	if _, err := projects.Archive(ctx, f.projectID); err != nil {
+		t.Fatal(err)
+	}
+	schedules, err := f.automation.ListSchedules(ctx, f.projectID, f.environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 1 || schedules[0].Enabled {
+		t.Fatalf("schedule after archive = %#v, want disabled", schedules)
+	}
+	due, err := f.automation.ClaimDueSchedules(ctx, 20)
+	if err != nil || len(due) != 0 {
+		t.Fatalf("disabled schedule was claimed: due=%+v err=%v", due, err)
+	}
+	// Belt and suspenders: even a schedule some other path re-enabled while
+	// the project stayed archived must not be claimable — ClaimDueSchedules
+	// joins deploy_projects for exactly this case.
+	if _, err := f.store.DB.Exec(`UPDATE deploy_schedules SET enabled=1,next_run_at=? WHERE id=?`,
+		f.automation.now().Add(-time.Minute).Unix(), schedule.ID); err != nil {
+		t.Fatal(err)
+	}
+	due, err = f.automation.ClaimDueSchedules(ctx, 20)
+	if err != nil || len(due) != 0 {
+		t.Fatalf("archived project schedule was claimed: due=%+v err=%v", due, err)
+	}
+	// Restore the pre-unarchive state Archive itself would have left: the
+	// schedule disabled, not re-enabled by this test's own defensive check.
+	if _, err := f.store.DB.Exec(`UPDATE deploy_schedules SET enabled=0 WHERE id=?`, schedule.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	project, err := projects.Unarchive(ctx, f.projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.ArchivedAt != nil || project.Name != "automation" {
+		t.Fatalf("project after unarchive = %#v", project)
+	}
+	schedules, err = f.automation.ListSchedules(ctx, f.projectID, f.environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 1 || schedules[0].Enabled {
+		t.Fatalf("schedule after unarchive = %#v, want still disabled", schedules)
+	}
+}
+
+// TriggerDeliveries reads the same rows RecordDelivery/FinishDelivery write,
+// newest first, and refuses a trigger id from another project or environment.
+// RotateTriggerSecret replaces the sealed secret without disturbing anything
+// else about the trigger.
+func TestTriggerDeliveriesAndSecretRotation(t *testing.T) {
+	ctx := context.Background()
+	f := newAutomationFixture(t)
+	created, err := f.automation.CreateTrigger(ctx, f.projectID, f.environmentID, TriggerWrite{
+		Name: "GitHub", Kind: TriggerGitHub, Provider: "github", Enabled: true,
+		Config: TriggerConfig{Repository: "acme/app", Ref: "main"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := &created.Trigger
+	first := ProviderEvent{DeliveryID: "one", Event: "push", Repository: "acme/app", Ref: "refs/heads/main"}
+	if err := f.automation.RecordDelivery(ctx, trigger, first, []byte("body-1"), "processing", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.automation.FinishDelivery(ctx, trigger, "one", "accepted", "", 42); err != nil {
+		t.Fatal(err)
+	}
+	second := ProviderEvent{DeliveryID: "two", Event: "push", Repository: "acme/app", Ref: "refs/heads/main"}
+	if err := f.automation.RecordDelivery(ctx, trigger, second, []byte("body-2"), "rejected", "wrong_ref", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	deliveries, err := f.automation.TriggerDeliveries(ctx, f.projectID, f.environmentID, trigger.ID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deliveries) != 2 || deliveries[0].DeliveryID != "two" || deliveries[0].Decision != "rejected" ||
+		deliveries[0].Reason != "wrong_ref" || deliveries[1].DeliveryID != "one" ||
+		deliveries[1].Decision != "accepted" || deliveries[1].RunID != 42 {
+		t.Fatalf("deliveries = %#v", deliveries)
+	}
+	if _, err := f.automation.TriggerDeliveries(ctx, f.projectID+1, f.environmentID, trigger.ID, 50); !errors.Is(err, ErrTriggerNotFound) {
+		t.Fatalf("deliveries for another project = %v, want ErrTriggerNotFound", err)
+	}
+
+	secret, err := f.automation.RotateTriggerSecret(ctx, f.projectID, f.environmentID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret == "" || secret == created.Secret {
+		t.Fatalf("rotated secret = %q, want a new non-empty value distinct from %q", secret, created.Secret)
+	}
+	_, opened, err := f.automation.TriggerByID(ctx, f.projectID, trigger.ID)
+	if err != nil || opened != secret {
+		t.Fatalf("stored secret after rotation = %q, %v, want %q", opened, err, secret)
+	}
+	if _, err := f.automation.RotateTriggerSecret(ctx, f.projectID, f.environmentID, trigger.ID+1); !errors.Is(err, ErrTriggerNotFound) {
+		t.Fatalf("rotate for an unknown trigger = %v, want ErrTriggerNotFound", err)
+	}
+}
+
+// Unarchive refuses to restore a name another active project has since taken.
+func TestUnarchiveRefusesATakenName(t *testing.T) {
+	ctx := context.Background()
+	f := newAutomationFixture(t)
+	sealer, err := auth.NewSealer(strings.Repeat("a7", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := NewStore(f.store, sealer, []string{t.TempDir()})
+	if _, err := projects.Archive(ctx, f.projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('automation', '/srv/new', 'sealed', 'new-hook', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.Unarchive(ctx, f.projectID); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("unarchive over a taken name = %v, want ErrNameTaken", err)
+	}
+}
+
 func TestScheduleTimezoneDSTAndInvalidExpressions(t *testing.T) {
 	springAfter := time.Date(2026, 3, 8, 6, 55, 0, 0, time.UTC)
 	next, err := NextCron("30 2 * * *", "America/New_York", springAfter)

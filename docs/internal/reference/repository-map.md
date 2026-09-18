@@ -26,7 +26,7 @@ services, handles signals, and supports the isolated self-update worker mode. Th
 | `api` | Route map, middleware composition, handlers, module wiring, audit, and feature joins | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |
 | `audit` | Durable and process-log mutation audit records | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#auth-secrets-state) |
 | `auth` | Passwords, TOTP enrolment and policy, recovery codes, sessions, roles/capabilities, and API tokens | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#auth-secrets-state) |
-| `backups` | Backup definitions/runs, scheduler, object stores, retention, archive listing, and contained restore | [`../backend/git-backups-users.md`](../backend/git-backups-users.md#backups) |
+| `backups` | Backup definitions/runs, scheduler, object stores, retention by count and age, container pausing, archive listing, subset and in-place restore, and artifact download | [`../backend/git-backups-users.md`](../backend/git-backups-users.md#backups) |
 | `config` | Environment parsing, defaults, bounds, legacy aliases, and network safety validation | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
 | `dbx` | SQL and NoSQL connections, classification, browsing, DDL, query, import/export, and dumps | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#databases-eight-engines-one-shape) |
 | `deploy` | Legacy compatibility plus normalized planning, artifacts, orchestration, activation, recovery, configuration, and automation | [`../deployments/implementation.md`](../deployments/implementation.md) |
@@ -57,7 +57,7 @@ services, handles signals, and supports the isolated self-update worker mode. Th
 
 | Area | Responsibility | Detailed reference |
 | --- | --- | --- |
-| `src/app/` | App Router layouts plus 48 page entry points across account, dashboard, audit, backups, databases, deployments, Docker, files, Git, logs, metrics, packages, processes, proxy, security, users, terminal, and login | [`../frontend/feature-map.md`](../frontend/feature-map.md) |
+| `src/app/` | App Router layouts plus 73 page entry points across account, dashboard, audit, backups, databases, deployments, Docker, files, Git, logs, metrics, packages, processes, proxy, security, users, terminal, and login | [`../frontend/feature-map.md`](../frontend/feature-map.md) |
 | `src/components/ui/` | Low-level accessible controls; project composition lives above this layer | [`../frontend/shell-design.md`](../frontend/shell-design.md#the-design-system) |
 | `src/components/{database,deploy,docker,files,git,logs,metrics,packages,procs,proxy,security,terminal,update}/` | Feature panels, forms, tables, dialogs, visualizations, and workspaces | [`../frontend/features-terminal.md`](../frontend/features-terminal.md) |
 | `src/components/` top level | Shell, sidebar, command palette, page/panel/state primitives, editors, icons, and shared confirmations | [`../frontend/shell-design.md`](../frontend/shell-design.md) |

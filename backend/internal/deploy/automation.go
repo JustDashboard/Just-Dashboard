@@ -75,7 +75,14 @@ type TriggerConfig struct {
 	Preview       bool     `json:"preview,omitempty"`
 	PreviewQuota  int      `json:"previewQuota,omitempty"`
 	PreviewDomain string   `json:"previewDomain,omitempty"`
+	// Delivery is how a GitHub trigger's events arrive: through its own
+	// per-trigger hook and secret, or, as DeliveryApp, through the
+	// dashboard's GitHub App, which needs nothing configured on GitHub.
+	Delivery string `json:"delivery,omitempty"`
 }
+
+// DeliveryApp marks a trigger fed by the GitHub App's single webhook.
+const DeliveryApp = "app"
 
 type TriggerWrite struct {
 	Name     string        `json:"name"`
@@ -126,6 +133,32 @@ func scanTrigger(row interface{ Scan(...any) error }) (*Trigger, error) {
 		t.LastDeliveryAt = &value
 	}
 	return &t, nil
+}
+
+// TriggersForAppDelivery finds every enabled GitHub trigger that asked the App
+// to deliver for a repository. One push can legitimately reach several: a
+// production trigger on main and a preview trigger for pull requests.
+func (s *AutomationStore) TriggersForAppDelivery(ctx context.Context, repository string) ([]Trigger, error) {
+	repository = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(repository), ".git"))
+	if repository == "" {
+		return []Trigger{}, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT t.id,t.environment_id,e.project_id,t.name,t.kind,t.provider,t.config_json,t.hook_id,t.enabled,t.last_delivery_at,t.last_status,t.created_at,t.updated_at FROM deploy_triggers t JOIN deploy_environments e ON e.id=t.environment_id JOIN deploy_projects p ON p.id=e.project_id WHERE t.provider='github' AND t.enabled=1 AND e.archived_at=0 AND p.archived_at=0 ORDER BY t.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Trigger{}
+	for rows.Next() {
+		t, err := scanTrigger(rows)
+		if err != nil {
+			return nil, err
+		}
+		if t.Config.Delivery == DeliveryApp && strings.ToLower(strings.TrimSuffix(t.Config.Repository, ".git")) == repository {
+			out = append(out, *t)
+		}
+	}
+	return out, rows.Err()
 }
 
 func (s *AutomationStore) TriggerByHook(ctx context.Context, hookID string) (*Trigger, string, error) {
@@ -242,6 +275,80 @@ func (s *AutomationStore) UpdateTrigger(ctx context.Context, projectID, environm
 	}
 	return s.triggerByID(ctx, triggerID, projectID)
 }
+
+// RotateTriggerSecret issues a new HMAC secret for a trigger, invalidating
+// the old one, without disturbing the trigger's configuration or hook id.
+func (s *AutomationStore) RotateTriggerSecret(ctx context.Context, projectID, environmentID, triggerID int64) (string, error) {
+	secret, err := randomHex(32)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := s.sealer.Seal(secret)
+	if err != nil {
+		return "", err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE deploy_triggers SET secret_enc=?,updated_at=?
+		 WHERE id=? AND environment_id=? AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id=?)`,
+		sealed, s.now().UTC().Unix(), triggerID, environmentID, projectID)
+	if err != nil {
+		return "", err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return "", ErrTriggerNotFound
+	}
+	return secret, nil
+}
+
+// TriggerDelivery is one row of a trigger's webhook delivery log: enough to
+// tell an operator what arrived and what this host decided to do with it,
+// without repeating the raw payload.
+type TriggerDelivery struct {
+	DeliveryID string    `json:"deliveryId"`
+	Event      string    `json:"event"`
+	Ref        string    `json:"ref,omitempty"`
+	Decision   string    `json:"decision"`
+	Reason     string    `json:"reason,omitempty"`
+	RunID      int64     `json:"runId,omitempty"`
+	ReceivedAt time.Time `json:"receivedAt"`
+}
+
+// TriggerDeliveries returns the last limit deliveries recorded for a trigger,
+// newest first.
+func (s *AutomationStore) TriggerDeliveries(ctx context.Context, projectID, environmentID, triggerID int64, limit int) ([]TriggerDelivery, error) {
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	var exists int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT 1 FROM deploy_triggers t JOIN deploy_environments e ON e.id=t.environment_id
+		 WHERE t.id=? AND t.environment_id=? AND e.project_id=?`, triggerID, environmentID, projectID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTriggerNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT delivery_id,event,ref,status,reason,run_id,received_at
+		  FROM deploy_webhook_deliveries WHERE trigger_id=? ORDER BY id DESC LIMIT ?`, triggerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TriggerDelivery{}
+	for rows.Next() {
+		var d TriggerDelivery
+		var received int64
+		if err := rows.Scan(&d.DeliveryID, &d.Event, &d.Ref, &d.Decision, &d.Reason, &d.RunID, &received); err != nil {
+			return nil, err
+		}
+		d.ReceivedAt = time.Unix(received, 0).UTC()
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (s *AutomationStore) DeleteTrigger(ctx context.Context, projectID, environmentID, triggerID int64) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM deploy_triggers WHERE id=? AND environment_id=? AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id=?)`, triggerID, environmentID, projectID)
 	if err != nil {
@@ -280,6 +387,16 @@ func validateTriggerWrite(in *TriggerWrite) error {
 	valid := map[TriggerKind]bool{TriggerGenericHook: true, TriggerAPI: true, TriggerGitHub: true, TriggerGitLab: true, TriggerBitbucket: true, TriggerGitea: true}
 	if !valid[in.Kind] {
 		return fmt.Errorf("unsupported trigger kind %q", in.Kind)
+	}
+	in.Config.Delivery = strings.ToLower(strings.TrimSpace(in.Config.Delivery))
+	switch in.Config.Delivery {
+	case "":
+	case DeliveryApp:
+		if in.Kind != TriggerGitHub || in.Config.Repository == "" {
+			return fmt.Errorf("GitHub App delivery needs a GitHub trigger with a repository")
+		}
+	default:
+		return fmt.Errorf("unsupported delivery %q", in.Config.Delivery)
 	}
 	if in.Kind == TriggerGitHub || in.Kind == TriggerGitLab || in.Kind == TriggerBitbucket || in.Kind == TriggerGitea {
 		if in.Provider == "" {
@@ -625,7 +742,10 @@ func (s *AutomationStore) ClaimDueSchedules(ctx context.Context, limit int) ([]S
 		limit = 20
 	}
 	now := s.now().UTC()
-	rows, err := s.db.QueryContext(ctx, `SELECT s.id,s.environment_id,e.project_id,s.name,s.expression,s.timezone,s.enabled,s.next_run_at,s.created_at,s.updated_at FROM deploy_schedules s JOIN deploy_environments e ON e.id=s.environment_id WHERE s.enabled=1 AND s.next_run_at>0 AND s.next_run_at<=? AND e.archived_at=0 ORDER BY s.next_run_at LIMIT ?`, now.Unix(), limit)
+	// The project join is a defensive backstop, not the primary guard: Archive
+	// disables a project's schedules directly. It only matters for a schedule
+	// that was already enabled on a project archived before that fix shipped.
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id,s.environment_id,e.project_id,s.name,s.expression,s.timezone,s.enabled,s.next_run_at,s.created_at,s.updated_at FROM deploy_schedules s JOIN deploy_environments e ON e.id=s.environment_id JOIN deploy_projects p ON p.id=e.project_id WHERE s.enabled=1 AND s.next_run_at>0 AND s.next_run_at<=? AND e.archived_at=0 AND p.archived_at=0 ORDER BY s.next_run_at LIMIT ?`, now.Unix(), limit)
 	if err != nil {
 		return nil, err
 	}

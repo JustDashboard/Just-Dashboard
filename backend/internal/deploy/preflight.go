@@ -471,6 +471,11 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 			Address: configuration.Runtime.BindAddress, Port: configuration.Runtime.HostPort, Protocol: "tcp",
 		})
 	}
+	for _, port := range configuration.Runtime.Ports {
+		request.Ports = append(request.Ports, PortObservation{
+			Address: port.BindAddress, Port: port.HostPort, Protocol: port.effectiveProtocol(),
+		})
+	}
 	if draft.Data.Detection != nil && draft.Data.Detection.Compose != nil {
 		for _, service := range draft.Data.Detection.Compose.Services {
 			for _, mount := range service.Mounts {
@@ -566,6 +571,13 @@ func preflightFindings(
 				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
 				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
 		}
+	}
+	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
+			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
+			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
+			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
+			"deploy", "configuration.build"))
 	}
 	if selected != nil && selected.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
@@ -786,7 +798,7 @@ func preflightFindings(
 				"HTTPS certificate will be issued during the release", planned.Hostname+"; certbot available",
 				"No certificate covers this hostname yet; the release orders one before it starts the candidate.",
 				"", "certificates", field)
-			item.DeepLink = "/certificates"
+			item.DeepLink = "/proxy/certificates"
 			findings = append(findings, item)
 		} else if planned.HTTPS && !observed.CertificateAvailable {
 			item := finding("certificate_unavailable", PreflightBlocked,
@@ -794,13 +806,13 @@ func preflightFindings(
 				"HTTPS activation has no existing certificate for this hostname and this host cannot issue one.",
 				"Install certbot, or issue and import the certificate in Certificates, then retry preflight.",
 				"certificates", field)
-			item.DeepLink = "/certificates"
+			item.DeepLink = "/proxy/certificates"
 			findings = append(findings, item)
 		} else if planned.HTTPS {
 			item := finding("certificate_available", PreflightPass,
 				"HTTPS certificate is available", observed.CertificateName,
 				"The certificate inventory contains a valid certificate for this hostname.", "", "certificates", field)
-			item.DeepLink = "/certificates"
+			item.DeepLink = "/proxy/certificates"
 			findings = append(findings, item)
 		}
 	}
@@ -817,21 +829,21 @@ func preflightFindings(
 				"Firewall state is unavailable", observation.Firewall.Detail,
 				"The public port cannot be compared with the host firewall.",
 				"Inspect the firewall before deploying a public bind.", "security", "runtime.hostPort")
-			item.DeepLink = "/security?tab=firewall"
+			item.DeepLink = "/security/firewall"
 			findings = append(findings, item)
 		case !observation.Firewall.Enabled:
 			item := finding("firewall_mismatch", PreflightWarning,
 				"Public port has no active firewall boundary", observation.Firewall.Backend,
 				"The selected direct bind may be reachable from every network interface.",
 				"Enable an allowlisted firewall policy or explicitly accept public exposure.", "security", "runtime.hostPort")
-			item.DeepLink = "/security?tab=firewall"
+			item.DeepLink = "/security/firewall"
 			findings = append(findings, item)
 		case !observation.Firewall.Allows:
 			item := finding("firewall_mismatch", PreflightBlocked,
 				"Firewall does not admit the selected port", observation.Firewall.Backend,
 				"The runtime may start, but clients cannot reach its direct public port.",
 				"Add the port through Firewall or choose a route already admitted.", "security", "runtime.hostPort")
-			item.DeepLink = "/security?tab=firewall"
+			item.DeepLink = "/security/firewall"
 			findings = append(findings, item)
 		default:
 			findings = append(findings, finding("firewall_matches", PreflightPass,
@@ -869,10 +881,10 @@ func preflightFindings(
 				exclusiveStorage = true
 			}
 		}
-		if !eligibleProfile || configuration.Runtime.HostPort != 0 || configuration.Runtime.HostNetwork || exclusiveStorage {
+		if !eligibleProfile || configuration.Runtime.HostPort != 0 || len(configuration.Runtime.Ports) != 0 || configuration.Runtime.HostNetwork || exclusiveStorage {
 			findings = append(findings, finding("strategy_ineligible", PreflightBlocked,
 				"Blue/green activation is not eligible", "",
-				"A fixed host port, host network, non-HTTP profile, or writable exclusive mount prevents two candidates.",
+				"A fixed or published host port, host network, non-HTTP profile, or writable exclusive mount prevents two candidates.",
 				"Use stop-first or remove the exclusive requirement.", "deploy", "runtime.strategy"))
 		} else {
 			findings = append(findings, finding("strategy_blue_green", PreflightPass,
@@ -893,6 +905,10 @@ func preflightFindings(
 		findings = append(findings, finding("variable_graph_valid", PreflightPass,
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
+	}
+	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
+		configuration.Build.Method == BuildRecipe && hasDatabaseDependency(configuration.Dependencies) {
+		findings = append(findings, schemaStepFinding(selected, configuration.Build))
 	}
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
@@ -1289,6 +1305,39 @@ func stepChangesState(step StepKey) bool {
 func hasReadinessCheck(checks []PlannedCheck) bool {
 	for _, check := range checks {
 		if check.Phase == "readiness" && check.Required {
+			return true
+		}
+	}
+	return false
+}
+
+// schemaStepFinding is the difference between a database that is linked and
+// one that is usable: a database created here is empty, and the detected
+// tool creates no table until its schema step runs somewhere in the plan.
+func schemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) PreflightFinding {
+	label := candidate.SchemaTool
+	if tool := schemaToolByName(candidate.SchemaTool); tool != nil {
+		label = tool.Label
+	}
+	if schemaStepConfigured(candidate, build) {
+		return finding("schema_step", PreflightPass,
+			"The application's schema is applied before it serves", label,
+			"The linked database receives the "+label+" schema from the start command, a release task or the package's start script.",
+			"", "deploy", "build.startCommand")
+	}
+	action := "Choose how the " + label + " schema reaches the linked database before the application starts."
+	if candidate.SchemaCommand != "" {
+		action = "Run " + candidate.SchemaCommand + " in the start command before the server starts, or apply the schema another way."
+	}
+	return finding("schema_step_missing", PreflightWarning,
+		"The linked database will not receive the application's schema", label,
+		"A database created here is empty, and "+label+" creates no table until its schema step runs; the first request would fail.",
+		action, "deploy", "build.startCommand")
+}
+
+func hasDatabaseDependency(dependencies []PlannedDependency) bool {
+	for _, dependency := range dependencies {
+		if dependency.Kind == "database" {
 			return true
 		}
 	}

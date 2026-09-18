@@ -5,33 +5,18 @@ import { get, post } from "@/lib/api"
 import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SectionNav } from "@/components/tabs"
 import { SecurityProvider } from "@/components/security/security-context"
 
 /**
- * Security is seven areas, not one screen of tabs — a firewall, sshd, fail2ban,
- * live connections, the login record, the interface list and a scanner. The
- * sidebar entry expands to them; this strip is the switcher for when it is
- * collapsed, and the faster target on a wide screen.
- *
- * The layout owns the three verdicts every sub-page reads (`posture`,
+ * Security is eight pages, not one screen of tabs — a firewall, sshd,
+ * fail2ban, live connections, the login record, the interface list and a
+ * scanner. The rail lists them; this layout owns the three verdicts every sub-page reads (`posture`,
  * `firewall`, `exposure`) and the one action that must not be duplicated
  * (`applyFix`, with its typed confirmations). It does not gate the section:
  * fail2ban absent, ufw absent and an unreadable sshd are independent absences,
  * and each page reports its own — an unavailable check is information here,
  * not an error.
  */
-const TABS = [
-  { title: "Overview", href: "/security" },
-  { title: "Firewall", href: "/security/firewall" },
-  { title: "SSH", href: "/security/ssh" },
-  { title: "Intrusion", href: "/security/intrusion" },
-  { title: "Connections", href: "/security/connections" },
-  { title: "Logins", href: "/security/logins" },
-  { title: "Network", href: "/security/network" },
-  { title: "Tools", href: "/security/tools" },
-]
-
 export default function SecurityLayout({ children }: { children: React.ReactNode }) {
   const { confirm, dialog } = useConfirm()
 
@@ -109,7 +94,6 @@ export default function SecurityLayout({ children }: { children: React.ReactNode
         applyFix,
       }}
     >
-      <SectionNav tabs={TABS} />
       {children}
       {dialog}
     </SecurityProvider>

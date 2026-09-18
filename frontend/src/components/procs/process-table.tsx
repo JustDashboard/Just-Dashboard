@@ -398,7 +398,9 @@ function ProcessTableRow({
       <TableCell className="numeric font-mono text-muted-foreground">{process.pid}</TableCell>
       <TableCell>
         <div className="max-w-[28rem] min-w-0">
-          <RowLink onClick={() => onOpen(process)}>{process.name}</RowLink>
+          <RowLink title={process.name} onClick={() => onOpen(process)}>
+            {process.name}
+          </RowLink>
           <p className="truncate font-mono text-hint text-muted-foreground" title={process.cmdline}>
             {process.cmdline || "Kernel worker"}
           </p>

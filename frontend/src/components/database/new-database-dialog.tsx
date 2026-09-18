@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/state"
 import { Modal } from "@/components/modal"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
-import { Field, FieldRow, FormNote, FormSection } from "@/components/form"
+import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 
 /**
  * Making a database, which is the thing somebody on this page actually wants.
@@ -47,6 +47,9 @@ export function NewDatabaseDialog({
   const [engine, setEngine] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [database, setDatabase] = useState("")
+  // On by default: a database made here exists to be handed to somebody, and
+  // a string that only works from this server is the wrong thing to hand over.
+  const [shared, setShared] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
   const selected = options.data?.find((o) => o.engine === engine)
@@ -64,11 +67,17 @@ export function NewDatabaseDialog({
     if (!selected) return
     setBusy("Starting the container…")
     try {
-      const started = await post<{ container: string }>("/databases/provision", {
-        engine: selected.engine,
-        name: name.trim() || undefined,
-        database: database.trim() || undefined,
-      })
+      const started = await post<{ container: string; firewallError?: string }>(
+        "/databases/provision",
+        {
+          engine: selected.engine,
+          name: name.trim() || undefined,
+          database: database.trim() || undefined,
+          exposure: shared ? "public" : "local",
+        },
+      )
+      if (started.firewallError)
+        notify.warning("The firewall was not opened", { description: started.firewallError })
       setBusy("Waiting for it to accept connections…")
       const deadline = Date.now() + 3 * 60_000
       for (;;) {
@@ -82,8 +91,8 @@ export function NewDatabaseDialog({
           // then restart, so the first thing the dashboard asks for after that
           // fails. Waiting for a ping that actually dials is what makes "it is
           // ready" true.
-          const alive = await get<{ ok: boolean }>(`/databases/${conn.id}/ping`)
-          if (!alive.ok) throw new Error("not accepting connections yet")
+          const alive = await get<{ ok: boolean; error?: string }>(`/databases/${conn.id}/ping`)
+          if (!alive.ok) throw new Error(alive.error || "not accepting connections yet")
           notify.success(`${selected.label} is ready`, { description: `Connected as ${conn.name}` })
           onCreated(conn.name)
           onOpenChange(false)
@@ -208,9 +217,19 @@ export function NewDatabaseDialog({
             </Field>
           </FieldRow>
 
+          <OptionList>
+            <OptionRow
+              title="Reachable from anywhere"
+              hint="Publishes the port on every interface and opens the firewall for it, so the connection string works from your own machine or anyone you share it with. Off keeps it to this server; it can be opened later under Maintenance."
+              checked={shared}
+              onCheckedChange={setShared}
+              disabled={!selected}
+            />
+          </OptionList>
+
           <FormNote>
-            Runs on this server, published to localhost only, with a generated password you never
-            have to type. It appears in the picker as soon as it answers.
+            Runs on this server with a generated password you never have to type. It appears in the
+            picker as soon as it answers.
           </FormNote>
         </div>
       )}

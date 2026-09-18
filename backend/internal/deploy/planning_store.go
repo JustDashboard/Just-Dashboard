@@ -50,6 +50,9 @@ type PlanningStore struct {
 	now         func() time.Time
 	mu          sync.Mutex
 	databaseURL func(context.Context, int64, int, string) (string, error)
+	// installationTokens mints GitHub App credentials; nil until an App is
+	// connected.
+	installationTokens InstallationTokenMinter
 }
 
 func (s *PlanningStore) WithDatabaseURLResolver(resolve func(context.Context, int64, int, string) (string, error)) *PlanningStore {
@@ -84,6 +87,9 @@ func (s *PlanningStore) OpenCredential(ctx context.Context, id int64) (Credentia
 	}
 	if !json.Valid([]byte(config)) {
 		return CredentialMaterial{}, fmt.Errorf("%w: credential configuration is malformed", ErrSourceUnavailable)
+	}
+	if kind == CredentialGitHubApp {
+		return s.openGitHubAppCredential(ctx, json.RawMessage(config))
 	}
 	return CredentialMaterial{Kind: kind, Config: json.RawMessage(config), Secret: secret}, nil
 }
@@ -504,6 +510,43 @@ func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 	return draft, nil
 }
 
+// ListDrafts returns the caller's own uncommitted, unexpired drafts, newest
+// first, so the new-project page can offer to resume one instead of starting
+// the wizard over. A committed or expired draft has nothing left to resume.
+func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID int64) ([]DraftSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, data_json, current_step, updated_at, expires_at
+		  FROM deploy_drafts
+		 WHERE owner_user_id = ? AND committed_project_id = 0 AND expires_at > ?
+		 ORDER BY updated_at DESC, rowid DESC`, ownerUserID, s.now().UTC().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DraftSummary{}
+	for rows.Next() {
+		var id, data string
+		var step DraftStep
+		var updated, expires int64
+		if err := rows.Scan(&id, &data, &step, &updated, &expires); err != nil {
+			return nil, err
+		}
+		var parsed DraftData
+		if json.Unmarshal([]byte(data), &parsed) != nil {
+			continue
+		}
+		summary := DraftSummary{
+			ID: id, CurrentStep: step, Source: draftSourceSummary(parsed.Source),
+			UpdatedAt: time.Unix(updated, 0).UTC(), ExpiresAt: time.Unix(expires, 0).UTC(),
+		}
+		if parsed.Intent != nil {
+			summary.Name = parsed.Intent.Name
+		}
+		out = append(out, summary)
+	}
+	return out, rows.Err()
+}
+
 func scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
 	var draft Draft
 	var data, findings string
@@ -578,6 +621,11 @@ func (s *PlanningStore) Save(
 		if err := copy.ValidateForDeployment(); err != nil {
 			return nil, err
 		}
+		if exists, err := s.credentialExists(ctx, copy.CredentialID); err != nil {
+			return nil, err
+		} else if !exists {
+			return nil, fmt.Errorf("%w: credential does not exist", ErrInvalidSource)
+		}
 		draft.Data.Source = &copy
 		draft.Data.Detection = nil
 	case DraftConfiguration:
@@ -585,8 +633,11 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: configuration step requires only configuration data", ErrInvalidPlan)
 		}
 		copy := canonicalConfiguration(*request.Configuration)
+		if err := sealDomainProtection(&copy); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
 		if err := copy.Validate(); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		draft.Data.Configuration = &copy
 	}
@@ -1026,7 +1077,7 @@ func validateDraftComplete(draft *Draft) error {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	return nil
 }

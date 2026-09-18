@@ -8,6 +8,31 @@
       "summary": "Deployments were a git pull and a compose up: no record of what was deployed, no way back except another build, and nothing that survived closing the tab. 0.6.7 replaces that with a persistent engine. Every deployment commits its plan before it answers, runs as a queued job with a permanent URL, and produces an immutable release that records its source revision, image digest, configuration and variables — so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. Domains, storage, backups and databases are linked to the pages that own them rather than reimplemented, and a reviewed blueprint catalogue — including Minecraft — deploys through exactly the same machinery as a hand-built container.",
       "changes": [
         {
+          "kind": "added",
+          "text": "A detected Node service applies its database schema before it serves, and preflight says so when it would not",
+          "detail": "A database created in the dashboard is empty, and Prisma, Drizzle, Knex, Sequelize and MikroORM create no table until their migration step runs — so a freshly linked application answered every request with HTTP 500 and failed its readiness check. Detection now recognises the tool from the manifest and its configuration files and chains its schema step in front of the start command: prisma migrate deploy or drizzle-kit migrate when migrations are committed, prisma db push or drizzle-kit push when only the model is, knex migrate:latest, sequelize-cli db:migrate or mikro-orm migration:up for the rest. TypeORM is recognised and asked about, since its data source cannot be guessed. The command is visible in the configure form and Build settings and follows the package manager when that changes. When a database is linked and neither the start command, a release task nor the package's own start script runs the tool, preflight raises a warning on the start command that names the command to add."
+        },
+        {
+          "kind": "changed",
+          "text": "A failed readiness check names the cause when the application's own output proves one",
+          "detail": "A freshly linked database is empty, and an application that queries it before anything applied its schema answers every request with HTTP 500 while its log says which table is missing. The failed check used to say only that the last output was in the build log; it now reads that output, names the missing table, and says what to do about it — apply the schema before the application starts, for Prisma with prisma migrate deploy, or prisma db push when the project has no migrations. Opening the run later shows the same sentence, and the step's evidence records the cause rather than the output."
+        },
+        {
+          "kind": "changed",
+          "text": "Backups reads like the host Overview and says what is not backed up",
+          "detail": "Four readings (jobs, last backup, next backup, stored), then what needs attention — a job whose last run failed, a job that has gone two intervals without a good run, the things on this server no job covers — then the jobs as a plain table and a Coverage list of every Docker volume, compose stack, deployment, Git repository, saved database, the proxy's configuration and the dashboard's own data, each with the job that protects it or a Back up button that writes one: the paths, the SQLite file to snapshot, the connection to dump and the containers to pause come with it. A job opens in a sheet with its facts, its verbs and its runs; the form picks sources from the same list, builds the schedule from presets with its next firings shown, and keeps archives by count and by age."
+        },
+        {
+          "kind": "added",
+          "text": "A backup can freeze the containers that write to it, restore one file, or put everything back in place",
+          "detail": "A job names the containers to pause for the archive step — a pause is a freeze, not a stop; dumps are taken first while the engines can still answer, and the containers resume the moment the archive is written, whatever happened in between. A run's archive browser lists what it holds without unpacking it, and any entries can be restored on their own; a restore can go into a directory as before or back over the original paths, typed with the phrase \"restore in place\". Schedules can be paused and resumed from the job's menu without re-sending its definition, retention can keep by days as well as by count without ever ageing away the newest archive, an overdue job is reported on the Overview tile, and an administrator can download any verified archive."
+        },
+        {
+          "kind": "fixed",
+          "text": "Choosing a verb from a row's menu closes the menu",
+          "detail": "Every menu drawn through the shared verb menu — processes, services, timers, cron jobs and now backups — stayed open after a choice, so the action ran behind a menu that was still asking. It closes now, and where a sheet has its own menu above rows that each have theirs, every ellipsis is named after its row."
+        },
+        {
           "kind": "changed",
           "text": "The Security section reads as readings, findings and lists, like the host Overview",
           "detail": "All eight pages open the same way: how this dashboard is reached — the grade, the allowlist, the tunnel interfaces and the address your browser arrived from — then a run of figures on the page's own ground, then what needs attention, then the detail as plain tables. The overview's five tiles carry the verdict of each area and go to it; the firewall opens on its rules, defaults and logging with the controls that set them in one block; SSH opens on the port, passwords, root login and keyed accounts before its settings; a below-recommendation setting is marked by a word rather than a coloured band. No block on any of the pages is framed, every icon-only control is named, and row controls are reachable on a phone."
@@ -91,6 +116,51 @@
           "kind": "fixed",
           "text": "A database found running on the host was offered under the literal title \"{server.driver}\"",
           "detail": "The dialog for a server installed on the machine rather than in a container is titled with the engine's name again."
+        },
+        {
+          "kind": "added",
+          "text": "The connection page hands out the connection string, and can open a database to the internet",
+          "detail": "The string an application needs is on the Connection tab, masked until you show it and copied whole with one press — reading it is audited, as the deployment link already was. A database started from the dashboard is published to this server only, which is right until you want to reach it from your own laptop or give a colleague access: Open to the internet under Maintenance recreates its container with the port on every interface, adds the firewall rule where there is a firewall to add it to, and a second connection string carrying the server's public address appears beside the first. Close puts it back and removes only the rule the dashboard wrote. A compose-owned database says where its binding is changed instead."
+        },
+        {
+          "kind": "changed",
+          "text": "A database created from the Databases page is reachable from anywhere by default",
+          "detail": "New database starts its container with the port published on every interface and the firewall opened for it, the same two things Open to the internet does, so the string under \"From anywhere\" works the first time you paste it on your own machine or send it to whoever needs the database. A Reachable from anywhere switch in the dialog is on by default; turned off, the database is published to this server only and can be opened later under Maintenance. Where the firewall could not be opened, the dialog says so and the audit entry carries the exposure and what the firewall did. A database started by deployment quick setup stays on loopback: the application reaches it over the deployment network."
+        },
+        {
+          "kind": "fixed",
+          "text": "A database running on this server could be removed from the dashboard and came straight back",
+          "detail": "Every database found running here connects itself on the next page load, so the Remove row on its connection page forgot it for as long as it took to refresh. The row is only drawn for a connection the sync would not re-add — one on another machine, or one that needed a password typed."
+        },
+        {
+          "kind": "fixed",
+          "text": "A database the dashboard could see but not sign in to could not be deleted",
+          "detail": "Delete signs in and asks the engine to drop the database, which fails with the engine's own refusal when the stored password no longer matches — what a container started over a data volume set up under an older password produces. The page now says so, explains why, and the delete dialog offers to remove the container and its data volume instead, which needs no password and is what deleting a database started from this page meant all along. The Delete dialog offers it ticked when the connection cannot sign in."
+        },
+        {
+          "kind": "changed",
+          "text": "Deployments were rebuilt as one product",
+          "detail": "The projects page is a grid of cards with one status word each, reachable from the command palette; a project has its own pages — Overview, Deployments, Logs, Runtime, Console and nine settings sections of setting cards — instead of a tab in a query string, and every old link redirects. The header carries one command and a menu of verbs as words: Restart, Stop and Start, Redeploy the live release, Rebuild without cache, Deploy a specific version, Open in Docker, Archive. A run's row reads status, duration, title and the commit it built, and the deployment page shows the release path with each stage's duration over the build console."
+        },
+        {
+          "kind": "added",
+          "text": "Creating a project is one page",
+          "detail": "Pick a Git repository, a Docker image, a reviewed template, a database, a Compose stack or an existing workload; the dashboard detects what it is and fills in the build and output settings. Add variables, a database and the public address, open Advanced only when you need to, and press Deploy or Save. An unfinished setup is offered for resumption the next time the page opens."
+        },
+        {
+          "kind": "added",
+          "text": "Stop a deployment, start it again, and deploy a specific version",
+          "detail": "Stop keeps the release and its data and takes the routes down; Start brings the same release back. Deploy a specific version builds a branch, a tag or a commit once, without moving the branch automatic deployments follow. A Git run now records the commit's subject, author and date."
+        },
+        {
+          "kind": "added",
+          "text": "Archived projects can be restored, a release can be pinned, and a webhook shows its deliveries",
+          "detail": "Restore brings an archived project back with its history and its name; a pinned release is never pruned; a webhook's row lists what it received and what the dashboard decided, and its secret can be rotated. A pull-request preview can be rejected, older deployments load on request, a proposed hostname is the same on every visit, and a refused setting is marked on the field it concerns."
+        },
+        {
+          "kind": "added",
+          "text": "Saved credentials, a source you can change, and a project you can duplicate",
+          "detail": "Credentials — a token for a Git host, an SSH key, a registry login or a provider token — are saved once under Deployments, sealed with the server's key, tested against the remote before you rely on them, and picked from a list when a project is created; one cannot be removed while a project uses it. A project's repository, branch, root directory or image can be changed from its General settings: the new source is checked before it is saved and the next deployment builds from it. Duplicate a project to get a draft with the same source and settings, variable names without their values, and no domains, ready to review and deploy under a new name."
         },
         {
           "kind": "added",
@@ -211,6 +281,61 @@
           "kind": "changed",
           "text": "The logs page is one workbench, and a log line is read down its columns",
           "detail": "The source rail and the lines share one frame with a hairline between them, the way the terminal does; the rail hides and resizes and remembers both. One pane holds the source's facts and the Live/History tabs, the filter with the window and the journal unit inline, the histogram, the lines and a footer that says whether the stream is open, how many lines and errors are on screen, what the search read and whether logrotate is trimming the file. Each line is columns — a level edge, the line number, the clock, a small-caps level mark in the level's colour, the journal unit, then the message in ink — so a page can be scanned down for the red ones instead of read across; the level chips above the lines carry the counts and share their colours with the level column and the histogram."
+        },
+        {
+          "kind": "added",
+          "text": "Detection recognises the project and fills the form in, for twenty-one JavaScript frameworks, five Python frameworks, Go, Rust, Java, .NET and Deno",
+          "detail": "Import a repository and the configure form arrives with the framework named, the build and start commands, the port, static output where the framework builds a site, the interpreter or toolchain release, and a Procfile's web process honoured over every guess. The catalogue reads a meta-framework built on Vite (Remix, React Router, SolidStart, SvelteKit) before Vite itself, which is what used to turn a Remix server into a static site of client assets; Astro, Nuxt, Angular, NestJS, Gatsby, Docusaurus, VitePress, Eleventy, Create React App, Vue CLI, Ember and Parcel each get their own serving defaults, and a server framework's entry file is checked after the build so a wrong output path fails with the framework's name rather than at the readiness gate. Django starts by applying its migrations, FastAPI and Flask are started through the application object found in the source (factories included), Streamlit and Gradio through their scripts. Rust (axum, Actix, Rocket, warp, Poem), Java and Kotlin on Maven or Gradle (Spring Boot, Quarkus, Micronaut), ASP.NET Core and Deno build on digest-pinned images with the release the repository declares. Every detected value is an editable setting, and what the catalogue cannot serve automatically is a decision or a finding, never a silent guess."
+        },
+        {
+          "kind": "added",
+          "text": "The variables your code reads and the database it connects to are listed before you deploy",
+          "detail": "Detection reads .env.example and its relatives (values kept as placeholders unless they look like credentials), a committed .env for names only, and the code's own reads of its environment in JavaScript, Python, Go, Ruby and PHP — never tests, fixtures or documentation — and the environment section opens with those rows, each saying where it was read. A row left empty is skipped rather than set to nothing, and the form says how many are unset. The engines the dependencies, a Prisma datasource or a documented URL name are each one button that opens the database sheet on that engine and the variable the connection belongs in."
+        },
+        {
+          "kind": "changed",
+          "text": "Unpinned Python requirements deploy with a warning instead of a refusal, and an undeclared gunicorn or uvicorn is installed",
+          "detail": "Refusing a requirements.txt without exact versions turned the most ordinary Python repository there is into a manual Dockerfile. It now builds, and preflight raises dependencies_unpinned as a warning that says what a rebuild of the same commit may resolve differently and how to pin. uv and Poetry locks, and a bare PEP 621 pyproject, install the way their tools intend; the interpreter follows .python-version, runtime.txt or requires-python (3.10 to 3.13); a process manager the start command runs that no manifest declares is installed at a pinned release into the same environment as the dependencies."
+        },
+        {
+          "kind": "added",
+          "text": "A single-page site answers deep links, and a deploy link opens the form with the repository filled in",
+          "detail": "Vite, Create React App, Vue CLI, Ember, Parcel and Angular sites are served with nginx's index.html fallback, so a client-side route opens directly instead of 404ing; the switch is on the configure form and Build settings whenever there is static output, and multi-page generators keep nginx's own configuration. /deploy/new?repo=<clone url>&ref=<branch> arrives on the Git tab with the URL filled in, which is what a “deploy to your server” link in a README points at."
+        },
+        {
+          "kind": "added",
+          "text": "A Laravel, Symfony or plain PHP repository deploys with nothing typed in",
+          "detail": "Detection reads composer.json — the PHP version from Composer's own constraint syntax, the ext-* requirements, the framework from its packages and entry files — and builds on FrankenPHP with Composer, an asset stage when the package.json builds with Vite or Encore, migrations before the first request for Laravel and Symfony, and writable storage directories. The configure form mints APP_KEY for Laravel and offers a Generate button on any secret-shaped variable. A Laravel application and a plain index.php are built and served live by the test suite."
+        },
+        {
+          "kind": "added",
+          "text": "A domain can ask visitors for a password",
+          "detail": "Ask visitors for a password on the public address step or the Domains settings, and the proxy — Caddy or nginx — asks for it before the application sees a request. The password is kept only as a bcrypt hash, so a plan, a release and a preview never carry it; previews inherit the protection, and a protected domain is tagged on the overview."
+        },
+        {
+          "kind": "added",
+          "text": "Thirty-six more blueprints, every one started live before it shipped",
+          "detail": "Nextcloud, Jellyfin, Navidrome, Audiobookshelf, Kavita, Directus, Healthchecks, Gotify, Homepage, Shlink, linkding, FreshRSS, wallabag, Memos, Trilium, Actual, pgAdmin, phpMyAdmin, Mongo Express, code-server, Portainer, File Browser, Syncthing, Stirling PDF, Metabase, Jupyter, Ollama, Meilisearch, Typesense, RabbitMQ, InfluxDB, MySQL, IT-Tools, CyberChef, draw.io and whoami join the catalogue. A new sweep pulls every deployable definition's image, starts it with generated secrets and runs its own readiness checks, which is how five wrong health paths and settings were caught in review instead of on somebody's first deploy — and how three shipped pins (both Minecraft images and MinIO) were found to no longer exist and were repointed, and MinIO was found to have shipped without the server command it needs."
+        },
+        {
+          "kind": "changed",
+          "text": "A blueprint's second port is published beside the routed one, and its startup budget is honoured",
+          "detail": "Gitea's SSH port and Syncthing's sync protocol used to replace the web port silently, so the proxy would have sent browsers to SSH; a second direct port is now an additional publication on its own number, shown on the Domains settings as Also published, and any plan with one activates stop-first. A definition's readiness timeout used to become ten instant attempts before the process had bound its port; it is now paced retries over the whole budget."
+        },
+        {
+          "kind": "added",
+          "text": "A GitHub App: no webhook secrets to paste, private clones without a personal token, and a comment on every pull request",
+          "detail": "Create the App from the Credentials page through GitHub's own manifest flow and install it on the accounts whose repositories deploy here. Its repositories appear first in the import picker and clone with the installation's own short-lived tokens; a GitHub webhook created while it is connected needs nothing configured on GitHub, because the App's single webhook feeds every trigger that asked for it; deployment statuses are posted as the App wherever it is installed; and each preview keeps one comment on its pull request — building, ready with the address, failed with the reason, removed — edited in place as the run moves."
+        },
+        {
+          "kind": "added",
+          "text": "Certificates can be ordered from a staging or private ACME authority, and object-storage backups are proven against a real S3 API",
+          "detail": "JD_ACME_DIRECTORY points the managed Caddy and certbot at another directory — Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority with JD_ACME_CA_ROOT naming its roots — and the public-certificate journey is proven end to end against a Pebble that validates nothing. S3 and Backblaze B2 backup targets, which already existed, are now exercised live: target test, upload, retention and restore against a MinIO container."
+        },
+        {
+          "kind": "changed",
+          "text": "Gradle, Streamlit and Gradio projects are built and served live by the test suite",
+          "detail": "The framework suite gained a plain Gradle jar, a Streamlit script checked through its health endpoint and its own static-serving setting, and a Gradio app checked through the page's embedded configuration, so every detected layout in the catalogue is proven by a real build rather than a rendered Dockerfile."
         }
       ]
     },

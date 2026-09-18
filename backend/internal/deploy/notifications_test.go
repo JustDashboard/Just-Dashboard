@@ -169,6 +169,17 @@ func TestRenderNotificationDescribesEveryOutcome(t *testing.T) {
 	if !strings.Contains(test.Title, "Test notification") {
 		t.Fatal("test event not described")
 	}
+	stoppedRun := base
+	stoppedRun.Event, stoppedRun.Operation = NotificationEventSucceeded, "stop"
+	if joined := strings.Join(flattenFields(renderNotification(stoppedRun).Fields), ";"); !strings.Contains(joined, "Operation=Stop") {
+		t.Fatalf("stop operation not described: %q", joined)
+	}
+	startedRun := base
+	startedRun.Operation = "start"
+	startedRun.Event = NotificationEventSucceeded
+	if joined := strings.Join(flattenFields(renderNotification(startedRun).Fields), ";"); !strings.Contains(joined, "Operation=Start") {
+		t.Fatalf("start operation not described: %q", joined)
+	}
 }
 
 func flattenFields(fields [][2]string) []string {

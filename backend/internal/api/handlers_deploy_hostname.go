@@ -2,8 +2,8 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net"
 	"net/http"
 	"regexp"
@@ -70,10 +70,11 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 		return nil
 	}
 
-	slug := hostnameSlug(r.URL.Query().Get("name"))
-	if base, name := s.wildcardBase(ctx); base != "" {
+	name := r.URL.Query().Get("name")
+	if base, certName := s.wildcardBase(ctx); base != "" {
+		slug := s.suggestHostnameSlug(ctx, name, base)
 		httpx.JSON(w, http.StatusOK, hostnameSuggestion{
-			Hostname: slug + "." + base, Base: base, Covered: true, CertificateName: name,
+			Hostname: slug + "." + base, Base: base, Covered: true, CertificateName: certName,
 			Method: "wildcard",
 			Detail: "Covered by the existing wildcard certificate for *." + base + ".",
 		})
@@ -89,6 +90,7 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 		return nil
 	}
 	base := strings.ReplaceAll(address, ".", "-") + ".sslip.io"
+	slug := s.suggestHostnameSlug(ctx, name, base)
 	suggestion := hostnameSuggestion{
 		Hostname: slug + "." + base, Base: base, Method: "sslip", Address: address,
 	}
@@ -177,9 +179,9 @@ func (s *Server) certificateMethod(ctx context.Context) (string, string) {
 	return method, ""
 }
 
-// hostnameSlug turns a deployment name into one DNS label, and appends enough
-// randomness that two deployments called "app" on the same server do not ask
-// for the same public name.
+// hostnameSlug turns a deployment name into one DNS label. It carries no
+// randomness of its own — suggestHostnameSlug appends the deterministic
+// suffix that used to live here.
 func hostnameSlug(name string) string {
 	slug := hostnameSlugStripRE.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-")
 	slug = strings.Trim(slug, "-")
@@ -189,11 +191,53 @@ func hostnameSlug(name string) string {
 	if slug == "" {
 		slug = "app"
 	}
-	buf := make([]byte, 3)
-	if _, err := rand.Read(buf); err != nil {
-		return slug
+	return slug
+}
+
+// maxHostnameSuffixAttempts bounds the counter suggestHostnameSlug appends
+// when a deterministic suggestion collides with a domain already in managed
+// use. Exhausting it needs a 24-bit HMAC collision or that many distinct
+// projects sharing one name on one host — vanishingly unlikely either way.
+const maxHostnameSuffixAttempts = 20
+
+// hostnameSuffix derives the label suffix that used to be random bytes from
+// an HMAC of the requested name (and, past the first attempt, a counter that
+// disambiguates a suggestion already in use), so the same name always
+// proposes the same hostname instead of a fresh one on every call.
+func (s *Server) hostnameSuffix(name string, attempt int) string {
+	data := []byte(strings.ToLower(strings.TrimSpace(name)))
+	if attempt > 0 {
+		data = append(data, []byte(fmt.Sprintf("#%d", attempt+1))...)
 	}
-	return slug + "-" + hex.EncodeToString(buf)
+	sum := s.Sealer.DeriveHMAC("deploy.hostname", data)
+	return hex.EncodeToString(sum[:3])
+}
+
+// suggestHostnameSlug is hostnameSlug's public-facing form: the deterministic
+// label plus a deterministic suffix, advanced by a counter only when the
+// resulting hostname is already a managed domain of another project.
+func (s *Server) suggestHostnameSlug(ctx context.Context, name, domainSuffix string) string {
+	base := hostnameSlug(name)
+	for attempt := 0; attempt < maxHostnameSuffixAttempts; attempt++ {
+		candidate := base + "-" + s.hostnameSuffix(name, attempt)
+		if !s.hostnameDomainTaken(ctx, candidate+"."+domainSuffix) {
+			return candidate
+		}
+	}
+	return base
+}
+
+// hostnameDomainTaken reports whether an active project already configured
+// hostname as a managed domain.
+func (s *Server) hostnameDomainTaken(ctx context.Context, hostname string) bool {
+	var exists int
+	err := s.Store.DB.QueryRowContext(ctx, `
+		SELECT 1 FROM deploy_dependencies d
+		  JOIN deploy_environments e ON e.id = d.environment_id
+		  JOIN deploy_projects p ON p.id = e.project_id
+		 WHERE d.kind = 'domain' AND p.archived_at = 0 AND lower(d.resource_id) = lower(?)
+		 LIMIT 1`, hostname).Scan(&exists)
+	return err == nil
 }
 
 func firstIPv4(addresses []string) string {

@@ -1,0 +1,92 @@
+{
+  "id": "metabase",
+  "version": "1.0.0",
+  "name": "Metabase",
+  "category": "tool",
+  "profile": "tool",
+  "description": "Dashboards and questions over the databases you connect. Its own application database is an embedded H2 file here, which is what a backup has to carry.",
+  "iconId": "monitoring",
+  "docsUrl": "https://www.metabase.com/docs/latest/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/metabase/metabase",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "metabase/metabase:v0.63.18",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/metabase-data",
+      "purpose": "The application database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/health",
+      "timeoutSeconds": 240
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "MB_DB_FILE",
+        "value": "/metabase-data/metabase.db"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Metabase migrates its application database on start and does not migrate back.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:a008fe7e77226f2a3cbff67fc7ced2700d81e8bed4207265a160a02d8032f66d"
+    }
+  ]
+}

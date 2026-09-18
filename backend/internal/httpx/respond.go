@@ -23,6 +23,11 @@ type APIError struct {
 	// whole name.
 	Phrase string `json:"phrase,omitempty"`
 
+	// Field is a pointer a UI control can attach itself to — "runtime.internalPort",
+	// "checks[2].kind" — set only when the failure traces back to one field of
+	// the request rather than the request as a whole.
+	Field string `json:"field,omitempty"`
+
 	// What the request was trying to do, to what, and why it did not work.
 	//
 	// "Something went wrong" is what a client shows when the server sent it a

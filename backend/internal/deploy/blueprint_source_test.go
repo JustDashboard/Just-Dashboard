@@ -158,7 +158,14 @@ func TestBlueprintPlansCarryGeneratedSecretsByNameOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
+		// The reviewed fixture is the definition's own example of a complete
+		// set of answers; the loop below only fills what it leaves open.
 		inputs := map[string]string{}
+		if len(entry.Fixtures) > 0 {
+			for name, value := range entry.Fixtures[0].Inputs {
+				inputs[name] = value
+			}
+		}
 		for _, input := range entry.Inputs {
 			if input.Kind == blueprint.InputAccept {
 				inputs[input.Name] = "true"
@@ -228,5 +235,43 @@ func TestBlueprintDefaultSchedulesTranslateExactlyOrNotAtAll(t *testing.T) {
 	}}
 	if got := BlueprintSchedules(&untranslatable); len(got) != 0 {
 		t.Fatalf("an untranslatable preset became %#v", got)
+	}
+}
+
+// A definition with a routed web port and a second port the proxy cannot carry
+// (Gitea's SSH, Syncthing's sync protocol) keeps the web port as the routed
+// one and publishes the other on its own number. Before this, the second port
+// silently replaced the first: the proxy would have sent browsers to SSH.
+func TestSecondaryDirectPortsArePublishedNextToTheRoutedPort(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []struct {
+		id        string
+		routed    int
+		published int
+	}{{"gitea", 3000, 2222}, {"syncthing", 8384, 22000}} {
+		plan, err := RenderBlueprintPlan(DraftSourceConfig{
+			Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: fixture.id, BlueprintVersion: "1.0.0",
+			BlueprintInputs: map[string]string{"domain": fixture.id + ".example.test"},
+		}, fixture.id)
+		if err != nil {
+			t.Fatalf("%s: %v", fixture.id, err)
+		}
+		runtime := plan.Configuration.Runtime
+		if runtime.InternalPort != fixture.routed || runtime.HostPort != 0 || runtime.BindAddress != "127.0.0.1" ||
+			runtime.Strategy != StrategyStopFirst || runtime.Protocol != "tcp" {
+			t.Fatalf("%s runtime = %#v", fixture.id, runtime)
+		}
+		if len(runtime.Ports) != 1 || runtime.Ports[0] != (PublishedPort{HostPort: fixture.published, ContainerPort: fixture.published, Protocol: "tcp"}) {
+			t.Fatalf("%s published ports = %#v", fixture.id, runtime.Ports)
+		}
+		if err := plan.Configuration.Validate(); err != nil {
+			t.Fatalf("%s: %v", fixture.id, err)
+		}
+	}
+	// A game server's single direct port is still the fixed host port, not a
+	// second publication.
+	game := renderGamePlan(t, "solo", map[string]string{"eula": "true"})
+	if game.Configuration.Runtime.HostPort != 25565 || len(game.Configuration.Runtime.Ports) != 0 {
+		t.Fatalf("game runtime = %#v", game.Configuration.Runtime)
 	}
 }

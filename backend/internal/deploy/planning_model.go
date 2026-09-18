@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,6 +68,37 @@ type DraftData struct {
 	Source        *DraftSourceConfig `json:"source,omitempty"`
 	Detection     *DetectionResult   `json:"detection,omitempty"`
 	Configuration *PlanConfiguration `json:"configuration,omitempty"`
+}
+
+// DraftSummary is what the new-project page shows to offer resuming an
+// uncommitted draft: enough to recognise it, not the whole wizard state.
+type DraftSummary struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name,omitempty"`
+	Source      string    `json:"source,omitempty"`
+	CurrentStep DraftStep `json:"currentStep"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+}
+
+// draftSourceSummary is a one-line description of a draft's source step, for
+// a resume list that has no room for the full DraftSourceConfig.
+func draftSourceSummary(source *DraftSourceConfig) string {
+	if source == nil {
+		return ""
+	}
+	switch {
+	case source.Repository != "":
+		return string(source.Kind) + " · " + source.Repository
+	case source.URL != "":
+		return string(source.Kind) + " · " + source.URL
+	case source.Image != "":
+		return string(source.Kind) + " · " + source.Image
+	case source.LocalPath != "":
+		return string(source.Kind) + " · " + source.LocalPath
+	default:
+		return string(source.Kind)
+	}
 }
 
 type DraftIntentConfig struct {
@@ -158,8 +190,43 @@ type DetectedCandidate struct {
 	PackageManagers  []string            `json:"packageManagers,omitempty"`
 	RecipeIssue      string              `json:"recipeIssue,omitempty"`
 	Port             int                 `json:"port,omitempty"`
-	Evidence         []DetectionEvidence `json:"evidence"`
-	NeedsDecision    []string            `json:"needsDecision"`
+	// SchemaTool names the migration tool the source declares. SchemaCommand
+	// is how the detected start command applies its schema; it is empty when
+	// the tool needs a decision, and SchemaInStart says the package's own
+	// start script already runs it.
+	SchemaTool    string `json:"schemaTool,omitempty"`
+	SchemaCommand string `json:"schemaCommand,omitempty"`
+	SchemaInStart bool   `json:"schemaInStart,omitempty"`
+	// SPAFallback says the site's client owns its routes, so nginx answers
+	// any path it has no file for with index.html.
+	SPAFallback   bool   `json:"spaFallback,omitempty"`
+	PythonVersion string `json:"pythonVersion,omitempty"`
+	// UnpinnedDependencies records that the manifest names dependencies
+	// without exact versions, so a rebuild may install different ones.
+	UnpinnedDependencies bool                `json:"unpinnedDependencies,omitempty"`
+	Variables            []DetectedVariable  `json:"variables,omitempty"`
+	Databases            []DetectedDatabase  `json:"databases,omitempty"`
+	Evidence             []DetectionEvidence `json:"evidence"`
+	NeedsDecision        []string            `json:"needsDecision"`
+}
+
+// DetectedVariable is an environment variable the source reads, found in an
+// example env file or in the code itself. Example is the template's own
+// value when it has one and it is not credential-shaped; a committed real
+// .env contributes names only.
+type DetectedVariable struct {
+	Name    string   `json:"name"`
+	Example string   `json:"example,omitempty"`
+	Sources []string `json:"sources"`
+}
+
+// DetectedDatabase is a database engine the source's dependencies or example
+// variables say it connects to, with the variable its connection URL is
+// conventionally read from.
+type DetectedDatabase struct {
+	Engine   string `json:"engine"`
+	Variable string `json:"variable"`
+	Evidence string `json:"evidence"`
 }
 
 type DetectionResult struct {
@@ -181,19 +248,23 @@ type GitRequirements struct {
 }
 
 type BuildPlanConfig struct {
-	Method          BuildMethod         `json:"method"`
-	Recipe          string              `json:"recipe,omitempty"`
-	GoVersion       string              `json:"goVersion,omitempty"`
-	PackageManager  string              `json:"packageManager,omitempty"`
-	RootDirectory   string              `json:"rootDirectory,omitempty"`
-	Dockerfile      string              `json:"dockerfile,omitempty"`
-	BuildCommand    string              `json:"buildCommand,omitempty"`
-	StartCommand    string              `json:"startCommand,omitempty"`
-	OutputDirectory string              `json:"outputDirectory,omitempty"`
-	TargetPlatform  string              `json:"targetPlatform,omitempty"`
-	NoCache         bool                `json:"noCache,omitempty"`
-	Secrets         []BuildSecretConfig `json:"secrets"`
-	ReleaseTasks    []ReleaseTaskConfig `json:"releaseTasks"`
+	Method          BuildMethod `json:"method"`
+	Recipe          string      `json:"recipe,omitempty"`
+	GoVersion       string      `json:"goVersion,omitempty"`
+	PythonVersion   string      `json:"pythonVersion,omitempty"`
+	PackageManager  string      `json:"packageManager,omitempty"`
+	RootDirectory   string      `json:"rootDirectory,omitempty"`
+	Dockerfile      string      `json:"dockerfile,omitempty"`
+	BuildCommand    string      `json:"buildCommand,omitempty"`
+	StartCommand    string      `json:"startCommand,omitempty"`
+	OutputDirectory string      `json:"outputDirectory,omitempty"`
+	// SPAFallback makes the static server answer unknown paths with
+	// index.html, for a site whose client owns its routes.
+	SPAFallback    bool                `json:"spaFallback,omitempty"`
+	TargetPlatform string              `json:"targetPlatform,omitempty"`
+	NoCache        bool                `json:"noCache,omitempty"`
+	Secrets        []BuildSecretConfig `json:"secrets"`
+	ReleaseTasks   []ReleaseTaskConfig `json:"releaseTasks"`
 }
 
 // BuildSecretConfig names a variable and the single reviewed recipe stage in
@@ -221,6 +292,7 @@ type RuntimePlanConfig struct {
 	Command            []string        `json:"command,omitempty"`
 	InternalPort       int             `json:"internalPort,omitempty"`
 	HostPort           int             `json:"hostPort,omitempty"`
+	Ports              []PublishedPort `json:"ports,omitempty"`
 	BindAddress        string          `json:"bindAddress,omitempty"`
 	Strategy           ReleaseStrategy `json:"strategy"`
 	StopSignal         string          `json:"stopSignal,omitempty"`
@@ -238,6 +310,30 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+}
+
+// PublishedPort is a container port published on the host next to the routed
+// one: Gitea's SSH, Syncthing's sync protocol, anything a reverse proxy cannot
+// carry. It pins a host binding the way a fixed host port does, so a plan that
+// has one activates stop-first and never becomes a preview.
+type PublishedPort struct {
+	HostPort      int    `json:"hostPort"`
+	ContainerPort int    `json:"containerPort"`
+	Protocol      string `json:"protocol,omitempty"`
+	// BindAddress is the host interface. Empty publishes on every interface,
+	// which is what a port a proxy cannot front exists for.
+	BindAddress string `json:"bindAddress,omitempty"`
+}
+
+func (p PublishedPort) effectiveProtocol() string {
+	if p.Protocol == "udp" {
+		return "udp"
+	}
+	return "tcp"
+}
+
+func validBindAddress(address string) bool {
+	return address == "" || address == "127.0.0.1" || address == "::1" || address == "0.0.0.0" || address == "::"
 }
 
 // Resource limit bounds. The floor keeps a typo such as "5" (MiB) from producing
@@ -317,6 +413,9 @@ type PlannedDomain struct {
 	Hostname  string        `json:"hostname"`
 	HTTPS     bool          `json:"https"`
 	Ownership OwnershipMode `json:"ownership"`
+	// Protection asks the proxy for a password before it serves this
+	// deployment. It applies to the deployment's route as a whole.
+	Protection *DomainProtection `json:"protection,omitempty"`
 }
 
 type PlanConfiguration struct {
@@ -394,9 +493,32 @@ var (
 	ErrInvalidCompose    = errors.New("invalid compose source")
 	ErrImportNotFound    = errors.New("import resource not found")
 	ErrInvalidVariable   = errors.New("invalid deployment variable")
+	ErrVariableNotFound  = errors.New("deployment variable not found")
 	ErrVariableCycle     = errors.New("deployment variable reference cycle")
 	ErrRevisionConflict  = errors.New("deployment desired revision conflict")
 )
+
+// ValidationError is a PlanConfiguration.Validate failure a UI control can
+// attach to: Field is a JSON-path-shaped pointer such as
+// "runtime.internalPort" or "checks[2]", empty when the failure does not
+// belong to one field. Every Validate call site that returns one wraps it
+// behind ErrInvalidPlan (fmt.Errorf("%w: %w", ErrInvalidPlan, validationErr)),
+// so an existing errors.Is(err, ErrInvalidPlan) check keeps working exactly
+// as it did before this type existed; callers that also want the field use
+// errors.As to reach it.
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Message }
+
+// invalidField builds a ValidationError. Every Validate call site that names
+// a field reads the same way: the pointer a control can attach to, then the
+// message it shows.
+func invalidField(field, format string, a ...any) error {
+	return &ValidationError{Field: field, Message: fmt.Sprintf(format, a...)}
+}
 
 func (c DraftIntentConfig) Validate() error {
 	if !projectNameRe.MatchString(c.Name) {
@@ -772,7 +894,7 @@ func (c PlanConfiguration) Validate() error {
 	if !validBuildMethod(c.Build.Method) {
 		return fmt.Errorf("invalid build method %q", c.Build.Method)
 	}
-	if c.Build.Recipe != "" && c.Build.Recipe != "node" && c.Build.Recipe != "go" && c.Build.Recipe != "python" {
+	if c.Build.Recipe != "" && !validRecipe(c.Build.Recipe) {
 		return fmt.Errorf("unsupported automatic build recipe %q", c.Build.Recipe)
 	}
 	if c.Build.Method != BuildRecipe && c.Build.Recipe != "" {
@@ -783,6 +905,12 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !validNodePackageManager(c.Build.PackageManager)) {
 		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript recipe")
+	}
+	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
+		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
+	}
+	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
+		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
 	}
 	if c.Build.Recipe == "go" && cgoEnabledCommandRE.MatchString(c.Build.BuildCommand) {
 		return fmt.Errorf("the Go recipe builds without CGO; use a Dockerfile with the required C toolchain")
@@ -831,8 +959,32 @@ func (c PlanConfiguration) Validate() error {
 	if c.Runtime.Protocol != "" && c.Runtime.Protocol != "tcp" {
 		return fmt.Errorf("runtime protocol %q is not supported by this release", c.Runtime.Protocol)
 	}
-	if c.Runtime.InternalPort < 0 || c.Runtime.InternalPort > 65535 || c.Runtime.HostPort < 0 || c.Runtime.HostPort > 65535 {
-		return fmt.Errorf("runtime ports must be between 1 and 65535")
+	if c.Runtime.InternalPort < 0 || c.Runtime.InternalPort > 65535 {
+		return invalidField("runtime.internalPort", "runtime internal port must be 0 (unset) or between 1 and 65535")
+	}
+	if c.Runtime.HostPort < 0 || c.Runtime.HostPort > 65535 {
+		return invalidField("runtime.hostPort", "runtime host port must be 0 (unset) or between 1 and 65535")
+	}
+	publishedHostPorts := map[string]bool{}
+	for index, port := range c.Runtime.Ports {
+		field := fmt.Sprintf("runtime.ports[%d]", index)
+		if port.HostPort < 1 || port.HostPort > 65535 || port.ContainerPort < 1 || port.ContainerPort > 65535 {
+			return invalidField(field, "a published port needs a host port and a container port between 1 and 65535")
+		}
+		if port.Protocol != "" && port.Protocol != "tcp" && port.Protocol != "udp" {
+			return invalidField(field, "a published port's protocol must be tcp or udp")
+		}
+		if !validBindAddress(port.BindAddress) {
+			return invalidField(field, "a published port's bind address is not supported")
+		}
+		if c.Runtime.HostNetwork {
+			return invalidField(field, "host networking already exposes every port; remove the published ports or the host network")
+		}
+		key := port.effectiveProtocol() + ":" + strconv.Itoa(port.HostPort)
+		if publishedHostPorts[key] || (port.effectiveProtocol() == "tcp" && port.HostPort == c.Runtime.HostPort) {
+			return invalidField(field, "host port %d/%s is published twice", port.HostPort, port.effectiveProtocol())
+		}
+		publishedHostPorts[key] = true
 	}
 	if c.Runtime.GracePeriodSeconds < 0 || c.Runtime.GracePeriodSeconds > 300 ||
 		c.Runtime.DrainSeconds < 0 || c.Runtime.DrainSeconds > 300 {
@@ -842,7 +994,7 @@ func (c PlanConfiguration) Validate() error {
 		c.Runtime.StopSignal != "SIGQUIT" && c.Runtime.StopSignal != "SIGHUP" {
 		return fmt.Errorf("runtime stop signal is not supported")
 	}
-	if c.Runtime.BindAddress != "" && c.Runtime.BindAddress != "127.0.0.1" && c.Runtime.BindAddress != "::1" && c.Runtime.BindAddress != "0.0.0.0" && c.Runtime.BindAddress != "::" {
+	if !validBindAddress(c.Runtime.BindAddress) {
 		return fmt.Errorf("runtime bind address is not supported")
 	}
 	if c.Runtime.MemoryMB != 0 && (c.Runtime.MemoryMB < MinRuntimeMemoryMB || c.Runtime.MemoryMB > MaxRuntimeMemoryMB) {
@@ -858,7 +1010,7 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
 	}
 	seenMountTargets := map[string]bool{}
-	for _, mount := range c.Runtime.Mounts {
+	for index, mount := range c.Runtime.Mounts {
 		source := strings.TrimSpace(mount.Source)
 		target := filepath.Clean(mount.Target)
 		pathShapedSource := filepath.IsAbs(source) || strings.HasPrefix(source, ".") || strings.Contains(source, "/")
@@ -866,7 +1018,7 @@ func (c PlanConfiguration) Validate() error {
 			(pathShapedSource && !filepath.IsAbs(source)) || mount.Target == "" || !filepath.IsAbs(target) ||
 			target == "/" || strings.ContainsAny(mount.Target, "\x00\r\n") || seenMountTargets[target] ||
 			!validOwnership(mount.Ownership) {
-			return fmt.Errorf("runtime mount target and ownership are invalid")
+			return invalidField(fmt.Sprintf("runtime.mounts[%d]", index), "runtime mount target and ownership are invalid")
 		}
 		seenMountTargets[target] = true
 	}
@@ -884,22 +1036,22 @@ func (c PlanConfiguration) Validate() error {
 	variableScopes := map[string]map[string]bool{}
 	for _, variable := range c.Variables {
 		if ValidateEnvKey(variable.Name) != nil || seenVariables[variable.Name] {
-			return fmt.Errorf("invalid or duplicate planned variable %q", variable.Name)
+			return invalidField(variable.Name, "invalid or duplicate planned variable %q", variable.Name)
 		}
 		seenVariables[variable.Name] = true
 		if variable.Sensitivity != "plain" && variable.Sensitivity != "secret" {
-			return fmt.Errorf("invalid sensitivity for %s", variable.Name)
+			return invalidField(variable.Name, "invalid sensitivity for %s", variable.Name)
 		}
 		if len(variable.Scopes) == 0 || len(variable.Scopes) > 3 {
-			return fmt.Errorf("variable %s must have at least one scope", variable.Name)
+			return invalidField(variable.Name, "variable %s must have at least one scope", variable.Name)
 		}
 		seenScopes := map[string]bool{}
 		for _, scope := range variable.Scopes {
 			if scope != "build" && scope != "runtime" && scope != "release_task" {
-				return fmt.Errorf("invalid scope %q for %s", scope, variable.Name)
+				return invalidField(variable.Name, "invalid scope %q for %s", scope, variable.Name)
 			}
 			if seenScopes[scope] {
-				return fmt.Errorf("duplicate scope %q for %s", scope, variable.Name)
+				return invalidField(variable.Name, "duplicate scope %q for %s", scope, variable.Name)
 			}
 			seenScopes[scope] = true
 		}
@@ -907,35 +1059,35 @@ func (c PlanConfiguration) Validate() error {
 		if variable.Reference != "" {
 			reference, err := ParseVariableReference(variable.Reference)
 			if err != nil {
-				return fmt.Errorf("invalid typed reference for %s", variable.Name)
+				return invalidField(variable.Name, "invalid typed reference for %s", variable.Name)
 			}
 			if (reference.Kind == "credential" || reference.Kind == "database") && variable.Sensitivity != "secret" {
-				return fmt.Errorf("%s reference for %s must be secret", reference.Kind, variable.Name)
+				return invalidField(variable.Name, "%s reference for %s must be secret", reference.Kind, variable.Name)
 			}
 		}
 		if variable.Value != "" {
 			if variable.Reference != "" || variable.Generate != 0 {
-				return fmt.Errorf("%s may carry a value, a reference or a generation request, not several", variable.Name)
+				return invalidField(variable.Name, "%s may carry a value, a reference or a generation request, not several", variable.Name)
 			}
 			if variable.Sensitivity == "secret" {
-				return fmt.Errorf("%s is secret and cannot carry a literal value; use a typed reference or generate it", variable.Name)
+				return invalidField(variable.Name, "%s is secret and cannot carry a literal value; use a typed reference or generate it", variable.Name)
 			}
 			if len(variable.Value) > 4096 || strings.ContainsAny(variable.Value, "\x00") || strings.HasPrefix(strings.TrimSpace(variable.Value), "${{") {
-				return fmt.Errorf("literal value for %s is malformed", variable.Name)
+				return invalidField(variable.Name, "literal value for %s is malformed", variable.Name)
 			}
 			if err := rejectPlanSecretLiteral("value for "+variable.Name, variable.Value); err != nil {
-				return err
+				return invalidField(variable.Name, "%v", err)
 			}
 		}
 		if variable.Generate != 0 {
 			if variable.Reference != "" {
-				return fmt.Errorf("%s cannot be both generated and referenced", variable.Name)
+				return invalidField(variable.Name, "%s cannot be both generated and referenced", variable.Name)
 			}
 			if variable.Sensitivity != "secret" {
-				return fmt.Errorf("generated variable %s must be secret", variable.Name)
+				return invalidField(variable.Name, "generated variable %s must be secret", variable.Name)
 			}
 			if variable.Generate < MinGeneratedSecretLength || variable.Generate > MaxGeneratedSecretLength {
-				return fmt.Errorf("generated length for %s must be between %d and %d", variable.Name, MinGeneratedSecretLength, MaxGeneratedSecretLength)
+				return invalidField(variable.Name, "generated length for %s must be between %d and %d", variable.Name, MinGeneratedSecretLength, MaxGeneratedSecretLength)
 			}
 		}
 	}
@@ -958,86 +1110,92 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("build secrets are supported only by reviewed automatic recipes")
 	}
 	seenTasks := map[string]bool{}
-	for _, task := range c.Build.ReleaseTasks {
+	for index, task := range c.Build.ReleaseTasks {
+		field := fmt.Sprintf("build.releaseTasks[%d]", index)
 		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || task.Command == "" ||
 			len(task.Command) > 16<<10 || task.TimeoutSeconds < 1 || task.TimeoutSeconds > 3600 ||
 			(task.WorkingDirectory != "" && !safeRelativePath(task.WorkingDirectory)) || len(task.Env) > 64 {
-			return fmt.Errorf("release task %q is invalid", task.Name)
+			return invalidField(field, "release task %q is invalid", task.Name)
 		}
 		if err := rejectPlanSecretLiteral("release task command", task.Command); err != nil {
-			return err
+			return invalidField(field, "%v", err)
 		}
 		if secretCommandFlagRE.MatchString(task.Command) {
-			return fmt.Errorf("release task %q passes credential material through argv; use its scoped environment", task.Name)
+			return invalidField(field, "release task %q passes credential material through argv; use its scoped environment", task.Name)
 		}
 		seenTasks[task.Name] = true
 		seenEnv := map[string]bool{}
 		for _, name := range task.Env {
 			if ValidateEnvKey(name) != nil || seenEnv[name] || !variableScopes[name]["release_task"] {
-				return fmt.Errorf("release task %q environment %q is not a declared release_task-scoped variable", task.Name, name)
+				return invalidField(field, "release task %q environment %q is not a declared release_task-scoped variable", task.Name, name)
 			}
 			seenEnv[name] = true
 		}
 	}
-	for _, dependency := range c.Dependencies {
+	for index, dependency := range c.Dependencies {
+		field := fmt.Sprintf("dependencies[%d]", index)
 		if dependency.Kind == "" || dependency.ResourceKind == "" || !validOwnership(dependency.Ownership) ||
 			len(dependency.Kind) > 64 || len(dependency.ResourceKind) > 64 || len(dependency.ResourceID) > 512 ||
 			len(dependency.Config) > 256<<10 || dependency.Kind == "domain" ||
 			strings.ContainsAny(dependency.ResourceID, "\x00\r\n") ||
 			(len(dependency.Config) != 0 && !json.Valid(dependency.Config)) {
-			return fmt.Errorf("invalid planned dependency")
+			return invalidField(field, "invalid planned dependency")
 		}
 		if err := rejectPlanConfigSecrets("dependency config", dependency.Config); err != nil {
-			return err
+			return invalidField(field, "%v", err)
 		}
 		switch dependency.Kind {
 		case "backup":
 			if dependency.ResourceKind != "backup_job" {
-				return fmt.Errorf("backup dependency must name a backup_job")
+				return invalidField(field, "backup dependency must name a backup_job")
 			}
 			if _, err := parsePositiveReferenceID(dependency.ResourceID); err != nil {
-				return err
+				return invalidField(field, "%v", err)
 			}
 			if _, err := decodeBackupDependencyConfig(dependency.Config); err != nil {
-				return err
+				return invalidField(field, "%v", err)
 			}
 		case "database":
 			if dependency.ResourceKind != "database_connection" {
-				return fmt.Errorf("database dependency must name a database_connection")
+				return invalidField(field, "database dependency must name a database_connection")
 			}
 			if _, err := parsePositiveReferenceID(dependency.ResourceID); err != nil {
-				return err
+				return invalidField(field, "%v", err)
 			}
 		case "storage":
 			if dependency.ResourceKind != "docker_volume" && dependency.ResourceKind != "bind_path" {
-				return fmt.Errorf("storage dependency must name a docker_volume or bind_path")
+				return invalidField(field, "storage dependency must name a docker_volume or bind_path")
 			}
 			if dependency.ResourceID == "" {
-				return fmt.Errorf("storage dependency resource id is required")
+				return invalidField(field, "storage dependency resource id is required")
 			}
 		}
 	}
-	for _, check := range c.Checks {
+	for index, check := range c.Checks {
+		field := fmt.Sprintf("checks[%d]", index)
 		if check.Name == "" || !validCheckKind(check.Kind) || (check.Phase != "readiness" && check.Phase != "smoke") ||
 			len(check.Name) > 128 || len(check.Config) > 256<<10 || strings.ContainsAny(check.Name, "\x00\r\n") ||
 			(len(check.Config) != 0 && !json.Valid(check.Config)) {
-			return fmt.Errorf("invalid planned check %q", check.Name)
+			return invalidField(field, "invalid planned check %q", check.Name)
 		}
 		if err := rejectPlanConfigSecrets("check config", check.Config); err != nil {
-			return err
+			return invalidField(field, "%v", err)
 		}
 		if err := validateCheckConfiguration(check.Kind, check.Config); err != nil {
-			return fmt.Errorf("invalid planned check %q: %w", check.Name, err)
+			return invalidField(field, "invalid planned check %q: %v", check.Name, err)
 		}
 	}
 	seenDomains := map[string]bool{}
-	for _, domain := range c.Domains {
+	for index, domain := range c.Domains {
 		hostname := strings.ToLower(strings.TrimSpace(domain.Hostname))
 		if !plannedDomainRE.MatchString(hostname) || seenDomains[hostname] ||
 			(domain.Ownership != OwnershipManaged && domain.Ownership != OwnershipLinked) {
-			return fmt.Errorf("invalid or duplicate planned domain")
+			return invalidField(fmt.Sprintf("domains[%d]", index), "invalid or duplicate planned domain")
 		}
 		seenDomains[hostname] = true
+		if err := domain.Protection.validate(fmt.Sprintf("domains[%d].protection", index)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1153,6 +1311,26 @@ func configContainsSecretLiteral(value any, key string) bool {
 	return false
 }
 
+// validRecipe is the closed set of automatic recipes; a name outside it is
+// refused at planning so a plan never names a builder that does not exist.
+func validRecipe(name string) bool {
+	switch name {
+	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php":
+		return true
+	}
+	return false
+}
+
+// validDetectedDatabaseEngine is the closed set of engines quick setup can
+// provision, which is what makes a suggestion actionable.
+func validDetectedDatabaseEngine(engine string) bool {
+	switch engine {
+	case "postgres", "mysql", "mariadb", "redis", "mongodb":
+		return true
+	}
+	return false
+}
+
 func validBuildMethod(method BuildMethod) bool {
 	switch method {
 	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose:
@@ -1263,7 +1441,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			!validDetectionConfidence(candidate.Confidence) || candidate.Name == "" || len(candidate.Name) > 256 ||
 			(candidate.Root != "" && !safeRelativePath(candidate.Root)) || len(candidate.Root) > 4096 ||
 			len(candidate.Framework) > 128 || len(candidate.Recipe) > 32 ||
-			(candidate.Recipe != "" && candidate.Recipe != "node" && candidate.Recipe != "go" && candidate.Recipe != "python") ||
+			(candidate.Recipe != "" && !validRecipe(candidate.Recipe)) ||
+			len(candidate.PythonVersion) > 16 || (candidate.PythonVersion != "" && !pythonRecipeVersionRE.MatchString(candidate.PythonVersion)) ||
+			len(candidate.Variables) > 64 || len(candidate.Databases) > 8 ||
 			len(candidate.BuildCommand) > 4096 ||
 			len(candidate.StartCommand) > 4096 || len(candidate.OutputDirectory) > 4096 ||
 			len(candidate.Dockerfile) > 4096 || (candidate.Dockerfile != "" && !safeRelativePath(candidate.Dockerfile)) ||
@@ -1295,6 +1475,26 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 				strings.ContainsAny(evidence.Path, "\x00\r\n") ||
 				rejectPlanSecretLiteral("detection evidence", evidence.Reason) != nil {
 				return fmt.Errorf("%w: detection evidence is malformed", ErrInvalidPlan)
+			}
+		}
+		for _, variable := range candidate.Variables {
+			if ValidateEnvKey(variable.Name) != nil || len(variable.Example) > 256 ||
+				strings.ContainsAny(variable.Example, "\x00\r\n") ||
+				rejectPlanSecretLiteral("detected variable example", variable.Example) != nil ||
+				len(variable.Sources) > 8 {
+				return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
+			}
+			for _, source := range variable.Sources {
+				if source == "" || len(source) > 4096 || strings.ContainsAny(source, "\x00\r\n") {
+					return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
+				}
+			}
+		}
+		for _, database := range candidate.Databases {
+			if !validDetectedDatabaseEngine(database.Engine) || ValidateEnvKey(database.Variable) != nil ||
+				len(database.Evidence) > 512 || strings.ContainsAny(database.Evidence, "\x00\r\n") ||
+				rejectPlanSecretLiteral("detected database evidence", database.Evidence) != nil {
+				return fmt.Errorf("%w: detected database is malformed", ErrInvalidPlan)
 			}
 		}
 		for _, decision := range candidate.NeedsDecision {
@@ -1423,6 +1623,16 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	if c.Runtime.Mounts == nil {
 		c.Runtime.Mounts = []RuntimeMount{}
 	}
+	if c.Runtime.Ports == nil {
+		c.Runtime.Ports = []PublishedPort{}
+	}
+	sort.SliceStable(c.Runtime.Ports, func(i, j int) bool {
+		left, right := c.Runtime.Ports[i], c.Runtime.Ports[j]
+		if left.effectiveProtocol() != right.effectiveProtocol() {
+			return left.effectiveProtocol() < right.effectiveProtocol()
+		}
+		return left.HostPort < right.HostPort
+	})
 	sort.Slice(c.Variables, func(i, j int) bool { return c.Variables[i].Name < c.Variables[j].Name })
 	sort.Slice(c.Dependencies, func(i, j int) bool {
 		left := c.Dependencies[i].Kind + "\x00" + c.Dependencies[i].ResourceKind + "\x00" + c.Dependencies[i].ResourceID
@@ -1432,6 +1642,7 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	sort.Slice(c.Checks, func(i, j int) bool { return c.Checks[i].Name < c.Checks[j].Name })
 	for index := range c.Domains {
 		c.Domains[index].Hostname = strings.ToLower(strings.TrimSpace(c.Domains[index].Hostname))
+		c.Domains[index].Protection = canonicalDomainProtection(c.Domains[index].Protection)
 	}
 	sort.Slice(c.Domains, func(i, j int) bool { return c.Domains[i].Hostname < c.Domains[j].Hostname })
 	return c

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -32,8 +33,27 @@ func (s *Server) handleDeploymentArchive(w http.ResponseWriter, r *http.Request)
 		return mapDeployError(err)
 	}
 	httpx.SetAudit(r, "deploy.archive", project.Name, map[string]any{
-		"deploymentId": projectID, "resourcesRemoved": false,
+		"deploymentId": projectID, "resourcesRemoved": false, "schedulesDisabled": true,
 	})
+	httpx.JSON(w, http.StatusOK, project)
+	return nil
+}
+
+// handleDeploymentUnarchive restores the display name Archive tombstoned and
+// clears the archived marker. Triggers and schedules are left exactly as
+// Archive set them — disabled — so a project does not come back auto-firing;
+// the operator re-enables what they want running.
+func (s *Server) handleDeploymentUnarchive(w http.ResponseWriter, r *http.Request) error {
+	projectID, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	project, err := s.modules.deployStore.Unarchive(r.Context(), projectID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	s.enrichProject(r, project)
+	httpx.SetAudit(r, "deploy.unarchive", project.Name, map[string]any{"deploymentId": projectID})
 	httpx.JSON(w, http.StatusOK, project)
 	return nil
 }
@@ -95,17 +115,33 @@ func (s *Server) handleDeploymentRemoveManaged(w http.ResponseWriter, r *http.Re
 	execution, err := s.modules.deployPlanning.RemoveManaged(
 		r.Context(), projectID, principal.Username(), request, newDeploymentResourceRemover(s),
 	)
-	if err != nil {
+	// A removal-plan or precondition failure (not archived, stale digest, bad
+	// target) has no partial execution at all; only a RemovalFailure from the
+	// remover itself carries one worth showing beside the error.
+	var removalFailure *deploy.RemovalFailure
+	if err != nil && !errors.As(err, &removalFailure) {
 		return mapDeploymentPlanningError(err)
 	}
 	targets := make([]map[string]string, 0, len(execution.Removed))
 	for _, target := range execution.Removed {
 		targets = append(targets, map[string]string{"kind": target.Kind, "resourceId": target.ResourceID})
 	}
-	httpx.SetAudit(r, "deploy.resources.remove", strconv.FormatInt(projectID, 10), map[string]any{
-		"targets": targets, "remaining": len(execution.Remaining),
-	})
-	httpx.JSON(w, http.StatusOK, execution)
+	detail := map[string]any{"targets": targets, "remaining": len(execution.Remaining)}
+	if err == nil {
+		httpx.SetAudit(r, "deploy.resources.remove", strconv.FormatInt(projectID, 10), detail)
+		httpx.JSON(w, http.StatusOK, execution)
+		return nil
+	}
+	// The remover's own sentence, and everything it already removed before
+	// hitting this target, travel with the error instead of being lost to a
+	// bare 500.
+	var apiErr *httpx.APIError
+	if !errors.As(mapDeploymentPlanningError(err), &apiErr) {
+		return httpx.Internal(err)
+	}
+	detail["error"] = apiErr.Message
+	httpx.SetAudit(r, "deploy.resources.remove", strconv.FormatInt(projectID, 10), detail)
+	httpx.JSON(w, apiErr.Status, map[string]any{"error": apiErr, "execution": execution})
 	return nil
 }
 

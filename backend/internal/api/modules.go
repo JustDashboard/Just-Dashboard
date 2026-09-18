@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
@@ -83,6 +84,9 @@ type moduleSet struct {
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
+	// githubApp is the dashboard's own GitHub identity: one App, installed on
+	// the accounts whose repositories deploy here.
+	githubApp *githubapp.Service
 	// Upstream game-version metadata, behind one bounded client and a short
 	// cache so opening the wizard does not hammer somebody else's API.
 	gameVersions *gameserver.Adapter
@@ -166,6 +170,7 @@ func (s *Server) initModules() {
 		filepath.Join(s.Cfg.DataDir, "staging"), s.Log).
 		WithRecoveryChecker(&backupRecoveryChecker{server: s}).
 		WithDatabaseDumper(databaseDumper).
+		WithContainerPauser(&backupContainerPauser{docker: s.modules.docker}).
 		WithSQLiteSnapshotter(func(ctx context.Context, source, directory string) (string, error) {
 			dump, err := dbx.Dump(ctx, dbx.DriverSQLite, source, "", directory)
 			if err != nil {
@@ -180,6 +185,8 @@ func (s *Server) initModules() {
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
 	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
+	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
+	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
 	s.modules.deploySources = deploy.NewHostSourceAnalyzer(
 		s.Cfg.DeployRoots,
@@ -242,7 +249,8 @@ func (s *Server) initModules() {
 	notifications := deploy.NewNotificationDispatcher(s.modules.deployAutomation, s.modules.deployRuns, s.dashboardEndpoint, s.Log)
 	s.modules.deployEngine.WithObservers(
 		notifications,
-		deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{s.modules.github}, s.dashboardEndpoint, s.Log),
+		deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log),
+		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)
@@ -366,11 +374,26 @@ func (s *Server) healthURL() string {
 	return scheme + "://" + net.JoinHostPort(host, port) + "/healthz"
 }
 
-// githubStatusPoster adapts the GitHub CLI service to the deploy package's
-// narrow commit-status contract.
-type githubStatusPoster struct{ github *ghx.Service }
+// githubStatusPoster adapts the two GitHub identities to the deploy package's
+// narrow commit-status contract: the App where it is installed on the
+// repository, the CLI's personal credential everywhere else.
+type githubStatusPoster struct {
+	app    *githubapp.Service
+	github *ghx.Service
+}
 
 func (p githubStatusPoster) PostCommitStatus(ctx context.Context, nameWithOwner, sha string, status deploy.CommitStatus) error {
+	if p.app != nil {
+		err := p.app.PostCommitStatus(ctx, nameWithOwner, sha, githubapp.CommitStatus{
+			State: status.State, TargetURL: status.TargetURL, Description: status.Description, Context: status.Context,
+		})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, githubapp.ErrNotConfigured) && !errors.Is(err, githubapp.ErrNotInstalled) {
+			return err
+		}
+	}
 	if p.github == nil {
 		return ghx.ErrNotInstalled
 	}

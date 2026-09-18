@@ -1,0 +1,83 @@
+{
+  "id": "phpmyadmin",
+  "version": "1.0.0",
+  "name": "phpMyAdmin",
+  "category": "tool",
+  "profile": "tool",
+  "description": "The MySQL and MariaDB administration app, configured to ask for the server to connect to at sign-in.",
+  "iconId": "database",
+  "docsUrl": "https://docs.phpmyadmin.net/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-2.0",
+    "upstreamUrl": "https://github.com/phpmyadmin/phpmyadmin",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "phpmyadmin:5.2.3-apache",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Sign-in page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "PMA_ARBITRARY",
+        "value": "1"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:90a69da21964ac8277c36ed112bc5d57a25967e4e0a57693e812912c436f2e67"
+    }
+  ]
+}

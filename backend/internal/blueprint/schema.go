@@ -97,6 +97,11 @@ type Image struct {
 	TagPolicy  string   `json:"tagPolicy"`
 	Platforms  []string `json:"platforms,omitempty"`
 	PullPolicy string   `json:"pullPolicy,omitempty"`
+	// Command replaces the image's default arguments; its entrypoint stays.
+	// It is an argument vector, never a shell string, and it is not
+	// templated: an image that needs an input in its arguments takes it from
+	// a variable instead.
+	Command []string `json:"command,omitempty"`
 }
 
 type Choice struct {

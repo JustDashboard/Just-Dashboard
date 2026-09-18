@@ -211,11 +211,14 @@ export function MetricStrip({ className, ...props }: React.ComponentProps<"div">
 export function RowLink({
   onClick,
   mono,
+  title,
   className,
   children,
 }: {
   onClick: () => void
   mono?: boolean
+  /** For a title long enough to ellipse — the secondary line beside it has one. */
+  title?: string
   className?: string
   children: React.ReactNode
 }) {
@@ -223,8 +226,14 @@ export function RowLink({
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={cn(
-        "truncate text-left text-body font-medium hover:underline",
+        // `truncate` alone does nothing on a button: it is inline-block, so it
+        // sizes to its text and a process whose name is a 200-character command
+        // line paints straight across Owner, CPU and Memory. `max-w-full` binds
+        // it to the title column's cap, `min-w-0` lets it shrink where the row
+        // lays its title out with flex.
+        "max-w-full min-w-0 truncate text-left text-body font-medium hover:underline",
         mono && "font-mono text-xs",
         className,
       )}

@@ -29,7 +29,10 @@ import (
 // /etc/letsencrypt: certbot owns that tree and prunes what it does not
 // recognise, and a renewal run should never be able to delete a certificate it
 // did not issue.
-const importedDir = "/etc/ssl/just-dashboard"
+//
+// A variable rather than a constant so a live test running as an ordinary
+// user can import into a directory it may write; nothing else assigns it.
+var importedDir = "/etc/ssl/just-dashboard"
 
 var importNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 

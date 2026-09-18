@@ -38,6 +38,9 @@ var (
 	// A username may not contain a colon: the file format is user:hash, and a
 	// colon in the first field silently truncates it.
 	authUserRe = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,64}$`)
+	// bcryptHashRe is the one hash shape both proxies read: nginx through
+	// libxcrypt, Caddy natively.
+	bcryptHashRe = regexp.MustCompile(`^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$`)
 )
 
 // AuthFile is one password file and who is in it.

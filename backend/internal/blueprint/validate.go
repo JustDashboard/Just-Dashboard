@@ -166,6 +166,14 @@ func validateImage(image Image) error {
 	default:
 		return fmt.Errorf("pull policy %q is not one of missing, always", image.PullPolicy)
 	}
+	if len(image.Command) > 64 {
+		return fmt.Errorf("image command has %d arguments; the limit is 64", len(image.Command))
+	}
+	for index, argument := range image.Command {
+		if argument == "" || len(argument) > 512 || strings.ContainsAny(argument, "\x00\r\n") {
+			return fmt.Errorf("image command argument %d is empty, too long or contains control characters", index)
+		}
+	}
 	return nil
 }
 

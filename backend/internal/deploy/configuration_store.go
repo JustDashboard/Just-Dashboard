@@ -91,6 +91,14 @@ type EnvironmentConfiguration struct {
 	Checks       []PlannedCheck       `json:"checks"`
 	Domains      []PlannedDomain      `json:"domains"`
 	Pending      *PendingState        `json:"pending"`
+	// Source and Identity are the environment's current desired source, so
+	// the settings page can prefill the Source card from the same read that
+	// already answers everything else about desired state. Both are absent
+	// for a legacy project with no deploy_sources row at its desired
+	// revision. Source never carries a credential secret — CredentialID
+	// names one, the same as everywhere else this type is returned.
+	Source   *DraftSourceConfig `json:"source,omitempty"`
+	Identity *SourceIdentity    `json:"identity,omitempty"`
 }
 
 type ConfigurationWriteRequest struct {
@@ -304,7 +312,7 @@ func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environme
 		}
 		return result, nil
 	}
-	return nil, ErrInvalidVariable
+	return nil, fmt.Errorf("%w: %s", ErrVariableNotFound, name)
 }
 
 func (s *PlanningStore) PutVariable(
@@ -884,17 +892,30 @@ func (s *PlanningStore) EnvironmentConfiguration(
 		Checks: []PlannedCheck{}, Domains: []PlannedDomain{},
 	}
 	var buildJSON, runtimeJSON string
+	// The LEFT JOIN is the same desired-revision source row SaveEnvironmentSource
+	// starts from; a legacy project without one leaves sourceJSON/identityJSON
+	// NULL instead of failing this read.
+	var sourceJSON, identityJSON sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT e.desired_revision, b.config_json, r.config_json
+		SELECT e.desired_revision, b.config_json, r.config_json, src.config_json, src.identity_json
 		  FROM deploy_environments e
 		  JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
 		  JOIN deploy_runtime_plans r ON r.environment_id = e.id AND r.revision = e.desired_revision
+		  LEFT JOIN deploy_sources src ON src.environment_id = e.id AND src.revision = e.desired_revision
 		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&result.Revision, &buildJSON, &runtimeJSON); err != nil {
+		Scan(&result.Revision, &buildJSON, &runtimeJSON, &sourceJSON, &identityJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
 		return nil, err
+	}
+	if sourceJSON.Valid && identityJSON.Valid {
+		var source DraftSourceConfig
+		var identity SourceIdentity
+		if json.Unmarshal([]byte(sourceJSON.String), &source) != nil || json.Unmarshal([]byte(identityJSON.String), &identity) != nil {
+			return nil, fmt.Errorf("%w: desired source configuration is malformed", ErrInvalidPlan)
+		}
+		result.Source, result.Identity = &source, &identity
 	}
 	if json.Unmarshal([]byte(buildJSON), &result.Build) != nil || json.Unmarshal([]byte(runtimeJSON), &result.Runtime) != nil {
 		return nil, fmt.Errorf("%w: desired plan configuration is malformed", ErrInvalidPlan)
@@ -916,8 +937,9 @@ func (s *PlanningStore) EnvironmentConfiguration(
 		dependency.Config = json.RawMessage(config)
 		if dependency.Kind == "domain" {
 			var domain struct {
-				Hostname string `json:"hostname"`
-				HTTPS    bool   `json:"https"`
+				Hostname   string            `json:"hostname"`
+				HTTPS      bool              `json:"https"`
+				Protection *DomainProtection `json:"protection"`
 			}
 			if json.Unmarshal(dependency.Config, &domain) != nil {
 				rows.Close()
@@ -925,6 +947,7 @@ func (s *PlanningStore) EnvironmentConfiguration(
 			}
 			result.Domains = append(result.Domains, PlannedDomain{
 				Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: dependency.Ownership,
+				Protection: canonicalDomainProtection(domain.Protection),
 			})
 		} else {
 			result.Dependencies = append(result.Dependencies, dependency)
@@ -989,8 +1012,11 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		Build: request.Build, Runtime: request.Runtime, Variables: plannedVariables,
 		Dependencies: request.Dependencies, Checks: request.Checks, Domains: request.Domains,
 	})
+	if err := sealDomainProtection(&configuration); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	if err := configuration.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1065,7 +1091,11 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		}
 	}
 	for _, domain := range configuration.Domains {
-		config := mustJSON(map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS})
+		domainConfig := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
+		if domain.Protection != nil {
+			domainConfig["protection"] = domain.Protection
+		}
+		config := mustJSON(domainConfig)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_dependencies(environment_id, release_id, kind, ownership, resource_kind, resource_id, config_json, created_at)
 			VALUES(?, 0, 'domain', ?, 'proxy_site', ?, ?, ?)`, environmentID, domain.Ownership,
@@ -1092,6 +1122,102 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		UPDATE deploy_environments SET desired_revision = ?, strategy = ?, expected_downtime = ?, updated_at = ?
 		 WHERE id = ? AND project_id = ? AND desired_revision = ?`, next, configuration.Runtime.Strategy,
 		boolInt(configuration.Runtime.Strategy == StrategyStopFirst), now, environmentID, projectID, current)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.EnvironmentConfiguration(ctx, projectID, environmentID)
+}
+
+// SaveEnvironmentSource changes a committed project's source — repository,
+// ref, subdirectory, credential, or image reference — without touching the
+// live release. It clones build and runtime forward unchanged (exactly as
+// SaveEnvironmentConfiguration clones the source row) and writes only a
+// fresh deploy_sources row, because the caller has already run the read-only
+// inspection this needs (resolving the ref or registry digest) and is
+// handing this the resulting identity; a source kind cannot change here,
+// since build/runtime were built for the kind already live.
+//
+// PendingState already compares the live release's source digest against
+// the desired one, so this alone is what makes a source edit show up as a
+// pending "source" change; the Git watcher already keys its own cursor on
+// the source config's digest, so a changed URL/ref resets that cursor and
+// the next poll reports branch_changed on its own — neither needs any
+// change here.
+func (s *PlanningStore) SaveEnvironmentSource(
+	ctx context.Context,
+	projectID, environmentID int64,
+	revision int,
+	source DraftSourceConfig,
+	identity SourceIdentity,
+) (*EnvironmentConfiguration, error) {
+	source = canonicalSourceConfig(source)
+	if err := source.ValidateForDeployment(); err != nil {
+		return nil, err
+	}
+	if exists, err := s.credentialExists(ctx, source.CredentialID); err != nil {
+		return nil, err
+	} else if !exists {
+		return nil, fmt.Errorf("%w: credential does not exist", ErrInvalidSource)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var current int
+	var currentKind SourceKind
+	if err := tx.QueryRowContext(ctx, `
+		SELECT e.desired_revision, s.kind
+		  FROM deploy_environments e
+		  JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
+		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
+		Scan(&current, &currentKind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrEnvironmentNotFound
+		}
+		return nil, err
+	}
+	if current != revision {
+		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
+	}
+	if currentKind != source.Kind {
+		return nil, fmt.Errorf("%w: source kind cannot change from %s to %s", ErrInvalidSource, currentKind, source.Kind)
+	}
+	next, now := current+1, s.now().UTC().Unix()
+	sourceJSON, _ := json.Marshal(source)
+	identityJSON, _ := json.Marshal(identity)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, next, source.Kind, string(sourceJSON),
+		source.CredentialID, string(identityJSON), digestBytes(sourceJSON, identityJSON), now); err != nil {
+		return nil, err
+	}
+	for _, statement := range []string{
+		`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
+		 SELECT environment_id, ?, method, config_json, evidence_json, preview, digest, ?
+		   FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`,
+		`INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at)
+		 SELECT environment_id, ?, config_json, preview, digest, ?
+		   FROM deploy_runtime_plans WHERE environment_id = ? AND revision = ?`,
+	} {
+		result, err := tx.ExecContext(ctx, statement, next, now, environmentID, current)
+		if err != nil {
+			return nil, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return nil, fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, current)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE deploy_environments SET desired_revision = ?, updated_at = ?
+		 WHERE id = ? AND project_id = ? AND desired_revision = ? AND archived_at = 0`,
+		next, now, environmentID, projectID, current)
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,9 @@ A change that weakens any of these has to say so explicitly.
    in at all. It defaults to false.
 3. Every destructive action is behind `s.destructive` — capability, `destrLim`, audit entry — and pauses
    the operator with a confirmation dialog. A **subset** also requires the typed `X-Confirm` phrase,
-   enforced server-side inside the handler. See below.
+   enforced server-side inside the handler. See below. A route that also serves routine, non-destructive
+   operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
+   wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `api.authoriseSpec` for a
    container spec that is privileged or mounts a host path.
@@ -88,7 +90,7 @@ is what `s.destructive` marks) but **"how often does somebody do this, and can t
 
 **Typed — rare, and no way back:** `DROP DATABASE`, `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, an import that
 truncates first, dropping a Mongo collection, a Mongo pipeline with `$out`/`$merge`, a `critical` statement
-in the query runner, restoring a database or backup over live data, `compose down`, removing a Docker
+in the query runner, restoring a database or backup over live data (a backup restore types the destination directory, or the phrase `restore in place` when the archive goes back over the paths it was taken from), `compose down`, removing a Docker
 volume, a prune that also sweeps volumes, deleting a dashboard or Linux account, a recursive directory
 delete, `git discard`, `git reset --hard` and dropping a git stash, toggling the firewall, resetting it, switching the inbound
 default to deny, changing sshd's configuration, revoking a certificate, applying package updates,

@@ -33,10 +33,19 @@ type DeploymentSummary struct {
 	InternalPort     int             `json:"internalPort,omitempty"`
 	HostPort         int             `json:"hostPort,omitempty"`
 	Health           string          `json:"health"`
-	PendingChanges   bool            `json:"pendingChanges"`
-	LastRun          *EngineRun      `json:"lastRun,omitempty"`
-	ActiveRun        *EngineRun      `json:"activeRun,omitempty"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	// Stopped is true when the live release's runtime is recorded as stopped
+	// by a stop operation. It is a distinct fact from Health: a stopped
+	// runtime has no health outcome to report at all.
+	Stopped bool `json:"stopped"`
+	// ServiceCount is the number of Compose services the live release's
+	// runtime snapshot recorded, or 1 for any release that is not a Compose
+	// build (a single container or static bundle is one service). It is 0
+	// only when there is no live release yet to read a snapshot from.
+	ServiceCount   int        `json:"serviceCount,omitempty"`
+	PendingChanges bool       `json:"pendingChanges"`
+	LastRun        *EngineRun `json:"lastRun,omitempty"`
+	ActiveRun      *EngineRun `json:"activeRun,omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 type ActiveWork struct {
@@ -94,6 +103,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		       COALESCE(src.kind, ''), COALESCE(NULLIF(l.source_identity_json, '{}'), src.identity_json, '{}'),
 		       COALESCE(build.method, 'none'),
 		       COALESCE(runtime.config_json, '{}'), COALESCE(live_runtime.port, 0),
+		       COALESCE(live_runtime.state, ''),
 		       COALESCE((
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = e.id AND d.kind = 'domain'
@@ -120,17 +130,19 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		var summary DeploymentSummary
 		var updated int64
 		var expectedDowntime, livePort int
-		var identityJSON, runtimeJSON string
+		var identityJSON, runtimeJSON, liveRuntimeState string
 		if err := rows.Scan(
 			&summary.ID, &summary.Name, &summary.Profile, &updated,
 			&summary.EnvironmentID, &summary.EnvironmentName, &summary.EnvironmentKind,
 			&summary.DesiredRevision, &summary.LiveReleaseID, &summary.Strategy,
 			&expectedDowntime, &summary.LivePlanRevision, &summary.SourceKind,
-			&identityJSON, &summary.BuildMethod, &runtimeJSON, &livePort, &summary.Endpoint,
+			&identityJSON, &summary.BuildMethod, &runtimeJSON, &livePort, &liveRuntimeState,
+			&summary.Endpoint,
 		); err != nil {
 			return nil, err
 		}
 		summary.ExpectedDowntime = expectedDowntime != 0
+		summary.Stopped = liveRuntimeState == "stopped"
 		summary.UpdatedAt = unixTime(updated)
 		if updated == 0 {
 			summary.UpdatedAt = time.Time{}
@@ -168,7 +180,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			releaseIDs = append(releaseIDs, summary.LiveReleaseID)
 		}
 	}
-	health, err := s.liveReleaseHealths(ctx, releaseIDs)
+	health, serviceCounts, err := s.liveReleaseFacts(ctx, releaseIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +199,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			outcome = HealthUnavailable
 		}
 		summary.Health = string(outcome)
+		summary.ServiceCount = serviceCounts[summary.LiveReleaseID]
 		summary.LastRun, summary.ActiveRun = lastRuns[summary.ID], activeRuns[summary.ID]
 	}
 
@@ -240,15 +253,20 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	return result, nil
 }
 
-// liveReleaseHealths answers the health question for every live release in one
-// fixed set of statements. A health outcome is only reported when the release's
-// own recorded checks were all observed; anything less stays unavailable rather
-// than being rounded up to healthy.
-func (s *OrchestrationStore) liveReleaseHealths(
+// liveReleaseFacts answers, in one fixed set of statements, the two questions
+// the fleet read needs about every summary's live release: its health and how
+// many services its runtime snapshot describes. A health outcome is only
+// reported when the release's own recorded checks were all observed; anything
+// less stays unavailable rather than being rounded up to healthy. A service
+// count is read from the same snapshot regardless of whether the runtime is
+// currently live or stopped, so a stopped Compose deployment still reports
+// its service count.
+func (s *OrchestrationStore) liveReleaseFacts(
 	ctx context.Context,
 	releaseIDs []int64,
-) (map[int64]HealthOutcome, error) {
+) (map[int64]HealthOutcome, map[int64]int, error) {
 	result := map[int64]HealthOutcome{}
+	serviceCounts := map[int64]int{}
 	wanted := []int64{}
 	for _, releaseID := range releaseIDs {
 		if releaseID > 0 {
@@ -259,7 +277,7 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		}
 	}
 	if len(wanted) == 0 {
-		return result, nil
+		return result, serviceCounts, nil
 	}
 	placeholders, args := inPlaceholders(wanted)
 
@@ -267,18 +285,18 @@ func (s *OrchestrationStore) liveReleaseHealths(
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT release_id FROM deploy_release_runtimes WHERE state = 'live' AND release_id IN `+placeholders, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for rows.Next() {
 		var releaseID int64
 		if err := rows.Scan(&releaseID); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		liveRuntimes[releaseID] = true
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	live := []int64{}
 	for _, releaseID := range wanted {
@@ -286,33 +304,32 @@ func (s *OrchestrationStore) liveReleaseHealths(
 			live = append(live, releaseID)
 		}
 	}
-	if len(live) == 0 {
-		return result, nil
-	}
-	placeholders, args = inPlaceholders(live)
 
+	// Scoped to every wanted release, not only the live-runtime subset: a
+	// stopped release still has a runtime snapshot worth reading for its
+	// service count, even though it contributes no health evidence below.
 	releases := map[int64]*ReleaseWithArtifacts{}
 	rows, err = s.db.QueryContext(ctx, `SELECT `+releaseColumns+` FROM deploy_releases WHERE id IN `+placeholders, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for rows.Next() {
 		release, scanErr := scanRelease(rows)
 		if scanErr != nil {
 			rows.Close()
-			return nil, scanErr
+			return nil, nil, scanErr
 		}
 		releases[release.ID] = &ReleaseWithArtifacts{Release: *release, Artifacts: []ReleaseArtifact{}}
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT id, release_id, kind, reference, digest, metadata_json, size_bytes,
 		       retain_until, state, created_at
 		  FROM deploy_release_artifacts WHERE release_id IN `+placeholders+` ORDER BY id`, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for rows.Next() {
 		var artifact ReleaseArtifact
@@ -322,7 +339,7 @@ func (s *OrchestrationStore) liveReleaseHealths(
 			&artifact.Digest, &metadata, &artifact.SizeBytes, &retainUntil, &artifact.State,
 			&createdAt); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		artifact.Metadata = json.RawMessage(metadata)
 		artifact.RetainUntil, artifact.CreatedAt = unixTimePtr(retainUntil), unixTime(createdAt)
@@ -331,8 +348,29 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		}
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	for _, releaseID := range wanted {
+		release, found := releases[releaseID]
+		if !found {
+			continue
+		}
+		snapshot, snapshotErr := decodeReleaseRuntimeSnapshot(release)
+		if snapshotErr != nil {
+			continue
+		}
+		count := 1
+		if snapshot.Compose != nil && len(snapshot.Compose.Services) > 0 {
+			count = len(snapshot.Compose.Services)
+		}
+		serviceCounts[releaseID] = count
+	}
+
+	if len(live) == 0 {
+		return result, serviceCounts, nil
+	}
+	livePlaceholders, liveArgs := inPlaceholders(live)
 
 	// The newest run of each release carries the evidence its checks produced.
 	healthRuns := map[int64]int64{}
@@ -341,24 +379,24 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		SELECT release_id, id FROM (
 		  SELECT release_id, id,
 		         ROW_NUMBER() OVER (PARTITION BY release_id ORDER BY id DESC) AS rank
-		    FROM deploy_runs WHERE release_id IN `+placeholders+`
-		) WHERE rank = 1`, args...)
+		    FROM deploy_runs WHERE release_id IN `+livePlaceholders+`
+		) WHERE rank = 1`, liveArgs...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for rows.Next() {
 		var releaseID, runID int64
 		if err := rows.Scan(&releaseID, &runID); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		healthRuns[releaseID], runReleases[runID] = runID, releaseID
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(runReleases) == 0 {
-		return result, nil
+		return result, serviceCounts, nil
 	}
 	runIDs := make([]int64, 0, len(runReleases))
 	for runID := range runReleases {
@@ -374,7 +412,7 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		   AND status IN ('passed','warning','skipped')
 		 ORDER BY attempt DESC`, runArgs...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for rows.Next() {
 		var runID int64
@@ -382,7 +420,7 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		var raw string
 		if err := rows.Scan(&runID, &key, &raw); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		if evidence[runID] == nil {
 			evidence[runID] = map[StepKey]json.RawMessage{}
@@ -392,7 +430,7 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		}
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for _, releaseID := range live {
@@ -414,7 +452,7 @@ func (s *OrchestrationStore) liveReleaseHealths(
 		}
 		result[releaseID] = healthFromEvidence(snapshot.Checks, evidence[runID])
 	}
-	return result, nil
+	return result, serviceCounts, nil
 }
 
 func healthFromEvidence(checks []PlannedCheck, latest map[StepKey]json.RawMessage) HealthOutcome {
@@ -535,6 +573,86 @@ func (s *OrchestrationStore) ProjectRuns(ctx context.Context, projectID int64, l
 		result = append(result, *run)
 	}
 	return result, rows.Err()
+}
+
+// RunListFilter narrows ProjectRunsFiltered's result to one environment
+// and/or operation and/or state, and pages it with a "before" run id cursor.
+// State accepts a literal RunState, "terminal" (any of the five terminal
+// states) or "active" (everything else); Limit is clamped to (0,200] the
+// same way ProjectRuns clamps it, defaulting to 30.
+type RunListFilter struct {
+	Environment int64
+	Operation   Operation
+	State       string
+	Before      int64
+	Limit       int
+}
+
+// ProjectRunsFiltered lists a project's runs newest-first, optionally
+// narrowed by RunListFilter and paginated by its Before cursor. nextBefore is
+// 0 when no older row remains; otherwise it is the id a caller passes back as
+// Before to fetch the next page.
+func (s *OrchestrationStore) ProjectRunsFiltered(
+	ctx context.Context, projectID int64, filter RunListFilter,
+) ([]EngineRun, int64, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 30
+	}
+	where := []string{"project_id = ?"}
+	args := []any{projectID}
+	if filter.Environment > 0 {
+		where = append(where, "environment_id = ?")
+		args = append(args, filter.Environment)
+	}
+	if filter.Operation != "" {
+		where = append(where, "operation = ?")
+		args = append(args, filter.Operation)
+	}
+	switch filter.State {
+	case "":
+	// "active" is exactly activeRunWhere's own state list, and "terminal" is
+	// its complement — derived from the same constant so this can't drift
+	// into a second, inversely-spelled copy of the terminal state list.
+	case "active":
+		where = append(where, activeRunWhere)
+	case "terminal":
+		where = append(where, "NOT "+activeRunWhere)
+	default:
+		where = append(where, "state = ?")
+		args = append(args, filter.State)
+	}
+	if filter.Before > 0 {
+		where = append(where, "id < ?")
+		args = append(args, filter.Before)
+	}
+	// One extra row reveals whether another page remains without a second
+	// round trip.
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+engineRunColumns+`
+		FROM deploy_runs WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY id DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	result := []EngineRun{}
+	for rows.Next() {
+		run, err := scanEngineRun(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		result = append(result, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var nextBefore int64
+	if len(result) > limit {
+		nextBefore = result[limit-1].ID
+		result = result[:limit]
+	}
+	return result, nextBefore, nil
 }
 
 func (s *OrchestrationStore) latestProjectRun(ctx context.Context, projectID int64, active bool) (*EngineRun, error) {

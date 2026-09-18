@@ -1,0 +1,108 @@
+{
+  "id": "shlink",
+  "version": "1.0.0",
+  "name": "Shlink",
+  "category": "http",
+  "profile": "web",
+  "description": "A URL shortener with visit statistics and an API; the domain is what every short link starts with.",
+  "iconId": "globe",
+  "docsUrl": "https://shlink.io/documentation/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/shlinkio/shlink",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "shlinkio/shlink:5.1.6",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Short links are minted on it."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "Short links and the REST API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/etc/shlink/data",
+      "purpose": "The SQLite database and GeoLite data",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/rest/health",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "DEFAULT_DOMAIN",
+        "value": "{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "IS_HTTPS_ENABLED",
+        "value": "true"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Shlink migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "go.example.test"
+      },
+      "digest": "sha256:c7d6778d5f791a4e085e5aca5fad1cc1d8202705015e04024f7451183af79031"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "api-key",
+      "variable": "INITIAL_API_KEY",
+      "label": "Initial API key",
+      "length": 32,
+      "description": "The key the web client or curl uses to create links."
+    }
+  ]
+}

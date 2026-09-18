@@ -184,11 +184,11 @@ disagree about order; every path is resolved before storing.
 
 Frontend `components/files/`: the page is **one framed workbench** — a sidebar, the listing and an
 inspector as three flush columns with a hairline between each, resizable through `panel-size.ts`. The
-sidebar (`files-sidebar.tsx`) is a single scrolling column, not the places list over a tree it used to
-be: the tree is folders only (the listing beside it has the files) and is rooted at the *place* the
-browsed folder belongs to (`placeFor` in the page — home when under home, otherwise the longest
-configured root or notable directory above it), starred folders sit above it, and every other place, the roots, the accounts and the recent folders are behind one menu
-(`places-menu.tsx`). `file-icon.tsx` is the vocabulary (~200 extensions, the files with none —
+sidebar (`files-sidebar.tsx`) is a fixed list the way a desktop file manager's is, not a folder tree:
+the server's places (home, the roots, the accounts, the notable directories), then the starred folders,
+then the recent ones, each a drop target, with the browsed folder marked when it is one of them. It does
+not change as the listing walks into folders — the walking happens in the listing. `destinations` in
+`places-menu.tsx` builds that list once for the sidebar and for the phone's menu alike. `file-icon.tsx` is the vocabulary (~200 extensions, the files with none —
 Dockerfile, authorized_keys, lockfiles — and the folders whose name says more than "folder") mapped to
 eight **categories** rather than languages, in the shared semantic `--tag-*` hues, drawn from Material
 Design Icons (`@mdi/js`); every other glyph in the product comes from the Heroicons vocabulary in
@@ -197,7 +197,7 @@ row and a tile alike (images lazily, a video only once it scrolls into view, and
 pointer on a tile). `file-actions.tsx` declares every verb **once, as data**, and renders it into the
 row's overflow button, the tile's, and the right-click menu (`ui/context-menu.tsx`, one root over the
 listing that reads the row from `data-entry-path`); the space between rows gets the folder's verbs.
-`dnd.ts` makes folder rows, tree nodes, crumbs and starred folders drop targets for paths dragged from
+`dnd.ts` makes folder rows, sidebar places, crumbs and starred folders drop targets for paths dragged from
 the listing (Ctrl or Alt copies) and for files from the desktop. `uploads.tsx` is the queue — one
 `XMLHttpRequest` per file for progress, three at a time, folders walked through the entries API so a
 dropped folder is its contents rather than an empty file named after it — and `conflict-dialog.tsx`

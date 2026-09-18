@@ -38,7 +38,7 @@ func TestLiveBackupDumpsAndRestoresAPostgresDatabase(t *testing.T) {
 			t.Errorf("test volume cleanup: %v", err)
 		}
 	})
-	body, _ := json.Marshal(map[string]string{"engine": "postgres", "name": name, "database": "app"})
+	body, _ := json.Marshal(map[string]string{"engine": "postgres", "name": name, "database": "app", "exposure": "local"})
 	created := do(t, router, http.MethodPost, "/databases/provision", string(body))
 	if created.Code != http.StatusAccepted {
 		t.Fatalf("provision failed: HTTP %d: %s", created.Code, created.Body)

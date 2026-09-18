@@ -163,6 +163,8 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   recovery_json TEXT NOT NULL DEFAULT 'null',
   sqlite_paths TEXT NOT NULL DEFAULT '[]',
   database_dumps TEXT NOT NULL DEFAULT '[]',
+  retention_days INTEGER NOT NULL DEFAULT 0,
+  pause_containers TEXT NOT NULL DEFAULT '[]',
   created_at  INTEGER NOT NULL
 );
 
@@ -283,6 +285,18 @@ CREATE TABLE IF NOT EXISTS deploy_credentials (
   secret_enc  TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS github_app (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  app_id     INTEGER NOT NULL,
+  slug       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  owner      TEXT NOT NULL DEFAULT '',
+  html_url   TEXT NOT NULL DEFAULT '',
+  client_id  TEXT NOT NULL DEFAULT '',
+  secret_enc TEXT NOT NULL,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS deploy_sources (
@@ -994,6 +1008,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"backup_jobs", "sqlite_paths", "TEXT NOT NULL DEFAULT '[]'"},
 	// Backup jobs learned to capture native database dumps beside their files.
 	{"backup_jobs", "database_dumps", "TEXT NOT NULL DEFAULT '[]'"},
+	// Backup jobs learned to prune by age and to freeze containers while
+	// they archive the volumes those containers write to.
+	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
+	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},

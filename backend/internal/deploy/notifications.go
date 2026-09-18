@@ -388,6 +388,10 @@ func humanizeOperation(operation string) string {
 		return "Rollback"
 	case OperationRestart:
 		return "Restart"
+	case OperationStop:
+		return "Stop"
+	case OperationStart:
+		return "Start"
 	case OperationPreviewCreate:
 		return "Preview deployment"
 	case OperationPreviewRemove:

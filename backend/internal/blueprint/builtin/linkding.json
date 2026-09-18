@@ -1,0 +1,104 @@
+{
+  "id": "linkding",
+  "version": "1.0.0",
+  "name": "linkding",
+  "category": "http",
+  "profile": "web",
+  "description": "A bookmark manager with tags, full-text search and a browser extension. Its SQLite database lives in the data volume.",
+  "iconId": "globe",
+  "docsUrl": "https://linkding.link/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/sissbruecker/linkding",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "sissbruecker/linkding:1.47.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "admin-user",
+      "kind": "text",
+      "label": "First user",
+      "variable": "LD_SUPERUSER_NAME",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$",
+      "description": "Created on first start with the generated password."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 9090,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/etc/linkding/data",
+      "purpose": "Bookmarks, tags and the search index",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "linkding migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:3a03add3ffa0678dcba626c793a7ec50eea489cda5bc28539f51b37ef874aad2"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "LD_SUPERUSER_PASSWORD",
+      "label": "First user's password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in the first time."
+    }
+  ]
+}

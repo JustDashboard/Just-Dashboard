@@ -24,6 +24,53 @@ type DeploymentRoute struct {
 	CertPath   string   `json:"certPath,omitempty"`
 	KeyPath    string   `json:"keyPath,omitempty"`
 	ForceHTTPS bool     `json:"forceHttps,omitempty"`
+	// BasicAuth puts a password in front of the route. Each entry is a user
+	// and a bcrypt hash, which is what both proxies read.
+	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
+}
+
+type BasicAuthUser struct {
+	Username string `json:"username"`
+	Hash     string `json:"hash"`
+}
+
+// deploymentAuthFileName is the htpasswd file a protected nginx route reads,
+// named after the route so removal finds it again.
+func deploymentAuthFileName(routeName string) string {
+	return strings.TrimSuffix(routeName, ".conf") + ".htpasswd"
+}
+
+// deploymentAuthFile is where the route's credentials live on this host, or
+// nothing for a route that asks for none.
+func (s *Service) deploymentAuthFile(route DeploymentRoute) string {
+	if len(route.BasicAuth) == 0 {
+		return ""
+	}
+	return filepath.Join(s.authDir(), deploymentAuthFileName(route.Name))
+}
+
+// writeDeploymentAuthFile writes the route's credentials, or removes the
+// file a previous protected route left when the route asks for none, so a
+// stale file never outlives the plan that wrote it.
+func (s *Service) writeDeploymentAuthFile(route DeploymentRoute) error {
+	path := filepath.Join(s.authDir(), deploymentAuthFileName(route.Name))
+	if !authFileRe.MatchString(deploymentAuthFileName(route.Name)) {
+		return errors.New("invalid deployment route name")
+	}
+	if len(route.BasicAuth) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	lines := make([]string, 0, len(route.BasicAuth))
+	for _, user := range route.BasicAuth {
+		if !authUserRe.MatchString(user.Username) || !bcryptHashRe.MatchString(user.Hash) {
+			return errors.New("invalid deployment route credentials")
+		}
+		lines = append(lines, user.Username+":"+user.Hash)
+	}
+	return s.writeAuthFile(path, lines)
 }
 
 type DeploymentRouteSnapshot struct {
@@ -67,7 +114,7 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	if edge != nil {
 		return s.applyDockerCaddyRoute(ctx, edge, route)
 	}
-	spec := deploymentSiteSpec(route)
+	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
 	content, err := RenderNginx(spec)
 	if err != nil {
 		return DeploymentRouteResult{}, err
@@ -79,6 +126,9 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 		return DeploymentRouteResult{}, err
 	}
 	result := DeploymentRouteResult{Snapshot: snapshot}
+	if err := s.writeDeploymentAuthFile(route); err != nil {
+		return result, err
+	}
 	if _, err := s.applySiteLocked(ctx, spec, content, true, true, true); err != nil {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		restoreErr := s.restoreDeploymentRouteLocked(recoveryCtx, snapshot)
@@ -179,6 +229,10 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 		}
 		return err
 	}
+	// The credentials file is the route's own; nothing else reads it.
+	if err := os.Remove(filepath.Join(s.authDir(), deploymentAuthFileName(name))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 
@@ -205,7 +259,7 @@ func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRou
 		}
 		return edge.configurationSynced(ctx)
 	}
-	content, err := RenderNginx(deploymentSiteSpec(route))
+	content, err := RenderNginx(deploymentSiteSpec(route, s.deploymentAuthFile(route)))
 	if err != nil {
 		return err
 	}
@@ -286,8 +340,8 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 	return prefix != "" && !strings.Contains(prefix, ".")
 }
 
-func deploymentSiteSpec(route DeploymentRoute) *SiteSpec {
-	return &SiteSpec{
+func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
+	spec := &SiteSpec{
 		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.Upstream,
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
 		ManagedACME: true,
@@ -295,6 +349,10 @@ func deploymentSiteSpec(route DeploymentRoute) *SiteSpec {
 		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
 		AllowFrom: []string{}, DenyFrom: []string{}, Locations: []SiteLocation{},
 	}
+	if authFile != "" {
+		spec.BasicAuthFile, spec.BasicAuthRealm = authFile, "Protected deployment"
+	}
+	return spec
 }
 
 func (s *Service) snapshotDeploymentRouteLocked(name string) (DeploymentRouteSnapshot, error) {

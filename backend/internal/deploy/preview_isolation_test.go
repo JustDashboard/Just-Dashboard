@@ -72,6 +72,56 @@ func TestPreviewApprovalIsBoundToExactRevisionAndProjectBeforeCreatingWork(t *te
 	}
 }
 
+// A rejected revision must not be approvable afterward without a new event,
+// and it must not show up in the pending list an administrator reviews.
+func TestRejectPreviewClosesTheApprovalUntilANewEvent(t *testing.T) {
+	ctx := t.Context()
+	f := newAutomationFixture(t)
+	created, err := f.automation.CreateTrigger(ctx, f.projectID, f.environmentID, TriggerWrite{
+		Name: "Review", Kind: TriggerGitHub, Provider: "github", Enabled: true,
+		Config: TriggerConfig{Repository: "acme/app", Ref: "main", Preview: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := ProviderEvent{PreviewNumber: 7, PreviewRef: "refs/pull/7/head", Revision: strings.Repeat("a", 40), Author: "untrusted"}
+	if _, _, err := f.automation.EnsurePreview(ctx, &created.Trigger, event); !errors.Is(err, ErrPreviewApproval) {
+		t.Fatal(err)
+	}
+	approvals, err := f.automation.ListPreviewApprovals(ctx, f.projectID)
+	if err != nil || len(approvals) != 1 {
+		t.Fatalf("approval = %v, %v", approvals, err)
+	}
+
+	rejected, err := f.automation.RejectPreview(ctx, f.projectID, approvals[0].ID, event.Revision, "admin")
+	if err != nil || rejected.State != "rejected" {
+		t.Fatalf("reject = %+v, %v", rejected, err)
+	}
+	// A rejected approval drops out of the pending list...
+	remaining, err := f.automation.ListPreviewApprovals(ctx, f.projectID)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("approvals after reject = %v, %v, want none pending", remaining, err)
+	}
+	// ...and cannot be approved after the fact.
+	if _, err := f.automation.ApprovePreview(ctx, f.projectID, approvals[0].ID, event.Revision, "admin"); !errors.Is(err, ErrPreviewApproval) {
+		t.Fatalf("approved a rejected revision: %v", err)
+	}
+	if _, _, err := f.automation.EnsurePreview(ctx, &created.Trigger, event); !errors.Is(err, ErrPreviewApproval) {
+		t.Fatalf("rejected revision built without a new event: %v", err)
+	}
+
+	// The trigger's next revision creates its own, independent pending
+	// approval — the earlier rejection does not follow it.
+	event.Revision = strings.Repeat("b", 40)
+	if _, _, err := f.automation.EnsurePreview(ctx, &created.Trigger, event); !errors.Is(err, ErrPreviewApproval) {
+		t.Fatal(err)
+	}
+	fresh, err := f.automation.ListPreviewApprovals(ctx, f.projectID)
+	if err != nil || len(fresh) != 1 || fresh[0].State != "pending" || fresh[0].Revision != event.Revision {
+		t.Fatalf("fresh approval after rejection = %#v, %v", fresh, err)
+	}
+}
+
 func TestPreviewNumbersAreScopedToTheirTrigger(t *testing.T) {
 	f := newAutomationFixture(t)
 	var first *PreviewRef
@@ -95,7 +145,7 @@ func TestPreviewNumbersAreScopedToTheirTrigger(t *testing.T) {
 
 func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testing.T) {
 	f := newAutomationFixture(t)
-	runtime := RuntimePlanConfig{Strategy: StrategyStopFirst, InternalPort: 8080, HostPort: 8080, Mounts: []RuntimeMount{
+	runtime := RuntimePlanConfig{Strategy: StrategyStopFirst, InternalPort: 8080, HostPort: 8080, Ports: []PublishedPort{{HostPort: 2222, ContainerPort: 2222}}, Mounts: []RuntimeMount{
 		{Source: "production-data", Target: "/data", Ownership: OwnershipManaged},
 		{Source: "/srv/production-secrets", Target: "/config", ReadOnly: true, Ownership: OwnershipLinked},
 	}}
@@ -141,6 +191,11 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 	if len(build.ReleaseTasks) != 0 || len(build.Secrets) != 0 || strings.Contains(runtimeRaw, "production") {
 		t.Fatalf("production inputs inherited: %s %s", buildRaw, runtimeRaw)
 	}
+	// A preview never pins a host port: the production plan's published SSH
+	// port would collide with production itself.
+	if runtime.HostPort != 0 || len(runtime.Ports) != 0 {
+		t.Fatalf("preview kept published ports: %s", runtimeRaw)
+	}
 	for _, mount := range runtime.Mounts {
 		if mount.Source != previewVolumeName(preview.EnvironmentID, mount.Target) {
 			t.Fatal(mount)
@@ -154,6 +209,7 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 		},
 		func(p *RuntimePlanConfig) { p.HostNetwork = true },
 		func(p *RuntimePlanConfig) { p.Privileged = true },
+		func(p *RuntimePlanConfig) { p.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 2222}} },
 	} {
 		copy := runtime
 		mutate(&copy)

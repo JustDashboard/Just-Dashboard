@@ -17,6 +17,32 @@ var (
 	ErrDeploymentActive   = errors.New("deployment must be archived before managed resources are removed")
 )
 
+// RemovalFailure marks a managed-resource removal that a ManagedResourceRemover
+// itself refused or could not complete. Its Error() is the remover's own
+// sentence — "Docker is unavailable", "remove application containers before
+// removing their database network" — safe to show an operator verbatim
+// instead of translating it to a generic internal error.
+type RemovalFailure struct {
+	// Unavailable marks a failure caused by a missing adapter (Docker, the
+	// proxy, backups, a database owner, …) rather than the resource itself
+	// refusing removal, so the API reports 503 instead of 409.
+	Unavailable bool
+	err         error
+}
+
+func (f *RemovalFailure) Error() string { return f.err.Error() }
+func (f *RemovalFailure) Unwrap() error { return f.err }
+
+// unavailableRemoval marks a removal error as caused by a missing resource
+// owner. A ManagedResourceRemover implementation returns Unavailable(err)
+// instead of a plain error for that case so RemoveManaged can classify it.
+type unavailableRemoval struct{ error }
+
+// Unavailable marks err as caused by a missing resource owner, so
+// RemoveManaged reports it as temporarily unavailable (503) rather than a
+// removal the operator must resolve by hand (409).
+func Unavailable(err error) error { return unavailableRemoval{err} }
+
 type RemovalTarget struct {
 	ID                 string        `json:"id"`
 	Kind               string        `json:"kind"`
@@ -309,9 +335,16 @@ func (s *PlanningStore) RemoveManaged(
 		}
 	}
 	sort.SliceStable(selected, func(i, j int) bool { return priority(selected[i]) < priority(selected[j]) })
+	// A remover failure stops the batch but must not lose what already
+	// succeeded: the caller still gets execution.Removed and, once the plan is
+	// re-read below, an accurate execution.Remaining that includes the target
+	// that just failed.
+	var failure error
 	for _, target := range selected {
 		if err := remover.RemoveManagedResource(ctx, target); err != nil {
-			return execution, fmt.Errorf("remove %s %s: %w", target.Kind, target.ResourceID, err)
+			var unavailable unavailableRemoval
+			failure = &RemovalFailure{Unavailable: errors.As(err, &unavailable), err: err}
+			break
 		}
 		if _, err := s.db.ExecContext(ctx, `
 			INSERT INTO deploy_resource_removals(project_id, target_id, target_kind, resource_id, removed_by, removed_at)
@@ -324,10 +357,13 @@ func (s *PlanningStore) RemoveManaged(
 	}
 	remaining, err := s.RemovalPlan(ctx, projectID)
 	if err != nil {
+		if failure != nil {
+			return execution, failure
+		}
 		return execution, err
 	}
 	execution.Remaining = remaining.Targets
-	return execution, nil
+	return execution, failure
 }
 
 func removalTargetID(kind, resourceID string) string {

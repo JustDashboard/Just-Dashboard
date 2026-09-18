@@ -255,7 +255,7 @@ func (r *Runner) VerifyRestore(ctx context.Context, runID int64) (record *Restor
 	if err := os.Mkdir(directory, 0o755); err != nil {
 		return record, err
 	}
-	restored, err := extractArchiveBounded(ctx, archive, directory, runID, job.Recovery.MaxBytes)
+	restored, err := extractArchiveBounded(ctx, archive, directory, runID, job.Recovery.MaxBytes, restorePlan{})
 	if err != nil {
 		record.Detail = "the archive could not be restored within the configured limits"
 		return record, err

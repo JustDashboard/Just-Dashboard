@@ -61,9 +61,9 @@ func TestC6PreflightSurfacesNetworkFirewallAndDependencyGates(t *testing.T) {
 	assertC6Finding(t, findings, "dns_unverified", PreflightUnavailable, "/proxy/sites")
 	// certbot on this host means the release itself will order the certificate,
 	// so a name nobody has published before is reported rather than refused.
-	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/certificates")
+	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates")
 	assertC6Finding(t, findings, "public_bind", PreflightWarning, "")
-	assertC6Finding(t, findings, "firewall_mismatch", PreflightBlocked, "/security?tab=firewall")
+	assertC6Finding(t, findings, "firewall_mismatch", PreflightBlocked, "/security/firewall")
 	assertC6Finding(t, findings, "database_unavailable", PreflightBlocked, "/databases/12")
 	assertC6Finding(t, findings, "storage_unavailable", PreflightDecision, "/docker/volumes/shared")
 	assertC6Finding(t, findings, "backup_stale", PreflightWarning, "/backups/42")
@@ -95,7 +95,7 @@ func TestPreflightBlocksHTTPSOnAHostThatCannotIssue(t *testing.T) {
 		}},
 	}
 	findings := preflightFindings(draft, configuration, observation, false)
-	assertC6Finding(t, findings, "certificate_unavailable", PreflightBlocked, "/certificates")
+	assertC6Finding(t, findings, "certificate_unavailable", PreflightBlocked, "/proxy/certificates")
 	for _, item := range findings {
 		if item.Code == "certificate_automatic" {
 			t.Fatalf("a host without certbot claimed automatic issuance: %#v", item)

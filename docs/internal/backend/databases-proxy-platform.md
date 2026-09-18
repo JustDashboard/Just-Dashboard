@@ -79,7 +79,35 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   database is a file to unlink, a Redis keyspace can only be emptied, which `DropResult.Gone` reports
   rather than pretending. The connection is deleted with the database when it was that connection's own.
   A managed deployment network binding blocks forgetting the connection or dropping its database before
-  data is changed; remove that network through deployment lifecycle first.
+  data is changed; remove that network through deployment lifecycle first. The same route takes
+  `removeContainer: true`, which removes the Docker container behind the connection (found by its
+  published port at the saved loopback address) and the named volumes it mounted, without signing in —
+  the delete that still works when the stored password no longer matches, which is what a container
+  started over an older data volume produces. A compose-owned container is refused (`compose_managed`);
+  a volume another container uses is kept by Docker and reported as a warning, never forced.
+- **Where a database is reachable from is a reading and a switch, not a trip through three pages.**
+  `GET /databases/{id}/access` (admin) reports the container behind a connection, whether the sync
+  would re-adopt it (`detected` — the page draws no Remove row for one that would come straight back),
+  its exposure read off the port binding (`local`, `public`, `private`, `remote`), the machine's public
+  addresses and the firewall's part of the answer (present, on, an allow rule for the port from
+  anywhere, editable). `PUT /databases/{id}/access` with `exposure: local|public` recreates the
+  container through `dockerx.Recreate` with the one host address changed — the park-and-restore path
+  the Docker page uses, on the same named volume — then adds a `tcp` allow rule for the port where the
+  firewall is on and writable, or removes only the rule this dashboard wrote (matched by its
+  comment). It sits in the destructive group beside the Docker page's Recreate, is refused for a
+  compose-owned container, and audits as `database.access.change` with the binding before and after
+  and what the firewall did. Publishing a database port to every interface is the operator's explicit,
+  audited decision, the same one the Docker page already allows; invariant 7 is about what the
+  dashboard itself binds. `GET /databases/{id}/url?target=public` hands back the saved string with the
+  machine's public address (IPv4 preferred) in place of loopback, for pasting on another machine.
+- **A database made from the Databases page is reachable from anywhere unless the switch says
+  otherwise.** `POST /databases/provision` takes the same `exposure` (`provisionBinding`; empty means
+  `public`): the port is published on `0.0.0.0` and the same `setDBFirewall` opens it, with the
+  exposure, the firewall's word and any firewall error in the `database.server.provision` audit and in
+  the `202` reply (`firewallError` is surfaced as a warning by the dialog). The saved connection still
+  dials loopback — `hostAddress` maps a `0.0.0.0` binding to `127.0.0.1` — so the string under "From
+  anywhere" is the public-address form of the same row. Deployment quick setup sends `exposure: local`
+  because its database is reached over the deployment network.
 - **Live tests skip rather than fail**, or a suite failing for want of a database teaches people to ignore
   it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
   the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
@@ -90,7 +118,18 @@ Redis on pure-Go drivers, so the image still needs no CGO.
 ### Database provisioning for deployments
 
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
-Provisioning publishes database ports to host loopback only. The URL endpoint's `target=container`
+Quick setup provisions with `exposure: local`, so those ports are published to host loopback only;
+the Databases page's own dialog defaults to every interface (above). The data volume is named
+`<container>-data`, and provisioning refuses with `409 volume_exists` when that volume already exists:
+an official image that finds a populated data directory skips initialisation, so the freshly generated
+password is never set and the server refuses every sign-in while looking reachable. The `/ping` reply's
+`error` is surfaced by both creation dialogs so an engine's own refusal is not reported as "not ready".
+`/adopt` is idempotent by address: a container whose address is already covered by a connection gets
+that row back, and when the container's credentials differ from the stored DSN the row is re-sealed in
+place (audited as `database.connection.refresh`, pool dropped) rather than returned stale — a database
+removed and created again under the same name takes the same loopback port back with a new password,
+and a `${{database.N}}` reference must keep resolving to a URL that works.
+The URL endpoint's `target=container`
 option resolves a matching Docker database to a stable `db-ID.jd.internal` hostname without changing networking or the saved DSN;
 `target=host` and the default retain the original DSN. Replies are non-cacheable and audits contain
 the connection identity and target, never credentials. Setup saves the returned typed database reference.

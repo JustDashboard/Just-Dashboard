@@ -6,12 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 )
 
 const GitWatchInterval = 5 * time.Second
+
+// ErrRefNotFound marks a manual deploy's requested branch or tag as absent
+// from the remote — distinct from ErrSourceUnavailable, which means the
+// remote itself could not be read at all.
+var ErrRefNotFound = errors.New("git ref was not found on the remote")
+
+// ErrRefNotApplicable marks a manual deploy's sourceRevision/ref override as
+// sent against a project that cannot use one: anything other than a remote
+// Git source kind (an image, Compose, blueprint or import project, or a
+// local Git checkout with nothing to resolve a ref against).
+var ErrRefNotApplicable = errors.New("a source revision or ref override does not apply to this deployment's source")
 
 func IsRemoteGitSource(source DraftSourceConfig) bool {
 	return (source.Kind == SourceGit || source.Kind == SourceCompose) &&
@@ -60,6 +72,63 @@ func (a *HostSourceAnalyzer) ResolveGitRevision(ctx context.Context, source Draf
 	return fields[0], nil
 }
 
+// ResolveGitRef is ResolveGitRevision against an explicit branch or tag name
+// instead of the source's own configured ref, for a manual deploy that
+// targets a specific version without rewriting the environment's saved
+// branch. Unlike ResolveGitRevision it distinguishes "no such ref" (git
+// ls-remote --exit-code exits 2, having successfully talked to the remote)
+// from "the remote could not be read at all" (any other failure), so the API
+// can tell an operator which one happened instead of folding both into one
+// unavailable source.
+func (a *HostSourceAnalyzer) ResolveGitRef(ctx context.Context, source DraftSourceConfig, ref string) (string, error) {
+	source = canonicalSourceConfig(source)
+	if err := source.ValidateForDeployment(); err != nil {
+		return "", err
+	}
+	if !IsRemoteGitSource(source) {
+		return "", ErrInvalidSource
+	}
+	// ref reaches ls-remote as a bare argv element: one starting with "-"
+	// would be read as a flag rather than a ref, and one containing a glob
+	// character asks ls-remote to match a pattern instead of the exact name
+	// the operator typed. validSourceRef's anchored, alphanumeric-first
+	// pattern excludes both, so this is refused before any git subprocess
+	// runs at all.
+	if !validSourceRef(ref) {
+		return "", fmt.Errorf("%w: %q is not a valid branch or tag name", ErrInvalidRef, ref)
+	}
+	remote, _, err := remoteForSource(source)
+	if err != nil {
+		return "", err
+	}
+	root, cleanup, err := a.planningCacheRoot()
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	environment, cleanupCredential, err := a.gitEnvironment(ctx, root, remote, source.CredentialID)
+	if err != nil {
+		return "", err
+	}
+	defer cleanupCredential()
+	remoteRef, _ := planningGitRef(ref)
+	resolveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := runPlanningGit(resolveCtx, "", environment, "ls-remote", "--exit-code", "--refs", remote, remoteRef)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+			return "", fmt.Errorf("%w: %q has no matching branch or tag", ErrRefNotFound, ref)
+		}
+		return "", fmt.Errorf("%w: Git remote could not be read", ErrSourceUnavailable)
+	}
+	fields := strings.Fields(out)
+	if len(fields) != 2 || fields[1] != remoteRef || !validGitObjectID(fields[0]) {
+		return "", fmt.Errorf("%w: %q has no matching branch or tag", ErrRefNotFound, ref)
+	}
+	return fields[0], nil
+}
+
 func (s *OrchestrationStore) SourceConfiguration(ctx context.Context, environmentID int64, revision int) (DraftSourceConfig, error) {
 	var raw string
 	err := s.db.QueryRowContext(ctx, `SELECT config_json FROM deploy_sources WHERE environment_id = ? AND revision = ?`, environmentID, revision).Scan(&raw)
@@ -81,6 +150,9 @@ type GitWatchTarget struct {
 	SourceKey, BaselineRevision, LatestRevision string
 	LatestRunID                                 int64
 	PolicyKey                                   string
+	// LiveReleaseID gates automatic deployment: a branch change observed
+	// while this release's runtime is stopped must not enqueue a deploy.
+	LiveReleaseID int64
 }
 
 type GitWatchStatus struct {
@@ -102,7 +174,7 @@ type gitWatchCursor struct {
 
 func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, environmentID int64) ([]GitWatchTarget, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.name, e.id, e.desired_revision, src.config_json, src.identity_json,
+		SELECT p.id, p.name, e.id, e.desired_revision, e.live_release_id, src.config_json, src.identity_json,
 		       COALESCE((SELECT r.id FROM deploy_runs r WHERE r.environment_id = e.id
 		         AND r.operation IN ('deploy','force_build') ORDER BY r.id DESC LIMIT 1), 0),
 		       COALESCE((SELECT COALESCE(NULLIF(r.source_revision, ''), json_extract(rs.identity_json, '$.revision'))
@@ -124,7 +196,7 @@ func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, env
 		var target GitWatchTarget
 		var config, identity string
 		if err := rows.Scan(&target.ProjectID, &target.ProjectName, &target.EnvironmentID, &target.PlanRevision,
-			&config, &identity, &target.LatestRunID, &target.LatestRevision); err != nil {
+			&target.LiveReleaseID, &config, &identity, &target.LatestRunID, &target.LatestRevision); err != nil {
 			return nil, err
 		}
 		if json.Unmarshal([]byte(config), &target.Source) != nil || !IsRemoteGitSource(target.Source) ||
@@ -204,7 +276,7 @@ type GitRevisionResolver interface {
 	ResolveGitRevision(context.Context, DraftSourceConfig) (string, error)
 }
 
-type GitWatchDispatch func(context.Context, GitWatchTarget, string, string) (*EngineRun, error)
+type GitWatchDispatch func(context.Context, GitWatchTarget, string, string, []string) (*EngineRun, error)
 
 type GitWatcher struct {
 	store    *OrchestrationStore
@@ -286,7 +358,7 @@ func (w *GitWatcher) check(ctx context.Context, target GitWatchTarget) error {
 	var dispatchErr error
 	if decision.Allowed {
 		key := "git:" + digestBytes([]byte(fmt.Sprintf("%s:%d:%s:%s", target.SourceKey, decision.cursor.Generation, decision.Revision, decision.Target.PolicyKey)))
-		run, err := w.dispatch(ctx, decision.Target, decision.Revision, key)
+		run, err := w.dispatch(ctx, decision.Target, decision.Revision, key, decision.ChangedPaths)
 		dispatchErr = err
 		if err == nil {
 			decision.RunID = run.ID
@@ -300,9 +372,14 @@ type GitDeploymentDecision struct {
 	Revision, Reason string
 	Allowed          bool
 	RunID            int64
-	cursor           gitWatchCursor
-	record           bool
-	unavailable      bool
+	// ChangedPaths is set only when a watch-path filter made the watcher
+	// compute the full tree diff against the baseline; it is what
+	// supersession compares two automatic runs by; leaving it nil (the
+	// unfiltered common case) means "unscoped" rather than "no changes".
+	ChangedPaths []string
+	cursor       gitWatchCursor
+	record       bool
+	unavailable  bool
 }
 
 // EvaluateWebhook uses the same remote observation and complete tree diff as
@@ -401,7 +478,22 @@ func (w *GitWatcher) evaluate(ctx context.Context, target GitWatchTarget, expect
 			d.Reason = "watch_paths_ignored"
 			return d, nil
 		}
+		d.ChangedPaths = paths
 		d.Reason = "watched_paths_changed"
+	}
+	// A stop leaves the live release in place; a branch change is still
+	// observed and its cursor still advances (d.record stays true, unlike the
+	// manual_only return above, which leaves d.Revision at the cursor's old
+	// value), but must not enqueue a deployment onto a runtime the operator
+	// deliberately stopped. That means a commit pushed while stopped is
+	// recorded seen and deployed by the next push, not retroactively by
+	// starting the runtime back up — starting it is a runtime action with no
+	// hook into the watcher at all.
+	if target.LiveReleaseID != 0 {
+		if runtime, err := w.store.RuntimeForRelease(ctx, target.LiveReleaseID); err == nil && runtime.State == "stopped" {
+			d.Reason = "stopped"
+			return d, nil
+		}
 	}
 	d.Allowed = true
 	return d, nil

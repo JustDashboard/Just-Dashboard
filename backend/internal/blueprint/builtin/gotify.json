@@ -1,0 +1,103 @@
+{
+  "id": "gotify",
+  "version": "1.0.0",
+  "name": "Gotify",
+  "category": "http",
+  "profile": "web",
+  "description": "A push-notification server with a web interface and mobile apps. Applications post messages with a token; people receive them on their phone.",
+  "iconId": "bolt",
+  "docsUrl": "https://gotify.net/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/gotify/server",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "gotify/server:3.1.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "admin-user",
+      "kind": "text",
+      "label": "Admin user",
+      "variable": "GOTIFY_DEFAULTUSER_NAME",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web interface and message API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/app/data",
+      "purpose": "Messages, applications and the SQLite database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Gotify migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:8745bdd84d3d2548cee84190ada796fab59b3dc8e80aa19f315cde42274697bb"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "GOTIFY_DEFAULTUSER_PASS",
+      "label": "Admin password",
+      "length": 24,
+      "description": "Only used to create the first user; change it inside Gotify afterwards."
+    }
+  ]
+}

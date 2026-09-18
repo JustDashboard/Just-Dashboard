@@ -99,34 +99,47 @@ func nodePackageManagers(present []string) []string {
 // Package manifests are inert input. Detection and preparation never evaluate
 // a repository's JavaScript configuration on the dashboard host.
 
-func validateNodeRecipeContent(content []byte, config BuildPlanConfig) (string, error) {
-	var manifest struct {
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
-	}
+// nodeRecipeFramework is what the recipe knows about a matched framework at
+// build time: its catalogue name and the defaults its production build has,
+// re-read from the manifest so the generated Dockerfile can check the build
+// produced the server entry and give that server the environment it needs.
+type nodeRecipeFramework struct {
+	name       string
+	label      string
+	resolution nodeFrameworkResolution
+}
+
+func validateNodeRecipeContent(content []byte, files nodeRootFiles, config BuildPlanConfig) (nodeRecipeFramework, error) {
+	var manifest nodeManifest
 	if json.Unmarshal(content, &manifest) != nil {
-		return "", fmt.Errorf("%w: package.json is malformed", ErrUnsupportedBuilder)
+		return nodeRecipeFramework{}, fmt.Errorf("%w: package.json is malformed", ErrUnsupportedBuilder)
 	}
-	has := func(name string) bool {
-		return manifest.Dependencies[name] != "" || manifest.DevDependencies[name] != ""
+	framework := matchNodeFramework(manifest)
+	if framework == nil {
+		return nodeRecipeFramework{}, nil
 	}
-	if !has("@sveltejs/kit") {
-		return "", nil
+	runner := config.PackageManager
+	if runner == "" {
+		runner = "npm"
 	}
-	if has("@sveltejs/adapter-node") == has("@sveltejs/adapter-static") {
-		return "", fmt.Errorf("%w: SvelteKit requires one of adapter-node or adapter-static; configure one supported adapter or use a Dockerfile", ErrUnsupportedBuilder)
+	result := nodeRecipeFramework{name: framework.Name, label: framework.Label, resolution: framework.resolve(manifest, files, runner)}
+	if framework.Name != "sveltekit" {
+		return result, nil
+	}
+	if manifest.has("@sveltejs/adapter-node") == manifest.has("@sveltejs/adapter-static") {
+		return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit requires one of adapter-node or adapter-static; configure one supported adapter or use a Dockerfile", ErrUnsupportedBuilder)
 	}
 	if strings.TrimSpace(config.BuildCommand) == "" {
-		return "", fmt.Errorf("%w: SvelteKit needs a build command", ErrUnsupportedBuilder)
+		return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit needs a build command", ErrUnsupportedBuilder)
 	}
-	if has("@sveltejs/adapter-static") {
+	if manifest.has("@sveltejs/adapter-static") {
 		if strings.TrimSpace(config.OutputDirectory) == "" {
-			return "", fmt.Errorf("%w: SvelteKit adapter-static needs its generated output directory (normally build)", ErrUnsupportedBuilder)
+			return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit adapter-static needs its generated output directory (normally build)", ErrUnsupportedBuilder)
 		}
-		return "sveltekit-static", nil
+		return result, nil
 	}
 	if config.OutputDirectory != "" {
-		return "", fmt.Errorf("%w: SvelteKit adapter-node produces a server; clear static output and set a server start command", ErrUnsupportedBuilder)
+		return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit adapter-node produces a server; clear static output and set a server start command", ErrUnsupportedBuilder)
 	}
-	return "sveltekit-node", nil
+	return result, nil
 }

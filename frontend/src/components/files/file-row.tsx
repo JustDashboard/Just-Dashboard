@@ -43,7 +43,7 @@ export const COLUMN = {
  * viewer.
  *
  * A folder row is also a drop target, for paths dragged from other rows and
- * for files dragged in from the desktop. The active row carries a brand-orange
+ * for files dragged in from the desktop. The active row carries a brand-blue
  * rule at its edge: it is *where you are*, which is what the hue is for, and
  * that is how it stays distinct from the rows that are merely checked.
  */

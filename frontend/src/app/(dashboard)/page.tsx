@@ -756,6 +756,9 @@ function BackupsCard() {
       .map((j) => j.nextRun as string)
       .sort()[0]
   }, [data])
+  // A job that has gone quiet is as much a finding as one that failed: the
+  // schedule stopped delivering, and nothing else on the page would say so.
+  const overdue = data?.filter((j) => j.overdue).length ?? 0
   return (
     <ServiceTile
       icon={Archive}
@@ -774,9 +777,11 @@ function BackupsCard() {
                 ? "Last run failed"
                 : latest.status === "running"
                   ? "Running"
-                  : "Last run OK"
+                  : overdue > 0
+                    ? `${overdue} overdue`
+                    : "Last run OK"
       }
-      tone={latest?.status === "failed" ? "danger" : "default"}
+      tone={latest?.status === "failed" ? "danger" : overdue > 0 ? "warning" : "default"}
       hint={
         latest
           ? `${relativeTime(latest.startedAt)}${next ? ` · next ${relativeTime(next)}` : ""}`

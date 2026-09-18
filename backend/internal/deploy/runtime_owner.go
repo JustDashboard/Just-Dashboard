@@ -274,6 +274,28 @@ func (o *DockerRuntimeOwner) StartCandidate(
 	return o.startContainer(ctx, request)
 }
 
+// runtimePortMappings publishes the routed port on the leased or fixed host
+// port and every additional published port on the number the plan pins. Host
+// networking publishes nothing: the container already owns the host's ports.
+func runtimePortMappings(plan RuntimePlanConfig, host string, port int) []dockerx.PortMapping {
+	ports := []dockerx.PortMapping{}
+	if plan.HostNetwork {
+		return ports
+	}
+	if plan.InternalPort > 0 && port > 0 {
+		ports = append(ports, dockerx.PortMapping{
+			HostIP: host, HostPort: port, ContainerPort: plan.InternalPort, Protocol: "tcp",
+		})
+	}
+	for _, published := range plan.Ports {
+		ports = append(ports, dockerx.PortMapping{
+			HostIP: published.BindAddress, HostPort: published.HostPort,
+			ContainerPort: published.ContainerPort, Protocol: published.effectiveProtocol(),
+		})
+	}
+	return ports
+}
+
 // PORT is derived from the frozen runtime plan, not a host publication that
 // may move. Explicit runtime variables remain authoritative.
 func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]string) ([]dockerx.EnvVar, []string) {
@@ -316,12 +338,7 @@ func (o *DockerRuntimeOwner) startContainer(
 	for _, device := range plan.Devices {
 		devices = append(devices, dockerx.DeviceSpec{Host: device, Container: device, Permissions: "rwm"})
 	}
-	ports := []dockerx.PortMapping{}
-	if plan.InternalPort > 0 && request.Port > 0 && !plan.HostNetwork {
-		ports = append(ports, dockerx.PortMapping{
-			HostIP: request.Host, HostPort: request.Port, ContainerPort: plan.InternalPort, Protocol: "tcp",
-		})
-	}
+	ports := runtimePortMappings(plan, request.Host, request.Port)
 	labels := releaseRuntimeLabels(request)
 	networks := append([]string(nil), request.Networks...)
 	if plan.PreviewIsolation {

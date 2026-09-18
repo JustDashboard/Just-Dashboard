@@ -48,6 +48,9 @@ func (s *Server) Routes() http.Handler {
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Method(http.MethodPost, "/deploy/{hookID}", s.handle(s.handleDeployWebhook))
 			r.Method(http.MethodPost, "/providers/{provider}/{hookID}", s.handle(s.handleDeploymentProviderWebhook))
+			// The GitHub App's one webhook: signed with the App's own secret
+			// and routed by repository to whichever triggers asked for it.
+			r.Method(http.MethodPost, "/github-app", s.handle(s.handleGitHubAppWebhook))
 			r.Method(http.MethodPost, "/scoped/{hookID}", s.handle(s.handleDeploymentGenericWebhook))
 		})
 		r.Group(func(r chi.Router) {

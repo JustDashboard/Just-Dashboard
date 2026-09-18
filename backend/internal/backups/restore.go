@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safepath"
@@ -20,13 +21,23 @@ type RestoreResult struct {
 	Entries     int      `json:"entries"`
 	Bytes       int64    `json:"bytes"`
 	Skipped     []string `json:"skipped,omitempty"`
+	// Targets are the directories written to. One for a restore into a
+	// destination; one per recorded source for a restore in place.
+	Targets []string `json:"targets,omitempty"`
+}
+
+// RestoreOptions narrows a restore. Paths are archive paths ("source-0001/etc"
+// or a single file); an entry restores when it is one of them or lies under
+// one. Empty means everything.
+type RestoreOptions struct {
+	Paths []string
 }
 
 // Restore unpacks a completed run's artifact into a destination directory.
-// It never restores in place over the original paths by default: the caller
-// names an explicit destination, so recovering a single file does not require
-// overwriting a live tree.
-func (r *Runner) Restore(ctx context.Context, runID int64, destination string) (*RestoreResult, error) {
+// It never restores in place over the original paths: the caller names an
+// explicit destination, so recovering a single file does not require
+// overwriting a live tree. RestoreInPlace is the one that does.
+func (r *Runner) Restore(ctx context.Context, runID int64, destination string, opts ...RestoreOptions) (*RestoreResult, error) {
 	_, archivePath, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -42,14 +53,113 @@ func (r *Runner) Restore(ctx context.Context, runID int64, destination string) (
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return nil, err
 	}
-	return extractArchive(ctx, archivePath, dest, runID)
+	res, err := extractArchiveBounded(ctx, archivePath, dest, runID, 0, restorePlan{filter: newPathFilter(opts)})
+	if res != nil {
+		res.Targets = []string{dest}
+	}
+	return res, err
+}
+
+// RestoreInPlace writes each recorded source back over the path it was taken
+// from, dropping the source-NNNN prefix. It needs the run's manifest — a
+// legacy archive cannot say where its trees came from — and every original
+// path is resolved through the file service again, so a root restriction
+// added since the backup still holds. Database dumps are never written to
+// disk by this; they go back through the Databases owner.
+func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...RestoreOptions) (*RestoreResult, error) {
+	run, archivePath, cleanup, err := r.localArtifact(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	if run.Manifest == nil || !run.Manifest.Complete {
+		return nil, errors.New("this archive has no manifest, so its files cannot be put back where they came from; restore it into a directory instead")
+	}
+	plan := restorePlan{filter: newPathFilter(opts), roots: map[string]string{}}
+	var targets []string
+	for _, source := range run.Manifest.Sources {
+		resolved, err := r.store.paths.Resolve(source.Path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", source.Path, err)
+		}
+		if resolved == "/" {
+			return nil, fmt.Errorf("refusing to restore directly over /")
+		}
+		if err := os.MkdirAll(resolved, 0o755); err != nil {
+			return nil, err
+		}
+		plan.roots[source.ArchivePath] = resolved
+		targets = append(targets, resolved)
+	}
+	res, err := extractArchiveBounded(ctx, archivePath, "", runID, 0, plan)
+	if res != nil {
+		res.Destination = ""
+		res.Targets = targets
+	}
+	return res, err
+}
+
+// restorePlan decides where an entry lands and whether it lands at all.
+type restorePlan struct {
+	filter *pathFilter
+	// roots maps an archive root (source-0001) to the directory it restores
+	// into. Nil means every entry restores under one destination.
+	roots map[string]string
+}
+
+// place returns the directory and relative name an entry restores as, or
+// false for an entry the plan leaves in the archive.
+func (p restorePlan) place(dest, name string) (string, string, bool) {
+	if p.filter != nil && !p.filter.wants(name) {
+		return "", "", false
+	}
+	if p.roots == nil {
+		return dest, name, true
+	}
+	root, rest, _ := strings.Cut(name, "/")
+	target, ok := p.roots[root]
+	if !ok {
+		return "", "", false
+	}
+	if rest == "" {
+		rest = "."
+	}
+	return target, rest, true
+}
+
+type pathFilter struct{ prefixes []string }
+
+func newPathFilter(opts []RestoreOptions) *pathFilter {
+	var out []string
+	for _, o := range opts {
+		for _, p := range o.Paths {
+			p = strings.Trim(filepath.ToSlash(filepath.Clean("/"+p)), "/")
+			if p != "" && p != "." {
+				out = append(out, p)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return &pathFilter{prefixes: out}
+}
+
+func (f *pathFilter) wants(name string) bool {
+	name = strings.TrimSuffix(name, "/")
+	for _, p := range f.prefixes {
+		if name == p || strings.HasPrefix(name, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func extractArchive(ctx context.Context, archivePath, dest string, runID int64) (*RestoreResult, error) {
-	return extractArchiveBounded(ctx, archivePath, dest, runID, 0)
+	return extractArchiveBounded(ctx, archivePath, dest, runID, 0, restorePlan{})
 }
 
-func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID int64, maxBytes int64) (*RestoreResult, error) {
+func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID int64, maxBytes int64, plan restorePlan) (*RestoreResult, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return nil, err
@@ -79,7 +189,17 @@ func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID 
 		if maxBytes > 0 && (seen > 200000 || hdr.Size > maxBytes-res.Bytes) {
 			return res, errors.New("restore extraction exceeds its configured limit")
 		}
-		target, err := safepath.Join(dest, hdr.Name)
+		base, name, wanted := plan.place(dest, hdr.Name)
+		if !wanted {
+			continue
+		}
+		if name == "." {
+			// The source root itself: it exists already, and its recorded
+			// mode belongs to the directory the operator chose.
+			res.Entries++
+			continue
+		}
+		target, err := safepath.Join(base, name)
 		if err != nil {
 			// A tampered or hand-built archive could carry ../ entries; the
 			// restore refuses them rather than writing outside the target.
@@ -97,7 +217,7 @@ func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID 
 				}
 			}
 		case tar.TypeSymlink:
-			if err := safepath.CheckLinkTarget(dest, hdr.Name, hdr.Linkname); err != nil {
+			if err := safepath.CheckLinkTarget(base, name, hdr.Linkname); err != nil {
 				res.Skipped = append(res.Skipped, hdr.Name)
 				continue
 			}
@@ -107,7 +227,7 @@ func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID 
 		case tar.TypeReg:
 			if maxBytes > 0 {
 				var available syscall.Statfs_t
-				if err := syscall.Statfs(dest, &available); err != nil {
+				if err := syscall.Statfs(base, &available); err != nil {
 					return res, err
 				}
 				if uint64(hdr.Size)+(256<<20) > available.Bavail*uint64(available.Bsize) {
@@ -205,6 +325,13 @@ func verifyArtifact(ctx context.Context, path string, run *Run) error {
 		return fmt.Errorf("backup artifact checksum does not match its recorded manifest")
 	}
 	return nil
+}
+
+// OpenArtifact hands a caller the verified archive file for a run: the local
+// artifact, or a private download of a remote one. The cleanup releases the
+// retention pin and removes the download, and must be called.
+func (r *Runner) OpenArtifact(ctx context.Context, runID int64) (*Run, string, func(), error) {
+	return r.localArtifact(ctx, runID)
 }
 
 // localArtifact pins the run against retention and uses its original target

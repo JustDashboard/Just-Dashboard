@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"io"
 	"net"
 	"net/http"
@@ -238,6 +239,34 @@ func TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute(t *testing.
 		}
 	}
 	if err := edge.restore(ctx, tlsResult.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	// A protected route asks for credentials before the application sees the
+	// request: 401 without them, the application with them.
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct horse battery"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guarded := route
+	guarded.Name, guarded.Domains = "just-dashboard-guarded", []string{"guarded.example.test"}
+	guarded.BasicAuth = []BasicAuthUser{{Username: "team", Hash: string(hash)}}
+	guardedResult, err := service.applyDockerCaddyRoute(ctx, edge, guarded)
+	if err != nil || !guardedResult.Verified {
+		t.Fatalf("protected apply=%+v error=%v", guardedResult, err)
+	}
+	if _, status, err := get("guarded.example.test"); err != nil || status != 401 {
+		t.Fatalf("protected route without credentials: %d %v", status, err)
+	}
+	authed, _ := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	authed.Host = "guarded.example.test"
+	authed.SetBasicAuth("team", "correct horse battery")
+	if res, err := http.DefaultClient.Do(authed); err != nil || res.StatusCode != 200 {
+		t.Fatalf("protected route with credentials: %v %v", res, err)
+	} else {
+		res.Body.Close()
+	}
+	if err := edge.restore(ctx, guardedResult.Snapshot); err != nil {
 		t.Fatal(err)
 	}
 

@@ -27,7 +27,7 @@
 
   /* Primary is the neutral ink mark: a *reading* drawn as a fill rather than
      a command — the checked state of a checkbox or switch, a meter's bar. The
-     pressable face belongs to the brand orange below, so white stays the one
+     pressable face belongs to the brand blue below, so white stays the one
      value on this ground that carries no hue and can never be read as the
      mark or as a warning. */
   --primary: oklch(1 0 0);
@@ -40,11 +40,11 @@
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1 0 0);
 
-  /* ---- The brand orange, at rest and lit ---------------------------------
+  /* ---- The brand blue, at rest and lit ------------------------------------
    *
    * `--brand` says *where you are*: the mark, the current nav entry, the plot
    * behind a panel's icon, the first chart series. It is also the face of a
-   * command — every default button is this orange — because the product has
+   * command — every default button is this blue — because the product has
    * one mark and that mark is one colour. `--signal` says *pay attention here
    * now*: the focus ring, a search hit, a cursor readout. Brand carrying both
    * identity and the pressable action is the deliberate trade: a button and a
@@ -54,34 +54,34 @@
    * value.
    *
    * Both are the same hue, because the product has a mark and the mark is
-   * one colour: #E05623, the orange the J is drawn in. A focus ring in some
-   * other hue was a second identity nobody chose — it only ever meant "the
-   * blue one", and next to a logo that is emphatically not blue that reads as
-   * chrome borrowed from somewhere else.
+   * one colour: #CAE9FF, the pale blue the J in `public/LOGO.svg` is drawn in.
+   * A focus ring in some other hue would be a second identity nobody chose.
    *
-   * What separates the two roles is lightness, not hue. `--brand` is the
-   * logo's own value, the colour at rest: the mark, the current nav entry, the
-   * plot behind a panel's icon. `--signal` is the same orange lit — a step
-   * brighter, and the brightest thing on the ground — so the mark of what is
-   * happening *now* is found before the marks that are always there.
+   * What separates the two roles is chroma, not hue. `--brand` is the logo's
+   * own value, the colour at rest: a pale blue that is already one of the
+   * lightest things on this ground, so there is no brighter step left for
+   * attention to take. `--signal` is the same blue *saturated* instead — a
+   * step deeper and far more vivid — so the mark of what is happening *now*
+   * is still found before the marks that are always there.
    *
-   * Orange sits at 39° rather than the 78° the amber status hue uses. That
-   * distance is the whole difference between "this is Just Dashboard" and
-   * "this is a warning", so the identity hue stays where the logo put it and
-   * the warning stays where every operator already expects amber. */
-  --brand: oklch(0.6289 0.1829 38.78); /* #E05623 — the mark's own orange */
-  /* The label on the orange face is charcoal, not black: a #000-adjacent ink
-     on a saturated ground reads as a cut-out, while this dark neutral sits on
-     it as printed type does. */
-  --brand-foreground: oklch(0.209 0 0); /* #181818 */
-  --signal: oklch(0.72 0.172 38.78);
-  --signal-foreground: oklch(0.16 0.04 38.78);
+   * Blue sits at 239°, a long way from the 78° amber and the 25° red the
+   * status hues use, so the identity hue can never be read as a warning or a
+   * failure. The cost is at the chart ramp: `--chart-2` is a blue too, kept
+   * because it is also the terminal's ANSI blue, and it is told apart from
+   * `--chart-1` by lightness and chroma rather than by hue. */
+  --brand: oklch(0.9185 0.0444 238.9); /* #CAE9FF — the mark's own blue */
+  /* The label on the brand face is black: the face is pale, so the type on it
+     has to be the darkest thing on the ground to read at all, and black is the
+     one value that carries no hue and cannot be mistaken for a status. */
+  --brand-foreground: oklch(0 0 0); /* #000000 */
+  --signal: oklch(0.78 0.13 238.9);
+  --signal-foreground: oklch(0.16 0.04 238.9);
 
   /* The command face's three steps, named once rather than re-mixed at every
      call site the way a `/90`, `/80` opacity pair leaves them. At rest it is
-     the brand itself; hover lifts it a fifth of the way towards the lit
+     the brand itself; hover pulls it a fifth of the way towards the vivid
      `--signal`, and press settles it a touch darker, so the gesture has a
-     direction. The dark `--brand-foreground` clears 4.5:1 against all three. */
+     direction. The black `--brand-foreground` holds its contrast against all three. */
   --brand-hover: color-mix(in oklab, var(--brand) 78%, var(--signal) 22%);
   --brand-active: color-mix(in oklab, var(--brand) 94%, #000 6%);
 
@@ -92,31 +92,26 @@
 
   --border: oklch(0.235 0 0);
   --input: oklch(0.235 0 0);
-  /* Focus is the lit orange. It is the one mark that has to be found
-     instantly, and at this lightness nothing else on the ground competes with
-     it — amber is fifteen points of chroma away and sits behind a status dot,
-     never around a control. */
+  /* Focus is the vivid blue. It is the one mark that has to be found
+     instantly, and at this chroma nothing else on the ground competes with
+     it — the pale brand sits on faces and marks, never around a control. */
   --ring: var(--signal);
 
   --chart-1: var(--brand);
-  /* Blue stays in the chart ramp even though it left the palette's roles.
-     A series needs neighbours it cannot be confused with, and slot two is
-     also the terminal's ANSI blue — `ls` painting directories orange is a
-     terminal nobody can read. */
+  /* Slot two is the terminal's ANSI blue as well as a chart series, so it is
+     a literal blue rather than a reference to the brand: `ls` painting
+     directories in the pale brand tint is a terminal nobody can read. */
   --chart-2: oklch(0.72 0.152 258);
-  /* Slot three was a red fourteen degrees off the new brand orange, which on a
-     three-line load chart is two series a reader has to check the legend for.
-     Moved to the magenta the ramp lost when orange walked into the warm-red
-     end of it — no status tone claims that hue, and the slot carries no
-     meaning of its own to break. */
+  /* Slot three is a magenta: no status tone claims that hue, and the slot
+     carries no meaning of its own to break. */
   --chart-3: oklch(0.68 0.2 345);
   --chart-4: oklch(0.6056 0.2189 292.7172);
   --chart-5: oklch(0.6959 0.1491 162.4796);
 
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.9461 0 0);
-  /* The "you are here" mark is the brand orange, not the ink. Ink is what you
-     press; orange is where you are. */
+  /* The "you are here" mark is the brand blue, not the ink. Ink is what you
+     press; blue is where you are. */
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: oklch(0.18 0 0);
@@ -288,7 +283,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  /* The brand orange and its two interaction steps, so `bg-brand`,
+  /* The brand blue and its two interaction steps, so `bg-brand`,
      `bg-brand-hover` and `border-signal` are real utilities. Brand is the
      command face at rest, signal is it lit — see the note above. */
   --color-brand: var(--brand);
@@ -425,12 +420,20 @@
    *   sweep   — an indeterminate bar for work whose progress is unknowable
    *             (a pull, a prune), where a spinner in the corner of a wide
    *             panel is too small to be the answer.
+   *   drill   — you crossed a level. `rise` with its four pixels turned
+   *             sideways, for the one place in the product where a list is
+   *             replaced by a list: the sidebar going into a section and back
+   *             out of it. The direction is the message — in arrives from the
+   *             right, out from the left — so the distance comes from
+   *             `--drill-from` at the call site rather than from the keyframe,
+   *             and a panel that merely re-rendered does not move at all.
    *
-   * All three are covered by the root `prefers-reduced-motion` rule, which
+   * All four are covered by the root `prefers-reduced-motion` rule, which
    * collapses their duration rather than cancelling them — see the note there. */
   --animate-breathe: jd-breathe 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-rise: jd-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-sweep: jd-sweep 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-drill: jd-drill 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes jd-breathe {
@@ -462,6 +465,17 @@
   }
   to {
     transform: translateX(300%);
+  }
+}
+
+@keyframes jd-drill {
+  from {
+    opacity: 0;
+    transform: translateX(var(--drill-from, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -627,7 +641,7 @@
  * that genuinely float — popover, dropdown, dialog — where the page really is
  * behind them.
  *
- * Press feedback moved to colour: `--brand-active` on the orange command face,
+ * Press feedback moved to colour: `--brand-active` on the brand command face,
  * `--control-active` on the neutral ones, nothing at all on the controls that
  * have no face. */
 

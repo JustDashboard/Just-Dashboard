@@ -86,7 +86,16 @@ async function mockShell(page: Page) {
   })
 }
 
-const SURFACES = ["/audit", "/system-users", "/packages", "/security"] as const
+const SURFACES = [
+  "/audit",
+  "/system-users",
+  "/packages",
+  "/security",
+  "/backups",
+  "/deploy/notifications",
+  "/deploy/credentials",
+  "/deploy/new",
+] as const
 
 /**
  * Rule 5: selection, hover and focus are three different mechanisms, so a

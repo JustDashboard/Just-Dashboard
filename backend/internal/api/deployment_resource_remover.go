@@ -36,47 +36,47 @@ func (r *deploymentResourceRemover) RemoveManagedResource(ctx context.Context, t
 	switch target.Kind {
 	case "deployment_database_network":
 		if r.networks == nil {
-			return errors.New("managed database networks are unavailable")
+			return deploy.Unavailable(errors.New("managed database networks are unavailable"))
 		}
 		return r.networks.RemoveNetworkByID(ctx, target.ResourceID)
 	case "docker_container":
 		if r.docker == nil {
-			return errors.New("Docker is unavailable")
+			return deploy.Unavailable(errors.New("Docker is unavailable"))
 		}
 		return r.docker.RemoveContainer(ctx, target.ResourceID, false, false)
 	case "compose_stack":
 		if r.docker == nil {
-			return errors.New("Docker is unavailable")
+			return deploy.Unavailable(errors.New("Docker is unavailable"))
 		}
 		if target.WorkingDirectory == "" {
-			return errors.New("Compose working directory is unavailable")
+			return deploy.Unavailable(errors.New("Compose working directory is unavailable"))
 		}
 		_, err := r.docker.RunCompose(ctx, target.WorkingDirectory, dockerx.ComposeDown, "")
 		return err
 	case "proxy_site":
 		if r.proxy == nil {
-			return errors.New("Proxy is unavailable")
+			return deploy.Unavailable(errors.New("Proxy is unavailable"))
 		}
 		return r.proxy.DeleteSite(ctx, target.ResourceID)
 	case "docker_volume":
 		if r.docker == nil {
-			return errors.New("Docker is unavailable")
+			return deploy.Unavailable(errors.New("Docker is unavailable"))
 		}
 		return r.docker.RemoveVolume(ctx, target.ResourceID, false)
 	case "bind_path":
 		if r.files == nil {
-			return errors.New("deployment path guard is unavailable")
+			return deploy.Unavailable(errors.New("deployment path guard is unavailable"))
 		}
 		return r.files.Delete(target.ResourceID, true)
 	case "docker_image":
 		if r.docker == nil {
-			return errors.New("Docker is unavailable")
+			return deploy.Unavailable(errors.New("Docker is unavailable"))
 		}
 		_, err := r.docker.RemoveImage(ctx, target.ResourceID, false, false)
 		return err
 	case "backup_job":
 		if r.backups == nil {
-			return errors.New("Backups is unavailable")
+			return deploy.Unavailable(errors.New("Backups is unavailable"))
 		}
 		id, err := strconv.ParseInt(target.ResourceID, 10, 64)
 		if err != nil || id <= 0 {
@@ -85,7 +85,7 @@ func (r *deploymentResourceRemover) RemoveManagedResource(ctx context.Context, t
 		return r.backups.Delete(ctx, id)
 	case "database_connection":
 		if r.store == nil {
-			return errors.New("Databases is unavailable")
+			return deploy.Unavailable(errors.New("Databases is unavailable"))
 		}
 		id, err := strconv.ParseInt(target.ResourceID, 10, 64)
 		if err != nil || id <= 0 {
@@ -103,6 +103,6 @@ func (r *deploymentResourceRemover) RemoveManagedResource(ctx context.Context, t
 		}
 		return nil
 	default:
-		return fmt.Errorf("resource owner for %s is unavailable", target.Kind)
+		return deploy.Unavailable(fmt.Errorf("resource owner for %s is unavailable", target.Kind))
 	}
 }

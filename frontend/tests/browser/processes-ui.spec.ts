@@ -477,6 +477,47 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(page).toHaveURL(/pid=4021/)
 })
 
+/**
+ * A process name is whatever the kernel reports, and a headless Chrome reports
+ * its entire argv — two hundred characters of `--disable-*` flags. `RowLink`
+ * carried `truncate`, but a button is inline-block: it sized to that text and
+ * painted it straight across Owner, State, CPU and Memory, seven hundred pixels
+ * past the cell it lives in.
+ *
+ * The assertion is over the whole table rather than over the name, because the
+ * same shape — a capped wrapper around something that sizes to its content —
+ * is what every title column in the app is built from.
+ */
+test("a process named by its whole command line stays inside its cell", async ({ page }) => {
+  const argv =
+    "chrome-headless-shell --type=gpu-process --no-sandbox --disable-dev-shm-usage " +
+    "--disable-breakpad --headless --ozone-platform=headless --use-angle=swiftshader-webgl " +
+    "--enable-unsafe-swiftshader --gpu-preferences=YAAAAAA"
+
+  await mockHost(page)
+  await page.route("**/api/v1/processes/inventory*", (route) =>
+    json(route, { ...inventory, processes: [process({ pid: 9001, name: argv }), ...processes] }),
+  )
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.goto("/processes")
+  await expect(page.getByRole("button", { name: argv, exact: true })).toBeVisible()
+
+  const bleeding = await page.evaluate(() => {
+    const out: string[] = []
+    for (const cell of document.querySelectorAll("td")) {
+      const edge = cell.getBoundingClientRect().right
+      for (const el of cell.querySelectorAll("*")) {
+        const box = el.getBoundingClientRect()
+        if (box.width > 0 && box.right - edge > 1) {
+          out.push(`${el.textContent?.slice(0, 40)} +${Math.round(box.right - edge)}px`)
+        }
+      }
+    }
+    return out
+  })
+  expect(bleeding, "content painted past the cell holding it").toEqual([])
+})
+
 test("PM2 says whether it survives a reboot and offers the housekeeping verbs", async ({
   page,
 }) => {

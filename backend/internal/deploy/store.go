@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ var (
 	ErrNotFound        = errors.New("deploy project not found")
 	ErrBadSignature    = errors.New("webhook signature does not match")
 	ErrDisabled        = errors.New("this deploy hook is disabled")
+	ErrNameTaken       = errors.New("a project with that name already exists")
+	ErrProjectArchived = errors.New("this deployment is archived")
 )
 
 type Store struct {
@@ -168,6 +171,42 @@ func (s *Store) Update(ctx context.Context, id int64, p *Project) (*Project, err
 	return s.Get(ctx, id)
 }
 
+// Rename changes only a project's display name. It is the one partial-update
+// path PUT /deploy/{id} supports: unlike Update, it never touches repoPath,
+// branch, composeFile or enabled, so a `{name}`-only body cannot blank them.
+// The name rule is the same one draft intent validation uses (projectNameRe),
+// and uniqueness among non-archived projects is enforced by the same unique
+// index Create and the draft commit path already rely on: an archived
+// project's name column holds an internal tombstone, never its display name,
+// so that index is already scoped to active projects.
+//
+// An archived project is refused outright: its name column holds that same
+// tombstone, and writing the requested name there would both hide it from
+// Get/List (which read archived_name instead, see projectCols) and block a
+// later POST /deploy from ever taking the name, since nothing would appear to
+// be holding it.
+func (s *Store) Rename(ctx context.Context, id int64, name string) (*Project, error) {
+	if !projectNameRe.MatchString(name) {
+		return nil, fmt.Errorf("name must start with a letter or digit and contain only letters, digits, dots, dashes and underscores")
+	}
+	project, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if project.ArchivedAt != nil {
+		return nil, ErrProjectArchived
+	}
+	_, err = s.st.DB.ExecContext(ctx,
+		`UPDATE deploy_projects SET name = ?, updated_at = ? WHERE id = ?`, name, time.Now().UTC().Unix(), id)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return nil, ErrNameTaken
+		}
+		return nil, err
+	}
+	return s.Get(ctx, id)
+}
+
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM deploy_projects WHERE id = ?`, id)
 	return err
@@ -176,6 +215,14 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 // Archive is the default deployment lifecycle action. It disables every
 // trigger but deliberately leaves runtime, release, artifact, route and data
 // ownership rows intact; removing managed resources is separately previewed.
+//
+// It also disables the project's schedules. Their own dispatch query only
+// excludes an archived *environment*, not an archived project, so without
+// this an archived project's schedules keep firing: each occurrence fails at
+// enqueue with environment_not_found, and the failure is visible only in the
+// backend log because even the summary marker run cannot be recorded. Git
+// watch needs no equivalent write here — gitWatchTargets already filters on
+// the project's own archived_at and stops polling on its next tick.
 func (s *Store) Archive(ctx context.Context, id int64) (*Project, error) {
 	tx, err := s.st.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -200,7 +247,38 @@ func (s *Store) Archive(ctx context.Context, id int64) (*Project, error) {
 		 WHERE environment_id IN (SELECT id FROM deploy_environments WHERE project_id = ?)`, now, id); err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE deploy_schedules SET enabled = 0, updated_at = ?
+		 WHERE enabled = 1 AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id = ?)`, now, id); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, id)
+}
+
+// Unarchive restores an archived project's display name and clears its
+// archived marker, so it comes back to a fleet read exactly where a fresh
+// project would. Triggers and schedules stay disabled: Archive turned them
+// off deliberately, and reviving automatic deployment the instant a project
+// returns is not what "undo the archive" should mean on its own — the
+// operator re-enables what they actually want running again.
+func (s *Store) Unarchive(ctx context.Context, id int64) (*Project, error) {
+	project, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if project.ArchivedAt == nil {
+		return project, nil
+	}
+	_, err = s.st.DB.ExecContext(ctx, `
+		UPDATE deploy_projects SET name = archived_name, archived_name = '', archived_at = 0, updated_at = ?
+		 WHERE id = ?`, time.Now().UTC().Unix(), id)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return nil, ErrNameTaken
+		}
 		return nil, err
 	}
 	return s.Get(ctx, id)

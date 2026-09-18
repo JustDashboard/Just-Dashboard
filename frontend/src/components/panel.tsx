@@ -65,7 +65,7 @@ export function Panel({
  * A panel's header: what this block is, and what you can do to it.
  *
  * **No icon.** Every header used to open with a brand-tinted plot and a glyph
- * inside it, which on a page of six panels is six orange marks competing with
+ * inside it, which on a page of six panels is six brand marks competing with
  * the one control the reader is meant to press — and none of them said anything
  * the title beside them did not already say. The title is the panel's name,
  * drawn one step up the ladder now that it stands alone, and the hairline under

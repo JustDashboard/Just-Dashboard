@@ -106,6 +106,64 @@ func (s *OrchestrationStore) Run(ctx context.Context, runID int64) (*EngineRun, 
 	return run, err
 }
 
+// MergeRunMetadata folds additional key/value pairs into a run's persisted
+// metadata, keeping every key the run was enqueued with (targetReleaseId,
+// compatibility, changedPaths, …). It is the one path that mutates
+// deploy_runs.metadata_json after enqueue: today only acquire_source uses it,
+// to attach a Git commit summary the frozen source identity does not carry on
+// its own. A retry copies the run row it retries verbatim, so a later retry
+// of a run this has already annotated carries the same metadata forward.
+func (s *OrchestrationStore) MergeRunMetadata(
+	ctx context.Context,
+	runID int64,
+	updates map[string]any,
+) (*EngineRun, error) {
+	if len(updates) == 0 {
+		return s.Run(ctx, runID)
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	run, err := scanEngineRun(tx.QueryRowContext(ctx,
+		`SELECT `+engineRunColumns+` FROM deploy_runs WHERE id = ?`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	merged := map[string]any{}
+	// The stored metadata is always valid JSON (Enqueue defaults it to `{}`),
+	// but never one written by an attacker: an object is required here so a
+	// merge cannot silently discard whatever the run was enqueued with.
+	if err := json.Unmarshal(run.Metadata, &merged); err != nil {
+		return nil, fmt.Errorf("run metadata is not a JSON object: %w", err)
+	}
+	for key, value := range updates {
+		merged[key] = value
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > maxEventBytes {
+		return nil, ErrEventPayloadTooLarge
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE deploy_runs SET metadata_json = ? WHERE id = ?`, string(encoded), runID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	run.Metadata = json.RawMessage(encoded)
+	return run, nil
+}
+
 func (s *OrchestrationStore) ProductionEnvironment(
 	ctx context.Context,
 	projectID int64,
@@ -495,7 +553,7 @@ func normalizeRunRequest(req *RunRequest) error {
 	if req.ProjectID <= 0 || req.EnvironmentID <= 0 {
 		return fmt.Errorf("invalid deployment or environment id")
 	}
-	if !validOperation(req.Operation) {
+	if !ValidOperation(req.Operation) {
 		return fmt.Errorf("invalid deployment operation %q", req.Operation)
 	}
 	if !validTrigger(req.Trigger) {

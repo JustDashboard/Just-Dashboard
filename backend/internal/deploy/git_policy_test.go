@@ -57,7 +57,7 @@ func TestGitPolicyPollingAndHooksShareDecisions(t *testing.T) {
 	group.Add(2)
 	go func() {
 		defer group.Done()
-		_, err := watcher.dispatch(ctx, decision.Target, c, "poll-race")
+		_, err := watcher.dispatch(ctx, decision.Target, c, "poll-race", nil)
 		errorsCh <- err
 	}()
 	go func() {

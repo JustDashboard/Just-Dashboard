@@ -73,10 +73,23 @@ All mutations require `system.admin` and are audited as `deploy.notification.*`.
 `deploy.CommitStatusPublisher` is a second observer. For a run whose environment source is a
 `github.com` remote (HTTPS, SSH or `git@` forms; GitHub Enterprise hosts and other providers are
 ignored) it posts `pending` on start and `success`, `failure` or `error` on the terminal state to
-`repos/{owner}/{name}/statuses/{sha}` through the dashboard's own `gh` credential, with context
-`just-dashboard/<environment slug>` and a link to the run. Restarts and preview removals deploy no
-new commit and post nothing. A missing `gh`, an expired token or a repository the token cannot
-write are logged warnings; a run's outcome is never changed by a status that could not be posted.
+`repos/{owner}/{name}/statuses/{sha}` with context `just-dashboard/<environment slug>` and a link to
+the run. The status is posted as the dashboard's [GitHub App](github-app.md) when one is connected
+and installed on the repository, and through the dashboard's own `gh` credential otherwise (or when
+the App is not installed there). Restarts and preview removals deploy no new commit and post
+nothing. A missing `gh`, an expired token or a repository the token cannot write are logged
+warnings; a run's outcome is never changed by a status that could not be posted.
+
+## Pull request comments
+
+`deploy.PullRequestCommenter` is a third observer, and it speaks only as the GitHub App. For a run
+whose environment is a preview created by a GitHub trigger it keeps one comment on the pull request —
+found again by a `<!-- just-dashboard:preview:<environment id> -->` marker and edited in place — that
+reads Building, then Ready with the preview's address, Failed with the terminal reason, or Removed
+once the preview is torn down, with the commit and a link to the run. Production runs, previews from
+other providers and a repository the App is not installed on produce no comment; a comment that
+cannot be posted is a logged warning. `github_comments_test.go` covers the state sequence, the
+per-run deduplication and the refusals.
 
 The per-environment policy row gained an additive `commit_statuses` column (default on), exposed as
 `commitStatuses` on `GET …/git-watch` and `PUT …/git-policy` and as **Report deployment status to

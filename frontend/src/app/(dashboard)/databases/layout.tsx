@@ -12,25 +12,32 @@ import { useAuth } from "@/hooks/use-auth"
 import { Page, PageHeader } from "@/components/page"
 import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { TabLink } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { NewDatabaseDialog } from "@/components/database/new-database-dialog"
 import { ConnectionDialog } from "@/components/database/connection-dialog"
 import { HostConnectDialog } from "@/components/database/host-connect-dialog"
 import { ConnectionSwitcher } from "@/components/database/connection-switcher"
 import { DatabaseProvider, type SectionParams } from "@/components/database/db-context"
+import { useNavScope } from "@/components/nav-scope"
+import { NAV } from "@/components/nav"
 
-/** Every tab, and which of them a non-SQL engine (Redis, Mongo) still has. */
-const TABS = [
-  { title: "Browse", href: "/databases", sqlOnly: false },
-  { title: "Structure", href: "/databases/structure", sqlOnly: true },
-  { title: "Diagram", href: "/databases/diagram", sqlOnly: true },
-  { title: "Query", href: "/databases/query", sqlOnly: true },
-  { title: "Find", href: "/databases/find", sqlOnly: true },
-  { title: "Monitor", href: "/databases/monitor", sqlOnly: true },
-  { title: "Generate", href: "/databases/generate", sqlOnly: true },
-  { title: "Connection", href: "/databases/connection", sqlOnly: false },
-]
+/**
+ * The section's pages, and which of them a non-SQL engine (Redis, Mongo) still
+ * has. The rail draws this list rather than a strip across the page, so the
+ * order and the icons come from the one nav registry and only the SQL rule
+ * lives here — it is the one thing about these pages the route cannot say.
+ */
+const SQL_ONLY = new Set([
+  "/databases/structure",
+  "/databases/diagram",
+  "/databases/query",
+  "/databases/find",
+  "/databases/monitor",
+  "/databases/generate",
+])
+
+const PAGES =
+  NAV.flatMap((group) => group.items).find((item) => item.href === "/databases")?.children ?? []
 
 export default function DatabasesLayout({ children }: { children: React.ReactNode }) {
   const { can } = useAuth()
@@ -153,17 +160,41 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       .catch(() => undefined)
   }, [can, connections])
 
-  const tabs = TABS.filter((t) => !t.sqlOnly || (info?.sql ?? true))
-  const currentTab = TABS.find((t) =>
-    t.href === "/databases" ? pathname === "/databases" : pathname.startsWith(t.href),
+  const pages = PAGES.filter((page) => !SQL_ONLY.has(page.href) || (info?.sql ?? true))
+  const currentPage = PAGES.find((page) =>
+    page.href === "/databases" ? pathname === "/databases" : pathname.startsWith(page.href),
   )
-  // A SQL-only tab is held until the driver catalogue is in — mounting it for a
-  // Redis connection before `info` resolves fires a SQL query against a
+  // A SQL-only page is held until the driver catalogue is in — mounting it for
+  // a Redis connection before `info` resolves fires a SQL query against a
   // key-value store and flashes an error where an explanation belongs.
-  const sqlOnlyRoute = Boolean(currentTab?.sqlOnly)
+  const sqlOnlyRoute = Boolean(currentPage && SQL_ONLY.has(currentPage.href))
   const awaitingDrivers = sqlOnlyRoute && !drivers.data
   const blocked = sqlOnlyRoute && Boolean(drivers.data) && info != null && !info.sql
   const admin = can("system.admin")
+
+  // The rail is the section's navigation now, so it has to know two things
+  // only this layout holds: which pages this engine actually has, and that
+  // every one of them carries the chosen connection in its query string.
+  useNavScope(
+    conn
+      ? {
+          path: "/databases",
+          replaces: true,
+          title: conn.name,
+          caption: info?.label ?? conn.driver,
+          icon: Database,
+          groups: [
+            {
+              items: pages.map((page) => ({
+                title: page.title,
+                href: hrefFor(page.href),
+                icon: page.icon,
+              })),
+            },
+          ],
+        }
+      : null,
+  )
 
   const dialogs = admin && (
     <>
@@ -247,9 +278,11 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       }}
     >
       <div className="flex h-full min-h-0 flex-col">
-        {/* The section's own header band: what you are looking at, as the
-            title; what it is, as a row of facts; where you can go, as the
-            tab strip. Plain ground and one hairline, like every page header. */}
+        {/* The section's own header band: which connection you are working
+            in, as the title, and what it is, as a row of facts. Where you can
+            go is the rail's job — the strip of page links that used to close
+            this band said the same thing the rail now says on the left of it.
+            Plain ground and one hairline, like every page header. */}
         <div className="shrink-0 border-b border-hairline">
           <div className="mx-auto w-full max-w-[1440px] px-5 md:px-8">
             <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3 pt-6 pb-3 md:pt-8">
@@ -300,23 +333,10 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
                 <span>added {relativeTime(conn.createdAt)}</span>
               </div>
             )}
-            <nav aria-label="Database section" className="-mx-3 -mb-px flex gap-1 overflow-x-auto">
-              {tabs.map((tab) => {
-                const active =
-                  tab.href === "/databases"
-                    ? pathname === "/databases"
-                    : pathname.startsWith(tab.href)
-                return (
-                  <TabLink key={tab.href} href={hrefFor(tab.href)} selected={active}>
-                    {tab.title}
-                  </TabLink>
-                )
-              })}
-            </nav>
           </div>
         </div>
 
-        {/* Keyed on the connection so a switch remounts the tab — the old
+        {/* Keyed on the connection so a switch remounts the page — the old
             single-page design got this from `key` on <Tabs> plus Radix
             unmounting the inactive panels; a shared route keeps neither. */}
         <div key={conn?.id} className="min-h-0 flex-1 overflow-y-auto">
@@ -328,7 +348,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
             <Page>
               <EmptyState
                 icon={Database}
-                title={`${currentTab?.title} is for SQL databases`}
+                title={`${currentPage?.title} is for SQL databases`}
                 description={`${info?.label ?? conn?.driver} is a ${
                   info?.kind === "keyvalue" ? "key-value store" : "document database"
                 }. Use Browse to work with its ${

@@ -113,6 +113,17 @@ const graph = {
   truncated: false,
 }
 
+/** A database this dashboard started: published to loopback, in a container it can recreate. */
+const localAccess = {
+  detected: true,
+  container: "shop-db",
+  managed: true,
+  exposure: "local",
+  port: 5432,
+  publicAddresses: ["203.0.113.9"],
+  firewall: { backend: "ufw", active: true, open: false, editable: true },
+}
+
 async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -122,12 +133,31 @@ async function json(route: Route, body: unknown, status = 200) {
  * enough to remember: a PUT is kept and handed back on the next GET, which is
  * what the reload assertion below relies on.
  */
-async function mockDatabases(page: Page, state: { layout: unknown; puts: unknown[] }) {
+async function mockDatabases(
+  page: Page,
+  state: { layout: unknown; puts: unknown[]; access?: unknown; deletes?: unknown[] },
+) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
     const method = route.request().method()
     if (path === "/auth/session") return json(route, user)
+    if (path === "/databases/1/access") return json(route, state.access ?? localAccess)
+    if (path === "/databases/1/url") {
+      const target = url.searchParams.get("target")
+      const host = target === "public" ? "203.0.113.9" : "127.0.0.1"
+      return json(route, {
+        id: 1,
+        name: "shop",
+        driver: "postgres",
+        url: `postgres://app:s3cret@${host}:5432/shop?sslmode=disable`,
+        reference: "",
+      })
+    }
+    if (path === "/databases/1/database" && method === "DELETE") {
+      state.deletes?.push(route.request().postDataJSON())
+      return json(route, { detail: "container shop-db removed", connectionRemoved: true })
+    }
     if (path === "/updates/self" || path === "/dashboard/update")
       return json(route, { current: "0.6.7", latest: "0.6.7" })
     if (path === "/databases/") return json(route, [connection])
@@ -229,9 +259,13 @@ test("the connection is the section's title and the tables are on the rail", asy
   await expect(
     page.getByRole("button", { name: "Connection: shop. Switch connection" }),
   ).toBeVisible()
-  await expect(
-    page.getByLabel("Database section").getByRole("link", { name: "Diagram" }),
-  ).toBeVisible()
+  // The section's pages are the sidebar's, not a strip above the page, and
+  // every one of them carries the connection it was opened with.
+  const rail = page.getByRole("navigation", { name: "Sidebar" })
+  await expect(rail.getByRole("link", { name: "Diagram" })).toHaveAttribute(
+    "href",
+    "/databases/diagram?conn=1",
+  )
   await expect(page.getByRole("button", { name: /^orders/ })).toBeVisible()
 
   await page.getByRole("button", { name: /^users/ }).click()
@@ -313,6 +347,102 @@ test("structure picks a table from its own rail and edits from there", async ({ 
   await dialog.getByLabel("Name").fill("shipped_at")
   await dialog.getByRole("textbox", { name: "Type" }).fill("timestamptz")
   await expect(dialog.getByText(/ADD COLUMN shipped_at timestamptz/)).toBeVisible()
+})
+
+/**
+ * The connection page hands out the string an application needs, masked until
+ * asked for, and only offers to forget a connection the sync would not simply
+ * re-add on the next load.
+ */
+test("the connection string is masked, shown on request, and the public one names the server", async ({
+  page,
+}) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/connection?conn=1")
+
+  const local = page.getByText("On this server", { exact: true }).locator("..")
+  await expect(local).toContainText("postgres://app:••••••@127.0.0.1:5432/shop")
+  await expect(local).not.toContainText("s3cret")
+  await page.getByRole("button", { name: "Show the connection string" }).click()
+  await expect(local).toContainText("postgres://app:s3cret@127.0.0.1:5432/shop?sslmode=disable")
+  await page.getByRole("button", { name: "Hide the connection string" }).click()
+  await expect(local).not.toContainText("s3cret")
+
+  // Loopback only, so the second row explains rather than offers a string,
+  // and Maintenance carries the switch that opens it up.
+  await expect(
+    page.getByText("Not reachable from outside this server", { exact: false }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open up…" })).toBeVisible()
+  // A database running here is re-added by the sync, so there is nothing to
+  // forget: the Remove row is not drawn.
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0)
+  await expect(page.getByText("Remove from the dashboard")).toHaveCount(0)
+})
+
+test("a server published to every interface hands out the public string and can be closed", async ({
+  page,
+}) => {
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    access: {
+      ...localAccess,
+      exposure: "public",
+      firewall: { backend: "ufw", active: true, open: true, editable: true },
+    },
+  })
+  await page.goto("/databases/connection?conn=1")
+
+  const remote = page.getByText("From anywhere", { exact: true }).locator("..")
+  await expect(remote).toContainText("postgres://app:••••••@203.0.113.9:5432/shop")
+  await expect(page.getByText("The firewall lets it through", { exact: false })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible()
+})
+
+test("a connection to a server somewhere else keeps its Remove row and has no switch", async ({
+  page,
+}) => {
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    access: {
+      detected: false,
+      managed: false,
+      exposure: "remote",
+      port: 5432,
+      publicAddresses: [],
+      firewall: { active: false, open: false, editable: false },
+    },
+  })
+  await page.goto("/databases/connection?conn=1")
+
+  await expect(page.getByText("Remove from the dashboard")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open up…" })).toHaveCount(0)
+  await expect(page.getByText("From anywhere")).toHaveCount(0)
+})
+
+test("deleting a container database can take the container and its data with it", async ({
+  page,
+}) => {
+  const deletes: unknown[] = []
+  await mockDatabases(page, { layout: null, puts: [], deletes })
+  await page.goto("/databases/connection?conn=1")
+
+  // The sync notice about a server that needs credentials never expires by
+  // design, and it sits over the maintenance rows at this height.
+  await page.getByLabel("Close toast").click()
+  await page.getByRole("button", { name: "Delete…" }).click()
+  const dialog = page.getByRole("dialog", { name: "Delete database" })
+  const also = dialog.getByRole("checkbox", {
+    name: "Also remove the container shop-db and its data",
+  })
+  await expect(also).not.toBeChecked()
+  await also.click()
+  await dialog.getByPlaceholder("Type the phrase above").fill("shop")
+  await dialog.getByRole("button", { name: "Delete for good" }).click()
+  await expect.poll(() => deletes.length).toBe(1)
+  expect(deletes[0]).toEqual({ removeContainer: true })
 })
 
 for (const path of [

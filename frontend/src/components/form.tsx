@@ -1,5 +1,7 @@
 "use client"
 
+import { useId } from "react"
+
 import { Copy, Information } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
@@ -183,11 +185,16 @@ export function OptionRow({
   /** An extra control the option reveals — a field that only matters when it is on. */
   children?: React.ReactNode
 }) {
+  // The wrapping label already names the switch for assistive technology;
+  // the explicit reference keeps the name where tooling that only reads
+  // `aria-*` attributes (the design-system browser check included) can see it.
+  const titleId = useId()
   return (
     <div className="py-2.5 first:pt-0 last:pb-0">
       <label className="flex min-w-0 items-start justify-between gap-4">
         <span className="min-w-0">
           <span
+            id={titleId}
             className={cn(
               "block text-body font-medium",
               tone === "danger" && "text-destructive",
@@ -203,6 +210,7 @@ export function OptionRow({
         <Switch
           size="sm"
           className="mt-0.5"
+          aria-labelledby={titleId}
           checked={checked}
           onCheckedChange={onCheckedChange}
           disabled={disabled}

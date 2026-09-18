@@ -4,7 +4,7 @@
 
 Use the supplied project-list, repository-import, configuration, build-log and project-preview
 references to reorganize the complete deployment experience. Preserve the dashboard's dark palette,
-orange command buttons, typography, flat surfaces, status vocabulary and capability checks.
+brand-coloured command buttons, typography, flat surfaces, status vocabulary and capability checks.
 Use existing components and APIs where possible; the backend remains the authority for execution,
 secrets, resource ownership, confirmation and audit.
 
@@ -107,3 +107,66 @@ implementation, frontend feature map, database provisioning, terminal backend/fr
 README, contributor validation instructions and the internal index were updated. AGENTS.md requires
 no change. Preview restrictions, capability checks, destructive confirmation, audit, secret storage
 and the owning-feature boundaries remain in place.
+
+## Rebuild — 2026-09-17
+
+The deployment section was rebuilt from the ground up around the shapes Vercel settled on and the
+capabilities Coolify ships, on the design system's terms: readings on the page, plain panels,
+hairlines, one brand colour. The query-string workspace (`/deploy/[id]?tab=`) became real routes under a
+`(project)` route group; every old `?tab=` value redirects to its new address. The 24 `deployment-*`
+components, the five-step wizard, `deployment-handoff.ts` and `deploy-ui.spec.ts` are gone; the
+screens below live in `frontend/src/components/deploy/` and are covered by
+`deploy-projects.spec.ts`, `deploy-new.spec.ts`, `deploy-project.spec.ts`, `deploy-run.spec.ts`,
+`deploy-settings-a.spec.ts` and `deploy-settings-b.spec.ts` over the shared mocked fixture
+`deploy-fixture.ts`.
+
+| Route | Screen |
+| --- | --- |
+| `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word. `?view=archived` lists archived projects with Restore and Delete permanently. |
+| `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
+| `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose, Existing workload) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
+| `/deploy/[id]` | The project shell (name, status word, Visit, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage. |
+| `/deploy/[id]/deployments` | Delivery figures, filter chips, and the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. |
+| `/deploy/[id]/logs`, `/runtime`, `/console` | Runtime logs in the Logs workspace; services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
+| `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a stack of setting cards with a footer Save, reached from the Settings group on the rail rather than a rail of their own. |
+| `/deploy/[id]/runs/[run]` | The deployment page: status, facts, the release path with durations, the build console (search, stage, errors, wrap, follow), runtime logs, details and metrics. |
+
+Backend additions in the same change: `stop` and `start` operations (and `stopped` on every
+summary), a `ref`/`sourceRevision` override on manual deploys, commit subject/author/date recorded
+on Git runs, project rename, unarchive, release pinning, run-history filters and pagination, a
+trigger delivery log with secret rotation, preview-approval rejection, draft listing, the Compose
+service count, deterministic hostname proposals, field pointers on validation refusals, and the
+archive/candidate-release/remove-managed fixes listed in the audit ledger
+(`docs/audits/2026-09-16-deployments/implementation-progress.md`, "Fourth pass").
+
+### Verification — 2026-09-17
+
+- Backend: `go build ./... && go vet ./... && go test ./... -count=1` passed for every package
+  (one intermittent `internal/term` test, `TestSetMetaIsVisibleImmediatelyAndPersisted`, failed
+  once under full-suite load and passed on its own and on two of three whole-package reruns; the
+  package was not touched by this work). `gofmt` and `go vet` are clean for `internal/deploy`,
+  `internal/api`, `internal/auth`.
+- Deployment race gate: `go test -race ./internal/deploy ./internal/api ./internal/proxysvc
+  ./internal/backups ./internal/store -count=1` passed with no data races.
+- Live Docker gates: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
+  'TestLiveC5ActivationAdapters|TestLiveC4ArtifactAdapters' -count=1 -v` passed against the host's
+  Docker daemon.
+- `python3 scripts/e2e-deployments.py` passed 27 of 27 checks against a freshly built backend and
+  a real Docker daemon (signed webhook channel, nginx image deployment with resource limits, a
+  crashing image failing at the health gate with the transcript and evidence the operator sees,
+  restart, pause, and a Redis blueprint deployment with a generated secret).
+- Frontend: `bun run lint`, `bunx prettier --check` over the deployment tree, `bunx next typegen &&
+  bunx tsc --noEmit`, and `bun test src` (64 tests) passed. `bun run build` passed in an isolated
+  copy of the tree, and the complete browser suite ran against that production build:
+  the ten deployment specs (`deploy-projects`, `deploy-new`, `deploy-new-flow`,
+  `deploy-project`, `deploy-run`, `deploy-settings-a`, `deploy-settings-b`, `deploy-notifications`,
+  `deploy-credentials`, `deploy-source`) passed 144 of 144, and the sixteen remaining specs passed
+  136 with 16 conditional skips and no failures — 280 checks in all.
+- Screenshots of every rebuilt screen at 1280, 1720 and 390 wide were reviewed (projects, archived,
+  credentials and its add sheet, new project with unfinished setups, overview with its menu and the
+  duplicate dialog, deployments, runtime, the deployment page, all nine settings sections); no
+  page scrolls sideways at 390.
+- Not verified live: a real GitHub push, provider webhooks and pull-request previews against a
+  real provider, Discord/Slack/Telegram/e-mail delivery, public TLS issuance, and credentials
+  against a real remote host (SSH and bearer plumbing were verified against a local bare
+  repository and a refused loopback connection).

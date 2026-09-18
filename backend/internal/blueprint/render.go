@@ -112,6 +112,7 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 	plan := &Plan{
 		BlueprintID: blueprint.ID, BlueprintVersion: blueprint.Version, Profile: blueprint.Profile,
 		Image: blueprint.Image.Reference, PullPolicy: blueprint.Image.PullPolicy,
+		Command:   append([]string(nil), blueprint.Image.Command...),
 		Variables: []RenderedVariable{}, Ports: []RenderedPort{}, Volumes: []RenderedVolume{},
 		Checks: []RenderedCheck{}, MemoryMB: blueprint.Resources.MemoryMB, CPUs: blueprint.Resources.CPUs,
 		Security: blueprint.Security,

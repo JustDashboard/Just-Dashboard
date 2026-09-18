@@ -1,0 +1,14 @@
+{
+  "name": "jd-acceptance-nuxt",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-check.cjs && nuxt build",
+    "postinstall": "node install-check.cjs"
+  },
+  "dependencies": {
+    "nuxt": "4.5.2",
+    "vue": "3.5.43"
+  }
+}

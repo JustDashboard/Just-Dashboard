@@ -55,11 +55,14 @@ export function VerbActions({
   verbs,
   reveal,
   dim,
+  menuLabel,
   className,
 }: {
   verbs: Verb[]
   reveal?: boolean
   dim?: boolean
+  /** Names the menu button after its row, where a surface draws more than one. */
+  menuLabel?: string
   className?: string
 }) {
   const inline = verbs.filter((v) => v.inline)
@@ -82,7 +85,7 @@ export function VerbActions({
           <verb.icon />
         </IconAction>
       ))}
-      {rest.length > 0 && <VerbMenu verbs={rest} />}
+      {rest.length > 0 && <VerbMenu verbs={rest} label={menuLabel} />}
     </Wrapper>
   )
 }
@@ -95,7 +98,15 @@ function PlainActions({ className, ...props }: React.ComponentProps<"div">) {
  * A detail surface's controls: the inline verbs as named buttons, because a
  * sheet has the width for a word, and the rest behind the same menu.
  */
-export function VerbBar({ verbs, className }: { verbs: Verb[]; className?: string }) {
+export function VerbBar({
+  verbs,
+  menuLabel,
+  className,
+}: {
+  verbs: Verb[]
+  menuLabel?: string
+  className?: string
+}) {
   const inline = verbs.filter((v) => v.inline)
   const rest = verbs.filter((v) => !v.inline)
   return (
@@ -113,7 +124,7 @@ export function VerbBar({ verbs, className }: { verbs: Verb[]; className?: strin
           {verb.label}
         </Button>
       ))}
-      {rest.length > 0 && <VerbMenu verbs={rest} />}
+      {rest.length > 0 && <VerbMenu verbs={rest} label={menuLabel} />}
     </div>
   )
 }
@@ -131,6 +142,9 @@ export function VerbMenu({
   /** A named trigger instead of the ellipsis, for a menu that stands alone in a header. */
   trigger?: React.ReactNode
 }) {
+  // A choice closes the menu. Preventing the item's default, which the
+  // Docker copy of this menu still does, kept every menu drawn through here
+  // open after a choice until 0.6.7.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -154,10 +168,7 @@ export function VerbMenu({
               variant={verb.danger ? "destructive" : "default"}
               disabled={verb.disabled}
               className="items-start gap-2.5 py-1.5"
-              onSelect={(event) => {
-                event.preventDefault()
-                verb.run()
-              }}
+              onSelect={() => verb.run()}
             >
               <verb.icon className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0 flex-1">

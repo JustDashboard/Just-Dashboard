@@ -723,3 +723,193 @@ func TestArtifactRetentionProtectsRollbackSetPinsSharedDigestsAndLeases(t *testi
 		t.Fatalf("active lease prune error = %v (lease %#v)", err, lease)
 	}
 }
+
+// SetReleasePinned is the only way to set deploy_releases.pinned; the
+// retention planner already reads that column (see the pin case in
+// ArtifactRetentionPlan above), so pinning through the store method is enough
+// to make a release that would otherwise be pruned survive a prune plan.
+func TestSetReleasePinnedSurvivesAPrunePlan(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	// A failed, month-old release is outside every other retention rule (not
+	// live, not a rollback candidate, well past the seven-day diagnostic
+	// window), so pinning is the only thing that can still save it.
+	result, err := fixture.base.DB.Exec(
+		"INSERT INTO deploy_releases(project_id, environment_id, release_number, state, plan_revision, config_digest, variables_digest, strategy, created_at) VALUES(?, ?, 1, 'failed', 1, ?, ?, 'blue_green', ?)",
+		fixture.projectID, fixture.envID, fakeContentDigest("config"), fakeContentDigest("variables"),
+		fixture.now.Add(-30*24*time.Hour).Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseID, _ := result.LastInsertId()
+	if _, err := fixture.base.DB.Exec(
+		"INSERT INTO deploy_release_artifacts(release_id, kind, reference, digest, metadata_json, size_bytes, state, created_at) VALUES(?, 'image', 'example.test/app:old', ?, '{}', 100, 'available', ?)",
+		releaseID, fakeContentDigest("old-image"), fixture.now.Add(-30*24*time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+
+	unpinned, err := fixture.runs.ArtifactRetentionPlan(context.Background(), fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unpinned) != 1 || unpinned[0].Retain {
+		t.Fatalf("old unpinned release retention = %#v, want a prune candidate", unpinned)
+	}
+
+	updated, err := fixture.runs.SetReleasePinned(context.Background(), fixture.projectID, fixture.envID, releaseID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Pinned {
+		t.Fatalf("SetReleasePinned result = %#v, want Pinned", updated)
+	}
+
+	pinned, err := fixture.runs.ArtifactRetentionPlan(context.Background(), fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pinned) != 1 || !pinned[0].Retain || !strings.Contains(pinned[0].Reason, "pin") {
+		t.Fatalf("pinned release retention = %#v, want retained for the operator pin", pinned)
+	}
+
+	// A release outside the project/environment it was asked for is refused,
+	// not silently pinned.
+	if _, err := fixture.runs.SetReleasePinned(context.Background(), fixture.projectID+1, fixture.envID, releaseID, true); !errors.Is(err, ErrArtifactMissing) {
+		t.Fatalf("cross-project pin error = %v, want ErrArtifactMissing", err)
+	}
+
+	if _, err := fixture.runs.SetReleasePinned(context.Background(), fixture.projectID, fixture.envID, releaseID, false); err != nil {
+		t.Fatal(err)
+	}
+	unpinnedAgain, err := fixture.runs.ArtifactRetentionPlan(context.Background(), fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unpinnedAgain) != 1 || unpinnedAgain[0].Retain {
+		t.Fatalf("unpinned release retention = %#v, want a prune candidate again", unpinnedAgain)
+	}
+}
+
+// reserveArtifactPrune is PruneArtifacts's live re-check, run once per
+// artifact right before it is actually removed — the safety net for a release
+// pinned in the window between ArtifactRetentionPlan's read and this
+// artifact's own turn in the prune loop. Its retained EXISTS used to join the
+// target release (aliased tr) without ever reading tr.pinned, checking only
+// whether some *other* release sharing the same physical artifact was
+// retained; a release pinned by itself, sharing its image with nothing, was
+// not protected at all.
+func TestReserveArtifactPruneProtectsTheTargetReleasesOwnPin(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	// A failed, month-old release is outside every other retention rule (not
+	// live, not a rollback candidate, well past the seven-day diagnostic
+	// window), so pinning is the only thing that can still save it — and
+	// nothing else shares its digest, so the "shared release" branch of the
+	// query can't be what saves it either.
+	result, err := fixture.base.DB.Exec(
+		"INSERT INTO deploy_releases(project_id, environment_id, release_number, state, plan_revision, config_digest, variables_digest, strategy, created_at) VALUES(?, ?, 1, 'failed', 1, ?, ?, 'blue_green', ?)",
+		fixture.projectID, fixture.envID, fakeContentDigest("config"), fakeContentDigest("variables"),
+		fixture.now.Add(-30*24*time.Hour).Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseID, _ := result.LastInsertId()
+	artifact, err := fixture.base.DB.Exec(
+		"INSERT INTO deploy_release_artifacts(release_id, kind, reference, digest, metadata_json, size_bytes, state, created_at) VALUES(?, 'image', 'example.test/app:solo', ?, '{}', 100, 'available', ?)",
+		releaseID, fakeContentDigest("solo-image"), fixture.now.Add(-30*24*time.Hour).Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactID, _ := artifact.LastInsertId()
+
+	before, err := fixture.runs.ArtifactRetentionPlan(context.Background(), fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || before[0].Retain {
+		t.Fatalf("unpinned release retention = %#v, want a prune candidate", before)
+	}
+
+	// The operator pins the release after that plan was read — a concurrent
+	// request racing an in-progress prune — before this artifact's own turn
+	// in the prune loop reaches reserveArtifactPrune.
+	if _, err := fixture.runs.SetReleasePinned(context.Background(), fixture.projectID, fixture.envID, releaseID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.runs.reserveArtifactPrune(context.Background(), artifactID); !errors.Is(err, ErrArtifactRetained) {
+		t.Fatalf("reserveArtifactPrune on a now-pinned, unshared release = %v, want ErrArtifactRetained", err)
+	}
+	var state string
+	if err := fixture.base.DB.QueryRow("SELECT state FROM deploy_release_artifacts WHERE id = ?", artifactID).Scan(&state); err != nil || state != "available" {
+		t.Fatalf("pinned artifact state = %q, error=%v, want still available", state, err)
+	}
+
+	// PruneArtifacts itself now sees the pin directly at the plan level too
+	// (ArtifactRetentionPlan reads pinned fresh), so the end-to-end call keeps
+	// the artifact and says why.
+	report, err := fixture.runs.PruneArtifacts(context.Background(), &retentionRemover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Pruned != 0 || len(report.Decisions) != 1 || !report.Decisions[0].Retain ||
+		!strings.Contains(report.Decisions[0].Reason, "pin") {
+		t.Fatalf("prune report over a pinned solo release = %#v", report)
+	}
+}
+
+// A run that fails after render_runtime must not leave its release at
+// "candidate" forever: ArtifactRetentionPlan never applies its failed-artifact
+// window to a candidate, so the release and its artifacts would be kept
+// indefinitely and the releases list would show a stale in-progress build.
+func TestFailedRunFailsItsCandidateReleaseAndRetentionKeepsItSevenDays(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	fixture.addPlan(t, 1, strings.Repeat("a", 40))
+	run, lease := fixture.claimedRun(t, 1)
+	release := fixture.candidate(t, *run, lease, fakeContentDigest("failed-image"))
+	if release.Release.State != "candidate" {
+		t.Fatalf("release state before failure = %s, want candidate", release.Release.State)
+	}
+	if _, err := fixture.runs.TransitionRun(context.Background(), run.ID, lease.Token,
+		RunFailed, TransitionDetail{Code: "build_artifact_failed", Reason: "test failure"}); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := fixture.base.DB.QueryRow(
+		"SELECT state FROM deploy_releases WHERE id = ?", release.Release.ID,
+	).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "failed" {
+		t.Fatalf("release state after failed run = %s, want failed", state)
+	}
+
+	decisions, err := fixture.runs.ArtifactRetentionPlan(context.Background(), fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, decision := range decisions {
+		if decision.Artifact.ReleaseID != release.Release.ID {
+			continue
+		}
+		found = true
+		if !decision.Retain || !strings.Contains(decision.Reason, "seven-day") {
+			t.Fatalf("failed-release retention decision = %#v", decision)
+		}
+	}
+	if !found {
+		t.Fatal("failed release produced no retention decision")
+	}
+	// Eight days later the same failed artifact has aged out of the window.
+	later, err := fixture.runs.ArtifactRetentionPlan(context.Background(), fixture.now.Add(8*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decision := range later {
+		if decision.Artifact.ReleaseID == release.Release.ID && decision.Retain {
+			t.Fatalf("failed release retained past its seven-day window: %#v", decision)
+		}
+	}
+}

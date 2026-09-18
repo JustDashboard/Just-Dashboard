@@ -121,21 +121,6 @@ const INSPECTOR = { base: 320, min: 260, max: 560 }
 const EMPTY = new Set<string>()
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-/**
- * The place a folder belongs to: home when it is under home, otherwise the
- * longest configured root or notable directory above it. That is what the
- * sidebar's tree is rooted at, so browsing into /etc re-roots the tree at
- * /etc rather than unfolding the whole filesystem from "/" to get there.
- */
-function placeFor(path: string, places: FilePlaces): string {
-  const candidates = [places.home, ...places.roots, ...places.places.map((p) => p.path)]
-  let best = ""
-  for (const candidate of candidates) {
-    if (isWithin(path, candidate) && candidate.length > best.length) best = candidate
-  }
-  return best || places.roots[0] || "/"
-}
-
 export default function FilesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -194,9 +179,6 @@ export default function FilesPage() {
   const [symlinkOpen, setSymlinkOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
   const [clip, setClip] = useState<Clip | null>(null)
-  // Bumped whenever this page changed the disk, so the sidebar's open
-  // folders read themselves again without collapsing.
-  const [tick, setTick] = useState(0)
   // The selection and the active row are scoped to the directory they were
   // made in, so navigating away discards both without a reset effect.
   const [selection, setSelection] = useState<{ dir: string; paths: Set<string> }>({
@@ -235,7 +217,6 @@ export default function FilesPage() {
   }, [showHidden, refreshListing])
   const reload = useCallback(() => {
     refreshListing()
-    setTick((t) => t + 1)
   }, [refreshListing])
 
   useEffect(() => {
@@ -276,10 +257,6 @@ export default function FilesPage() {
   // The viewer walks the folder's files in the order the listing shows them.
   const viewable = useMemo(() => entries.filter((e) => !e.isDir), [entries])
   const dimmed = useMemo(() => new Set(clip?.mode === "cut" ? clip.paths : []), [clip])
-  const treeRoot = useMemo(
-    () => (path && places.data ? placeFor(path, places.data) : undefined),
-    [path, places.data],
-  )
   const bookmarks = useMemo(() => places.data?.bookmarks ?? [], [places.data])
   const starred = path !== null && bookmarks.some((b) => b.path === path)
   // The row above the listing that goes up a level — only where up is
@@ -306,11 +283,12 @@ export default function FilesPage() {
     return best
   }, [path, snapshot])
 
+  // An upload into the browsed folder is a change to the listing; one into
+  // another folder shows up when that folder is opened.
   const uploads = useUploads(
     useCallback(
       (dir: string) => {
         if (dir === pathRef.current) reload()
-        else setTick((t) => t + 1)
       },
       [reload],
     ),
@@ -989,27 +967,11 @@ export default function FilesPage() {
           <div className="relative hidden shrink-0 border-r border-hairline lg:flex lg:w-(--jd-files-rail)">
             <FilesSidebar
               places={places.data}
-              root={treeRoot}
               path={path ?? "/"}
               recent={recent}
-              showHidden={showHidden}
               canWrite={canWrite}
-              canDestruct={canDestruct}
-              refreshTick={tick}
               onNavigate={navigate}
-              onOpenFile={(p) => setEditing(p)}
               onBookmarksChange={(next) => void saveBookmarks(next)}
-              onConfirm={(req) =>
-                confirm({
-                  title: req.title,
-                  description: req.body,
-                  confirmLabel: req.confirmLabel,
-                  action: async () => {
-                    await req.run()
-                  },
-                })
-              }
-              onChanged={reload}
               onDropPaths={(paths, dir, mode) => void movePaths(paths, dir, mode)}
               onDropFiles={(transfer, dir) => void dropFiles(transfer, dir)}
               onClose={() => setShowSidebar(false)}
@@ -1038,8 +1000,8 @@ export default function FilesPage() {
                 <SidebarLeft />
               </IconAction>
             )}
-            {/* The places menu lives in the sidebar; where the sidebar is not
-                drawn, the same menu sits here so a phone can still jump. */}
+            {/* The sidebar lists the places; where it is not drawn, the same
+                list sits behind this button so a phone can still jump. */}
             <div className={cn(showSidebar && "lg:hidden")}>
               <PlacesMenu
                 places={places.data}

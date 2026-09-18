@@ -13,6 +13,14 @@ import (
 
 var ErrPortUnavailable = errors.New("deployment port is unavailable")
 
+// ErrAlreadyStopped and ErrNotStopped gate stop/start admission before a run
+// is enqueued: stopping an already-stopped runtime or starting one that is
+// not stopped are conflicts with the recorded runtime state, not invalid plans.
+var (
+	ErrAlreadyStopped = errors.New("deployment runtime is already stopped")
+	ErrNotStopped     = errors.New("deployment runtime is not stopped")
+)
+
 type ReleaseRuntime struct {
 	ReleaseID        int64           `json:"releaseId"`
 	EnvironmentID    int64           `json:"environmentId"`

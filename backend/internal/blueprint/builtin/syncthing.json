@@ -1,0 +1,92 @@
+{
+  "id": "syncthing",
+  "version": "1.0.0",
+  "name": "Syncthing",
+  "category": "tool",
+  "profile": "tool",
+  "description": "Continuous file synchronisation between devices, peer to peer. The sync protocol is a direct port because devices connect to it, not to a browser.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.syncthing.net/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MPL-2.0",
+    "upstreamUrl": "https://github.com/syncthing/syncthing",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "syncthing/syncthing:2.1.5",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "The web interface only; protect it with a password."
+    }
+  ],
+  "ports": [
+    {
+      "name": "gui",
+      "internal": 8384,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    },
+    {
+      "name": "sync",
+      "internal": 22000,
+      "protocol": "tcp",
+      "purpose": "The sync protocol, which other devices connect to directly",
+      "exposure": "direct"
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/syncthing",
+      "purpose": "Configuration, keys and the synced folders",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/rest/noauth/health",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Syncthing upgrades its configuration on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:87f78a7b56dadac0b5c0373c0dc3281953b0c35f4b6499022b207a008a167809"
+    }
+  ]
+}

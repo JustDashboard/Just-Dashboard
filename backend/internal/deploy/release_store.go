@@ -520,6 +520,26 @@ func (s *OrchestrationStore) Release(ctx context.Context, releaseID int64) (*Rel
 	return &ReleaseWithArtifacts{Release: *release, Artifacts: artifacts}, nil
 }
 
+// SetReleasePinned marks a release pinned or unpinned. A pinned release is
+// exempt from ArtifactRetentionPlan's prune eligibility regardless of its age
+// or rank among an environment's other releases; the caller is expected to
+// have already checked the release belongs to projectID/environmentID.
+func (s *OrchestrationStore) SetReleasePinned(
+	ctx context.Context, projectID, environmentID, releaseID int64, pinned bool,
+) (*Release, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE deploy_releases SET pinned = ?
+		 WHERE id = ? AND project_id = ? AND environment_id = ?`,
+		boolInt(pinned), releaseID, projectID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrArtifactMissing
+	}
+	return releaseByIDTx(ctx, s.db, releaseID)
+}
+
 type ReleaseComparison struct {
 	FromReleaseID int64                   `json:"fromReleaseId"`
 	ToReleaseID   int64                   `json:"toReleaseId"`
@@ -748,13 +768,20 @@ func (s *OrchestrationStore) reserveArtifactPrune(ctx context.Context, artifactI
 		       EXISTS(
 		         SELECT 1 FROM deploy_release_artifacts target
 		         JOIN deploy_releases tr ON tr.id = target.release_id
-		         JOIN deploy_release_artifacts shared
-		           ON shared.kind = target.kind AND shared.digest = target.digest
-		          AND (target.kind = 'image' OR shared.reference = target.reference)
-		         JOIN deploy_releases sr ON sr.id = shared.release_id
-		         JOIN deploy_environments e ON e.id = sr.environment_id
-		        WHERE target.id = ? AND shared.id <> target.id AND shared.state = 'available'
-		          AND (sr.pinned = 1 OR sr.id = e.live_release_id OR sr.state = 'candidate')
+		         JOIN deploy_environments te ON te.id = tr.environment_id
+		        WHERE target.id = ?
+		          AND (
+		            tr.pinned = 1 OR tr.id = te.live_release_id OR tr.state = 'candidate'
+		            OR EXISTS(
+		                 SELECT 1 FROM deploy_release_artifacts shared
+		                 JOIN deploy_releases sr ON sr.id = shared.release_id
+		                 JOIN deploy_environments e ON e.id = sr.environment_id
+		                WHERE shared.kind = target.kind AND shared.digest = target.digest
+		                  AND (target.kind = 'image' OR shared.reference = target.reference)
+		                  AND shared.id <> target.id AND shared.state = 'available'
+		                  AND (sr.pinned = 1 OR sr.id = e.live_release_id OR sr.state = 'candidate')
+		               )
+		          )
 		       )`, artifactID).Scan(&active, &retained); err != nil {
 		return err
 	}

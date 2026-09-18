@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -276,6 +277,52 @@ func TestFleetReadModelStatementCountDoesNotGrowWithTheFleet(t *testing.T) {
 	}
 }
 
+// A fleet with no live runtime at all still needs liveReleaseFacts's
+// releases/artifacts read for every summary's serviceCount (it is reported
+// "regardless of whether the runtime is currently live or stopped"), so this
+// pins the same fixed, non-growing statement count for that case: the point
+// is not that fewer statements run here than in the fully live fleet above,
+// only that the count still does not grow with the fleet.
+func TestFleetReadModelStatementCountDoesNotGrowWithAnAllStoppedFleet(t *testing.T) {
+	small, driver := countingFleet(t, 2)
+	if _, err := small.db.ExecContext(context.Background(), `UPDATE deploy_release_runtimes SET state = 'stopped'`); err != nil {
+		t.Fatal(err)
+	}
+	driver.reset()
+	if _, err := small.Fleet(context.Background(), QueueBudget{Heavy: 2, Light: 4}); err != nil {
+		t.Fatal(err)
+	}
+	smallCount := driver.count.Load()
+
+	large, driver := countingFleet(t, 40)
+	if _, err := large.db.ExecContext(context.Background(), `UPDATE deploy_release_runtimes SET state = 'stopped'`); err != nil {
+		t.Fatal(err)
+	}
+	driver.reset()
+	fleet, err := large.Fleet(context.Background(), QueueBudget{Heavy: 2, Light: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	largeCount := driver.count.Load()
+	if len(fleet.Deployments) != 40 {
+		t.Fatalf("fleet returned %d deployments, want 40", len(fleet.Deployments))
+	}
+	if smallCount == 0 || largeCount != smallCount {
+		t.Fatalf("all-stopped fleet statements grew with the fleet: %d for 2 deployments, %d for 40", smallCount, largeCount)
+	}
+	if largeCount > 10 {
+		t.Fatalf("all-stopped fleet read model issued %d statements, want a small fixed set", largeCount)
+	}
+	for _, summary := range fleet.Deployments {
+		if !summary.Stopped {
+			t.Fatalf("%s stopped = false, want true once its runtime is stopped", summary.Name)
+		}
+		if summary.ServiceCount != 1 {
+			t.Fatalf("%s serviceCount = %d, want 1 (read from the snapshot) even while stopped", summary.Name, summary.ServiceCount)
+		}
+	}
+}
+
 // Opening one workspace must read one deployment. The page polls every few
 // seconds; loading the whole fleet to answer it is the N+1 in disguise.
 func TestDeploymentSummaryReadsOnlyTheRequestedDeployment(t *testing.T) {
@@ -296,5 +343,98 @@ func TestDeploymentSummaryReadsOnlyTheRequestedDeployment(t *testing.T) {
 	}
 	if got := driver.count.Load(); got > 10 {
 		t.Fatalf("workspace read issued %d statements, want a small fixed set", got)
+	}
+}
+
+// A single-container release reports one service; a Compose release reports
+// however many services its runtime snapshot recorded, whether or not the
+// runtime is currently running.
+func TestFleetSummaryReportsServiceCountFromTheRuntimeSnapshot(t *testing.T) {
+	t.Parallel()
+	fixture, _ := liveOperationsFixture(t)
+	summary := fixture.deploymentSummary(t)
+	if summary.ServiceCount != 1 {
+		t.Fatalf("single-container serviceCount = %d, want 1", summary.ServiceCount)
+	}
+
+	compose := newReleaseStoreFixture(t)
+	compose.addPlan(t, 1, strings.Repeat("d", 40))
+	run, lease := compose.claimedRun(t, 1)
+	// Built through json.Marshal, not a hand-typed literal: an embedded
+	// json.RawMessage is compacted when it is marshaled into its parent
+	// object, so a literal containing insignificant whitespace would hash
+	// differently from what CreateCandidateRelease stores and reads back.
+	snapshot, err := json.Marshal(runtimeReleaseSnapshot{
+		Version: 1, Plan: RuntimePlanConfig{Strategy: StrategyBlueGreen},
+		Compose: &ResolvedComposeSnapshot{
+			SourceDigest: fakeContentDigest("compose-source"),
+			Files:        []string{"compose.yml"},
+			Services: []ResolvedComposeService{
+				{Plan: ComposeServicePlan{Name: "api"}, Reference: "example.test/api:v1", Digest: fakeContentDigest("api"), Source: "build"},
+				{Plan: ComposeServicePlan{Name: "worker"}, Reference: "example.test/worker:v1", Digest: fakeContentDigest("worker"), Source: "build"},
+				{Plan: ComposeServicePlan{Name: "redis"}, Reference: "redis:7", Digest: fakeContentDigest("redis"), Source: "pull"},
+			},
+		},
+		Variables: []ReleaseVariableSnapshot{}, Dependencies: []PlannedDependency{},
+		Checks: []PlannedCheck{}, Domains: []PlannedDomain{}, PlanInputsHash: fakeContentDigest("plan-inputs"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	composeRelease, err := compose.runs.CreateCandidateRelease(context.Background(), *run, lease.Token, CandidateReleaseInput{
+		Artifacts: []ReleaseArtifactInput{{
+			Kind: ArtifactCompose, Reference: "compose", Digest: fakeContentDigest("compose-bundle"),
+			Metadata: json.RawMessage(`{}`), SizeBytes: 512,
+		}},
+		Prepared: PreparedBuild{
+			Method: BuildCompose, BaseImages: []ResolvedImage{}, CachePolicy: "reuse", SecretIDs: []string{},
+		},
+		RuntimeSnapshot: snapshot, RuntimeDigest: digestBytes(snapshot),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compose.base.DB.Exec(`
+		INSERT INTO deploy_release_runtimes(
+		  release_id, environment_id, kind, runtime_id, name, working_directory,
+		  host, port, state, metadata_json, created_at, updated_at)
+		VALUES(?, ?, 'compose', 'jd-e1-compose', 'jd-e1', '', '', 0, 'live', '{}', ?, ?)`,
+		composeRelease.Release.ID, compose.envID, compose.now.Unix(), compose.now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	compose.finishCandidate(t, composeRelease.Release.ID, run.ID, lease.Token)
+	composeSummary := compose.deploymentSummary(t)
+	if composeSummary.ServiceCount != 3 {
+		t.Fatalf("compose serviceCount = %d, want 3", composeSummary.ServiceCount)
+	}
+
+	// Stopping the runtime must not blank the count: it comes from the
+	// release's own snapshot, not from the runtime being live.
+	if _, err := compose.base.DB.Exec(`UPDATE deploy_release_runtimes SET state='stopped' WHERE release_id=?`, composeRelease.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	stoppedSummary := compose.deploymentSummary(t)
+	if stoppedSummary.ServiceCount != 3 || !stoppedSummary.Stopped {
+		t.Fatalf("stopped compose summary = %#v, want serviceCount 3 and stopped true", stoppedSummary)
+	}
+}
+
+// Stopped is folded into the same batched live-runtime join the fleet read
+// already performs for the published port, so it costs no extra statement.
+func TestFleetSummaryReportsStoppedFromRuntimeState(t *testing.T) {
+	t.Parallel()
+	fixture, release := liveOperationsFixture(t)
+	summary := fixture.deploymentSummary(t)
+	if summary.Stopped {
+		t.Fatalf("summary reported stopped before the runtime was stopped: %#v", summary)
+	}
+	if _, err := fixture.base.DB.Exec(
+		`UPDATE deploy_release_runtimes SET state='stopped' WHERE release_id=?`, release.Release.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	summary = fixture.deploymentSummary(t)
+	if !summary.Stopped {
+		t.Fatalf("summary did not report stopped once the live runtime was stopped: %#v", summary)
 	}
 }

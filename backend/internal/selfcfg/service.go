@@ -190,8 +190,12 @@ func (s *Service) drift(onDisk Settings) []Change {
 	running.BackendPort = live.BackendPort
 	running.TerminalEnabled = live.TerminalEnabled
 	running.Require2FA = live.Require2FA
-	running.SessionTTL = live.SessionTTL
-	running.IdleTTL = live.IdleTTL
+	// Durations likewise: the process reports them as time.Duration renders
+	// them, the file holds whatever the operator typed.
+	running.SessionTTL = normalizeDuration(live.SessionTTL)
+	running.IdleTTL = normalizeDuration(live.IdleTTL)
+	onDisk.SessionTTL = normalizeDuration(onDisk.SessionTTL)
+	onDisk.IdleTTL = normalizeDuration(onDisk.IdleTTL)
 	running.UpdateCheck = live.UpdateCheck
 	// Diff the other way round from the apply path: "from" is what is running
 	// and "to" is what the file asks for, which is the order the sentence

@@ -99,6 +99,74 @@ func TestDeploymentAutomationRoutesFenceProviderDeliveriesAndSecrets(t *testing.
 	}
 }
 
+// Two ordinary pushes with disjoint file lists and no watch-path filter must
+// still supersede one another: the environment's automatic deployment policy
+// has no filter configured here, so decision.ChangedPaths stays nil for both
+// (the "unscoped" case) and neither push's run metadata should fall back to
+// the provider payload's own per-push commit list — that per-push list is not
+// a baseline diff, so two disjoint pushes would never cover one another and
+// the first would survive queued forever behind the second. This engine
+// never starts in this harness (no call to s.modules.deployEngine.Start), so
+// both runs stay RunQueued exactly as they would behind a busy heavy slot in
+// production, which is what makes supersession the code path under test.
+func TestWebhookPushSupersessionIgnoresThePerPushFileList(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	routes := s.Routes()
+	admin := &client{t: t, h: routes, cookie: signInAs(t, s, "supersede-admin", auth.RoleAdmin)}
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", projectID, environmentID)
+	body := `{"name":"GitHub","kind":"github","provider":"github","enabled":true,"config":{"repository":"acme/app","ref":"main","events":["push"]}}`
+	created := admin.do(http.MethodPost, base+"/triggers", body, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("trigger create=%d %s", created.Code, created.Body.String())
+	}
+	var result deploy.TriggerCreated
+	if err := json.Unmarshal(created.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	hook := fmt.Sprintf("/api/v1/hooks/providers/github/%s", result.Trigger.HookID)
+	guest := &client{t: t, h: routes}
+
+	pushA := []byte(`{"ref":"refs/heads/main","after":"` + strings.Repeat("a", 40) + `","repository":{"full_name":"acme/app"},"commits":[{"modified":["src/api.go"]}]}`)
+	headersA := map[string]string{"X-GitHub-Event": "push", "X-GitHub-Delivery": "push-a", "X-Hub-Signature-256": signProviderPayload(pushA, result.Secret)}
+	first := guest.do(http.MethodPost, hook, string(pushA), headersA)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("push A=%d %s", first.Code, first.Body.String())
+	}
+	var runA struct {
+		RunID int64 `json:"runId"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &runA); err != nil {
+		t.Fatal(err)
+	}
+	var stateA string
+	if err := s.Store.DB.QueryRow(`SELECT state FROM deploy_runs WHERE id=?`, runA.RunID).Scan(&stateA); err != nil || stateA != string(deploy.RunQueued) {
+		t.Fatalf("run A state = %q, error=%v, want queued", stateA, err)
+	}
+
+	pushB := []byte(`{"ref":"refs/heads/main","after":"` + strings.Repeat("b", 40) + `","repository":{"full_name":"acme/app"},"commits":[{"modified":["README.md"]}]}`)
+	headersB := map[string]string{"X-GitHub-Event": "push", "X-GitHub-Delivery": "push-b", "X-Hub-Signature-256": signProviderPayload(pushB, result.Secret)}
+	second := guest.do(http.MethodPost, hook, string(pushB), headersB)
+	if second.Code != http.StatusAccepted {
+		t.Fatalf("push B=%d %s", second.Code, second.Body.String())
+	}
+	var runB struct {
+		RunID int64 `json:"runId"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &runB); err != nil {
+		t.Fatal(err)
+	}
+
+	var stateAfter string
+	var supersededBy int64
+	if err := s.Store.DB.QueryRow(`SELECT state, superseded_by FROM deploy_runs WHERE id=?`, runA.RunID).Scan(&stateAfter, &supersededBy); err != nil {
+		t.Fatal(err)
+	}
+	if stateAfter != string(deploy.RunSuperseded) || supersededBy != runB.RunID {
+		t.Fatalf("run A after push B: state=%q supersededBy=%d, want superseded by %d", stateAfter, supersededBy, runB.RunID)
+	}
+}
+
 func TestScopedGenericHookAndAPIIdempotencyCreateOneRun(t *testing.T) {
 	s := testServer(t)
 	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)

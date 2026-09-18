@@ -22,7 +22,8 @@ cannot also join this network and is refused. Generated override files use root-
 operations and atomic publication so repository symlinks cannot redirect writes outside the checkout.
 
 Network labels, name, environment and driver must match before adoption or mutation. The bridge does
-not change host bindings: managed database publication remains loopback-only. This is environment
+not change host bindings: a database quick setup provisions is published to loopback only, and a
+database the operator opened or created as reachable from anywhere keeps that binding. This is environment
 network separation, not a sandbox against an administrator or arbitrary outbound network access.
 Previews cannot share a linked database endpoint/container with another environment, including another
 preview or a different saved connection ID. Reference resolution checks known links and bindings before

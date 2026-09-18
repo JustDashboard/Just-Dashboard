@@ -7,28 +7,60 @@ deployment detail/new wrappers remain server components and hand interaction to 
 
 ## The shell
 
-`(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `SidebarProvider` +
-`AppSidebar`, `TopBar`, and `MetricsStream` — which renders nothing and exists to hold the metrics socket
-open for the whole shell, so Overview's charts and the top bar's vitals keep filling from other pages. Its
+`(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
+`SidebarProvider` + `AppSidebar`, and `MetricsStream` — which renders nothing and exists to hold the
+metrics socket open for the whole shell, so Overview's charts keep filling from other pages. Its
 redirect to `/login` is convenience, not a control; every API call behind it is authenticated server-side.
 
-**The scroll container is on the `SidebarInset`, not the document.** That is what pins the top bar and
-lets a page ask for the remaining height (`<Page fill>`) instead of growing past the viewport.
+**The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
+the remaining height (`<Page fill>`) instead of growing past the viewport.
 
-`components/app-sidebar.tsx` exports the nav registry (`NAV`, `PERSONAL_NAV`) so `command-palette.tsx`
-offers the same destinations without a second list — 43 entries plus the five account pages. Items may
-carry a `capability`, and the sidebar hides what the role cannot use. ⌘K covers every page.
+### The rail drills in
+
+**The sidebar shows one list at a time: the list for where you are.** Opening Docker replaces the list
+of everything with the list of Docker's seven pages, under Docker's own name and a control back out.
+Until 0.6.7 the rail was one list whose section rows unfolded a second list beneath them — Docker and
+Security open together was thirty rows deep — and because that rail could not be relied on to show a
+section's pages, six section layouts also carried a strip of route tabs across the top of every page in
+them. **Those strips are gone. There is no route-level tab anywhere in the product**; a switcher that
+remains switches between views of one page, never between pages (see `components/tabs.tsx` below).
+
+Which panel is showing is derived from the route, not remembered, so a pasted link opens with the rail
+already inside the right section. The single piece of state is the step back out, which shows the level
+above without leaving the page you are on and is dropped on the next navigation. Three levels exist:
+the top-level list, a section, and one deployment inside Deployments.
+
+`components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
+`PROJECT_SETTINGS_NAV`, `navMatches`, `sectionFor`, `navLocation` — so `app-sidebar.tsx` and
+`command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
+may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
+the one surface that still sees them all at once.
+
+A section's `children` are its pages **including its own landing page, first and named for what it
+shows** — "Browse", "Live", "Version", otherwise "Overview" — so every destination in a panel is a leaf
+and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
+which is how one array serves both.
+
+`components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
+`useNavScope(...)` and the rail draws what it publishes: the databases layout, because which pages exist
+depends on whether the connection is SQL and because every one of them carries `?conn=` (`replaces: true`
+— it stands in place of the static Databases panel); and `deploy/project-shell.tsx`, because a project's
+name, its game-only pages and its pending-changes mark are not in the URL (a level *below* Deployments).
+The rail draws a project's rows from the route alone until that registration lands, so the panel does not
+reflow — only the name fills in. The alternative was the rail polling the driver catalogue and a project
+on every page in the product to draw a list the page beneath it already holds.
 
 The groups run in the order a day on the server runs, and a page's header eyebrow is its group's
 label: **Server** (Overview, Metrics, Processes, Logs), **Apps** (Deployments first, then Docker,
 Databases, Proxy & TLS), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups) and
 **System** (Packages, System users, Audit log, Settings). Deployments open the second group because
-shipping something is the reason most visits happen; until 0.6.8 it sat fourth in a group called
+shipping something is the reason most visits happen; until 0.6.7 it sat fourth in a group called
 Operations, between Packages and Backups.
 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
-`system.admin`, Users — drawn three times from the one array: the account layout's `SectionNav`, the
-palette's Account group, and the menu on the rail's foot. That menu opens with the account's picture,
+`system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
+panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
+the rail's foot. That menu opens with the account's picture,
 display name, sign-in name and role, then the five pages (Security carries a `Status` for two-factor)
 and Sign out. The picture is `components/account/user-avatar.tsx`: the stored image when there is
 one, otherwise the display name's initials on the brand plot, square with the control radius rather
@@ -62,8 +94,11 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   at a thing rather than filling in a form (the file viewer). Their `description` is rendered `sr-only` — Radix wants an
   accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
   components** — a page or a feature panel never opens one itself.
-- `components/tabs.tsx` — every switcher: `SectionNav` (the sticky strip under the top bar), `TabLink`,
-  `FilterChip`, `ChipCount`.
+- `components/tabs.tsx` — the switchers that remain, all of which switch between *views of one page*:
+  `tabClasses` (the underlined tab, for the log console's live feed against its search, the packages
+  page's installed against its updates, the deploy wizard's source kinds), `FilterChip` and `ChipCount`.
+  `SectionNav` and `TabLink` — the route-level strips — were deleted in 0.6.7 when the rail started
+  drilling into sections; do not reintroduce a strip that changes the URL.
 - `components/form.tsx` — what goes inside a task surface: `Field` (a label, a control, one line under
   it — a hint, or the error while there is one), `FieldRow`, `FormSection` (an eyebrow and a hairline
   opening part of a longer form), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
@@ -109,7 +144,7 @@ on a control with a face, the accent wash on a ghost — so nothing translates a
 to say it was pressed.
 
 The nav's own treatment did not change with it, because it never used the lift: the current destination
-takes the sidebar accent fill, a brand-orange icon and a `font-medium` label against the `font-normal` of
+takes the sidebar accent fill, a brand-blue icon and a `font-medium` label against the `font-normal` of
 the rest. The rail is the one surface dense enough to need three weights, and the group labels above the
 entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
 
@@ -123,9 +158,10 @@ only rendering of the product's name, so sidebar, sign-in and splash agree and a
 `LogoMark` is the glyph alone, which is what the collapsed rail falls back to.
 
 The same two paths are the browser icons: `app/icon.svg` (and `favicon.ico` / `apple-icon.png`
-rasterised from them at 16–256px) put the mark in the tab. `public/logo-mark.svg` is the standalone
-file for anything outside the app that needs it; `public/MainLogo.svg` is the original export the
-mark was traced from and is not referenced by the build.
+rasterised from it at 16–180px) put the mark in the tab, on the dashboard's dark ground rather than
+transparent because the pale mark would vanish on a light tab strip. `public/LOGO.svg` is the file
+the mark ships as — the same two paths, already filled `#CAE9FF` — for anything outside the app that
+needs it, and the source `logo.tsx` inlines.
 
 **Selection is `bg-accent`, everywhere.** The active session in the terminal rail, a pressed
 `ToggleGroupItem`, an applied `FilterChip`, a highlighted command row, a selected table row, the current

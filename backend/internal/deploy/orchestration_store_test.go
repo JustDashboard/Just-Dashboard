@@ -465,6 +465,162 @@ func TestAutomaticEnqueueSupersedesOnlyCoveredUnclaimedRuns(t *testing.T) {
 	}
 }
 
+// A routine scheduled action queued behind a real push must not cancel it: a
+// schedule's changedPaths are empty (unscoped, not "nothing changed"), and
+// coversPaths only supersedes an older run whose own changed paths are a
+// subset of the newer one's — an empty newer set covers nothing but another
+// empty set. The reverse direction still works: a push queued behind a stale
+// schedule does supersede it, since any set covers the empty one.
+func TestScheduleQueuedBehindAPushDoesNotSupersedeIt(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	push := f.enqueue(t, environmentID, func(req *RunRequest) {
+		req.Trigger = TriggerGitHub
+		req.Metadata = mustJSON(map[string]any{"changedPaths": []string{"app/main.go"}})
+	})
+	f.enqueue(t, environmentID, func(req *RunRequest) {
+		req.Trigger = TriggerSchedule
+		req.Metadata = mustJSON(map[string]any{"changedPaths": []string{}})
+	})
+	got, err := f.runs.Run(context.Background(), push.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != RunQueued {
+		t.Fatalf("push was superseded by an unscoped schedule queued behind it: %s", got.State)
+	}
+
+	stale := f.enqueue(t, environmentID, func(req *RunRequest) {
+		req.Trigger = TriggerSchedule
+		req.Metadata = mustJSON(map[string]any{"changedPaths": []string{}})
+	})
+	later := f.enqueue(t, environmentID, func(req *RunRequest) {
+		req.Trigger = TriggerGitHub
+		req.Metadata = mustJSON(map[string]any{"changedPaths": []string{"app/main.go"}})
+	})
+	got, err = f.runs.Run(context.Background(), stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != RunSuperseded || got.SupersededBy != later.ID {
+		t.Fatalf("stale schedule survived a push queued behind it: %#v", got)
+	}
+}
+
+// ProjectRunsFiltered must keep the byte-compatible default (no filters, no
+// cursor) while adding environment/operation/state filtering and before-id
+// pagination with an honest nextBefore cursor.
+func TestProjectRunsFilteredNarrowsAndPaginates(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	production := f.addEnvironment(t, "production", EnvironmentProduction)
+	staging := f.addEnvironment(t, "staging", EnvironmentStaging)
+	var deploys []*EngineRun
+	for i := 0; i < 3; i++ {
+		deploys = append(deploys, f.enqueue(t, production, func(req *RunRequest) {
+			req.Operation = OperationDeploy
+		}))
+	}
+	restart := f.enqueue(t, production, func(req *RunRequest) { req.Operation = OperationRestart })
+	stagingRun := f.enqueue(t, staging, func(req *RunRequest) { req.Operation = OperationDeploy })
+
+	// The byte-compatible default: no filters, same rows ProjectRuns returns.
+	def, nextBefore, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(def) != 5 || nextBefore != 0 {
+		t.Fatalf("unfiltered runs = %d (next=%d), want all 5 rows and no cursor", len(def), nextBefore)
+	}
+	plain, err := f.runs.ProjectRuns(context.Background(), f.projectID, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain) != len(def) {
+		t.Fatalf("ProjectRunsFiltered default diverged from ProjectRuns: %d vs %d", len(def), len(plain))
+	}
+	for i := range plain {
+		if plain[i].ID != def[i].ID {
+			t.Fatalf("row %d = %d, want %d (same order as ProjectRuns)", i, def[i].ID, plain[i].ID)
+		}
+	}
+
+	// environment narrows to just that environment's run.
+	byEnvironment, _, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{Environment: staging})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byEnvironment) != 1 || byEnvironment[0].ID != stagingRun.ID {
+		t.Fatalf("environment filter = %#v, want only %d", byEnvironment, stagingRun.ID)
+	}
+
+	// operation narrows to the restart.
+	byOperation, _, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{Operation: OperationRestart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byOperation) != 1 || byOperation[0].ID != restart.ID {
+		t.Fatalf("operation filter = %#v, want only %d", byOperation, restart.ID)
+	}
+
+	// state accepts a literal state, and the "active"/"terminal" keywords.
+	lease, err := f.runs.ClaimNext(context.Background(), "worker", QueueBudget{Heavy: 1, Light: 1}, time.Minute)
+	if err != nil || lease == nil {
+		t.Fatalf("claim = %#v, %v", lease, err)
+	}
+	if _, err := f.runs.TransitionRun(context.Background(), lease.RunID, lease.Token,
+		RunFailed, TransitionDetail{Code: "fixture_failed", Reason: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	active, _, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{State: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != len(def)-1 {
+		t.Fatalf("active state filter = %d rows, want %d still non-terminal", len(active), len(def)-1)
+	}
+	terminal, _, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{State: "terminal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(terminal) != 1 || terminal[0].ID != lease.RunID {
+		t.Fatalf("terminal state filter = %#v, want exactly the failed run", terminal)
+	}
+	failed, _, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{State: "failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 || failed[0].ID != lease.RunID {
+		t.Fatalf("literal-state filter = %#v, want exactly the failed run", failed)
+	}
+
+	// before/limit paginate newest-first with an honest cursor.
+	page, next, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 2 || next != page[1].ID {
+		t.Fatalf("first page = %#v (next=%d), want 2 rows and nextBefore = the second row's id", page, next)
+	}
+	rest, next, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{Limit: 2, Before: next})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) != 2 || rest[0].ID == page[0].ID || rest[0].ID == page[1].ID {
+		t.Fatalf("second page = %#v, want the next 2 distinct rows", rest)
+	}
+	last, next, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{Limit: 2, Before: rest[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(last) != 1 || next != 0 {
+		t.Fatalf("final page = %#v (next=%d), want the last row and no further cursor", last, next)
+	}
+
+	if _, _, err := f.runs.ProjectRunsFiltered(context.Background(), f.projectID, RunListFilter{State: "not-a-state"}); err != nil {
+		t.Fatalf("an unrecognised literal state should filter to nothing, not error: %v", err)
+	}
+}
+
 func TestQueuedAndClaimedCancellationHaveDistinctCleanup(t *testing.T) {
 	f := newOrchestrationFixture(t)
 	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
@@ -705,5 +861,122 @@ func TestSavedReadinessFailureExplainsRetainedAttempt(t *testing.T) {
 	}
 	if !strings.Contains(step.ErrorMessage, "could not connect") || !strings.Contains(step.ErrorMessage, "127.0.0.1:3123") {
 		t.Fatalf("historical failure remains opaque: %s", step.ErrorMessage)
+	}
+}
+
+func TestSavedReadinessFailureKeepsTheDiagnosedCause(t *testing.T) {
+	fixture := newOrchestrationFixture(t)
+	evidence := `{"health":{"phase":"readiness","outcome":"failed","checks":[{"name":"HTTP readiness","required":true,"outcome":"failed","attempts":[{"code":"unexpected_status","statusCode":500,"address":"http://127.0.0.1:3123/"}]}]},"diagnostics":{"available":true,"lines":200,"cause":{"code":"schema_missing","table":"public.products"}}}`
+	row := fixture.store.DB.QueryRow(`SELECT 1, 13, 'verify_readiness', 1, 'failed', 1, 60, 0, 0, ?, 'health_gate_failed', 'readiness checks failed', '{}', 0`, evidence)
+	step, err := scanRunStep(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"HTTP 500", "table public.products does not exist", "last output is in the build log"} {
+		if !strings.Contains(step.ErrorMessage, want) {
+			t.Fatalf("saved failure lacks %q: %s", want, step.ErrorMessage)
+		}
+	}
+}
+
+func TestMergeRunMetadataMergesWithoutClobberingEnqueuedKeys(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	run := f.enqueue(t, environmentID, func(req *RunRequest) {
+		req.Metadata = json.RawMessage(`{"targetReleaseId":5,"compatibility":false}`)
+	})
+
+	commit := map[string]any{
+		"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "subject": "Fix checkout flow",
+		"author": "Dev", "authoredAt": "2026-01-01T00:00:00Z",
+	}
+	updated, err := f.runs.MergeRunMetadata(context.Background(), run.ID, map[string]any{"commit": commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		TargetReleaseID int64          `json:"targetReleaseId"`
+		Compatibility   bool           `json:"compatibility"`
+		Commit          map[string]any `json:"commit"`
+	}
+	if err := json.Unmarshal(updated.Metadata, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.TargetReleaseID != 5 || decoded.Commit["sha"] != commit["sha"] {
+		t.Fatalf("merged metadata = %s", updated.Metadata)
+	}
+	reloaded, err := f.runs.Run(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reloaded.Metadata) != string(updated.Metadata) {
+		t.Fatalf("persisted metadata = %s, want %s", reloaded.Metadata, updated.Metadata)
+	}
+
+	// A second merge overwrites only the key it names; targetReleaseId and
+	// compatibility, which the run was enqueued with, survive untouched.
+	second, err := f.runs.MergeRunMetadata(context.Background(), run.ID,
+		map[string]any{"commit": map[string]any{"sha": "b", "subject": "Second pass"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded = struct {
+		TargetReleaseID int64          `json:"targetReleaseId"`
+		Compatibility   bool           `json:"compatibility"`
+		Commit          map[string]any `json:"commit"`
+	}{}
+	if err := json.Unmarshal(second.Metadata, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.TargetReleaseID != 5 || decoded.Commit["sha"] != "b" || decoded.Commit["subject"] != "Second pass" {
+		t.Fatalf("re-merged metadata = %s", second.Metadata)
+	}
+}
+
+func TestMergeRunMetadataOnUnknownRunFailsWithRunNotFound(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	if _, err := f.runs.MergeRunMetadata(context.Background(), 9999, map[string]any{"commit": "x"}); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("merge on unknown run = %v, want ErrRunNotFound", err)
+	}
+}
+
+// A retry copies the run row it retries verbatim, so metadata this store
+// merged into the original run after enqueue — a commit summary read only
+// once acquire_source materializes the source — still reaches the retry.
+func TestRetryCarriesForwardMergedRunMetadata(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	run := f.enqueue(t, environmentID)
+	if _, err := f.runs.MergeRunMetadata(context.Background(), run.ID,
+		map[string]any{"commit": map[string]any{"sha": "deadbeef", "subject": "Ship it"}}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := f.runs.ClaimNext(context.Background(), "retry-metadata-worker", QueueBudget{}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease == nil || lease.RunID != run.ID {
+		t.Fatalf("lease = %#v, want run %d", lease, run.ID)
+	}
+	failed, err := f.runs.TransitionRun(context.Background(), run.ID, lease.Token,
+		RunFailed, TransitionDetail{Code: "fixture_failed", Reason: "test failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, created, err := f.runs.Retry(context.Background(), failed.ID, "admin", "retry-carries-metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("retry unexpectedly joined an existing run")
+	}
+	var decoded struct {
+		Commit map[string]any `json:"commit"`
+	}
+	if err := json.Unmarshal(retry.Metadata, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Commit["sha"] != "deadbeef" {
+		t.Fatalf("retried run metadata = %s, want the original commit carried forward", retry.Metadata)
 	}
 }

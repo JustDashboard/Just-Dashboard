@@ -62,20 +62,20 @@ func (s *Store) ValidatePaths(j *Job) error {
 	return s.validateDatabaseDumps(context.Background(), j)
 }
 
-const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps`
+const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers`
 
 func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var (
-		j                             Job
-		sources, excludes, targetKind string
-		targetCfg, secrets, schedule  string
-		enabled                       int
-		created                       int64
-		recovery, sqlitePaths         string
-		databaseDumps                 string
+		j                              Job
+		sources, excludes, targetKind  string
+		targetCfg, secrets, schedule   string
+		enabled                        int
+		created                        int64
+		recovery, sqlitePaths          string
+		databaseDumps, pauseContainers string
 	)
 	if err := row.Scan(&j.ID, &j.Name, &sources, &excludes, &targetKind,
-		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps); err != nil {
+		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps, &j.RetentionDays, &pauseContainers); err != nil {
 		return nil, err
 	}
 	j.Sources = decodeStrings(sources)
@@ -91,6 +91,7 @@ func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	}
 	j.SQLitePaths = decodeStrings(sqlitePaths)
 	j.DatabaseDumps = decodeInt64s(databaseDumps)
+	j.PauseContainers = decodeStrings(pauseContainers)
 	return &j, nil
 }
 
@@ -123,11 +124,38 @@ func (s *Store) List(ctx context.Context) ([]*Job, error) {
 		return nil, err
 	}
 	for _, j := range out {
-		if last, err := s.LastRun(ctx, j.ID); err == nil {
-			j.LastRun = last
+		if err := s.attachReadings(ctx, j); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// attachReadings fills the figures a list shows beside a job: its last run,
+// when it last succeeded, and what its retained artifacts add up to.
+func (s *Store) attachReadings(ctx context.Context, j *Job) error {
+	if last, err := s.LastRun(ctx, j.ID); err == nil {
+		j.LastRun = last
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	var (
+		runs     int
+		size     int64
+		lastGood sql.NullInt64
+	)
+	err := s.st.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(size_bytes),0), MAX(started_at) FROM backup_runs WHERE job_id = ? AND status = ? AND artifact != ''`,
+		j.ID, string(StatusSuccess)).Scan(&runs, &size, &lastGood)
+	if err != nil {
+		return err
+	}
+	j.Stored = StoredSummary{Runs: runs, Bytes: size}
+	if lastGood.Valid && lastGood.Int64 > 0 {
+		at := time.Unix(lastGood.Int64, 0).UTC()
+		j.LastSuccessAt = &at
+	}
+	return nil
 }
 
 func (s *Store) Get(ctx context.Context, id int64) (*Job, error) {
@@ -136,7 +164,27 @@ func (s *Store) Get(ctx context.Context, id int64) (*Job, error) {
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
-	return j, err
+	if err != nil {
+		return nil, err
+	}
+	return j, s.attachReadings(ctx, j)
+}
+
+// SetEnabled pauses or resumes a job's schedule without touching anything
+// else about it, so a pause survives the edit form and never rewrites keys.
+func (s *Store) SetEnabled(ctx context.Context, id int64, enabled bool) (*Job, error) {
+	value := 0
+	if enabled {
+		value = 1
+	}
+	res, err := s.st.DB.ExecContext(ctx, `UPDATE backup_jobs SET enabled = ? WHERE id = ?`, value, id)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, id)
 }
 
 // Secrets opens the sealed credentials for one job. Callers use them and
@@ -181,10 +229,10 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 		enabled = 1
 	}
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO backup_jobs(name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO backup_jobs(name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), sealed, j.Schedule, j.Retention, enabled, time.Now().Unix(), encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps))
+		encodeJSON(j.Target), sealed, j.Schedule, j.Retention, enabled, time.Now().Unix(), encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers))
 	if err != nil {
 		return nil, err
 	}
@@ -216,9 +264,9 @@ func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSec
 	}
 	_, err := s.st.DB.ExecContext(ctx,
 		`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,
-		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ? WHERE id = ?`,
+		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ? WHERE id = ?`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), id)
+		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), id)
 	if err != nil {
 		return nil, err
 	}

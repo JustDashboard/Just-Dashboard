@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -27,6 +28,18 @@ func (s *Server) handleDeploymentDraftCreate(w http.ResponseWriter, r *http.Requ
 	}
 	httpx.SetAudit(r, "deploy.draft.create", draft.ID, nil)
 	httpx.JSON(w, http.StatusCreated, draft)
+	return nil
+}
+
+// handleDeploymentDraftList answers the caller's own uncommitted drafts so
+// the new-project page can offer to resume one instead of starting over.
+func (s *Server) handleDeploymentDraftList(w http.ResponseWriter, r *http.Request) error {
+	principal := httpx.MustPrincipal(r)
+	drafts, err := s.modules.deployPlanning.ListDrafts(r.Context(), principal.UserID())
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, drafts)
 	return nil
 }
 
@@ -92,7 +105,8 @@ func (s *Server) handleDeploymentDraftDetect(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		if !selected {
-			return mapDeploymentPlanningError(deploy.ErrInvalidPlan)
+			return mapDeploymentPlanningError(fmt.Errorf(
+				"%w: selected candidate %q was not among the detected candidates", deploy.ErrInvalidPlan, request.SelectedID))
 		}
 		detection.SelectedID = request.SelectedID
 	}
@@ -285,11 +299,31 @@ func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, er
 }
 
 func mapDeploymentPlanningError(err error) error {
+	// Checked first, above every errors.Is case below: a RemovalFailure
+	// carries its own status and message from the remover that raised it, and
+	// must not be reclassified just because its wrapped cause also happens to
+	// satisfy one of those sentinels (a missing dependency inside a removal,
+	// say, is still a removal_failed, not a deploy_not_found).
+	var removal *deploy.RemovalFailure
+	if errors.As(err, &removal) {
+		status := http.StatusConflict
+		if removal.Unavailable {
+			status = http.StatusServiceUnavailable
+		}
+		return httpx.Err(status, "removal_failed", removal.Error())
+	}
 	switch {
 	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation):
 		return mapAutomationError(err)
-	case errors.Is(err, deploy.ErrDraftNotFound), errors.Is(err, deploy.ErrDraftExpired),
-		errors.Is(err, deploy.ErrDraftForbidden):
+	// Ownership and expiry are distinguished from a genuinely missing id: a
+	// 404 for someone else's draft would tell a caller that guessed ids that
+	// this one belongs to nobody, and an expired draft is a different,
+	// recoverable situation ("start over") from one that never existed.
+	case errors.Is(err, deploy.ErrDraftForbidden):
+		return httpx.Err(http.StatusForbidden, "draft_forbidden", "this deployment draft belongs to another user")
+	case errors.Is(err, deploy.ErrDraftExpired):
+		return httpx.Err(http.StatusGone, "draft_expired", "this deployment draft has expired")
+	case errors.Is(err, deploy.ErrDraftNotFound):
 		return httpx.Err(http.StatusNotFound, "draft_not_found", "deployment draft was not found")
 	case errors.Is(err, deploy.ErrImportNotFound):
 		return httpx.Err(http.StatusNotFound, "deploy_not_found", "deployment import resource was not found")
@@ -301,6 +335,8 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(http.StatusNotFound, "environment_not_found", err.Error())
 	case errors.Is(err, deploy.ErrVariableCycle):
 		return httpx.Err(http.StatusUnprocessableEntity, "variable_cycle", err.Error())
+	case errors.Is(err, deploy.ErrVariableNotFound):
+		return httpx.Err(http.StatusNotFound, "variable_not_found", err.Error())
 	case errors.Is(err, deploy.ErrInvalidVariable):
 		return httpx.Err(http.StatusBadRequest, "invalid_variable", err.Error())
 	case errors.Is(err, deploy.ErrRemovalPlanChanged):
@@ -316,7 +352,12 @@ func mapDeploymentPlanningError(err error) error {
 	case errors.Is(err, deploy.ErrDraftIncomplete):
 		return httpx.Err(http.StatusUnprocessableEntity, "invalid_plan", err.Error())
 	case errors.Is(err, deploy.ErrInvalidPlan):
-		return httpx.Err(http.StatusUnprocessableEntity, "invalid_plan", err.Error())
+		apiErr := httpx.Err(http.StatusUnprocessableEntity, "invalid_plan", err.Error())
+		var validation *deploy.ValidationError
+		if errors.As(err, &validation) {
+			apiErr.Field = validation.Field
+		}
+		return apiErr
 	case errors.Is(err, deploy.ErrPreflightBlocked):
 		return httpx.Err(http.StatusConflict, "preflight_blocked", err.Error())
 	case errors.Is(err, deploy.ErrInvalidSource):
