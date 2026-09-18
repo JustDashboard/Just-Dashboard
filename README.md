@@ -8,7 +8,7 @@ the firewall, backups and deploys, behind a login that lives on your private net
 
 **Version 0.6.7** · Go backend · Next.js frontend · one `docker compose` stack
 
-[Install](#install) · [Security](#read-this-before-you-expose-it) · [The tour](#the-tour) · [Version](#version-and-updating) · [Configuration](#configuration-reference) · [Licence](#licence)
+[Install](#install) · [Security](#read-this-before-you-expose-it) · [The tour](#the-tour) · [Version](#version-and-updating) · [Configuration](#configuration-reference) · [Support](#who-makes-this) · [Licence](#licence)
 
 </div>
 
@@ -30,10 +30,37 @@ you pick up where you stopped.
 
 It manages exactly one machine. There is no fleet view, no agents to enrol, no cluster.
 
+## What it does, in short
+
+- **Deploy from a repository, an image, a template or a Compose file.** Detection reads the
+  project and fills the form in — framework, port, build and start commands, the variables the
+  code reads, the database it expects — and every release is immutable, so rolling back
+  reactivates what was running rather than rebuilding it. Web services get a health-gated
+  cutover; the old release keeps serving until the new one passes.
+- **Databases you can hand to an application, or to a colleague.** Eight engines browsed, queried
+  and diagrammed from one place. A database started here gets a connection string to paste, and
+  one press opens it to the internet — republishing the port and writing the firewall rule — or
+  closes it again.
+- **Fifty-three reviewed templates.** PostgreSQL, Redis, MinIO, n8n, Grafana, Uptime Kuma,
+  Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama and more, each pinned to a digest and
+  started through the same machinery as a hand-built container.
+- **Automatic Git deployments, previews and notifications.** Push to the production branch and
+  it deploys; open a pull request and, once approved, it gets its own isolated preview with a
+  comment on the PR; every run reports to Discord, Slack, Telegram, e-mail or a signed webhook
+  and to the commit's status on GitHub.
+- **Backups that know what is not backed up.** Every volume, stack, deployment, repository,
+  database and the dashboard itself listed under Coverage, written into a job in one press, with
+  writers frozen for the length of the archive and native dumps for the databases.
+- **A verdict, not a number.** Health, Docker and Security each say what was measured, what it
+  means and what to do — and where the dashboard can do it, the finding comes with a button.
+- **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
+  the tab closing, a file manager with previews, drag and drop and an editor, and every Git
+  checkout on the server with staging, history, branches and pull requests.
+
 ## Install
 
 ```bash
-git clone https://github.com/Wayy01/Just-Dashboard.git
+git clone https://github.com/JustDashboard/Just-Dashboard.git
 cd Just-Dashboard && sudo ./install.sh
 ```
 
@@ -68,8 +95,8 @@ change and puts the previous configuration back if it does not come up.
 ### Upgrading an install you already have
 
 `git pull` and `docker compose up -d --build`, or the in-app update, or `sudo ./install.sh` again —
-all three keep your `.env`, your database, your accounts and your sessions. There is no schema
-change in this release and nothing to migrate.
+all three keep your `.env`, your database, your accounts and your sessions. The columns this
+release adds are applied on first start; there is nothing to migrate by hand.
 
 Three things worth knowing before you do it:
 
@@ -151,18 +178,23 @@ history, so a spike is told apart from a trend, and it is visible from every pag
 ![The command palette](docs/command-palette.png)
 
 **⌘K** from anywhere. Every page in the nav, because a server dashboard is
-navigated by someone who already knows where they are going. The top bar keeps CPU, memory and
-the health verdict in view while you are elsewhere.
+navigated by someone who already knows where they are going.
+
+**The sidebar goes in.** A section that is several pages — Docker, Databases, Security, the proxy,
+one deployment — is a single row, and opening it replaces the list of everything with the list of
+that section, under its own name and a step back out. One list at a time, always the list for where
+you are, so nothing is a row of tabs across the top of the page saying what the sidebar to its left
+already said. A link you paste opens with the sidebar already inside the right section.
 
 **Every page comes back the way you left it.** The panel you hid, the folder you collapsed, the
-tab you were on, the sort you chose and the rail you narrowed are remembered in the browser you
+view you were on, the sort you chose and the rail you narrowed are remembered in the browser you
 are sitting at — so leaving a page and returning to it is not a page you have to set up again.
 What you were *looking at* is not: a search box, a selected row and a half-filled form all start
 empty, because a filter restored from yesterday is a table that looks broken.
 
 ### Docker: a panel you can run things from
 
-![The container list, with the verdict above it](docs/docker.png)
+![The Docker overview, with what needs attention above the stacks](docs/docker.png)
 
 **Create container** from a template, from a pasted `docker run` command, or from a
 blank form. The command and the compose service it would produce are rendered back to you,
@@ -222,7 +254,7 @@ else.
 
 ### Terminal: host shells in one workspace
 
-![The terminal](docs/terminal.png)
+![A terminal window, with the Files companion beside it](docs/terminal.png)
 
 A real PTY over a WebSocket, running `su -l` into a host account, not a shell inside the
 container. Your dotfiles, your PATH, your installed tools.
@@ -261,7 +293,7 @@ viewport. Opening and closing a session is recorded in the audit log.
 
 ### Files: browse, edit, and mean the host's paths
 
-![The file manager](docs/files.png)
+![The file manager, with pictures drawn as themselves](docs/files.png)
 
 One workbench: a sidebar that is a folder tree rooted at your home (or at whichever root or
 system directory you have browsed into, with `/etc`, `/var/www`, the other accounts and your
@@ -284,7 +316,7 @@ destination.
 
 ### Git: the repositories that are actually on the server
 
-![A repository, with a working-tree diff open beside its history](docs/git.png)
+![A repository, with its changes and a file open beside them](docs/git.png)
 
 Every repository under the configured roots, found by walking them rather than by being
 registered — and, with **Add repository**, cloned into one of them or started from an empty
@@ -312,6 +344,34 @@ opened from the branch you are on without leaving for a browser tab: with what t
 carry counted first, their review and check state on the row, merge and check-out one menu
 away, and the Actions runs on your branch underneath.
 
+### Deployments: a plan, a run, and a release you can go back to
+
+![A project, with its website preview and what needs attention](docs/deployments.png)
+
+Point it at a GitHub repository, a Git URL, a Docker image, a reviewed template, a Compose
+stack or something already running. It says what it found — the framework, the port, the
+commands, the variables the code reads, the database it expects — and shows the plan before
+anything happens. The run is a queued job with a permanent URL, so the tab can close. The
+release records the source revision, the image digest and every setting that produced it,
+which is what makes rollback a reactivation rather than another build.
+
+Each project has an overview with a live preview of the site, its deployments with rollback
+and comparison, logs, runtime, a console into the container and its settings. Production
+follows a branch; pull requests get approved, isolated previews; every run reports where you
+read — Discord, Slack, Telegram, e-mail, a signed webhook, and the commit's status on GitHub.
+
+### Databases: eight engines, one place, and a way out to the world
+
+![A database connection, with its connection string and the switch that opens it to the internet](docs/databases.png)
+
+PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. Browse
+and edit rows, change the structure with the statement shown first, run queries with
+completion and history, search for a value without knowing which table holds it, and draw the
+schema as a diagram that remembers how you arranged it. The connection page hands out the
+string an application needs, and a database started from the dashboard can be opened to the
+internet from the same page — the port republished, the firewall rule written — and closed
+again when the colleague is done.
+
 ### And the rest
 
 | | |
@@ -319,13 +379,13 @@ away, and the Actions runs on your branch underneath.
 | **Processes** | Four pages. Live: an htop-style table with owner, user and state filters and an automatic focus (CPU, memory or disk I/O, and it says why), a detail sheet with listening ports, connections, open-file limit, parent chain and children, and terminate, kill, pause, hang-up and priority as words with a sentence each. PM2: every account's daemon, whether it would come back after a reboot, start/reload/restart/stop, scale, reset counters, flush logs, delete, merged live output, daemon-wide verbs, and a dialog that starts a new application and shows the `pm2 start` it will run. Services: systemd units with failed ones first, journal streaming, enable/disable, clear-failed, reload where supported, and `daemon-reload`. Scheduled: cron jobs as rows with the schedule in words and its next run, enable/disable/edit/add/remove, systemd timers with run-now, and the system cron files. |
 | **Logs** | One viewer over files, container output, PM2 and the journal. Grep and level filters are applied on the server, before the lines are sent. |
 | **Proxy & TLS** | A form that puts a domain in front of a port and writes the nginx for you — TLS, HTTP/2, HSTS, WebSockets, upload limits, IP allow lists, basic auth and extra paths sent somewhere else — /api to a backend while everything else goes to a static build — rendered on the server and shown live next to the form, so the file it produces is ordinary nginx you can commit and edit by hand. Password files managed here too, so the basic-auth option has something to point at. Streams forward the services that do not speak HTTP. Certificates issued, renewed and revoked through certbot in a live console rather than a request that hangs, including wildcards over a DNS challenge with eight provider plugins, and certificates you bought imported with the key checked against them first. A live TLS report grading what a visitor actually gets, opened from any site or certificate. The overview says whether the engine is running and tests, reloads or restarts it; every site has its verbs as words — open, TLS report, access log, duplicate, enable, disable, delete — and every certificate says which site uses it, with a stopped renewal timer switched back on from the page and saved DNS-provider credentials removable as well as saved. |
-| **Databases** | Eight engines: PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis — all on pure-Go drivers, so the image still needs no CGO. A data grid that edits rows through forms (always scoped to a primary key), server-side sort and filtering, schema editing with the statement shown before it runs, CSV/JSON import inside one transaction, a structure view, an entity diagram that remembers how you arranged it — drag, hide, colour and annotate tables, read a table's relations both ways in its inspector, jump from any table to its rows, structure or a query, go full screen, and export the picture as PNG, SVG, Mermaid or DBML — a query runner that classifies a statement as destructive before it runs with schema-aware completion, history and saved snippets, CSV/JSON export, one-click Prisma, Drizzle, TypeScript or Zod generation from the live database, and a value search that finds which table an id lives in without knowing where to look. A Monitor tab lists what the server is running right now — with the blocking session named — and stops a stuck query, next to a per-table size breakdown for when the disk alert fires. Any row copies out as JSON or as a runnable INSERT in that engine's own syntax, or duplicates into a pre-filled form. MongoDB gets document editing, an aggregation runner, and its own export and import; Redis gets a SCAN-based key browser with full collection editing. Plus a dump that downloads to the browser as it is written, restores, and a typed-confirmation delete of the database itself, for every one of the eight — the three with a client-side tool use it, the rest are dumped over the connection the dashboard already has, so no engine's backup depends on a binary that may not be installed. Passwords never appear in argv. Optional live tests exercise configured engines and skip unavailable servers. |
+| **Databases** | Eight engines: PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis — all on pure-Go drivers, so the image still needs no CGO. A data grid that edits rows through forms (always scoped to a primary key), server-side sort and filtering, schema editing with the statement shown before it runs, CSV/JSON import inside one transaction, a structure view, an entity diagram that remembers how you arranged it — drag, hide, colour and annotate tables, read a table's relations both ways in its inspector, jump from any table to its rows, structure or a query, go full screen, and export the picture as PNG, SVG, Mermaid or DBML — a query runner that classifies a statement as destructive before it runs with schema-aware completion, history and saved snippets, CSV/JSON export, one-click Prisma, Drizzle, TypeScript or Zod generation from the live database, and a value search that finds which table an id lives in without knowing where to look. A Monitor page lists what the server is running right now — with the blocking session named — and stops a stuck query, next to a per-table size breakdown for when the disk alert fires. Any row copies out as JSON or as a runnable INSERT in that engine's own syntax, or duplicates into a pre-filled form. MongoDB gets document editing, an aggregation runner, and its own export and import; Redis gets a SCAN-based key browser with full collection editing. The connection page hands out the connection string to paste into an application — masked until shown, with a second form carrying the server's public address — and a database started from the dashboard can be opened to the internet from the same page, which republishes its port and writes the firewall rule, or closed again. Plus a dump that downloads to the browser as it is written, restores, and a typed-confirmation delete of the database itself (or, for a container on this server, of the container and its data), for every one of the eight — the three with a client-side tool use it, the rest are dumped over the connection the dashboard already has, so no engine's backup depends on a binary that may not be installed. Passwords never appear in argv. Optional live tests exercise configured engines and skip unavailable servers. |
 | **Security** | A verdict on the host, not just its settings: exposure, firewall, sshd, intrusion prevention, open ports, certificates and pending security patches, each finding carrying what was measured, what it means, what to do, and where the dashboard can do it, a button. Firewall rules on ufw **or firewalld**, with a named-service catalogue that warns before you open Redis to the world, default policies, logging, ordering, editing (the replacement goes in before the original comes out, so the port is never briefly unprotected) and outbound rules. sshd's own settings — root login, passwords, keys, port, account lists — applied through its parser and rolled back if it objects, refused outright when the change would leave nobody a way in, and streamed step by step so "it said it worked" and "the daemon came back" are not the same claim. fail2ban jails tuned in place and kept across a restart, folded into the one question a ban list cannot answer: who keeps coming back. Live connections by peer, interfaces and routes, the host's login record with the ability to end a session and the failed attempts folded into who is attacking and with which account names, and ping, DNS, traceroute and port checks on the page the question came from. Any address in any of those lists is one press from a firewall block that goes in front of every allow, a ban by hand, or a lookup of who owns it — and the jail's allowlist offers your own address by name, so hardening never locks you out. |
 | **Updates** | Two things that can be behind. The dashboard itself — with the release notes for every version between yours and the newest, and a one-click pull-rebuild-restart that runs in its own container so it survives replacing the dashboard. And the host's packages: what is behind, which of it is security, and whether a reboot is due, on apt, dnf, yum, zypper, pacman or apk. Alpine and Arch publish no advisory data, so they say so rather than reporting zero security updates. Upgrades run as a job with its output streamed, so closing the tab does not abandon a half-finished run. Upgrades only — it never installs or removes packages. |
-| **Deployments** | Browse projects in a searchable grid or list. Import a connected GitHub repository or any HTTPS/SSH Git URL, configure environment variables, and create or connect a database before deploying. Follow numbered, searchable build logs and open the finished URL; each project opens on a website preview, release details, recent deployments and measured usage, with separate settings for configuration. A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, or an existing container; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Automatic production Git deployments, plus signed provider hooks, scheduled actions, PR previews, and notifications to Discord, Slack, Telegram, e-mail or a signed webhook for every started, succeeded, failed or cancelled run. Runs report their state to GitHub commits, a failed health check shows the application's own last output next to the failure, runtime settings cap memory, CPU and processes, and a Console tab opens a shell inside the live container. Notifications that fail are retried with backoff, and the Deployments tab shows delivery figures computed from the run history: success rate, deploys per week, median release time, recovery time and the current failure streak, each with its basis. |
-| **Blueprints** | Seventeen reviewed, versioned definitions with a browsable catalogue and deterministic previews. PostgreSQL, MariaDB, MongoDB, Redis, MinIO, Adminer, Dozzle, Grafana, n8n, Uptime Kuma, Vaultwarden and the static nginx site deploy in one click as immutable image releases: the image is pinned to a digest at inspection, inputs become variables, declared passwords are generated on the server and only ever revealed on demand, data volumes are managed storage, and the definition's readiness checks and memory limit gate activation. Blueprints that install configuration files or download artifacts, and game servers, stay preview-only and say exactly why. |
+| **Deployments** | Projects are a grid of cards with one status word each, searchable, filterable and reachable from ⌘K. Creating one is a single page: pick a connected GitHub repository, any HTTPS/SSH Git URL, a Docker image, a reviewed template, a database, a Compose stack or an existing workload, check what was detected, set the variables, the database and the public address, and press Deploy. Each project has its own pages — an overview with the website preview and what needs attention, deployments with rollback and comparison, logs, runtime, a console and nine settings sections — and one command in the header, with Restart, Stop and Start, Redeploy, Rebuild without cache, Deploy a specific version and Archive behind a menu. Follow numbered, searchable build logs and open the finished URL. A deployment is a plan, a run, and an immutable release. Point it at a Git repository, a registry image, a Compose file, or an existing container; it detects what the thing is, shows you the exact plan before anything happens, and runs it as a queued job with a permanent URL you can close the tab on. Every release records its source revision, image digest, configuration digest and variable digests, so rolling back reactivates a retained artifact through the same checks and cutover path rather than rebuilding and hoping. An HTTP service with somewhere to put a candidate gets a health-gated cutover; a database, a game server or anything holding an exclusive volume is told, before it runs, that it will stop first. Domains, ports, storage, backups and databases are *linked* to their own pages rather than reimplemented — the workspace reads each owner and says so when one cannot be reached, instead of showing an empty panel that looks healthy. Automatic production Git deployments, plus signed provider hooks, scheduled actions, PR previews, and notifications to Discord, Slack, Telegram, e-mail or a signed webhook for every started, succeeded, failed or cancelled run. Runs report their state to GitHub commits, a failed health check shows the application's own last output next to the failure and names the cause when that output proves one (a table missing from a freshly linked database), runtime settings cap memory, CPU and processes, and a Console page opens a shell inside the live container. Detection reads Node, Python (Django, Flask, FastAPI, Streamlit, Gradio), Go, Rust, Java (Maven and Gradle), .NET, Deno and PHP (Laravel, Symfony, Slim) projects into a ready plan — framework, port, start command, interpreter or toolchain, the variables the code reads with their examples, the database it expects, a minted `APP_KEY` for Laravel — and every one of those layouts is built and served live by the test suite. A domain can ask visitors for a password, kept as a bcrypt hash and enforced by the proxy, so a staging site or a preview is not public. One GitHub App, created from the Credentials page through GitHub's own manifest flow, replaces a webhook secret per repository, a personal token for private clones and statuses, and reading a run log for a preview's address: its installations' repositories appear in the import picker, its single webhook feeds every trigger that asked for it, and each preview keeps one comment on its pull request with its state and address. Backups go to a local path, S3 or Backblaze B2, proven against a real S3 API, and certificates can be ordered from a staging or private ACME authority for a rehearsal. Notifications that fail are retried with backoff, and the Deployments page shows delivery figures computed from the run history: success rate, deploys per week, median release time, recovery time and the current failure streak, each with its basis. |
+| **Blueprints** | Fifty-three reviewed, versioned definitions with a browsable catalogue and deterministic previews. Databases and stores (PostgreSQL, MySQL, MariaDB, MongoDB, Redis, InfluxDB, RabbitMQ, Meilisearch, Typesense, MinIO), tools (Adminer, pgAdmin, phpMyAdmin, Mongo Express, Dozzle, Portainer, Grafana, Prometheus, Metabase, code-server, Jupyter, Ollama, File Browser, Syncthing, Stirling PDF, IT-Tools, CyberChef, draw.io, whoami), applications (n8n, Uptime Kuma, Vaultwarden, Nextcloud, Jellyfin, Navidrome, Audiobookshelf, Kavita, Directus, Healthchecks, Gotify, Homepage, Shlink, linkding, FreshRSS, wallabag, Memos, Trilium, Actual) and the static nginx site deploy in one click as immutable image releases: the image is pinned to a digest at inspection, inputs become variables, declared passwords are generated on the server and only ever revealed on demand, data volumes are managed storage, a second port the proxy cannot carry (Gitea's SSH, Syncthing's sync protocol) is published beside the routed one, and the definition's readiness checks and memory limit gate activation. Every image reference is checked against its registry and every deployable definition is started live by the catalogue sweep, so a health path or a missing setting fails in the test, not on a first deploy. Blueprints that install configuration files or download artifacts, and game servers, stay preview-only and say exactly why. |
 | **Game servers** | Adapters for existing Minecraft Java and Bedrock deployments provide supported console/player controls and declared `server.properties` settings. Property reads exclude undeclared credentials, and edits preserve unrelated settings. New game-server deployments through blueprints are unavailable in this release; UDP runtime deployment and Bedrock save/backup automation remain unsupported. |
-| **Backups** | Scheduled archives to local disk, S3 or Backblaze B2, with retention and restore. A job can also name saved database connections: every run captures a native dump of each (pg_dump, mysqldump, mongodump, a Redis snapshot, or the built-in dump when the tool is not installed) into the same archive with its own manifest evidence, a deployment linked to that database accepts the dump as its backup coverage, and any run can restore a dump back into the connection or into a drill database on the same server with a typed confirmation. |
+| **Backups** | Scheduled archives to local disk, S3 or Backblaze B2, kept by count and by age, with restore into a directory, back in place over the original paths, or of a single file picked out of the archive browser. The page says what on the server is *not* backed up — every Docker volume, compose stack, deployment, Git repository, saved database, the proxy's configuration and the dashboard's own data — and writes the job for any of them in one press, with the containers that write to a volume frozen for the length of the archive so the copy is taken at one instant. A job can also name saved database connections: every run captures a native dump of each (pg_dump, mysqldump, mongodump, a Redis snapshot, or the built-in dump when the tool is not installed) into the same archive with its own manifest evidence, a deployment linked to that database accepts the dump as its backup coverage, and any run can restore a dump back into the connection or into a drill database on the same server with a typed confirmation. A job that goes two intervals without a good run is reported as overdue, here and on the Overview, and an administrator can download any verified archive. |
 | **System users** | Host accounts, SSH keys, lock and unlock. |
 | **Audit log** | Every state-changing request, filterable by actor, action and outcome. |
 | **Dashboard → Configuration** | The panel's own settings: the address and port it answers on, which certificate it presents, the network allowlist, whether two-factor is compulsory, session lifetimes, and the internal ports. Applying a change restarts the stack into it from a container that outlives the restart, narrates each phase, and **puts the previous configuration back automatically** if the new one does not come up. Restart and rebuild live here too. |
@@ -354,7 +414,7 @@ cannot pass the public HTTP challenge.
 
 Git projects default to deploying new commits from their selected production branch after the first
 deployment. The server checks the branch every five seconds over an outbound Git connection, so this
-works while the dashboard remains private. **Deployment policy** on the overview or Automations page
+works while the dashboard remains private. **Deploy automatically** under **Settings → General**
 can disable automatic deployments or set repository-relative include/exclude paths. Polling and push
 webhooks share the same branch, complete Git change comparison and commit deduplication. Manual-only
 mode also blocks new signed-hook and scheduled deployments; already queued runs continue. An unchanged
@@ -370,7 +430,7 @@ Additional signed webhooks, preview environments and schedules remain separate i
 watch-path filters do not disable the default production branch monitor.
 
 Pull-request previews require administrator approval of each exact commit. Review it under
-**Settings → Automations → Preview environments**, configure the preview's own variables, then deploy.
+**Settings → Automation → Preview environments**, configure the preview's own variables, then deploy.
 Production credentials and database links are not inherited; container previews receive separate storage
 and a dedicated network. Compose and host-access preview plans are currently refused. PR close removes
 only preview-owned resources and archives the environment after cleanup succeeds.
@@ -379,16 +439,28 @@ and requires approval again. On upgrade, older unsafe previews are stopped and t
 their existing containers and data are retained. The preview list reports isolation failures and guides
 fresh approval/configuration before another deployment.
 
+Detection reads the repository and fills the form in: the framework (Next.js, SvelteKit, Astro, Nuxt,
+Remix, React Router, SolidStart, TanStack Start, Angular, NestJS, Gatsby, Docusaurus, VitePress, Eleventy,
+Create React App, Vue CLI, Vite and the plain Node servers; Django, FastAPI, Flask, Streamlit and Gradio;
+Go; Rust with axum, Actix, Rocket, warp or Poem; Spring Boot, Quarkus and Micronaut on Maven or Gradle;
+ASP.NET Core; Deno), its build and start commands, the port, the interpreter or toolchain release, a
+`Procfile`'s web process, the environment variables the code reads (from `.env.example` and the source,
+with the file each came from) and the databases it connects to, offered as one button each. Unpinned
+Python requirements deploy with a warning rather than a refusal, and an undeclared `gunicorn` or
+`uvicorn` is installed. A client-routed site gets nginx's `index.html` fallback. Everything detected is
+an editable setting, and `/deploy/new?repo=<clone url>` opens the form with a repository filled in.
+
 For automatic recipes, build-scoped variables reach the build command without extra mapping. Use
-**Build settings** to limit private package credentials to dependency installation. Values compiled
+**Settings → Build** to limit private package credentials to dependency installation. Values compiled
 into browser assets (including `NEXT_PUBLIC_` and `VITE_` settings) are public. Static sites use port 80;
 SvelteKit requires its Node or static adapter. Go builds select a toolchain from the source or an explicit
-Go version, and custom build commands must produce `/out/app`. CGO workloads use a Dockerfile.
+Go version, and custom build commands must produce `/out/app`. CGO workloads, nightly Rust, Java releases
+outside 11/17/21/25 and .NET before 8 use a Dockerfile.
 
 Connecting a database saves a reference to its encrypted connection. Locally provisioned databases use
 a stable hostname on the deployment's managed network; matching database container replacements are
 reconnected automatically even when their IP changes. Applications must retry lost connections. Existing
-literal IP settings need reconnecting once to adopt this behavior. **Configuration → Dependencies** shows
+literal IP settings need reconnecting once to adopt this behavior. The project's **Runtime** page shows
 the network status. Removing that network leaves the database and its data intact. See
 [database connections](docs/internal/deployments/database-networks.md) for supported cases and cleanup.
 
@@ -397,8 +469,17 @@ header’s actions menu. Confirmation archives its history, disables automatic d
 new project—even from the same repository. Existing deleted projects get this name-reuse fix on upgrade.
 Run numbers start at **Run #1** for each new project and increase with each run, including retries.
 Existing history receives project-specific numbers on upgrade; saved run links keep working. Running containers,
-routes and data are retained; use **Settings → Lifecycle** to preview and
+routes and data are retained; use **Settings → Danger zone** to preview and
 remove managed resources separately.
+
+**Credentials** on the deployments page keeps the tokens, SSH keys, registry logins and provider
+tokens the server uses to read private repositories and registries. They are sealed with the
+server's key, never shown again, testable against their remote, picked from a list when a project
+is created or its source changes, and refused for removal while a project uses them. A project's
+repository, branch, root directory or image can be changed under **Settings → General**; the new
+source is checked before it is saved, and the next deployment builds from it. **Duplicate
+project** in the header's actions menu opens a draft with the same source and settings, the
+variable names without their values, and no domains.
 
 Open **Archived** on the deployments page to search retained projects. **Delete permanently** removes
 an archived project’s saved configuration, variables, and history after confirmation. It leaves host
@@ -549,7 +630,9 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
 | `JD_METRICS_RETENTION` | `7d` | How long that history is kept. Accepts days. `0` records nothing and leaves only the live feed. |
 | `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, four times a day, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
-| `JD_UPDATE_REPO` | `Wayy01/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
+| `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it. |
+| `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
+| `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
 | `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
@@ -808,13 +891,39 @@ The dashboard's own state is a SQLite database in `JD_DATA_DIR`
 and every encrypted secret.
 
 Back up that directory **and** keep `JD_MASTER_KEY` somewhere separate. Either one alone will
-not restore.
+not restore. The Backups page lists the dashboard itself under Coverage and writes that job for you:
+the data directory with its staging and build workspaces excluded, and its SQLite file taken as a
+consistent snapshot.
 
-Backup jobs offer **Consistency and recovery checks**. Select SQLite files for native snapshots while
-the application is running. A pinned application image can check a restored copy against its schema
+Backup jobs offer **Consistency** settings. Select SQLite files for native snapshots while
+the application is running, and name the containers to pause for the archive step — a pause is a
+freeze, not a stop, and the container resumes where it was the moment the archive is written. A pinned application image can check a restored copy against its schema
 and a known canary record; history shows verification and cleanup results. Deployment policies can
 require that exact-artifact evidence before activation. Other database engines still need their own
 consistent capture protocol. See [application restore verification](docs/internal/deployments/restore-verification.md).
+
+## Who makes this
+
+Just Dashboard is built and maintained by one person: [Wayy01](https://github.com/Wayy01),
+who started it, runs it on the servers it was written for, and writes every release. The code
+lives under the [JustDashboard](https://github.com/JustDashboard) organisation on GitHub, with
+Wayy01 as its founder, its maintainer and, so far, its only contributor. Issues and pull
+requests are read by the same person who wrote the thing you are reporting on.
+
+### Supporting the work
+
+The dashboard is free, and every feature stays free. If it has saved you an evening and you
+would like to give something back, there is a
+[Buy Me a Coffee page](https://buymeacoffee.com/ionmoisei72). It is entirely optional and
+buys nothing but the time to keep going.
+
+### Sponsors
+
+Companies and individuals who would like to sponsor the project can write to
+[ionmoisei755@gmail.com](mailto:ionmoisei755@gmail.com). Sponsors are listed here, with a logo
+and a link, for as long as they sponsor.
+
+*No sponsors yet — the space is open.*
 
 ## Licence
 

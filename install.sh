@@ -2,7 +2,7 @@
 #
 # One-command setup for Just Dashboard.
 #
-#   git clone https://github.com/Wayy01/Just-Dashboard.git
+#   git clone https://github.com/JustDashboard/Just-Dashboard.git
 #   cd Just-Dashboard && sudo ./install.sh
 #
 # It asks a handful of questions, writes .env, builds the stack and leaves you

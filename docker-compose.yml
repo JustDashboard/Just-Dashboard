@@ -90,7 +90,7 @@ services:
       # JD_UPDATE_DIR is normally empty — the dashboard asks Docker where this
       # stack was deployed from, which is why the label below is not needed.
       JD_UPDATE_CHECK: ${JD_UPDATE_CHECK:-true}
-      JD_UPDATE_REPO: ${JD_UPDATE_REPO:-Wayy01/Just-Dashboard}
+      JD_UPDATE_REPO: ${JD_UPDATE_REPO:-JustDashboard/Just-Dashboard}
       JD_UPDATE_BRANCH: ${JD_UPDATE_BRANCH:-main}
       JD_UPDATE_DIR: ${JD_UPDATE_DIR:-}
       JD_LOG_LEVEL: ${JD_LOG_LEVEL:-info}
