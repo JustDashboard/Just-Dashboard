@@ -150,3 +150,13 @@ jobs:
           name: deployment-live-evidence
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
+      - name: Return the build cache the fixtures filled
+        # The runner shares the release host's Docker daemon. One pass of the
+        # live fixtures leaves around ten gigabytes of BuildKit cache behind,
+        # which filled the disk after three runs; the host's own deployments
+        # rebuild their layers, they do not depend on them being kept.
+        if: always()
+        run: |
+          docker builder prune --all --force --keep-storage 2GB
+          docker image prune --force
+          df -h / | tail -1

@@ -60,8 +60,10 @@ carries no licensing question at all.
   `package.json`; dependencies use the frozen Bun lockfile; Playwright's Chromium is installed into the
   runner user's cache. Race packages run serially on a dedicated job so frontend builds do not compete
   with the fleet latency check. Required live fixtures fail CI if skipped or absent. Logs and browser
-  failure traces are retained for 30 days, including failed runs. Workflows from outside contributors
-  wait for approval before they touch the runner. CI does not replace public TLS, clean-host
+  failure traces are retained for 30 days, including failed runs. The live job ends by pruning the
+  BuildKit cache its fixtures fill back to two gigabytes, because the runner shares the host's Docker
+  daemon and a few unpruned runs fill the disk. Workflows from outside contributors wait for approval
+  before they touch the runner. CI does not replace public TLS, clean-host
   installation, remote-host, architecture or soak acceptance.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
