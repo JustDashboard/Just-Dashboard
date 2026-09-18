@@ -8,8 +8,11 @@ on:
 permissions:
   contents: read
 
+# One runner, one job at a time: a push to a branch with an open pull request
+# would otherwise queue the same commit twice. Keying on the branch name lets
+# the push run and the pull-request run cancel each other, so the newest wins.
 concurrency:
-  group: verify-${{ github.workflow }}-${{ github.ref }}
+  group: verify-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -36,7 +39,10 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+          # The runner's home persists between jobs, so the module and build
+          # caches are already on disk; restoring a cache archive over them
+          # fails on files that exist, and saving one afterwards fails the job.
+          cache: false
       - name: Build, vet and test
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
@@ -108,7 +114,10 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+          # The runner's home persists between jobs, so the module and build
+          # caches are already on disk; restoring a cache archive over them
+          # fails on files that exist, and saving one afterwards fails the job.
+          cache: false
       - name: Verify runner tooling
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
