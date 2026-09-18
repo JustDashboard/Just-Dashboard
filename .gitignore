@@ -1,8 +1,17 @@
 node_modules/
 .next/
-out/
-dist/
-build/
+# Build output only at a project root: an unanchored `build/` swallowed
+# frontend/src/app/(dashboard)/deploy/[id]/(project)/settings/build/, and the
+# Build settings page shipped as a 404 on every fresh checkout.
+/out/
+/dist/
+/build/
+/frontend/out/
+/frontend/dist/
+/frontend/build/
+/backend/out/
+/backend/dist/
+/backend/build/
 *.log
 .env
 .env.local

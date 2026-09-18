@@ -1078,10 +1078,6 @@ test.describe("Screenshots", () => {
         path: testInfo.outputPath(`${screen.name}-1280.png`),
         fullPage: true,
       })
-      await page.screenshot({
-        path: `/tmp/claude-1000/-home-ubuntu-Just-Dashboard/90a09a77-3f7a-492f-821f-889e6c3484c4/scratchpad/screens/${screen.name}-1280.png`,
-        fullPage: true,
-      })
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true)
@@ -1090,10 +1086,6 @@ test.describe("Screenshots", () => {
       await page.waitForTimeout(150)
       await page.screenshot({
         path: testInfo.outputPath(`${screen.name}-390.png`),
-        fullPage: true,
-      })
-      await page.screenshot({
-        path: `/tmp/claude-1000/-home-ubuntu-Just-Dashboard/90a09a77-3f7a-492f-821f-889e6c3484c4/scratchpad/screens/${screen.name}-390.png`,
         fullPage: true,
       })
       expect(
