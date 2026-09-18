@@ -130,7 +130,9 @@ loses its path and extension, and a tool run from `node_modules` answers with it
 `node /usr/local/bin/claude` is "claude". A title counts only while the group that set it still holds the
 terminal, which lets a program that names itself win, one that does not fall back to its process name, and
 the prompt's directory title return the moment the job ends — the bundled prompts set that title (`\W`,
-`%1~`).
+`%1~`). A group that holds the terminal with no live process left in it is the instant between a job
+ending and its shell taking the terminal back; that reading is a transition, not an idle prompt with no
+title, and what was last published stands until the shell is back.
 
 Holding the terminal is not working, and the difference is what the marks are for. A job is announced
 (`busy`) only once it has lasted a second (`holdOff`): `ls` holds the terminal for milliseconds, and a

@@ -223,7 +223,10 @@ func TestDirectPTYAttachRetainsBestEffortShellHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	// A real login shell as the host account, with whatever its rc files
+	// load; on a runner already busy with the rest of the suite, five seconds
+	// to the first prompt was not a fair bound.
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		snapshot, id, _, err := sess.Subscribe()
 		if err != nil {
