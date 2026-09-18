@@ -23,7 +23,7 @@ env:
 
 jobs:
   backend:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 25
     defaults:
       run:
@@ -56,7 +56,7 @@ jobs:
           retention-days: 30
 
   frontend:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 20
     defaults:
       run:
@@ -72,7 +72,7 @@ jobs:
       - name: Install locked dependencies and Chromium
         run: |
           bun install --frozen-lockfile
-          bun run test:browser:install --with-deps
+          bun run test:browser:install
       - name: Lint, unit tests, production build and browser gate
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
@@ -93,7 +93,7 @@ jobs:
           retention-days: 30
 
   deployment-live:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 45
     env:
       JD_DEPLOY_LIVE: "1"
@@ -109,7 +109,7 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Verify disposable runner infrastructure
+      - name: Verify runner tooling
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           docker version | tee "$RUNNER_TEMP/jd-ci/docker-version.txt"
