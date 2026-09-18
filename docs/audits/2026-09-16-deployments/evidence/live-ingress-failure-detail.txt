@@ -1,0 +1,3 @@
+{"Time":"2026-09-16T01:22:06.260570328Z","Action":"output","Package":"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc","Test":"TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute","Output":"    docker_caddy_test.go:142: Docker fixture command failed: exit status 1: Error response from daemon: page not found\n"}
+{"Time":"2026-09-16T01:22:06.819947098Z","Action":"fail","Package":"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc","Test":"TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute","Elapsed":4.06}
+{"Time":"2026-09-16T01:22:06.827524999Z","Action":"fail","Package":"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc","Elapsed":7.761}

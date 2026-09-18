@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   External,
+  GitHubMark,
   Key,
   Logout,
   RefreshClockwise,
@@ -19,19 +20,12 @@ import { useAuth } from "@/hooks/use-auth"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Field } from "@/components/form"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,18 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-
-/**
- * GitHub's own brand mark, drawn inline — no icon set ships brand logos, and
- * a generic glyph beside the word "GitHub" reads as a different product.
- */
-export function GitHubMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden className={cn("size-4", className)}>
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-    </svg>
-  )
-}
+import { useCopy } from "@/hooks/use-copy"
 
 /**
  * Who this dashboard is, to GitHub, in the repository being worked on.
@@ -122,9 +105,9 @@ export function GitHubAccountControl({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
             <GitHubMark className="size-3.5" />
-            unavailable
+            <Tag>no gh</Tag>
           </span>
         </TooltipTrigger>
         <TooltipContent>
@@ -143,7 +126,7 @@ export function GitHubAccountControl({
             <Button
               size={compact ? "sm" : "sm"}
               variant={compact ? "ghost" : "outline"}
-              className={compact ? "h-6 gap-1 px-1.5 text-[11px] text-muted-foreground" : undefined}
+              className={compact ? "h-6 gap-1 px-1.5 text-hint text-muted-foreground" : undefined}
               disabled={!canAdmin || !status.data}
               onClick={() => setSigningIn(true)}
             >
@@ -180,12 +163,12 @@ export function GitHubAccountControl({
               variant={compact ? "ghost" : "outline"}
               className={cn(
                 "gap-1.5 pr-2 pl-1.5",
-                compact && "h-6 gap-1 pr-1.5 pl-1 text-[11px] font-normal",
+                compact && "h-6 gap-1 pr-1.5 pl-1 text-hint font-normal",
               )}
             >
               <Avatar size="sm" className={compact ? "size-4" : "size-5"}>
                 {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}
-                <AvatarFallback className="text-[9px]">{initials}</AvatarFallback>
+                <AvatarFallback className="text-micro">{initials}</AvatarFallback>
               </Avatar>
               <span className={compact ? "max-w-[7rem] truncate" : "max-w-[10rem] truncate"}>
                 {account.login}
@@ -202,13 +185,13 @@ export function GitHubAccountControl({
       </Tooltip>
       <DropdownMenuContent align="end" className="w-72">
         <DropdownMenuLabel className="space-y-1 font-normal">
-          <p className="text-[13px] font-medium">{account.name || account.login}</p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-body font-medium">{account.name || account.login}</p>
+          <p className="text-hint text-muted-foreground">
             {account.login} on {account.host}
             {account.owner ? ` · for the ${account.owner} account` : ""}
           </p>
           {account.committerEmail && (
-            <p className="truncate font-mono text-[10px] text-muted-foreground">
+            <p className="truncate font-mono text-micro text-muted-foreground">
               {account.committerName} &lt;{account.committerEmail}&gt;
             </p>
           )}
@@ -216,27 +199,33 @@ export function GitHubAccountControl({
         {account.scopes && account.scopes.length > 0 && (
           <div className="flex flex-wrap gap-1 px-2 pb-1.5">
             {account.scopes.map((s) => (
-              <Badge key={s} variant="secondary" className="font-mono text-[10px] font-normal">
+              <Tag key={s} mono>
                 {s}
-              </Badge>
+              </Tag>
             ))}
           </div>
         )}
         {!account.gitConfigured ? (
           <div className="space-y-1.5 px-2 pb-1.5">
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-hint text-muted-foreground">
               {!account.committerEmail
                 ? "git here has no name and address, so it cannot record a commit as you yet."
                 : "git here is not set up to hand the token to a push yet."}
             </p>
-            <Button size="sm" className="w-full" disabled={fixing || !canAdmin} onClick={useForGit}>
-              {fixing ? <Spinner className="size-3.5" /> : <Wrench className="size-3.5" />}
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={fixing || !canAdmin}
+              onClick={useForGit}
+              pending={fixing}
+            >
+              <Wrench className="size-3.5" />
               Use this account for git
             </Button>
           </div>
         ) : (
           account.remoteProtocol === "ssh" && (
-            <p className="px-2 pb-1.5 text-[11px] text-muted-foreground">
+            <p className="px-2 pb-1.5 text-hint text-muted-foreground">
               This repository pushes over SSH, so the push uses this server&apos;s key. Commits are
               recorded as the account, and pull requests are opened as it.
             </p>
@@ -329,7 +318,7 @@ function SignInDialog({
   const [host, setHost] = useState("github.com")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
-  const [copied, setCopied] = useState(false)
+  const { copy, copied } = useCopy()
   const [remaining, setRemaining] = useState(0)
   // The callback is closed over by the poll below, which must not restart on
   // every render of the parent, so it is kept in a ref synced after render
@@ -432,152 +421,148 @@ function SignInDialog({
     }
   }
 
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      notify.error("Could not copy", "Select the code and copy it by hand.")
-    }
-  }
-
   return (
-    <Dialog open={open} onOpenChange={change}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <GitHubMark className="size-4" />
-            Sign in to GitHub
-          </DialogTitle>
-          <DialogDescription>
-            Commits and pushes made from this page will be yours, and pull requests can be opened
-            from here.
-            {owner
-              ? ` The credential is stored for the ${owner} account, which owns this repository.`
-              : ""}
-          </DialogDescription>
-        </DialogHeader>
-
-        {error && (
-          <Notice title="Sign-in failed" tone="danger">
-            {error}
-          </Notice>
-        )}
-
-        {stage.kind === "done" ? (
-          <div className="space-y-3 py-2 text-center">
-            <ShieldCheck className="mx-auto size-8 text-success" />
-            <div>
-              <p className="text-[13px] font-medium">
-                Signed in as {stage.account?.login ?? "your account"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                git here now uses the account for pushes, and records commits as{" "}
-                {stage.account?.committerName || stage.account?.login}.
-              </p>
-            </div>
-          </div>
-        ) : stage.kind === "code" ? (
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label>Your one-time code</Label>
-              <div className="flex items-center justify-center rounded-lg border border-hairline bg-surface-sunken py-3">
-                <code className="font-mono text-2xl tracking-[0.35em]">{stage.start.userCode}</code>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => copy(stage.start.userCode)}>
-                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied ? "Copied" : "Copy code"}
-                </Button>
-                <Button size="sm" asChild>
-                  <a href={stage.start.verificationUri} target="_blank" rel="noreferrer">
-                    <External className="size-3.5" />
-                    Open github.com and enter it
-                  </a>
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 rounded-lg border border-hairline bg-surface-header/60 px-3 py-2 text-xs text-muted-foreground">
-              <Spinner className="size-3.5" />
-              Waiting for you to authorise the GitHub CLI…
-              {remaining > 0 && (
-                <span className="numeric ml-auto font-mono">
-                  {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
-                </span>
-              )}
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              This is the same flow as <span className="font-mono">gh auth login</span>. The code
-              expires if it is not entered, and nothing is stored until you approve it.
-            </p>
-          </div>
-        ) : mode === "code" ? (
-          <div className="space-y-3">
-            <ol className="space-y-1.5 text-[13px] text-muted-foreground">
-              <li>1. We ask GitHub for a one-time code.</li>
-              <li>2. You enter it on github.com and approve the GitHub CLI.</li>
-              <li>3. The token is stored on this server, for this repository&apos;s account.</li>
-            </ol>
-            <Button className="w-full" disabled={busy} onClick={start}>
-              {busy ? <Spinner className="size-4" /> : <GitHubMark className="size-4" />}
-              Get a one-time code
-            </Button>
-            <button
-              className="w-full text-center text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-              onClick={() => setMode("token")}
-            >
-              Use a token instead — for GitHub Enterprise, or a machine account
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="gh-token">Personal access token</Label>
-              <Input
-                id="gh-token"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="ghp_…"
-                className="font-mono"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Needs the <span className="font-mono">repo</span> scope, and{" "}
-                <span className="font-mono">workflow</span> to push changes under{" "}
-                <span className="font-mono">.github/workflows</span>.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="gh-host">Host</Label>
-              <Input
-                id="gh-host"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="github.com"
-                className="font-mono"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button className="flex-1" disabled={busy || !token.trim()} onClick={signInWithToken}>
-                {busy ? <Spinner className="size-4" /> : <Key className="size-4" />}
-                Sign in with token
-              </Button>
-              <Button variant="ghost" onClick={() => setMode("code")}>
-                Back
-              </Button>
-            </div>
-          </div>
-        )}
-
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={change}
+      title="Sign in to GitHub"
+      description={
+        <>
+          Commits and pushes made from this page will be yours, and pull requests can be opened from
+          here.
+          {owner
+            ? ` The credential is stored for the ${owner} account, which owns this repository.`
+            : ""}
+        </>
+      }
+      footer={
+        <>
           <Button variant="ghost" size="sm" onClick={() => change(false)}>
             {stage.kind === "done" ? "Close" : "Cancel"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      {error && (
+        <Notice title="Sign-in failed" tone="danger">
+          {error}
+        </Notice>
+      )}
+
+      {stage.kind === "done" ? (
+        <div className="space-y-3 py-2 text-center">
+          <ShieldCheck className="mx-auto size-8 text-success" />
+          <div>
+            <p className="text-body font-medium">
+              Signed in as {stage.account?.login ?? "your account"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              git here now uses the account for pushes, and records commits as{" "}
+              {stage.account?.committerName || stage.account?.login}.
+            </p>
+          </div>
+        </div>
+      ) : stage.kind === "code" ? (
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <p className="eyebrow">Your one-time code</p>
+            <div className="flex items-center justify-center rounded-lg border border-hairline bg-surface-sunken py-3">
+              <code className="font-mono text-2xl tracking-[0.35em]">{stage.start.userCode}</code>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => copy(stage.start.userCode)}>
+                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                {copied ? "Copied" : "Copy code"}
+              </Button>
+              <Button size="sm" asChild>
+                <a href={stage.start.verificationUri} target="_blank" rel="noreferrer">
+                  <External className="size-3.5" />
+                  Open github.com and enter it
+                </a>
+              </Button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-hairline bg-surface-header/60 px-3 py-2 text-xs text-muted-foreground">
+            <Spinner className="size-3.5" />
+            Waiting for you to authorise the GitHub CLI…
+            {remaining > 0 && (
+              <span className="numeric ml-auto font-mono">
+                {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
+              </span>
+            )}
+          </div>
+          <p className="text-hint text-muted-foreground">
+            This is the same flow as <span className="font-mono">gh auth login</span>. The code
+            expires if it is not entered, and nothing is stored until you approve it.
+          </p>
+        </div>
+      ) : mode === "code" ? (
+        <div className="space-y-3">
+          <ol className="space-y-1.5 text-body text-muted-foreground">
+            <li>1. We ask GitHub for a one-time code.</li>
+            <li>2. You enter it on github.com and approve the GitHub CLI.</li>
+            <li>3. The token is stored on this server, for this repository&apos;s account.</li>
+          </ol>
+          <Button className="w-full" onClick={start} pending={busy}>
+            <GitHubMark className="size-4" />
+            Get a one-time code
+          </Button>
+          <button
+            className="w-full text-center text-hint text-muted-foreground hover:text-foreground hover:underline"
+            onClick={() => setMode("token")}
+          >
+            Use a token instead — for GitHub Enterprise, or a machine account
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field
+            label="Personal access token"
+            htmlFor="gh-token"
+            hint={
+              <>
+                Needs the <span className="font-mono">repo</span> scope, and{" "}
+                <span className="font-mono">workflow</span> to push changes under{" "}
+                <span className="font-mono">.github/workflows</span>.
+              </>
+            }
+          >
+            <Input
+              id="gh-token"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="ghp_…"
+              className="font-mono"
+            />
+          </Field>
+          <Field label="Host" htmlFor="gh-host" hint="github.com, or a GitHub Enterprise host.">
+            <Input
+              id="gh-host"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder="github.com"
+              className="font-mono"
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Button
+              className="flex-1"
+              disabled={busy || !token.trim()}
+              onClick={signInWithToken}
+              pending={busy}
+            >
+              <Key className="size-4" />
+              Sign in with token
+            </Button>
+            <Button variant="ghost" onClick={() => setMode("code")}>
+              Back
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   )
 }

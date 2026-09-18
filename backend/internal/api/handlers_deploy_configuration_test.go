@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 func TestDeploymentConfigurationRoutesEnforceSessionCapabilityConfirmationAndAudit(t *testing.T) {
@@ -123,6 +124,221 @@ func TestDeploymentConfigurationRoutesEnforceSessionCapabilityConfirmationAndAud
 	}
 	if strings.Contains(audits, secret) {
 		t.Fatalf("deployment audit leaked secret: %s", audits)
+	}
+}
+
+// A remover failure must reach the operator as the remover's own sentence at
+// 503 (a missing owner) rather than a bare 500, with the partial execution —
+// what still needs attention — in the body beside the error.
+func TestRemoveManagedReportsAnUnavailableOwnerWithThePartialExecution(t *testing.T) {
+	s := testServer(t)
+	projectID, _, backupID := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "remove-fail-admin", auth.RoleAdmin)}
+	archivePath := fmt.Sprintf("/api/v1/deploy/%d/archive", projectID)
+	if response := admin.do(http.MethodPost, archivePath, `{}`, nil); response.Code != http.StatusOK {
+		t.Fatalf("archive = %d %s", response.Code, response.Body.String())
+	}
+	removalPath := fmt.Sprintf("/api/v1/deploy/%d/removal-plan", projectID)
+	preview := admin.do(http.MethodPost, removalPath, `{}`, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("removal preview = %d %s", preview.Code, preview.Body.String())
+	}
+	var plan deploy.RemovalPlan
+	if err := json.Unmarshal(preview.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	var backup *deploy.RemovalTarget
+	for index := range plan.Targets {
+		if plan.Targets[index].Kind == "backup_job" && plan.Targets[index].ResourceID == fmt.Sprint(backupID) {
+			backup = &plan.Targets[index]
+		}
+	}
+	if backup == nil {
+		t.Fatalf("no backup_job target in plan: %#v", plan.Targets)
+	}
+
+	s.modules.backupStore = nil // the owner this removal needs is unavailable
+	removePath := fmt.Sprintf("/api/v1/deploy/%d/remove-managed", projectID)
+	body, _ := json.Marshal(deploy.RemoveManagedRequest{PlanDigest: plan.Digest, TargetIDs: []string{backup.ID}})
+	response := admin.do(http.MethodPost, removePath, string(body), nil)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("remove-managed with unavailable owner = %d %s", response.Code, response.Body.String())
+	}
+	var decoded struct {
+		Error     httpx.APIError          `json:"error"`
+		Execution deploy.RemovalExecution `json:"execution"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Error.Code != "removal_failed" || decoded.Error.Message != "Backups is unavailable" {
+		t.Fatalf("error body = %#v", decoded.Error)
+	}
+	found := false
+	for _, target := range decoded.Execution.Remaining {
+		found = found || target.ID == backup.ID
+	}
+	if !found {
+		t.Fatalf("execution body missing the failed target in remaining: %#v", decoded.Execution)
+	}
+	var audited string
+	if err := s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action='deploy.resources.remove' ORDER BY id DESC LIMIT 1`).Scan(&audited); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(audited, "Backups is unavailable") {
+		t.Fatalf("audit detail missing the remover's message: %s", audited)
+	}
+}
+
+// The configuration save route surfaces PlanConfiguration.Validate's field
+// pointer in the error body, so the settings UI can highlight the control
+// that needs fixing instead of a plan-wide banner.
+func TestDeploymentConfigurationSaveReportsAFieldForAnInvalidPort(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "config-field-admin", auth.RoleAdmin)}
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", projectID, environmentID)
+	configuration, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := deploy.ConfigurationWriteRequest{
+		Revision: configuration.Revision, Build: configuration.Build,
+		Runtime:      configuration.Runtime,
+		Dependencies: configuration.Dependencies, Checks: configuration.Checks, Domains: configuration.Domains,
+	}
+	request.Runtime.InternalPort = 99999
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := admin.do(http.MethodPut, base+"/configuration", string(body), nil)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid port save = %d %s", response.Code, response.Body.String())
+	}
+	var decoded struct {
+		Error httpx.APIError `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Error.Code != "invalid_plan" || decoded.Error.Field != "runtime.internalPort" {
+		t.Fatalf("error body = %#v", decoded.Error)
+	}
+}
+
+// Revealing a variable that does not exist is a missing resource, not a bad
+// request: the route answers 404 variable_not_found rather than the 400 an
+// operator would otherwise read as "you typed the name wrong".
+func TestDeploymentVariableRevealAnswersNotFoundForAnUnknownName(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "reveal-404-admin", auth.RoleAdmin)}
+	path := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/variables/NOT_A_VARIABLE/reveal", projectID, environmentID)
+	response := admin.do(http.MethodGet, path, "", nil)
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"variable_not_found"`) {
+		t.Fatalf("reveal unknown variable = %d %s", response.Code, response.Body.String())
+	}
+}
+
+// POST /deploy/{id}/unarchive restores the display name Archive tombstoned,
+// refuses a name another active project has since taken, and leaves triggers
+// disabled for the operator to turn back on.
+func TestDeploymentUnarchiveRestoresNameAndRefusesATakenOne(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "unarchive-admin", auth.RoleAdmin)}
+	if _, err := s.Store.DB.Exec(`
+		INSERT INTO deploy_triggers(environment_id, name, kind, enabled, created_at, updated_at)
+		VALUES(?, 'push', 'generic_hook', 1, 1, 1)`, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := fmt.Sprintf("/api/v1/deploy/%d/archive", projectID)
+	if response := admin.do(http.MethodPost, archivePath, `{}`, nil); response.Code != http.StatusOK {
+		t.Fatalf("archive = %d %s", response.Code, response.Body.String())
+	}
+
+	unarchivePath := fmt.Sprintf("/api/v1/deploy/%d/unarchive", projectID)
+	response := admin.do(http.MethodPost, unarchivePath, `{}`, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unarchive = %d %s", response.Code, response.Body.String())
+	}
+	var project deploy.Project
+	if err := json.Unmarshal(response.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "api-config-app" || project.ArchivedAt != nil {
+		t.Fatalf("unarchived project = %#v", project)
+	}
+	var enabled int
+	if err := s.Store.DB.QueryRow(`SELECT enabled FROM deploy_triggers WHERE environment_id=?`, environmentID).Scan(&enabled); err != nil || enabled != 0 {
+		t.Fatalf("trigger enabled = %d, %v, want still disabled after unarchive", enabled, err)
+	}
+	var audited int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='deploy.unarchive' AND success=1`).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("unarchive audit count = %d, %v", audited, err)
+	}
+
+	// Re-archive, let another project take the freed name, then the next
+	// unarchive attempt must be refused rather than colliding.
+	if response := admin.do(http.MethodPost, archivePath, `{}`, nil); response.Code != http.StatusOK {
+		t.Fatalf("re-archive = %d %s", response.Code, response.Body.String())
+	}
+	if _, err := s.Store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('api-config-app', '/srv/new', 'sealed', 'new-hook', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	taken := admin.do(http.MethodPost, unarchivePath, `{}`, nil)
+	if taken.Code != http.StatusConflict {
+		t.Fatalf("unarchive over a taken name = %d %s", taken.Code, taken.Body.String())
+	}
+	if got := decodedAPIError(t, taken.Body.Bytes()); got.Code != "name_taken" {
+		t.Fatalf("error code = %q, want name_taken", got.Code)
+	}
+}
+
+// PUT .../releases/{release}/pin toggles the pinned column an admin session
+// can flip, and refuses a release from another project or environment.
+func TestDeploymentReleasePinRoute(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	now := time.Now().UTC().Unix()
+	result, err := s.Store.DB.Exec(`
+		INSERT INTO deploy_releases(project_id, environment_id, release_number, state, plan_revision, config_digest, variables_digest, strategy, created_at)
+		VALUES(?, ?, 1, 'retained', 1, 'digest-config', 'digest-vars', 'blue_green', ?)`, projectID, environmentID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseID, _ := result.LastInsertId()
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "pin-admin", auth.RoleAdmin)}
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "pin-reader", auth.RoleReadOnly)}
+	path := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/releases/%d/pin", projectID, environmentID, releaseID)
+
+	if response := reader.do(http.MethodPut, path, `{"pinned":true}`, nil); response.Code != http.StatusForbidden {
+		t.Fatalf("reader pin = %d %s", response.Code, response.Body.String())
+	}
+	response := admin.do(http.MethodPut, path, `{"pinned":true}`, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("pin = %d %s", response.Code, response.Body.String())
+	}
+	var pinned int
+	if err := s.Store.DB.QueryRow(`SELECT pinned FROM deploy_releases WHERE id=?`, releaseID).Scan(&pinned); err != nil || pinned != 1 {
+		t.Fatalf("pinned column = %d, %v, want 1", pinned, err)
+	}
+	response = admin.do(http.MethodPut, path, `{"pinned":false}`, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unpin = %d %s", response.Code, response.Body.String())
+	}
+	if err := s.Store.DB.QueryRow(`SELECT pinned FROM deploy_releases WHERE id=?`, releaseID).Scan(&pinned); err != nil || pinned != 0 {
+		t.Fatalf("pinned column after unpin = %d, %v, want 0", pinned, err)
+	}
+	var audited int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='deploy.release.pin' AND success=1`).Scan(&audited); err != nil || audited != 2 {
+		t.Fatalf("pin audit count = %d, %v, want 2", audited, err)
+	}
+
+	otherPath := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/releases/%d/pin", projectID+1, environmentID, releaseID)
+	if response := admin.do(http.MethodPut, otherPath, `{"pinned":true}`, nil); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-project pin = %d %s", response.Code, response.Body.String())
 	}
 }
 

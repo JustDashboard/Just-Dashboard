@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 )
 
 // The program the sibling container runs.
@@ -102,12 +104,21 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 	if compose == "" {
 		compose = "docker-compose.yml"
 	}
-	// --remove-orphans for the reason the stack runner uses it: a service
-	// renamed by the update otherwise leaves its old container running
-	// forever, owned by a project that no longer describes it.
-	args := []string{"compose", "-f", compose, "up", "-d", "--build", "--remove-orphans"}
-	fmt.Fprintf(out, "\n$ docker %s\n", strings.Join(args, " "))
-	if err := stream(ctx, run.Dir, out, "docker", args...); err != nil {
+	if err := stream(ctx, run.Dir, out, "docker", "compose", "-f", compose, "build"); err != nil {
+		return err
+	}
+	err = stackports.Start(ctx, run.Dir, compose, out, func() error {
+		args := []string{"compose", "-f", compose, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "90"}
+		fmt.Fprintf(out, "\n$ docker %s\n", strings.Join(args, " "))
+		return stream(ctx, run.Dir, out, "docker", args...)
+	}, func(selected stackports.Selection) error {
+		if selected.Health() == "" {
+			return nil
+		}
+		run.Health = selected.Health()
+		return store.Update(func(r *Run) { r.Health = run.Health })
+	})
+	if err != nil {
 		return err
 	}
 

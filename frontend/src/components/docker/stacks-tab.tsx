@@ -1,98 +1,240 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
-import { FolderPlus, Layers, Play, Plus } from "@/components/icons"
+import {
+  Code,
+  FolderOpen,
+  FolderPlus,
+  Layers,
+  MoreHorizontal,
+  Play,
+  Terminal,
+  Warning,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import type { ComposeStack } from "@/lib/types"
+import type { ComposeService, ComposeStack } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
-import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
-import { StatusDot } from "@/components/status-dot"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { RowLink } from "@/components/page"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Status, StatusDot } from "@/components/status-dot"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { RowLink, SearchInput } from "@/components/page"
+import { ROW_BLEED } from "@/components/row-list"
+import { ChipCount, FilterChip } from "@/components/tabs"
+import { cn } from "@/lib/utils"
 import { PortLink, type ConfirmFn } from "@/components/docker/shared"
+import { MenuItemBody } from "@/components/docker/container-actions"
+import { StackSummary, stackTone } from "@/components/docker/stack-state"
 import { StackDetailPanel } from "@/components/docker/stack-detail"
-import { Hint, Term } from "@/components/docker/explain"
-import { Badge } from "@/components/ui/badge"
+import { ExplainIcon, Field, Term } from "@/components/docker/explain"
+import { Modal } from "@/components/modal"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 /**
- * The stack list, which is now a way in rather than the whole feature.
+ * The stack list, which is a way in rather than the whole feature.
  *
  * Everything a stack can do moved into its own panel, because a card with six
- * buttons on it is a card nobody reads and there was nowhere to put the
- * compose file, the merged logs, or the output of the command you just ran.
- * What is left here is the question the list should answer at a glance: which
+ * buttons on it is a card nobody reads and there was nowhere to put the compose
+ * file, the merged logs, or the output of the command you just ran. What is
+ * left here is the question the list should answer at a glance: which
  * applications exist, are they up, and where do I reach them.
+ *
+ * It is one panel of rows rather than a grid of bordered cards. A stack is a
+ * row in a list — name, state, the services under it — and a phone is where
+ * somebody checks whether the thing they just deployed is alive. The search box
+ * and the state chips are the same pair the containers page opens with, because
+ * "which of these is down" is the same question asked of the same server.
  */
-export function StacksTab({ confirm }: { confirm: ConfirmFn }) {
+
+type StateFilter = "all" | "running" | "stopped" | "attention"
+
+const FILTER_LABEL: Record<StateFilter, string> = {
+  all: "All",
+  running: "Running",
+  stopped: "Not running",
+  attention: "Needs attention",
+}
+
+/** A stack the dashboard has something to act on: a bad service or a leftover. */
+function needsAttention(stack: ComposeStack) {
+  return (
+    stack.orphans.length > 0 ||
+    stack.services.some((s) => s.health === "unhealthy") ||
+    stack.state === "degraded" ||
+    stack.state === "partial"
+  )
+}
+
+export function StacksTab({
+  confirm,
+  creating: externalCreating,
+  onCreatingChange,
+}: {
+  confirm: ConfirmFn
+  creating?: boolean
+  onCreatingChange?: (open: boolean) => void
+}) {
   const { can } = useAuth()
-  const [selected, setSelected] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [selected, setSelected] = useQuerySelection("stack")
+  const [internalCreating, setInternalCreating] = useState(false)
+  const creating = externalCreating ?? internalCreating
+  const setCreating = onCreatingChange ?? setInternalCreating
+  const [filter, setFilter] = useState("")
+  const [state, setState] = useState<StateFilter>("all")
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
     15000,
   )
 
-  if (loading) return <LoadingPanel rows={3} />
-  if (error) return <ErrorState error={error} />
+  const stacks = useMemo(() => data ?? [], [data])
 
-  const newStack = can("file.write") && (
-    <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-      <FolderPlus className="size-3.5" />
-      New stack
+  const counts = useMemo(
+    () => ({
+      all: stacks.length,
+      running: stacks.filter((s) => s.running > 0).length,
+      stopped: stacks.filter((s) => s.running === 0).length,
+      attention: stacks.filter(needsAttention).length,
+    }),
+    [stacks],
+  )
+
+  const visible = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    return stacks.filter((stack) => {
+      if (state === "running" && stack.running === 0) return false
+      if (state === "stopped" && stack.running > 0) return false
+      if (state === "attention" && !needsAttention(stack)) return false
+      if (!needle) return true
+      return (
+        stack.name.toLowerCase().includes(needle) ||
+        stack.services.some(
+          (s) => s.name.toLowerCase().includes(needle) || s.image.toLowerCase().includes(needle),
+        )
+      )
+    })
+  }, [stacks, filter, state])
+
+  const newStack = can("system.admin") && can("file.write") && (
+    <Button size="sm" onClick={() => setCreating(true)}>
+      <FolderPlus className="size-4" />
+      Create stack
     </Button>
   )
 
+  const filtered = filter.trim().length > 0 || state !== "all"
+  const hasRows = !loading && !error && visible.length > 0
+
   return (
     <div className="space-y-4">
-      {!data?.length ? (
-        <EmptyState
-          icon={Layers}
-          title="No compose stacks found"
-          description={
-            <>
-              A <Term name="stack">stack</Term> is a directory with a compose file in it. The
-              dashboard finds them by the labels compose puts on the containers it creates, and by
-              looking under the configured compose directories.
-            </>
+      {/* Plain: the list is the page. */}
+      <Panel plain>
+        <PanelHeader
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              Stacks
+              <ExplainIcon name="stack" />
+            </span>
           }
-          action={newStack}
         />
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Hint>
-              {data.length} stack{data.length === 1 ? "" : "s"}. Open one to edit its compose file,
-              watch a deploy, or read every service&apos;s logs together.
-            </Hint>
-            {newStack}
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-            {data.map((stack) => (
-              <StackCard
-                key={stack.name}
-                stack={stack}
-                onOpen={() => setSelected(stack.name)}
-                onChanged={refresh}
-              />
-            ))}
-          </div>
-        </>
-      )}
+
+        {stacks.length > 0 && (
+          <PanelToolbar>
+            <SearchInput
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by name, service or image"
+            />
+            <div className="flex min-w-0 flex-wrap gap-1">
+              {(["all", "running", "stopped", "attention"] as const).map((key) =>
+                key === "all" || counts[key] > 0 ? (
+                  <FilterChip
+                    key={key}
+                    selected={state === key}
+                    onClick={() => setState(key)}
+                    className={
+                      key === "attention" && counts.attention > 0
+                        ? "text-warning hover:text-warning"
+                        : undefined
+                    }
+                  >
+                    {FILTER_LABEL[key]}
+                    <ChipCount>{counts[key]}</ChipCount>
+                  </FilterChip>
+                ) : null,
+              )}
+            </div>
+          </PanelToolbar>
+        )}
+
+        <PanelBody flush={hasRows}>
+          {loading && !data ? (
+            <LoadingRows rows={3} />
+          ) : error ? (
+            <ErrorState error={error} />
+          ) : stacks.length === 0 ? (
+            <EmptyState
+              icon={Layers}
+              title="No compose stacks found"
+              description={
+                <>
+                  A <Term name="stack">stack</Term> is a directory with a compose file in it. The
+                  dashboard finds them by the labels compose puts on the containers it creates, and
+                  by looking under the configured compose directories.
+                </>
+              }
+              action={newStack}
+            />
+          ) : visible.length === 0 ? (
+            <EmptyState
+              icon={Warning}
+              title="Nothing matches those filters"
+              description="Clear the filter, or look under a different state."
+              action={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setFilter("")
+                    setState("all")
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <ul className="animate-rise divide-y divide-hairline">
+              {visible.map((stack) => (
+                <StackRow
+                  key={stack.name}
+                  stack={stack}
+                  onOpen={() => setSelected(stack.name)}
+                  onChanged={refresh}
+                />
+              ))}
+            </ul>
+          )}
+          {/* The filters narrowed everything away to nothing rather than the
+              server having nothing to show; the count is the difference. */}
+          {filtered && !loading && !error && visible.length > 0 && (
+            <p className="border-t border-hairline py-2 text-hint text-muted-foreground">
+              {visible.length} of {stacks.length} stacks.
+            </p>
+          )}
+        </PanelBody>
+      </Panel>
 
       <StackDetailPanel
         name={selected}
@@ -101,7 +243,7 @@ export function StacksTab({ confirm }: { confirm: ConfirmFn }) {
         confirm={confirm}
       />
       <NewStackDialog
-        open={creating}
+        open={creating && can("system.admin") && can("file.write")}
         onOpenChange={setCreating}
         onCreated={(name) => {
           refresh()
@@ -112,7 +254,23 @@ export function StacksTab({ confirm }: { confirm: ConfirmFn }) {
   )
 }
 
-function StackCard({
+/** Anything inside the row that owns its own press — mirrors the container card. */
+const INTERACTIVE = "a, button, input, select, textarea, label, [role='menuitem']"
+
+/**
+ * One stack, drawn down the row rather than across it.
+ *
+ * The service list is the load-bearing part: a stack is an application made of
+ * several containers, and "which of its parts is not running" is what the row
+ * exists to answer. Each service keeps its dot, its name, its ports and its
+ * health, and the ports are still links, so a phone can reach the thing without
+ * opening anything.
+ *
+ * The row keeps the server-provided state sentence beside the service
+ * inventory. The sentence distinguishes a stopped stack from one that has
+ * never been deployed, while the service rows show which part needs attention.
+ */
+function StackRow({
   stack,
   onOpen,
   onChanged,
@@ -123,102 +281,188 @@ function StackCard({
 }) {
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
-  const healthy = stack.running === stack.total && stack.total > 0
   const unhealthy = stack.services.filter((s) => s.health === "unhealthy").length
+  const canDeploy =
+    can("system.admin") && can("service.control") && stack.managed && stack.state !== "running"
 
-  // The one action worth having on a card: an application that is down and
-  // should not be. Everything else needs the panel, where the output is.
-  const bringUp = async () => {
+  // The one action worth having on the row: an application that is down and
+  // should not be. Everything else needs the panel, where the output is — and
+  // where a deploy can be previewed before it runs.
+  const deploy = async () => {
     setBusy(true)
     try {
       await post(`/docker/stacks/${encodeURIComponent(stack.name)}/up`)
-      notify.success(`${stack.name} is up`)
+      notify.success(`${stack.name} deployed`)
       onChanged()
     } catch (err) {
-      notify.error(`Could not start ${stack.name}`, err)
+      notify.error(`Could not deploy ${stack.name}`, err)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Panel>
-      <PanelHeader
-        icon={Layers}
-        title={
-          <RowLink className="text-[13px] leading-tight" onClick={onOpen}>
-            {stack.name}
-          </RowLink>
-        }
-        description={stack.workingDir || "location unknown"}
-        actions={
-          <>
-            {unhealthy > 0 && (
-              <Badge variant="destructive" className="font-normal">
-                {unhealthy} unhealthy
-              </Badge>
-            )}
-            <Badge variant={healthy ? "success" : "secondary"} className="font-normal">
-              {stack.running}/{stack.total} up
-            </Badge>
-          </>
-        }
-      />
-      <PanelBody className="space-y-1.5">
-        {stack.services.map((svc) => (
-          <div
-            key={svc.container || svc.name}
-            className="flex min-w-0 items-center justify-between gap-2 text-[13px]"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <StatusDot state={svc.state} />
-              <span className="truncate">{svc.name}</span>
-            </span>
-            <span className="flex shrink-0 flex-wrap justify-end gap-1">
-              {svc.ports
-                .filter((p) => p.publicPort)
-                .slice(0, 2)
-                .map((p, i) => (
-                  <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
-                ))}
-            </span>
+    <li>
+      <div
+        aria-busy={busy ? true : undefined}
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest(INTERACTIVE)) return
+          onOpen()
+        }}
+        className={cn(
+          "group min-w-0 cursor-pointer space-y-2 px-4 py-2.5 transition-colors hover:bg-row-hover",
+          ROW_BLEED,
+          busy && "opacity-70",
+        )}
+      >
+        {/* One title line: the name and the actions share a baseline, so the
+            buttons read as part of the row rather than furniture parked beside
+            it. View is a quiet ghost next to the primary Deploy — the row
+            itself opens the panel, so it does not need to shout. */}
+        <div className="flex min-w-0 items-center justify-between gap-x-3 gap-y-1">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+              <StatusDot tone={stackTone(stack.state)} live={stack.state === "running"} />
+              <RowLink onClick={onOpen}>{stack.name}</RowLink>
+              {unhealthy > 0 && <Status verdict="critical" label={`${unhealthy} unhealthy`} />}
+            </div>
+            <StackSummary stack={stack} className="mt-0.5 block" />
           </div>
-        ))}
-        {stack.services.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            Nothing running. Its compose file is on disk and can be brought up.
+
+          <div className="flex shrink-0 items-center gap-1">
+            {canDeploy && (
+              <Button size="sm" onClick={deploy} pending={busy}>
+                <Play className="size-3.5" />
+                Deploy
+              </Button>
+            )}
+            {/* Hidden on a phone: the row itself opens the panel on tap and the
+                overflow menu carries "View" too, so the button is a third way
+                of doing the same thing — three controls wrapping onto a second
+                line on a 390px screen. It earns its place only where the row is
+                not itself an obvious press target. */}
+            <Button size="sm" variant="ghost" onClick={onOpen} className="hidden sm:inline-flex">
+              View
+            </Button>
+            <StackRowMenu stack={stack} onOpen={onOpen} />
+          </div>
+        </div>
+
+        {stack.services.length > 0 && (
+          <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {stack.services.map((service) => (
+              <ServiceMarker key={service.container || service.name} service={service} />
+            ))}
+          </ul>
+        )}
+
+        {stack.orphans.length > 0 && (
+          <p className="flex items-start gap-1.5 text-hint text-warning">
+            <Warning className="mt-0.5 size-3 shrink-0" />
+            <span>
+              {stack.orphans.join(", ")} {stack.orphans.length === 1 ? "is" : "are"} running under
+              this project name and no longer in the compose file. A deploy removes{" "}
+              {stack.orphans.length === 1 ? "it" : "them"}.
+            </span>
           </p>
         )}
-      </PanelBody>
-      <PanelFooter>
-        {!stack.managed ? (
-          <p className="text-[11px] text-muted-foreground">
+
+        {!stack.managed && (
+          <p className="text-hint text-muted-foreground">
             No compose file reachable from this dashboard, so this stack is read-only here.
           </p>
-        ) : (
-          <>
-            <Button size="sm" variant="outline" onClick={onOpen}>
-              Open
-            </Button>
-            {can("service.control") && stack.running < stack.total && (
-              <Button size="sm" variant="ghost" onClick={bringUp} disabled={busy}>
-                {busy ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <Play className="size-3.5" />
-                )}
-                Bring up
-              </Button>
-            )}
-            {stack.workingDir && (
-              <Button size="sm" variant="ghost" asChild className="ml-auto">
-                <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>Files</Link>
-              </Button>
-            )}
-          </>
         )}
-      </PanelFooter>
-    </Panel>
+      </div>
+    </li>
+  )
+}
+
+/** One service of a stack: its dot, its name, its health and where it answers. */
+function ServiceMarker({ service }: { service: ComposeService }) {
+  const ports = service.ports.filter((p) => p.publicPort)
+  return (
+    // Everything on one centred baseline: the port tags and the "defined" mark
+    // are taller than the text beside them, and without a shared line-height
+    // the row reads as bumpy.
+    <li className="inline-flex min-w-0 items-center gap-1.5 text-hint leading-5">
+      <StatusDot state={service.missing ? "unknown" : service.state} />
+      <span className={cn("truncate leading-5", service.missing && "text-muted-foreground")}>
+        {service.name}
+      </span>
+      {service.health && service.health !== "healthy" && (
+        <span
+          className={cn(
+            "shrink-0 leading-5 capitalize",
+            service.health === "unhealthy" ? "text-destructive" : "text-warning",
+          )}
+        >
+          {service.health}
+        </span>
+      )}
+      {service.missing ? (
+        <Tag>defined</Tag>
+      ) : (
+        <span className="inline-flex items-center gap-1">
+          {ports.slice(0, 2).map((p, i) => (
+            <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
+          ))}
+        </span>
+      )}
+    </li>
+  )
+}
+
+/** The row's overflow: the things that are navigation rather than an action. */
+function StackRowMenu({ stack, onOpen }: { stack: ComposeStack; onOpen: () => void }) {
+  const { can } = useAuth()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="More actions"
+          onClick={(event) => event.stopPropagation()}
+          className="[&_svg:not([class*='size-'])]:size-3.5"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-68">
+        <DropdownMenuItem
+          className="items-start gap-2.5 py-1.5"
+          onSelect={(event) => {
+            event.preventDefault()
+            onOpen()
+          }}
+        >
+          <Code className="mt-0.5 size-3.5 shrink-0" />
+          <MenuItemBody
+            label="View"
+            detail="Services, the compose file, deploy history and the merged log feed."
+          />
+        </DropdownMenuItem>
+        {stack.workingDir && (
+          <DropdownMenuItem asChild className="items-start gap-2.5 py-1.5">
+            <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>
+              <FolderOpen className="mt-0.5 size-3.5 shrink-0" />
+              <MenuItemBody label="Files" detail="The stack's directory in the file manager." />
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {stack.workingDir && can("terminal") && (
+          <DropdownMenuItem asChild className="items-start gap-2.5 py-1.5">
+            <Link href={`/terminal?cwd=${encodeURIComponent(stack.workingDir)}`}>
+              <Terminal className="mt-0.5 size-3.5 shrink-0" />
+              <MenuItemBody
+                label="Open shell"
+                detail="A terminal opened in the stack's directory."
+              />
+            </Link>
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -261,63 +505,53 @@ function NewStackDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="size-4" />
-            New stack
-          </DialogTitle>
-          <DialogDescription>
-            Creates a directory with a starter compose file in it. Nothing runs until you bring it
-            up.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="stack-name" className="text-xs">
-              Name
-            </Label>
-            <Input
-              id="stack-name"
-              value={name}
-              spellCheck={false}
-              placeholder="my-app"
-              onChange={(e) => setName(e.target.value)}
-            />
-            <Hint>
-              Lower-case letters, digits, dashes and underscores. Compose uses it to name the
-              containers and the network it creates.
-            </Hint>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="stack-dir" className="text-xs">
-              Directory
-            </Label>
-            <Input
-              id="stack-dir"
-              value={dir}
-              spellCheck={false}
-              className="font-mono text-xs"
-              placeholder="leave empty for the default compose directory"
-              onChange={(e) => setDir(e.target.value)}
-            />
-            <Hint>
-              It has to be under one of the server&apos;s configured compose directories, or the
-              dashboard will not find the stack again once it is stopped.
-            </Hint>
-          </div>
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      title="Create stack"
+      description="Creates a directory with a starter compose file in it. Nothing runs until you bring it
+            up."
+      footer={
+        <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={create} disabled={busy || !name.trim()}>
-            {busy && <Spinner className="size-4" />}
+          <Button onClick={create} disabled={busy || !name.trim()} pending={busy}>
             Create
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field
+          label="Name"
+          htmlFor="stack-name"
+          required
+          hint="Lower-case letters, digits, dashes and underscores. Compose uses it to name the containers and the network it creates."
+        >
+          <Input
+            id="stack-name"
+            value={name}
+            spellCheck={false}
+            placeholder="my-app"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <Field
+          label="Directory"
+          htmlFor="stack-dir"
+          hint="It has to be under one of the server's configured compose directories, or the dashboard will not find the stack again once it is stopped."
+        >
+          <Input
+            id="stack-dir"
+            value={dir}
+            spellCheck={false}
+            className="font-mono text-xs"
+            placeholder="leave empty for the default compose directory"
+            onChange={(e) => setDir(e.target.value)}
+          />
+        </Field>
+      </div>
+    </Modal>
   )
 }

@@ -73,7 +73,6 @@ function mdi(path: string, name: string): Icon {
   Forwarded.displayName = name
   return Forwarded
 }
-
 const MdiCode = mdi(mdiFileCode, "MdiCode")
 const MdiHtml = mdi(mdiLanguageHtml5, "MdiHtml")
 const MdiXml = mdi(mdiFileXmlBox, "MdiXml")
@@ -129,7 +128,7 @@ const MdiFolderSync = mdi(mdiFolderSync, "MdiFolderSync")
  * icon that says nothing is worse than no icon: it costs the same space and
  * trains you to ignore the column.
  *
- * The colours are the terminal rail's `--tag-*` tokens rather than anything
+ * The colours are the shared semantic `--tag-*` tokens rather than anything
  * computed from the palette, for the same reason they are there: a category
  * is a label, and a label whose hue changes with the theme stops being the
  * same label. They are fixed hues that hold up on a near-black card and a
@@ -155,15 +154,7 @@ const MdiFolderSync = mdi(mdiFolderSync, "MdiFolderSync")
  * because it marks a filesystem relation rather than a file type.
  */
 export type FileTone =
-  | "slate"
-  | "red"
-  | "amber"
-  | "green"
-  | "cyan"
-  | "blue"
-  | "violet"
-  | "pink"
-  | "primary"
+  "slate" | "red" | "amber" | "green" | "cyan" | "blue" | "violet" | "pink" | "primary"
 
 export type FileKind = {
   icon: Icon
@@ -206,45 +197,177 @@ const PLAIN: FileKind = { icon: MdiPlain, tone: "slate", label: "File" }
 
 const BY_EXTENSION: Record<string, FileKind> = {
   // Code
-  go: CODE, rs: CODE, py: CODE, rb: CODE, php: CODE, java: CODE, kt: CODE,
-  swift: CODE, c: CODE, h: CODE, cpp: CODE, cc: CODE, hpp: CODE, cs: CODE,
-  ts: CODE, tsx: CODE, js: CODE, jsx: CODE, mjs: CODE, cjs: CODE, mts: CODE,
-  lua: CODE, pl: CODE, ex: CODE, exs: CODE, erl: CODE, hs: CODE, scala: CODE,
-  clj: CODE, dart: CODE, r: CODE, zig: CODE, vue: CODE, svelte: CODE, astro: CODE,
+  go: CODE,
+  rs: CODE,
+  py: CODE,
+  rb: CODE,
+  php: CODE,
+  java: CODE,
+  kt: CODE,
+  swift: CODE,
+  c: CODE,
+  h: CODE,
+  cpp: CODE,
+  cc: CODE,
+  hpp: CODE,
+  cs: CODE,
+  ts: CODE,
+  tsx: CODE,
+  js: CODE,
+  jsx: CODE,
+  mjs: CODE,
+  cjs: CODE,
+  mts: CODE,
+  lua: CODE,
+  pl: CODE,
+  ex: CODE,
+  exs: CODE,
+  erl: CODE,
+  hs: CODE,
+  scala: CODE,
+  clj: CODE,
+  dart: CODE,
+  r: CODE,
+  zig: CODE,
+  vue: CODE,
+  svelte: CODE,
+  astro: CODE,
   // Shell and automation
-  sh: SHELL, bash: SHELL, zsh: SHELL, fish: SHELL, ps1: SHELL, bat: SHELL, cmd: SHELL,
+  sh: SHELL,
+  bash: SHELL,
+  zsh: SHELL,
+  fish: SHELL,
+  ps1: SHELL,
+  bat: SHELL,
+  cmd: SHELL,
   // Markup and style
-  html: HTML, htm: HTML, xml: XML, svg: SVG,
-  css: STYLE, scss: STYLE, sass: STYLE, less: STYLE,
+  html: HTML,
+  htm: HTML,
+  xml: XML,
+  svg: SVG,
+  css: STYLE,
+  scss: STYLE,
+  sass: STYLE,
+  less: STYLE,
   // Data
-  json: JSON_, jsonc: JSON_, json5: JSON_, yaml: DATA, yml: DATA, toml: DATA,
-  proto: DATA, graphql: DATA, gql: DATA, ndjson: JSON_,
-  csv: SHEET, tsv: SHEET, ods: SHEET, xlsx: XLS, xls: XLS,
-  sql: SQL, db: SQL, sqlite: SQL, sqlite3: SQL, dump: SQL,
+  json: JSON_,
+  jsonc: JSON_,
+  json5: JSON_,
+  yaml: DATA,
+  yml: DATA,
+  toml: DATA,
+  proto: DATA,
+  graphql: DATA,
+  gql: DATA,
+  ndjson: JSON_,
+  csv: SHEET,
+  tsv: SHEET,
+  ods: SHEET,
+  xlsx: XLS,
+  xls: XLS,
+  sql: SQL,
+  db: SQL,
+  sqlite: SQL,
+  sqlite3: SQL,
+  dump: SQL,
   // Documents
-  md: MARKDOWN, mdx: MARKDOWN, txt: DOC, rst: DOC, adoc: DOC,
-  pdf: PDF, doc: WORD, docx: WORD, ppt: SLIDES, pptx: SLIDES, odp: SLIDES,
+  md: MARKDOWN,
+  mdx: MARKDOWN,
+  txt: DOC,
+  rst: DOC,
+  adoc: DOC,
+  pdf: PDF,
+  doc: WORD,
+  docx: WORD,
+  ppt: SLIDES,
+  pptx: SLIDES,
+  odp: SLIDES,
   log: LOG,
   // Media
-  png: PNG, jpg: JPEG, jpeg: JPEG, gif: GIF, webp: IMAGE, avif: IMAGE,
-  bmp: IMAGE, ico: IMAGE, tiff: IMAGE, heic: IMAGE, psd: IMAGE,
-  mp4: VIDEO, webm: VIDEO, mkv: VIDEO, mov: VIDEO, avi: VIDEO, ogv: VIDEO,
-  mp3: AUDIO, wav: AUDIO, flac: AUDIO, ogg: AUDIO, m4a: AUDIO, aac: AUDIO,
-  woff: FONT, woff2: FONT, ttf: FONT, otf: FONT, eot: FONT,
+  png: PNG,
+  jpg: JPEG,
+  jpeg: JPEG,
+  gif: GIF,
+  webp: IMAGE,
+  avif: IMAGE,
+  bmp: IMAGE,
+  ico: IMAGE,
+  tiff: IMAGE,
+  heic: IMAGE,
+  psd: IMAGE,
+  mp4: VIDEO,
+  webm: VIDEO,
+  mkv: VIDEO,
+  mov: VIDEO,
+  avi: VIDEO,
+  ogv: VIDEO,
+  mp3: AUDIO,
+  wav: AUDIO,
+  flac: AUDIO,
+  ogg: AUDIO,
+  m4a: AUDIO,
+  aac: AUDIO,
+  woff: FONT,
+  woff2: FONT,
+  ttf: FONT,
+  otf: FONT,
+  eot: FONT,
   // Archives and packages
-  zip: ARCHIVE, tar: ARCHIVE, gz: ARCHIVE, tgz: ARCHIVE, bz2: ARCHIVE,
-  xz: ARCHIVE, zst: ARCHIVE, "7z": ARCHIVE, rar: ARCHIVE, jar: ARCHIVE,
-  deb: PACKAGE, rpm: PACKAGE, apk: PACKAGE, whl: PACKAGE, iso: PACKAGE,
+  zip: ARCHIVE,
+  tar: ARCHIVE,
+  gz: ARCHIVE,
+  tgz: ARCHIVE,
+  bz2: ARCHIVE,
+  xz: ARCHIVE,
+  zst: ARCHIVE,
+  "7z": ARCHIVE,
+  rar: ARCHIVE,
+  jar: ARCHIVE,
+  deb: PACKAGE,
+  rpm: PACKAGE,
+  apk: PACKAGE,
+  whl: PACKAGE,
+  iso: PACKAGE,
   // Configuration
-  conf: CONFIG, cfg: CONFIG, ini: CONFIG, env: CONFIG, properties: CONFIG,
-  service: CONFIG, socket: CONFIG, timer: CONFIG, mount: CONFIG, rules: CONFIG,
-  tf: CONFIG, tfvars: CONFIG, hcl: CONFIG, nginx: CONFIG, list: CONFIG,
+  conf: CONFIG,
+  cfg: CONFIG,
+  ini: CONFIG,
+  env: CONFIG,
+  properties: CONFIG,
+  service: CONFIG,
+  socket: CONFIG,
+  timer: CONFIG,
+  mount: CONFIG,
+  rules: CONFIG,
+  tf: CONFIG,
+  tfvars: CONFIG,
+  hcl: CONFIG,
+  nginx: CONFIG,
+  list: CONFIG,
   // Secrets
-  pem: SECRET, key: SECRET, crt: SECRET, cer: SECRET, csr: SECRET, p12: SECRET,
-  pfx: SECRET, pub: SECRET, gpg: SECRET, asc: SECRET, kdbx: SECRET,
+  pem: SECRET,
+  key: SECRET,
+  crt: SECRET,
+  cer: SECRET,
+  csr: SECRET,
+  p12: SECRET,
+  pfx: SECRET,
+  pub: SECRET,
+  gpg: SECRET,
+  asc: SECRET,
+  kdbx: SECRET,
   // Binary
-  so: BINARY, o: BINARY, a: BINARY, dll: BINARY, exe: BINARY, bin: BINARY,
-  dat: BINARY, pyc: BINARY, wasm: BINARY, img: BINARY, swp: BINARY,
+  so: BINARY,
+  o: BINARY,
+  a: BINARY,
+  dll: BINARY,
+  exe: BINARY,
+  bin: BINARY,
+  dat: BINARY,
+  pyc: BINARY,
+  wasm: BINARY,
+  img: BINARY,
+  swp: BINARY,
 }
 
 /** Files a server keeps that have no extension to key off at all. */

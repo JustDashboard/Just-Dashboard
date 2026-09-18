@@ -24,19 +24,69 @@ type DeploymentRoute struct {
 	CertPath   string   `json:"certPath,omitempty"`
 	KeyPath    string   `json:"keyPath,omitempty"`
 	ForceHTTPS bool     `json:"forceHttps,omitempty"`
+	// BasicAuth puts a password in front of the route. Each entry is a user
+	// and a bcrypt hash, which is what both proxies read.
+	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
+}
+
+type BasicAuthUser struct {
+	Username string `json:"username"`
+	Hash     string `json:"hash"`
+}
+
+// deploymentAuthFileName is the htpasswd file a protected nginx route reads,
+// named after the route so removal finds it again.
+func deploymentAuthFileName(routeName string) string {
+	return strings.TrimSuffix(routeName, ".conf") + ".htpasswd"
+}
+
+// deploymentAuthFile is where the route's credentials live on this host, or
+// nothing for a route that asks for none.
+func (s *Service) deploymentAuthFile(route DeploymentRoute) string {
+	if len(route.BasicAuth) == 0 {
+		return ""
+	}
+	return filepath.Join(s.authDir(), deploymentAuthFileName(route.Name))
+}
+
+// writeDeploymentAuthFile writes the route's credentials, or removes the
+// file a previous protected route left when the route asks for none, so a
+// stale file never outlives the plan that wrote it.
+func (s *Service) writeDeploymentAuthFile(route DeploymentRoute) error {
+	path := filepath.Join(s.authDir(), deploymentAuthFileName(route.Name))
+	if !authFileRe.MatchString(deploymentAuthFileName(route.Name)) {
+		return errors.New("invalid deployment route name")
+	}
+	if len(route.BasicAuth) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	lines := make([]string, 0, len(route.BasicAuth))
+	for _, user := range route.BasicAuth {
+		if !authUserRe.MatchString(user.Username) || !bcryptHashRe.MatchString(user.Hash) {
+			return errors.New("invalid deployment route credentials")
+		}
+		lines = append(lines, user.Username+":"+user.Hash)
+	}
+	return s.writeAuthFile(path, lines)
 }
 
 type DeploymentRouteSnapshot struct {
-	Version       int    `json:"version"`
-	Name          string `json:"name"`
-	Path          string `json:"path"`
-	Existed       bool   `json:"existed"`
-	Mode          uint32 `json:"mode,omitempty"`
-	Content       string `json:"content,omitempty"`
-	ContentDigest string `json:"contentDigest"`
-	LinkPath      string `json:"linkPath,omitempty"`
-	LinkExisted   bool   `json:"linkExisted"`
-	LinkTarget    string `json:"linkTarget,omitempty"`
+	IngressIdentity string `json:"ingressIdentity,omitempty"`
+	Driver          string `json:"driver,omitempty"`
+	ContainerID     string `json:"containerId,omitempty"`
+	Version         int    `json:"version"`
+	Name            string `json:"name"`
+	Path            string `json:"path"`
+	Existed         bool   `json:"existed"`
+	Mode            uint32 `json:"mode,omitempty"`
+	Content         string `json:"content,omitempty"`
+	ContentDigest   string `json:"contentDigest"`
+	LinkPath        string `json:"linkPath,omitempty"`
+	LinkExisted     bool   `json:"linkExisted"`
+	LinkTarget      string `json:"linkTarget,omitempty"`
 }
 
 type DeploymentRouteResult struct {
@@ -50,7 +100,21 @@ type DeploymentRouteResult struct {
 // a deployment-owned nginx route. If apply or reload fails, the exact prior
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
-	spec := deploymentSiteSpec(route)
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return DeploymentRouteResult{}, err
+	} else if edge != nil {
+		return s.applyDockerCaddyRoute(ctx, edge, route)
+	}
+	s.mu.Lock()
+	edge, provisionErr := s.provisionIngress(ctx)
+	s.mu.Unlock()
+	if provisionErr != nil {
+		return DeploymentRouteResult{}, provisionErr
+	}
+	if edge != nil {
+		return s.applyDockerCaddyRoute(ctx, edge, route)
+	}
+	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
 	content, err := RenderNginx(spec)
 	if err != nil {
 		return DeploymentRouteResult{}, err
@@ -62,6 +126,9 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 		return DeploymentRouteResult{}, err
 	}
 	result := DeploymentRouteResult{Snapshot: snapshot}
+	if err := s.writeDeploymentAuthFile(route); err != nil {
+		return result, err
+	}
 	if _, err := s.applySiteLocked(ctx, spec, content, true, true, true); err != nil {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		restoreErr := s.restoreDeploymentRouteLocked(recoveryCtx, snapshot)
@@ -90,11 +157,109 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if snapshot.Driver == "docker-caddy" {
+		edge, err := s.dockerCaddy(ctx)
+		if err != nil {
+			return err
+		}
+		if edge == nil {
+			return ErrRouteRecovery
+		}
+		if err := edge.configurationSynced(ctx); err != nil {
+			return err
+		}
+		return edge.restore(ctx, snapshot)
+	}
 	return s.restoreDeploymentRouteLocked(ctx, snapshot)
 }
 
-func (s *Service) VerifyDeploymentRoute(_ context.Context, route DeploymentRoute) error {
-	content, err := RenderNginx(deploymentSiteSpec(route))
+// RemoveDeploymentRoute uses the same snapshot/reload recovery boundary as a
+// cutover. It is intentionally name-scoped so preview cleanup cannot select
+// or remove a route owned by another feature.
+func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return err
+	} else if edge != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		snapshot, err := edge.snapshot(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !snapshot.Existed {
+			return nil
+		}
+		if !strings.HasPrefix(snapshot.Content, "# Managed by Just Dashboard\n") {
+			return ErrRouteRecovery
+		}
+		if err := edge.configurationSynced(ctx); err != nil {
+			return err
+		}
+		empty := snapshot
+		empty.Existed = false
+		empty.Content = ""
+		empty.ContentDigest = routeDigest("")
+		if err := edge.restore(ctx, empty); err != nil {
+			recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			return errors.Join(err, edge.restore(recovery, snapshot))
+		}
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot, err := s.snapshotDeploymentRouteLocked(name)
+	if err != nil {
+		return err
+	}
+	if !snapshot.Existed && !snapshot.LinkExisted {
+		return nil
+	}
+	empty := snapshot
+	empty.Existed = false
+	empty.LinkExisted = false
+	empty.Content = ""
+	empty.ContentDigest = routeDigest("")
+	if err = s.restoreDeploymentRouteLocked(ctx, empty); err != nil {
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		recoveryErr := s.restoreDeploymentRouteLocked(recoveryCtx, snapshot)
+		cancel()
+		if recoveryErr != nil {
+			return fmt.Errorf("%w: remove: %v; restore: %v", ErrRouteRecovery, err, recoveryErr)
+		}
+		return err
+	}
+	// The credentials file is the route's own; nothing else reads it.
+	if err := os.Remove(filepath.Join(s.authDir(), deploymentAuthFileName(name))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return err
+	} else if edge != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		target, err := edge.target(ctx, route.Upstream)
+		if err != nil {
+			return err
+		}
+		want, err := renderDockerCaddyRoute(route, target.upstream())
+		if err != nil {
+			return err
+		}
+		snapshot, err := edge.snapshot(ctx, route.Name)
+		if err != nil {
+			return err
+		}
+		if !snapshot.Existed || snapshot.Content != want+target.metadata() {
+			return ErrRouteRecovery
+		}
+		return edge.configurationSynced(ctx)
+	}
+	content, err := RenderNginx(deploymentSiteSpec(route, s.deploymentAuthFile(route)))
 	if err != nil {
 		return err
 	}
@@ -175,14 +340,19 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 	return prefix != "" && !strings.Contains(prefix, ".")
 }
 
-func deploymentSiteSpec(route DeploymentRoute) *SiteSpec {
-	return &SiteSpec{
+func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
+	spec := &SiteSpec{
 		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.Upstream,
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
-		HTTP2:      route.TLS,
-		WebSockets: true, Gzip: true, SecurityHeaders: true, AccessLog: true,
+		ManagedACME: true,
+		HTTP2:       route.TLS,
+		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
 		AllowFrom: []string{}, DenyFrom: []string{}, Locations: []SiteLocation{},
 	}
+	if authFile != "" {
+		spec.BasicAuthFile, spec.BasicAuthRealm = authFile, "Protected deployment"
+	}
+	return spec
 }
 
 func (s *Service) snapshotDeploymentRouteLocked(name string) (DeploymentRouteSnapshot, error) {

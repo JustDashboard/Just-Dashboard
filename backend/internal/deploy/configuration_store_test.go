@@ -220,6 +220,9 @@ func TestVariableMutationAdvancesDesiredWithoutChangingLiveAndFreezesRuns(t *tes
 	if err != nil || revealed.Value != generated.GeneratedValue {
 		t.Fatalf("revealed variable = %#v, error=%v", revealed, err)
 	}
+	if _, err := fixture.plans.RevealVariable(ctx, projectID, environmentID, "NOT_A_VARIABLE"); !errors.Is(err, ErrVariableNotFound) {
+		t.Fatalf("reveal of an unknown variable = %v, want ErrVariableNotFound", err)
+	}
 	state, err := fixture.plans.PendingState(ctx, projectID, environmentID)
 	if err != nil || !state.Pending || state.DesiredRevision != 3 || len(state.Changes) == 0 {
 		t.Fatalf("pending state = %#v, error=%v", state, err)

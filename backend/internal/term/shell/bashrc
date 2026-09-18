@@ -7,8 +7,11 @@ bind 'set show-all-if-ambiguous on'
 bind 'set completion-ignore-case on'
 bind '"\t":menu-complete'
 bind '"\e[Z":menu-complete-backward'
+# The window title is the directory: the dashboard reads OSC titles off the
+# PTY and names the tab after them, so at a prompt a tab says where it is and
+# a program that sets its own title takes over while it runs.
 __jd_prompt() {
-  PS1='\[\e[36m\]\w\[\e[0m\]\n\[\e[36m\]❯\[\e[0m\] '
+  PS1='\[\e]0;\W\a\]\[\e[36m\]\w\[\e[0m\]\n\[\e[36m\]>\[\e[0m\] '
 }
 PROMPT_COMMAND+=(__jd_prompt)
 __jd_prompt

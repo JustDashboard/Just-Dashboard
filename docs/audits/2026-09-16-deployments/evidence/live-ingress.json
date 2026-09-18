@@ -1,0 +1,54 @@
+{
+  "name": "live-ingress",
+  "command": [
+    "/tmp/jd-go1.26.8/bin/go",
+    "test",
+    "-json",
+    "-count=1",
+    "./internal/proxysvc",
+    "-run",
+    "TestLive(DockerCaddy|DeploymentWebroot)"
+  ],
+  "cwd": "backend",
+  "started": "2026-09-16T01:21:58.349382+00:00",
+  "elapsed_seconds": 8.518,
+  "exit_code": 1,
+  "packages": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Action": "fail",
+      "Elapsed": 7.761
+    }
+  ],
+  "tests": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDeploymentWebroot",
+      "Action": "pass",
+      "Elapsed": 0.58
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyProvisionAndRestart",
+      "Action": "pass",
+      "Elapsed": 3.1
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute",
+      "Action": "fail",
+      "Elapsed": 4.06
+    }
+  ],
+  "failure_markers": [
+    {
+      "Time": "2026-09-16T01:22:06.819879207Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute",
+      "Output": "--- FAIL: TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute (4.06s)\n"
+    }
+  ],
+  "skip_output": [],
+  "non_json_output": []
+}

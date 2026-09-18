@@ -32,15 +32,18 @@ func TestRequiredBackupGateRunsBeforeStatefulChangeAndPersistsSafeEvidence(t *te
 		Runtime: RuntimePlanConfig{Mounts: []RuntimeMount{{Source: "/srv/state", Target: "/data", Ownership: OwnershipLinked}}},
 		Dependencies: jsonRawFixture{
 			`{"kind":"backup","ownership":"linked","resourceKind":"backup_job","resourceId":"42","config":{"requiredBeforeDeploy":true,"maxAgeSeconds":3600}}`,
+			`{"kind":"database","ownership":"linked","resourceKind":"database_connection","resourceId":"19"}`,
+			`{"kind":"storage","ownership":"linked","resourceKind":"docker_volume","resourceId":"app-uploads"}`,
 		}.raw(),
 	}
-	result := executor.backupGate(context.Background(), plan)
+	result := executor.backupGate(context.Background(), StepExecution{}, plan)
 	if result.State != StepPassed || len(fake.requests) != 1 {
 		t.Fatalf("backup gate = %#v, requests=%#v", result, fake.requests)
 	}
 	request := fake.requests[0]
 	if request.JobID != 42 || !request.RequiredBeforeDeploy || request.MaxAgeSeconds != 3600 ||
-		len(request.PersistentSources) != 1 || request.PersistentSources[0] != "/srv/state" {
+		len(request.PersistentSources) != 2 || request.PersistentSources[0] != "/srv/state" || request.PersistentSources[1] != "app-uploads" ||
+		len(request.DatabaseConnections) != 1 || request.DatabaseConnections[0] != 19 {
 		t.Fatalf("backup request = %#v", request)
 	}
 	if string(result.Evidence) == "" || containsAny(string(result.Evidence), "/srv/state", "artifact", "secret") {
@@ -57,7 +60,7 @@ func TestRequiredBackupFailureBlocksBeforeCandidateStart(t *testing.T) {
 	plan := &StoredExecutionPlan{Dependencies: jsonRawFixture{
 		`{"kind":"backup","ownership":"linked","resourceKind":"backup_job","resourceId":"7","config":{"requiredBeforeDeploy":true}}`,
 	}.raw()}
-	result := executor.backupGate(context.Background(), plan)
+	result := executor.backupGate(context.Background(), StepExecution{}, plan)
 	if result.State != StepFailed || result.ErrorCode != "backup_required" || len(fake.requests) != 1 {
 		t.Fatalf("failed backup gate = %#v, requests=%#v", result, fake.requests)
 	}

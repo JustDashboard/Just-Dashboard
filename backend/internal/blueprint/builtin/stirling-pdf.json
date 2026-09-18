@@ -1,0 +1,91 @@
+{
+  "id": "stirling-pdf",
+  "version": "1.0.0",
+  "name": "Stirling PDF",
+  "category": "tool",
+  "profile": "tool",
+  "description": "PDF tools in the browser: merge, split, convert, compress, sign and OCR, processed on this server and kept nowhere.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.stirlingpdf.com/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/Stirling-Tools/Stirling-PDF",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "stirlingtools/stirling-pdf:2.14.3",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The tools page and API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "configs",
+      "target": "/configs",
+      "purpose": "Settings",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "custom",
+      "target": "/customFiles",
+      "purpose": "Custom fonts, signatures and templates",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Status endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v1/info/status",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Settings carry over between versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:f4c23e47c6308380daa72b630878b727b1c5c1f86b628a180dde5dab789d5276"
+    }
+  ]
+}

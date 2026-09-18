@@ -1,0 +1,12 @@
+=== RUN   TestAuditSvelteKitDetectionObservation
+    audit_20260916_test.go:24: SvelteKit + Vite is detected as framework=vite profile=static output=dist
+--- PASS: TestAuditSvelteKitDetectionObservation (0.00s)
+=== RUN   TestAuditBuildScopedVariableObservation
+    audit_20260916_test.go:44: Build-scoped variable supplied to builder, no build.secrets mapping: real Docker build failed as expected
+    audit_20260916_test.go:50: Same variable with explicit build-stage mapping: real Docker build succeeded
+--- PASS: TestAuditBuildScopedVariableObservation (8.29s)
+=== RUN   TestAuditGoBuildCommandObservation
+    audit_20260916_test.go:59: Go recipe ignores configured build/start commands and emits its fixed CGO_ENABLED=0 build plus /app entrypoint
+--- PASS: TestAuditGoBuildCommandObservation (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	8.320s

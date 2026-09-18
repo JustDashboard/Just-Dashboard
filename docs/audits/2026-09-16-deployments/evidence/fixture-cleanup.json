@@ -1,0 +1,18 @@
+{
+  "container_id": "9c6e0aaf53abb208ad138fadf3f8f46cedf71d0b0889344ef5b325c338b050af",
+  "image": "nginx:alpine",
+  "created": "2026-09-16T01:22:05.794039547Z",
+  "mounts": [],
+  "published_ports": {
+    "80/tcp": [
+      {
+        "HostIp": "127.0.0.1",
+        "HostPort": "32775"
+      }
+    ]
+  },
+  "ownership_evidence": "Created during the failed live Caddy ingress fixture; exact nginx image, automatic name, no mounts, and dynamic loopback port match its docker run at docker_caddy_test.go. Absent before this audit.",
+  "action": "Removed this identified audit fixture by immutable container ID; no prune",
+  "exit_code": 0,
+  "output": "9c6e0aaf53abb208ad138fadf3f8f46cedf71d0b0889344ef5b325c338b050af\n"
+}

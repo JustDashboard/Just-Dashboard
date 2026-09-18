@@ -1,0 +1,4 @@
+=== RUN   TestLiveCutoverSurvivesProxyLoss
+--- PASS: TestLiveCutoverSurvivesProxyLoss (4.15s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	4.165s

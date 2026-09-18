@@ -1,0 +1,14 @@
+{
+  "transitions": 100,
+  "duration": "35.853s",
+  "slowestActivation": "442ms",
+  "fastRequests": 54448,
+  "fastFailed": 0,
+  "longRequests": 60,
+  "longFailed": 0,
+  "newSockets": 228,
+  "newSocketsFailed": 0,
+  "persistentSockets": 4,
+  "persistentMessages": 1432,
+  "persistentFailed": 0
+}

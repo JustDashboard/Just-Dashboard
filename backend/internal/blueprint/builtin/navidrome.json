@@ -1,0 +1,92 @@
+{
+  "id": "navidrome",
+  "version": "1.0.0",
+  "name": "Navidrome",
+  "category": "http",
+  "profile": "web",
+  "description": "A music streaming server that speaks the Subsonic API, so every Subsonic client works with it. Point it at a music folder; scanning is automatic.",
+  "iconId": "globe",
+  "docsUrl": "https://www.navidrome.org/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/navidrome/navidrome",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "deluan/navidrome:0.64.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 4533,
+      "protocol": "tcp",
+      "purpose": "The web player and Subsonic API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "The library database and settings",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "music",
+      "target": "/music",
+      "purpose": "The music files",
+      "data": true,
+      "backup": false
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Ping answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/ping",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Navidrome migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:c51275abb5c033951ecaac69146e57aa716400fe0a074321b922a14d54dcaaaa"
+    }
+  ]
+}

@@ -103,6 +103,34 @@ HEALTHCHECK --interval=1s --timeout=1s --start-period=1s --retries=10 CMD wget -
 		}
 	})
 
+	t.Run("selected application port survives a host collision", func(t *testing.T) {
+		busy, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer busy.Close()
+		requested := busy.Addr().(*net.TCPAddr).Port
+		environmentID := nextEnvironment(4)
+		plan := RuntimePlanConfig{InternalPort: 3123, HostPort: requested, BindAddress: "127.0.0.1", Strategy: StrategyStopFirst, GracePeriodSeconds: 3,
+			Command: []string{"sh", "-c", `exec caddy file-server --root /usr/share/caddy --listen ":$PORT"`}}
+		run := EngineRun{ID: environmentID + 10, EnvironmentID: environmentID}
+		release := Release{ID: environmentID + 20, EnvironmentID: environmentID, RunID: run.ID, Number: 1}
+		snapshot := runtimeReleaseSnapshot{Version: 1, Plan: plan, Image: result.Image}
+		started, err := owner.StartCandidate(context.Background(), CandidateRuntimeRequest{Run: run, Release: release, Snapshot: snapshot, Host: plan.BindAddress, Port: requested}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runtime := runtimeFromInput(started.Input)
+		t.Cleanup(func() { _, _ = owner.Stop(context.Background(), runtime, plan, nil, true, nil) })
+		if runtime.Port == requested {
+			t.Fatal("kept occupied host port")
+		}
+		evidence := runner.Run(context.Background(), PlannedCheck{Name: "HTTP readiness", Kind: "http", Phase: "readiness", Required: true, Config: json.RawMessage(`{"port":3123,"attempts":5,"intervalSeconds":1}`)}, targetForRuntime(runtime, snapshot))
+		if evidence.Outcome != HealthPassed {
+			t.Fatalf("allocated-port readiness: %+v", evidence)
+		}
+	})
+
 	t.Run("SIGTERM escalates to bounded SIGKILL", func(t *testing.T) {
 		environmentID := nextEnvironment(2)
 		plan := RuntimePlanConfig{

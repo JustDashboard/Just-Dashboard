@@ -234,7 +234,11 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 // order reads as a failed job rather than as a job that succeeded while
 // printing a problem.
 func certbotJob(ctx context.Context, out jobs.Emitter, args []string) error {
-	code, err := out.Run(ctx, "certbot", args...)
+	environment, err := proxysvc.CertbotEnvironment()
+	if err != nil {
+		return err
+	}
+	code, err := out.RunEnv(ctx, environment, "certbot", args...)
 	if err != nil {
 		return err
 	}
@@ -450,6 +454,16 @@ func (s *Server) handleDNSCredentials(w http.ResponseWriter, r *http.Request) er
 	}
 	httpx.SetAudit(r, "certificates.dns.credentials", req.Provider, map[string]any{"file": path})
 	httpx.JSON(w, http.StatusOK, map[string]any{"provider": req.Provider, "saved": true})
+	return nil
+}
+
+func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Request) error {
+	provider := chi.URLParam(r, "provider")
+	if err := proxysvc.RemoveDNSCredentials(provider); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "certificates.dns.credentials.remove", provider, nil)
+	httpx.NoContent(w)
 	return nil
 }
 

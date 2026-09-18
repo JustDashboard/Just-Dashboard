@@ -1,0 +1,133 @@
+{
+  "id": "influxdb",
+  "version": "1.0.0",
+  "name": "InfluxDB",
+  "category": "database",
+  "profile": "web",
+  "description": "A time-series database with its own UI and query language, set up on first start with an organisation, a bucket and an admin token.",
+  "iconId": "database",
+  "docsUrl": "https://docs.influxdata.com/influxdb/v2/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/influxdata/influxdb",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "influxdb:2.9-alpine",
+    "tagPolicy": "minor",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; applications on this host reach it over the Docker network without one."
+    },
+    {
+      "name": "user",
+      "kind": "text",
+      "label": "Admin user",
+      "variable": "DOCKER_INFLUXDB_INIT_USERNAME",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$"
+    },
+    {
+      "name": "org",
+      "kind": "text",
+      "label": "Organisation",
+      "variable": "DOCKER_INFLUXDB_INIT_ORG",
+      "default": "main",
+      "required": true,
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    {
+      "name": "bucket",
+      "kind": "text",
+      "label": "First bucket",
+      "variable": "DOCKER_INFLUXDB_INIT_BUCKET",
+      "default": "metrics",
+      "required": true,
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8086,
+      "protocol": "tcp",
+      "purpose": "The UI and API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/lib/influxdb2",
+      "purpose": "Every series this server holds",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "DOCKER_INFLUXDB_INIT_MODE",
+        "value": "setup"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "InfluxDB 2 upgrades its storage in place; the minor tag policy keeps this blueprint inside the 2.x line.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:639e9c3d2b4d1feed27fe9e6eca4c6b5febe3132756ee5738146d4bc1b256cc0"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "password",
+      "variable": "DOCKER_INFLUXDB_INIT_PASSWORD",
+      "label": "Admin password",
+      "length": 24
+    },
+    {
+      "name": "token",
+      "variable": "DOCKER_INFLUXDB_INIT_ADMIN_TOKEN",
+      "label": "Admin API token",
+      "length": 48
+    }
+  ]
+}

@@ -56,7 +56,13 @@ export function proxy(request: NextRequest) {
     "form-action 'self'",
     "frame-ancestors 'none'",
     "manifest-src 'self'",
-    ...(isDev ? [] : ["upgrade-insecure-requests"]),
+    // Only where the browser actually arrived over HTTPS. The ssh-tunnel
+    // install serves http://localhost deliberately — the tunnel is the
+    // encrypted hop, and localhost is a secure context — and while the
+    // upgrade algorithm is specified to leave trustworthy origins alone, a
+    // directive whose whole job is to rewrite this page's own scheme has no
+    // business being sent to a page that has no HTTPS to be upgraded to.
+    ...(isDev || requestProtocol !== "https" ? [] : ["upgrade-insecure-requests"]),
   ].join("; ")
 
   const requestHeaders = new Headers(request.headers)

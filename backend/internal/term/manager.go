@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"os"
 	"slices"
 	"sort"
@@ -96,6 +97,10 @@ type CreateOptions struct {
 	// inherits the folder's colour, which is what makes a group readable as a
 	// group rather than as four rows that happen to be adjacent.
 	Colour string
+	// WorkspaceID is empty for the first window. Additional direct-PTY
+	// windows reuse the first window's workspace id.
+	WorkspaceID string
+	WindowName  string
 }
 
 // Create spawns a session. When tmux is present and persistence is requested
@@ -135,7 +140,9 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 
 	sess := &Session{
 		ID:          id,
-		Title:       m.defaultTitle(ctx, opts.Title),
+		WorkspaceID: opts.WorkspaceID,
+		WindowName:  sanitiseField(opts.WindowName),
+		Title:       m.defaultTitle(opts.Title),
 		Shell:       shell,
 		User:        m.account.Name,
 		CreatedAt:   time.Now().UTC(),
@@ -143,16 +150,25 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 		Rows:        opts.Rows,
 		Cols:        opts.Cols,
 		subscribers: map[int64]chan []byte{},
+		events:      map[int64]chan Activity{},
 		scrollback:  newRingBuffer(scrollbackKB * 1024),
 		lastActive:  time.Now(),
+		focusedAt:   time.Now(),
 		folder:      sanitiseField(opts.Folder),
 		colour:      normaliseColour(opts.Colour),
+		named:       opts.Title != "",
+		windowNamed: opts.WindowName != "",
 	}
-
+	if sess.WorkspaceID == "" {
+		sess.WorkspaceID = id
+	}
+	if sess.WindowName == "" {
+		sess.WindowName = m.defaultWindowName(sess.WorkspaceID)
+	}
 	// Where the session should start. Empty unless the caller asked for one
 	// and it is a real directory on the host, so everything below can treat a
 	// non-empty value as settled.
-	startDir := hostDir(opts.CWD)
+	startDir := hostDir(ctx, opts.CWD)
 	cmdDir := ""
 
 	// What ssh would have run: become the account and exec its login shell.
@@ -176,11 +192,14 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 		// session is the same session as a plain one with a multiplexer in
 		// front. `-c` sets the directory tmux starts the pane in, which the
 		// login above is now built to keep rather than override.
-		wrap := []string{"tmux", "new-session", "-A", "-s", sess.TmuxName}
-		if startDir != "" {
-			wrap = append(wrap, "-c", startDir)
-		}
-		argv = append(wrap, argv...)
+		// The environment on the tmux *client* is not automatically the
+		// environment of the pane. In particular COLORTERM is not in tmux's
+		// default update-environment list, so an already-running server silently
+		// dropped truecolor from every new dashboard shell even though the outer
+		// PTY correctly advertised it. `new-session -e` writes the capability on
+		// the session before the first pane process starts; setting it later is
+		// too late for Codex, Claude and any login shell already running there.
+		argv = tmuxNewSessionArgv(sess.TmuxName, startDir, argv)
 	}
 	// CommandOnHost always crosses into the host's namespaces, even though
 	// this image happens to ship bash and tmux of its own. That is the whole
@@ -191,11 +210,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	// A login resets the environment anyway; these are the two variables that
 	// survive it and that the terminal on the other end depends on to render
 	// colour and cursor keys correctly.
-	cmd.Env = append(os.Environ(),
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-		"JD_SESSION="+id,
-	)
+	cmd.Env = terminalEnv(os.Environ(), id)
 
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: opts.Rows, Cols: opts.Cols})
 	if err != nil {
@@ -208,6 +223,11 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	}
 
 	m.mu.Lock()
+	for _, existing := range m.sessions {
+		if existing.WorkspaceID == sess.WorkspaceID && existing.WindowOrder >= sess.WindowOrder {
+			sess.WindowOrder = existing.WindowOrder + 1
+		}
+	}
 	m.sessions[id] = sess
 	m.mu.Unlock()
 
@@ -271,49 +291,70 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	return sess, nil
 }
 
-// hostDir accepts a requested working directory only if it is one. The host's
-// real /home, /opt, /srv and /etc are bind-mounted here under their own names,
-// so this stat asks about the same directory the session will land in.
-func hostDir(dir string) string {
-	if dir == "" {
+func tmuxNewSessionArgv(name, startDir string, login []string) []string {
+	argv := []string{"tmux", "new-session", "-A", "-e", "COLORTERM=truecolor", "-s", name}
+	if startDir != "" {
+		argv = append(argv, "-c", startDir)
+	}
+	return append(argv, login...)
+}
+
+// hostDir accepts a requested working directory only if it is one on the
+// host, where the shell will actually run. The check has to cross into the
+// host's mount namespace: this process sees the container's filesystem, in
+// which only /home, /opt, /srv, /root, /etc and a handful of other paths are
+// the host's. A plain os.Stat here answered about the wrong machine in both
+// directions — a shell sitting in /var/www or /tmp (host paths the image does
+// not carry) was reported as nowhere and the new window fell back to home,
+// while a container-only path such as /usr/lib/postgresql passed and then
+// made nsenter fail, killing the new PTY on arrival.
+func hostDir(ctx context.Context, dir string) string {
+	if dir == "" || strings.ContainsRune(dir, 0) {
 		return ""
 	}
-	if st, err := os.Stat(dir); err == nil && st.IsDir() {
-		return dir
+	// `test -d` follows symlinks and fails for deleted (" (deleted)") and
+	// missing paths alike. CommandOnHost runs it on the host when containerised
+	// and locally otherwise, so both deployments ask the right filesystem.
+	if err := hostexec.CommandOnHost(ctx, "test", "-d", dir).Run(); err != nil {
+		return ""
 	}
-	return ""
+	return dir
 }
+
+// defaultName is what a session or window is called until somebody names it
+// or the shell says what it is doing. "Terminal" rather than "shell": it is
+// the word on the page's own navigation, and the one a person uses.
+const defaultName = "Terminal"
 
 // defaultTitle names a session the operator did not name.
 //
 // Numbered, and that is the whole point: the rail exists because five sessions
-// called `vpsd-3f2a91c4` are indistinguishable, and five called `shell` are no
-// better. The number is the lowest one free across everything this dashboard
-// knows about — live sessions and the ones only tmux is holding — so closing
-// "shell 2" and opening another gives back "shell 2" rather than counting
-// forever upward.
-func (m *Manager) defaultTitle(ctx context.Context, t string) string {
+// called `vpsd-3f2a91c4` are indistinguishable, and five called `Terminal` are
+// no better. The number is the lowest one free across everything this dashboard
+// knows about, so closing "Terminal 2" and opening another gives back
+// "Terminal 2" rather than counting forever upward. The default only shows
+// while the window has nothing better to say for itself — see activity.go.
+func (m *Manager) defaultTitle(t string) string {
 	if t != "" {
 		if len(t) > 64 {
 			return t[:64]
 		}
 		return t
 	}
-	const base = "shell"
 	taken := map[string]bool{}
-	for _, meta := range m.AllMeta(ctx) {
+	for _, meta := range m.WorkspaceMeta() {
 		taken[meta.Title] = true
 	}
-	if !taken[base] {
-		return base
+	return freeName(defaultName, taken)
+}
+
+// defaultWindowName numbers windows the same way, within their session.
+func (m *Manager) defaultWindowName(workspaceID string) string {
+	taken := map[string]bool{}
+	for _, sess := range m.Workspace(workspaceID) {
+		taken[sess.WindowName] = true
 	}
-	for n := 2; n < 1000; n++ {
-		candidate := base + " " + strconv.Itoa(n)
-		if !taken[candidate] {
-			return candidate
-		}
-	}
-	return base
+	return freeName(defaultName, taken)
 }
 
 func (m *Manager) Get(id string) (*Session, error) {
@@ -335,6 +376,145 @@ func (m *Manager) List() []*Session {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out
+}
+
+// Workspace returns every direct PTY window in one dashboard session. The
+// workspace id is stable even when its first window is later closed.
+func (m *Manager) Workspace(id string) []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []*Session{}
+	for _, sess := range m.sessions {
+		if sess.TmuxName == "" && (sess.WorkspaceID == id || sess.ID == id) {
+			out = append(out, sess)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WindowOrder == out[j].WindowOrder {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].WindowOrder < out[j].WindowOrder
+	})
+	return out
+}
+
+// NewDirectWindow opens another independent PTY inside a direct dashboard session.
+// It intentionally does not use tmux: windows are organisation in the UI,
+// while each child remains a native PTY with its own terminal negotiation.
+//
+// The directory falls back down the chain — the caller's (the active
+// window's) directory first, then the workspace's first window as it stands,
+// then home — and every step is validated on the host, so a stale directory
+// can only move the new window home, never kill it on arrival.
+func (m *Manager) NewDirectWindow(ctx context.Context, workspaceID, name, cwd string, rows, cols uint16) (*Session, error) {
+	windows := m.Workspace(workspaceID)
+	if len(windows) == 0 {
+		return nil, ErrNotFound
+	}
+	root := windows[0]
+	meta := root.Meta()
+	if hostDir(ctx, cwd) == "" {
+		cwd = root.CWD()
+	}
+	created, err := m.Create(ctx, CreateOptions{
+		Title: meta.Title, Owner: root.Owner, Rows: rows, Cols: cols, CWD: cwd,
+		Folder: meta.Folder, WorkspaceID: root.WorkspaceID, WindowName: name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	created.setMeta(meta)
+	return created, nil
+}
+
+// RenameDirectWindow changes only the compact tab label; the session name in
+// the rail remains the name of the whole workspace.
+func (m *Manager) RenameDirectWindow(workspaceID, windowID, name string) error {
+	name = sanitiseField(name)
+	if name == "" {
+		return errors.New("a window name is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.sessions[windowID]
+	if !ok || sess.TmuxName != "" || sess.WorkspaceID != workspaceID {
+		return ErrNotFound
+	}
+	sess.WindowName = name
+	sess.mu.Lock()
+	sess.windowNamed = true
+	sess.mu.Unlock()
+	return nil
+}
+
+// MoveDirectWindow updates the explicit display order after a tab drag.
+func (m *Manager) MoveDirectWindow(workspaceID, windowID string, position int) error {
+	windows := m.Workspace(workspaceID)
+	if position < 0 {
+		position = 0
+	}
+	if position >= len(windows) {
+		position = len(windows) - 1
+	}
+	from := -1
+	for i, sess := range windows {
+		if sess.ID == windowID {
+			from = i
+			break
+		}
+	}
+	if from < 0 {
+		return ErrNotFound
+	}
+	moving := windows[from]
+	windows = append(windows[:from], windows[from+1:]...)
+	windows = append(windows, nil)
+	copy(windows[position+1:], windows[position:])
+	windows[position] = moving
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, sess := range windows {
+		sess.WindowOrder = i
+	}
+	return nil
+}
+
+// KillDirectWindow closes one PTY but refuses the last: the session close
+// route owns that clearer consequence and confirmation.
+func (m *Manager) KillDirectWindow(ctx context.Context, workspaceID, windowID string) error {
+	windows := m.Workspace(workspaceID)
+	if len(windows) == 0 {
+		return ErrNotFound
+	}
+	if len(windows) == 1 {
+		return errors.New("this is the only window; close the session instead")
+	}
+	found := false
+	for _, sess := range windows {
+		if sess.ID == windowID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return m.Kill(ctx, windowID)
+}
+
+// KillWorkspace ends every window in a direct session.
+func (m *Manager) KillWorkspace(ctx context.Context, id string) error {
+	windows := m.Workspace(id)
+	if len(windows) == 0 {
+		return ErrNotFound
+	}
+	var first error
+	for _, sess := range windows {
+		if err := m.Kill(ctx, sess.ID); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func (m *Manager) remove(id string) {
@@ -664,15 +844,24 @@ func (m *Manager) Reattach(ctx context.Context, tmuxName, owner string, rows, co
 		Rows:        rows,
 		Cols:        cols,
 		subscribers: map[int64]chan []byte{},
+		events:      map[int64]chan Activity{},
 		scrollback:  newRingBuffer(scrollbackKB * 1024),
 		lastActive:  time.Now(),
+		focusedAt:   time.Now(),
 	}
 	// The display options are set on the way in as well as at creation, so a
 	// session made before they existed — or by an older build — is fixed by
 	// being picked up rather than by being recreated. Both are idempotent.
 	m.rememberOptions(tmuxName, option{"status", "off"}, option{"mouse", "on"})
+	// Sessions created by older dashboard builds have no COLORTERM in their
+	// session environment. This cannot rewrite the environment of a process
+	// that is already running, but it makes every new window/pane correct and
+	// means restarting a TUI after reattach observes the same capabilities as
+	// a newly-created session.
+	_ = hostexec.CommandOnHost(ctx, "tmux", "set-environment", "-t", tmuxName,
+		"COLORTERM", "truecolor").Run()
 	cmd := hostexec.CommandOnHost(context.Background(), "tmux", "attach-session", "-t", tmuxName)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	cmd.Env = terminalEnv(os.Environ(), id)
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
 		return nil, err
@@ -686,6 +875,27 @@ func (m *Manager) Reattach(ctx context.Context, tmuxName, owner string, rows, co
 	m.mu.Unlock()
 	go sess.readLoop(func() { m.remove(id) })
 	return sess, nil
+}
+
+// terminalEnv replaces terminal capability variables rather than appending
+// duplicates. execve permits duplicate names and many libc implementations
+// return the first one, so append(os.Environ(), "TERM=...") can leave a
+// service manager's TERM=dumb in force inside the shell.
+func terminalEnv(base []string, sessionID string) []string {
+	env := make([]string, 0, len(base)+3)
+	for _, entry := range base {
+		name, _, _ := strings.Cut(entry, "=")
+		switch name {
+		case "TERM", "COLORTERM", "JD_SESSION":
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env,
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"JD_SESSION="+sessionID,
+	)
 }
 
 // reap closes sessions nobody is attached to and that have seen no output for

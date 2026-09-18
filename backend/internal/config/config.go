@@ -18,17 +18,37 @@ import (
 // field that weakens the security posture (such as the allowlist or TLS)
 // fails closed: the zero value is the restrictive one.
 type Config struct {
-	Addr             string
-	DataDir          string
-	MasterKeyHex     string
-	TrustedProxies   []*net.IPNet
-	AllowedCIDRs     []*net.IPNet
-	AllowedOrigins   []string
-	SessionTTL       time.Duration
-	IdleTTL          time.Duration
-	DockerHost       string
-	TerminalEnable   bool
-	AgentMode        bool
+	Addr           string
+	DataDir        string
+	MasterKeyHex   string
+	TrustedProxies []*net.IPNet
+	AllowedCIDRs   []*net.IPNet
+	AllowedOrigins []string
+	SessionTTL     time.Duration
+	IdleTTL        time.Duration
+	DockerHost     string
+	// Site and TLSMode describe how the proxy in front of this process is
+	// reached. This process never binds them — it is loopback-only in every
+	// configuration — but it is the half of the stack that can run `tailscale
+	// cert` on the host, and it is what the settings page reports the address
+	// from.
+	Site           string
+	TLSMode        string
+	TerminalEnable bool
+	AgentMode      bool
+	// Require2FA makes an authenticator mandatory for every account: a
+	// password-only session then reaches nothing but the enrolment routes.
+	//
+	// It used to be unconditional, and the reasoning was sound for the install
+	// this product was first written for. It is wrong for the one it is
+	// actually installed into: a dashboard reachable only over a tailnet or an
+	// ssh tunnel already sits behind an authenticated network, and forcing an
+	// authenticator app onto a single operator setting up their own server was
+	// turning the first ninety seconds of the product into a chore that could
+	// not be skipped. Enrolment is still offered, still encouraged, and can be
+	// made compulsory again by setting this — but the default no longer
+	// decides on the operator's behalf.
+	Require2FA       bool
 	TerminalShell    string
 	TerminalUser     string
 	FileRoots        []string
@@ -52,11 +72,9 @@ type Config struct {
 	MetricsRetention time.Duration
 
 	// UpdateCheck is whether the dashboard may ask the repository whether a
-	// newer version exists. It is the only outbound request this product makes
-	// on its own initiative, which is worth a switch of its own: plenty of
-	// these installs sit on machines that deliberately reach nothing. Turning
-	// it off leaves the changelog for the installed version readable, because
-	// that half is compiled in.
+	// newer version exists. Turning it off leaves the compiled-in changelog
+	// readable. Deployment branch monitoring uses separate Git connections
+	// and is independent of update discovery.
 	UpdateCheck bool
 	// UpdateRepo is the GitHub repository releases are read from, as
 	// owner/name. A fork sets it and starts describing its own releases.
@@ -79,8 +97,11 @@ func Load() (*Config, error) {
 		SessionTTL:     l.duration("JD_SESSION_TTL", 12*time.Hour),
 		IdleTTL:        l.duration("JD_SESSION_IDLE_TTL", 60*time.Minute),
 		DockerHost:     env("JD_DOCKER_HOST", "unix:///var/run/docker.sock"),
+		Site:           env("JD_SITE", "localhost"),
+		TLSMode:        strings.ToLower(env("JD_TLS", "internal")),
 		TerminalEnable: l.boolean("JD_TERMINAL_ENABLED", true),
 		AgentMode:      l.boolean("JD_AGENT_MODE", false),
+		Require2FA:     l.boolean("JD_REQUIRE_2FA", false),
 		// Empty means "the account's own login shell", read from the host's
 		// passwd file. Naming a shell here would override what the operator
 		// chose with chsh, which is the opposite of behaving like ssh.

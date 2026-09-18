@@ -1,0 +1,6 @@
+=== RUN   TestLiveSQLiteApplicationRecoveryVerification
+    backup_recovery_live_test.go:65: inspect built image: docker is not available on this host: unable to parse docker host ``
+--- FAIL: TestLiveSQLiteApplicationRecoveryVerification (3.35s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/api	3.377s
+FAIL

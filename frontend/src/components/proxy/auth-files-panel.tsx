@@ -4,24 +4,20 @@ import { useState } from "react"
 import { Key, Plus, Trash, UserMinus } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import type { AuthFile } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
+import { Field } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { ROW_BLEED } from "@/components/row-list"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
+import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 /**
  * Passwords for the site form's basic-auth option.
@@ -39,96 +35,116 @@ export function AuthFilesPanel() {
     0,
   )
 
-  if (loading) return <LoadingPanel rows={3} />
-  if (error) return <ErrorState error={error} />
+  const removeUser = (file: AuthFile, user: string) =>
+    confirm({
+      title: `Remove ${user}`,
+      confirmLabel: "Remove",
+      description: (
+        <p>
+          <b>{user}</b> can no longer sign in to any site using <b>{file.name}</b>. Removing the
+          last login leaves the file in place, admitting nobody.
+        </p>
+      ),
+      action: async () => {
+        await del(
+          `/proxy/auth-files/${encodeURIComponent(file.name)}/users/${encodeURIComponent(user)}`,
+        )
+        refresh()
+      },
+    })
 
-  const removeUser = async (file: string, user: string) => {
-    try {
-      await del(`/proxy/auth-files/${encodeURIComponent(file)}/users/${encodeURIComponent(user)}`)
-      notify.success(`${user} removed`)
-      refresh()
-    } catch (err) {
-      notify.error("Could not remove", err)
-    }
-  }
+  const removeFile = (file: AuthFile) =>
+    confirm({
+      title: `Delete ${file.name}`,
+      confirmLabel: "Delete",
+      description: (
+        <p className="text-destructive">
+          Any site pointing at this file stops nginx from starting at its next reload. Change those
+          sites first.
+        </p>
+      ),
+      action: async () => {
+        await del(`/proxy/auth-files/${encodeURIComponent(file.name)}`)
+        refresh()
+      },
+    })
 
   return (
     <>
-      <Panel>
+      <Panel plain>
         <PanelHeader
-          icon={Key}
           title="Password files"
-          description="For sites put behind a login. Hashed with bcrypt here, so the password never reaches a command line."
           actions={<AuthUserDialog files={data ?? []} onDone={refresh} />}
         />
-        <PanelBody className={data?.length ? "space-y-2.5" : undefined}>
-          {!data?.length ? (
+        <PanelBody flush>
+          {loading ? (
+            <LoadingRows rows={2} />
+          ) : error ? (
+            <ErrorState error={error} />
+          ) : !data?.length ? (
             <EmptyState
               icon={Key}
               title="No password files yet"
-              description="Create one, then choose it in a site's password field to put that site behind a login."
+              description="Add a login, then choose the file in a site's password field to put that site behind it."
+              className="mt-2"
             />
           ) : (
-            data.map((file) => (
-              <div
-                key={file.name}
-                className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2 rounded-lg border border-hairline bg-surface-sunken p-2.5"
-              >
-                <div className="min-w-0 space-y-1.5">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-[13px] font-medium">{file.name}</span>
-                    <code className="font-mono text-[11px] text-muted-foreground">
-                      {file.path}
-                    </code>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {file.users.length === 0 ? (
-                      <span className="text-[11px] text-muted-foreground">
-                        Empty — this file admits nobody.
-                      </span>
-                    ) : (
-                      file.users.map((user) => (
-                        <Badge key={user} variant="outline" className="gap-1 font-normal">
-                          {user}
-                          <button
-                            type="button"
-                            aria-label={`Remove ${user}`}
-                            className="text-muted-foreground hover:text-destructive"
-                            onClick={() => removeUser(file.name, user)}
-                          >
-                            <UserMinus className="size-3" />
-                          </button>
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                </div>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="text-destructive"
-                  onClick={() =>
-                    confirm({
-                      title: `Delete ${file.name}`,
-                      confirmLabel: "Delete",
-                      description: (
-                        <p className="text-destructive">
-                          Any site pointing at this file stops nginx from starting at its next
-                          reload. Change those sites first.
-                        </p>
-                      ),
-                      action: async () => {
-                        await del(`/proxy/auth-files/${encodeURIComponent(file.name)}`)
-                        refresh()
-                      },
-                    })
-                  }
+            <ul className="animate-rise divide-y divide-hairline">
+              {data.map((file) => (
+                <li
+                  key={file.name}
+                  className={cn(
+                    "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
+                    ROW_BLEED,
+                  )}
                 >
-                  <Trash className="size-3.5" />
-                  Delete file
-                </Button>
-              </div>
-            ))
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                      <span className="text-body font-medium">{file.name}</span>
+                      <span className="truncate font-mono text-hint text-muted-foreground">
+                        {file.path}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {file.users.length === 0 ? (
+                        <span className="text-hint text-muted-foreground">
+                          Empty — this file admits nobody.
+                        </span>
+                      ) : (
+                        file.users.map((user) => (
+                          <Tag key={user} mono className="gap-1 pr-0.5">
+                            {user}
+                            <IconAction
+                              label={`Remove ${user}`}
+                              size="icon-xs"
+                              className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                              onClick={() => removeUser(file, user)}
+                            >
+                              <UserMinus />
+                            </IconAction>
+                          </Tag>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <VerbActions
+                    dim
+                    className="shrink-0"
+                    verbs={[
+                      {
+                        key: "delete",
+                        label: "Delete file",
+                        detail:
+                          "Remove the file. A site still pointing at it fails its next reload.",
+                        icon: Trash,
+                        danger: true,
+                        run: () => removeFile(file),
+                      },
+                    ]}
+                  />
+                </li>
+              ))}
+            </ul>
           )}
         </PanelBody>
       </Panel>
@@ -161,24 +177,33 @@ function AuthUserDialog({ files, onDone }: { files: AuthFile[]; onDone: () => vo
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Plus className="size-4" />
-          Add user
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add a login</DialogTitle>
-          <DialogDescription>
-            Creates the password file if it does not exist, and replaces the entry if the user is
-            already in it.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="auth-file">File</Label>
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus className="size-4" />
+        Add login
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        size="sm"
+        title="Add a login"
+        description="Creates the password file if it does not exist, and replaces the entry if the user is already in it."
+        footer={
+          <Button
+            onClick={submit}
+            disabled={busy || !file.trim() || !user.trim() || password.length < 8}
+            pending={busy}
+          >
+            Save
+          </Button>
+        }
+      >
+        <div className="grid gap-4">
+          <Field
+            label="File"
+            htmlFor="auth-file"
+            hint="A new name creates the file; an existing one adds to it."
+          >
             <Input
               id="auth-file"
               value={file}
@@ -192,13 +217,15 @@ function AuthUserDialog({ files, onDone }: { files: AuthFile[]; onDone: () => vo
                 <option key={f.name} value={f.name} />
               ))}
             </datalist>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="auth-user">User</Label>
+          </Field>
+          <Field label="User" htmlFor="auth-user">
             <Input id="auth-user" value={user} onChange={(e) => setUser(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="auth-password">Password</Label>
+          </Field>
+          <Field
+            label="Password"
+            htmlFor="auth-password"
+            hint="At least 8 characters, at most 72 — bcrypt truncates anything longer, which would quietly make it a different password from the one you typed."
+          >
             <Input
               id="auth-password"
               type="password"
@@ -206,21 +233,9 @@ function AuthUserDialog({ files, onDone }: { files: AuthFile[]; onDone: () => vo
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"
             />
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              At least 8 characters, at most 72 — bcrypt truncates anything longer, which would
-              quietly make it a different password from the one you typed.
-            </p>
-          </div>
+          </Field>
         </div>
-        <DialogFooter>
-          <Button
-            onClick={submit}
-            disabled={busy || !file.trim() || !user.trim() || password.length < 8}
-          >
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

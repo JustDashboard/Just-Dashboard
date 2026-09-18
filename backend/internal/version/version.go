@@ -26,4 +26,4 @@ package version
 //
 // It is a marketing version, not a semver contract: 0.5 is the dashboard as a
 // complete single-server panel, 1.0 is when the API stops moving under people.
-const Version = "0.6.6"
+const Version = "0.6.7"

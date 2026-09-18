@@ -2,69 +2,69 @@
 
 import { createPortal } from "react-dom"
 import { CheckCircle, CrossCircle, Information, LoaderCircle, Warning } from "@/components/icons"
-import { useTheme } from "@/hooks/use-theme"
 import { usePortalContainer } from "@/lib/portal-container"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
 /**
- * The one place a toast is rendered.
+ * The one place a toast is rendered — shadcn's sonner, kept close to stock.
  *
- * Three things about sonner's defaults had to be corrected rather than lived
- * with, and all three were visible in the same screenshot of one failed dump:
+ * It used to run with `richColors`, which floods the whole surface with the
+ * status hue: a green card with a green border and green body text for every
+ * "Installed", a red one for every failure. Four saturated surfaces competing
+ * with a product whose own palette is ink and grey. The surface is now the
+ * same `--popover` as every other floating panel here — menu, tooltip,
+ * dropdown — and status is carried by the icon alone, the way `text-warning`
+ * and `text-destructive` already carry it in the tables and badges.
  *
- * **The close button sits at the top left by default**, which for a toaster
- * anchored to the top right puts it on the far side of the toast from every
- * other control on that edge of the screen, half outside the corner radius. It
- * moves to the trailing edge, where a close button on a right-aligned surface
- * belongs.
+ * The rest is the shadcn default. The deviations that remain are not
+ * cosmetic:
  *
- * **The icon is centred against the whole toast**, so a message with a title
- * and a description gets an icon floating between the two lines pointing at
- * neither. It aligns to the first line, which is the one it is about.
+ * **The icons are this app's**, so a check in a toast is the same check as
+ * everywhere else rather than sonner's own set.
  *
- * **The description inherits full-strength foreground**, which gives a title
- * and its detail the same weight and makes a two-line toast read as two
- * unrelated sentences.
+ * **The description colour is a literal in sonner's stylesheet** (`#3f3f3f`,
+ * and a fixed grey in dark mode) rather than a variable, so it is the one
+ * piece of the palette that cannot be handed over through `--normal-*` and
+ * has to be overridden by class.
+ *
+ * **The icon is centred against the whole toast**, which is right for a
+ * one-line toast and wrong for every other. A failure here carries its reason
+ * underneath it — a `dpkg` refusal runs to three lines — and a centred icon
+ * ends up beside the middle of the explanation, pointing at nothing. It
+ * aligns to the first line, which is the one it is about.
+ *
+ * **Sonner renders where it is mounted rather than through a portal**, and
+ * this is mounted in the root layout — outside whatever element is in the
+ * browser's fullscreen, which is the only thing the compositor paints. So
+ * while something is fullscreen the toaster moves inside it; otherwise every
+ * "Saved" and every "Could not save" from a fullscreen workspace is silent.
+ * The move remounts it, which sonner survives: live toasts live in its own
+ * store, not in the element.
  */
 const Toaster = ({ ...props }: ToasterProps) => {
   // Sonner paints its own surface, so it has to be told which way the active
   // palette leans or a light theme gets black toasts.
-  const { mode } = useTheme()
-  // Sonner renders where it is mounted rather than through a portal, and this
-  // is mounted in the root layout — outside whatever element is in the
-  // browser's fullscreen, which is the only thing the compositor paints. So
-  // while something is fullscreen the toaster moves inside it; otherwise every
-  // "Saved" and every "Could not save" from a fullscreen workspace is silent.
-  // The move remounts it, which sonner survives: live toasts live in its own
-  // store, not in the element.
   const fullscreen = usePortalContainer()
 
   const toaster = (
     <Sonner
-      theme={mode}
+      theme="dark"
       className="toaster group"
       icons={{
-        success: <CheckCircle className="size-4" />,
-        info: <Information className="size-4" />,
-        warning: <Warning className="size-4" />,
-        error: <CrossCircle className="size-4" />,
-        loading: <LoaderCircle className="size-4 animate-spin" />,
+        success: <CheckCircle className="size-4 text-success" />,
+        info: <Information className="size-4 text-muted-foreground" />,
+        warning: <Warning className="size-4 text-warning" />,
+        error: <CrossCircle className="size-4 text-destructive" />,
+        loading: <LoaderCircle className="size-4 animate-spin text-muted-foreground" />,
       }}
       toastOptions={{
         classNames: {
-          toast: "items-start gap-3 p-4 shadow-lg",
-          // Nudged down by the difference between the icon box and the cap
-          // height of the title beside it, so the two share a baseline rather
-          // than the icon hanging above it.
-          icon: "mt-px self-start",
-          content: "gap-1",
-          title: "text-[13px] font-medium leading-snug",
-          description:
-            "!text-muted-foreground text-[12px] leading-relaxed break-words group-data-[type=error]:!text-current group-data-[type=error]:opacity-80",
-          closeButton:
-            "!left-auto !right-2 !top-2 !translate-x-0 !translate-y-0 !border-0 !bg-transparent opacity-60 transition-opacity hover:opacity-100",
-          actionButton: "text-xs",
-          cancelButton: "text-xs",
+          toast: "!items-start",
+          // Half the difference between the 16px icon box and the title's
+          // 19.5px line box, so the two share a centre rather than the icon
+          // hanging above it.
+          icon: "mt-0.5",
+          description: "!text-muted-foreground",
         },
       }}
       style={
@@ -73,11 +73,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
-          // Sonner positions the close button from these rather than from its
-          // class, so the class alone is not enough to move it.
-          "--toast-close-button-start": "auto",
-          "--toast-close-button-end": "0.5rem",
-          "--toast-close-button-transform": "none",
         } as React.CSSProperties
       }
       {...props}

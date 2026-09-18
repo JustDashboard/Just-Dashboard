@@ -18,12 +18,13 @@ type loginRequest struct {
 }
 
 type authStatus struct {
-	Authenticated bool              `json:"authenticated"`
-	User          *auth.User        `json:"user,omitempty"`
-	Capabilities  []auth.Capability `json:"capabilities,omitempty"`
-	NeedsTOTP     bool              `json:"needsTotp"`
-	NeedsEnroll   bool              `json:"needsEnrollment"`
-	Require2FA    bool              `json:"require2fa"`
+	NeedsPasswordChange bool              `json:"needsPasswordChange"`
+	Authenticated       bool              `json:"authenticated"`
+	User                *auth.User        `json:"user,omitempty"`
+	Capabilities        []auth.Capability `json:"capabilities,omitempty"`
+	NeedsTOTP           bool              `json:"needsTotp"`
+	NeedsEnroll         bool              `json:"needsEnrollment"`
+	Require2FA          bool              `json:"require2fa"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
@@ -55,12 +56,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 		"needsTotp": res.NeedsTOTP, "needsEnrollment": res.NeedsEnroll,
 	})
 	httpx.JSON(w, http.StatusOK, authStatus{
-		Authenticated: !res.NeedsTOTP && !res.NeedsEnroll,
-		User:          res.User,
-		Capabilities:  res.User.Role.Capabilities(),
-		NeedsTOTP:     res.NeedsTOTP,
-		NeedsEnroll:   res.NeedsEnroll,
-		Require2FA:    s.Auth.Require2FA(),
+		Authenticated:       !res.NeedsTOTP && !res.NeedsEnroll && !res.User.MustChangePW,
+		NeedsPasswordChange: !res.NeedsTOTP && !res.NeedsEnroll && res.User.MustChangePW,
+		User:                res.User,
+		Capabilities:        res.User.Role.Capabilities(),
+		NeedsTOTP:           res.NeedsTOTP,
+		NeedsEnroll:         res.NeedsEnroll,
+		Require2FA:          s.Auth.Require2FA(),
 	})
 	return nil
 }
@@ -106,8 +108,10 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case current != nil && !current.TwoFAPassed && p.User.TOTPEnabled:
 		st.NeedsTOTP = true
-	case current != nil && !current.TwoFAPassed:
+	case current != nil && !current.TwoFAPassed && s.Auth.Require2FA():
 		st.NeedsEnroll = true
+	case p.User.MustChangePW:
+		st.NeedsPasswordChange = true
 	default:
 		st.Authenticated = true
 	}
@@ -117,12 +121,18 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) error {
 	p := httpx.MustPrincipal(r)
+	if err := s.limitSecondFactor(r); err != nil {
+		return err
+	}
 	if p.User.TOTPEnabled {
 		return httpx.Err(http.StatusConflict, "totp_already_enabled",
 			"two-factor is already enrolled; an admin must reset it first")
 	}
 	enroll, err := s.Auth.BeginTOTPEnrollment(r.Context(), p.UserID())
 	if err != nil {
+		if errors.Is(err, auth.ErrTOTPAlreadyEnabled) {
+			return httpx.Err(http.StatusConflict, "totp_already_enabled", err.Error())
+		}
 		return httpx.Internal(err)
 	}
 	httpx.SetAudit(r, "auth.2fa.setup", p.Username(), nil)
@@ -140,23 +150,19 @@ func (s *Server) handleTOTPEnable(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	p := httpx.MustPrincipal(r)
-	codes, err := s.Auth.ConfirmTOTPEnrollment(r.Context(), p.UserID(), req.Code)
+	if err := s.limitSecondFactor(r); err != nil {
+		return err
+	}
+	codes, err := s.Auth.ConfirmTOTPEnrollmentForSession(r.Context(), p.UserID(), p.SessionID, req.Code)
 	if err != nil {
+		if errors.Is(err, auth.ErrTOTPAlreadyEnabled) {
+			return httpx.Err(http.StatusConflict, "totp_already_enabled", err.Error())
+		}
 		if errors.Is(err, auth.ErrInvalidTOTP) {
 			httpx.SetAudit(r, "auth.2fa.enable", p.Username(), map[string]any{"result": "rejected"})
 			return httpx.Err(http.StatusUnauthorized, "invalid_code", err.Error())
 		}
 		return httpx.Internal(err)
-	}
-	if err := s.Auth.VerifySecondFactor(r.Context(), p.SessionID, p.UserID(), req.Code); err != nil {
-		// The code was just consumed confirming the enrollment, so TOTP's
-		// replay window refuses it a second time. That leaves this partial
-		// session unable to pass its second factor, so it is revoked and the
-		// user signs in again — rather than elevated on the strength of a
-		// check that did not pass.
-		if err := s.Auth.RevokeSession(r.Context(), p.SessionID); err != nil {
-			return httpx.Internal(err)
-		}
 	}
 	httpx.SetAudit(r, "auth.2fa.enable", p.Username(), nil)
 	httpx.JSON(w, http.StatusOK, map[string]any{"recoveryCodes": codes})
@@ -169,8 +175,8 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	p := httpx.MustPrincipal(r)
-	if !s.loginLim.Allow("totp|" + p.Username() + "|" + httpx.ClientIP(r)) {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many verification attempts")
+	if err := s.limitSecondFactor(r); err != nil {
+		return err
 	}
 	if err := s.Auth.VerifySecondFactor(r.Context(), p.SessionID, p.UserID(), req.Code); err != nil {
 		httpx.SetAudit(r, "auth.2fa.verify", p.Username(), map[string]any{"result": "rejected"})
@@ -178,11 +184,26 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) error 
 	}
 	httpx.SetAudit(r, "auth.2fa.verify", p.Username(), nil)
 	httpx.JSON(w, http.StatusOK, authStatus{
-		Authenticated: true,
-		User:          p.User,
-		Capabilities:  p.Role.Capabilities(),
-		Require2FA:    s.Auth.Require2FA(),
+		Authenticated:       !p.User.MustChangePW,
+		NeedsPasswordChange: p.User.MustChangePW,
+		User:                p.User,
+		Capabilities:        p.Role.Capabilities(),
+		Require2FA:          s.Auth.Require2FA(),
 	})
+	return nil
+}
+
+// Enrollment and verification share an account budget; changing routes or
+// source addresses must not multiply the number of guesses.
+func (s *Server) limitSecondFactor(r *http.Request) error {
+	p := httpx.MustPrincipal(r)
+	if p.Elevated && p.User.MustChangePW {
+		return httpx.Err(http.StatusForbidden, "password_change_required", "change your temporary password before continuing")
+	}
+	key := "totp|" + strconv.FormatInt(p.UserID(), 10)
+	if !s.loginLim.Allow(key) {
+		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many verification attempts")
+	}
 	return nil
 }
 
@@ -200,6 +221,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 	if !s.Auth.VerifyUserPassword(r.Context(), p.UserID(), req.CurrentPassword) {
 		httpx.SetAudit(r, "auth.password.change", p.Username(), map[string]any{"result": "rejected"})
 		return httpx.Err(http.StatusUnauthorized, "invalid_credentials", "current password is incorrect")
+	}
+	if req.NewPassword == req.CurrentPassword {
+		return httpx.BadRequest("choose a different password")
 	}
 	if err := s.Auth.SetPassword(r.Context(), p.UserID(), req.NewPassword); err != nil {
 		return httpx.BadRequest("%v", err)
@@ -223,6 +247,35 @@ func (s *Server) handleRecoveryCodesRegen(w http.ResponseWriter, r *http.Request
 	}
 	httpx.SetAudit(r, "auth.2fa.recovery.regenerate", p.Username(), nil)
 	httpx.JSON(w, http.StatusOK, map[string]any{"recoveryCodes": codes})
+	return nil
+}
+
+// handleDisableTOTP turns the caller's own authenticator off.
+//
+// The current password is required, and that is the whole security argument
+// for this route: a session left open on an unlocked laptop is exactly the
+// threat two-factor exists to answer, so removing it has to cost something
+// only the account holder has.
+func (s *Server) handleDisableTOTP(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	p := httpx.MustPrincipal(r)
+	if !s.Auth.VerifyUserPassword(r.Context(), p.UserID(), req.Password) {
+		httpx.SetAudit(r, "auth.2fa.disable", p.Username(), map[string]any{"result": "rejected"})
+		return httpx.Err(http.StatusUnauthorized, "invalid_credentials", "that password is incorrect")
+	}
+	if err := s.Auth.DisableTOTP(r.Context(), p.UserID()); err != nil {
+		if errors.Is(err, auth.ErrTOTPRequired) {
+			return httpx.Err(http.StatusConflict, "totp_required", err.Error())
+		}
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "auth.2fa.disable", p.Username(), nil)
+	httpx.NoContent(w)
 	return nil
 }
 
@@ -264,9 +317,10 @@ func (s *Server) handleRevokeOwnSession(w http.ResponseWriter, r *http.Request) 
 // --- dashboard account administration ---
 
 type createUserRequest struct {
-	Username string    `json:"username"`
-	Password string    `json:"password"`
-	Role     auth.Role `json:"role"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"displayName"`
+	Password    string    `json:"password"`
+	Role        auth.Role `json:"role"`
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) error {
@@ -287,15 +341,25 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	if req.DisplayName != "" {
+		if err := s.Auth.SetProfile(r.Context(), u.ID, auth.Profile{DisplayName: &req.DisplayName}); err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+		if u, err = s.Auth.UserByID(r.Context(), u.ID); err != nil {
+			return httpx.Internal(err)
+		}
+	}
 	httpx.SetAudit(r, "dashboard.user.create", u.Username, map[string]any{"role": u.Role})
 	httpx.JSON(w, http.StatusCreated, u)
 	return nil
 }
 
 type updateUserRequest struct {
-	Role     *auth.Role `json:"role,omitempty"`
-	Disabled *bool      `json:"disabled,omitempty"`
-	Password *string    `json:"password,omitempty"`
+	Role        *auth.Role `json:"role,omitempty"`
+	Disabled    *bool      `json:"disabled,omitempty"`
+	Password    *string    `json:"password,omitempty"`
+	Username    *string    `json:"username,omitempty"`
+	DisplayName *string    `json:"displayName,omitempty"`
 }
 
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error {
@@ -310,6 +374,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error 
 	target, err := s.Auth.UserByID(r.Context(), id)
 	if err != nil {
 		return httpx.ErrNotFound
+	}
+	if req.Username != nil || req.DisplayName != nil {
+		if err := s.Auth.SetProfile(r.Context(), id, auth.Profile{
+			Username: req.Username, DisplayName: req.DisplayName,
+		}); err != nil {
+			return httpx.BadRequest("%v", err)
+		}
 	}
 	if req.Role != nil {
 		if err := s.Auth.SetRole(r.Context(), id, *req.Role); err != nil {
@@ -342,6 +413,12 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error 
 	}
 	if req.Disabled != nil {
 		detail["disabled"] = *req.Disabled
+	}
+	if req.Username != nil && updated.Username != target.Username {
+		detail["renamedTo"] = updated.Username
+	}
+	if req.DisplayName != nil {
+		detail["displayName"] = updated.DisplayName
 	}
 	httpx.SetAudit(r, "dashboard.user.update", target.Username, detail)
 	httpx.JSON(w, http.StatusOK, updated)

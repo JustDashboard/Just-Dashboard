@@ -1,25 +1,31 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Key, LockClosed, LockOpen, Plus, Trash, UserPlus, Users } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import type { SSHKey, SystemUser } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
+import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
+import { Status, type DotTone } from "@/components/status-dot"
+import { FilterChip } from "@/components/tabs"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { IconAction } from "@/components/icon-action"
+import { VerbActions, type Verb } from "@/components/verbs"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   stickyTableHeader,
   Table,
@@ -29,19 +35,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+
+type Pending = Record<string, string | undefined>
+
+/**
+ * The one word an account's state comes down to. Locked wins over everything —
+ * a locked account cannot be signed into however it is otherwise arranged —
+ * and a missing password is the only state on this page that is a warning.
+ */
+function accountState(user: SystemUser): { tone: DotTone; label: string } {
+  if (user.locked) return { tone: "stopped", label: "Locked" }
+  if (user.noPassword) return { tone: "warning", label: "No password" }
+  if (!user.canLogin) return { tone: "unknown", label: "No login" }
+  return { tone: "running", label: "Active" }
+}
 
 export default function SystemUsersPage() {
   const { confirm, dialog } = useConfirm()
   const [showSystem, setShowSystem] = useViewState("system-users.show-system", false)
+  const [query, setQuery] = useState("")
   const [keysFor, setKeysFor] = useState<string | null>(null)
+  const [pending, setPending] = useState<Pending>({})
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<SystemUser[]>("/system-users/", { system: showSystem }, signal),
     30000,
@@ -49,144 +63,192 @@ export default function SystemUsersPage() {
   )
 
   const setLocked = async (user: SystemUser, locked: boolean) => {
+    setPending((p) => ({ ...p, [user.username]: locked ? "Locking" : "Unlocking" }))
     try {
       await patch(`/system-users/${encodeURIComponent(user.username)}`, { locked })
       notify.success(`${user.username} ${locked ? "locked" : "unlocked"}`)
       refresh()
     } catch (err) {
       notify.error("Could not change lock state", err)
+    } finally {
+      setPending((p) => ({ ...p, [user.username]: undefined }))
     }
   }
 
+  const remove = (user: SystemUser) =>
+    confirm({
+      title: "Delete system user",
+      phrase: user.username,
+      confirmLabel: "Delete",
+      description: (
+        <p className="text-destructive">
+          Removes the account <b>{user.username}</b> from this host. Its home directory is left in
+          place.
+        </p>
+      ),
+      action: async (c) => {
+        await del(`/system-users/${encodeURIComponent(user.username)}`, { confirm: c })
+        refresh()
+      },
+    })
+
+  // The figures are read over everything the host returned, so the search box
+  // narrows the rows without narrowing the readings above them.
+  const figures = useMemo(() => {
+    const users = data ?? []
+    const latest = users
+      .filter((u) => u.lastLogin)
+      .sort((a, b) => (b.lastLogin ?? "").localeCompare(a.lastLogin ?? ""))[0]
+    return {
+      system: users.filter((u) => u.system).length,
+      signIn: users.filter((u) => u.canLogin && !u.locked).length,
+      noPassword: users.filter((u) => u.noPassword && !u.locked).length,
+      locked: users.filter((u) => u.locked).length,
+      keys: users.reduce((sum, u) => sum + u.sshKeyCount, 0),
+      latest,
+    }
+  }, [data])
+
+  const rows = useMemo(() => {
+    if (!data) return []
+    const q = query.trim().toLowerCase()
+    if (!q) return data
+    return data.filter(
+      (u) =>
+        u.username.toLowerCase().includes(q) ||
+        u.comment.toLowerCase().includes(q) ||
+        u.shell.toLowerCase().includes(q) ||
+        u.groups.some((g) => g.toLowerCase().includes(q)),
+    )
+  }, [data, query])
+
+  const rowProps = { pending, setLocked, remove, onKeys: setKeysFor }
+
   return (
-    <Page>
+    <Page className="animate-rise">
       <PageHeader
-        eyebrow="Operations"
+        eyebrow="System"
         title="System users"
-        description="Operating system accounts on this host, separate from dashboard logins"
         actions={<CreateUserDialog onDone={refresh} />}
       />
 
-      {loading && <LoadingPanel />}
-      {error && <ErrorState error={error} />}
-
       {data && (
-        <Panel>
-          <PanelHeader icon={Users} title="Accounts" description={`${data.length} shown`} />
-          <PanelToolbar>
-            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Checkbox checked={showSystem} onCheckedChange={(v) => setShowSystem(v === true)} />
-              Include system accounts
-            </label>
-          </PanelToolbar>
-          <PanelBody flush>
-            <Table containerClassName="max-h-[calc(100svh-20rem)]">
-              <TableHeader className={stickyTableHeader}>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead className="w-20">UID</TableHead>
-                  <TableHead className="w-full">Groups</TableHead>
-                  <TableHead>Shell</TableHead>
-                  <TableHead>Last login</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead className="w-px" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((user) => (
-                  <TableRow key={user.username} className="group">
-                    <TableCell>
-                      <div className="max-w-[14rem] min-w-0">
-                        <div className="truncate text-[13px] font-medium">{user.username}</div>
-                        {user.comment && (
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {user.comment}
-                          </p>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="numeric font-mono text-xs">{user.uid}</TableCell>
-                    <TableCell className="max-w-48 truncate text-xs text-muted-foreground">
-                      {user.groups.join(", ")}
-                    </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
-                      {user.shell}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {user.lastLogin ? relativeTime(user.lastLogin) : "never"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {user.locked && (
-                          <Badge variant="secondary" className="font-normal">
-                            locked
-                          </Badge>
-                        )}
-                        {user.noPassword && (
-                          <Badge variant="warning" className="font-normal">
-                            no password
-                          </Badge>
-                        )}
-                        {!user.canLogin && (
-                          <Badge variant="outline" className="font-normal">
-                            no shell
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-                        <Button size="xs" variant="ghost" onClick={() => setKeysFor(user.username)}>
-                          <Key className="size-3" />
-                          {user.sshKeyCount}
-                        </Button>
-                        <IconAction
-                          label={user.locked ? "Unlock" : "Lock"}
-                          onClick={() => setLocked(user, !user.locked)}
-                        >
-                          {user.locked ? <LockOpen /> : <LockClosed />}
-                        </IconAction>
-                        <IconAction
-                          label="Delete"
-                          className="text-destructive"
-                          onClick={() =>
-                            confirm({
-                              title: "Delete system user",
-                              phrase: user.username,
-                              confirmLabel: "Delete",
-                              description: (
-                                <p className="text-destructive">
-                                  Removes the account <b>{user.username}</b> from this host. Its
-                                  home directory is left in place.
-                                </p>
-                              ),
-                              action: async (c) => {
-                                await del(`/system-users/${encodeURIComponent(user.username)}`, {
-                                  confirm: c,
-                                })
-                                refresh()
-                              },
-                            })
-                          }
-                        >
-                          <Trash />
-                        </IconAction>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="p-0">
-                      <EmptyState icon={Users} title="No accounts to show" />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </PanelBody>
-        </Panel>
+        <StatGrid columns={4} key="figures" className="animate-rise">
+          <StatTile
+            label="Accounts"
+            value={data.length}
+            hint={
+              showSystem
+                ? `${figures.system} system · ${data.length - figures.system} people`
+                : "system accounts hidden"
+            }
+            trailing={<span className="text-hint text-muted-foreground">on this host</span>}
+          />
+          <StatTile
+            label="Can sign in"
+            value={figures.signIn}
+            tone={figures.noPassword > 0 ? "warning" : "default"}
+            hint={
+              figures.noPassword > 0
+                ? `${figures.noPassword} without a password`
+                : `${plural(figures.keys, "SSH key")} authorised`
+            }
+          />
+          <StatTile
+            label="Locked"
+            value={figures.locked}
+            hint={figures.locked > 0 ? "password sign-in refused" : "no account is locked"}
+          />
+          <StatTile
+            label="Last sign-in"
+            value={figures.latest ? relativeTime(figures.latest.lastLogin) : "Never"}
+            hint={
+              figures.latest
+                ? `${figures.latest.username}${figures.latest.lastLoginFrom ? ` from ${figures.latest.lastLoginFrom}` : ""}`
+                : "no sign-in recorded"
+            }
+          />
+        </StatGrid>
       )}
+
+      {/* The list is the whole of the page below the figures: a title and a
+          hairline, no box. */}
+      <Panel plain>
+        <PanelHeader title="Accounts" />
+        <PanelToolbar>
+          <SearchInput
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Name, group or shell"
+            containerClassName="sm:w-64"
+          />
+          <FilterChip selected={showSystem} onClick={() => setShowSystem(!showSystem)}>
+            System accounts
+          </FilterChip>
+        </PanelToolbar>
+        <PanelBody flush>
+          {loading && !data && <LoadingPanel />}
+          {error && !data && <ErrorState error={error} />}
+          {data && (
+            <div key="rows" className="animate-rise">
+              {/* Bled by the cells' own padding, so the first column starts
+                  where the title does. */}
+              <div className="-mx-4 hidden min-w-0 lg:block">
+                <Table containerClassName="max-h-[calc(100svh-24rem)]">
+                  <TableHeader className={stickyTableHeader}>
+                    <TableRow>
+                      <TableHead className="w-full">Account</TableHead>
+                      <TableHead>UID</TableHead>
+                      <TableHead>Groups</TableHead>
+                      <TableHead className="hidden xl:table-cell">Shell</TableHead>
+                      <TableHead>Last sign-in</TableHead>
+                      <TableHead className="text-right">Keys</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead className="w-px" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((user) => (
+                      <UserTableRow key={user.username} user={user} {...rowProps} />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {/* Below `lg` the same rows are drawn down the row instead of
+                  across it: a seven-column table keeps two on a phone, and
+                  what is left is the remains of a table. Nothing is dropped. */}
+              <ul className="divide-y divide-hairline lg:hidden">
+                {rows.map((user) => (
+                  <UserNarrowRow key={user.username} user={user} {...rowProps} />
+                ))}
+              </ul>
+              {rows.length === 0 && (
+                <EmptyState
+                  icon={Users}
+                  title={data.length === 0 ? "No accounts to show" : "No accounts match"}
+                  description={
+                    data.length === 0
+                      ? "Every account on this host is a system account."
+                      : "Clear the search or include system accounts."
+                  }
+                  className="mt-4"
+                />
+              )}
+            </div>
+          )}
+        </PanelBody>
+        {data && (
+          <PanelFooter className="text-hint text-muted-foreground">
+            <span className="numeric">
+              {rows.length === data.length
+                ? plural(data.length, "account")
+                : `${rows.length} of ${plural(data.length, "account")}`}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>{showSystem ? "system accounts included" : "system accounts hidden"}</span>
+          </PanelFooter>
+        )}
+      </Panel>
 
       <SSHKeysSheet
         username={keysFor}
@@ -198,8 +260,160 @@ export default function SystemUsersPage() {
   )
 }
 
+type RowProps = {
+  user: SystemUser
+  pending: Pending
+  setLocked: (user: SystemUser, locked: boolean) => void
+  remove: (user: SystemUser) => void
+  onKeys: (username: string) => void
+}
+
+/**
+ * What can be done to an account, declared once and drawn by both row shapes.
+ * Keys and the lock are the daily verbs and go inline; deleting an account is
+ * rare and unrecoverable, so it lives in the menu with its sentence.
+ */
+function useUserVerbs({ user, pending, setLocked, remove, onKeys }: RowProps): Verb[] {
+  const busy = Boolean(pending[user.username])
+  return [
+    {
+      key: "keys",
+      label: "SSH keys",
+      detail: "The keys that can sign in as this account, and a place to add one",
+      icon: Key,
+      inline: true,
+      run: () => onKeys(user.username),
+    },
+    {
+      key: "lock",
+      label: user.locked ? "Unlock" : "Lock",
+      detail: user.locked ? "Accept password sign-in again" : "Refuse password sign-in",
+      icon: user.locked ? LockOpen : LockClosed,
+      inline: true,
+      disabled: busy,
+      run: () => setLocked(user, !user.locked),
+    },
+    {
+      key: "delete",
+      label: "Delete account",
+      detail: "Removes the account from this host; the home directory stays",
+      icon: Trash,
+      danger: true,
+      run: () => remove(user),
+    },
+  ]
+}
+
+function UserTableRow(props: RowProps) {
+  const { user, pending, onKeys } = props
+  const verbs = useUserVerbs(props)
+  const busy = pending[user.username]
+  const state = accountState(user)
+  return (
+    <TableRow className="group" onActivate={() => onKeys(user.username)}>
+      <TableCell>
+        <div className="max-w-[20rem] min-w-0">
+          <RowLink onClick={() => onKeys(user.username)}>{user.username}</RowLink>
+          {user.comment && (
+            <p className="truncate text-hint text-muted-foreground" title={user.comment}>
+              {user.comment}
+            </p>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="numeric font-mono text-muted-foreground">{user.uid}</TableCell>
+      <TableCell>
+        <p className="max-w-56 truncate text-muted-foreground" title={user.groups.join(", ")}>
+          {user.groups.join(", ") || "—"}
+        </p>
+      </TableCell>
+      <TableCell className="hidden font-mono text-hint text-muted-foreground xl:table-cell">
+        {user.shell}
+      </TableCell>
+      <TableCell>
+        {user.lastLogin ? (
+          <>
+            <div>{relativeTime(user.lastLogin)}</div>
+            {user.lastLoginFrom && (
+              <p className="truncate font-mono text-hint text-muted-foreground">
+                from {user.lastLoginFrom}
+              </p>
+            )}
+          </>
+        ) : (
+          <span className="text-muted-foreground">never</span>
+        )}
+      </TableCell>
+      <TableCell
+        className={cn(
+          "numeric text-right font-mono",
+          user.sshKeyCount === 0 && "text-muted-foreground",
+        )}
+      >
+        {user.sshKeyCount}
+      </TableCell>
+      <TableCell>
+        <Status tone={busy ? "warning" : state.tone} label={busy ? `${busy}…` : state.label} />
+      </TableCell>
+      <TableCell>
+        {/* Always drawn, quiet until the row is hovered: these own their
+            column, and a reserved column left empty reads as a layout bug. */}
+        <VerbActions dim verbs={verbs} />
+      </TableCell>
+    </TableRow>
+  )
+}
+
+/**
+ * A row drawn down rather than across. Still a row, not a card: no frame, a
+ * hairline to the next, a wash under the pointer. The title is the real
+ * button; the surrounding click is a convenience for the pointer that skips
+ * any press landing on a control of its own.
+ */
+function UserNarrowRow(props: RowProps) {
+  const { user, pending, onKeys } = props
+  const verbs = useUserVerbs(props)
+  const busy = pending[user.username]
+  const state = accountState(user)
+  return (
+    <li
+      className={cn(
+        "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
+      )}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("a, button, [role='menuitem']")) return
+        onKeys(user.username)
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <RowLink onClick={() => onKeys(user.username)}>{user.username}</RowLink>
+          <span className="numeric font-mono text-hint text-muted-foreground">{user.uid}</span>
+          {user.comment && (
+            <span className="truncate text-hint text-muted-foreground">{user.comment}</span>
+          )}
+        </div>
+        <p className="truncate font-mono text-hint text-muted-foreground">
+          {user.shell}
+          {user.groups.length > 0 && ` · ${user.groups.join(", ")}`}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-hint">
+          <Status tone={busy ? "warning" : state.tone} label={busy ? `${busy}…` : state.label} />
+          <span className="text-muted-foreground">
+            {user.lastLogin ? `signed in ${relativeTime(user.lastLogin)}` : "never signed in"}
+          </span>
+          <span className="numeric text-muted-foreground">{plural(user.sshKeyCount, "key")}</span>
+        </div>
+      </div>
+      <VerbActions verbs={verbs} className="shrink-0" />
+    </li>
+  )
+}
+
 function CreateUserDialog({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [username, setUsername] = useState("")
   const [comment, setComment] = useState("")
   const [shell, setShell] = useState("/bin/bash")
@@ -207,6 +421,7 @@ function CreateUserDialog({ onDone }: { onDone: () => void }) {
   const [sshKey, setSshKey] = useState("")
 
   const create = async () => {
+    setBusy(true)
     try {
       await post("/system-users/", {
         username,
@@ -227,51 +442,67 @@ function CreateUserDialog({ onDone }: { onDone: () => void }) {
       onDone()
     } catch (err) {
       notify.error("Could not create account", err)
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <UserPlus className="size-4" />
-          New account
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New system account</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="new-username">Username</Label>
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <UserPlus className="size-4" />
+        New account
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title="New system account"
+        description="Create a local account on this host"
+        footer={
+          <Button onClick={create} disabled={!username} pending={busy}>
+            Create
+          </Button>
+        }
+      >
+        <div className="grid gap-4">
+          <Field label="Username" htmlFor="new-username">
             <Input
               id="new-username"
+              autoComplete="off"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-comment">Full name</Label>
+          </Field>
+          <Field
+            label="Full name"
+            htmlFor="new-comment"
+            hint="Optional. Stored as the account's comment."
+          >
             <Input id="new-comment" value={comment} onChange={(e) => setComment(e.target.value)} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="new-shell">Shell</Label>
-              <Input id="new-shell" value={shell} onChange={(e) => setShell(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="new-groups">Groups</Label>
+          </Field>
+          <FieldRow>
+            <Field label="Shell" htmlFor="new-shell">
+              <Input
+                id="new-shell"
+                className="font-mono"
+                value={shell}
+                onChange={(e) => setShell(e.target.value)}
+              />
+            </Field>
+            <Field
+              label="Groups"
+              htmlFor="new-groups"
+              hint="Comma-separated; each must already exist."
+            >
               <Input
                 id="new-groups"
                 value={groups}
                 onChange={(e) => setGroups(e.target.value)}
                 placeholder="sudo, docker"
               />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-key">SSH public key</Label>
+            </Field>
+          </FieldRow>
+          <Field label="SSH public key" htmlFor="new-key">
             <Textarea
               id="new-key"
               value={sshKey}
@@ -280,19 +511,14 @@ function CreateUserDialog({ onDone }: { onDone: () => void }) {
               rows={3}
               placeholder="ssh-ed25519 AAAA…"
             />
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              The account is created with no password, so a key is the only way in. It is validated
-              before the account exists.
-            </p>
-          </div>
+          </Field>
+          <FormNote>
+            The account is created with no password, so a key is the only way in. It is validated
+            before the account exists.
+          </FormNote>
         </div>
-        <DialogFooter>
-          <Button onClick={create} disabled={!username}>
-            Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }
 
@@ -307,21 +533,22 @@ function SSHKeysSheet({
 }) {
   const { confirm, dialog } = useConfirm()
   const [newKey, setNewKey] = useState("")
+  const [adding, setAdding] = useState(false)
   const { data, error, loading, refresh } = usePoll(
     (signal) =>
-      username
-        ? get<{ path: string; keys: SSHKey[] }>(
-            `/system-users/${encodeURIComponent(username)}/keys`,
-            undefined,
-            signal,
-          )
-        : Promise.resolve({ path: "", keys: [] }),
+      get<{ path: string; keys: SSHKey[] }>(
+        `/system-users/${encodeURIComponent(username ?? "")}/keys`,
+        undefined,
+        signal,
+      ),
     0,
     [username],
+    { enabled: username !== null },
   )
 
   const add = async () => {
     if (!username) return
+    setAdding(true)
     try {
       await post(`/system-users/${encodeURIComponent(username)}/keys`, { key: newKey.trim() })
       notify.success("Key authorised")
@@ -330,8 +557,29 @@ function SSHKeysSheet({
       onChanged()
     } catch (err) {
       notify.error("Key rejected", err)
+    } finally {
+      setAdding(false)
     }
   }
+
+  const revoke = (key: SSHKey) =>
+    confirm({
+      title: "Revoke SSH key",
+      confirmLabel: "Revoke",
+      description: (
+        <p>
+          Whoever holds this key loses SSH access as <b>{username}</b>.
+        </p>
+      ),
+      action: async (c) => {
+        await del(`/system-users/${encodeURIComponent(username ?? "")}/keys`, {
+          confirm: c,
+          query: { fingerprint: key.fingerprint },
+        })
+        refresh()
+        onChanged()
+      },
+    })
 
   return (
     <>
@@ -339,78 +587,87 @@ function SSHKeysSheet({
         open={username !== null}
         onOpenChange={onOpenChange}
         width="md"
-        icon={Key}
-        title={`SSH keys for ${username ?? ""}`}
-        description={data?.path}
+        title={username ?? ""}
+        description="Authorised SSH keys for this account"
       >
-        <div className="space-y-4">
-          {loading && <LoadingRows />}
-          {error && <ErrorState error={error} />}
-
-          {data?.keys.map((key) => (
-            <div key={key.fingerprint} className="rounded-lg border border-hairline p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="font-normal">
-                      {key.type}
-                    </Badge>
-                    <span className="truncate text-[13px]">{key.comment || "no comment"}</span>
-                  </div>
-                  <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-                    {key.fingerprint}
-                  </p>
-                </div>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label="Revoke key"
-                  className="shrink-0 text-destructive"
-                  onClick={() =>
-                    confirm({
-                      title: "Revoke SSH key",
-                      confirmLabel: "Revoke",
-                      description: (
-                        <p>
-                          Whoever holds this key loses SSH access as <b>{username}</b>.
-                        </p>
-                      ),
-                      action: async (c) => {
-                        await del(`/system-users/${encodeURIComponent(username!)}/keys`, {
-                          confirm: c,
-                          query: { fingerprint: key.fingerprint },
-                        })
-                        refresh()
-                        onChanged()
-                      },
-                    })
-                  }
-                >
-                  <Trash />
-                </Button>
-              </div>
-            </div>
-          ))}
-
-          {data?.keys.length === 0 && !loading && (
-            <EmptyState icon={Key} title="No authorised keys" />
-          )}
-
-          <div className="space-y-2 border-t border-hairline pt-4">
-            <Label htmlFor="add-key">Authorise another key</Label>
-            <Textarea
-              id="add-key"
-              value={newKey}
-              onChange={(e) => setNewKey(e.target.value)}
-              className="font-mono text-xs"
-              rows={3}
-              placeholder="ssh-ed25519 AAAA…"
+        <div className="space-y-6">
+          <Panel plain>
+            <PanelHeader
+              title="Authorised keys"
+              actions={
+                data && (
+                  <span className="numeric text-hint text-muted-foreground">
+                    {plural(data.keys.length, "key")}
+                  </span>
+                )
+              }
             />
-            <Button size="sm" onClick={add} disabled={!newKey.trim()}>
-              <Plus className="size-4" />
-              Add key
-            </Button>
-          </div>
+            <PanelBody flush className="py-1">
+              {loading && !data && <LoadingRows rows={3} className="py-3" />}
+              {error && <ErrorState error={error} />}
+              {data && data.keys.length === 0 && <EmptyNote>No authorised keys yet.</EmptyNote>}
+              {data && data.keys.length > 0 && (
+                <RowList className="animate-rise">
+                  {data.keys.map((key) => (
+                    <Row
+                      key={key.fingerprint}
+                      title={
+                        key.comment || <span className="text-muted-foreground">No comment</span>
+                      }
+                      subtitle={key.fingerprint}
+                      mono
+                      className="py-2.5"
+                      trailing={
+                        <>
+                          <Tag mono>{key.bits ? `${key.type} ${key.bits}` : key.type}</Tag>
+                          <IconAction
+                            label="Revoke key"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => revoke(key)}
+                          >
+                            <Trash />
+                          </IconAction>
+                        </>
+                      }
+                    />
+                  ))}
+                </RowList>
+              )}
+            </PanelBody>
+            {data?.path && (
+              <PanelFooter>
+                <FormFacts>
+                  <FormFact label="File" mono>
+                    {data.path}
+                  </FormFact>
+                </FormFacts>
+              </PanelFooter>
+            )}
+          </Panel>
+
+          <Panel plain>
+            <PanelHeader title="Authorise another key" />
+            <PanelBody className="space-y-3">
+              <Field
+                label="Public key"
+                htmlFor="add-key"
+                hint="One public key. It is checked before anything is written."
+              >
+                <Textarea
+                  id="add-key"
+                  value={newKey}
+                  onChange={(e) => setNewKey(e.target.value)}
+                  className="font-mono text-xs"
+                  rows={3}
+                  placeholder="ssh-ed25519 AAAA…"
+                />
+              </Field>
+              <Button size="sm" onClick={add} disabled={!newKey.trim()} pending={adding}>
+                <Plus className="size-4" />
+                Add key
+              </Button>
+            </PanelBody>
+          </Panel>
         </div>
       </SidePanel>
       {dialog}

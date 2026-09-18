@@ -588,7 +588,11 @@ export function storageRows(history: StorageHistory): {
       if (Number.isNaN(ts)) continue
       let row = byTs.get(ts)
       if (!row) {
-        row = { t: step >= 3_600_000 ? shortDateTime(ts) : clock(point.ts), ts, at: timestamp(point.ts) }
+        row = {
+          t: step >= 3_600_000 ? shortDateTime(ts) : clock(point.ts),
+          ts,
+          at: timestamp(point.ts),
+        }
         byTs.set(ts, row)
       }
       row[key] = point.usedPercent
@@ -618,7 +622,11 @@ export function liveStorageRows(
   // The live buffer keeps only the fullest figure per frame, not a breakdown,
   // so there is one series here and it is labelled for what it is.
   const series: StorageSeriesMeta[] = [
-    { key: "m0", mountpoint: mounts.length === 1 ? mounts[0].mountpoint : "fullest", color: MOUNT_COLORS[0] },
+    {
+      key: "m0",
+      mountpoint: mounts.length === 1 ? mounts[0].mountpoint : "fullest",
+      color: MOUNT_COLORS[0],
+    },
   ]
   const rows = history.map<StorageRow>((p) => ({
     t: p.t,

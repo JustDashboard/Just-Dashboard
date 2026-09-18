@@ -1,0 +1,39 @@
+{
+  "id": "caddy",
+  "version": "1.0.0",
+  "name": "Caddy",
+  "category": "http",
+  "profile": "web",
+  "description": "A web server that obtains its own certificates. Useful as a second server behind the dashboard's proxy, or on a host where nginx is not installed.",
+  "iconId": "globe",
+  "docsUrl": "https://caddyserver.com/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://hub.docker.com/_/caddy",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "caddy:2.9-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Leave empty to serve only behind the dashboard's own proxy." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 80, "protocol": "tcp", "purpose": "HTTP requests", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "site", "target": "/usr/share/caddy", "purpose": "The files this site serves", "data": true, "backup": true },
+    { "name": "config", "target": "/data", "purpose": "Certificates and Caddy's own state", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 256, "minMemoryMb": 64 },
+  "checks": [
+    { "name": "Serves the site root", "kind": "http", "phase": "readiness", "required": true, "path": "/", "timeoutSeconds": 30 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "files": [
+    { "path": "/etc/caddy/Caddyfile", "label": "Caddyfile", "format": "raw", "restartRequired": true }
+  ],
+  "update": { "detector": "registry", "notes": "Caddy keeps its certificates in the data volume across upgrades." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:fc2e0a01773d3b9ca73e159ee3159a47e4b9a2e29565be5ea597ae7c123e7514" }]
+}

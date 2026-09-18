@@ -81,7 +81,7 @@ func TestBrowseSortAndFilterOnSQLite(t *testing.T) {
 		t.Fatalf("rows = %d", desc.RowCount)
 	}
 	idIdx := indexOf(desc.Columns, "id")
-	if got := desc.Rows[0][idIdx]; got != int64(2) {
+	if got := desc.Rows[0][idIdx]; got != "2" {
 		t.Errorf("descending sort put %v first, want 2", got)
 	}
 

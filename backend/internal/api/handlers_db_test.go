@@ -115,6 +115,7 @@ func TestRoutineDatabaseRoutesDoNotAskForAPhrase(t *testing.T) {
 		{http.MethodDelete, "/databases/1/rows", `{"table":"t","key":{"id":1}}`, "editing rows is what a data browser is"},
 		{http.MethodDelete, "/databases/1/ddl/index", `{"table":"t","name":"i"}`, "an index rebuilds from its own definition"},
 		{http.MethodDelete, "/databases/1", `{}`, "forgetting a connection string does not touch the server"},
+		{http.MethodPut, "/databases/1/access", `{"exposure":"public"}`, "a port binding is changed back the same way it was changed"},
 		{http.MethodDelete, "/databases/1/keys", `{"key":"k"}`, "a Redis key is the unit of work in a key browser"},
 		{http.MethodDelete, "/databases/1/documents", `{"collection":"c","id":"x"}`, "a document is Mongo's row"},
 		{http.MethodPost, "/databases/1/activity/kill", `{"pid":"42"}`, "a stopped query rolls back; nothing is lost"},
@@ -318,16 +319,36 @@ func TestProvisionTemplatesAreCoherent(t *testing.T) {
 	}
 }
 
-// A provisioned server is published to loopback only: one this dashboard
-// started should not become reachable from the internet because a default was
-// convenient.
-func TestProvisionTemplatesBindLoopback(t *testing.T) {
-	s := testServer(t)
-	t.Cleanup(s.Shutdown)
-	// The binding is written at the one place the spec is built, so this
-	// asserts on that constant rather than on a container nobody started.
-	if !strings.Contains(readSource(t, "handlers_db_detect.go"), `HostIP: "127.0.0.1"`) {
-		t.Error("the provision spec no longer pins the published port to loopback")
+// A provisioned server is published on every interface unless the request
+// asks for this server only: a database made to be shared has to work from
+// another machine without a second trip through Maintenance, and deployment
+// quick setup, which reaches its database over the deployment network, says
+// "local" in so many words.
+func TestProvisionBindingDefaultsToPublic(t *testing.T) {
+	cases := []struct {
+		in       dbExposure
+		exposure dbExposure
+		hostIP   string
+	}{
+		{"", exposurePublic, "0.0.0.0"},
+		{exposurePublic, exposurePublic, "0.0.0.0"},
+		{exposureLocal, exposureLocal, "127.0.0.1"},
+	}
+	for _, c := range cases {
+		exposure, hostIP, err := provisionBinding(c.in)
+		if err != nil || exposure != c.exposure || hostIP != c.hostIP {
+			t.Errorf("provisionBinding(%q) = %q, %q, %v; want %q, %q", c.in, exposure, hostIP, err, c.exposure, c.hostIP)
+		}
+	}
+	for _, in := range []dbExposure{exposurePrivate, exposureRemote, "everywhere"} {
+		if _, _, err := provisionBinding(in); err == nil {
+			t.Errorf("provisionBinding(%q) accepted an exposure the request cannot mean", in)
+		}
+	}
+	// The binding is written at the one place the spec is built; nothing
+	// else in the handler may pin an address of its own.
+	if strings.Contains(readSource(t, "handlers_db_detect.go"), `HostIP: "127.0.0.1"`) {
+		t.Error("the provision spec pins the published port to loopback instead of the requested binding")
 	}
 }
 

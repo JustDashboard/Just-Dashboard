@@ -1,24 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle, CloudUpload, Warning } from "@/components/icons"
+import { CheckCircle, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import type { ImportResult } from "@/lib/types"
-import { Notice, Spinner } from "@/components/state"
+import { Field } from "@/components/form"
+import { Notice } from "@/components/state"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 /**
  * Not every certificate comes from Let's Encrypt.
@@ -31,8 +23,29 @@ import {
  * a mismatched pair is accepted by every text editor and refused by nginx at
  * reload — which on a live server means finding out during an outage.
  */
-export function ImportDialog({ onDone }: { onDone: () => void }) {
-  const [open, setOpen] = useState(false)
+export function ImportDialog({
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDone: () => void
+}) {
+  return (
+    <ImportDialogBody key={String(open)} open={open} onOpenChange={onOpenChange} onDone={onDone} />
+  )
+}
+
+function ImportDialogBody({
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDone: () => void
+}) {
   const [name, setName] = useState("")
   const [certificate, setCertificate] = useState("")
   const [key, setKey] = useState("")
@@ -60,110 +73,89 @@ export function ImportDialog({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Dialog
+    <Modal
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (!next) setResult(null)
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <CloudUpload className="size-3.5" />
-          Import
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Import a certificate</DialogTitle>
-          <DialogDescription>
-            For a certificate you bought or were given. Nothing here renews it — that is what the
-            expiry column is for.
-          </DialogDescription>
-        </DialogHeader>
-
-        {result ? (
-          <div className="space-y-3">
-            <Notice tone="success" icon={CheckCircle} title={`${result.name} is on disk`}>
-              <div className="space-y-1">
-                <p>
-                  Certificate: <code className="font-mono">{result.certPath}</code>
-                </p>
-                <p>
-                  Key: <code className="font-mono">{result.keyPath}</code>
-                </p>
-                <p>
-                  Covers {result.certificate.domains.join(", ")} · expires in{" "}
-                  {result.certificate.daysLeft} days.
-                </p>
-              </div>
-            </Notice>
-            {result.warnings.map((warning) => (
-              <Notice key={warning} tone="warning" icon={Warning} title="Worth knowing">
-                {warning}
-              </Notice>
-            ))}
-          </div>
+      onOpenChange={onOpenChange}
+      size="lg"
+      title="Import a certificate"
+      description="For a certificate you bought or were given. Nothing here renews it — that is what the expiry column is for."
+      footer={
+        result ? (
+          <Button onClick={() => onOpenChange(false)}>Done</Button>
         ) : (
-          <div className="grid gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="import-name">Name</Label>
-              <Input
-                id="import-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="example-com"
-                className="font-mono text-xs"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Names the directory it is stored in. Kept outside certbot&rsquo;s tree so a renewal
-                run can never prune a certificate it did not issue.
+          <Button
+            onClick={submit}
+            disabled={busy || !name.trim() || !certificate.trim() || !key.trim()}
+            pending={busy}
+          >
+            Check and import
+          </Button>
+        )
+      }
+    >
+      {result ? (
+        <div className="space-y-3">
+          <Notice tone="success" icon={CheckCircle} title={`${result.name} is on disk`}>
+            <div className="space-y-1">
+              <p>
+                Certificate: <code className="font-mono">{result.certPath}</code>
+              </p>
+              <p>
+                Key: <code className="font-mono">{result.keyPath}</code>
+              </p>
+              <p>
+                Covers {result.certificate.domains.join(", ")} · expires in{" "}
+                {result.certificate.daysLeft} days.
               </p>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="import-cert">Certificate</Label>
-              <Textarea
-                id="import-cert"
-                value={certificate}
-                onChange={(e) => setCertificate(e.target.value)}
-                rows={6}
-                className="font-mono text-[10px]"
-                placeholder={"-----BEGIN CERTIFICATE-----\n…"}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Paste the full chain if your authority gave you one — leaf first, then the
-                intermediates. Desktop browsers paper over a missing intermediate from cache;
-                phones, curl and payment gateways do not.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="import-key">Private key</Label>
-              <Textarea
-                id="import-key"
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                rows={5}
-                className="font-mono text-[10px]"
-                placeholder={"-----BEGIN PRIVATE KEY-----\n…"}
-              />
-            </div>
-          </div>
-        )}
-
-        <DialogFooter>
-          {result ? (
-            <Button onClick={() => setOpen(false)}>Done</Button>
-          ) : (
-            <Button
-              onClick={submit}
-              disabled={busy || !name.trim() || !certificate.trim() || !key.trim()}
-            >
-              {busy && <Spinner className="size-4" />}
-              Check and import
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </Notice>
+          {result.warnings.map((warning) => (
+            <Notice key={warning} tone="warning" icon={Warning} title="Worth knowing">
+              {warning}
+            </Notice>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          <Field
+            label="Name"
+            htmlFor="import-name"
+            hint="Names the directory it is stored in. Kept outside certbot's tree so a renewal run can never prune a certificate it did not issue."
+          >
+            <Input
+              id="import-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="example-com"
+              className="font-mono text-xs"
+            />
+          </Field>
+          <Field
+            label="Certificate"
+            htmlFor="import-cert"
+            hint="Paste the full chain if your authority gave you one — leaf first, then the intermediates. Desktop browsers paper over a missing intermediate from cache; phones, curl and payment gateways do not."
+          >
+            <Textarea
+              id="import-cert"
+              value={certificate}
+              onChange={(e) => setCertificate(e.target.value)}
+              rows={6}
+              className="font-mono text-micro"
+              placeholder={"-----BEGIN CERTIFICATE-----\n…"}
+            />
+          </Field>
+          <Field label="Private key" htmlFor="import-key">
+            <Textarea
+              id="import-key"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              rows={5}
+              className="font-mono text-micro"
+              placeholder={"-----BEGIN PRIVATE KEY-----\n…"}
+            />
+          </Field>
+        </div>
+      )}
+    </Modal>
   )
 }

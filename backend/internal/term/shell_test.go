@@ -30,7 +30,7 @@ func TestBundledShellPromptAndCompletion(t *testing.T) {
 			} else {
 				os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export JD_RC_LOADED=yes\n"), 0600)
 				env = append(env, "ZDOTDIR="+m.shellDir, "JD_ORIGINAL_ZDOTDIR="+home)
-				args = []string{"-ic", `printf 'loaded:%s\nprompt:%s\n' "$JD_RC_LOADED" "$PROMPT"; bindkey '^I'; whence -w compdef`}
+				args = []string{"-ic", `printf 'loaded:%s\nprompt:%s\nhistfile:%s\n' "$JD_RC_LOADED" "$PROMPT" "$HISTFILE"; bindkey '^I'; whence -w compdef; whence -w _zsh_autosuggest_start _zsh_highlight`}
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -41,7 +41,7 @@ func TestBundledShellPromptAndCompletion(t *testing.T) {
 				t.Fatalf("startup: %v: %s", err, out)
 			}
 			got := string(out)
-			if !strings.Contains(got, "loaded:yes") || !strings.Contains(got, "❯") {
+			if !strings.Contains(got, "loaded:yes") || !strings.Contains(got, ">") {
 				t.Fatalf("profile/prompt missing: %s", got)
 			}
 			completion := "menu-complete"
@@ -51,8 +51,36 @@ func TestBundledShellPromptAndCompletion(t *testing.T) {
 			if !strings.Contains(got, completion) {
 				t.Fatalf("completion missing: %s", got)
 			}
+			if shell == "zsh" {
+				// The account rc set no history file, so the bundled startup must.
+				if !strings.Contains(got, "histfile:"+filepath.Join(home, ".zsh_history")) {
+					t.Fatalf("history file missing: %s", got)
+				}
+				// Only where the host has the packages: the startup is a guarded
+				// source, not a dependency, and a build machine without them is fine.
+				for plugin, fn := range map[string]string{
+					"zsh-autosuggestions":     "_zsh_autosuggest_start",
+					"zsh-syntax-highlighting": "_zsh_highlight",
+				} {
+					if !zshPluginInstalled(plugin) {
+						continue
+					}
+					if !strings.Contains(got, fn+": function") {
+						t.Fatalf("%s installed but not loaded: %s", plugin, got)
+					}
+				}
+			}
 		})
 	}
+}
+
+func zshPluginInstalled(name string) bool {
+	for _, dir := range []string{"/usr/share/" + name, "/usr/share/zsh/plugins/" + name} {
+		if _, err := os.Stat(filepath.Join(dir, name+".zsh")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func TestShellSetupRejectsSymlink(t *testing.T) {
@@ -140,7 +168,7 @@ func TestNativePromptCompletesInTmux(t *testing.T) {
 					time.Sleep(25 * time.Millisecond)
 				}
 			}
-			waitText("❯")
+			waitText(">")
 			if out, err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", sess.TmuxName, "cat autocomplete-fi", "Tab").CombinedOutput(); err != nil {
 				t.Fatalf("Tab: %v %s", err, out)
 			}

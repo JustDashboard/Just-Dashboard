@@ -271,6 +271,13 @@ func TestSendKeysRejectsAKeyItDoesNotKnow(t *testing.T) {
 
 func waitForTmuxSession(t *testing.T, m *Manager, name string) {
 	t.Helper()
+	var pending *Session
+	for _, sess := range m.List() {
+		if sess.TmuxName == name {
+			pending = sess
+			break
+		}
+	}
 	// Generous, because what is being waited on is another process starting:
 	// tmux may have to boot a server, and a test that fails at two seconds is
 	// reporting the machine's load rather than the product's behaviour.
@@ -289,8 +296,17 @@ func waitForTmuxSession(t *testing.T, m *Manager, name string) {
 		names = append(names, s.Name)
 	}
 	out, err := exec.Command("tmux", "list-sessions").CombinedOutput()
-	t.Fatalf("tmux never reported session %s; manager sees %v; tmux says %q (err %v); TMUX_TMPDIR=%s",
-		name, names, string(out), err, os.Getenv("TMUX_TMPDIR"))
+	var startup []byte
+	if pending != nil {
+		pending.mu.Lock()
+		startup = append([]byte(nil), pending.scrollback.Bytes()...)
+		pending.mu.Unlock()
+		if len(startup) > 2048 {
+			startup = startup[len(startup)-2048:]
+		}
+	}
+	t.Fatalf("tmux never reported session %s; manager sees %v; tmux says %q (err %v); startup %q; TMUX_TMPDIR=%s",
+		name, names, string(out), err, string(startup), os.Getenv("TMUX_TMPDIR"))
 }
 
 func windowsOf(t *testing.T, m *Manager, name string) []Window {

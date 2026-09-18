@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react"
 import dynamic from "next/dynamic"
 import { cn } from "@/lib/utils"
-import { useTheme } from "@/hooks/use-theme"
 import { Spinner } from "@/components/state"
 
 // Monaco pulls in a large worker bundle and touches `window`, so it is loaded
@@ -89,7 +88,6 @@ export function CodeEditor({
   /** Called with a function that formats the document, once the editor exists. */
   onFormat?: (format: (() => void) | null) => void
 }) {
-  const { mode } = useTheme()
   // The save handler is read through a ref for the same reason the completion
   // schema is: the command is registered once on mount and would otherwise
   // keep calling the first render's closure, saving the file as it was when
@@ -114,7 +112,7 @@ export function CodeEditor({
     <div className={cn("monaco-host min-h-0", className)} style={{ minHeight }}>
       <MonacoEditor
         height="100%"
-        theme={mode === "light" ? "vs" : "vs-dark"}
+        theme="vs-dark"
         language={language}
         value={value}
         onChange={(v) => onChange?.(v ?? "")}

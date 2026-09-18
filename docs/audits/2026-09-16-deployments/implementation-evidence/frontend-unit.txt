@@ -1,0 +1,42 @@
+$ bun test src
+bun test v1.4.0 (34cbb9a40)
+
+src/lib/database-integrity.test.js:
+(pass) lossless database values > exact SQL types retain all entered digits through JSON [1.08ms]
+(pass) lossless database values > non-finite and unsafe ordinary numbers never turn into null or rounded JSON [0.41ms]
+(pass) lossless database values > CSV escapes headers and carriage returns as well as data [0.62ms]
+(pass) docker command parsing > explicit false cannot enable privileges or removal [1.88ms]
+(pass) docker command parsing > unrepresentable pull policy and invalid booleans are disclosed [0.18ms]
+(pass) confirmations preserve Unicode, whitespace, and literal percent signs in valid headers [1.17ms]
+
+src/lib/log-format.test.js:
+(pass) structured log lines > a Go slog line becomes a message, a level and its remaining fields [0.43ms]
+(pass) structured log lines > the other common field names are recognised [0.10ms]
+(pass) structured log lines > a level is optional [0.05ms]
+(pass) structured log lines > plain container output is left completely alone [0.10ms]
+(pass) structured log lines > a JSON object with no message field is not rearranged [0.03ms]
+(pass) structured log lines > a message that is not a string does not count as one [0.02ms]
+(pass) structured log lines > field values survive being something other than a string [0.08ms]
+
+src/lib/terminal-upload.test.js:
+(pass) terminal clipboard images > normal text paste is left completely unchanged [0.37ms]
+(pass) terminal clipboard images > accepts image/png clipboard data [0.44ms]
+(pass) terminal clipboard images > accepts image/jpeg clipboard data [0.02ms]
+(pass) terminal clipboard images > accepts image/webp clipboard data
+(pass) terminal clipboard images > intercepts an unsupported clipboard image without treating it as text [0.09ms]
+(pass) terminal clipboard images > inserts the uploaded path through terminal input without Enter [0.17ms]
+(pass) terminal clipboard images > refuses a returned path containing terminal control characters [0.08ms]
+(pass) terminal clipboard images > sends CSRF proof with the multipart upload [0.47ms]
+
+src/components/deploy/deployment-defaults.test.js:
+(pass) detected deployment serving defaults > packaged Vite output serves on nginx port even with source port undefined [0.42ms]
+(pass) detected deployment serving defaults > packaged Vite output serves on nginx port even with source port 0 [0.05ms]
+(pass) detected deployment serving defaults > packaged Vite output serves on nginx port even with source port 3000
+(pass) detected deployment serving defaults > packaged Vite output serves on nginx port even with source port 5173 [0.01ms]
+(pass) detected deployment serving defaults > plain HTML and nested static roots have readiness without manual settings [0.06ms]
+(pass) detected deployment serving defaults > Containerfile path stays relative to the detected build root [0.04ms]
+
+ 27 pass
+ 0 fail
+ 67 expect() calls
+Ran 27 tests across 4 files. [40.00ms]

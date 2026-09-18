@@ -1,16 +1,18 @@
 "use client"
 
-import { useState } from "react"
 import { MoreHorizontal } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
-import { FileIcon } from "@/components/files/file-icon"
-import { FileActionsMenu, type RowCaps } from "@/components/files/file-actions"
-import { rawUrl } from "@/components/files/preview-panel"
+import { FileActionsMenu, type FileActions, type RowCaps } from "@/components/files/file-actions"
+import { Thumbnail } from "@/components/files/thumbnail"
 import { Button } from "@/components/ui/button"
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { rowReveal } from "@/components/icon-action"
+import { useDropTarget, type DropMode } from "@/components/files/dnd"
+
+export type TileSize = "sm" | "md" | "lg"
 
 /**
  * The listing as tiles rather than rows.
@@ -20,45 +22,39 @@ import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
  * is forty rows of identical grey glyphs and a name each. Tiles give the space
  * back to the thing itself — a thumbnail where there is one, a large kind icon
  * where there is not — and folders become targets big enough to hit without
- * aiming, which is most of what browsing actually is.
- *
- * The thumbnail is the file itself at its own size, drawn small by the
- * browser. That is honest for the sizes a server holds — an icon, a
- * screenshot, a photograph — and it needs no thumbnail cache to go stale or
- * to fill a disk this page exists to keep tidy. The cap on which files are
- * tried is what keeps it from pulling a 40 MB scan over a VPN.
+ * aiming, which is most of what browsing actually is. A video tile plays,
+ * muted, while the pointer rests on it.
  */
-const THUMBNAIL_MAX_BYTES = 4 << 20
-
-const THUMBNAIL_KINDS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg"])
-
-function thumbnailFor(entry: FileEntry): string | null {
-  if (entry.isDir || entry.size > THUMBNAIL_MAX_BYTES || entry.size === 0) return null
-  const ext = entry.name.split(".").pop()?.toLowerCase()
-  return ext && THUMBNAIL_KINDS.has(ext) ? rawUrl(entry.path, entry.modified) : null
-}
-
 export function GridView({
   entries,
   selected,
   activePath,
+  dimmed,
   caps,
   size,
   onToggle,
   onSelect,
   onOpen,
+  onDragStart,
+  onDropPaths,
+  onDropFiles,
   actions,
 }: {
   entries: FileEntry[]
-  selected: string[]
-  /** The row the preview is showing, which is not the same as the selection. */
+  selected: Set<string>
+  /** The row the inspector is showing, which is not the same as the selection. */
   activePath: string | null
+  /** Paths on the clipboard waiting to be moved. */
+  dimmed: Set<string>
   caps: RowCaps
-  size: "sm" | "md" | "lg"
+  size: TileSize
   onToggle: (entry: FileEntry, checked: boolean) => void
-  onSelect: (entry: FileEntry) => void
+  onSelect: (entry: FileEntry, event: React.MouseEvent) => void
   onOpen: (entry: FileEntry) => void
-  actions: (entry: FileEntry) => React.ComponentProps<typeof FileActionsMenu>["actions"]
+  onDragStart?: (entry: FileEntry, event: React.DragEvent) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+  actions: (entry: FileEntry) => FileActions
 }) {
   const min = size === "sm" ? "7rem" : size === "lg" ? "13rem" : "10rem"
   return (
@@ -70,13 +66,17 @@ export function GridView({
         <Tile
           key={entry.path}
           entry={entry}
-          selected={selected.includes(entry.path)}
+          selected={selected.has(entry.path)}
           active={activePath === entry.path}
+          dimmed={dimmed.has(entry.path)}
           caps={caps}
           size={size}
           onToggle={(checked) => onToggle(entry, checked)}
-          onSelect={() => onSelect(entry)}
+          onSelect={(event) => onSelect(entry, event)}
           onOpen={() => onOpen(entry)}
+          onDragStart={onDragStart ? (event) => onDragStart(entry, event) : undefined}
+          onDropPaths={onDropPaths}
+          onDropFiles={onDropFiles}
           actions={actions(entry)}
         />
       ))}
@@ -88,53 +88,62 @@ function Tile({
   entry,
   selected,
   active,
+  dimmed,
   caps,
   size,
   onToggle,
   onSelect,
   onOpen,
+  onDragStart,
+  onDropPaths,
+  onDropFiles,
   actions,
 }: {
   entry: FileEntry
   selected: boolean
   active: boolean
+  dimmed: boolean
   caps: RowCaps
-  size: "sm" | "md" | "lg"
+  size: TileSize
   onToggle: (checked: boolean) => void
-  onSelect: () => void
+  onSelect: (event: React.MouseEvent) => void
   onOpen: () => void
-  actions: React.ComponentProps<typeof FileActionsMenu>["actions"]
+  onDragStart?: (event: React.DragEvent) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+  actions: FileActions
 }) {
-  const [broken, setBroken] = useState(false)
-  const thumbnail = broken ? null : thumbnailFor(entry)
-  const iconSize = size === "sm" ? "size-8" : size === "lg" ? "size-14" : "size-11"
+  const drop = useDropTarget({
+    dir: entry.isDir ? entry.path : null,
+    onDropPaths,
+    onDropFiles,
+  })
 
+  // The tile is a click target, not a control: its name is the real button,
+  // and the wrapper's handlers are a convenience for the pointer. A wrapper
+  // with `role="button"` would announce the checkbox, the menu and the name
+  // to a screen reader as one control's label.
   return (
     <div
-      role="button"
-      tabIndex={0}
+      data-entry-path={entry.path}
+      data-state={selected ? "selected" : undefined}
+      draggable={caps.write && !!onDragStart}
+      onDragStart={onDragStart}
+      {...drop.handlers}
       onClick={onSelect}
       onDoubleClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault()
-          onOpen()
-        }
-      }}
-      data-state={selected ? "selected" : undefined}
       className={cn(
-        "group relative flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-transparent p-2 text-center transition-colors",
-        "hover:border-hairline hover:bg-accent/50",
-        active && "border-primary/40 bg-primary/[0.06]",
-        selected && "border-primary/60 bg-primary/10",
+        "group relative flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-transparent p-2 text-center transition-colors select-none",
+        "hover:bg-row-hover",
+        (active || selected) && "bg-accent",
+        active && "border-rule-brand",
+        dimmed && "opacity-50",
+        drop.over && "border-rule-brand bg-wash-brand",
       )}
       title={entry.name}
     >
       <span
-        className={cn(
-          "absolute top-1.5 left-1.5 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
-          selected && "opacity-100",
-        )}
+        className={cn("absolute top-1.5 left-1.5 z-10", rowReveal(), selected && "opacity-100")}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
@@ -147,7 +156,7 @@ function Tile({
       </span>
 
       <span
-        className="absolute top-1 right-1 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+        className={cn("absolute top-1 right-1 z-10", rowReveal())}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
@@ -165,30 +174,30 @@ function Tile({
         </FileActionsMenu>
       </span>
 
-      <span
-        className={cn(
-          "flex w-full items-center justify-center rounded-md",
-          size === "sm" ? "h-14" : size === "lg" ? "h-28" : "h-20",
-          thumbnail && "checkerboard overflow-hidden border border-hairline",
-        )}
-      >
-        {thumbnail ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={thumbnail}
-            alt=""
-            loading="lazy"
-            onError={() => setBroken(true)}
-            className="max-h-full max-w-full object-contain"
-          />
-        ) : (
-          <FileIcon entry={entry} className={iconSize} badgeClassName="bg-background" />
-        )}
-      </span>
+      <Thumbnail entry={entry} size={size} hoverPlay />
 
       <span className="w-full min-w-0">
-        <span className="line-clamp-2 text-[12px] leading-snug break-words">{entry.name}</span>
-        <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+        <button
+          type="button"
+          className="line-clamp-2 w-full rounded-sm text-xs leading-snug break-words focus-ring"
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelect(e)
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              onOpen()
+            }
+          }}
+        >
+          {entry.name}
+        </button>
+        <span className="mt-0.5 block truncate text-micro text-muted-foreground">
           {entry.isDir ? relativeTime(entry.modified) : bytes(entry.size)}
         </span>
       </span>

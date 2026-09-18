@@ -38,6 +38,27 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			// Clearing a finished run is not destructive: it forgets a notice,
 			// and the version it describes is still installed.
 			r.Method(http.MethodDelete, "/update/run", s.handle(s.handleSelfUpdateDismiss))
+
+			// The dashboard's own settings. Reading them is admin-only rather
+			// than open to every role: the allowlist and the ports are the
+			// shape of this install's perimeter, and that is not something a
+			// read-only operator needs on screen.
+			r.Method(http.MethodGet, "/config", s.handle(s.handleSelfConfigStatus))
+			r.Method(http.MethodDelete, "/config/run", s.handle(s.handleSelfConfigDismiss))
+			// Applying settings and restarting both take the dashboard away
+			// for a minute and can leave it answering somewhere else. The
+			// rollback makes them recoverable rather than irreversible, but
+			// they belong in the same budget as everything else that stops a
+			// running service.
+			s.destructive(r, func(r chi.Router) {
+				r.Method(http.MethodPut, "/config", s.handle(s.handleSelfConfigApply))
+				r.Method(http.MethodPost, "/restart", s.handle(s.handleSelfConfigRestart))
+			})
+			// Asking for the certificate now rather than at the next check.
+			// Not in the destructive budget: it fetches a file and restarts
+			// the proxy for a second or two, which is the same interruption a
+			// renewal makes on its own at three in the morning.
+			r.Method(http.MethodPost, "/config/certificate", s.handle(s.handleSelfConfigCertificate))
 		})
 	})
 }

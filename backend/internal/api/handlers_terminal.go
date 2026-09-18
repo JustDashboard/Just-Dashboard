@@ -25,30 +25,22 @@ func (s *Server) mountTerminalRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapTerminal))
 		r.Method(http.MethodGet, "/", s.handle(s.handleTerminalList))
 		r.Method(http.MethodPost, "/", s.handle(s.handleTerminalCreate))
-		r.Method(http.MethodPost, "/reattach", s.handle(s.handleTerminalReattach))
 		r.Method(http.MethodGet, "/{id}/attach", s.handle(s.handleTerminalAttach))
-		r.Method(http.MethodPost, "/{id}/detach", s.handle(s.handleTerminalDetach))
 		r.Method(http.MethodPost, "/{id}/clipboard", s.handle(s.handleTerminalClipboardUpload))
 
-		// Naming and filing a session. Addressed by tmux name rather than by
-		// session id, because the sessions most in need of a name are exactly
-		// the ones this process is not currently holding a PTY for — the ones
-		// left running after a restart.
-		r.Method(http.MethodPatch, "/persistent/{name}", s.handle(s.handleTerminalMeta))
+		// Naming and filing address the in-memory workspace rather than an
+		// individual window, so every direct PTY in the workspace stays grouped.
+		r.Method(http.MethodPatch, "/{id}", s.handle(s.handleTerminalMeta))
 
-		// Folders. They are the dashboard's own record rather than tmux's,
-		// for the reason handlers_terminal_folders.go opens with, but they
-		// are part of the same surface and mount here so the route map for
-		// the terminal stays in one place.
+		// Folders are the dashboard's own record, but remain part of this
+		// surface so the terminal route map stays in one place.
 		s.mountTerminalFolderRoutes(r)
 
-		// The windows inside a session: a tab strip within a tab. tmux has had
-		// these all along and an operator who has not memorised `C-b c` had no
-		// way to reach them.
-		r.Method(http.MethodGet, "/persistent/{name}/windows", s.handle(s.handleTerminalWindows))
-		r.Method(http.MethodPost, "/persistent/{name}/windows", s.handle(s.handleTerminalWindowCreate))
-		r.Method(http.MethodPatch, "/persistent/{name}/windows/{index}", s.handle(s.handleTerminalWindowUpdate))
-		// Closing a window, a pane or a session is destructive — it takes
+		// Each window is an independent direct PTY grouped by the workspace id.
+		r.Method(http.MethodGet, "/{id}/windows", s.handle(s.handleTerminalWindows))
+		r.Method(http.MethodPost, "/{id}/windows", s.handle(s.handleTerminalWindowCreate))
+		r.Method(http.MethodPatch, "/{id}/windows/{window}", s.handle(s.handleTerminalWindowUpdate))
+		// Closing a window or session is destructive — it takes
 		// whatever is running with it — and stays inside `s.destructive` for
 		// the capability check, the tighter budget and the audit entry. It
 		// deliberately carries **no typed phrase**, which is the one place in
@@ -63,22 +55,9 @@ func (s *Server) mountTerminalRoutes(r chi.Router) {
 		// is worse than no guard at all, because it is exactly the habit the
 		// typed confirmation exists to prevent everywhere it still applies.
 		s.destructive(r, func(r chi.Router) {
-			r.Method(http.MethodDelete, "/persistent/{name}/windows/{index}", s.handle(s.handleTerminalWindowKill))
+			r.Method(http.MethodDelete, "/{id}/windows/{window}", s.handle(s.handleTerminalWindowKill))
 		})
 
-		// The panes inside a window: tmux's third level, and the one no
-		// browser terminal in this class exposes at all.
-		r.Method(http.MethodGet, "/persistent/{name}/windows/{index}/panes", s.handle(s.handleTerminalPanes))
-		r.Method(http.MethodPost, "/persistent/{name}/windows/{index}/panes", s.handle(s.handleTerminalPaneSplit))
-		r.Method(http.MethodPatch, "/persistent/{name}/windows/{index}/panes/{pane}", s.handle(s.handleTerminalPaneUpdate))
-		s.destructive(r, func(r chi.Router) {
-			r.Method(http.MethodDelete, "/persistent/{name}/windows/{index}/panes/{pane}", s.handle(s.handleTerminalPaneKill))
-		})
-
-		// Typing into a session that does not have the browser's focus — the
-		// interrupt keys and the stored one-liners. A write, and audited as
-		// one: "Ctrl+C was sent to a shell" is an event.
-		r.Method(http.MethodPost, "/persistent/{name}/windows/{index}/keys", s.handle(s.handleTerminalSendKeys))
 		s.destructive(r, func(r chi.Router) {
 			// Killing a session takes whatever is running in it with it. No
 			// typed phrase, for the reason given above the window route.
@@ -113,26 +92,17 @@ func mapTermError(err error) error {
 	}
 }
 
-// workspace is one terminal as the operator thinks of it: a named, filed piece
-// of work that may or may not have a PTY attached right now.
-//
-// The page used to receive two lists — live sessions and "detached" tmux names
-// — and had to reconcile them itself, which is why a session that had been
-// idle for an hour appeared to vanish and reappear somewhere else. They are the
-// same thing in two states, so they are one list with a flag.
+// workspace is one terminal as the operator thinks of it: a named, filed group
+// of direct PTYs. Every workspace in the response is live and process-local.
 type workspace struct {
-	// ID is set only while a PTY is attached; it is what the socket addresses.
-	// Without one, the session is running and reattaching gives it an id.
-	ID        string `json:"id,omitempty"`
-	TmuxName  string `json:"tmuxName,omitempty"`
-	Title     string `json:"title"`
-	Folder    string `json:"folder,omitempty"`
-	Favourite bool   `json:"favourite"`
-	Colour    string `json:"colour,omitempty"`
-	// Live distinguishes "this dashboard is holding a PTY for it" from "it is
-	// running on the host and can be picked up".
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Named is whether the operator chose Title. A default title gives way in
+	// the rail to what the session is doing, a chosen one does not.
+	Named     bool      `json:"named"`
+	Folder    string    `json:"folder,omitempty"`
+	Favourite bool      `json:"favourite"`
 	Live      bool      `json:"live"`
-	Persisted bool      `json:"persisted"`
 	CWD       string    `json:"cwd,omitempty"`
 	Windows   int       `json:"windows"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -140,81 +110,79 @@ type workspace struct {
 	User      string    `json:"user,omitempty"`
 	Shell     string    `json:"shell,omitempty"`
 	Owner     string    `json:"owner,omitempty"`
+	// Busy is whether any window has a program in the foreground, and Current
+	// is the window that stands for the session — the one a browser last
+	// showed, or failing that the one opened most recently — so the rail can
+	// name a session after what is going on inside it.
+	Busy bool `json:"busy"`
+	// Working and FinishedAt aggregate the windows the same way: something in
+	// the session is working, or the most recent thing in it to finish.
+	Working    bool           `json:"working"`
+	FinishedAt int64          `json:"finishedAt,omitempty"`
+	Current    *sessionWindow `json:"current,omitempty"`
+}
+
+// sessionWindow is one direct PTY as the rail and the window strip see it: its
+// name, whether that name was chosen, and what it is doing right now.
+type sessionWindow struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Named bool   `json:"named"`
+	term.Activity
+}
+
+// windowView adds what the strip needs beyond the name: position and directory.
+type windowView struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+	Named bool   `json:"named"`
+	CWD   string `json:"cwd,omitempty"`
+	term.Activity
 }
 
 func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) error {
-	// Keyed by tmux name so a session the dashboard is holding and the same
-	// session as tmux reports it collapse into one entry rather than appearing
-	// twice under different names.
-	byTmux := map[string]*workspace{}
+	byID := map[string]*workspace{}
+	focused := map[string]time.Time{}
 	out := []*workspace{}
-	// Kept beside the workspaces so a session whose directory tmux did not
-	// answer for can be asked directly, below.
-	live := map[*workspace]*term.Session{}
-
 	for _, sess := range s.modules.term.List() {
-		meta := sess.Meta()
-		ws := &workspace{
-			ID: sess.ID, TmuxName: sess.TmuxName, Title: meta.Title,
-			Folder: meta.Folder, Favourite: meta.Favourite, Colour: meta.Colour,
-			Live: true, Persisted: sess.Persisted, CreatedAt: sess.CreatedAt,
-			Attached: sess.Attached(), User: sess.User, Shell: sess.Shell,
-			Owner: sess.Owner, Windows: 1,
-		}
-		out = append(out, ws)
-		live[ws] = sess
+		// Persistent tmux sessions are no longer part of the product. Existing
+		// ones are left untouched on the host, but are not adopted into this
+		// direct-PTY interface.
 		if sess.TmuxName != "" {
-			byTmux[sess.TmuxName] = ws
-		}
-	}
-
-	// tmux answers for the sessions this process is not holding, and for the
-	// live ones it answers only about the *shell's* state — where it is, how
-	// many windows it has.
-	//
-	// It deliberately does not answer for the name, the folder or the colour
-	// of a live session, though it stores all three. `tmux new-session` is
-	// handed to a PTY and the `set-option` that files the session away can
-	// land half a second later, so a listing taken from tmux immediately
-	// after a create reports a session with no folder — which is precisely
-	// how a shell opened inside a folder appeared under "Other" and moved
-	// into place on some later poll. The in-memory copy is seeded on create,
-	// read back on reattach and written on every change, so for a live
-	// session it is never behind and is sometimes ahead.
-	for _, t := range s.modules.term.TmuxSessions(r.Context()) {
-		if ws, ok := byTmux[t.Name]; ok {
-			ws.Windows = t.Windows
-			// Only when tmux actually answered. A blank from a tmux that is
-			// there but has not caught up must not erase a directory this
-			// process can read for itself.
-			if t.CWD != "" {
-				ws.CWD = t.CWD
-			}
 			continue
 		}
-		out = append(out, &workspace{
-			TmuxName: t.Name, Title: orDefault(t.Title, t.Name), Folder: t.Folder,
-			Favourite: t.Favourite, Colour: t.Colour, Persisted: true, CWD: t.CWD,
-			Windows: t.Windows, CreatedAt: t.CreatedAt,
-		})
-	}
-
-	// Where a session is now, for the ones tmux did not answer for.
-	//
-	// tmux reports every session's directory in the one `list-sessions` call
-	// above, so on a host that has it this loop does nothing. On a host that
-	// does not — Debian installs no tmux by default — that call returns
-	// nothing at all, and the listing used to carry no directory for any
-	// session. The files and git panel beside the terminal is rooted at
-	// exactly that value, so both of them silently had nowhere to look: the
-	// panel opened empty and stayed empty, on a shell sitting in a repository.
-	//
-	// Session.CWD reads it from /proc, which needs no multiplexer, and it is
-	// asked only where the answer is still missing so a tmux host pays nothing
-	// for it.
-	for ws, sess := range live {
+		id := sess.WorkspaceID
+		if id == "" {
+			id = sess.ID
+		}
+		ws := byID[id]
+		if ws == nil {
+			meta := sess.Meta()
+			ws = &workspace{
+				ID: id, Title: meta.Title, Named: meta.Named, Folder: meta.Folder,
+				Favourite: meta.Favourite, Live: true, CreatedAt: sess.CreatedAt,
+				User: sess.User, Shell: sess.Shell, Owner: sess.Owner,
+			}
+			byID[id] = ws
+			out = append(out, ws)
+		}
+		ws.Windows++
+		ws.Attached += sess.Attached()
 		if ws.CWD == "" {
 			ws.CWD = sess.CWD()
+		}
+		window := sessionWindow{
+			ID: sess.ID, Name: sess.WindowName, Named: sess.WindowNamed(), Activity: sess.Activity(),
+		}
+		ws.Busy = ws.Busy || window.Busy
+		ws.Working = ws.Working || window.Working
+		if window.FinishedAt > ws.FinishedAt {
+			ws.FinishedAt = window.FinishedAt
+		}
+		if at := sess.FocusedAt(); ws.Current == nil || at.After(focused[id]) {
+			ws.Current = &window
+			focused[id] = at
 		}
 	}
 
@@ -228,7 +196,6 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"enabled": s.modules.term.Enabled(),
-		"tmux":    s.modules.term.TmuxAvailable(),
 		"login":   login,
 		// The folders come with the listing rather than from a second
 		// request, because the rail cannot be drawn without both and two
@@ -236,28 +203,17 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 		// — the same class of flicker this endpoint was collapsed into one
 		// list to remove.
 		"folders":  s.mergedTerminalFolders(r.Context(), out),
-		"colours":  term.Colours,
-		"layouts":  term.Layouts,
 		"sessions": out,
 	})
 	return nil
 }
 
-func orDefault(v, fallback string) string {
-	if v == "" {
-		return fallback
-	}
-	return v
-}
-
 type createTerminalRequest struct {
-	Title   string `json:"title"`
-	CWD     string `json:"cwd"`
-	Folder  string `json:"folder"`
-	Colour  string `json:"colour"`
-	Rows    uint16 `json:"rows"`
-	Cols    uint16 `json:"cols"`
-	Persist *bool  `json:"persist"`
+	Title  string `json:"title"`
+	CWD    string `json:"cwd"`
+	Folder string `json:"folder"`
+	Rows   uint16 `json:"rows"`
+	Cols   uint16 `json:"cols"`
 }
 
 func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) error {
@@ -266,72 +222,34 @@ func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	p := httpx.MustPrincipal(r)
-	persist := true
-	if req.Persist != nil {
-		persist = *req.Persist
-	}
-	// A session opened into a folder takes the folder's colour unless it was
-	// given one, which is what "the sessions inside carry the highlight"
-	// means in practice: the operator paints the folder once and every shell
-	// they open there is already the right colour.
-	colour := req.Colour
-	if colour == "" && req.Folder != "" {
-		for _, f := range s.terminalFolders(r.Context()) {
-			if strings.EqualFold(f.Name, req.Folder) {
-				colour = f.Colour
-			}
-		}
-	}
 	sess, err := s.modules.term.Create(r.Context(), term.CreateOptions{
 		Title: req.Title, Owner: p.Username(), CWD: req.CWD, Folder: req.Folder,
-		Colour: colour, Rows: req.Rows, Cols: req.Cols, Persist: persist,
+		Rows: req.Rows, Cols: req.Cols,
 	})
 	if err != nil {
 		return mapTermError(err)
+	}
+	if s.Log != nil {
+		rows, cols := sess.Size()
+		s.Log.Debug("terminal PTY created", "session", sess.ID, "rows", rows, "cols", cols)
 	}
 	// The account is the part of this record that matters later: "a shell was
 	// opened" and "a shell was opened as root" are different events.
 	httpx.SetAudit(r, "terminal.create", sess.ID,
-		map[string]any{"shell": sess.Shell, "user": sess.User,
-			"persisted": sess.Persisted, "cwd": req.CWD})
+		map[string]any{"shell": sess.Shell, "user": sess.User, "cwd": req.CWD})
 	meta := sess.Meta()
 	httpx.JSON(w, http.StatusCreated, map[string]any{
-		"id": sess.ID, "title": meta.Title, "shell": sess.Shell, "user": sess.User,
-		"persisted": sess.Persisted, "tmuxName": sess.TmuxName, "pid": sess.PID,
-		"folder": meta.Folder, "colour": meta.Colour,
-	})
-	return nil
-}
-
-type reattachRequest struct {
-	TmuxName string `json:"tmuxName"`
-	Rows     uint16 `json:"rows"`
-	Cols     uint16 `json:"cols"`
-}
-
-func (s *Server) handleTerminalReattach(w http.ResponseWriter, r *http.Request) error {
-	var req reattachRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	p := httpx.MustPrincipal(r)
-	sess, err := s.modules.term.Reattach(r.Context(), req.TmuxName, p.Username(), req.Rows, req.Cols)
-	if err != nil {
-		return mapTermError(err)
-	}
-	httpx.SetAudit(r, "terminal.reattach", req.TmuxName, map[string]any{"sessionId": sess.ID})
-	httpx.JSON(w, http.StatusOK, map[string]any{
-		"id": sess.ID, "title": sess.Title, "tmuxName": sess.TmuxName, "persisted": true,
+		"id": sess.WorkspaceID, "windowId": sess.ID, "title": meta.Title,
+		"shell": sess.Shell, "user": sess.User, "pid": sess.PID, "folder": meta.Folder,
 	})
 	return nil
 }
 
 type terminalControl struct {
-	Type   string `json:"type"`
-	Rows   uint16 `json:"rows"`
-	Cols   uint16 `json:"cols"`
-	Data   string `json:"data"`
-	Offset int    `json:"offset"`
+	Type string `json:"type"`
+	Rows uint16 `json:"rows"`
+	Cols uint16 `json:"cols"`
+	Data string `json:"data"`
 }
 
 // handleTerminalAttach wires a browser to a PTY. Binary frames carry raw
@@ -344,8 +262,11 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return mapTermError(err)
 	}
+	if sess.TmuxName != "" {
+		return httpx.ErrNotFound
+	}
 	s.recordAudit(r, "terminal.attach", id,
-		map[string]any{"shell": sess.Shell, "user": sess.User, "tmux": sess.TmuxName})
+		map[string]any{"shell": sess.Shell, "user": sess.User})
 
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
@@ -356,6 +277,9 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 	defer cancel()
 	go conn.Keepalive(ctx)
 
+	// Subscribe before touching the PTY size. TIOCSWINSZ may make the program
+	// redraw immediately; subscribing afterwards loses those bytes and
+	// leaves the new emulator with an already-stale picture.
 	snapshot, subID, out, err := sess.Subscribe()
 	if err != nil {
 		conn.SendError(err.Error())
@@ -363,6 +287,21 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 	}
 	defer sess.Unsubscribe(subID)
 
+	// xterm puts its measured geometry on the handshake. Apply it after the
+	// subscription exists but before sending any stored bytes, so every redraw
+	// caused by the resize is queued behind a coherent starting point.
+	if rows, cols, ok := terminalSizeQuery(r); ok {
+		if err := sess.SynchronizeSize(rows, cols); err != nil {
+			conn.SendError("could not resize terminal")
+			return nil
+		}
+		if s.Log != nil {
+			s.Log.Debug("terminal PTY synchronized", "session", id, "rows", rows, "cols", cols)
+		}
+	}
+
+	// Direct sessions have no independent screen model, so reconnect retains
+	// the historical best-effort replay used for ordinary shell scrollback.
 	if len(snapshot) > 0 {
 		// Announced before it is sent, because the browser has to know that
 		// what follows is a replay rather than live output.
@@ -383,25 +322,35 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 			return nil
 		}
 	}
+	// What the window is doing, stated once on arrival and then whenever it
+	// changes, so a tab can be titled and marked busy without waiting for the
+	// next listing poll.
+	if err := conn.Send("state", sess.Activity()); err != nil {
+		return nil
+	}
+	events := sess.Events(subID)
 	go func() {
-		for chunk := range out {
-			if err := conn.WriteBinary(chunk); err != nil {
-				cancel()
-				return
+		for {
+			select {
+			case chunk, ok := <-out:
+				if !ok {
+					cancel()
+					return
+				}
+				if err := conn.WriteBinary(chunk); err != nil {
+					cancel()
+					return
+				}
+			case activity, ok := <-events:
+				if !ok {
+					events = nil
+					continue
+				}
+				if err := conn.Send("state", activity); err != nil {
+					cancel()
+					return
+				}
 			}
-		}
-		cancel()
-	}()
-
-	// A repaint owed to the session because its size changed, held back until
-	// the size stops changing. Dragging the panel divider produces a resize a
-	// frame, and a `refresh-client` per frame would be a subprocess per frame
-	// for a picture that is about to be wrong again. One repaint after the
-	// drag settles is the whole point — see term.Manager.Redraw.
-	var redraw *time.Timer
-	defer func() {
-		if redraw != nil {
-			redraw.Stop()
 		}
 	}()
 
@@ -415,42 +364,24 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 			if json.Unmarshal(data, &ctrl) == nil {
 				switch ctrl.Type {
 				case "resize":
-					if changed, _ := sess.Resize(ctrl.Rows, ctrl.Cols); changed && sess.TmuxName != "" {
-						name := sess.TmuxName
-						if redraw != nil {
-							redraw.Stop()
-						}
-						redraw = time.AfterFunc(200*time.Millisecond, func() {
-							// Detached: the repaint is owed to the tmux
-							// session, which outlives this socket, and a
-							// browser that closed the tab mid-drag has left a
-							// half-drawn screen for whoever attaches next.
-							ctx, cancel := detachedContext(10)
-							defer cancel()
-							_ = s.modules.term.Redraw(ctx, name)
-						})
+					changed, resizeErr := sess.Resize(ctrl.Rows, ctrl.Cols)
+					if resizeErr != nil {
+						_ = conn.SendError("could not resize terminal")
+						continue
 					}
-					continue
-				case "exit-copy", "sync-copy", "scroll-to":
-					// Report tmux's real position after navigation. The client
-					// must not mistake its emulator history for shell history.
-					ctx, cancel := detachedContext(5)
-					if sess.TmuxName != "" {
-						if ctrl.Type == "exit-copy" {
-							_ = s.modules.term.ExitCopyMode(ctx, sess.TmuxName)
-						}
-						if ctrl.Type == "scroll-to" {
-							_ = s.modules.term.ScrollTo(ctx, sess.TmuxName, ctrl.Offset)
-						}
-					}
-					state, err := s.modules.term.ScrollState(ctx, sess.TmuxName)
-					cancel()
-					if err == nil {
-						_ = conn.Send("copy-mode", state)
+					if changed && s.Log != nil {
+						s.Log.Debug("terminal PTY resized", "session", id, "rows", ctrl.Rows, "cols", ctrl.Cols)
 					}
 					continue
 				case "input":
 					sess.Write([]byte(ctrl.Data))
+					continue
+				case "focus":
+					// The browser is showing this window. Which window a
+					// session is "on" is otherwise unknowable here: a visited
+					// window keeps its socket while hidden, so attaching says
+					// nothing about what is on screen.
+					sess.MarkFocused()
 					continue
 				case "ping":
 					continue
@@ -465,19 +396,18 @@ func (s *Server) handleTerminalAttach(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
+func terminalSizeQuery(r *http.Request) (rows, cols uint16, ok bool) {
+	parsedRows, errRows := strconv.ParseUint(r.URL.Query().Get("rows"), 10, 16)
+	parsedCols, errCols := strconv.ParseUint(r.URL.Query().Get("cols"), 10, 16)
+	if errRows != nil || errCols != nil || parsedRows == 0 || parsedCols == 0 {
+		return 0, 0, false
+	}
+	return uint16(parsedRows), uint16(parsedCols), true
+}
+
 // gorilla's TextMessage constant, kept local so handlers do not need to import
 // the websocket package directly.
 const websocketTextFrame = 1
-
-func (s *Server) handleTerminalDetach(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
-	if err := s.modules.term.Detach(id); err != nil {
-		return mapTermError(err)
-	}
-	httpx.SetAudit(r, "terminal.detach", id, nil)
-	httpx.NoContent(w)
-	return nil
-}
 
 // handleTerminalClipboardUpload moves an image out-of-band rather than
 // feeding binary clipboard data through the PTY. The destination is derived
@@ -485,6 +415,12 @@ func (s *Server) handleTerminalDetach(w http.ResponseWriter, r *http.Request) er
 // filename is display metadata only and never participates in a filesystem
 // path.
 func (s *Server) handleTerminalClipboardUpload(w http.ResponseWriter, r *http.Request) error {
+	id := chi.URLParam(r, "id")
+	sess, err := s.modules.term.Get(id)
+	if err != nil || sess.TmuxName != "" {
+		return httpx.Err(http.StatusNotFound, "terminal_session_not_found",
+			"the terminal session no longer exists")
+	}
 	const multipartAllowance = 1 << 20
 	r.Body = http.MaxBytesReader(w, r.Body, term.MaxClipboardImageBytes+multipartAllowance)
 	reader, err := r.MultipartReader()
@@ -568,7 +504,7 @@ func clipboardDisplayName(raw, fallback string) string {
 
 func (s *Server) handleTerminalKill(w http.ResponseWriter, r *http.Request) error {
 	id := chi.URLParam(r, "id")
-	if err := s.modules.term.Kill(r.Context(), id); err != nil {
+	if err := s.modules.term.KillWorkspace(r.Context(), id); err != nil {
 		return mapTermError(err)
 	}
 	httpx.SetAudit(r, "terminal.kill", id, nil)
@@ -583,6 +519,9 @@ func (s *Server) handleTerminalCWD(w http.ResponseWriter, r *http.Request) error
 	sess, err := s.modules.term.Get(chi.URLParam(r, "id"))
 	if err != nil {
 		return mapTermError(err)
+	}
+	if sess.TmuxName != "" {
+		return httpx.ErrNotFound
 	}
 	cwd := sess.CWD()
 	if cwd == "" {
@@ -607,7 +546,6 @@ type sessionMetaRequest struct {
 	Title     *string `json:"title"`
 	Folder    *string `json:"folder"`
 	Favourite *bool   `json:"favourite"`
-	Colour    *string `json:"colour"`
 }
 
 func (s *Server) handleTerminalMeta(w http.ResponseWriter, r *http.Request) error {
@@ -615,13 +553,21 @@ func (s *Server) handleTerminalMeta(w http.ResponseWriter, r *http.Request) erro
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	name := chi.URLParam(r, "name")
-	meta, err := s.modules.term.Meta(r.Context(), name)
+	id := chi.URLParam(r, "id")
+	if len(s.modules.term.Workspace(id)) == 0 {
+		return httpx.ErrNotFound
+	}
+	meta, err := s.modules.term.Meta(r.Context(), id)
 	if err != nil {
 		return mapTermError(err)
 	}
 	if req.Title != nil {
 		meta.Title = *req.Title
+		// A title somebody typed is theirs from now on: the rail stops
+		// following the shell for this session and shows what they wrote.
+		if strings.TrimSpace(*req.Title) != "" {
+			meta.Named = true
+		}
 	}
 	if req.Folder != nil {
 		meta.Folder = *req.Folder
@@ -629,24 +575,28 @@ func (s *Server) handleTerminalMeta(w http.ResponseWriter, r *http.Request) erro
 	if req.Favourite != nil {
 		meta.Favourite = *req.Favourite
 	}
-	if req.Colour != nil {
-		meta.Colour = *req.Colour
-	}
-	if err := s.modules.term.SetMeta(r.Context(), name, meta); err != nil {
+	if err := s.modules.term.SetMeta(r.Context(), id, meta); err != nil {
 		return mapTermError(err)
 	}
-	httpx.SetAudit(r, "terminal.rename", name, map[string]any{
+	httpx.SetAudit(r, "terminal.rename", id, map[string]any{
 		"title": meta.Title, "folder": meta.Folder,
-		"favourite": meta.Favourite, "colour": meta.Colour,
+		"favourite": meta.Favourite,
 	})
 	httpx.JSON(w, http.StatusOK, meta)
 	return nil
 }
 
 func (s *Server) handleTerminalWindows(w http.ResponseWriter, r *http.Request) error {
-	windows, err := s.modules.term.Windows(r.Context(), chi.URLParam(r, "name"))
-	if err != nil {
-		return mapTermError(err)
+	sessions := s.modules.term.Workspace(chi.URLParam(r, "id"))
+	if len(sessions) == 0 {
+		return httpx.ErrNotFound
+	}
+	windows := make([]windowView, 0, len(sessions))
+	for index, sess := range sessions {
+		windows = append(windows, windowView{
+			ID: sess.ID, Index: index, Name: sess.WindowName, Named: sess.WindowNamed(),
+			CWD: sess.CWD(), Activity: sess.Activity(),
+		})
 	}
 	httpx.JSON(w, http.StatusOK, windows)
 	return nil
@@ -662,230 +612,49 @@ func (s *Server) handleTerminalWindowCreate(w http.ResponseWriter, r *http.Reque
 			return err
 		}
 	}
-	name := chi.URLParam(r, "name")
-	if err := s.modules.term.NewWindow(r.Context(), name, req.Name, req.CWD); err != nil {
+	id := chi.URLParam(r, "id")
+	sess, err := s.modules.term.NewDirectWindow(r.Context(), id, req.Name, req.CWD, 30, 110)
+	if err != nil {
 		return mapTermError(err)
 	}
-	httpx.SetAudit(r, "terminal.window.create", name, map[string]any{"name": req.Name})
-	httpx.NoContent(w)
+	httpx.SetAudit(r, "terminal.window.create", id, map[string]any{"name": sess.WindowName})
+	httpx.JSON(w, http.StatusCreated, map[string]any{"id": sess.ID, "name": sess.WindowName})
 	return nil
 }
 
-// handleTerminalWindowUpdate renames a window, selects it, or both.
-//
-// Selecting is a write rather than a read because tmux redraws every attached
-// client when the active window changes — the browser sees the switch without
-// reconnecting, which is what makes the strip a control instead of a picture.
+// handleTerminalWindowUpdate renames or reorders a direct-PTY window.
 func (s *Server) handleTerminalWindowUpdate(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
-		Name   string  `json:"name,omitempty"`
-		Select bool    `json:"select,omitempty"`
-		Colour *string `json:"colour,omitempty"`
-		// Position is where a drag dropped the window in the strip, counted
-		// in the strip rather than in tmux indices — the operator never sees
-		// the latter, and they stop being contiguous the moment a window in
-		// the middle is closed.
+		Name string `json:"name,omitempty"`
+		// Position is where a drag dropped the window in the strip.
 		Position *int `json:"position,omitempty"`
-		// Session moves the window to a different session altogether, which
-		// is the drag that recovers from opening the build in the wrong place.
-		Session string `json:"session,omitempty"`
-		// Synchronize sends every keystroke to every pane in the window.
-		Synchronize *bool `json:"synchronize,omitempty"`
-		// Layout rearranges the window's panes into one of tmux's shapes.
-		Layout string `json:"layout,omitempty"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	name := chi.URLParam(r, "name")
-	index, err := strconv.Atoi(chi.URLParam(r, "index"))
-	if err != nil {
-		return httpx.BadRequest("window index must be a number")
-	}
+	id := chi.URLParam(r, "id")
+	windowID := chi.URLParam(r, "window")
 	if req.Name != "" {
-		if err := s.modules.term.RenameWindow(r.Context(), name, index, req.Name); err != nil {
-			return mapTermError(err)
-		}
-	}
-	if req.Colour != nil {
-		if err := s.modules.term.ColourWindow(r.Context(), name, index, *req.Colour); err != nil {
+		if err := s.modules.term.RenameDirectWindow(id, windowID, req.Name); err != nil {
 			return mapTermError(err)
 		}
 	}
 	if req.Position != nil {
-		if err := s.modules.term.MoveWindow(r.Context(), name, index, *req.Position); err != nil {
+		if err := s.modules.term.MoveDirectWindow(id, windowID, *req.Position); err != nil {
 			return mapTermError(err)
 		}
 	}
-	if req.Session != "" {
-		if err := s.modules.term.MoveWindowToSession(r.Context(), name, index, req.Session); err != nil {
-			return mapTermError(err)
-		}
-	}
-	if req.Layout != "" {
-		if err := s.modules.term.SetLayout(r.Context(), name, index, req.Layout); err != nil {
-			return mapTermError(err)
-		}
-	}
-	if req.Synchronize != nil {
-		if err := s.modules.term.Synchronize(r.Context(), name, index, *req.Synchronize); err != nil {
-			return mapTermError(err)
-		}
-	}
-	if req.Select {
-		if err := s.modules.term.SelectWindow(r.Context(), name, index); err != nil {
-			return mapTermError(err)
-		}
-	}
-	httpx.SetAudit(r, "terminal.window.update", name, map[string]any{
-		"index": index, "name": req.Name, "select": req.Select,
-		"position": req.Position, "session": req.Session,
-		"layout": req.Layout, "synchronize": req.Synchronize,
+	httpx.SetAudit(r, "terminal.window.update", id, map[string]any{
+		"window": windowID, "name": req.Name, "position": req.Position,
 	})
 	httpx.NoContent(w)
 	return nil
 }
 
-func (s *Server) handleTerminalPanes(w http.ResponseWriter, r *http.Request) error {
-	index, err := strconv.Atoi(chi.URLParam(r, "index"))
-	if err != nil {
-		return httpx.BadRequest("window index must be a number")
-	}
-	panes, err := s.modules.term.Panes(r.Context(), chi.URLParam(r, "name"), index)
-	if err != nil {
-		return mapTermError(err)
-	}
-	httpx.JSON(w, http.StatusOK, panes)
-	return nil
-}
-
-func (s *Server) handleTerminalPaneSplit(w http.ResponseWriter, r *http.Request) error {
-	var req struct {
-		// Vertical describes the *result* — two panes side by side — not
-		// tmux's `-h`, whose name means the opposite of what everyone reads
-		// it as.
-		Vertical bool `json:"vertical"`
-	}
-	if r.ContentLength > 0 {
-		if err := httpx.DecodeJSON(r, &req); err != nil {
-			return err
-		}
-	}
-	name := chi.URLParam(r, "name")
-	index, err := strconv.Atoi(chi.URLParam(r, "index"))
-	if err != nil {
-		return httpx.BadRequest("window index must be a number")
-	}
-	if err := s.modules.term.SplitPane(r.Context(), name, index, req.Vertical); err != nil {
-		return mapTermError(err)
-	}
-	httpx.SetAudit(r, "terminal.pane.split", name,
-		map[string]any{"window": index, "vertical": req.Vertical})
-	httpx.NoContent(w)
-	return nil
-}
-
-func (s *Server) handleTerminalPaneUpdate(w http.ResponseWriter, r *http.Request) error {
-	var req struct {
-		Select bool `json:"select,omitempty"`
-		Zoom   bool `json:"zoom,omitempty"`
-	}
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	name := chi.URLParam(r, "name")
-	window, pane, err := windowAndPane(r)
-	if err != nil {
-		return err
-	}
-	if req.Select {
-		if err := s.modules.term.SelectPane(r.Context(), name, window, pane); err != nil {
-			return mapTermError(err)
-		}
-	}
-	if req.Zoom {
-		if err := s.modules.term.ZoomPane(r.Context(), name, window, pane); err != nil {
-			return mapTermError(err)
-		}
-	}
-	httpx.SetAudit(r, "terminal.pane.update", name,
-		map[string]any{"window": window, "pane": pane, "zoom": req.Zoom})
-	httpx.NoContent(w)
-	return nil
-}
-
-func (s *Server) handleTerminalPaneKill(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
-	window, pane, err := windowAndPane(r)
-	if err != nil {
-		return err
-	}
-	if err := s.modules.term.KillPane(r.Context(), name, window, pane); err != nil {
-		if errors.Is(err, term.ErrNotFound) || errors.Is(err, term.ErrNoPersistence) {
-			return mapTermError(err)
-		}
-		// "This is the only pane" names the route to take instead, which is a
-		// sentence the operator needs rather than a 500.
-		return httpx.BadRequest("%s", err.Error())
-	}
-	httpx.SetAudit(r, "terminal.pane.kill", name, map[string]any{"window": window, "pane": pane})
-	httpx.NoContent(w)
-	return nil
-}
-
-// handleTerminalSendKeys types into a session the browser is not focused on.
-//
-// The literal text and the named keys are separate fields rather than one
-// string with escapes, because tmux's `send-keys` decides between the two by
-// parsing what it is given: a stored one-liner that happened to contain the
-// word `Enter` would otherwise become a keypress. `-l` for the text, a closed
-// list for the keys.
-func (s *Server) handleTerminalSendKeys(w http.ResponseWriter, r *http.Request) error {
-	var req struct {
-		Text string   `json:"text"`
-		Keys []string `json:"keys"`
-	}
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	name := chi.URLParam(r, "name")
-	index, err := strconv.Atoi(chi.URLParam(r, "index"))
-	if err != nil {
-		return httpx.BadRequest("window index must be a number")
-	}
-	if err := s.modules.term.SendKeys(r.Context(), name, index, req.Text, req.Keys); err != nil {
-		if errors.Is(err, term.ErrNotFound) || errors.Is(err, term.ErrNoPersistence) {
-			return mapTermError(err)
-		}
-		return httpx.BadRequest("%s", err.Error())
-	}
-	// The text is recorded: this is a way to run a command on the host, and
-	// an audit entry saying only "keys were sent" would be worth nothing.
-	httpx.SetAudit(r, "terminal.keys", name,
-		map[string]any{"window": index, "text": req.Text, "keys": req.Keys})
-	httpx.NoContent(w)
-	return nil
-}
-
-func windowAndPane(r *http.Request) (window, pane int, err error) {
-	window, convErr := strconv.Atoi(chi.URLParam(r, "index"))
-	if convErr != nil {
-		return 0, 0, httpx.BadRequest("window index must be a number")
-	}
-	pane, convErr = strconv.Atoi(chi.URLParam(r, "pane"))
-	if convErr != nil {
-		return 0, 0, httpx.BadRequest("pane index must be a number")
-	}
-	return window, pane, nil
-}
-
 func (s *Server) handleTerminalWindowKill(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
-	index, err := strconv.Atoi(chi.URLParam(r, "index"))
-	if err != nil {
-		return httpx.BadRequest("window index must be a number")
-	}
-	if err := s.modules.term.KillWindow(r.Context(), name, index); err != nil {
+	id := chi.URLParam(r, "id")
+	windowID := chi.URLParam(r, "window")
+	if err := s.modules.term.KillDirectWindow(r.Context(), id, windowID); err != nil {
 		// "This is the only window" is a sentence the operator needs, not a
 		// 500 — it names the route they should have taken instead.
 		if errors.Is(err, term.ErrNotFound) {
@@ -893,7 +662,7 @@ func (s *Server) handleTerminalWindowKill(w http.ResponseWriter, r *http.Request
 		}
 		return httpx.BadRequest("%s", err.Error())
 	}
-	httpx.SetAudit(r, "terminal.window.kill", name, map[string]any{"index": index})
+	httpx.SetAudit(r, "terminal.window.kill", id, map[string]any{"window": windowID})
 	httpx.NoContent(w)
 	return nil
 }

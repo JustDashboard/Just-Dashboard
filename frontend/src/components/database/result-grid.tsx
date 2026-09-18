@@ -12,10 +12,11 @@ import {
   Pencil,
   Trash,
 } from "@/components/icons"
-import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DbForeignKey, QueryResult } from "@/lib/types"
+import { Modal } from "@/components/modal"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -27,7 +28,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { copyText } from "@/lib/clipboard"
 
 /**
  * The one result grid every database view renders through, so a query result, a
@@ -58,6 +59,8 @@ export function ResultGrid({
   onSelectionChange,
   className,
   maxHeightClass = "max-h-[calc(100svh-22rem)]",
+  emptyTitle = "No rows",
+  emptyDescription,
 }: {
   result: QueryResult
   onEdit?: (row: Record<string, unknown>) => void
@@ -81,6 +84,14 @@ export function ResultGrid({
   onSelectionChange?: (next: Set<number>) => void
   className?: string
   maxHeightClass?: string
+  /**
+   * What to say when the query succeeded and matched nothing. The columns are
+   * still worth rendering — they are how you read the shape of what you asked
+   * for — but headers over an empty void look like a component that failed to
+   * load rather than a table that genuinely has none.
+   */
+  emptyTitle?: string
+  emptyDescription?: string
 }) {
   const [detail, setDetail] = useState<{ column: string; value: unknown } | null>(null)
   const hasActions = Boolean(onEdit || onDelete || onDuplicate || onCopySQL)
@@ -112,7 +123,7 @@ export function ResultGrid({
 
   if (result.columns.length === 0) {
     return (
-      <p className="p-4 text-[13px] text-muted-foreground">
+      <p className="p-4 text-body text-muted-foreground">
         {plural(result.rowsAffected, "row")} affected in {result.duration}.
       </p>
     )
@@ -156,7 +167,7 @@ export function ResultGrid({
                   col
                 )}
                 {result.types[i] && (
-                  <span className="ml-1 text-[10px] font-normal normal-case text-muted-foreground/70">
+                  <span className="ml-1 text-micro font-normal text-muted-foreground/70 normal-case">
                     {result.types[i].toLowerCase()}
                   </span>
                 )}
@@ -165,6 +176,21 @@ export function ResultGrid({
           </TableRow>
         </TableHeader>
         <TableBody>
+          {result.rows.length === 0 && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={result.columns.length + (selectable ? 1 : 0) + (hasActions ? 1 : 0)}
+                className="py-10 text-center"
+              >
+                <p className="text-body font-medium text-foreground">{emptyTitle}</p>
+                {emptyDescription && (
+                  <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                    {emptyDescription}
+                  </p>
+                )}
+              </TableCell>
+            </TableRow>
+          )}
           {result.rows.map((row, i) => (
             <TableRow key={i} className="group" data-selected={selection?.has(i) || undefined}>
               {selectable && (
@@ -178,22 +204,24 @@ export function ResultGrid({
               )}
               {hasActions && (
                 <TableCell className="w-[5.5rem]">
-                  <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
+                  <RowActions>
                     {onEdit && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-6"
-                        title="Edit row"
-                        onClick={() => onEdit(rowRecord(row))}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
+                      <IconAction label="Edit row" onClick={() => onEdit(rowRecord(row))}>
+                        <Pencil />
+                      </IconAction>
                     )}
                     <DropdownMenu>
+                      {/* A menu trigger cannot be an `IconAction`: that renders a
+                          tooltip root, which `asChild` has no element to hand the
+                          trigger props to. The label has to be the ARIA one. */}
                       <DropdownMenuTrigger asChild>
-                        <Button size="icon" variant="ghost" className="size-6" title="More">
-                          <MoreHorizontal className="size-3.5" />
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="More row actions"
+                          className="[&_svg:not([class*='size-'])]:size-3.5"
+                        >
+                          <MoreHorizontal />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="w-52">
@@ -227,7 +255,7 @@ export function ResultGrid({
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </div>
+                  </RowActions>
                 </TableCell>
               )}
               {row.map((cell, j) => {
@@ -237,7 +265,7 @@ export function ResultGrid({
                   <TableCell
                     key={j}
                     onClick={() => setDetail({ column: result.columns[j], value: cell })}
-                    className="max-w-xs cursor-pointer truncate font-mono text-xs hover:bg-accent/50"
+                    className="max-w-xs cursor-pointer truncate font-mono text-xs hover:bg-menu-hover"
                     title="Click to view full value"
                   >
                     <span className="inline-flex min-w-0 items-center gap-1">
@@ -266,14 +294,14 @@ export function ResultGrid({
         </TableBody>
       </Table>
 
-      <Dialog open={detail !== null} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-mono text-sm">{detail?.column}</DialogTitle>
-          </DialogHeader>
-          {detail && <CellDetail value={detail.value} />}
-        </DialogContent>
-      </Dialog>
+      <Modal
+        open={detail !== null}
+        onOpenChange={(o) => !o && setDetail(null)}
+        size="lg"
+        title={<span className="font-mono">{detail?.column}</span>}
+      >
+        {detail && <CellDetail value={detail.value} />}
+      </Modal>
     </>
   )
 }
@@ -312,20 +340,11 @@ function CellDetail({ value }: { value: unknown }) {
         {isNull ? (
           <span className="text-sm text-muted-foreground italic">null</span>
         ) : (
-          <pre className="font-mono text-xs whitespace-pre-wrap break-words">{text}</pre>
+          <pre className="font-mono text-xs break-words whitespace-pre-wrap">{text}</pre>
         )}
       </div>
       {!isNull && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            navigator.clipboard
-              .writeText(text)
-              .then(() => notify.success("Copied to clipboard"))
-              .catch(() => notify.error("Could not copy"))
-          }
-        >
+        <Button size="sm" variant="outline" onClick={() => void copyText(text, "Copied")}>
           <Copy className="size-3.5" />
           Copy value
         </Button>
@@ -342,8 +361,5 @@ function CellDetail({ value }: { value: unknown }) {
  * lives.
  */
 function copyJSON(row: Record<string, unknown>) {
-  navigator.clipboard
-    .writeText(JSON.stringify(row, null, 2))
-    .then(() => notify.success("Copied row as JSON"))
-    .catch(() => notify.error("Could not copy"))
+  void copyText(JSON.stringify(row, null, 2), "Copied row as JSON")
 }

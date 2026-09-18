@@ -53,8 +53,9 @@ func TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying(t *testing.T)
 			"revision": draft.Revision, "selectedId": "candidate-that-was-not-detected",
 		})
 	if unknownSelection.Code != http.StatusUnprocessableEntity ||
-		!strings.Contains(unknownSelection.Body.String(), `"code":"invalid_plan"`) {
-		t.Fatalf("unknown detection selection = %d %s",
+		!strings.Contains(unknownSelection.Body.String(), `"code":"invalid_plan"`) ||
+		!strings.Contains(unknownSelection.Body.String(), "candidate-that-was-not-detected") {
+		t.Fatalf("unknown detection selection = %d %s, want the message to name the unknown id",
 			unknownSelection.Code, unknownSelection.Body.String())
 	}
 
@@ -108,7 +109,7 @@ func TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying(t *testing.T)
 	}
 	decodePlanningResponse(t, preflighted.Body.Bytes(), &preflightBody)
 	draft = preflightBody.Draft
-	if preflightBody.Preflight.Digest == "" || len(preflightBody.Preflight.Plan.Actions) != 15 || draft.PlanPreview == "" {
+	if preflightBody.Preflight.Digest == "" || len(preflightBody.Preflight.Plan.Actions) != 16 || draft.PlanPreview == "" {
 		t.Fatalf("preflight response = %#v", preflightBody)
 	}
 	for _, finding := range preflightBody.Preflight.Findings {
@@ -212,7 +213,53 @@ func TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying(t *testing.T)
 	}
 }
 
-func TestDeploymentDraftRoutesRequireSessionsAndHideOtherOwners(t *testing.T) {
+// GET /deploy/drafts is the new-project page's "resume a draft" list: the
+// caller's own uncommitted drafts, and nobody else's.
+func TestDeploymentDraftListReturnsOnlyTheCallersOwnDrafts(t *testing.T) {
+	s := testServer(t)
+	routes := s.Routes()
+	admin := &client{t: t, h: routes, cookie: signInAs(t, s, "list-drafts-admin", auth.RoleAdmin)}
+	reader := &client{t: t, h: routes, cookie: signInAs(t, s, "list-drafts-reader", auth.RoleReadOnly)}
+
+	created := admin.do(http.MethodPost, "/api/v1/deploy/drafts", `{}`, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create draft = %d %s", created.Code, created.Body.String())
+	}
+	var draft deploy.Draft
+	decodePlanningResponse(t, created.Body.Bytes(), &draft)
+
+	listed := admin.do(http.MethodGet, "/api/v1/deploy/drafts", "", nil)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list drafts = %d %s", listed.Code, listed.Body.String())
+	}
+	var summaries []deploy.DraftSummary
+	if err := json.Unmarshal(listed.Body.Bytes(), &summaries); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, summary := range summaries {
+		found = found || summary.ID == draft.ID
+	}
+	if !found {
+		t.Fatalf("drafts list = %#v, missing the just-created draft %s", summaries, draft.ID)
+	}
+
+	readerListed := reader.do(http.MethodGet, "/api/v1/deploy/drafts", "", nil)
+	if readerListed.Code != http.StatusOK {
+		t.Fatalf("reader list drafts = %d %s", readerListed.Code, readerListed.Body.String())
+	}
+	var readerSummaries []deploy.DraftSummary
+	if err := json.Unmarshal(readerListed.Body.Bytes(), &readerSummaries); err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range readerSummaries {
+		if summary.ID == draft.ID {
+			t.Fatalf("another user's draft leaked into the reader's list: %#v", summary)
+		}
+	}
+}
+
+func TestDeploymentDraftRoutesRequireSessionsAndDistinguishForbiddenExpiredAndMissing(t *testing.T) {
 	s := testServer(t)
 	adminCookie := signInAs(t, s, "planning-admin", auth.RoleAdmin)
 	readonlyCookie := signInAs(t, s, "planning-reader", auth.RoleReadOnly)
@@ -226,9 +273,26 @@ func TestDeploymentDraftRoutesRequireSessionsAndHideOtherOwners(t *testing.T) {
 	}
 	var adminDraft deploy.Draft
 	decodePlanningResponse(t, created.Body.Bytes(), &adminDraft)
+	// Another user's draft is a refusal, not an absence: 404 would tell a
+	// caller guessing ids that this one belongs to nobody.
 	other := reader.do(http.MethodGet, "/api/v1/deploy/drafts/"+adminDraft.ID, "", nil)
-	if other.Code != http.StatusNotFound {
+	if other.Code != http.StatusForbidden || !strings.Contains(other.Body.String(), `"code":"draft_forbidden"`) {
 		t.Fatalf("other-owner read = %d %s", other.Code, other.Body.String())
+	}
+	// A genuinely missing id stays 404 — there is nothing to distinguish it
+	// from, and no ownership fact to leak either way.
+	missing := admin.do(http.MethodGet, "/api/v1/deploy/drafts/does-not-exist", "", nil)
+	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), `"code":"draft_not_found"`) {
+		t.Fatalf("missing draft read = %d %s", missing.Code, missing.Body.String())
+	}
+	// An expired draft is its own recoverable situation ("start over"), not a
+	// permission refusal or a plain absence.
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_drafts SET expires_at = 1 WHERE id = ?`, adminDraft.ID); err != nil {
+		t.Fatal(err)
+	}
+	expired := admin.do(http.MethodGet, "/api/v1/deploy/drafts/"+adminDraft.ID, "", nil)
+	if expired.Code != http.StatusGone || !strings.Contains(expired.Body.String(), `"code":"draft_expired"`) {
+		t.Fatalf("expired draft read = %d %s", expired.Code, expired.Body.String())
 	}
 
 	var readonlyID int64

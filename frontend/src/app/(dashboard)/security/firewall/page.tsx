@@ -1,6 +1,6 @@
 "use client"
 
-import { Page, PageHeader } from "@/components/page"
+import { Page } from "@/components/page"
 import { FirewallPanel } from "@/components/security/firewall-panel"
 import { useSecurity } from "@/components/security/security-context"
 
@@ -16,8 +16,7 @@ export default function SecurityFirewallPage() {
   } = useSecurity()
 
   return (
-    <Page>
-      <PageHeader eyebrow="Security" title="Firewall" />
+    <Page className="animate-rise">
       <FirewallPanel
         status={firewall}
         posture={posture}

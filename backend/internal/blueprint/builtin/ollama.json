@@ -1,0 +1,84 @@
+{
+  "id": "ollama",
+  "version": "1.0.0",
+  "name": "Ollama",
+  "category": "tool",
+  "profile": "tool",
+  "description": "Runs open language models locally and serves them over an API. Models are large; the volume holds every one that is pulled, and memory decides which fit.",
+  "iconId": "bolt",
+  "docsUrl": "https://github.com/ollama/ollama/tree/main/docs",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/ollama/ollama",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ollama/ollama:0.34.2",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "The API accepts any request; put a password in front of a public domain."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 11434,
+      "protocol": "tcp",
+      "purpose": "The model API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "models",
+      "target": "/root/.ollama",
+      "purpose": "Downloaded models and keys",
+      "data": true,
+      "backup": false
+    }
+  ],
+  "resources": {
+    "memoryMb": 4096,
+    "minMemoryMb": 2048
+  },
+  "checks": [
+    {
+      "name": "API answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Models carry over between versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:2c40c6b16f0114377ccae75b364559bea9f2c20b888a8bee26fc8e73a76e0d32"
+    }
+  ]
+}

@@ -406,6 +406,9 @@ func TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct(t *testing.
 			if err != nil || len(fleet.Deployments) != 1 || fleet.Deployments[0].Health != string(test.want) {
 				t.Fatalf("fleet health = %#v, error=%v, want %s", fleet, err, test.want)
 			}
+			if fleet.Deployments[0].HostPort != 32111 {
+				t.Fatalf("fleet showed the planned port instead of actual binding: %+v", fleet.Deployments[0])
+			}
 		})
 	}
 }
@@ -466,6 +469,275 @@ func TestRestartReusesLiveRuntimeWithoutCreatingARelease(t *testing.T) {
 	releases, err := fixture.runs.EnvironmentReleases(context.Background(), fixture.projectID, fixture.envID, 10)
 	if err != nil || len(releases) != 1 || releases[0].ID != live.Release.ID {
 		t.Fatalf("restart created a release: %#v, error=%v", releases, err)
+	}
+}
+
+// A restart verifies its checks against the live release it restarted. Before
+// the fix, verifyChecks looked the release up by run id and every restart with
+// a readiness check ended as artifact_missing after the runtime was already
+// stopped and started again.
+func TestRestartVerifiesChecksAgainstTheLiveRelease(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, HostPort: 31995, BindAddress: "127.0.0.1",
+		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("e", 40), plan)
+	deployRun, deployLease := fixture.claimedRun(t, 1)
+	check := PlannedCheck{
+		Name: "ready", Kind: string(CheckCommand), Phase: "readiness", Required: true,
+		Config: json.RawMessage(`{"command":["app","check"],"attempts":1,"timeoutSeconds":1}`),
+	}
+	live := createRuntimeCandidateWithDomains(t, fixture, *deployRun, deployLease, plan, "restart-checked", []PlannedCheck{check}, nil)
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *deployRun, deployLease.Token,
+		ReleaseRuntimeInput{
+			ReleaseID: live.Release.ID, Kind: "container", RuntimeID: "restart-checked-runtime",
+			Host: "127.0.0.1", Port: plan.HostPort, Metadata: json.RawMessage(`{"version":1}`),
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.ActivateCandidate(context.Background(), deployRun.ID, deployLease.Token, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.finishActivatedRun(t, deployRun.ID, live.Release.ID, deployLease.Token)
+
+	restartRun, _, err := fixture.runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: fixture.projectID, EnvironmentID: fixture.envID,
+		Operation: OperationRestart, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: "restart-checked-runtime", PlanRevision: 1,
+		VariableSnapshotRunID: deployRun.ID, SlotClass: SlotLight,
+		Metadata: mustJSON(map[string]any{"targetReleaseId": live.Release.ID}),
+		Steps:    []StepKey{StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepRecordRelease},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartLease, err := fixture.runs.ClaimNext(context.Background(), "restart-check-worker", QueueBudget{}, time.Minute)
+	if err != nil || restartLease == nil {
+		t.Fatalf("restart lease = %#v, error=%v", restartLease, err)
+	}
+	claimed, _ := fixture.runs.Run(context.Background(), restartRun.ID)
+	owner := &orderingRuntimeOwner{running: map[string]bool{"restart-checked-runtime": true}}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, variables: fixture.variables, runtime: owner,
+		checks: NewCheckRunner(&checkBackendFake{}), proxy: &countingActivationProxy{},
+	}
+	execution := StepExecution{Run: *claimed, ClaimToken: restartLease.Token, Output: discardStepOutput{}}
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed)); result.State != StepPassed {
+		t.Fatalf("restart start = %#v", result)
+	}
+	result := executor.verifyChecks(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed), "readiness")
+	if result.State != StepPassed {
+		t.Fatalf("restart readiness = %#v", result)
+	}
+	if result := executor.recordRelease(context.Background(), execution); result.State != StepPassed {
+		t.Fatalf("restart record release = %#v", result)
+	}
+	owner.mu.Lock()
+	running := owner.running["restart-checked-runtime"]
+	owner.mu.Unlock()
+	if !running {
+		t.Fatal("restart left the live runtime stopped")
+	}
+}
+
+// A stop run stops the live runtime in place, without removing it or
+// creating a release, and record_release accepts the resulting "stopped"
+// state instead of demanding "live".
+func TestStopStopsLiveRuntimeWithoutCreatingAReleaseAndRecordsStopped(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, HostPort: 31996, BindAddress: "127.0.0.1",
+		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("f", 40), plan)
+	deployRun, deployLease := fixture.claimedRun(t, 1)
+	live := createRuntimeCandidate(t, fixture, *deployRun, deployLease, plan, "stop-live")
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *deployRun, deployLease.Token,
+		ReleaseRuntimeInput{
+			ReleaseID: live.Release.ID, Kind: "container", RuntimeID: "stop-runtime",
+			Host: "127.0.0.1", Port: plan.HostPort, Metadata: json.RawMessage(`{"version":1}`),
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.ActivateCandidate(context.Background(), deployRun.ID, deployLease.Token, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.finishActivatedRun(t, deployRun.ID, live.Release.ID, deployLease.Token)
+
+	stopRun, _, err := fixture.runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: fixture.projectID, EnvironmentID: fixture.envID,
+		Operation: OperationStop, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: "stop-live-runtime", PlanRevision: 1,
+		VariableSnapshotRunID: deployRun.ID, SlotClass: SlotLight,
+		Metadata: mustJSON(map[string]any{"targetReleaseId": live.Release.ID}),
+		Steps:    []StepKey{StepStartCandidate, StepRecordRelease, StepNotify},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := fixture.runs.Steps(context.Background(), stopRun.ID)
+	if err != nil || len(steps) != 3 || steps[0].Key != StepStartCandidate ||
+		steps[1].Key != StepRecordRelease || steps[2].Key != StepNotify {
+		t.Fatalf("stop steps = %#v, error=%v", steps, err)
+	}
+	stopLease, err := fixture.runs.ClaimNext(context.Background(), "stop-worker", QueueBudget{}, time.Minute)
+	if err != nil || stopLease == nil {
+		t.Fatalf("stop lease = %#v, error=%v", stopLease, err)
+	}
+	claimed, _ := fixture.runs.Run(context.Background(), stopRun.ID)
+	owner := &orderingRuntimeOwner{running: map[string]bool{"stop-runtime": true}}
+	executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: owner}
+	execution := StepExecution{Run: *claimed, ClaimToken: stopLease.Token, Output: discardStepOutput{}}
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed)); result.State != StepPassed {
+		t.Fatalf("stop start_candidate = %#v", result)
+	}
+	owner.mu.Lock()
+	calls := append([]string(nil), owner.calls...)
+	running := owner.running["stop-runtime"]
+	owner.mu.Unlock()
+	if fmt.Sprint(calls) != "[stop:stop-runtime]" || running {
+		t.Fatalf("stop calls=%v running=%t", calls, running)
+	}
+	runtime, err := fixture.runs.RuntimeForRelease(context.Background(), live.Release.ID)
+	if err != nil || runtime.State != "stopped" {
+		t.Fatalf("runtime state = %#v, error=%v", runtime, err)
+	}
+	if result := executor.recordRelease(context.Background(), execution); result.State != StepPassed {
+		t.Fatalf("stop record release = %#v", result)
+	}
+	releases, err := fixture.runs.EnvironmentReleases(context.Background(), fixture.projectID, fixture.envID, 10)
+	if err != nil || len(releases) != 1 || releases[0].ID != live.Release.ID {
+		t.Fatalf("stop created a release: %#v, error=%v", releases, err)
+	}
+}
+
+// A start run brings an already-stopped live runtime back up and verifies
+// readiness/smoke against the live release exactly as restart does, so a
+// start that comes up broken is still reported before record_release.
+func TestStartStartsExistingRuntimeAndVerifiesChecksAgainstTheLiveRelease(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, HostPort: 31997, BindAddress: "127.0.0.1",
+		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("g", 40), plan)
+	deployRun, deployLease := fixture.claimedRun(t, 1)
+	check := PlannedCheck{
+		Name: "ready", Kind: string(CheckCommand), Phase: "readiness", Required: true,
+		Config: json.RawMessage(`{"command":["app","check"],"attempts":1,"timeoutSeconds":1}`),
+	}
+	live := createRuntimeCandidateWithDomains(t, fixture, *deployRun, deployLease, plan, "start-checked", []PlannedCheck{check}, nil)
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *deployRun, deployLease.Token,
+		ReleaseRuntimeInput{
+			ReleaseID: live.Release.ID, Kind: "container", RuntimeID: "start-checked-runtime",
+			Host: "127.0.0.1", Port: plan.HostPort, Metadata: json.RawMessage(`{"version":1}`),
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.ActivateCandidate(context.Background(), deployRun.ID, deployLease.Token, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.finishActivatedRun(t, deployRun.ID, live.Release.ID, deployLease.Token)
+	// A prior stop run already recorded the runtime as stopped; nothing here
+	// actually stopped a process, only the recorded state matters to start.
+	if _, err := fixture.base.DB.Exec(`UPDATE deploy_release_runtimes SET state='stopped' WHERE release_id=?`, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	startRun, _, err := fixture.runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: fixture.projectID, EnvironmentID: fixture.envID,
+		Operation: OperationStart, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: "start-checked-runtime", PlanRevision: 1,
+		VariableSnapshotRunID: deployRun.ID, SlotClass: SlotLight,
+		Metadata: mustJSON(map[string]any{"targetReleaseId": live.Release.ID}),
+		Steps:    []StepKey{StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepRecordRelease},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startLease, err := fixture.runs.ClaimNext(context.Background(), "start-check-worker", QueueBudget{}, time.Minute)
+	if err != nil || startLease == nil {
+		t.Fatalf("start lease = %#v, error=%v", startLease, err)
+	}
+	claimed, _ := fixture.runs.Run(context.Background(), startRun.ID)
+	owner := &orderingRuntimeOwner{running: map[string]bool{"start-checked-runtime": false}}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, variables: fixture.variables, runtime: owner,
+		checks: NewCheckRunner(&checkBackendFake{}), proxy: &countingActivationProxy{},
+	}
+	execution := StepExecution{Run: *claimed, ClaimToken: startLease.Token, Output: discardStepOutput{}}
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed)); result.State != StepPassed {
+		t.Fatalf("start start_candidate = %#v", result)
+	}
+	result := executor.verifyChecks(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed), "readiness")
+	if result.State != StepPassed {
+		t.Fatalf("start readiness = %#v", result)
+	}
+	if result := executor.recordRelease(context.Background(), execution); result.State != StepPassed {
+		t.Fatalf("start record release = %#v", result)
+	}
+	owner.mu.Lock()
+	running := owner.running["start-checked-runtime"]
+	owner.mu.Unlock()
+	if !running {
+		t.Fatal("start did not bring the live runtime back up")
+	}
+	runtime, err := fixture.runs.RuntimeForRelease(context.Background(), live.Release.ID)
+	if err != nil || runtime.State != "live" {
+		t.Fatalf("runtime state = %#v, error=%v", runtime, err)
+	}
+}
+
+// start_candidate refuses to start a runtime that is not recorded stopped,
+// the same way it would be a mistake to restart something already down.
+func TestStartRefusedWhenRuntimeIsNotStopped(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, HostPort: 31998, BindAddress: "127.0.0.1",
+		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("h", 40), plan)
+	deployRun, deployLease := fixture.claimedRun(t, 1)
+	live := createRuntimeCandidate(t, fixture, *deployRun, deployLease, plan, "start-refused")
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *deployRun, deployLease.Token,
+		ReleaseRuntimeInput{
+			ReleaseID: live.Release.ID, Kind: "container", RuntimeID: "start-refused-runtime",
+			Host: "127.0.0.1", Port: plan.HostPort, Metadata: json.RawMessage(`{"version":1}`),
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.ActivateCandidate(context.Background(), deployRun.ID, deployLease.Token, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.finishActivatedRun(t, deployRun.ID, live.Release.ID, deployLease.Token)
+
+	startRun, _, err := fixture.runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: fixture.projectID, EnvironmentID: fixture.envID,
+		Operation: OperationStart, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: "start-refused-runtime", PlanRevision: 1,
+		VariableSnapshotRunID: deployRun.ID, SlotClass: SlotLight,
+		Metadata: mustJSON(map[string]any{"targetReleaseId": live.Release.ID}),
+		Steps:    []StepKey{StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepRecordRelease},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startLease, err := fixture.runs.ClaimNext(context.Background(), "start-refused-worker", QueueBudget{}, time.Minute)
+	if err != nil || startLease == nil {
+		t.Fatalf("start lease = %#v, error=%v", startLease, err)
+	}
+	claimed, _ := fixture.runs.Run(context.Background(), startRun.ID)
+	owner := &orderingRuntimeOwner{running: map[string]bool{"start-refused-runtime": true}}
+	executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: owner}
+	execution := StepExecution{Run: *claimed, ClaimToken: startLease.Token, Output: discardStepOutput{}}
+	result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed))
+	if result.State != StepFailed || result.ErrorCode != "runtime_not_stopped" {
+		t.Fatalf("start over a running runtime = %#v", result)
 	}
 }
 

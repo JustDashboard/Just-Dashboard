@@ -13,14 +13,23 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { clock, timestamp } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import type { LogLine } from "@/lib/types"
-import { LEVEL_EDGE, LEVEL_TEXT, highlightRanges, segmentLine } from "@/lib/log-filter"
+import {
+  LEVEL_EDGE,
+  LEVEL_MARK,
+  LEVEL_TEXT,
+  LEVEL_TONE,
+  highlightRanges,
+  segmentLine,
+  type LogLevel,
+} from "@/lib/log-filter"
 import { setLogView, useLogView } from "@/lib/log-view"
 import type { LogFilterState } from "@/components/logs/types"
+import { PaneFooter } from "@/components/panel"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { copyText } from "@/lib/clipboard"
 
 function lineToText(line: LogLine, withTime: boolean) {
   const stamp = withTime && line.timestamp ? `${timestamp(line.timestamp)} ` : ""
@@ -28,7 +37,14 @@ function lineToText(line: LogLine, withTime: boolean) {
 }
 
 /**
- * The pane the logs page is mostly made of.
+ * The lines, and the chrome that belongs to them.
+ *
+ * Not a surface of its own any more: it is the body of the workspace pane,
+ * between the filter rows above and the footer below, so the lines sit on the
+ * same ground as the controls that narrow them and nothing draws a second
+ * frame inside the first. `leading` is what the workspace puts at the left of
+ * the strip above the lines — the level chips — and the view toggles take the
+ * right of the same strip.
  *
  * Two things are load-bearing and easy to undo.
  *
@@ -52,8 +68,8 @@ export function LogConsole({
   lines,
   filter,
   className,
+  leading,
   status,
-  actions,
   empty,
   footer,
   showLineNumbers,
@@ -67,9 +83,12 @@ export function LogConsole({
   lines: LogLine[]
   filter: LogFilterState
   className?: string
+  /** The left of the strip above the lines: the level chips. */
+  leading?: React.ReactNode
+  /** The footer's first words: the stream's state, or the search's summary. */
   status?: React.ReactNode
-  actions?: React.ReactNode
   empty: React.ReactNode
+  /** Anything else the footer carries after the status — search notes, retention. */
   footer?: React.ReactNode
   showLineNumbers?: boolean
   /**
@@ -105,10 +124,11 @@ export function LogConsole({
     setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
   }
 
-  const copyAll = async () => {
-    await navigator.clipboard.writeText(lines.map((l) => lineToText(l, showTime)).join("\n"))
-    notify.success(`Copied ${lines.length.toLocaleString()} lines`)
-  }
+  const copyAll = () =>
+    copyText(
+      lines.map((l) => lineToText(l, showTime)).join("\n"),
+      `Copied ${lines.length.toLocaleString()} lines`,
+    )
 
   // Ranges come from the server for a search — it can re-run its own regular
   // expression and the browser cannot — and are worked out here for a live
@@ -120,30 +140,28 @@ export function LogConsole({
   )
 
   return (
-    <div
-      className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-hairline bg-surface-header px-2.5 py-1.5">
-        {status}
-        <Badge variant="outline" className="numeric text-[10px] font-normal">
-          {lines.length.toLocaleString()} lines
-        </Badge>
-        <div className="flex-1" />
-        {actions}
+    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+      {/* One row that scrolls sideways rather than wrapping: on a phone the
+          chips are the thing to reach, and two more rows of chrome above the
+          lines were two more rows of lines lost. */}
+      <div className="flex min-h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-hairline px-2 py-1">
+        {leading}
+        <div className="min-w-2 flex-1" />
         {onPausedChange && (
-          <Button
-            size="sm"
-            variant={paused ? "secondary" : "ghost"}
-            className="h-7 gap-1.5 px-2 text-xs"
+          <ToolbarToggle
+            active={paused}
             onClick={() => onPausedChange(!paused)}
-            title={paused ? "Append what arrived while paused" : "Hold new lines while you read"}
-          >
-            {paused ? <Play className="size-3" /> : <Pause className="size-3" />}
-            {paused ? (held > 0 ? `Resume · ${held.toLocaleString()} held` : "Resume") : "Pause"}
-          </Button>
+            icon={paused ? Play : Pause}
+            label={paused ? "Resume" : "Pause"}
+            hint={paused ? "Append what arrived while paused" : "Hold new lines while you read"}
+            // The held count stays beside the glyph at every width: it is the
+            // one thing a paused pane has to say.
+            extra={
+              paused && held > 0 ? (
+                <span className="numeric">{held.toLocaleString()} held</span>
+              ) : undefined
+            }
+          />
         )}
         <ToolbarToggle
           active={wrap}
@@ -173,81 +191,97 @@ export function LogConsole({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-auto font-mono text-xs leading-[1.55]"
+        className="min-h-0 flex-1 overflow-auto bg-surface-sunken font-mono text-xs leading-relaxed"
       >
         {lines.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">{empty}</div>
         ) : (
-          <div className={cn("py-1", !wrap && "w-max min-w-full")}>
+          // Keyed on arrival so the block rises once when the first lines
+          // land and then holds still while the tail appends to it.
+          <div key="lines" className={cn("animate-rise py-1.5", !wrap && "w-max min-w-full")}>
             {lines.map((line, i) => {
               const ranges = line.match?.length
                 ? line.match
                 : needsClientHighlight
                   ? highlightRanges(line.text, filter)
                   : undefined
+              const level = (line.level ?? "") as LogLevel
               return (
                 <div
                   key={i}
                   onClick={() => setPinned((p) => (p === i ? null : i))}
                   onDoubleClick={() => {
-                    navigator.clipboard.writeText(lineToText(line, showTime))
-                    notify.success("Line copied")
+                    void copyText(lineToText(line, showTime), "Line copied")
                   }}
                   className={cn(
-                    "flex cursor-default items-stretch gap-2.5 pr-3 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto] hover:bg-foreground/[0.04]",
-                    pinned === i && "bg-primary/12 hover:bg-primary/12",
+                    "flex cursor-default items-start gap-3 py-px pr-4 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto] hover:bg-row-hover",
+                    // The marked line is a selection, and takes the fill every
+                    // selection in the product takes.
+                    pinned === i && "bg-accent hover:bg-accent",
                     line.context && "opacity-60",
                   )}
                 >
                   <span
                     aria-hidden
                     className={cn(
-                      "w-[3px] shrink-0",
+                      "w-0.5 shrink-0 self-stretch",
                       line.level ? LEVEL_EDGE[line.level] : "bg-transparent",
                     )}
                   />
                   {showLineNumbers && (
-                    <span className="numeric w-14 shrink-0 select-none text-right text-muted-foreground/50">
+                    <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none">
                       {line.no ?? ""}
                     </span>
                   )}
                   {showTime && (
                     <span
                       title={line.timestamp ? timestamp(line.timestamp) : undefined}
-                      className="w-[4.5rem] shrink-0 select-none text-muted-foreground/60"
+                      className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
                     >
                       {line.timestamp ? clock(line.timestamp) : "—"}
                     </span>
                   )}
+                  {/* The level has a column of its own so a page of lines can
+                      be read down for the red ones, rather than each line
+                      being read across to find out. */}
+                  <span className="flex w-9 shrink-0 select-none">
+                    {LEVEL_MARK[level] && (
+                      <Tag tone={LEVEL_TONE[level]} className="leading-[inherit]">
+                        {LEVEL_MARK[level]}
+                      </Tag>
+                    )}
+                  </span>
                   {showFile && line.file && (
-                    <span className="w-28 shrink-0 truncate text-muted-foreground/70" title={line.file}>
+                    <span
+                      className="w-28 shrink-0 truncate text-muted-foreground/70"
+                      title={line.file}
+                    >
                       {line.file}
                     </span>
                   )}
                   {showSource && line.source && (
                     <span
-                      className="max-w-40 shrink-0 truncate text-primary/75"
+                      className="max-w-40 shrink-0 truncate font-medium text-muted-foreground"
                       title={line.source}
                     >
                       {line.source}
                     </span>
                   )}
                   {line.stream === "stderr" && (
-                    <span className="shrink-0 select-none text-destructive/70">err</span>
+                    <Tag tone="danger" className="leading-[inherit]">
+                      stderr
+                    </Tag>
                   )}
                   <span
                     className={cn(
                       "min-w-0",
-                      wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre",
+                      wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
                       line.level && LEVEL_TEXT[line.level],
                     )}
                   >
                     {segmentLine(line.text, ranges).map((part, k) =>
                       part.hit ? (
-                        <mark
-                          key={k}
-                          className="rounded-[2px] bg-warning/35 px-px text-foreground"
-                        >
+                        <mark key={k} className="rounded-sm bg-mark px-px text-foreground">
                           {part.text}
                         </mark>
                       ) : (
@@ -262,11 +296,9 @@ export function LogConsole({
         )}
       </div>
 
-      {footer}
-
       {!following && lines.length > 0 && (
         <button
-          className="flex items-center justify-center gap-1.5 border-t border-hairline bg-surface-header py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center justify-center gap-1.5 border-t border-hairline py-1.5 text-xs text-muted-foreground focus-ring-inset transition-colors hover:bg-row-hover hover:text-foreground"
           onClick={() => {
             setFollowing(true)
             toBottom()
@@ -277,22 +309,38 @@ export function LogConsole({
           {held > 0 && <span className="numeric">· {held.toLocaleString()} held</span>}
         </button>
       )}
+
+      <PaneFooter className="gap-x-4 gap-y-1 px-3 text-hint text-muted-foreground">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {status}
+          <span className="numeric whitespace-nowrap">{lines.length.toLocaleString()} lines</span>
+        </span>
+        {footer}
+      </PaneFooter>
     </div>
   )
 }
 
+/**
+ * A view toggle on the strip above the lines. The word appears only on the
+ * widest screens: beside six level chips there is no room for five words, and
+ * the glyph, the tooltip and the accessible name carry it the rest of the way.
+ */
 function ToolbarToggle({
   active,
   onClick,
   icon: Icon,
   label,
   hint,
+  extra,
 }: {
   active?: boolean
   onClick: () => void
   icon: React.ComponentType<{ className?: string }>
   label: string
   hint: string
+  /** A reading that stays visible at every width — the held count. */
+  extra?: React.ReactNode
 }) {
   return (
     <Tooltip>
@@ -300,12 +348,15 @@ function ToolbarToggle({
         <Button
           size="sm"
           variant={active ? "secondary" : "ghost"}
-          className="h-7 gap-1.5 px-2 text-xs"
+          className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+          aria-label={label}
+          aria-pressed={active}
           onClick={onClick}
         >
           <Icon className="size-3" />
-          <span className="hidden sm:inline">{label}</span>
-          {active && <Check className="size-3 sm:hidden" />}
+          <span className="hidden 2xl:inline">{label}</span>
+          {extra}
+          {active && !extra && <Check className="size-3 2xl:hidden" />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>

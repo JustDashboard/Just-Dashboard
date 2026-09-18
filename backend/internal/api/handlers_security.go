@@ -42,9 +42,11 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	// answered 404 while the page went on polling it.
 	r.Route("/ssh-sessions", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleSSHSessions))
-		// Ending somebody's session is destructive and rare — a handful of
-		// times a year, not a dozen a day — so it takes a typed phrase by the
-		// same frequency test the terminal close routes fail.
+		// Ending somebody's session is destructive — capability, the tighter
+		// budget, an audit entry — but recoverable: a SIGHUP the operator
+		// reconnects past. So it takes the ordinary confirmation and not a
+		// typed phrase, by the frequency test in
+		// docs/internal/security/invariants.md.
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			s.destructive(r, func(r chi.Router) {

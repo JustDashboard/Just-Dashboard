@@ -56,7 +56,7 @@ func NewOrchestrationStore(st *basestore.Store) *OrchestrationStore {
 }
 
 const engineRunColumns = `
-id, project_id, environment_id, state, operation, trigger, actor,
+id, run_number, source_revision, project_id, environment_id, state, operation, trigger, actor,
 requested_at, queued_at, claimed_at, heartbeat_at, ended_at,
 cancel_requested, superseded_by, retry_of_run_id, idempotency_key,
 request_digest, plan_revision, release_id, candidate_release_id,
@@ -74,7 +74,7 @@ func scanEngineRun(row scanner) (*EngineRun, error) {
 		metadata                                     string
 	)
 	if err := row.Scan(
-		&r.ID, &r.ProjectID, &r.EnvironmentID, &r.State, &r.Operation, &r.Trigger,
+		&r.ID, &r.RunNumber, &r.SourceRevision, &r.ProjectID, &r.EnvironmentID, &r.State, &r.Operation, &r.Trigger,
 		&r.Actor, &requested, &queued, &claimed, &heartbeat, &ended,
 		&cancelRequested, &r.SupersededBy, &r.RetryOfRunID, &r.IdempotencyKey,
 		&r.RequestDigest, &r.PlanRevision, &r.ReleaseID, &r.CandidateReleaseID,
@@ -104,6 +104,64 @@ func (s *OrchestrationStore) Run(ctx context.Context, runID int64) (*EngineRun, 
 		return nil, ErrRunNotFound
 	}
 	return run, err
+}
+
+// MergeRunMetadata folds additional key/value pairs into a run's persisted
+// metadata, keeping every key the run was enqueued with (targetReleaseId,
+// compatibility, changedPaths, …). It is the one path that mutates
+// deploy_runs.metadata_json after enqueue: today only acquire_source uses it,
+// to attach a Git commit summary the frozen source identity does not carry on
+// its own. A retry copies the run row it retries verbatim, so a later retry
+// of a run this has already annotated carries the same metadata forward.
+func (s *OrchestrationStore) MergeRunMetadata(
+	ctx context.Context,
+	runID int64,
+	updates map[string]any,
+) (*EngineRun, error) {
+	if len(updates) == 0 {
+		return s.Run(ctx, runID)
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	run, err := scanEngineRun(tx.QueryRowContext(ctx,
+		`SELECT `+engineRunColumns+` FROM deploy_runs WHERE id = ?`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	merged := map[string]any{}
+	// The stored metadata is always valid JSON (Enqueue defaults it to `{}`),
+	// but never one written by an attacker: an object is required here so a
+	// merge cannot silently discard whatever the run was enqueued with.
+	if err := json.Unmarshal(run.Metadata, &merged); err != nil {
+		return nil, fmt.Errorf("run metadata is not a JSON object: %w", err)
+	}
+	for key, value := range updates {
+		merged[key] = value
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > maxEventBytes {
+		return nil, ErrEventPayloadTooLarge
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE deploy_runs SET metadata_json = ? WHERE id = ?`, string(encoded), runID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	run.Metadata = json.RawMessage(encoded)
+	return run, nil
 }
 
 func (s *OrchestrationStore) ProductionEnvironment(
@@ -153,6 +211,7 @@ func (s *OrchestrationStore) Retry(
 		Operation: prior.Operation, Trigger: TriggerManual, Actor: actor,
 		IdempotencyKey: idempotencyKey, RequestDigest: digest,
 		PlanRevision: prior.PlanRevision, RetryOfRunID: prior.ID,
+		SourceRevision:        prior.SourceRevision,
 		VariableSnapshotRunID: prior.ID,
 		Priority:              prior.Priority, SlotClass: prior.SlotClass,
 		Metadata: append(json.RawMessage(nil), prior.Metadata...), Steps: orderedKeys(steps),
@@ -181,15 +240,63 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 	defer tx.Rollback()
 
 	var environmentKind string
+	var desiredRevision int
 	err = tx.QueryRowContext(ctx, `
-		SELECT kind FROM deploy_environments
-		 WHERE id = ? AND project_id = ? AND archived_at = 0`,
-		req.EnvironmentID, req.ProjectID).Scan(&environmentKind)
+		SELECT e.kind, e.desired_revision FROM deploy_environments e
+		JOIN deploy_projects p ON p.id = e.project_id
+		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0 AND p.archived_at = 0`,
+		req.EnvironmentID, req.ProjectID).Scan(&environmentKind, &desiredRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, ErrEnvironmentNotFound
 	}
 	if err != nil {
 		return nil, false, err
+	}
+	if req.ExpectedPlanRevision != 0 && desiredRevision != req.ExpectedPlanRevision {
+		return nil, false, ErrRevisionConflict
+	}
+	if err := validateGitPolicyAdmissionTx(ctx, tx, req); err != nil {
+		return nil, false, err
+	}
+	if EnvironmentKind(environmentKind) == EnvironmentPreview {
+		if err := validatePreviewAdmissionTx(ctx, tx, req); err != nil {
+			return nil, false, err
+		}
+	}
+	// Provider deliveries and the private branch monitor may observe the same
+	// push. Serialize their enqueue against the latest attempted commit, while
+	// manual rebuilds and a branch moving back to an older commit remain valid.
+	if req.Operation == OperationDeploy && req.SourceRevision != "" && sourceTriggered(req.Trigger) {
+		latest, lookupErr := scanEngineRun(tx.QueryRowContext(ctx, `SELECT `+engineRunColumns+`
+			FROM deploy_runs WHERE environment_id = ? AND operation IN ('deploy','force_build')
+			ORDER BY id DESC LIMIT 1`, req.EnvironmentID))
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, false, lookupErr
+		}
+		if latest != nil && latest.SourceRevision == req.SourceRevision && latest.PlanRevision == req.PlanRevision {
+			return latest, false, nil
+		}
+	}
+
+	// Existing workloads keep restart/removal controls, but a blueprint this
+	// dashboard cannot deploy end to end must not enter the queue through a
+	// stale draft or a direct API call.
+	switch req.Operation {
+	case OperationDeploy, OperationRedeploy, OperationForceBuild, OperationPreviewCreate, OperationPreviewUpdate:
+		var kind, configJSON string
+		sourceErr := tx.QueryRowContext(ctx, `SELECT kind, config_json FROM deploy_sources WHERE environment_id = ? ORDER BY revision DESC LIMIT 1`, req.EnvironmentID).Scan(&kind, &configJSON)
+		if sourceErr != nil && !errors.Is(sourceErr, sql.ErrNoRows) {
+			return nil, false, sourceErr
+		}
+		if SourceKind(kind) == SourceBlueprint {
+			var source DraftSourceConfig
+			if json.Unmarshal([]byte(configJSON), &source) != nil {
+				return nil, false, fmt.Errorf("%w: blueprint source configuration is malformed", ErrInvalidPlan)
+			}
+			if err := source.ValidateForDeployment(); err != nil {
+				return nil, false, err
+			}
+		}
 	}
 
 	now := s.now().UTC()
@@ -198,11 +305,11 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 		INSERT INTO deploy_runs(
 		  project_id, environment_id, started_at, status, state, operation, trigger,
 		  actor, requested_at, retry_of_run_id, idempotency_key, request_digest,
-		  plan_revision, priority, slot_class, metadata_json)
-		VALUES(?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  plan_revision, priority, slot_class, metadata_json, source_revision)
+		VALUES(?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.ProjectID, req.EnvironmentID, now.Unix(), RunRequested, req.Operation,
 		req.Trigger, req.Actor, now.Unix(), req.RetryOfRunID, req.IdempotencyKey,
-		req.RequestDigest, req.PlanRevision, req.Priority, req.SlotClass, metadata)
+		req.RequestDigest, req.PlanRevision, req.Priority, req.SlotClass, metadata, req.SourceRevision)
 	if err != nil {
 		if req.IdempotencyKey != "" && isUniqueConstraint(err) {
 			_ = tx.Rollback()
@@ -440,10 +547,13 @@ func snapshotRunPlanInputsTx(
 }
 
 func normalizeRunRequest(req *RunRequest) error {
+	if req.SourceRevision != "" && !validGitObjectID(req.SourceRevision) {
+		return fmt.Errorf("%w: source revision is not an immutable Git object id", ErrInvalidRef)
+	}
 	if req.ProjectID <= 0 || req.EnvironmentID <= 0 {
 		return fmt.Errorf("invalid deployment or environment id")
 	}
-	if !validOperation(req.Operation) {
+	if !ValidOperation(req.Operation) {
 		return fmt.Errorf("invalid deployment operation %q", req.Operation)
 	}
 	if !validTrigger(req.Trigger) {
@@ -484,6 +594,32 @@ func normalizeRunRequest(req *RunRequest) error {
 		seen[key] = true
 	}
 	return nil
+}
+
+func sourceTriggered(trigger TriggerKind) bool {
+	switch trigger {
+	case TriggerGitPush, TriggerGitHub, TriggerGitLab, TriggerBitbucket, TriggerGitea, TriggerGenericHook:
+		return true
+	default:
+		return false
+	}
+}
+
+// RunByIdempotencyKey finds the run an earlier request with this key created
+// in the environment, whatever operation label it carried. It lets a retried
+// request answer with the same run when the label itself depends on state the
+// first request changed (a preview that exists only because it was created).
+func (s *OrchestrationStore) RunByIdempotencyKey(ctx context.Context, environmentID int64, key string) (*EngineRun, error) {
+	if key == "" {
+		return nil, nil
+	}
+	run, err := scanEngineRun(s.db.QueryRowContext(ctx, `
+		SELECT `+engineRunColumns+` FROM deploy_runs
+		 WHERE environment_id = ? AND idempotency_key = ? ORDER BY id LIMIT 1`, environmentID, key))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return run, err
 }
 
 func (s *OrchestrationStore) idempotentRun(ctx context.Context, req RunRequest) (*EngineRun, error) {

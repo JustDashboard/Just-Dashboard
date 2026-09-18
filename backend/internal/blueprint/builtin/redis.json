@@ -1,0 +1,38 @@
+{
+  "id": "redis",
+  "version": "1.0.0",
+  "name": "Redis",
+  "category": "database",
+  "profile": "database",
+  "description": "An in-memory store for caches, queues and sessions. Persistence is on so a restart does not silently empty it.",
+  "iconId": "database",
+  "docsUrl": "https://redis.io/docs/latest/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "RSALv2",
+    "upstreamUrl": "https://hub.docker.com/_/redis",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "redis:7.4-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "maxmemory", "kind": "memory", "label": "Memory limit", "default": "256", "minimum": 64, "maximum": 65536, "advanced": true, "description": "Redis is evicted against this figure, so it should stay below the container limit." }
+  ],
+  "secrets": [
+    { "name": "password", "variable": "REDIS_PASSWORD", "label": "Redis password", "length": 40 }
+  ],
+  "ports": [
+    { "name": "redis", "internal": 6379, "protocol": "tcp", "purpose": "Client connections from other containers on this host", "exposure": "internal", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/data", "purpose": "The append-only file Redis restores from", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 384, "minMemoryMb": 128 },
+  "checks": [
+    { "name": "Responds to PING", "kind": "command", "phase": "readiness", "required": true, "command": ["redis-cli", "ping"], "timeoutSeconds": 30 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "update": { "detector": "registry", "notes": "Redis reads the append-only file written by the previous minor version." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:5e5e1998d5ae22b6f2f55891704cc6e5645ad7044318ca636037a347306d5fb0" }]
+}

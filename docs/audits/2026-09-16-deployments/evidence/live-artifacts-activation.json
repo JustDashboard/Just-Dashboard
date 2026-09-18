@@ -1,0 +1,100 @@
+{
+  "name": "live-artifacts-activation",
+  "command": [
+    "/tmp/jd-go1.26.8/bin/go",
+    "test",
+    "-json",
+    "-count=1",
+    "./internal/deploy",
+    "-run",
+    "TestLiveC[45]"
+  ],
+  "cwd": "backend",
+  "started": "2026-09-16T01:21:22.581827+00:00",
+  "elapsed_seconds": 35.766,
+  "exit_code": 0,
+  "packages": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Action": "pass",
+      "Elapsed": 34.222
+    }
+  ],
+  "tests": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters/immutable_container_and_all_C5_checks",
+      "Action": "pass",
+      "Elapsed": 1.8
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters/selected_application_port_survives_a_host_collision",
+      "Action": "pass",
+      "Elapsed": 2.15
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters/SIGTERM_escalates_to_bounded_SIGKILL",
+      "Action": "pass",
+      "Elapsed": 2.15
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters/Compose_uses_pinned_override_and_removes_private_env_file",
+      "Action": "pass",
+      "Elapsed": 2.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters",
+      "Action": "pass",
+      "Elapsed": 10.26
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters/automatic_recipe_and_secret_layers",
+      "Action": "pass",
+      "Elapsed": 10.74
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters/Dockerfile",
+      "Action": "pass",
+      "Elapsed": 1.11
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters/static",
+      "Action": "pass",
+      "Elapsed": 4.73
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters/immutable_image",
+      "Action": "pass",
+      "Elapsed": 2.19
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters/mixed_Compose",
+      "Action": "pass",
+      "Elapsed": 2.87
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters/failed_build_preserves_live_runtime",
+      "Action": "pass",
+      "Elapsed": 1.9
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters",
+      "Action": "pass",
+      "Elapsed": 23.94
+    }
+  ],
+  "failure_markers": [],
+  "skip_output": [],
+  "non_json_output": []
+}

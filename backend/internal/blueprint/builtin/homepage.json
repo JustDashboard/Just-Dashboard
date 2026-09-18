@@ -1,0 +1,91 @@
+{
+  "id": "homepage",
+  "version": "1.0.0",
+  "name": "Homepage",
+  "category": "http",
+  "profile": "web",
+  "description": "A start page for a server: bookmarks, service tiles and widgets, all from YAML files in its config volume. Its own host-name check is left to the proxy in front of it, which only ever forwards the domain configured here.",
+  "iconId": "globe",
+  "docsUrl": "https://gethomepage.dev/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/gethomepage/homepage",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ghcr.io/gethomepage/homepage:v2.4.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The start page",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "config",
+      "target": "/app/config",
+      "purpose": "The YAML configuration",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "HOMEPAGE_ALLOWED_HOSTS",
+        "value": "*"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Configuration files carry over between versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:e279884db0dfc8aae7e3ecd7691372ec89f927243a9b4c766d2b6e9363640708"
+    }
+  ]
+}

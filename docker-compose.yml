@@ -3,7 +3,7 @@
 # The topology exists to satisfy one rule: the dashboard is root-equivalent and
 # must never be reachable from the open internet.
 #
-#   browser ──(WireGuard / VPN, or an SSH tunnel)──▶ proxy:8443
+#   browser ──(Tailscale, or an SSH tunnel)──▶ proxy:8443
 #                                                     ├─ /api  ─▶ backend:8080
 #                                                     └─ /*    ─▶ frontend:3000
 #
@@ -48,11 +48,22 @@ services:
       JD_ALLOWED_CIDRS: ${JD_ALLOWED_CIDRS:-127.0.0.1/32,::1/128}
       JD_TRUSTED_PROXIES: ${JD_TRUSTED_PROXIES:-127.0.0.1/32}
       JD_ALLOWED_ORIGINS: ${JD_ALLOWED_ORIGINS:-}
+      # The address the proxy answers on and how it is trusted. This process
+      # binds neither — it is loopback-only in every configuration — but it is
+      # the half of the stack that can run `tailscale cert` on the host, and
+      # the settings page reports the dashboard's own address from here.
+      JD_SITE: ${JD_SITE:-localhost}
+      JD_TLS: ${JD_TLS:-internal}
       JD_TERMINAL_ENABLED: ${JD_TERMINAL_ENABLED:-true}
       JD_TERMINAL_SHELL: ${JD_TERMINAL_SHELL:-}
       JD_TERMINAL_USER: ${JD_TERMINAL_USER:-}
       JD_SESSION_TTL: ${JD_SESSION_TTL:-12h}
       JD_SESSION_IDLE_TTL: ${JD_SESSION_IDLE_TTL:-60m}
+      # Two-factor is offered to every account and demanded of none, unless
+      # this says otherwise. An account that has enrolled is always asked for a
+      # code whatever this is set to; what it changes is whether an account
+      # that has not enrolled can sign in at all.
+      JD_REQUIRE_2FA: ${JD_REQUIRE_2FA:-false}
       # No login page, no session: the hub's certificate is the only caller.
       JD_AGENT_MODE: ${JD_AGENT_MODE:-false}
       # First run only: creates the bootstrap admin with this username/password.
@@ -74,12 +85,12 @@ services:
       # Metrics history, recorded whether or not a browser is connected.
       JD_METRICS_INTERVAL: ${JD_METRICS_INTERVAL:-15s}
       JD_METRICS_RETENTION: ${JD_METRICS_RETENTION:-7d}
-      # Updating the dashboard itself. The check is the only outbound request
-      # this product makes on its own initiative; false turns it off entirely.
+      # Updating the dashboard itself. False disables update discovery;
+      # deployment Git branch monitoring remains automatic and independent.
       # JD_UPDATE_DIR is normally empty — the dashboard asks Docker where this
       # stack was deployed from, which is why the label below is not needed.
       JD_UPDATE_CHECK: ${JD_UPDATE_CHECK:-true}
-      JD_UPDATE_REPO: ${JD_UPDATE_REPO:-Wayy01/Just-Dashboard}
+      JD_UPDATE_REPO: ${JD_UPDATE_REPO:-JustDashboard/Just-Dashboard}
       JD_UPDATE_BRANCH: ${JD_UPDATE_BRANCH:-main}
       JD_UPDATE_DIR: ${JD_UPDATE_DIR:-}
       JD_LOG_LEVEL: ${JD_LOG_LEVEL:-info}
@@ -126,8 +137,8 @@ services:
     # dashboard's own certificate, with nothing anywhere saying why. With the
     # port published instead, Docker itself refuses: `docker compose up` stops
     # with "Bind for 127.0.0.1:3000 failed: port is already allocated", naming
-    # the port, before anything is serving. A loud failure at the moment of
-    # the mistake beats a quiet one discovered days later.
+    # the port, before anything is serving. The installer and lifecycle runner
+    # detect that conflict, persist an available port in .env, and retry.
     #
     # Inside the container the port is always 3000; only the host side is a
     # variable, because only the host side can collide.
@@ -164,8 +175,20 @@ services:
     # Tailscale or WireGuard address. Loopback is bound alongside it either
     # way, so an SSH tunnel is always available. Never set it to 0.0.0.0.
     network_mode: host
+    # The entrypoint turns one setting, JD_TLS, into the scheme and the tls
+    # directive the Caddyfile needs. A Caddyfile cannot branch, and the
+    # alternative — an installer that edits a tracked file — would make every
+    # future `git pull` a merge conflict.
+    entrypoint: ["/bin/sh", "/etc/caddy/entrypoint.sh"]
     environment:
       JD_SITE: ${JD_SITE:-localhost}
+      # What it listens on, when that is not the address above. Blank is the
+      # ordinary case; a Tailscale install answers for a MagicDNS name and
+      # binds the tailnet IP behind it, because this container resolves names
+      # through Docker's resolver rather than the host's.
+      JD_BIND: ${JD_BIND:-}
+      # tailscale | internal | off — see deploy/proxy-entrypoint.sh.
+      JD_TLS: ${JD_TLS:-internal}
       # The same three numbers the other two services bind, read from one
       # place. A proxy listening on one port while the service it forwards to
       # binds another is exactly the failure these variables exist to remove.
@@ -174,6 +197,10 @@ services:
       JD_FRONTEND_PORT: ${JD_FRONTEND_PORT:-3000}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/proxy-entrypoint.sh:/etc/caddy/entrypoint.sh:ro
+      # Where `tailscale cert` writes, and the backend renews. Read-only here:
+      # this container serves the certificate and never issues one.
+      - /var/lib/just-dashboard/certs:/certs:ro
       - caddy-data:/data
       - caddy-config:/config
 

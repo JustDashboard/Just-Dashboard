@@ -174,10 +174,10 @@ func TestUpgradeCommands(t *testing.T) {
 		}
 	}
 
-	// Security-only narrows to the pocket rather than being a different verb.
+	// Security-only is an explicit target list, never a suite preference.
 	_, secArgs, _ := aptManager{}.UpgradeCommand(true)
-	if !strings.Contains(strings.Join(secArgs, " "), "-t ") {
-		t.Errorf("security-only apt should pin a suite: %q", secArgs)
+	if !strings.Contains(strings.Join(secArgs, " "), "--only-upgrade --no-remove") || secArgs[len(secArgs)-1] != "install" {
+		t.Errorf("security-only apt should require explicit install targets: %q", secArgs)
 	}
 
 	_, dnfArgs, _ := dnfManager{binary: "dnf"}.UpgradeCommand(true)

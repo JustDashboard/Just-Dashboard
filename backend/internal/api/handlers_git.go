@@ -15,11 +15,17 @@ import (
 // Git routes are split by what they can cost you.
 //
 //	read            anyone authenticated
-//	service.control fetch, pull, push, checkout, branch, stash, stage, commit — recoverable
-//	destructive     discard and reset — these throw away uncommitted work
+//	service.control fetch, pull, push, checkout, branch, tag, stash, stage,
+//	                commit, merge, revert, cherry-pick, identity, remotes,
+//	                clone, init — every one of them recoverable
+//	destructive     discard and reset (typed: they throw away uncommitted
+//	                work), dropping a stash (typed: the same), and deleting a
+//	                branch, a tag or a remote (ordinary confirmation: the
+//	                commits survive)
 func (s *Server) mountGitRoutes(r chi.Router) {
 	r.Route("/git", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleGitRepos))
+		r.Method(http.MethodGet, "/roots", s.handle(s.handleGitRoots))
 		// detect answers "is this shell sitting in a checkout, and where is its
 		// root", for the terminal page's git panel. It takes an arbitrary
 		// directory rather than a repository the list already knows, which is
@@ -27,7 +33,13 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/detect", s.handle(s.handleGitDetect))
 		r.Method(http.MethodGet, "/status", s.handle(s.handleGitStatus))
 		r.Method(http.MethodGet, "/log", s.handle(s.handleGitLog))
+		r.Method(http.MethodGet, "/commit", s.handle(s.handleGitCommit))
+		r.Method(http.MethodGet, "/compare", s.handle(s.handleGitCompare))
 		r.Method(http.MethodGet, "/branches", s.handle(s.handleGitBranches))
+		r.Method(http.MethodGet, "/tags", s.handle(s.handleGitTags))
+		r.Method(http.MethodGet, "/stashes", s.handle(s.handleGitStashes))
+		r.Method(http.MethodGet, "/stash/diff", s.handle(s.handleGitStashDiff))
+		r.Method(http.MethodGet, "/remotes", s.handle(s.handleGitRemotes))
 		// The branch topology across every ref — a read, so it sits with /log
 		// and /branches rather than in the service.control group.
 		r.Method(http.MethodGet, "/graph", s.handle(s.handleGitGraph))
@@ -35,33 +47,49 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
+			r.Method(http.MethodPost, "/clone", s.handle(s.handleGitClone))
+			r.Method(http.MethodPost, "/init", s.handle(s.handleGitInit))
 			r.Method(http.MethodPost, "/fetch", s.handle(s.handleGitFetch))
 			r.Method(http.MethodPost, "/pull", s.handle(s.handleGitPull))
 			r.Method(http.MethodPost, "/push", s.handle(s.handleGitPush))
+			r.Method(http.MethodPost, "/push/tags", s.handle(s.handleGitPushTags))
 			r.Method(http.MethodPost, "/checkout", s.handle(s.handleGitCheckout))
 			r.Method(http.MethodPost, "/branch", s.handle(s.handleGitBranch))
+			r.Method(http.MethodPost, "/branch/rename", s.handle(s.handleGitBranchRename))
+			r.Method(http.MethodPost, "/merge", s.handle(s.handleGitMerge))
+			r.Method(http.MethodPost, "/revert", s.handle(s.handleGitRevert))
+			r.Method(http.MethodPost, "/cherry-pick", s.handle(s.handleGitCherryPick))
+			r.Method(http.MethodPost, "/tag", s.handle(s.handleGitTag))
 			r.Method(http.MethodPost, "/stash", s.handle(s.handleGitStash))
 			r.Method(http.MethodPost, "/stash/pop", s.handle(s.handleGitStashPop))
+			r.Method(http.MethodPost, "/stash/apply", s.handle(s.handleGitStashApply))
 			// Staging, unstaging and committing are recoverable: nothing here
 			// destroys work that exists nowhere else (a commit can be reset, a
 			// stage unstaged), so they share the service.control tier rather
 			// than the destructive one.
 			r.Method(http.MethodPost, "/stage", s.handle(s.handleGitStage))
 			r.Method(http.MethodPost, "/unstage", s.handle(s.handleGitUnstage))
-			r.Method(http.MethodPost, "/commit", s.handle(s.handleGitCommit))
+			r.Method(http.MethodPost, "/commit", s.handle(s.handleGitCommitCreate))
+			r.Method(http.MethodPost, "/identity", s.handle(s.handleGitIdentity))
+			r.Method(http.MethodPost, "/remote", s.handle(s.handleGitRemoteAdd))
 		})
 
-		// Signing in to GitHub, and the one operation git has no verb for.
+		// Signing in to GitHub, and the operations git has no verb for.
 		s.mountGitHubRoutes(r)
 
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/discard", s.handle(s.handleGitDiscard))
 			r.Method(http.MethodPost, "/reset", s.handle(s.handleGitReset))
-			// Deleting a branch is destructive but not typed for: the commits it
-			// pointed at survive in the reflog and on the remote, so an ordinary
-			// confirmation is the right weight (see handleGitBranchDelete, and
-			// invariant 3 for why frequency rather than severity decides).
+			r.Method(http.MethodPost, "/stash/drop", s.handle(s.handleGitStashDrop))
+			// Deleting a branch, a tag or a remote is destructive but not typed
+			// for: the commits they pointed at survive in the reflog and on the
+			// remote, so an ordinary confirmation is the right weight (see
+			// handleGitBranchDelete, and invariant 3 for why frequency rather
+			// than severity decides).
 			r.Method(http.MethodPost, "/branch/delete", s.handle(s.handleGitBranchDelete))
+			r.Method(http.MethodPost, "/branch/delete-remote", s.handle(s.handleGitBranchDeleteRemote))
+			r.Method(http.MethodPost, "/tag/delete", s.handle(s.handleGitTagDelete))
+			r.Method(http.MethodPost, "/remote/delete", s.handle(s.handleGitRemoteDelete))
 		})
 	})
 }
@@ -101,6 +129,13 @@ func (s *Server) handleGitRepos(w http.ResponseWriter, r *http.Request) error {
 		"available": s.modules.git.Available(),
 		"repos":     repos,
 	})
+	return nil
+}
+
+// handleGitRoots lists where a clone may land: the configured roots that
+// exist on this host.
+func (s *Server) handleGitRoots(w http.ResponseWriter, r *http.Request) error {
+	httpx.JSON(w, http.StatusOK, map[string]any{"roots": s.modules.git.Roots()})
 	return nil
 }
 
@@ -164,12 +199,51 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	commits, err := s.modules.git.Log(r.Context(), path, r.URL.Query().Get("ref"), limit)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	skip, _ := strconv.Atoi(q.Get("skip"))
+	commits, err := s.modules.git.Log(r.Context(), path, gitx.LogQuery{
+		Ref: q.Get("ref"), Limit: limit, Skip: skip,
+		Search: q.Get("search"), Author: q.Get("author"), File: q.Get("file"),
+	})
 	if err != nil {
 		return gitErr(err)
 	}
 	httpx.JSON(w, http.StatusOK, commits)
+	return nil
+}
+
+func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	ref := r.URL.Query().Get("ref")
+	if ref == "" {
+		return httpx.BadRequest("ref query parameter is required")
+	}
+	detail, err := s.modules.git.Show(r.Context(), path, ref)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+	return nil
+}
+
+func (s *Server) handleGitCompare(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	if q.Get("base") == "" || q.Get("head") == "" {
+		return httpx.BadRequest("base and head query parameters are required")
+	}
+	cmp, err := s.modules.git.Compare(r.Context(), path, q.Get("base"), q.Get("head"))
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, cmp)
 	return nil
 }
 
@@ -183,6 +257,62 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) error
 		return gitErr(err)
 	}
 	httpx.JSON(w, http.StatusOK, branches)
+	return nil
+}
+
+func (s *Server) handleGitTags(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	tags, err := s.modules.git.Tags(r.Context(), path)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, tags)
+	return nil
+}
+
+func (s *Server) handleGitStashes(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	stashes, err := s.modules.git.Stashes(r.Context(), path)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, stashes)
+	return nil
+}
+
+func (s *Server) handleGitStashDiff(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	index, err := strconv.Atoi(r.URL.Query().Get("index"))
+	if err != nil {
+		return httpx.BadRequest("index query parameter is required")
+	}
+	diff, err := s.modules.git.StashDiff(r.Context(), path, index)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"diff": diff})
+	return nil
+}
+
+func (s *Server) handleGitRemotes(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	remotes, err := s.modules.git.Remotes(r.Context(), path)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, remotes)
 	return nil
 }
 
@@ -223,11 +353,77 @@ func (s *Server) gitAction(w http.ResponseWriter, r *http.Request, action string
 	if err != nil {
 		return err
 	}
+	return s.gitActionAt(w, r, action, path, fn)
+}
+
+// gitActionAt is gitAction for a path the caller has already resolved — a
+// clone's parent directory, which is a place rather than a repository.
+func (s *Server) gitActionAt(w http.ResponseWriter, r *http.Request, action, path string,
+	fn func(path string) (*gitx.Result, error),
+) error {
 	res, err := fn(path)
 	httpx.SetAudit(r, "git."+action, path, map[string]any{"ok": err == nil})
 	if err != nil {
 		// git's own message is the useful part; a failed pull or checkout is
 		// an ordinary outcome, not a server fault.
+		if res != nil {
+			return httpx.BadRequest("%s", res.Output)
+		}
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+type gitCloneRequest struct {
+	URL    string `json:"url"`
+	Parent string `json:"parent"`
+	Name   string `json:"name"`
+}
+
+// handleGitClone gets a repository onto this server. The parent directory is
+// resolved against the git roots rather than the file roots: it is the git
+// page's boundary, and a clone the list could not then show would be a
+// checkout the page could not operate on.
+func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) error {
+	var req gitCloneRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.URL == "" || req.Parent == "" {
+		return httpx.BadRequest("url and parent are required")
+	}
+	// A clone can take minutes; the request waits for it rather than
+	// answering before the files exist.
+	ctx, cancel := timeoutCtx(r, 10*time.Minute)
+	defer cancel()
+	target, res, err := s.modules.git.Clone(ctx, req.Parent, req.URL, req.Name)
+	httpx.SetAudit(r, "git.clone", req.Parent, map[string]any{"ok": err == nil, "url": req.URL, "name": req.Name})
+	if err != nil {
+		if res != nil {
+			return httpx.BadRequest("%s", res.Output)
+		}
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"path": target, "result": res})
+	return nil
+}
+
+type gitPathRequest struct {
+	Path string `json:"path"`
+}
+
+func (s *Server) handleGitInit(w http.ResponseWriter, r *http.Request) error {
+	var req gitPathRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	res, err := s.modules.git.Init(r.Context(), req.Path)
+	httpx.SetAudit(r, "git.init", req.Path, map[string]any{"ok": err == nil})
+	if err != nil {
 		if res != nil {
 			return httpx.BadRequest("%s", res.Output)
 		}
@@ -258,19 +454,42 @@ func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) error {
 
 type gitRefRequest struct {
 	Ref     string   `json:"ref"`
+	From    string   `json:"from"`
+	Name    string   `json:"name"`
+	Local   string   `json:"local"`
+	Remote  string   `json:"remote"`
+	URL     string   `json:"url"`
+	Email   string   `json:"email"`
 	Message string   `json:"message"`
 	File    string   `json:"file"`
 	Hard    bool     `json:"hard"`
+	Clean   bool     `json:"clean"`
 	Files   []string `json:"files"`
 	Amend   bool     `json:"amend"`
+	Index   int      `json:"index"`
+	Pop     bool     `json:"pop"`
 }
 
+func (s *Server) handleGitPushTags(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	_ = httpx.DecodeJSON(r, &req)
+	return s.gitAction(w, r, "push.tags", func(p string) (*gitx.Result, error) {
+		return s.modules.git.PushTags(r.Context(), p, req.Ref)
+	})
+}
+
+// handleGitCheckout switches to a local branch, or — when `local` names the
+// branch to create — makes a tracking branch from a remote one and switches
+// to that.
 func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) error {
 	var req gitRefRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	return s.gitAction(w, r, "checkout", func(p string) (*gitx.Result, error) {
+		if req.Local != "" {
+			return s.modules.git.CheckoutRemote(r.Context(), p, req.Ref, req.Local)
+		}
 		return s.modules.git.Checkout(r.Context(), p, req.Ref)
 	})
 }
@@ -281,7 +500,57 @@ func (s *Server) handleGitBranch(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return s.gitAction(w, r, "branch.create", func(p string) (*gitx.Result, error) {
-		return s.modules.git.CreateBranch(r.Context(), p, req.Ref)
+		return s.modules.git.CreateBranch(r.Context(), p, req.Ref, req.From)
+	})
+}
+
+func (s *Server) handleGitBranchRename(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "branch.rename", func(p string) (*gitx.Result, error) {
+		return s.modules.git.RenameBranch(r.Context(), p, req.Ref, req.Name)
+	})
+}
+
+func (s *Server) handleGitMerge(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "merge", func(p string) (*gitx.Result, error) {
+		return s.modules.git.Merge(r.Context(), p, req.Ref)
+	})
+}
+
+func (s *Server) handleGitRevert(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "revert", func(p string) (*gitx.Result, error) {
+		return s.modules.git.Revert(r.Context(), p, req.Ref)
+	})
+}
+
+func (s *Server) handleGitCherryPick(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "cherry-pick", func(p string) (*gitx.Result, error) {
+		return s.modules.git.CherryPick(r.Context(), p, req.Ref)
+	})
+}
+
+func (s *Server) handleGitTag(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "tag.create", func(p string) (*gitx.Result, error) {
+		return s.modules.git.CreateTag(r.Context(), p, req.Name, req.Ref, req.Message)
 	})
 }
 
@@ -305,13 +574,45 @@ func (s *Server) handleGitUnstage(w http.ResponseWriter, r *http.Request) error 
 	})
 }
 
-func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleGitCommitCreate(w http.ResponseWriter, r *http.Request) error {
 	var req gitRefRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	return s.gitAction(w, r, "commit", func(p string) (*gitx.Result, error) {
 		return s.modules.git.Commit(r.Context(), p, req.Message, req.Amend)
+	})
+}
+
+func (s *Server) handleGitIdentity(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "identity", func(p string) (*gitx.Result, error) {
+		return s.modules.git.SetIdentity(r.Context(), p, req.Name, req.Email)
+	})
+}
+
+func (s *Server) handleGitRemoteAdd(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "remote.add", func(p string) (*gitx.Result, error) {
+		return s.modules.git.AddRemote(r.Context(), p, req.Name, req.URL)
+	})
+}
+
+func (s *Server) handleGitRemoteDelete(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	// Ordinary confirmation: nothing on the remote changes, and adding the
+	// remote back is the whole of the undo.
+	return s.gitAction(w, r, "remote.delete", func(p string) (*gitx.Result, error) {
+		return s.modules.git.RemoveRemote(r.Context(), p, req.Name)
 	})
 }
 
@@ -329,13 +630,38 @@ func (s *Server) handleGitStashPop(w http.ResponseWriter, r *http.Request) error
 	})
 }
 
+func (s *Server) handleGitStashApply(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "stash.apply", func(p string) (*gitx.Result, error) {
+		return s.modules.git.StashApply(r.Context(), p, req.Index, req.Pop)
+	})
+}
+
+func (s *Server) handleGitStashDrop(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	// The work in a stash exists nowhere else once it is dropped — the same
+	// argument as discard, and the same phrase weight.
+	if err := httpx.RequireTypedConfirmation(w, r, "drop stash"); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "stash.drop", func(p string) (*gitx.Result, error) {
+		return s.modules.git.StashDrop(r.Context(), p, req.Index)
+	})
+}
+
 func (s *Server) handleGitDiscard(w http.ResponseWriter, r *http.Request) error {
 	var req gitRefRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	// Discarding rewrites a file to its committed state; the copy being
-	// overwritten exists nowhere else.
+	// Discarding rewrites a file to its committed state, or deletes an
+	// untracked one; the copy being overwritten exists nowhere else.
 	if err := httpx.RequireTypedConfirmation(w, r, "discard changes"); err != nil {
 		return err
 	}
@@ -358,6 +684,26 @@ func (s *Server) handleGitBranchDelete(w http.ResponseWriter, r *http.Request) e
 	})
 }
 
+func (s *Server) handleGitBranchDeleteRemote(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "branch.delete.remote", func(p string) (*gitx.Result, error) {
+		return s.modules.git.DeleteRemoteBranch(r.Context(), p, req.Remote, req.Ref)
+	})
+}
+
+func (s *Server) handleGitTagDelete(w http.ResponseWriter, r *http.Request) error {
+	var req gitRefRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "tag.delete", func(p string) (*gitx.Result, error) {
+		return s.modules.git.DeleteTag(r.Context(), p, req.Name)
+	})
+}
+
 func (s *Server) handleGitReset(w http.ResponseWriter, r *http.Request) error {
 	var req gitRefRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -372,6 +718,6 @@ func (s *Server) handleGitReset(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	return s.gitAction(w, r, "reset", func(p string) (*gitx.Result, error) {
-		return s.modules.git.Reset(r.Context(), p, req.Ref, req.Hard)
+		return s.modules.git.Reset(r.Context(), p, req.Ref, req.Hard, req.Clean)
 	})
 }

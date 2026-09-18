@@ -10,8 +10,6 @@ import {
   Eye,
   EyeOff,
   Key,
-  Logs,
-  NetworkDevice,
   ShieldCheck,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -21,18 +19,30 @@ import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
 import { Logo } from "@/components/logo"
+import { useCopy } from "@/hooks/use-copy"
+import { Well } from "@/components/panel"
 
-type Step = "credentials" | "totp" | "enroll"
+type Step = "credentials" | "totp" | "enroll" | "password"
 
-/** The three states of the sign-in flow, in the order they happen. */
-const STEPS: { id: Step; label: string }[] = [
-  { id: "credentials", label: "Identify" },
-  { id: "enroll", label: "Enrol" },
-  { id: "totp", label: "Verify" },
-]
-
+/**
+ * Signing in.
+ *
+ * One column, centred, and that is the whole layout. It used to be a split
+ * screen with the product's three security claims down the left, which read
+ * well in a mock-up and poorly in use: the thing a person came here to do was
+ * pinned to one side of a very wide page, and on the laptop screens these
+ * dashboards are actually opened on, the panel took half the width to say
+ * something nobody reads twice. The claims are true and they are still made —
+ * on the marketing page, in the README, and in the one line under the card
+ * that matters at the moment of signing in.
+ *
+ * Everything here is the shared design system: the card is the same surface as
+ * every panel in the app, the inputs are the same inputs, and the backdrop is
+ * the same two washes used elsewhere. Sign-in should look like the beginning
+ * of the product rather than a page from a different one.
+ */
 export default function LoginPage() {
   const router = useRouter()
   const { status, loading, login, verifyTotp, refresh } = useAuth()
@@ -41,6 +51,8 @@ export default function LoginPage() {
   const [chosenStep, setChosenStep] = useState<Step | "auto">("auto")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [repeatPassword, setRepeatPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [code, setCode] = useState("")
   const [recoveryMode, setRecoveryMode] = useState(false)
@@ -55,7 +67,9 @@ export default function LoginPage() {
         ? "totp"
         : status?.needsEnrollment
           ? "enroll"
-          : "credentials"
+          : status?.needsPasswordChange
+            ? "password"
+            : "credentials"
   const setStep = setChosenStep
 
   useEffect(() => {
@@ -70,6 +84,7 @@ export default function LoginPage() {
       if (next.authenticated) router.replace("/")
       else if (next.needsTotp) setStep("totp")
       else if (next.needsEnrollment) setStep("enroll")
+      else if (next.needsPasswordChange) setStep("password")
     } catch (err) {
       notify.error("Sign in failed", err instanceof ApiError ? err.message : String(err))
     } finally {
@@ -108,6 +123,7 @@ export default function LoginPage() {
     try {
       const next = await verifyTotp(code)
       if (next.authenticated) router.replace("/")
+      else if (next.needsPasswordChange) setStep("password")
     } catch (err) {
       notify.error("Code rejected", err instanceof ApiError ? err.message : String(err))
       setCode("")
@@ -116,255 +132,292 @@ export default function LoginPage() {
     }
   }
 
-  // Enrolment consumes the entered code, so the operator signs in again with
-  // a fresh one — which also proves the authenticator really works.
+  const submitPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword !== repeatPassword) {
+      notify.error("Passwords do not match")
+      return
+    }
+    setBusy(true)
+    try {
+      await post("/account/password", { currentPassword: password, newPassword })
+      setPassword("")
+      setNewPassword("")
+      setRepeatPassword("")
+      setCode("")
+      setStep("credentials")
+      await refresh()
+      notify.success("Password changed", { description: "Sign in with your new password." })
+    } catch (err) {
+      notify.error("Could not change password", err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Enrollment consumes its proof and completes this session atomically.
+  // Only advance after the operator has saved the one-time recovery codes.
   const finishEnrollment = async () => {
-    setRecoveryCodes(null)
-    setEnrollment(null)
-    setStep("credentials")
-    setPassword("")
-    await refresh().catch(() => undefined)
-    notify.success("Two-factor enabled", {
-      description: "Sign in again with a code from your app.",
-    })
+    setBusy(true)
+    try {
+      const next = await refresh()
+      setRecoveryCodes(null)
+      setEnrollment(null)
+      setStep("auto")
+      if (!next?.needsPasswordChange) setPassword("")
+      notify.success("Two-factor enabled", {
+        description: next?.needsPasswordChange
+          ? "Set your new password to continue."
+          : "Your authenticator is ready.",
+      })
+    } catch (err) {
+      notify.error(
+        "Could not refresh your session",
+        err instanceof ApiError ? err.message : String(err),
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
-    <div className="relative flex min-h-svh flex-col bg-background lg:grid lg:grid-cols-[1.05fr_1fr]">
+    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-5 py-10">
       <div className="auth-backdrop pointer-events-none absolute inset-0" />
       <div className="auth-grid pointer-events-none absolute inset-0" />
 
-      <BrandPanel />
+      <main className="relative z-10 flex w-full max-w-[25rem] flex-col items-center">
+        <Logo size="md" className="mb-7" />
 
-      <main className="relative z-10 flex min-w-0 flex-1 items-center justify-center px-5 py-10 lg:py-12">
-        <div className="w-full max-w-[26rem]">
-          <Logo size="md" className="mb-6 lg:hidden" />
+        {/* Two steps on an ordinary install, three where an authenticator is
+            compulsory. The rail is hidden entirely when there is only one step
+            left to show, because a progress indicator with a single segment is
+            decoration pretending to be information. */}
+        <Steps current={recoveryCodes ? "totp" : step} enrolling={step === "enroll"} />
 
-          <Stepper current={recoveryCodes ? "totp" : step} />
+        <div className="mt-5 w-full rounded-xl border bg-card p-6 sm:p-7">
+          {recoveryCodes ? (
+            <RecoveryCodes codes={recoveryCodes} onDone={finishEnrollment} />
+          ) : (
+            <>
+              <header className="mb-6 space-y-1.5 text-center">
+                <h1 className="text-lg leading-tight font-semibold">
+                  {step === "credentials" && "Sign in"}
+                  {step === "totp" && "Two-factor code"}
+                  {step === "enroll" && "Set up two-factor"}
+                  {step === "password" && "Change your password"}
+                </h1>
+                <p className="text-body leading-relaxed text-balance text-muted-foreground">
+                  {step === "credentials" && "Administrator access to this server."}
+                  {step === "totp" && "Enter the six-digit code from your authenticator app."}
+                  {step === "enroll" &&
+                    "This dashboard requires an authenticator. Enrol one to continue."}
+                  {step === "password" && "Set a new password before accessing this server."}
+                </p>
+              </header>
 
-          <div className="raised mt-5 rounded-2xl border bg-card p-5 sm:p-6">
-            {recoveryCodes ? (
-              <RecoveryCodes codes={recoveryCodes} onDone={finishEnrollment} />
-            ) : (
-              <>
-                <header className="mb-5 space-y-1">
-                  <h1 className="text-lg leading-tight font-semibold">
-                    {step === "credentials" && "Sign in"}
-                    {step === "totp" && "Two-factor code"}
-                    {step === "enroll" && "Set up two-factor"}
-                  </h1>
-                  <p className="text-[13px] leading-relaxed text-muted-foreground">
-                    {step === "credentials" && "Administrator access to this server."}
-                    {step === "totp" && "Enter the six-digit code from your authenticator app."}
-                    {step === "enroll" &&
-                      "Two-factor is mandatory here. Enrol an authenticator to continue."}
-                  </p>
-                </header>
-
-                {step === "credentials" && (
-                  <form onSubmit={submitCredentials} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="username">Username</Label>
+              {step === "credentials" && (
+                <form onSubmit={submitCredentials} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="username">Username</Label>
+                    <Input
+                      id="username"
+                      autoFocus
+                      autoComplete="username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">Password</Label>
+                    <div className="relative">
                       <Input
-                        id="username"
-                        autoFocus
-                        autoComplete="username"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="current-password"
+                        className="pr-9"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
                         required
                       />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="password">Password</Label>
-                      <div className="relative">
-                        <Input
-                          id="password"
-                          type={showPassword ? "text" : "password"}
-                          autoComplete="current-password"
-                          className="pr-9"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword((v) => !v)}
-                          aria-label={showPassword ? "Hide password" : "Show password"}
-                          className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          {showPassword ? (
-                            <EyeOff className="size-3.5" />
-                          ) : (
-                            <Eye className="size-3.5" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    <Button type="submit" className="w-full" disabled={busy}>
-                      {busy ? <Spinner className="size-4" /> : null}
-                      Continue
-                      {!busy && <ArrowRight className="size-4" />}
-                    </Button>
-                  </form>
-                )}
-
-                {step === "totp" && (
-                  <form onSubmit={submitTotp} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="code">
-                        {recoveryMode ? "Recovery code" : "Verification code"}
-                      </Label>
-                      <Input
-                        id="code"
-                        autoFocus
-                        key={recoveryMode ? "recovery" : "totp"}
-                        inputMode={recoveryMode ? "text" : "numeric"}
-                        autoComplete="one-time-code"
-                        placeholder={recoveryMode ? "xxxx-xxxx" : "000000"}
-                        maxLength={recoveryMode ? 32 : 6}
-                        className={cn(
-                          "h-12 text-center font-mono",
-                          recoveryMode ? "text-base" : "text-xl tracking-[0.45em]",
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {showPassword ? (
+                          <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
                         )}
+                      </button>
+                    </div>
+                  </div>
+                  <Button type="submit" className="w-full" pending={busy}>
+                    Continue
+                    {!busy && <ArrowRight className="size-4" />}
+                  </Button>
+                </form>
+              )}
+
+              {step === "password" && (
+                <form onSubmit={submitPassword} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="current-password">Current password</Label>
+                    <Input
+                      id="current-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-password">New password</Label>
+                    <Input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="repeat-password">Repeat new password</Label>
+                    <Input
+                      id="repeat-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={repeatPassword}
+                      onChange={(e) => setRepeatPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" pending={busy}>
+                    Change password
+                  </Button>
+                </form>
+              )}
+
+              {step === "totp" && (
+                <form onSubmit={submitTotp} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="code">
+                      {recoveryMode ? "Recovery code" : "Verification code"}
+                    </Label>
+                    <Input
+                      id="code"
+                      autoFocus
+                      key={recoveryMode ? "recovery" : "totp"}
+                      inputMode={recoveryMode ? "text" : "numeric"}
+                      autoComplete="one-time-code"
+                      placeholder={recoveryMode ? "xxxx-xxxx" : "000000"}
+                      maxLength={recoveryMode ? 32 : 6}
+                      className={cn(
+                        "h-12 text-center font-mono",
+                        recoveryMode ? "text-base" : "text-xl tracking-[0.45em]",
+                      )}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={busy || !code} pending={busy}>
+                    Verify
+                  </Button>
+                  <button
+                    type="button"
+                    className="block w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    onClick={() => {
+                      setRecoveryMode((v) => !v)
+                      setCode("")
+                    }}
+                  >
+                    {recoveryMode
+                      ? "Use your authenticator app instead"
+                      : "Use a recovery code instead"}
+                  </button>
+                </form>
+              )}
+
+              {step === "enroll" &&
+                (!enrollment ? (
+                  <div className="space-y-4">
+                    <Notice title="One secret, kept encrypted" icon={ShieldCheck}>
+                      The seed is generated on the server and sealed with the dashboard&apos;s
+                      master key. It is shown to you exactly once, here.
+                    </Notice>
+                    <Button className="w-full" onClick={beginEnrollment} pending={busy}>
+                      Generate a secret
+                    </Button>
+                  </div>
+                ) : (
+                  <form onSubmit={submitEnrollment} className="space-y-4">
+                    <SecretBlock secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
+                    <div className="space-y-1.5">
+                      <Label htmlFor="enroll-code">Code from your app</Label>
+                      <Input
+                        id="enroll-code"
+                        autoFocus
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="000000"
+                        className="h-12 text-center font-mono text-xl tracking-[0.45em]"
                         value={code}
                         onChange={(e) => setCode(e.target.value)}
                         required
                       />
                     </div>
-                    <Button type="submit" className="w-full" disabled={busy || !code}>
-                      {busy && <Spinner className="size-4" />}
-                      Verify
-                    </Button>
-                    <button
-                      type="button"
-                      className="block w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                      onClick={() => {
-                        setRecoveryMode((v) => !v)
-                        setCode("")
-                      }}
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={busy || code.length < 6}
+                      pending={busy}
                     >
-                      {recoveryMode
-                        ? "Use your authenticator app instead"
-                        : "Use a recovery code instead"}
-                    </button>
+                      Enable two-factor
+                    </Button>
                   </form>
-                )}
-
-                {step === "enroll" &&
-                  (!enrollment ? (
-                    <div className="space-y-4">
-                      <Notice title="One secret, kept encrypted" icon={ShieldCheck}>
-                        The seed is generated on the server and sealed with the dashboard&apos;s
-                        master key. It is shown to you exactly once, here.
-                      </Notice>
-                      <Button className="w-full" onClick={beginEnrollment} disabled={busy}>
-                        {busy && <Spinner className="size-4" />}
-                        Generate a secret
-                      </Button>
-                    </div>
-                  ) : (
-                    <form onSubmit={submitEnrollment} className="space-y-4">
-                      <SecretBlock secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
-                      <div className="space-y-1.5">
-                        <Label htmlFor="enroll-code">Code from your app</Label>
-                        <Input
-                          id="enroll-code"
-                          autoFocus
-                          inputMode="numeric"
-                          maxLength={6}
-                          placeholder="000000"
-                          className="h-12 text-center font-mono text-xl tracking-[0.45em]"
-                          value={code}
-                          onChange={(e) => setCode(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <Button type="submit" className="w-full" disabled={busy || code.length < 6}>
-                        {busy && <Spinner className="size-4" />}
-                        Enable two-factor
-                      </Button>
-                    </form>
-                  ))}
-              </>
-            )}
-          </div>
-
-          <p className="mt-5 text-center text-[11px] leading-relaxed text-muted-foreground">
-            This host only accepts connections from its configured allowlist. Every sign-in attempt,
-            successful or not, is recorded.
-          </p>
+                ))}
+            </>
+          )}
         </div>
+
+        <p className="mt-6 max-w-[22rem] text-center text-hint leading-relaxed text-balance text-muted-foreground">
+          This host only accepts connections from its configured allowlist, and every sign-in
+          attempt — successful or not — is recorded.
+        </p>
       </main>
     </div>
   )
 }
 
 /**
- * The left half on a wide screen.
+ * Where you are, when there is more than one place to be.
  *
- * It is not decoration: someone reaching this page is about to hand root over
- * to a browser, and the three facts here are the reasons that is defensible.
- * Hidden below lg, where the form is the only thing worth the width.
+ * Two dashes for the ordinary flow, three while enrolling. It is a rail rather
+ * than numbered circles because the steps are seconds apart and what is worth
+ * saying is "one more after this", not "step 2 of 3".
  */
-function BrandPanel() {
-  const facts = [
-    {
-      icon: NetworkDevice,
-      title: "Network allowlist first",
-      body: "The allowlist runs before authentication, so an off-network attacker never reaches this form.",
-    },
-    {
-      icon: ShieldCheck,
-      title: "Two-factor, always",
-      body: "A password alone gets a partial session that can reach nothing but the 2FA routes.",
-    },
-    {
-      icon: Logs,
-      title: "Everything is recorded",
-      body: "Every state-changing request lands in the audit log with who, from where, and what happened.",
-    },
-  ]
+function Steps({ current, enrolling }: { current: Step; enrolling: boolean }) {
+  if (current === "password") return null
+  const steps: { id: Step; label: string }[] = enrolling
+    ? [
+        { id: "credentials", label: "Identify" },
+        { id: "enroll", label: "Enrol" },
+        { id: "totp", label: "Verify" },
+      ]
+    : [
+        { id: "credentials", label: "Identify" },
+        { id: "totp", label: "Verify" },
+      ]
+  const index = steps.findIndex((s) => s.id === current)
 
   return (
-    // One centred block rather than three pinned to top, middle and bottom: on
-    // a tall window the pinned version leaves a hole where the eye expects the
-    // product to be. The footnote is the exception — it belongs at the foot.
-    <aside className="relative z-10 hidden flex-col justify-center border-r p-10 lg:flex xl:p-14">
-      <div className="max-w-lg space-y-9">
-        <Logo size="lg" />
-
-        <h2 className="text-[28px] leading-[1.15] font-semibold tracking-tight text-balance xl:text-[32px]">
-          One server. Metrics, containers, files, a real shell — behind one door.
-        </h2>
-
-        <ul className="space-y-5">
-          {facts.map((fact) => (
-            <li key={fact.title} className="flex gap-3">
-              <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-card text-primary">
-                <fact.icon className="size-4" />
-              </span>
-              <div className="space-y-0.5">
-                <p className="text-[13px] font-medium">{fact.title}</p>
-                <p className="text-xs leading-relaxed text-muted-foreground">{fact.body}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <p className="absolute inset-x-10 bottom-8 text-[11px] text-muted-foreground xl:inset-x-14">
-        This software is root-equivalent. Keep it off the public internet.
-      </p>
-    </aside>
-  )
-}
-
-/** Where you are in a flow that can be one, two or three screens long. */
-function Stepper({ current }: { current: Step }) {
-  const index = STEPS.findIndex((s) => s.id === current)
-  return (
-    <ol className="flex items-center gap-2">
-      {STEPS.map((step, i) => {
+    <ol className="flex w-full items-center gap-2">
+      {steps.map((step, i) => {
         const done = i < index
         const active = i === index
         return (
@@ -377,7 +430,7 @@ function Stepper({ current }: { current: Step }) {
             />
             <span
               className={cn(
-                "flex items-center gap-1 text-[10px] font-semibold tracking-[0.14em] uppercase transition-colors",
+                "flex items-center gap-1 text-micro font-semibold tracking-[0.14em] uppercase transition-colors",
                 active ? "text-foreground" : "text-muted-foreground",
               )}
             >
@@ -397,31 +450,21 @@ function Stepper({ current }: { current: Step }) {
  * already holding the authenticator.
  */
 function SecretBlock({ secret, otpauthUrl }: { secret: string; otpauthUrl: string }) {
-  const [copied, setCopied] = useState(false)
+  const { copy, copied } = useCopy()
   const grouped = secret.replace(/\s+/g, "").match(/.{1,4}/g) ?? [secret]
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(secret)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      notify.error("Could not copy", "Select the text and copy it by hand.")
-    }
-  }
 
   return (
     <div className="space-y-2">
       <Label>Secret</Label>
       <div className="flex flex-wrap gap-1 rounded-lg border border-hairline bg-surface-sunken p-2.5">
         {grouped.map((chunk, i) => (
-          <code key={i} className="font-mono text-[13px] tracking-widest">
+          <code key={i} className="font-mono text-body tracking-widest">
             {chunk}
           </code>
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={copy}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void copy(secret)}>
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy secret"}
         </Button>
@@ -437,37 +480,32 @@ function SecretBlock({ secret, otpauthUrl }: { secret: string; otpauthUrl: strin
 }
 
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(codes.join("\n"))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch {
-      notify.error("Could not copy", "Select the codes and copy them by hand.")
-    }
-  }
+  const { copy, copied } = useCopy()
 
   return (
     <div className="space-y-4">
-      <header className="space-y-1">
+      <header className="space-y-1.5 text-center">
         <h1 className="text-lg leading-tight font-semibold">Save your recovery codes</h1>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
+        <p className="text-body leading-relaxed text-balance text-muted-foreground">
           Each one works once, in place of your authenticator. This is the only time they are shown.
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg border border-hairline bg-surface-sunken p-3 font-mono text-xs">
+      <Well plain className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         {codes.map((c) => (
           <span key={c} className="tracking-wider">
             {c}
           </span>
         ))}
-      </div>
+      </Well>
 
       <div className="flex gap-2">
-        <Button type="button" variant="outline" className="flex-1" onClick={copy}>
+        <Button
+          type="button"
+          variant="outline"
+          className="flex-1"
+          onClick={() => void copy(codes.join("\n"))}
+        >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {copied ? "Copied" : "Copy all"}
         </Button>

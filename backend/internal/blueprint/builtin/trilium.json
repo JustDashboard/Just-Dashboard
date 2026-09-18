@@ -1,0 +1,85 @@
+{
+  "id": "trilium",
+  "version": "1.0.0",
+  "name": "Trilium Notes",
+  "category": "http",
+  "profile": "web",
+  "description": "A hierarchical note-taking application with a tree of notes, scripting and a sync server, kept in one data directory.",
+  "iconId": "globe",
+  "docsUrl": "https://github.com/TriliumNext/Notes/wiki",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/TriliumNext/Notes",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "triliumnext/notes:v0.95.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/home/node/trilium-data",
+      "purpose": "Notes, attachments and settings",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health check answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/health-check",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Trilium migrates its database on start; downgrading needs a restored backup.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:58f0229c4a1b56740c42857a70e4a6f20624cc887bb11444d500564f8634b18e"
+    }
+  ]
+}

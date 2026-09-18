@@ -256,6 +256,129 @@ func TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials(t *testi
 	}
 }
 
+// A UI control needs to know which field a refusal is about, not just that
+// the plan as a whole was rejected. The most common refusals wrap a
+// *ValidationError behind ErrInvalidPlan, so errors.Is against the sentinel
+// still works exactly as before and errors.As reaches the field pointer.
+func TestPlanConfigurationValidateAttachesAFieldPointerToCommonRefusals(t *testing.T) {
+	base := PlanConfiguration{
+		Build:   BuildPlanConfig{Method: BuildNone},
+		Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst},
+	}
+	fieldOf := func(t *testing.T, err error) string {
+		t.Helper()
+		if err == nil {
+			t.Fatal("Validate() succeeded, want a refusal")
+		}
+		var validation *ValidationError
+		if !errors.As(err, &validation) {
+			t.Fatalf("Validate() error = %v (%T), want a *ValidationError", err, err)
+		}
+		return validation.Field
+	}
+
+	ports := base
+	ports.Runtime.InternalPort = 70000
+	if field := fieldOf(t, ports.Validate()); field != "runtime.internalPort" {
+		t.Fatalf("invalid internal port field = %q", field)
+	}
+	if !strings.Contains(ports.Validate().Error(), "0 (unset) or between 1 and 65535") {
+		t.Fatalf("invalid port message = %q, want it to say 0 is allowed", ports.Validate().Error())
+	}
+	hostPort := base
+	hostPort.Runtime.HostPort = -1
+	if field := fieldOf(t, hostPort.Validate()); field != "runtime.hostPort" {
+		t.Fatalf("invalid host port field = %q", field)
+	}
+	for name, mutate := range map[string]func(*RuntimePlanConfig){
+		"repeated host port": func(r *RuntimePlanConfig) {
+			r.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 2222}, {HostPort: 2222, ContainerPort: 22}}
+		},
+		"fixed port repeated": func(r *RuntimePlanConfig) {
+			r.HostPort, r.Ports = 2222, []PublishedPort{{HostPort: 2222, ContainerPort: 22}}
+		},
+		"container port missing": func(r *RuntimePlanConfig) { r.Ports = []PublishedPort{{HostPort: 2222}} },
+		"unknown protocol": func(r *RuntimePlanConfig) {
+			r.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 22, Protocol: "sctp"}}
+		},
+		"foreign bind address": func(r *RuntimePlanConfig) {
+			r.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 22, BindAddress: "10.0.0.1"}}
+		},
+		"host network": func(r *RuntimePlanConfig) {
+			r.HostNetwork, r.Ports = true, []PublishedPort{{HostPort: 2222, ContainerPort: 22}}
+		},
+	} {
+		published := base
+		mutate(&published.Runtime)
+		if field := fieldOf(t, published.Validate()); !strings.HasPrefix(field, "runtime.ports[") {
+			t.Fatalf("%s: field = %q", name, field)
+		}
+	}
+	// The same number on TCP and UDP is two different publications.
+	published := base
+	published.Runtime.Ports = []PublishedPort{{HostPort: 19132, ContainerPort: 19132, Protocol: "udp"}, {HostPort: 19132, ContainerPort: 19132}}
+	if err := published.Validate(); err != nil {
+		t.Fatalf("tcp and udp on one number refused: %v", err)
+	}
+
+	mounts := base
+	mounts.Runtime.Mounts = []RuntimeMount{
+		{Source: "config-data", Target: "/data", Ownership: OwnershipManaged},
+		{Source: "", Target: "/broken", Ownership: OwnershipManaged},
+	}
+	if field := fieldOf(t, mounts.Validate()); field != "runtime.mounts[1]" {
+		t.Fatalf("invalid mount field = %q, want the second mount's index", field)
+	}
+
+	deps := base
+	deps.Dependencies = []PlannedDependency{
+		{Kind: "backup", ResourceKind: "backup_job", ResourceID: "1", Ownership: OwnershipManaged},
+		{Kind: "backup", ResourceKind: "backup_job", ResourceID: "not-a-number", Ownership: OwnershipManaged},
+	}
+	if field := fieldOf(t, deps.Validate()); field != "dependencies[1]" {
+		t.Fatalf("invalid dependency field = %q, want the second dependency's index", field)
+	}
+
+	domains := base
+	domains.Domains = []PlannedDomain{
+		{Hostname: "app.example.test", Ownership: OwnershipManaged},
+		{Hostname: "not a hostname", Ownership: OwnershipManaged},
+	}
+	if field := fieldOf(t, domains.Validate()); field != "domains[1]" {
+		t.Fatalf("invalid domain field = %q, want the second domain's index", field)
+	}
+
+	variables := base
+	variables.Variables = []PlannedVariable{{Name: "1-bad-name", Sensitivity: "plain", Scopes: []string{"runtime"}}}
+	if field := fieldOf(t, variables.Validate()); field != "1-bad-name" {
+		t.Fatalf("invalid variable field = %q, want the variable's own name", field)
+	}
+
+	checks := base
+	checks.Checks = []PlannedCheck{
+		{Name: "ready", Kind: "http", Phase: "readiness", Required: true},
+		{Name: "bad-kind", Kind: "carrier-pigeon", Phase: "readiness", Required: true},
+	}
+	if field := fieldOf(t, checks.Validate()); field != "checks[1]" {
+		t.Fatalf("invalid check field = %q, want the second check's index", field)
+	}
+
+	tasks := base
+	tasks.Build.ReleaseTasks = []ReleaseTaskConfig{{Name: "bad name!", Command: "true", TimeoutSeconds: 30}}
+	if field := fieldOf(t, tasks.Validate()); field != "build.releaseTasks[0]" {
+		t.Fatalf("invalid release task field = %q, want its index", field)
+	}
+
+	// A refusal outside the named categories still has no field — this is not
+	// meant to become exhaustive, only the most common controls.
+	strategy := base
+	strategy.Runtime.Strategy = "not-a-strategy"
+	var validation *ValidationError
+	if errors.As(strategy.Validate(), &validation) {
+		t.Fatalf("an unnamed-category refusal unexpectedly carried a field: %q", validation.Field)
+	}
+}
+
 func TestComposeAnalysisAndAdapterPreserveMultiFileOrder(t *testing.T) {
 	documents := []ComposeDocument{
 		{Path: "compose.override.yml", Order: 2, Content: "services:\n  web:\n    image: nginx:1.27\n    ports: [\"127.0.0.1:8080:80\"]\n"},
@@ -364,11 +487,32 @@ func TestLocalGitImageAndImportSourceAdapters(t *testing.T) {
 	if err != nil || checkoutImport.Kind != "checkout" || len(checkoutImport.WouldChange) != 0 {
 		t.Fatalf("checkout import result = %#v, %v", checkoutImport, err)
 	}
-	blueprint, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+	// A blueprint source resolves against the reviewed catalogue. Its required
+	// acceptance is part of rendering, so an unaccepted EULA never reaches a plan.
+	if _, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
 		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java", BlueprintVersion: "1.0.0",
+	}); err == nil || !strings.Contains(err.Error(), "eula") {
+		t.Fatalf("unaccepted blueprint EULA rendered a plan: %v", err)
+	}
+	blueprintSource, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java",
+		BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"},
 	})
-	if err != nil || blueprint.Unavailable == "" || blueprint.Source.Kind != SourceBlueprint {
-		t.Fatalf("blueprint placeholder result = %#v, %v", blueprint, err)
+	// A game blueprint renders as a preview: its identity names the image the
+	// release would pull and the reviewed definition, but no digest is
+	// resolved because the game integration cannot deploy it yet.
+	if err != nil || blueprintSource.Source.Kind != SourceBlueprint ||
+		blueprintSource.Source.Repository != "itzg/minecraft-server:2026.9.1-java21" || blueprintSource.Source.Ref != "minecraft-java@1.0.0" ||
+		!strings.HasPrefix(blueprintSource.Source.Revision, "sha256:") || blueprintSource.Source.Digest != "" ||
+		len(blueprintSource.Candidates) != 1 || blueprintSource.Candidates[0].Profile != ProfileGame ||
+		blueprintSource.Candidates[0].Port != 25565 {
+		t.Fatalf("blueprint source result = %#v, %v", blueprintSource, err)
+	}
+	if _, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java", BlueprintVersion: "9.9.9",
+		BlueprintInputs: map[string]string{"eula": "true"},
+	}); err == nil {
+		t.Fatal("served a blueprint version this dashboard does not ship")
 	}
 	writePlanningFixture(t, filepath.Join(checkout, "safe-compose.yml"), "services:\n  app:\n    image: alpine:3\n")
 	localCompose, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
@@ -699,7 +843,7 @@ func TestPreflightIsPureStableAndSecretFree(t *testing.T) {
 	if first.Preview != second.Preview || first.Digest != second.Digest {
 		t.Fatalf("preflight changed with identical evidence:\n%s\n%s", first.Preview, second.Preview)
 	}
-	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 15 {
+	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 16 {
 		t.Fatalf("exact actions = %d", len(first.Plan.Actions))
 	}
 	if strings.Contains(first.Preview, "never-preview-this") || strings.Contains(first.Preview, "Observed") {
@@ -880,13 +1024,14 @@ func TestComposePreflightCoversVariablesPortsStorageAndAdvancedFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{"compose_variable_app_tag", "compose_unsupported_1", "port_conflict", "advanced_authorization_required"} {
+	for _, code := range []string{"compose_variable_app_tag", "compose_unsupported_1", "advanced_authorization_required"} {
 		severity := findingSeverity(result.Findings, code)
 		if severity != PreflightDecision && severity != PreflightBlocked {
 			t.Fatalf("finding %s severity = %q in %#v", code, severity, result.Findings)
 		}
 	}
-	if findingSeverity(result.Findings, "backup_policy_missing") != PreflightWarning ||
+	if findingSeverity(result.Findings, "port_conflict") != PreflightWarning ||
+		findingSeverity(result.Findings, "backup_policy_missing") != PreflightWarning ||
 		findingSeverity(result.Findings, "compose_warning_1") != PreflightWarning {
 		t.Fatalf("Compose storage/health warnings = %#v", result.Findings)
 	}
@@ -916,6 +1061,68 @@ func stringSliceContains(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+// ListDrafts is what the new-project page uses to offer resuming a draft: it
+// must show only the caller's own uncommitted, unexpired drafts, newest
+// first, with enough of the wizard state to recognise which is which.
+func TestListDraftsReturnsOnlyTheOwnersUncommittedUnexpiredDrafts(t *testing.T) {
+	ctx := context.Background()
+	fixture := newPlanningStoreFixture(t)
+	first, err := fixture.plans.Create(ctx, 41, "operator-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.plans.Save(ctx, first.ID, 41, false, DraftSaveRequest{
+		Revision: first.Revision, Step: DraftIntent,
+		Intent: &DraftIntentConfig{Name: "resume-me", Profile: ProfileWorker},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := fixture.plans.Create(ctx, 41, "operator-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := fixture.plans.Create(ctx, 99, "operator-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	drafts, err := fixture.plans.ListDrafts(ctx, 41)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drafts) != 2 {
+		t.Fatalf("drafts = %#v, want exactly operator-a's 2", drafts)
+	}
+	// Newest first.
+	if drafts[0].ID != second.ID || drafts[1].ID != first.ID {
+		t.Fatalf("drafts order = %#v, want newest (%s) before oldest (%s)", drafts, second.ID, first.ID)
+	}
+	if drafts[1].Name != "resume-me" || drafts[1].CurrentStep != DraftIntent {
+		t.Fatalf("resumable draft summary = %#v", drafts[1])
+	}
+	for _, draft := range drafts {
+		if draft.ID == other.ID {
+			t.Fatalf("another owner's draft leaked into the list: %#v", draft)
+		}
+	}
+
+	// A committed draft has nothing left to resume.
+	if _, err := fixture.store.DB.Exec(`UPDATE deploy_drafts SET committed_project_id = 1 WHERE id = ?`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	// An expired draft is its own recoverable situation, not a resumable one.
+	if _, err := fixture.store.DB.Exec(`UPDATE deploy_drafts SET expires_at = 1 WHERE id = ?`, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	drafts, err = fixture.plans.ListDrafts(ctx, 41)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drafts) != 0 {
+		t.Fatalf("drafts after commit/expiry = %#v, want none", drafts)
+	}
 }
 
 func TestDraftRevisionOwnershipExpiryAndAtomicIdempotentCommit(t *testing.T) {
@@ -988,7 +1195,7 @@ func TestDraftRevisionOwnershipExpiryAndAtomicIdempotentCommit(t *testing.T) {
 		"deploy_projects": 1, "deploy_environments": 1, "deploy_sources": 1,
 		"deploy_build_plans": 1, "deploy_runtime_plans": 1,
 		"deploy_variable_revisions": 1, "deploy_dependencies": 2,
-		"deploy_checks": 1, "deploy_triggers": 1, "deploy_runs": 0,
+		"deploy_checks": 1, "deploy_triggers": 0, "deploy_runs": 0,
 	} {
 		if got := planningTableCount(t, fixture.store, table); got != want {
 			t.Errorf("%s rows = %d, want %d", table, got, want)
@@ -1445,5 +1652,67 @@ func TestCanonicalConfigurationOrdering(t *testing.T) {
 	sort.Strings(names)
 	if !reflect.DeepEqual(names, []string{"ALPHA", "ZED"}) {
 		t.Fatal(names)
+	}
+}
+
+// A Node project's detected commands have to name the package manager its
+// lockfile locks to. The recipe picks its base image from that same lockfile,
+// and oven/bun carries no npm: "npm run build" was a build that installed
+// cleanly and then died on `npm: not found`, with the configuration screen
+// showing nothing wrong.
+func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
+	manifest := `{"name":"site","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.2.10"}}`
+	for _, tc := range []struct{ lockfile, build, start string }{
+		{"bun.lock", "bun run build", "bun run start"},
+		{"bun.lockb", "bun run build", "bun run start"},
+		{"pnpm-lock.yaml", "pnpm run build", "pnpm run start"},
+		{"yarn.lock", "yarn run build", "yarn run start"},
+		{"package-lock.json", "npm run build", "npm run start"},
+	} {
+		t.Run(tc.lockfile, func(t *testing.T) {
+			root := t.TempDir()
+			writePlanningFixture(t, filepath.Join(root, "package.json"), manifest)
+			writePlanningFixture(t, filepath.Join(root, tc.lockfile), "{}")
+
+			result, err := (Detector{}).DetectPath(context.Background(), root,
+				SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Candidates) != 1 {
+				t.Fatalf("candidates = %#v, want exactly one", result.Candidates)
+			}
+			candidate := result.Candidates[0]
+			if candidate.BuildCommand != tc.build || candidate.StartCommand != tc.start {
+				t.Fatalf("commands = %q / %q, want %q / %q",
+					candidate.BuildCommand, candidate.StartCommand, tc.build, tc.start)
+			}
+			if candidate.Framework != "nextjs" || candidate.Profile != ProfileWeb || candidate.Port != 3000 {
+				t.Fatalf("next.js candidate = %#v", candidate)
+			}
+		})
+	}
+}
+
+// With no lockfile, or with several, the recipe refuses to build at all — so
+// the detected command only has to be the one that fails legibly rather than
+// the one that happens to match a package manager nobody pinned.
+func TestDetectedJavaScriptCommandsFallBackToNpm(t *testing.T) {
+	root := t.TempDir()
+	writePlanningFixture(t, filepath.Join(root, "package.json"),
+		`{"name":"site","scripts":{"build":"tsc"},"dependencies":{}}`)
+	writePlanningFixture(t, filepath.Join(root, "bun.lock"), "{}")
+	writePlanningFixture(t, filepath.Join(root, "yarn.lock"), "")
+
+	result, err := (Detector{}).DetectPath(context.Background(), root,
+		SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].BuildCommand != "npm run build" {
+		t.Fatalf("ambiguous lockfiles = %#v, want an npm command", result.Candidates)
+	}
+	if !strings.Contains(strings.Join(result.Candidates[0].NeedsDecision, " "), "competing lockfiles") {
+		t.Fatalf("ambiguity is not reported: %#v", result.Candidates[0].NeedsDecision)
 	}
 }

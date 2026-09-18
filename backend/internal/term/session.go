@@ -26,21 +26,24 @@ var (
 	ErrDisabled = errors.New("the web terminal is disabled in this dashboard's configuration")
 	ErrNotFound = errors.New("terminal session not found")
 	ErrTooMany  = errors.New("too many terminal sessions are already open")
-	// Twelve was a guess made when a session was a thing you opened and
-	// closed. They are now kept — named, grouped, running for weeks — so the
-	// cap has to be a number of *workspaces* rather than of visits, and the
-	// cost of an idle one is a PTY and a goroutine.
+	// The limit counts PTY windows, because each direct window owns a process,
+	// file descriptor and reader goroutine even when no browser is attached.
 	maxSessions  = 32
 	scrollbackKB = 128
 )
 
-// Session is one PTY. Output is fanned out to every attached client and also
-// kept in a bounded scrollback buffer, so reopening a tab restores what was on
-// screen instead of an empty terminal.
+// Session is one PTY. Output is fanned out to every attached client and kept
+// in a bounded buffer as best-effort shell history for reconnecting a browser.
 type Session struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Shell string `json:"shell"`
+	ID string `json:"id"`
+	// WorkspaceID groups direct PTYs into the session/window model exposed by
+	// the dashboard. Direct mode deliberately has no multiplexer: every window
+	// is its own real PTY and closing the dashboard ends it.
+	WorkspaceID string `json:"workspaceId"`
+	WindowName  string `json:"windowName"`
+	WindowOrder int    `json:"windowOrder"`
+	Title       string `json:"title"`
+	Shell       string `json:"shell"`
 	// User is the host account the shell runs as, which is the answer to
 	// "whoami" without having to open the session and ask.
 	User      string    `json:"user"`
@@ -55,15 +58,8 @@ type Session struct {
 	// case where /proc cannot answer.
 	CWDHint string `json:"-"`
 
-	// Folder, Favourite and Colour shadow the tmux user options that hold
-	// them. tmux remains the store — it is what makes them survive a restart
-	// — but it cannot answer for a session it has only just been asked to
-	// create: `tmux new-session` has been handed to a PTY and the set-option
-	// that follows may lose the race by half a second. During that window a
-	// listing read straight from tmux reports a session with no folder, so a
-	// shell opened *into* a folder appeared under "Other" and jumped into
-	// place on some later poll. The copy here is written before the request
-	// returns, which is what makes the answer immediate and stable.
+	// Workspace metadata is copied to every direct window so listing any live
+	// member reconstructs the same session row.
 	folder    string
 	favourite bool
 	colour    string
@@ -72,10 +68,39 @@ type Session struct {
 	pty         *os.File
 	cmd         *exec.Cmd
 	subscribers map[int64]chan []byte
-	nextSub     atomic.Int64
-	scrollback  *ringBuffer
-	closed      bool
-	lastActive  time.Time
+	// events carries activity changes to the subscribers that asked for them,
+	// beside their output channel rather than inside it: the output stream is
+	// bytes whose order is sacred, and a state frame is not part of it.
+	events     map[int64]chan Activity
+	nextSub    atomic.Int64
+	scrollback *ringBuffer
+	closed     bool
+	lastActive time.Time
+
+	// What the window is doing — see activity.go. titles is fed only by the
+	// read loop; the rest is read under mu.
+	titles     oscScanner
+	title      string
+	titleOwner int
+	activity   Activity
+	observed   time.Time
+	tick       *time.Timer
+	focusedAt  time.Time
+	// The raw material of Working: the job as last seen, when output last
+	// arrived and when the current run of it began, when the operator last
+	// typed (so an echo is not mistaken for work), the last CPU reading, and
+	// when the last stretch of work ended.
+	job         jobState
+	lastOutput  time.Time
+	activeSince time.Time
+	lastInput   time.Time
+	cpu         cpuSample
+	finishedAt  time.Time
+	// named is whether the operator titled the workspace; windowNamed whether
+	// they named this window. A name somebody chose is shown as given; a
+	// default follows whatever the shell is doing.
+	named       bool
+	windowNamed bool
 }
 
 func (s *Session) Attached() int {
@@ -111,7 +136,9 @@ func (s *Session) isClosed() bool {
 func (s *Session) Meta() SessionMeta {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return SessionMeta{Title: s.Title, Folder: s.folder, Favourite: s.favourite, Colour: s.colour}
+	return SessionMeta{
+		Title: s.Title, Named: s.named, Folder: s.folder, Favourite: s.favourite, Colour: s.colour,
+	}
 }
 
 // setMeta records the operator's choice on the live session. Callers write
@@ -123,12 +150,14 @@ func (s *Session) setMeta(meta SessionMeta) {
 	if meta.Title != "" {
 		s.Title = meta.Title
 	}
+	s.named = meta.Named
 	s.folder, s.favourite, s.colour = meta.Folder, meta.Favourite, meta.Colour
 }
 
-// Subscribe returns the scrollback plus a channel of subsequent output. The
-// snapshot and the subscription are taken under the same lock so no output can
-// slip between them.
+// Subscribe returns the bounded output suffix plus a channel of subsequent
+// output. The suffix and subscription are taken under the same lock so no
+// output can slip between them. Callers must not mistake the suffix for an
+// emulator snapshot: it may begin halfway through terminal protocol state.
 func (s *Session) Subscribe() (snapshot []byte, id int64, ch chan []byte, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,6 +177,7 @@ func (s *Session) Unsubscribe(id int64) {
 		delete(s.subscribers, id)
 		close(ch)
 	}
+	s.dropEventsLocked(id)
 }
 
 func (s *Session) Write(p []byte) (int, error) {
@@ -157,6 +187,7 @@ func (s *Session) Write(p []byte) (int, error) {
 		return 0, ErrNotFound
 	}
 	s.lastActive = time.Now()
+	s.lastInput = s.lastActive
 	f := s.pty
 	s.mu.Unlock()
 	return f.Write(p)
@@ -179,8 +210,33 @@ func (s *Session) Resize(rows, cols uint16) (changed bool, err error) {
 		return false, nil
 	}
 	changed = s.Rows != rows || s.Cols != cols
+	if !changed {
+		return false, nil
+	}
+	if err := pty.Setsize(s.pty, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		return false, err
+	}
 	s.Rows, s.Cols = rows, cols
-	return changed, pty.Setsize(s.pty, &pty.Winsize{Rows: rows, Cols: cols})
+	return true, nil
+}
+
+// SynchronizeSize unconditionally applies the browser's authoritative size.
+// Resize can skip a duplicate during a drag, but reconnect is a boundary at
+// which the cached fields must not be trusted more than the kernel PTY.
+func (s *Session) SynchronizeSize(rows, cols uint16) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return ErrNotFound
+	}
+	if rows == 0 || cols == 0 {
+		return nil
+	}
+	if err := pty.Setsize(s.pty, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		return err
+	}
+	s.Rows, s.Cols = rows, cols
+	return nil
 }
 
 // maxPending bounds how far behind one attached browser may fall before it is
@@ -208,8 +264,8 @@ const maxPending = 4 << 20
 // their order are preserved exactly, and the queue goes back to holding one
 // item. Only a client that is not reading at all — more than maxPending
 // buffered — is dropped, and dropped *completely*, by closing its channel.
-// That ends its socket, and the browser reconnects and is sent the scrollback,
-// which is a correct screen rather than a plausible one.
+// That ends its socket. A tmux-backed reconnect is reconstructed by tmux; a
+// direct PTY receives its bounded best-effort output history.
 //
 // The original concern was right, and is still met: a stalled browser cannot
 // wedge the PTY for anybody else. Nothing here blocks the reader.
@@ -242,6 +298,7 @@ func (s *Session) broadcast(chunk []byte) {
 			// finish; Unsubscribe on the way out is then a no-op.
 			delete(s.subscribers, id)
 			close(ch)
+			s.dropEventsLocked(id)
 			continue
 		}
 		select {
@@ -251,6 +308,7 @@ func (s *Session) broadcast(chunk []byte) {
 			// can only mean it is not reading. Same answer as above.
 			delete(s.subscribers, id)
 			close(ch)
+			s.dropEventsLocked(id)
 		}
 	}
 }
@@ -263,6 +321,7 @@ func (s *Session) readLoop(onExit func()) {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
 			s.broadcast(chunk)
+			s.noteOutput(chunk)
 		}
 		if err != nil {
 			onExit()
@@ -284,6 +343,11 @@ func (s *Session) Close() error {
 	for id, ch := range s.subscribers {
 		delete(s.subscribers, id)
 		close(ch)
+		s.dropEventsLocked(id)
+	}
+	if s.tick != nil {
+		s.tick.Stop()
+		s.tick = nil
 	}
 	f, cmd := s.pty, s.cmd
 	s.mu.Unlock()

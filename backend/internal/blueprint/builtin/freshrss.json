@@ -1,0 +1,112 @@
+{
+  "id": "freshrss",
+  "version": "1.0.0",
+  "name": "FreshRSS",
+  "category": "http",
+  "profile": "web",
+  "description": "A feed aggregator that keeps up with hundreds of feeds on a small server. The first visit runs its setup; SQLite is the right choice there for one person.",
+  "iconId": "globe",
+  "docsUrl": "https://freshrss.github.io/FreshRSS/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/FreshRSS/FreshRSS",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "freshrss/freshrss:1.30.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "timezone",
+      "kind": "text",
+      "label": "Timezone",
+      "variable": "TZ",
+      "default": "UTC",
+      "pattern": "^[A-Za-z0-9_+/-]{1,64}$",
+      "description": "Feed refresh times and the reader's clock.",
+      "advanced": true
+    },
+    {
+      "name": "refresh",
+      "kind": "text",
+      "label": "Refresh minutes",
+      "variable": "CRON_MIN",
+      "default": "*/20",
+      "pattern": "^[0-9*,/-]{1,32}$",
+      "description": "The minutes of each hour feeds are fetched, in cron syntax.",
+      "advanced": true
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The reader",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/www/FreshRSS/data",
+      "purpose": "Feeds, articles and the SQLite database",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "extensions",
+      "target": "/var/www/FreshRSS/extensions",
+      "purpose": "Third-party extensions",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Reader answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "FreshRSS updates its database schema on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:df1dcd778a4d497a425d3288eb5887508b49dc3fb7d43853615f9f0193198898"
+    }
+  ]
+}

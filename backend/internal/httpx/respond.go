@@ -22,7 +22,54 @@ type APIError struct {
 	// at all, because the dialog asked for `my` and the server wanted the
 	// whole name.
 	Phrase string `json:"phrase,omitempty"`
-	err    error
+
+	// Field is a pointer a UI control can attach itself to — "runtime.internalPort",
+	// "checks[2].kind" — set only when the failure traces back to one field of
+	// the request rather than the request as a whole.
+	Field string `json:"field,omitempty"`
+
+	// What the request was trying to do, to what, and why it did not work.
+	//
+	// "Something went wrong" is what a client shows when the server sent it a
+	// sentence and nothing else. These fields let it show the sentence a
+	// person would have written — which resource, which operation, the likely
+	// reason, and the raw error from the subsystem underneath, kept for the
+	// expandable details rather than pasted into the headline.
+	Resource  string `json:"resource,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Raw       string `json:"raw,omitempty"`
+	// Retryable marks an error worth offering a retry for: a timeout or a
+	// daemon that was briefly unreachable, as opposed to a request that will
+	// fail identically every time.
+	Retryable bool `json:"retryable,omitempty"`
+
+	err error
+}
+
+// Describe attaches what was being attempted to an error.
+//
+// Chained rather than set at construction because the layer that knows the
+// resource and the operation is usually the handler, and the layer that
+// produced the error is usually below it.
+func (e *APIError) Describe(operation, resource string) *APIError {
+	out := *e
+	out.Operation, out.Resource = operation, resource
+	return &out
+}
+
+// Because records the likely reason and the raw error behind it.
+func (e *APIError) Because(reason, raw string) *APIError {
+	out := *e
+	out.Reason, out.Raw = reason, raw
+	return &out
+}
+
+// Retry marks the error as worth trying again.
+func (e *APIError) Retry() *APIError {
+	out := *e
+	out.Retryable = true
+	return &out
 }
 
 func (e *APIError) Error() string {
@@ -94,12 +141,25 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func DecodeJSON(r *http.Request, dst any) error {
+	return decodeJSON(r, dst, false)
+}
+
+// DecodeJSONNumbers keeps arbitrary database values exact until the database
+// adapter binds them. JSON numbers otherwise round through float64 in any fields.
+func DecodeJSONNumbers(r *http.Request, dst any) error {
+	return decodeJSON(r, dst, true)
+}
+
+func decodeJSON(r *http.Request, dst any, exactNumbers bool) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return Err(http.StatusUnsupportedMediaType, "json_content_type_required",
 			"request body must use application/json")
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
+	if exactNumbers {
+		dec.UseNumber()
+	}
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return BadRequest("malformed request body: %v", err)

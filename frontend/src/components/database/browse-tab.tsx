@@ -1,24 +1,10 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import {
-  AcronymJson,
-  CloudUpload,
-  Copy,
-  Cross,
-  Database,
-  Download,
-  Filter,
-  Hash,
-  Layout,
-  MoreHorizontal,
-  Plus,
-  Trash,
-} from "@/components/icons"
+import { Copy, Cross, Filter, Layout, Plus, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, downloadUrl, get, patch, post } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
-import { cn, ringSafeScroll } from "@/lib/utils"
+import { plural } from "@/lib/format"
 import type {
   DbConnection,
   DbDriverInfo,
@@ -33,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Toggle } from "@/components/ui/toggle"
 import {
   Select,
   SelectContent,
@@ -40,27 +27,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
+import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { ResultGrid } from "@/components/database/result-grid"
 import { RowEditor } from "@/components/database/row-editor"
 import { ImportDialog } from "@/components/database/import-dialog"
+import { TableRail, type TableSelection } from "@/components/database/table-rail"
+import { TableMenu } from "@/components/database/table-actions"
 import {
   AddColumnDialog,
   CreateIndexDialog,
   CreateTableDialog,
   RenameDialog,
 } from "@/components/database/ddl-dialogs"
+import { copyText } from "@/lib/clipboard"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
-export type TableSelection = { schema: string; table: string }
+export type { TableSelection }
 const PAGE = 100
 
 const OP_LABELS: Record<string, string> = {
@@ -79,6 +63,11 @@ const OP_LABELS: Record<string, string> = {
 /**
  * The Browse tab: a table rail beside a data grid that reads, edits, filters,
  * sorts, imports and reshapes.
+ *
+ * It is one working region — a rail, a strip, a grid, a footer — sized to the
+ * window rather than two framed cards stacked on a page: the grid is what the
+ * operator is here to read, and it now takes every row the screen has room
+ * for instead of a fixed slice under two headers.
  *
  * Two decisions are worth keeping. Sorting and filtering happen on the server,
  * not over the fetched page — filtering one page of a million-row table is not
@@ -104,16 +93,20 @@ export function BrowseTab({
   onSelect: (sel: TableSelection | null) => void
 }) {
   const { can } = useAuth()
-  const [textFilter, setTextFilter] = useState("")
-  const [schemaFilter, setSchemaFilter] = useState("all")
+  const [count, setCount] = useState<number | null>(null)
   const [offset, setOffset] = useState(0)
   const [sort, setSort] = useState<{ column: string; desc: boolean } | null>(null)
   const [filters, setFilters] = useState<DbFilter[]>([])
   const [showFilters, setShowFilters] = useState(false)
-  const [count, setCount] = useState<number | null>(null)
   const [counting, setCounting] = useState(false)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [rowSelection, setRowSelection] = useState<{
+    query: string
+    result?: QueryResult
+    indices: Set<number>
+  }>()
+  const tableIdentity = JSON.stringify([conn.id, selection?.schema, selection?.table])
   const [editor, setEditor] = useState<{
+    tableIdentity: string
     mode: "insert" | "edit"
     initial?: Record<string, unknown>
   } | null>(null)
@@ -149,7 +142,14 @@ export function BrowseTab({
     [filters],
   )
   const filterParam = activeFilters.length ? JSON.stringify(activeFilters) : undefined
-
+  const selectionQuery = JSON.stringify([
+    conn.id,
+    selection?.schema,
+    selection?.table,
+    offset,
+    sort,
+    filterParam,
+  ])
   const rows = usePoll(
     (signal) =>
       selection
@@ -170,20 +170,14 @@ export function BrowseTab({
     0,
     [conn.id, selection?.schema, selection?.table, offset, sort?.column, sort?.desc, filterParam],
   )
-
-  const schemaNames = useMemo(() => {
-    const set = new Set<string>()
-    for (const t of tables.data ?? []) set.add(t.schema)
-    return [...set].sort()
-  }, [tables.data])
-
-  const visibleTables = useMemo(() => {
-    let list = tables.data ?? []
-    if (schemaFilter !== "all") list = list.filter((t) => t.schema === schemaFilter)
-    const q = textFilter.trim().toLowerCase()
-    if (q) list = list.filter((t) => t.name.toLowerCase().includes(q))
-    return list
-  }, [tables.data, schemaFilter, textFilter])
+  // Indices belong to one result snapshot. Sorting, filtering, navigating,
+  // or refreshing must require a fresh selection before a mutation.
+  const selected =
+    rowSelection?.query === selectionQuery && rowSelection.result === rows.data
+      ? rowSelection.indices
+      : new Set<number>()
+  const setSelected = (indices: Set<number>) =>
+    setRowSelection({ query: selectionQuery, result: rows.data, indices })
 
   const select = (t: DbTable) => {
     setOffset(0)
@@ -213,6 +207,7 @@ export function BrowseTab({
   const canDDL = canWrite && (info?.ddl ?? false)
   const table = selection?.table
   const schema = selection?.schema ?? ""
+  const current = tables.data?.find((t) => t.name === table && t.schema === schema)
 
   const reload = () => {
     rows.refresh()
@@ -226,7 +221,8 @@ export function BrowseTab({
   // Asking somebody to type the table name eight times is how you teach them to
   // type it without reading, which is the habit the phrase exists to prevent.
   const deleteSelected = () => {
-    if (!rows.data || selected.size === 0) return
+    if (!rows.data || selected.size === 0 || !detail.data) return
+    if ([...selected].some((index) => !rows.data?.rows[index])) return
     const keys = [...selected].map((i) => {
       const key: Record<string, unknown> = {}
       for (const c of pk) key[c] = rows.data!.rows[i][rows.data!.columns.indexOf(c)]
@@ -236,7 +232,7 @@ export function BrowseTab({
       title: `Delete ${plural(keys.length, "row")}`,
       confirmLabel: `Delete ${plural(keys.length, "row")}`,
       description: (
-        <p className="text-sm">
+        <p>
           Permanently deletes <b>{plural(keys.length, "row")}</b> from <b>{table}</b>. This cannot
           be undone.
         </p>
@@ -279,8 +275,7 @@ export function BrowseTab({
         table,
         rows: recs,
       })
-      await navigator.clipboard.writeText(res.sql)
-      notify.success(`Copied ${plural(recs.length, "row")} as SQL`)
+      await copyText(res.sql, `Copied ${plural(recs.length, "row")} as SQL`)
     } catch (err) {
       notify.error("Could not copy", err)
     }
@@ -308,7 +303,7 @@ export function BrowseTab({
   const duplicateRow = (row: Record<string, unknown>) => {
     const copy = { ...row }
     for (const c of pk) delete copy[c]
-    setEditor({ mode: "insert", initial: copy })
+    setEditor({ mode: "insert", initial: copy, tableIdentity })
   }
 
   const toggleSort = (column: string) => {
@@ -352,7 +347,7 @@ export function BrowseTab({
       title: "Delete row",
       confirmLabel: "Delete row",
       description: (
-        <p className="text-sm">
+        <p>
           Permanently deletes the row where{" "}
           <span className="font-mono text-xs">
             {pk.map((c) => `${c}=${String(row[c])}`).join(", ")}
@@ -414,144 +409,80 @@ export function BrowseTab({
       },
     })
 
+  const first = offset + 1
+  const last = offset + (rows.data?.rowCount ?? 0)
+
   return (
-    <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] [&>*]:min-w-0">
-      <Panel>
-        <PanelHeader
-          icon={Database}
-          title="Tables"
-          description={`${visibleTables.length} of ${tables.data?.length ?? 0}`}
-          actions={
+    <Pane className="min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,14rem)_minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)] lg:grid-rows-1">
+        <TableRail
+          tables={tables.data}
+          loading={tables.loading}
+          selected={selection}
+          onSelect={select}
+          className="border-b border-hairline lg:border-r lg:border-b-0"
+          action={
             canDDL && (
-              <Button size="sm" variant="outline" onClick={() => setDialog("createTable")}>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                className="size-7"
+                aria-label="Create table"
+                title="Create table"
+                onClick={() => setDialog("createTable")}
+              >
                 <Plus className="size-3.5" />
-                New
               </Button>
             )
           }
         />
-        <PanelBody className="space-y-3">
-          {schemaNames.length > 1 && (
-            <Select value={schemaFilter} onValueChange={setSchemaFilter}>
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All schemas</SelectItem>
-                {schemaNames.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <Input
-            placeholder="Filter tables…"
-            value={textFilter}
-            onChange={(e) => setTextFilter(e.target.value)}
-            className="h-8 text-xs"
-          />
-          <div
-            className={cn("max-h-[calc(100svh-28rem)] space-y-0.5 overflow-y-auto", ringSafeScroll)}
-          >
-            {visibleTables.map((t) => (
-              <button
-                key={`${t.schema}.${t.name}`}
-                onClick={() => select(t)}
-                className={cn(
-                  "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
-                  table === t.name && selection?.schema === t.schema
-                    ? "bg-primary/12 font-medium text-foreground"
-                    : "hover:bg-accent",
-                )}
-              >
-                <span className="truncate text-[13px]">{t.name}</span>
-                <span className="truncate text-[11px] text-muted-foreground">
-                  {schemaNames.length > 1 ? `${t.schema} · ` : ""}
-                  {t.type}
-                  {t.estimatedRows > 0 && ` · ${plural(t.estimatedRows, "row")}`}
-                  {t.size ? ` · ${bytes(t.size)}` : ""}
-                </span>
-              </button>
-            ))}
-            {tables.loading && <LoadingRows rows={4} />}
-            {tables.data?.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No tables found.</p>
-            )}
-            {tables.data && tables.data.length > 0 && visibleTables.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No tables match the filter.</p>
-            )}
-          </div>
-        </PanelBody>
-      </Panel>
 
-      <Panel>
-        <PanelHeader
-          icon={Layout}
-          title={table ?? "Pick a table"}
-          description={
-            rows.data
-              ? `${plural(rows.data.rowCount, "row")} in ${rows.data.duration}${
-                  count !== null ? ` · ${count.toLocaleString()} total` : ""
-                }`
-              : undefined
-          }
-          actions={
-            table && (
-              <>
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <PaneHeader className="gap-2">
+            <span className="min-w-0 flex-1 truncate text-body font-medium">
+              {table ?? <span className="text-muted-foreground">Pick a table</span>}
+            </span>
+            {current?.type && current.type.toLowerCase() !== "table" && <Tag>{current.type}</Tag>}
+            {table && (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                {selected.size > 0 && (
+                  <>
+                    <Button size="sm" variant="outline" onClick={copySelectedAsInsert}>
+                      <Copy className="size-3.5" />
+                      Copy {selected.size} as SQL
+                    </Button>
+                    {canEditRows && (
+                      <Button size="sm" variant="destructive" onClick={deleteSelected}>
+                        <Trash className="size-3.5" />
+                        Delete {selected.size}
+                      </Button>
+                    )}
+                  </>
+                )}
+                <Toggle
+                  size="sm"
+                  variant="outline"
+                  pressed={showFilters}
+                  onPressedChange={setShowFilters}
+                  aria-label="Filter rows"
+                  className="gap-1.5 px-2.5 text-body"
+                >
+                  <Filter className="size-3.5" />
+                  Filter
+                  {activeFilters.length > 0 && (
+                    <span className="numeric text-hint opacity-70">{activeFilters.length}</span>
+                  )}
+                </Toggle>
                 {canWrite && (
-                  <Button size="sm" variant="outline" onClick={() => setEditor({ mode: "insert" })}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditor({ mode: "insert", tableIdentity })}
+                  >
                     <Plus className="size-3.5" />
                     Insert
                   </Button>
                 )}
-                {selected.size > 0 && (
-                  <Button size="sm" variant="outline" onClick={copySelectedAsInsert}>
-                    <Copy className="size-3.5" />
-                    Copy {selected.size} as SQL
-                  </Button>
-                )}
-                {canEditRows && selected.size > 0 && (
-                  <Button size="sm" variant="destructive" onClick={deleteSelected}>
-                    <Trash className="size-3.5" />
-                    Delete {selected.size}
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant={showFilters ? "default" : "ghost"}
-                  onClick={() => setShowFilters((v) => !v)}
-                >
-                  <Filter className="size-3.5" />
-                  Filter
-                  {activeFilters.length > 0 && ` (${activeFilters.length})`}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={offset === 0}
-                  onClick={() => {
-                    // Selection is by row index within the page, so it cannot
-                    // survive a page turn — carrying it would delete whatever
-                    // now sits at those positions.
-                    setSelected(new Set())
-                    setOffset((o) => Math.max(0, o - PAGE))
-                  }}
-                >
-                  Previous
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={rows.data ? rows.data.rowCount < PAGE : true}
-                  onClick={() => {
-                    setSelected(new Set())
-                    setOffset((o) => o + PAGE)
-                  }}
-                >
-                  Next
-                </Button>
                 <TableMenu
                   canWrite={canWrite}
                   canDDL={canDDL}
@@ -565,63 +496,56 @@ export function BrowseTab({
                   onTruncate={truncateTable}
                   onDrop={dropTable}
                 />
-              </>
-            )
-          }
-        />
+              </div>
+            )}
+          </PaneHeader>
 
-        {table && showFilters && (
-          <PanelToolbar className="flex-col items-stretch gap-1.5">
-            {filters.map((f, i) => (
-              <FilterRow
-                key={i}
-                filter={f}
-                columns={detail.data?.columns.map((c) => c.name) ?? []}
-                ops={info?.filterOps ?? Object.keys(OP_LABELS)}
-                onChange={(patchF) => {
-                  setOffset(0)
-                  setFilters((fs) => fs.map((x, j) => (j === i ? { ...x, ...patchF } : x)))
-                }}
-                onRemove={() => {
-                  setOffset(0)
-                  setFilters((fs) => fs.filter((_, j) => j !== i))
-                }}
-              />
-            ))}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setFilters((fs) => [
-                    ...fs,
-                    { column: detail.data?.columns[0]?.name ?? "", op: "eq", value: "" },
-                  ])
-                }
-              >
-                <Plus className="size-3.5" />
-                Add condition
-              </Button>
-              {activeFilters.length > 0 && (
-                <span className="text-[11px] text-muted-foreground">
-                  Applied on the server, across the whole table — not just this page.
-                </span>
-              )}
+          {table && showFilters && (
+            <div className="shrink-0 space-y-1.5 border-b border-hairline px-3 py-2">
+              {filters.map((f, i) => (
+                <FilterRow
+                  key={i}
+                  filter={f}
+                  columns={detail.data?.columns.map((c) => c.name) ?? []}
+                  ops={info?.filterOps ?? Object.keys(OP_LABELS)}
+                  onChange={(patchF) => {
+                    setOffset(0)
+                    setFilters((fs) => fs.map((x, j) => (j === i ? { ...x, ...patchF } : x)))
+                  }}
+                  onRemove={() => {
+                    setOffset(0)
+                    setFilters((fs) => fs.filter((_, j) => j !== i))
+                  }}
+                />
+              ))}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() =>
+                    setFilters((fs) => [
+                      ...fs,
+                      { column: detail.data?.columns[0]?.name ?? "", op: "eq", value: "" },
+                    ])
+                  }
+                >
+                  <Plus />
+                  Add condition
+                </Button>
+                {activeFilters.length > 0 && (
+                  <span className="text-hint text-muted-foreground">
+                    Applied on the server, across the whole table — not just this page.
+                  </span>
+                )}
+              </div>
             </div>
-          </PanelToolbar>
-        )}
+          )}
 
-        <PanelBody flush>
-          {rows.error && <ErrorState error={rows.error} className="m-4" />}
-          {!table && <EmptyState icon={Layout} title="Select a table to browse" />}
-          {table && rows.data && (
-            <>
-              {canWrite && pk.length === 0 && detail.data && (
-                <p className="border-b border-hairline bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
-                  This table has no primary key, so rows cannot be edited individually. Use the
-                  Query tab with an explicit WHERE clause.
-                </p>
-              )}
+          <div className="relative min-h-0 min-w-0 flex-1">
+            {!table && <EmptyState icon={Layout} title="Pick a table to browse its rows" />}
+            {table && rows.error && <ErrorState error={rows.error} className="m-4" />}
+            {table && !rows.error && !rows.data && <LoadingRows rows={8} className="p-4" />}
+            {table && rows.data && (
               <ResultGrid
                 result={rows.data}
                 sort={sort}
@@ -631,22 +555,85 @@ export function BrowseTab({
                 selection={canEditRows ? selected : undefined}
                 onSelectionChange={canEditRows ? setSelected : undefined}
                 onEdit={
-                  canEditRows ? (row) => setEditor({ mode: "edit", initial: row }) : undefined
+                  canEditRows
+                    ? (row) => setEditor({ mode: "edit", initial: row, tableIdentity })
+                    : undefined
                 }
                 onDelete={canEditRows ? deleteRow : undefined}
                 onDuplicate={canWrite ? duplicateRow : undefined}
                 onCopySQL={copyAsInsert}
+                maxHeightClass="h-full"
+                emptyTitle={
+                  activeFilters.length > 0
+                    ? "No rows match these conditions"
+                    : "This table is empty"
+                }
+                emptyDescription={
+                  activeFilters.length > 0
+                    ? "The conditions are applied on the server, across the whole table — so this is every row, not just this page."
+                    : `${table} exists and has its columns, but nothing has been written to it yet.`
+                }
               />
-            </>
-          )}
-        </PanelBody>
-      </Panel>
+            )}
+          </div>
 
-      {editor && detail.data && (
+          {table && (
+            <PaneFooter className="justify-between">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={offset === 0}
+                  onClick={() => {
+                    // Selection is by row index within the page, so it cannot
+                    // survive a page turn — carrying it would delete whatever
+                    // now sits at those positions.
+                    setSelected(new Set())
+                    setOffset((o) => Math.max(0, o - PAGE))
+                  }}
+                >
+                  Previous
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={rows.data ? rows.data.rowCount < PAGE : true}
+                  onClick={() => {
+                    setSelected(new Set())
+                    setOffset((o) => o + PAGE)
+                  }}
+                >
+                  Next
+                </Button>
+                {rows.data && rows.data.rowCount > 0 && (
+                  <span className="numeric ml-1.5 text-hint text-muted-foreground">
+                    Rows {first.toLocaleString()}–{last.toLocaleString()}
+                    {count !== null && ` of ${count.toLocaleString()}`}
+                    {rows.data.duration && ` · ${rows.data.duration}`}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-hint text-muted-foreground">
+                {canWrite && pk.length === 0 && detail.data && (
+                  <span>No primary key — rows cannot be edited here. Use Query with a WHERE.</span>
+                )}
+                {count === null && rows.data && (
+                  <Button size="xs" variant="ghost" onClick={fetchCount} pending={counting}>
+                    Count all rows
+                  </Button>
+                )}
+              </div>
+            </PaneFooter>
+          )}
+        </div>
+      </div>
+
+      {editor && editor.tableIdentity === tableIdentity && detail.data && (
         <RowEditor
           open
           onOpenChange={(o) => !o && setEditor(null)}
           mode={editor.mode}
+          table={table}
           columns={detail.data.columns}
           primaryKey={pk}
           initial={editor.initial}
@@ -659,7 +646,7 @@ export function BrowseTab({
           open
           onOpenChange={() => setDialog(null)}
           connId={conn.id}
-          schema={schemaFilter === "all" ? "" : schemaFilter}
+          schema={schema}
           info={info}
           onDone={reload}
         />
@@ -716,86 +703,7 @@ export function BrowseTab({
           onDone={reload}
         />
       )}
-    </div>
-  )
-}
-
-function TableMenu({
-  canWrite,
-  canDDL,
-  counting,
-  onCount,
-  onExport,
-  onImport,
-  onAddColumn,
-  onCreateIndex,
-  onRename,
-  onTruncate,
-  onDrop,
-}: {
-  canWrite: boolean
-  canDDL: boolean
-  counting: boolean
-  onCount: () => void
-  onExport: (f: "csv" | "json") => void
-  onImport: () => void
-  onAddColumn: () => void
-  onCreateIndex: () => void
-  onRename: () => void
-  onTruncate: () => void
-  onDrop: () => void
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost">
-          {counting ? <Spinner /> : <MoreHorizontal className="size-4" />}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem onClick={onCount}>
-          <Hash className="size-3.5" />
-          Count rows
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onExport("csv")}>
-          <Download className="size-3.5" />
-          Export CSV
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onExport("json")}>
-          <AcronymJson className="size-3.5" />
-          Export JSON
-        </DropdownMenuItem>
-        {canWrite && (
-          <DropdownMenuItem onClick={onImport}>
-            <CloudUpload className="size-3.5" />
-            Import data…
-          </DropdownMenuItem>
-        )}
-        {canDDL && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onAddColumn}>
-              <Plus className="size-3.5" />
-              Add column…
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onCreateIndex}>
-              <Plus className="size-3.5" />
-              Create index…
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onRename}>Rename table…</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={onTruncate}>
-              <Trash className="size-3.5" />
-              Empty table…
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={onDrop}>
-              <Trash className="size-3.5" />
-              Drop table…
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    </Pane>
   )
 }
 
@@ -814,9 +722,9 @@ function FilterRow({
 }) {
   const needsValue = filter.op !== "is_null" && filter.op !== "not_null"
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <Select value={filter.column} onValueChange={(v) => onChange({ column: v })}>
-        <SelectTrigger size="sm" className="w-44">
+        <SelectTrigger size="sm" className="h-7 w-44 text-xs sm:h-7" aria-label="Column">
           <SelectValue placeholder="column" />
         </SelectTrigger>
         <SelectContent>
@@ -828,7 +736,7 @@ function FilterRow({
         </SelectContent>
       </Select>
       <Select value={filter.op} onValueChange={(v) => onChange({ op: v })}>
-        <SelectTrigger size="sm" className="w-32">
+        <SelectTrigger size="sm" className="h-7 w-32 text-xs sm:h-7" aria-label="Condition">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -843,11 +751,18 @@ function FilterRow({
         value={filter.value}
         onChange={(e) => onChange({ value: e.target.value })}
         disabled={!needsValue}
-        className="h-8 max-w-xs font-mono text-xs"
+        className="h-7 max-w-xs font-mono text-xs sm:h-7"
         placeholder={needsValue ? "value" : ""}
+        aria-label="Value"
       />
-      <Button size="icon" variant="ghost" className="size-7" onClick={onRemove}>
-        <Cross className="size-3.5" />
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        aria-label="Remove this condition"
+        onClick={onRemove}
+        className="text-muted-foreground"
+      >
+        <Cross />
       </Button>
     </div>
   )

@@ -1,17 +1,17 @@
 "use client"
 
-import { Page, PageHeader } from "@/components/page"
+import { Suspense } from "react"
+import { Page } from "@/components/page"
 import { ToolsPanel } from "@/components/security/tools-panel"
 
+// The tool another page sends the reader to lives in the query string, which
+// the App Router only hands out inside a Suspense boundary.
 export default function SecurityToolsPage() {
   return (
-    <Page>
-      <PageHeader
-        eyebrow="Security"
-        title="Tools"
-        description="Twenty probes that run from this server — each card keeps its own input and runs on its own."
-      />
-      <ToolsPanel />
+    <Page className="animate-rise">
+      <Suspense>
+        <ToolsPanel />
+      </Suspense>
     </Page>
   )
 }

@@ -1,19 +1,27 @@
 "use client"
 
-import { Copy, Key, Layout, Linked, Monorepo, Pencil, Trash } from "@/components/icons"
+import { useState } from "react"
+import { Copy, Key, Layout, Pencil, Plus, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { del, get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
-import { del, get } from "@/lib/api"
-import type { DbConnection, DbDriverInfo, DbTableDetail } from "@/lib/types"
+import type { DbConnection, DbDriverInfo, DbTable, DbTableDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useState } from "react"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { RenameDialog } from "@/components/database/ddl-dialogs"
-import { Badge } from "@/components/ui/badge"
+import {
+  AddColumnDialog,
+  CreateIndexDialog,
+  CreateTableDialog,
+  RenameDialog,
+} from "@/components/database/ddl-dialogs"
+import { TableRail, type TableSelection } from "@/components/database/table-rail"
+import { TableMenu } from "@/components/database/table-actions"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Pane, PaneHeader, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Tag } from "@/components/tag"
 import {
   Table,
   TableBody,
@@ -22,25 +30,42 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { copyText } from "@/lib/clipboard"
 
-/** The Structure tab: a table's columns, primary key, indexes, foreign keys and
- *  the DDL that would recreate it — the reference view every database tool has
- *  and the original page lacked. */
+/**
+ * The Structure tab: a table's columns, primary key, indexes, foreign keys and
+ * the DDL that would recreate it — the reference view every database tool has.
+ *
+ * The same rail as Browse on the left, so a table is picked here the way it is
+ * picked there; the page used to open on "select a table" with nothing on it
+ * to select one with. The schema-changing verbs live here too — this is the
+ * page that shows what a column is, so it is the page that adds one.
+ */
 export function StructureTab({
   conn,
   schema,
   table,
   info,
   confirm,
+  onSelect,
 }: {
   conn: DbConnection
   schema: string
   table?: string
   info?: DbDriverInfo
   confirm: ReturnType<typeof useConfirm>["confirm"]
+  onSelect: (sel: TableSelection | null) => void
 }) {
   const { can } = useAuth()
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<
+    null | "createTable" | "addColumn" | "createIndex" | "renameTable"
+  >(null)
+  const tables = usePoll(
+    (signal) => get<DbTable[]>(`/databases/${conn.id}/tables`, { schema: "" }, signal),
+    0,
+    [conn.id],
+  )
   const detail = usePoll(
     (signal) =>
       table
@@ -50,14 +75,11 @@ export function StructureTab({
     [conn.id, schema, table],
   )
 
-  if (!table) return <EmptyState icon={Layout} title="Select a table to inspect its structure" />
-  if (detail.loading) return <LoadingPanel />
-  if (detail.error) return <ErrorState error={detail.error} />
-  if (!detail.data) return null
-
   const d = detail.data
-  const pk = new Set(d.primaryKey)
+  const pk = new Set(d?.primaryKey ?? [])
   const canEdit = can("service.control") && (info?.ddl ?? false)
+  const selection = table ? { schema, table } : null
+  const current = tables.data?.find((t) => t.name === table && t.schema === schema)
 
   const dropColumn = (column: string) =>
     confirm({
@@ -100,167 +122,277 @@ export function StructureTab({
       },
     })
 
+  const dropTable = () =>
+    confirm({
+      title: "Drop table",
+      phrase: table,
+      confirmLabel: "Drop table",
+      description: (
+        <p>
+          Permanently destroys <b>{table}</b> and every row in it. This cannot be undone.
+        </p>
+      ),
+      action: async (c) => {
+        await del(`/databases/${conn.id}/ddl/table`, { body: { schema, table }, confirm: c })
+        notify.success(`Dropped ${table}`)
+        onSelect(null)
+        tables.refresh()
+      },
+    })
+
+  const truncateTable = () =>
+    confirm({
+      title: "Empty table",
+      phrase: table,
+      confirmLabel: "Empty it",
+      description: (
+        <p>
+          Removes every row from <b>{table}</b>, keeping the table itself. This cannot be undone.
+        </p>
+      ),
+      action: async (c) => {
+        await post(`/databases/${conn.id}/ddl/truncate`, { schema, table }, { confirm: c })
+        notify.success(`Emptied ${table}`)
+        tables.refresh()
+      },
+    })
+
   return (
-    <div className="grid gap-4">
-      <Panel>
-        <PanelHeader
-          icon={Monorepo}
-          title="Columns"
-          description={plural(d.columns.length, "column")}
+    <Pane className="min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,14rem)_minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)] lg:grid-rows-1">
+        <TableRail
+          tables={tables.data}
+          loading={tables.loading}
+          selected={selection}
+          onSelect={(t) => onSelect({ schema: t.schema, table: t.name })}
+          className="border-b border-hairline lg:border-r lg:border-b-0"
+          action={
+            canEdit && (
+              <Button
+                size="icon-sm"
+                variant="outline"
+                className="size-7"
+                aria-label="Create table"
+                title="Create table"
+                onClick={() => setDialog("createTable")}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            )
+          }
         />
-        <PanelBody flush>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Nullable</TableHead>
-                <TableHead>Default</TableHead>
-                <TableHead>Key</TableHead>
-                {canEdit && <TableHead className="w-20" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {d.columns.map((c) => (
-                <TableRow key={c.name} className="group">
-                  <TableCell className="font-mono text-xs font-medium">{c.name}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {c.type.toLowerCase()}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {c.nullable ? (
-                      <span className="text-muted-foreground">yes</span>
-                    ) : (
-                      <span className="text-foreground">no</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="max-w-40 truncate font-mono text-xs text-muted-foreground">
-                    {c.default || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {pk.has(c.name) && (
-                      <Badge variant="secondary" className="gap-1 font-normal">
-                        <Key className="size-3" />
-                        pk
-                      </Badge>
-                    )}
-                  </TableCell>
-                  {canEdit && (
-                    <TableCell className="w-20">
-                      <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6"
-                          title="Rename column"
-                          onClick={() => setRenaming(c.name)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6 text-destructive"
-                          title="Drop column"
-                          onClick={() => dropColumn(c.name)}
-                        >
-                          <Trash className="size-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </PanelBody>
-      </Panel>
 
-      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-        <Panel>
-          <PanelHeader icon={Key} title="Indexes" description={`${d.indexes.length}`} />
-          <PanelBody flush>
-            {d.indexes.length === 0 ? (
-              <p className="p-4 text-xs text-muted-foreground">No indexes.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Columns</TableHead>
-                    <TableHead>Unique</TableHead>
-                    {canEdit && <TableHead className="w-10" />}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {d.indexes.map((ix) => (
-                    <TableRow key={ix.name} className="group">
-                      <TableCell className="font-mono text-xs">
-                        {ix.name}
-                        {ix.primary && (
-                          <Badge variant="secondary" className="ml-1.5 font-normal">
-                            primary
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {ix.columns.join(", ")}
-                      </TableCell>
-                      <TableCell className="text-xs">{ix.unique ? "yes" : "no"}</TableCell>
-                      {canEdit && (
-                        <TableCell className="w-10">
-                          {!ix.primary && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-6 text-destructive opacity-0 group-hover:opacity-100"
-                              title="Drop index"
-                              onClick={() => dropIndex(ix.name)}
-                            >
-                              <Trash className="size-3.5" />
-                            </Button>
-                          )}
-                        </TableCell>
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <PaneHeader className="gap-2">
+            <span className="min-w-0 flex-1 truncate text-body font-medium">
+              {table ?? <span className="text-muted-foreground">Pick a table</span>}
+            </span>
+            {current?.type && current.type.toLowerCase() !== "table" && <Tag>{current.type}</Tag>}
+            {table && d && (
+              <span className="numeric hidden text-hint text-muted-foreground sm:inline">
+                {plural(d.columns.length, "column")} ·{" "}
+                {plural(d.indexes.length, "index", "indexes")} ·{" "}
+                {plural(d.foreignKeys.length, "foreign key")}
+              </span>
+            )}
+            {table && canEdit && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button size="sm" variant="outline" onClick={() => setDialog("addColumn")}>
+                  <Plus className="size-3.5" />
+                  Add column
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setDialog("createIndex")}>
+                  <Plus className="size-3.5" />
+                  Create index
+                </Button>
+                <TableMenu
+                  canWrite={canEdit}
+                  canDDL={canEdit}
+                  onAddColumn={() => setDialog("addColumn")}
+                  onCreateIndex={() => setDialog("createIndex")}
+                  onRename={() => setDialog("renameTable")}
+                  onTruncate={truncateTable}
+                  onDrop={dropTable}
+                />
+              </div>
+            )}
+          </PaneHeader>
+
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+            {!table && <EmptyState icon={Layout} title="Pick a table to inspect its structure" />}
+            {table && detail.error && <ErrorState error={detail.error} className="m-4" />}
+            {table && !detail.error && !d && <LoadingRows rows={8} className="p-4" />}
+            {table && d && (
+              <div className="animate-rise space-y-8 p-5">
+                <Panel plain>
+                  <PanelHeader title="Columns" />
+                  <PanelBody flush className="-mx-5">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Nullable</TableHead>
+                          <TableHead>Default</TableHead>
+                          <TableHead>Key</TableHead>
+                          {canEdit && <TableHead className="w-20" />}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {d.columns.map((c) => (
+                          <TableRow key={c.name} className="group">
+                            <TableCell className="font-mono font-medium">{c.name}</TableCell>
+                            <TableCell className="font-mono text-muted-foreground">
+                              {c.type.toLowerCase()}
+                            </TableCell>
+                            <TableCell>
+                              {c.nullable ? (
+                                <span className="text-muted-foreground">yes</span>
+                              ) : (
+                                <span className="text-foreground">no</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="max-w-40 truncate font-mono text-muted-foreground">
+                              {c.default || "—"}
+                            </TableCell>
+                            <TableCell>{pk.has(c.name) && <Tag icon={Key}>pk</Tag>}</TableCell>
+                            {canEdit && (
+                              <TableCell className="w-20">
+                                <RowActions>
+                                  <IconAction
+                                    label="Rename column"
+                                    onClick={() => setRenaming(c.name)}
+                                  >
+                                    <Pencil />
+                                  </IconAction>
+                                  <IconAction
+                                    label="Drop column"
+                                    className="text-destructive"
+                                    onClick={() => dropColumn(c.name)}
+                                  >
+                                    <Trash />
+                                  </IconAction>
+                                </RowActions>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </PanelBody>
+                </Panel>
+
+                <div className="grid gap-8 xl:grid-cols-2 [&>*]:min-w-0">
+                  <Panel plain>
+                    <PanelHeader title="Indexes" />
+                    <PanelBody flush className="-mx-5">
+                      {d.indexes.length === 0 ? (
+                        <EmptyNote>No indexes.</EmptyNote>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Name</TableHead>
+                              <TableHead>Columns</TableHead>
+                              <TableHead>Unique</TableHead>
+                              {canEdit && <TableHead className="w-10" />}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {d.indexes.map((ix) => (
+                              <TableRow key={ix.name} className="group">
+                                <TableCell className="font-mono">
+                                  {ix.name}
+                                  {ix.primary && <Tag className="ml-1.5">primary</Tag>}
+                                </TableCell>
+                                <TableCell className="font-mono text-muted-foreground">
+                                  {ix.columns.join(", ")}
+                                </TableCell>
+                                <TableCell>{ix.unique ? "yes" : "no"}</TableCell>
+                                {canEdit && (
+                                  <TableCell className="w-10">
+                                    {!ix.primary && (
+                                      <IconAction
+                                        label="Drop index"
+                                        reveal
+                                        className="text-destructive"
+                                        onClick={() => dropIndex(ix.name)}
+                                      >
+                                        <Trash />
+                                      </IconAction>
+                                    )}
+                                  </TableCell>
+                                )}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
                       )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </PanelBody>
-        </Panel>
+                    </PanelBody>
+                  </Panel>
 
-        <Panel>
-          <PanelHeader icon={Linked} title="Foreign keys" description={`${d.foreignKeys.length}`} />
-          <PanelBody flush>
-            {d.foreignKeys.length === 0 ? (
-              <p className="p-4 text-xs text-muted-foreground">No foreign keys.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Columns</TableHead>
-                    <TableHead>References</TableHead>
-                    <TableHead>On delete</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {d.foreignKeys.map((fk) => (
-                    <TableRow key={fk.name}>
-                      <TableCell className="font-mono text-xs">{fk.columns.join(", ")}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {fk.refTable}({fk.refColumns.join(", ")})
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {fk.onDelete || "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  <Panel plain>
+                    <PanelHeader title="Foreign keys" />
+                    <PanelBody flush className="-mx-5">
+                      {d.foreignKeys.length === 0 ? (
+                        <EmptyNote>No foreign keys.</EmptyNote>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Columns</TableHead>
+                              <TableHead>References</TableHead>
+                              <TableHead>On delete</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {d.foreignKeys.map((fk) => (
+                              <TableRow
+                                key={fk.name}
+                                onActivate={() =>
+                                  onSelect({ schema: fk.refSchema || schema, table: fk.refTable })
+                                }
+                              >
+                                <TableCell className="font-mono">{fk.columns.join(", ")}</TableCell>
+                                <TableCell className="font-mono text-muted-foreground">
+                                  {fk.refTable}({fk.refColumns.join(", ")})
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {fk.onDelete || "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </PanelBody>
+                  </Panel>
+                </div>
+
+                {d.createSql && (
+                  <Panel plain>
+                    <PanelHeader
+                      title="Definition"
+                      actions={
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void copyText(d.createSql!, "Copied DDL")}
+                        >
+                          <Copy className="size-3.5" />
+                          Copy
+                        </Button>
+                      }
+                    />
+                    <PanelBody>
+                      <Well className="max-h-96 whitespace-pre">{d.createSql}</Well>
+                    </PanelBody>
+                  </Panel>
+                )}
+              </div>
             )}
-          </PanelBody>
-        </Panel>
+          </div>
+        </div>
       </div>
 
       {renaming && table && (
@@ -275,38 +407,53 @@ export function StructureTab({
           onDone={detail.refresh}
         />
       )}
-
-      {d.createSql && (
-        <Panel>
-          <PanelHeader
-            icon={Layout}
-            title="Definition"
-            description={
-              conn.driver === "postgres" ? "generated from structure" : "as reported by the engine"
-            }
-            actions={
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(d.createSql!)
-                    .then(() => notify.success("Copied DDL"))
-                    .catch(() => notify.error("Could not copy"))
-                }
-              >
-                <Copy className="size-3.5" />
-                Copy
-              </Button>
-            }
-          />
-          <PanelBody flush>
-            <pre className="max-h-96 overflow-auto p-4 font-mono text-xs whitespace-pre">
-              {d.createSql}
-            </pre>
-          </PanelBody>
-        </Panel>
+      {dialog === "createTable" && (
+        <CreateTableDialog
+          open
+          onOpenChange={() => setDialog(null)}
+          connId={conn.id}
+          schema={schema}
+          info={info}
+          onDone={tables.refresh}
+        />
       )}
-    </div>
+      {dialog === "addColumn" && table && (
+        <AddColumnDialog
+          open
+          onOpenChange={() => setDialog(null)}
+          connId={conn.id}
+          schema={schema}
+          table={table}
+          info={info}
+          onDone={detail.refresh}
+        />
+      )}
+      {dialog === "createIndex" && table && (
+        <CreateIndexDialog
+          open
+          onOpenChange={() => setDialog(null)}
+          connId={conn.id}
+          schema={schema}
+          table={table}
+          detail={d}
+          onDone={detail.refresh}
+        />
+      )}
+      {dialog === "renameTable" && table && (
+        <RenameDialog
+          open
+          onOpenChange={() => setDialog(null)}
+          connId={conn.id}
+          schema={schema}
+          table={table}
+          kind="table"
+          current={table}
+          onDone={(to) => {
+            onSelect({ schema, table: to })
+            tables.refresh()
+          }}
+        />
+      )}
+    </Pane>
   )
 }

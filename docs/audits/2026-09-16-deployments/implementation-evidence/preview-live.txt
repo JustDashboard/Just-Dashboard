@@ -1,0 +1,4 @@
+=== RUN   TestLivePreviewStorageCredentialsNetworkAndCleanup
+--- PASS: TestLivePreviewStorageCredentialsNetworkAndCleanup (11.66s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	11.681s

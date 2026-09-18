@@ -3,6 +3,7 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -48,6 +49,15 @@ type PlanningStore struct {
 	managedRoot string
 	now         func() time.Time
 	mu          sync.Mutex
+	databaseURL func(context.Context, int64, int, string) (string, error)
+	// installationTokens mints GitHub App credentials; nil until an App is
+	// connected.
+	installationTokens InstallationTokenMinter
+}
+
+func (s *PlanningStore) WithDatabaseURLResolver(resolve func(context.Context, int64, int, string) (string, error)) *PlanningStore {
+	s.databaseURL = resolve
+	return s
 }
 
 func NewPlanningStore(st *basestore.Store, sealer *auth.Sealer, deployRoots []string) *PlanningStore {
@@ -77,6 +87,9 @@ func (s *PlanningStore) OpenCredential(ctx context.Context, id int64) (Credentia
 	}
 	if !json.Valid([]byte(config)) {
 		return CredentialMaterial{}, fmt.Errorf("%w: credential configuration is malformed", ErrSourceUnavailable)
+	}
+	if kind == CredentialGitHubApp {
+		return s.openGitHubAppCredential(ctx, json.RawMessage(config))
 	}
 	return CredentialMaterial{Kind: kind, Config: json.RawMessage(config), Secret: secret}, nil
 }
@@ -275,6 +288,10 @@ func (s *PlanningStore) resolveExternalVariableReference(
 		}
 		return value, true, nil
 	case "database":
+		if s.databaseURL != nil {
+			value, err := s.databaseURL(ctx, environmentID, planRevision, reference.Target)
+			return value, true, err
+		}
 		sealed, err := s.referenceSealedValue(ctx, "db_connections", "dsn_enc", reference.Target)
 		if err != nil && strings.HasSuffix(reference.Target, ".url") {
 			sealed, err = s.referenceSealedValue(ctx, "db_connections", "dsn_enc", strings.TrimSuffix(reference.Target, ".url"))
@@ -493,6 +510,43 @@ func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 	return draft, nil
 }
 
+// ListDrafts returns the caller's own uncommitted, unexpired drafts, newest
+// first, so the new-project page can offer to resume one instead of starting
+// the wizard over. A committed or expired draft has nothing left to resume.
+func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID int64) ([]DraftSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, data_json, current_step, updated_at, expires_at
+		  FROM deploy_drafts
+		 WHERE owner_user_id = ? AND committed_project_id = 0 AND expires_at > ?
+		 ORDER BY updated_at DESC, rowid DESC`, ownerUserID, s.now().UTC().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DraftSummary{}
+	for rows.Next() {
+		var id, data string
+		var step DraftStep
+		var updated, expires int64
+		if err := rows.Scan(&id, &data, &step, &updated, &expires); err != nil {
+			return nil, err
+		}
+		var parsed DraftData
+		if json.Unmarshal([]byte(data), &parsed) != nil {
+			continue
+		}
+		summary := DraftSummary{
+			ID: id, CurrentStep: step, Source: draftSourceSummary(parsed.Source),
+			UpdatedAt: time.Unix(updated, 0).UTC(), ExpiresAt: time.Unix(expires, 0).UTC(),
+		}
+		if parsed.Intent != nil {
+			summary.Name = parsed.Intent.Name
+		}
+		out = append(out, summary)
+	}
+	return out, rows.Err()
+}
+
 func scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
 	var draft Draft
 	var data, findings string
@@ -564,8 +618,13 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
 		copy := canonicalSourceConfig(*request.Source)
-		if err := copy.Validate(); err != nil {
+		if err := copy.ValidateForDeployment(); err != nil {
 			return nil, err
+		}
+		if exists, err := s.credentialExists(ctx, copy.CredentialID); err != nil {
+			return nil, err
+		} else if !exists {
+			return nil, fmt.Errorf("%w: credential does not exist", ErrInvalidSource)
 		}
 		draft.Data.Source = &copy
 		draft.Data.Detection = nil
@@ -574,8 +633,11 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: configuration step requires only configuration data", ErrInvalidPlan)
 		}
 		copy := canonicalConfiguration(*request.Configuration)
+		if err := sealDomainProtection(&copy); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
 		if err := copy.Validate(); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		draft.Data.Configuration = &copy
 	}
@@ -613,6 +675,21 @@ func (s *PlanningStore) SaveDetection(
 		return nil, err
 	}
 	draft.Data.Detection = &detection
+	if draft.Data.Source.Mode == SourceModeBlueprint {
+		// The reviewed definition, not the browser, decides what a blueprint
+		// deployment looks like: image, volumes, checks, limits and variables
+		// come from the render and are offered to the operator to adjust.
+		name := ""
+		if draft.Data.Intent != nil {
+			name = draft.Data.Intent.Name
+		}
+		plan, err := RenderBlueprintPlan(*draft.Data.Source, name)
+		if err != nil {
+			return nil, err
+		}
+		configuration := canonicalConfiguration(plan.Configuration)
+		draft.Data.Configuration = &configuration
+	}
 	draft.CurrentStep = DraftDetection
 	draft.Revision++
 	draft.Findings = []PreflightFinding{}
@@ -873,6 +950,17 @@ func (s *PlanningStore) Commit(
 	}
 	for _, variable := range configuration.Variables {
 		value := variable.Reference
+		switch {
+		case variable.Generate > 0:
+			// Generated here and never anywhere else: the value exists only
+			// sealed, revealed on demand through the audited reveal route.
+			value, err = generatedSecret(variable.Generate)
+			if err != nil {
+				return nil, err
+			}
+		case variable.Value != "":
+			value = variable.Value
+		}
 		sealed, err := s.sealer.Seal(value)
 		if err != nil {
 			return nil, err
@@ -944,19 +1032,6 @@ func (s *PlanningStore) Commit(
 			return nil, err
 		}
 	}
-	if configuration.AutoDeploy {
-		kind := automaticTriggerKind(draft.Data.Source)
-		config := mustJSON(map[string]any{
-			"repository": draft.Data.Source.Repository, "ref": branch,
-		})
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO deploy_triggers(
-			  environment_id, name, kind, provider, config_json, enabled, created_at, updated_at)
-			VALUES(?, 'deploy on push', ?, ?, ?, 1, ?, ?)`, environmentID, kind,
-			draft.Data.Source.Provider, string(config), now.Unix(), now.Unix()); err != nil {
-			return nil, err
-		}
-	}
 	update, err := tx.ExecContext(ctx, `
 		UPDATE deploy_drafts SET committed_project_id = ?, updated_at = ?
 		 WHERE id = ? AND revision = ? AND committed_project_id = 0`,
@@ -975,6 +1050,21 @@ func (s *PlanningStore) Commit(
 	}, nil
 }
 
+// generatedSecret produces a URL- and shell-safe credential of exactly the
+// requested length from the operating system's random source.
+func generatedSecret(length int) (string, error) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	raw := make([]byte, length)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	out := make([]byte, length)
+	for i, b := range raw {
+		out[i] = alphabet[int(b)%len(alphabet)]
+	}
+	return string(out), nil
+}
+
 func validateDraftComplete(draft *Draft) error {
 	if draft.Data.Intent == nil || draft.Data.Source == nil || draft.Data.Detection == nil ||
 		draft.Data.Configuration == nil || draft.CurrentStep != DraftPreflight || draft.PlanPreview == "" {
@@ -983,11 +1073,11 @@ func validateDraftComplete(draft *Draft) error {
 	if err := draft.Data.Intent.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := draft.Data.Source.Validate(); err != nil {
+	if err := draft.Data.Source.ValidateForDeployment(); err != nil {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	return nil
 }
@@ -1007,21 +1097,6 @@ func digestBytes(parts ...[]byte) string {
 		_, _ = h.Write([]byte{0})
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
-}
-
-func automaticTriggerKind(source *DraftSourceConfig) TriggerKind {
-	switch source.Provider {
-	case "github":
-		return TriggerGitHub
-	case "gitlab":
-		return TriggerGitLab
-	case "bitbucket":
-		return TriggerBitbucket
-	case "gitea":
-		return TriggerGitea
-	default:
-		return TriggerGenericHook
-	}
 }
 
 func renderBuildPreview(build BuildPlanConfig) string {

@@ -1,13 +1,19 @@
 import { cn } from "@/lib/utils"
 
-export type Tone = "running" | "stopped" | "warning" | "critical" | "notice" | "unknown"
+/**
+ * What a status dot can be. A *state*, not a tone: `running` and `stopped` are
+ * facts about a thing, and `warning`/`danger`/`notice` are readings of it. The
+ * severe level takes the shared word from `components/tone.ts` so a component
+ * handing a level to another component does not have to translate it.
+ */
+export type DotTone = "running" | "stopped" | "warning" | "danger" | "notice" | "unknown"
 
 /** The dot's fill. */
-const DOT_TONE: Record<Tone, string> = {
+const DOT_TONE: Record<DotTone, string> = {
   running: "bg-success",
   stopped: "bg-muted-foreground",
   warning: "bg-warning",
-  critical: "bg-destructive",
+  danger: "bg-destructive",
   notice: "bg-muted-foreground",
   unknown: "bg-muted-foreground",
 }
@@ -17,11 +23,11 @@ const DOT_TONE: Record<Tone, string> = {
  * of green "running" text is as hard to scan as a column with no signal at
  * all.
  */
-const TEXT_TONE: Record<Tone, string> = {
+const TEXT_TONE: Record<DotTone, string> = {
   running: "text-foreground",
   stopped: "text-muted-foreground",
   warning: "text-warning",
-  critical: "text-destructive",
+  danger: "text-destructive",
   notice: "text-muted-foreground",
   unknown: "text-muted-foreground",
 }
@@ -32,13 +38,13 @@ const TEXT_TONE: Record<Tone, string> = {
  * (a column of green "running" is noise), but a lone check or arrow icon
  * carries the whole signal and should read as good.
  */
-const ICON_TONE: Record<Tone, string> = {
+const ICON_TONE: Record<DotTone, string> = {
   ...TEXT_TONE,
   running: "text-success",
 }
 
 /** Maps the many state vocabularies (docker, systemd, pm2) onto one signal. */
-export function toneFor(state: string | undefined): Tone {
+export function toneFor(state: string | undefined): DotTone {
   switch (state?.toLowerCase()) {
     case "running":
     case "active":
@@ -83,26 +89,46 @@ export function toneFor(state: string | undefined): Tone {
  */
 export type Verdict = "ok" | "notice" | "warning" | "critical"
 
-const VERDICT_TONE: Record<Verdict, Tone> = {
+const VERDICT_TONE: Record<Verdict, DotTone> = {
   ok: "running",
   notice: "notice",
   warning: "warning",
-  critical: "critical",
+  critical: "danger",
 }
 
 export function StatusDot({
   state,
   tone,
+  live,
   className,
 }: {
   state?: string
-  tone?: Tone
+  tone?: DotTone
+  /**
+   * This reading is arriving, not remembered.
+   *
+   * A halo that breathes out of the dot and fades, once every couple of
+   * seconds. It is deliberately not `animate-pulse` — that dims the dot itself,
+   * which on a table of twenty running containers reads as twenty things
+   * blinking for attention. Here the dot is constant and only the air around it
+   * moves, so a glance at the column still reads "all green" and a longer look
+   * reads "and it is live".
+   *
+   * Reserved for a row fed by an open socket. A polled figure is not live, and
+   * saying it is would be the interface lying about how fresh its numbers are.
+   */
+  live?: boolean
   className?: string
 }) {
+  const fill = DOT_TONE[tone ?? toneFor(state)]
+  if (!live) {
+    return <span className={cn("size-1.5 shrink-0 rounded-full", fill, className)} />
+  }
   return (
-    <span
-      className={cn("size-1.5 shrink-0 rounded-full", DOT_TONE[tone ?? toneFor(state)], className)}
-    />
+    <span className={cn("relative flex size-1.5 shrink-0", className)}>
+      <span className={cn("absolute inset-0 animate-breathe rounded-full", fill)} aria-hidden />
+      <span className={cn("relative size-1.5 rounded-full", fill)} />
+    </span>
   )
 }
 
@@ -120,17 +146,26 @@ export function StatusDot({
 export function Status({
   state,
   verdict,
+  tone: given,
   label,
+  live,
   icon: Icon,
   className,
 }: {
   state?: string
   verdict?: Verdict
+  /**
+   * The tone directly, for the callers that already hold one — a table of
+   * stacks whose six states map to tones the string vocabularies don't cover.
+   */
+  tone?: DotTone
   label?: React.ReactNode
+  /** Passed to the dot — see `StatusDot`. Ignored when an icon is given. */
+  live?: boolean
   icon?: React.ComponentType<{ className?: string }>
   className?: string
 }) {
-  const tone = verdict ? VERDICT_TONE[verdict] : toneFor(state)
+  const tone = given ?? (verdict ? VERDICT_TONE[verdict] : toneFor(state))
   return (
     <span
       className={cn(
@@ -141,7 +176,7 @@ export function Status({
       {Icon ? (
         <Icon className={cn("size-3.5 shrink-0", ICON_TONE[tone])} />
       ) : (
-        <StatusDot tone={tone} />
+        <StatusDot tone={tone} live={live} />
       )}
       <span className={TEXT_TONE[tone]}>{label ?? state ?? "unknown"}</span>
     </span>

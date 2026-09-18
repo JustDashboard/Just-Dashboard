@@ -1,0 +1,6 @@
+=== RUN   TestLiveDetectedFrameworkBuildAndServing
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/go
+--- PASS: TestLiveDetectedFrameworkBuildAndServing (26.47s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/go (26.33s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	26.493s

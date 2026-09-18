@@ -12,11 +12,52 @@ import type { GitFileChange } from "@/lib/types"
  * only marks *whether* a file changed throws that away and makes them read the
  * letter.
  *
+ * A file can be changed on both sides at once — staged, then edited again —
+ * and git reports it as one entry with two letters. The change lists draw
+ * such a file twice, once under each heading, and pass the `side` they are
+ * drawing so the letter, the tone and the sentence describe *that* side: the
+ * index's for "ready to commit", the working tree's for "changes". Callers
+ * with no side (the file tree, which marks the file once) get the side that
+ * is most recently touched — the working tree where it has anything, the
+ * index otherwise.
+ *
  * The colours are the `--git-*` tokens; every surface here is color-mix
  * against the card, so one set of hues holds on a near-black and a near-white
  * palette alike.
  */
 export type GitTone = "added" | "modified" | "deleted" | "untracked" | "renamed" | "conflict"
+
+export type GitSide = "staged" | "unstaged"
+
+const LABELS: Record<string, string> = {
+  M: "modified",
+  T: "modified",
+  A: "added",
+  D: "deleted",
+  R: "renamed",
+  C: "copied",
+  U: "conflicted",
+  "?": "untracked",
+}
+
+function conflicted(change: GitFileChange): boolean {
+  return change.label === "conflicted" || change.index === "U" || change.worktree === "U"
+}
+
+/** The status letter git itself prints for one side of the change. */
+function letterFor(change: GitFileChange, side?: GitSide): string {
+  if (change.label === "untracked") return "?"
+  if (side === "staged") return change.index || "M"
+  if (side === "unstaged") return change.worktree || change.index || "M"
+  return change.worktree || change.index || "?"
+}
+
+/** The status as a word, for one side of the change. */
+export function sideLabel(change: GitFileChange, side?: GitSide): string {
+  if (conflicted(change)) return "conflicted"
+  if (!side) return change.label
+  return LABELS[letterFor(change, side)] ?? change.label
+}
 
 /**
  * A file's tone from its status.
@@ -24,11 +65,9 @@ export type GitTone = "added" | "modified" | "deleted" | "untracked" | "renamed"
  * Conflict wins over everything: a `UU` file is "modified" by the label and is
  * the one thing in the list that will not commit.
  */
-export function gitTone(change: GitFileChange): GitTone {
-  if (change.label === "conflicted" || change.index === "U" || change.worktree === "U") {
-    return "conflict"
-  }
-  switch (change.label) {
+export function gitTone(change: GitFileChange, side?: GitSide): GitTone {
+  if (conflicted(change)) return "conflict"
+  switch (sideLabel(change, side)) {
     case "added":
       return "added"
     case "deleted":
@@ -44,18 +83,19 @@ export function gitTone(change: GitFileChange): GitTone {
 }
 
 /** The one-letter mark git itself uses, so the two agree. */
-export function gitLetter(change: GitFileChange): string {
+export function gitLetter(change: GitFileChange, side?: GitSide): string {
   if (change.label === "untracked") return "U"
-  const raw = change.staged ? change.index : change.worktree || change.index
-  return (raw || "?").toUpperCase()
+  if (conflicted(change)) return "!"
+  return letterFor(change, side).toUpperCase()
 }
 
 /** The status as a sentence, for a tooltip. */
-export function describeChange(change: GitFileChange): string {
-  const where = change.staged ? "staged" : "not staged"
-  return gitTone(change) === "conflict"
-    ? "conflicted — resolve before committing"
-    : `${change.label} · ${where}`
+export function describeChange(change: GitFileChange, side?: GitSide): string {
+  if (conflicted(change)) return "conflicted — resolve before committing"
+  const label = sideLabel(change, side)
+  const where = (side ?? (change.staged && !change.unstaged ? "staged" : "unstaged")) === "staged"
+  const renamed = change.from ? ` from ${change.from}` : ""
+  return `${label}${renamed} · ${where ? "staged" : "not staged"}`
 }
 
 /**

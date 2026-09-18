@@ -12,15 +12,8 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ReleaseList } from "@/components/update/release-notes"
 import { UpdateProgress } from "@/components/update/update-progress"
 import { Notice, Spinner } from "@/components/state"
+import { SidePanel } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 
 /**
  * "What changed", as a panel over the page rather than a page of its own.
@@ -84,84 +77,27 @@ export function ChangesSheet({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent className="w-full gap-0 p-0 sm:max-w-xl">
-          <SheetHeader className="gap-1 border-b border-hairline bg-surface-header px-5 py-4">
-            <SheetTitle className="text-[15px]">
-              {pending.length > 0 ? "What's new" : "Release notes"}
-            </SheetTitle>
-            <SheetDescription className="text-[12px]">
-              {pending.length > 0 ? (
-                <>
-                  Just Dashboard <span className="numeric">{report?.version}</span> →{" "}
-                  <span className="numeric font-medium text-foreground">{target}</span>
-                </>
-              ) : (
-                <>
-                  Just Dashboard <span className="numeric">{report?.version}</span> — the newest
-                  published version
-                </>
-              )}
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-            {report?.run && (
-              <UpdateProgress run={report.run} log={report.log} restarting={restarting} />
-            )}
-
-            {report?.check.enabled === false && (
-              <Notice title="Version checks are turned off on this install">
-                <code className="text-[11px]">JD_UPDATE_CHECK=false</code>, so the dashboard never
-                asks whether a newer version exists. The notes below are the ones compiled into the
-                version you are running.
-              </Notice>
-            )}
-            {report?.check.error && (
-              <Notice title="The last check could not reach the repository" tone="warning">
-                {report.check.error}
-              </Notice>
-            )}
-
-            {pending.length > 0 && (
-              <div className="space-y-3">
-                <p className="eyebrow">
-                  {pending.length === 1
-                    ? "In this release"
-                    : `In the ${pending.length} releases since yours`}
-                </p>
-                <ReleaseList releases={pending} />
-              </div>
-            )}
-
-            {earlier.length > 0 && (
-              <div className="space-y-3">
-                {pending.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowEarlier((v) => !v)}
-                    className="flex w-full items-center gap-1.5 rounded-lg py-1 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
-                  >
-                    <ClockRewind className="size-3.5 text-muted-foreground" />
-                    <span className="eyebrow flex-1">Earlier releases ({earlier.length})</span>
-                    <ChevronDown
-                      className={cn(
-                        "size-3.5 text-muted-foreground transition-transform",
-                        showEarlier && "rotate-180",
-                      )}
-                    />
-                  </button>
-                ) : (
-                  <p className="eyebrow">History</p>
-                )}
-                {(showEarlier || pending.length === 0) && (
-                  <ReleaseList releases={earlier} installed={report?.version} />
-                )}
-              </div>
-            )}
-          </div>
-
-          <SheetFooter className="mt-0 flex-row items-center gap-2 border-t border-hairline px-5 py-3">
+      <SidePanel
+        open={open}
+        onOpenChange={onOpenChange}
+        width="md"
+        title={pending.length > 0 ? "What's new" : "Release notes"}
+        description={
+          pending.length > 0 ? (
+            <>
+              Just Dashboard <span className="numeric">{report?.version}</span> →{" "}
+              <span className="numeric font-medium text-foreground">{target}</span>
+            </>
+          ) : (
+            <>
+              Just Dashboard <span className="numeric">{report?.version}</span> — the newest
+              published version
+            </>
+          )
+        }
+        bodyClassName="space-y-5 p-4"
+        footer={
+          <>
             <Button
               variant="ghost"
               size="sm"
@@ -177,7 +113,7 @@ export function ChangesSheet({
               )}
               Check now
             </Button>
-            <span className="flex-1 truncate text-[11px] text-muted-foreground">
+            <span className="flex-1 truncate text-hint text-muted-foreground">
               {report?.check.checkedAt ? `Checked ${relativeTime(report.check.checkedAt)}` : ""}
             </span>
             {canInstall && (
@@ -192,9 +128,65 @@ export function ChangesSheet({
                 Updating
               </Button>
             )}
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </>
+        }
+      >
+        <>
+          {report?.run && (
+            <UpdateProgress run={report.run} log={report.log} restarting={restarting} />
+          )}
+
+          {report?.check.enabled === false && (
+            <Notice title="Version checks are turned off on this install">
+              <code className="text-hint">JD_UPDATE_CHECK=false</code>, so the dashboard never asks
+              whether a newer version exists. The notes below are the ones compiled into the version
+              you are running.
+            </Notice>
+          )}
+          {report?.check.error && (
+            <Notice title="The last check could not reach the repository" tone="warning">
+              {report.check.error}
+            </Notice>
+          )}
+
+          {pending.length > 0 && (
+            <div className="space-y-3">
+              <p className="eyebrow">
+                {pending.length === 1
+                  ? "In this release"
+                  : `In the ${pending.length} releases since yours`}
+              </p>
+              <ReleaseList releases={pending} />
+            </div>
+          )}
+
+          {earlier.length > 0 && (
+            <div className="space-y-3">
+              {pending.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowEarlier((v) => !v)}
+                  className="flex w-full items-center gap-1.5 rounded-lg py-1 text-left focus-ring"
+                >
+                  <ClockRewind className="size-3.5 text-muted-foreground" />
+                  <span className="eyebrow flex-1">Earlier releases ({earlier.length})</span>
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 text-muted-foreground transition-transform",
+                      showEarlier && "rotate-180",
+                    )}
+                  />
+                </button>
+              ) : (
+                <p className="eyebrow">History</p>
+              )}
+              {(showEarlier || pending.length === 0) && (
+                <ReleaseList releases={earlier} installed={report?.version} />
+              )}
+            </div>
+          )}
+        </>
+      </SidePanel>
       {dialog}
     </>
   )

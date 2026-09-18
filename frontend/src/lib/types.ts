@@ -5,7 +5,12 @@ export type Role = "admin" | "limited" | "readonly"
 
 export type DashboardUser = {
   id: number
+  /** The sign-in key: lower case, one word, what the audit log names. */
   username: string
+  /** The name shown — the username as typed at creation until it is changed. */
+  displayName: string
+  /** When the picture was last set, or 0 for none; the avatar URL's cache key. */
+  avatarVersion: number
   role: Role
   totpEnabled: boolean
   disabled: boolean
@@ -20,6 +25,7 @@ export type AuthStatus = {
   capabilities?: Capability[]
   needsTotp: boolean
   needsEnrollment: boolean
+  needsPasswordChange?: boolean
   require2fa: boolean
 }
 
@@ -67,6 +73,32 @@ export type Snapshot = {
   pressure: Pressure
   sockets: Sockets
   procs: ProcCounts
+  /** Live-only readings the recorder does not keep; absent on an older backend. */
+  files?: FileHandles
+  sensors?: SensorReading[] | null
+}
+
+/**
+ * Open file descriptions against the kernel's ceiling.
+ *
+ * `max` is 0 when the kernel reports no real limit — some container runtimes
+ * hand out the 64-bit maximum — so a page must not divide by it.
+ */
+export type FileHandles = {
+  open: number
+  max: number
+}
+
+/**
+ * One temperature the board reports. `high` and `critical` are the sensor's
+ * own thresholds, 0 where the driver has none: a CPU package idles where an
+ * NVMe drive throttles, and only the driver knows which this is.
+ */
+export type SensorReading = {
+  name: string
+  tempC: number
+  high: number
+  critical: number
 }
 
 /**
@@ -362,6 +394,60 @@ export type DirEntry = {
 
 export type ContainerPort = { ip?: string; privatePort: number; publicPort?: number; type: string }
 
+/**
+ * Where a published port can be reached from, as far as the binding alone can
+ * say. `0.0.0.0:5432` and `127.0.0.1:5432` are one character apart and could
+ * not differ more in consequence; every panel used to draw them identically.
+ *
+ * The vocabulary is about binding, not reachability. Docker publishes a port
+ * with NAT rules the firewall never sees, so "bound to every interface" is a
+ * fact and "reachable from the internet" is a conclusion that needs the
+ * firewall too — see PortRoute, which is where that conclusion is drawn.
+ */
+export type PortScope = "loopback" | "private" | "all" | "internal"
+
+export type PortExposure = {
+  hostIp?: string
+  hostPort?: number
+  containerPort: number
+  protocol: string
+  scope: PortScope
+  ipv6?: boolean
+  /** The badge. */
+  label: string
+  /** The sentence behind it. */
+  summary: string
+}
+
+/** One published port traced from the container out to the firewall. */
+export type PortRoute = {
+  hostIp?: string
+  hostPort: number
+  containerPort: number
+  protocol: string
+  public: boolean
+  scope: PortScope
+  label: string
+  binding: string
+  vhost?: string
+  url?: string
+  tls?: boolean
+  firewall: {
+    known: boolean
+    backend?: string
+    enabled?: boolean
+    verdict: "allowed" | "denied" | "default" | "unknown"
+    rule?: string
+    defaultIncoming?: string
+    /** Docker's NAT rules are consulted before ufw's filter chain. */
+    dockerBypass?: boolean
+  }
+  reach: "server-only" | "proxied" | "external" | "blocked" | "unknown"
+  reasoning: string
+  /** True when the verdict was worked out rather than read. */
+  inferred: boolean
+}
+
 export type Container = {
   id: string
   names: string[]
@@ -382,6 +468,19 @@ export type Container = {
   composeService?: string
   /** Writable-layer size. Present only when the listing was asked for sizes. */
   sizeRw?: number
+  /** The port list with its meaning attached, computed on the server. */
+  exposure: PortExposure[]
+  /**
+   * What the container was told it may use, and whether anything watches it.
+   * Only running containers are inspected for these — `inspected` says whether
+   * a zero here is an answer or an absence.
+   */
+  memoryLimit?: number
+  cpuLimit?: number
+  hasHealthcheck: boolean
+  restartPolicy?: string
+  privileged?: boolean
+  inspected: boolean
 }
 
 export type ContainerDetail = Container & {
@@ -427,6 +526,13 @@ export type ContainerStats = {
   netTx: number
   blockRead: number
   blockWrite: number
+  /** True only when somebody set a limit. Docker reports host RAM otherwise. */
+  memLimited: boolean
+  /** Of the whole machine, and therefore always meaningful. */
+  memHostPercent?: number
+  /** 100% is one core. hostCpus is what the reader needs to know that. */
+  hostCpus?: number
+  cpuLimit?: number
   pids: number
   onlineCpus: number
   /** Cumulative nanosecond totals. Only meaningful as a difference between two samples. */
@@ -489,19 +595,37 @@ export type ComposeService = {
   missing?: boolean
 }
 
+/**
+ * A compose stack is two objects wearing one name: a *configuration* on disk,
+ * which may never have been deployed, and a *deployed project*, a set of
+ * containers Docker labelled. `running/total` used to count containers on both
+ * sides of the slash, so a stack that existed only as a file read "0/0 up".
+ */
+export type StackState = "running" | "partial" | "degraded" | "stopped" | "not-deployed" | "unknown"
+
 export type ComposeStack = {
   name: string
   workingDir: string
   configFiles: string[]
   services: ComposeService[]
   running: number
+  /** Services the compose file declares — not containers that exist. */
   total: number
   managed: boolean
+  declared: string[]
+  /** "compose" resolves includes and profiles; "file" is a direct YAML read. */
+  declaredSource?: "compose" | "file"
+  containers: number
+  deployed: boolean
+  /** Running containers this project labels that the file no longer declares. */
+  orphans: string[]
+  state: StackState
+  /** The sentence: "Running · 4/4 services", "Not deployed · 3 services defined". */
+  summary: string
 }
 
 export type StackDetail = ComposeStack & {
   configPath?: string
-  declared: string[]
   declaredError?: string
   git?: {
     path: string
@@ -527,9 +651,22 @@ export type ComposeValidation = {
  * `action` names a remedy the UI turns into a button; the empty ones are
  * findings whose fix is outside this panel.
  */
+export type Severity = "critical" | "warning" | "recommendation" | "info"
+
+/**
+ * What kind of problem this is, which decides whether it belongs to runtime
+ * health or to attention. Mixing the two is what let the overview say "all
+ * good" above a containers page full of security warnings.
+ */
+export type FindingClass =
+  "runtime" | "security" | "storage" | "configuration" | "exposure" | "lifecycle"
+
 export type DockerFinding = {
   id: string
+  /** Derived from `severity`; kept for older bundles. Prefer `severity`. */
   level: "critical" | "warning" | "notice"
+  severity: Severity
+  class: FindingClass
   title: string
   detail: string
   advice?: string
@@ -540,11 +677,44 @@ export type DockerFinding = {
   actionLabel?: string
 }
 
+/** What Docker itself reports about what is running. Clears itself. */
+export type RuntimeHealth = {
+  total: number
+  running: number
+  exited: number
+  created: number
+  restarting: number
+  paused: number
+  dead: number
+  removing: number
+  /** Of the running containers. `noHealthcheck` is what makes "all healthy" honest. */
+  healthy: number
+  unhealthy: number
+  starting: number
+  noHealthcheck: number
+  status: "ok" | "notice" | "warning" | "critical"
+  summary: string
+}
+
+/** Everything else: posture, storage, configuration, exposure. Never "health". */
+export type AttentionSummary = {
+  critical: number
+  warning: number
+  recommendations: number
+  info: number
+  /** critical + warning — what is wrong now, as opposed to what could be better. */
+  issues: number
+  total: number
+}
+
 export type DockerDiagnosis = {
+  /** The worst of everything. Never render this as "health" — see `runtime`. */
   status: "ok" | "notice" | "warning" | "critical"
   findings: DockerFinding[]
   checkedAt: string
   checked: number
+  runtime: RuntimeHealth
+  attention: AttentionSummary
 }
 
 /** One line of `docker system df`. */
@@ -561,16 +731,66 @@ export type DockerDiskUsageLine = {
   reclaimable: number
 }
 
+/** What one figure on the disk page actually measures. */
+export type DiskDefinition = {
+  key: string
+  label: string
+  measures: string
+  excludes?: string
+  /** Which Docker API it came from — two figures from different ones may not be comparable. */
+  source: string
+}
+
+/** One container's writable layer. */
+export type ContainerDisk = {
+  id: string
+  name: string
+  state: string
+  stack?: string
+  /** Written into the container's own filesystem. Volumes and bind mounts excluded. */
+  sizeRw: number
+  /** Writable layer plus the image beneath it — Docker's "virtual size". */
+  sizeRootFs: number
+}
+
 export type DockerDiskUsage = {
   layersSize: number
+  /** Every image's own size, summed. Larger than what the disk holds. */
   imagesSize: number
   containersSize: number
   volumesSize: number
   buildCacheSize: number
+  /**
+   * The gap between adding up every image's size and what the images occupy.
+   * Both figures are true; naming the difference is what stops the page
+   * reading as arithmetic that does not work.
+   */
+  sharedLayers: number
+  writable: ContainerDisk[]
+  definitions: DiskDefinition[]
   images: DockerDiskUsageLine
   containers: DockerDiskUsageLine
   volumes: DockerDiskUsageLine
   buildCache: DockerDiskUsageLine
+}
+
+/** One category of removable thing, with what removing it costs. */
+export type CleanupCategory = {
+  key: string
+  label: string
+  items: number
+  reclaimable: number
+  cost: string
+  /** Exactly one category destroys data. */
+  destroys: boolean
+  examples: string[]
+  recommended: boolean
+}
+
+export type CleanupPreview = {
+  categories: CleanupCategory[]
+  safeTotal: number
+  summary: string
 }
 
 export type PruneReport = {
@@ -592,6 +812,19 @@ export type DockerEvent = {
   exitCode?: string
   message: string
   level: "info" | "notice" | "error"
+  /**
+   * Who did this, as far as the event can say. "dashboard" is set by the
+   * server after correlating against the audit log — Docker records what
+   * happened and never who asked, so anything else is "external".
+   */
+  source: "dashboard" | "compose" | "daemon" | "docker"
+  trigger?: {
+    auditId: number
+    action: string
+    actor: string
+    /** Always "likely": a time window and a name, not a causal record. */
+    confidence: string
+  }
 }
 
 export type DockerEventFeed = {
@@ -604,7 +837,8 @@ export type DockerEventFeed = {
 /** Whether the tag a container runs still points where it did when pulled. */
 export type ImageUpdateStatus = {
   ref: string
-  state: "current" | "outdated" | "unknown" | "local"
+  /** `pinned` is a digest reference: it cannot change, so there is nothing to check. */
+  state: "current" | "outdated" | "unknown" | "local" | "pinned"
   localDigest?: string
   remoteDigest?: string
   reason?: string
@@ -637,6 +871,14 @@ export type ImageDetail = {
     tags: string[]
   }[]
   usedBy: { id: string; name: string; state: string; stack?: string; service?: string }[]
+  /** What the reference is, and therefore what can be done with it. */
+  kind: "tag" | "digest" | "id" | "dangling" | "unknown"
+  ref: string
+  pullable: boolean
+  checkable: boolean
+  movingTag: boolean
+  dangling: boolean
+  localBuild: boolean
 }
 
 export type VolumeUser = {
@@ -669,6 +911,162 @@ export type NetworkDetail = DockerNetwork & {
   options?: Record<string, string>
   members: NetworkMember[]
   system: boolean
+}
+
+/**
+ * Where a container's writable layer went, with how it was measured attached.
+ * "Writable layer: 38.7 GB" is true and useless; which directory holds it, and
+ * whether that directory survives a recreate, is the answer.
+ */
+export type WritableEntry = {
+  path: string
+  size: number
+  /** The mount covering this path, empty when nothing does. */
+  mounted?: string
+  /** Inferred from the path — labelled as inferred wherever it is shown. */
+  persistent: boolean
+  kind: "data" | "logs" | "cache" | "temporary" | "other"
+}
+
+export type WritableLayerReport = {
+  containerId: string
+  name: string
+  measuredAt: string
+  /** Docker's figure. `accounted` is what the breakdown adds up to. */
+  total: number
+  accounted: number
+  state: "measured" | "unavailable" | "failed"
+  method?: string
+  reason?: string
+  entries: WritableEntry[]
+  /** Directories holding data that no volume covers — the point of the feature. */
+  unbacked: WritableEntry[]
+}
+
+export type MigrationPlan = {
+  container: string
+  service?: string
+  stack?: string
+  path: string
+  size: number
+  volume: string
+  steps: { title: string; detail: string; reversible: boolean }[]
+  commands: string[]
+  composePatch?: string
+  warnings: string[]
+}
+
+/** Why a container is not working, with the reasoning shown. */
+export type FailureDiagnosis = {
+  containerId: string
+  name: string
+  checkedAt: string
+  state: "running" | "stopped" | "looping" | "unhealthy" | "flapping" | "unknown"
+  headline: string
+  /** The inferred cause. Always worded as "likely" when it is one. */
+  likely?: string
+  /** "observed" when the evidence states it outright, "inferred" when worked out. */
+  confidence: "observed" | "inferred"
+  evidence: {
+    label: string
+    value: string
+    source: string
+    weight: "decisive" | "supporting" | "context"
+  }[]
+  restarts: {
+    count: number
+    window?: string
+    recent: number
+    looping: boolean
+    since?: string
+    summary?: string
+  }
+  suggestions: string[]
+  /** The range worth reading logs over — the failure, not the tail. */
+  logWindow?: { since: string; until: string; reason: string }
+}
+
+/** A change in behaviour read out of recorded history. Always inferred. */
+export type Anomaly = {
+  id: string
+  severity: Severity
+  class: FindingClass
+  title: string
+  detail: string
+  advice?: string
+  metric: string
+  window: string
+  inferred: boolean
+}
+
+export type AnomalyReport = {
+  container: string
+  window: string
+  samples: number
+  anomalies: Anomaly[]
+  note?: string
+}
+
+/** What a deploy is expected to change, before it changes it. */
+export type ServiceChange = {
+  name: string
+  change: "recreate" | "start" | "create" | "remove" | "unchanged"
+  reason: string
+  fields: string[]
+  imageBefore?: string
+  imageAfter?: string
+  inferred: boolean
+}
+
+export type DiffLine = {
+  kind: "same" | "added" | "removed" | "gap"
+  text: string
+  section?: string
+}
+
+export type DeployPreview = {
+  project: string
+  action: string
+  services: ServiceChange[]
+  recreate: number
+  start: number
+  unchanged: number
+  create: number
+  remove: number
+  /** The one number that means data is destroyed. Almost always empty. */
+  volumesRemoved: string[]
+  volumesKept: string[]
+  diff: DiffLine[]
+  diffAgainst?: string
+  summary: string
+  /** What this cannot know. Compose makes the final call. */
+  caveats: string[]
+}
+
+/** One recorded state of a compose project, so a change is reversible. */
+export type StackDeployment = {
+  id: number
+  project: string
+  workingDir?: string
+  createdAt: string
+  configHash: string
+  /** Only on the single-record route; the list omits it. */
+  config?: string
+  services: string[]
+  /** What each service was actually running — the digest, not the tag. */
+  imageDigests: Record<string, string>
+  envHash?: string
+  gitCommit?: string
+  gitBranch?: string
+  gitDirty?: boolean
+  actor?: string
+  source?: string
+  action?: string
+  result?: string
+  detail?: string
+  /** Only on the single-record route: whether the images still exist. */
+  restorable?: boolean
+  missing?: string[]
 }
 
 export type FileChange = { path: string; kind: "modified" | "added" | "deleted" }
@@ -751,6 +1149,7 @@ export type ResourceLimits = {
 }
 
 export type CreateResult = {
+  ports: PortMapping[]
   id: string
   name: string
   warnings: string[]
@@ -761,6 +1160,9 @@ export type SpecPreview = { run: string; compose: string }
 
 export type PM2Process = {
   id: number
+  daemonId: string
+  logsAvailable?: boolean
+  logsUnavailableReason?: string
   name: string
   namespace: string
   status: string
@@ -779,6 +1181,51 @@ export type PM2Process = {
   nodeVersion: string
   user: string
   watching: boolean
+  interpreter?: string
+  version?: string
+  autorestart: boolean
+  maxMemoryRestart?: number
+  createdAtMs?: number
+}
+
+/** One account's PM2 daemon: whether what it runs would survive a reboot. */
+export type PM2Daemon = {
+  account: string
+  home: string
+  /** When `pm2 save` last wrote the resurrection list; absent when it never has. */
+  dumpSavedAt?: string
+  /** The systemd unit `pm2 startup` installed for this account, if any. */
+  startupUnit?: string
+}
+
+export type PM2Inventory = {
+  available: boolean
+  processes: PM2Process[] | null
+  daemons?: PM2Daemon[]
+}
+
+export type PM2StartRequest = {
+  account: string
+  script: string
+  name?: string
+  cwd?: string
+  interpreter?: string
+  /** 0 or 1 is one fork; 2+ is a cluster of that size; -1 is one per CPU. */
+  instances?: number
+  watch?: boolean
+  maxMemoryRestart?: string
+  args?: string[]
+}
+
+export type SystemdTimer = {
+  unit: string
+  activates: string
+  activeState: string
+  subState: string
+  unitFileState: string
+  enabled: boolean
+  next?: string
+  last?: string
 }
 
 export type SystemdUnit = {
@@ -823,6 +1270,34 @@ export type ProcessRow = {
   state: "running" | "sleeping" | "blocked" | "stopped" | "zombie" | "other"
   manager: "pm2" | "systemd" | "container" | "session" | "kernel" | "unmanaged"
   managerName?: string
+  /** Detail only: what it listens on and how many connections it holds. */
+  listening?: ListeningPort[]
+  connections?: number
+  openFilesLimit?: number
+}
+
+export type ListeningPort = {
+  proto: string
+  address: string
+  port: number
+}
+
+/** A process as seen from another's detail: enough to recognise and open it. */
+export type ProcessLink = {
+  pid: number
+  name: string
+  cmdline: string
+  username: string
+  state: ProcessRow["state"]
+  cpuPercent: number
+  rss: number
+  createTime: string
+}
+
+export type ProcessTree = {
+  /** Outermost first, ending with the direct parent. */
+  ancestors: ProcessLink[]
+  children: ProcessLink[]
 }
 
 export type ProcessFacet = {
@@ -1152,6 +1627,8 @@ export type Certificate = {
   selfSigned: boolean
   source: string
   error?: string
+  /** The nginx sites whose ssl_certificate points at this file. */
+  usedBy: string[]
 }
 
 export type Listener = {
@@ -1407,7 +1884,7 @@ export type RedisKeyInfo = {
 
 export type RedisPage = {
   keys: RedisKeyInfo[]
-  cursor: number
+  cursor: string
   done: boolean
 }
 
@@ -1607,11 +2084,122 @@ export type BackupJob = {
   }
   schedule: string
   retention: number
+  /** Prunes artifacts older than this many days; 0 keeps by count alone. */
+  retentionDays: number
   enabled: boolean
   createdAt: string
   hasCredentials: boolean
   lastRun?: BackupRun
   nextRun?: string
+  /** When the newest successful artifact was taken. */
+  lastSuccessAt?: string
+  /** A scheduled job that has gone two intervals without a successful run. */
+  overdue: boolean
+  /** The retained artifacts and what they add up to. */
+  stored: { runs: number; bytes: number }
+  sqlitePaths?: string[]
+  // Saved database connections whose native dump every run captures.
+  databaseDumps?: number[]
+  /** Containers frozen for the archive step, so their volumes are quiet. */
+  pauseContainers?: string[]
+  recovery?: BackupRecoveryPlan
+}
+
+export type BackupResourceKind =
+  "dashboard" | "proxy" | "volume" | "stack" | "deployment" | "repository" | "database"
+
+/**
+ * One thing the dashboard already knows about that a backup could protect,
+ * with the job it would write for it and the jobs that already cover it.
+ */
+export type BackupResource = {
+  kind: BackupResourceKind
+  id: string
+  name: string
+  detail?: string
+  paths?: string[]
+  connectionId?: number
+  suggest: {
+    name: string
+    sources: string[]
+    excludes?: string[]
+    sqlitePaths?: string[]
+    databaseDumps?: number[]
+    pauseContainers?: string[]
+  }
+  coveredBy: { jobId: number; jobName: string; enabled: boolean }[]
+  protected: boolean
+  lastBackupAt?: string
+}
+
+export type BackupResourceReport = {
+  resources: BackupResource[]
+  unavailable: Record<string, string>
+}
+
+export type BackupArchiveEntry = {
+  name: string
+  size: number
+  mode: string
+  isDir: boolean
+}
+
+export type BackupRestoreResult = {
+  runId: number
+  destination: string
+  entries: number
+  bytes: number
+  skipped?: string[]
+  targets?: string[]
+}
+
+export type BackupDatabaseDump = {
+  connectionId: number
+  name: string
+  driver: string
+  database: string
+  method: string
+  file: string
+  archivePath: string
+  digest: string
+  bytes: number
+}
+
+export type BackupManifest = {
+  version: number
+  artifactDigest: string
+  complete: boolean
+  sources?: { path: string; archivePath: string }[]
+  databaseDumps?: BackupDatabaseDump[]
+  pausedContainers?: string[]
+}
+
+export type BackupRecoveryPlan = {
+  image: string
+  command: string[]
+  schemaVersion: string
+  expectedOutputDigest: string
+  timeoutSeconds: number
+  maxBytes: number
+  automatic: boolean
+}
+
+export type BackupRestoreVerification = {
+  id: number
+  runId: number
+  state: "running" | "passed" | "failed" | "cleanup_failed"
+  startedAt: string
+  endedAt?: string
+  artifactDigest: string
+  manifestDigest: string
+  planDigest: string
+  applicationImage?: string
+  schemaVersion: string
+  outputDigest?: string
+  entries: number
+  bytes: number
+  cleanupComplete: boolean
+  detail?: string
 }
 
 export type BackupRun = {
@@ -1625,6 +2213,8 @@ export type BackupRun = {
   log: string
   trigger: string
   duration?: string
+  manifest?: BackupManifest
+  restoreVerification?: BackupRestoreVerification
 }
 
 export type DeployProject = {
@@ -1698,6 +2288,8 @@ export type DeploymentStepState =
 
 export type DeploymentEngineRun = {
   id: number
+  runNumber: number
+  sourceRevision?: string
   projectId: number
   environmentId: number
   state: DeploymentRunState
@@ -1752,6 +2344,404 @@ export type DeploymentRunEvent = {
   data: Record<string, unknown>
 }
 
+export type DeploymentRuntimeService = {
+  containerId: string
+  name: string
+  releaseId: number
+  liveRelease: boolean
+  state: string
+  health: string
+  imageId: string
+  stack?: string
+  service?: string
+  startedAt?: string
+}
+
+export type DeploymentRuntimeServices = {
+  status: "available" | "unavailable"
+  reason?: string
+  observedAt: string
+  services: DeploymentRuntimeService[]
+}
+
+export type DockerTemplate = {
+  id: string
+  name: string
+  blurb: string
+  category: "http" | "database" | "tool" | "automation" | "game"
+  requires?: string
+  docsUrl: string
+  license: string
+  spec: ContainerSpec
+}
+
+export type BlueprintSummary = {
+  deploymentSupported?: boolean
+  unavailableReason?: string
+  id: string
+  version: string
+  name: string
+  category: "http" | "database" | "tool" | "automation" | "game"
+  profile: "web" | "database" | "tool" | "worker" | "game" | "compose"
+  description: string
+  iconId: string
+  docsUrl: string
+  license: string
+  maintainer: string
+  reviewedAt: string
+  image: string
+  memoryMb: number
+  requiresAcceptance?: boolean
+  privileged?: boolean
+}
+
+export type BlueprintChoice = {
+  value: string
+  label: string
+  description?: string
+  image?: string
+}
+
+export type BlueprintInput = {
+  name: string
+  kind: "text" | "number" | "boolean" | "choice" | "domain" | "memory" | "accept"
+  label: string
+  description?: string
+  default?: string
+  required?: boolean
+  advanced?: boolean
+  minimum?: number
+  maximum?: number
+  pattern?: string
+  choices?: BlueprintChoice[]
+  variable?: string
+  acceptUrl?: string
+}
+
+export type BlueprintProperty = {
+  key: string
+  kind: "text" | "number" | "boolean" | "choice"
+  label: string
+  description?: string
+  default?: string
+  minimum?: number
+  maximum?: number
+  choices?: BlueprintChoice[]
+}
+
+export type BlueprintConfigFile = {
+  path: string
+  label: string
+  format: "properties" | "yaml" | "json" | "toml" | "raw"
+  description?: string
+  restartRequired?: boolean
+  properties?: BlueprintProperty[]
+}
+
+export type BlueprintAutomation = {
+  name: string
+  description: string
+  cron: string
+  timezone?: string
+  actions: string[]
+  default?: boolean
+}
+
+export type BlueprintDetail = BlueprintSummary & {
+  provenance: {
+    maintainer: string
+    license: string
+    upstreamUrl: string
+    reviewedAt: string
+    minimumDashboard: string
+    updateNotes?: string
+  }
+  inputs?: BlueprintInput[]
+  secrets?: {
+    name: string
+    variable: string
+    label: string
+    description?: string
+    length: number
+  }[]
+  ports?: {
+    name: string
+    internal: number
+    protocol: string
+    purpose: string
+    exposure: "proxy" | "direct" | "internal"
+    primary?: boolean
+  }[]
+  volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+  resources: { memoryMb: number; minMemoryMb: number; cpus?: number }
+  files?: BlueprintConfigFile[]
+  automation?: BlueprintAutomation[]
+  update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
+}
+
+export type GameImportPreview = {
+  root: string
+  edition: string
+  software: string
+  version?: string
+  evidence: { path: string; reason: string }[]
+  worldPaths: string[]
+  modPaths: string[]
+  configPaths: string[]
+  logPaths: string[]
+  ignoredPaths: string[]
+  properties?: Record<string, string>
+  port?: number
+  totalBytes: number
+  eulaAccepted: boolean
+  warnings: string[]
+}
+
+export type GameVersionList = {
+  status: "available" | "stale" | "unavailable"
+  reason?: string
+  source: string
+  checkedAt: string
+  versions: {
+    id: string
+    kind: string
+    releasedAt?: string
+    recommended?: boolean
+    latest?: boolean
+  }[]
+  recommended?: string
+}
+
+export type GamePlayers = {
+  supported: boolean
+  status: "available" | "unavailable" | "unsupported"
+  reason?: string
+  online: number
+  maximum: number
+  names: string[]
+  observedAt: string
+}
+
+export type GameOverview = {
+  status: "available" | "unavailable"
+  reason?: string
+  blueprintId?: string
+  edition?: string
+  containerId?: string
+  address?: string
+  players?: GamePlayers
+  console: boolean
+  files: BlueprintConfigFile[]
+}
+
+export type GameConsoleResult = {
+  command: string
+  output: string
+  exitCode: number
+  executedAt: string
+}
+
+export type GameProperties = {
+  status: "available" | "unavailable"
+  reason?: string
+  path?: string
+  raw?: string
+  values?: Record<string, string>
+  known: BlueprintProperty[]
+  restartRequired?: boolean
+}
+
+export type BlueprintRenderedPlan = {
+  detection: { source: { kind: string; repository?: string; ref?: string; digest?: string } }
+  configuration: DeploymentConfiguration
+  rendered: {
+    blueprintId: string
+    blueprintVersion: string
+    profile: string
+    image: string
+    memoryMb: number
+    digest: string
+    variables: {
+      name: string
+      value?: string
+      sensitivity: string
+      generated?: boolean
+      length?: number
+      label?: string
+    }[]
+    ports: {
+      name: string
+      internal: number
+      protocol: string
+      exposure: string
+      purpose: string
+      primary?: boolean
+    }[]
+    volumes: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+    checks: { name: string; kind: string; phase: string; required: boolean }[]
+    domains?: string[]
+    acceptances?: { input: string; label: string; url: string }[]
+    stopCommands?: string[]
+  }
+  summary: BlueprintSummary
+  inputs: BlueprintInput[]
+  automation: BlueprintAutomation[]
+  files: BlueprintConfigFile[]
+}
+
+export type DeploymentDiagnosisFinding = {
+  code: string
+  severity: "critical" | "warning" | "notice"
+  title: string
+  measured: string
+  means: string
+  action: string
+  owner: string
+  deepLink?: string
+  external?: boolean
+}
+
+export type DeploymentDiagnosis = {
+  status: "assessed" | "partial"
+  findings: DeploymentDiagnosisFinding[]
+  silences: { subject: string; reason: string }[]
+}
+
+export type DeploymentDomainRoute = {
+  hostname: string
+  https: boolean
+  ownership: DeploymentOwnership
+  route: "served" | "missing" | "foreign" | "conflict" | "unavailable"
+  servedBy?: string
+  certificate: "valid" | "expiring" | "expired" | "missing" | "not requested" | "unavailable"
+  certificateName?: string
+  certificateDaysLeft?: number
+  deepLink?: string
+  certificateLink?: string
+  protected?: boolean
+}
+
+export type DeploymentStorageMount = {
+  source: string
+  target: string
+  kind: "volume" | "bind"
+  readOnly?: boolean
+  ownership: DeploymentOwnership
+  status: "present" | "missing" | "unavailable"
+  detail?: string
+  deepLink?: string
+}
+
+export type DeploymentBackupJob = {
+  resourceId: string
+  required: boolean
+  status: "present" | "missing" | "unavailable"
+  lastStatus?: string
+  fresh: boolean
+  detail?: string
+  deepLink?: string
+}
+
+export type DeploymentDependencyItem = {
+  kind: string
+  resourceKind: string
+  resourceId: string
+  available: boolean
+  fresh?: boolean
+  status?: string
+  detail?: string
+  deepLink?: string
+}
+
+export type DeploymentOperations = {
+  observedAt: string
+  releaseId?: number
+  evidence: "release" | "none"
+  reason?: string
+  runtime: DeploymentRuntimeServices
+  domains: {
+    status: "available" | "unavailable"
+    reason?: string
+    siteName?: string
+    domains: DeploymentDomainRoute[]
+  }
+  storage: {
+    status: "available" | "unavailable"
+    reason?: string
+    mounts: DeploymentStorageMount[]
+  }
+  backups: {
+    status: "available" | "unavailable"
+    reason?: string
+    jobs: DeploymentBackupJob[]
+  }
+  dependencies: {
+    status: "available" | "unavailable"
+    reason?: string
+    items: DeploymentDependencyItem[]
+  }
+  diagnosis: DeploymentDiagnosis
+}
+
+export type ReleaseFieldChange = {
+  field: string
+  from: string
+  to: string
+  changed: boolean
+}
+
+export type ReleaseListChange = {
+  name: string
+  change: "added" | "removed" | "changed" | "unchanged"
+  from?: string
+  to?: string
+  detail?: string
+  secret?: boolean
+}
+
+export type ReleaseArtifactStatus = {
+  kind: string
+  reference: string
+  digest: string
+  sizeBytes: number
+  state: string
+  retained: boolean
+  reason: string
+}
+
+export type ReleaseComparison = {
+  fromReleaseId: number
+  toReleaseId: number
+  changes: Record<string, boolean>
+  detail: {
+    status: "available" | "unavailable"
+    reason?: string
+    fields: ReleaseFieldChange[]
+    variables: ReleaseListChange[]
+    dependencies: ReleaseListChange[]
+    checks: ReleaseListChange[]
+    domains: ReleaseListChange[]
+  }
+  artifacts: ReleaseArtifactStatus[]
+}
+
+export type ReleaseUpdateStatus = {
+  status: "available" | "unavailable"
+  reason?: string
+  reference?: string
+  state?: "current" | "outdated" | "unknown" | "local" | "pinned"
+  localDigest?: string
+  remoteDigest?: string
+  checkedAt?: string
+}
+
+export type ReleaseComparisonResponse = {
+  comparison: ReleaseComparison | null
+  update: ReleaseUpdateStatus
+  artifacts: ReleaseArtifactStatus[]
+  reason?: string
+}
+
 export type DeploymentSummary = {
   id: number
   name: string
@@ -1773,9 +2763,98 @@ export type DeploymentSummary = {
   hostPort?: number
   health: string
   pendingChanges: boolean
+  /** The live release's runtime was stopped on purpose and waits for Start. */
+  stopped?: boolean
+  /** Services in the live release's runtime: one, or a Compose stack's count. */
+  serviceCount?: number
   lastRun?: DeploymentEngineRun
   activeRun?: DeploymentEngineRun
   updatedAt: string
+}
+
+/** The commit a Git run built, recorded in the run's metadata under `commit`. */
+export type DeploymentCommit = {
+  sha: string
+  subject?: string
+  author?: string
+  authoredAt?: string
+}
+
+export type DeploymentGitPolicy = {
+  automatic: boolean
+  watchInclude: string[]
+  watchExclude: string[]
+  commitStatuses?: boolean
+  revision: number
+  inherited?: boolean
+  conflict?: boolean
+}
+
+export type DeploymentGitWatch = {
+  automatic: boolean
+  branch?: string
+  status: string
+  checkedAt?: string
+  intervalSeconds: number
+  reason?: string
+  policy?: DeploymentGitPolicy
+}
+
+/** One page of a project's run history, newest first. */
+export type DeploymentRunsPage = {
+  runs: DeploymentEngineRun[]
+  running: boolean
+  /** The cursor for the next page, present only when older runs exist. */
+  nextBefore?: number
+}
+
+/** A provider or generic hook delivery the trigger received. */
+export type DeploymentTriggerDelivery = {
+  deliveryId: string
+  event: string
+  ref?: string
+  decision: string
+  reason?: string
+  runId?: number
+  receivedAt: string
+}
+
+/** An unfinished project setup the caller can resume from `/deploy/new?draft=`. */
+export type DeploymentDraftSummary = {
+  id: string
+  name?: string
+  source?: string
+  currentStep: DeploymentDraft["currentStep"]
+  updatedAt: string
+  expiresAt: string
+}
+
+export type DeploymentInsights = {
+  projectId: number
+  windowDays: number
+  generatedAt: string
+  runs: number
+  succeeded: number
+  failed: number
+  rolledBack: number
+  cancelled: number
+  successRate: number
+  failureStreak: number
+  medianDurationSeconds: number
+  p95DurationSeconds: number
+  deploysPerWeek: number
+  meanRecoverySeconds: number
+  recoveredFailures: number
+  lastSuccessAt?: string
+  lastFailureAt?: string
+  daily: {
+    date: string
+    succeeded: number
+    failed: number
+    cancelled: number
+    medianDurationSeconds: number
+  }[]
+  topFailures: { code: string; count: number }[]
 }
 
 export type DeploymentRelease = {
@@ -1797,6 +2876,118 @@ export type DeploymentRelease = {
   activatedAt?: string
   retiredAt?: string
   pinned: boolean
+}
+
+export type DeploymentTrigger = {
+  id: number
+  environmentId: number
+  projectId: number
+  name: string
+  kind: "generic_hook" | "api" | "github" | "gitlab" | "bitbucket" | "gitea" | "legacy_hook"
+  provider?: string
+  config: {
+    repository?: string
+    ref?: string
+    events?: string[]
+    watchInclude?: string[]
+    watchExclude?: string[]
+    preview?: boolean
+    previewQuota?: number
+    previewDomain?: string
+    /** "app" when the dashboard's GitHub App delivers this trigger's events. */
+    delivery?: "app"
+  }
+  hookId?: string
+  enabled: boolean
+  lastDeliveryAt?: string
+  lastStatus?: string
+}
+
+/** One account that installed the dashboard's GitHub App. */
+export type GitHubAppInstallation = {
+  id: number
+  account: string
+  accountType: string
+  htmlUrl: string
+  repositorySelection: string
+  /** The deploy credential that mints this installation's tokens for clones. */
+  credentialId?: number
+}
+
+export type GitHubAppStatus = {
+  configured: boolean
+  app?: {
+    id: number
+    slug: string
+    name: string
+    owner: string
+    htmlUrl: string
+    createdAt: string
+  }
+  installations: GitHubAppInstallation[]
+  installUrl?: string
+  webhookUrl?: string
+  /** A GitHub-side problem beside a configured App: a deleted App, a revoked key. */
+  error?: string
+}
+
+/** A repository one of the App's installations grants. */
+export type GitHubAppRepository = {
+  installationId: number
+  account: string
+  nameWithOwner: string
+  name: string
+  description?: string
+  language?: string
+  private: boolean
+  defaultBranch: string
+  cloneUrl: string
+  htmlUrl: string
+  credentialId?: number
+}
+
+/** What the page posts to GitHub to create the App, and the state GitHub sends back. */
+export type GitHubAppManifestStart = {
+  action: string
+  state: string
+  manifest: Record<string, unknown>
+}
+
+export type DeploymentSchedule = {
+  id: number
+  environmentId: number
+  name: string
+  expression: string
+  timezone: string
+  enabled: boolean
+  nextRunAt?: string
+  steps: { action: string; config: Record<string, unknown>; required: boolean }[]
+}
+
+export type DeploymentPreview = {
+  id: number
+  triggerId: number
+  providerRef: string
+  environmentId: number
+  environmentSlug: string
+  state: "open" | "closed"
+  updatedAt: string
+  isolationStatus?: "pending" | "quarantined" | "cleared"
+  isolationReason?: string
+}
+
+export type DeploymentPreviewApproval = {
+  configured: boolean
+  id: number
+  triggerId: number
+  providerRef: string
+  revision: string
+  repository: string
+  headRepository: string
+  author: string
+  state: "pending" | "approved" | "rejected" | "superseded" | "closed"
+  approvedBy?: string
+  updatedAt: string
 }
 
 export type DeploymentActiveWork = {
@@ -1821,6 +3012,25 @@ export type DeploymentFleet = {
 
 export type DeploymentComposeDocument = { path: string; content: string; order: number }
 
+/**
+ * Where a new deployment's public address comes from when the operator has not
+ * bought a domain: a name that already resolves to this server, plus whether a
+ * certificate can cover it today.
+ */
+export type DeploymentHostnameSuggestion = {
+  hostname: string
+  base?: string
+  /** Whether a certificate on this host already covers it — the only thing activation accepts. */
+  covered: boolean
+  certificateName?: string
+  /** The HTTP-01 challenge this host could issue one with now, if any. */
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy"
+  certificateIssue?: string
+  method: "wildcard" | "sslip" | "custom" | "none"
+  detail: string
+  address?: string
+}
+
 export type DeploymentDraftSource = {
   kind: DeploymentSourceKind
   mode: DeploymentSourceMode
@@ -1841,9 +3051,36 @@ export type DeploymentDraftSource = {
   resourceId?: string
   blueprintId?: string
   blueprintVersion?: string
+  blueprintInputs?: Record<string, string>
+}
+
+export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
+
+/** The automatic recipes the backend can build; `validRecipe` is its closed set. */
+export type DeploymentRecipe =
+  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
+
+/** An environment variable detection found the source reading. */
+export type DeploymentDetectedVariable = {
+  name: string
+  /** The example file's own value, when it had one and it was not credential-shaped. */
+  example?: string
+  sources: string[]
+}
+
+/** A database engine detection found the source connecting to. */
+export type DeploymentDetectedDatabase = {
+  engine: string
+  variable: string
+  evidence: string
 }
 
 export type DeploymentDetectionCandidate = {
+  dockerfile?: string
+  goVersion?: string
+  packageManager?: NodePackageManager
+  packageManagers?: NodePackageManager[]
+  recipeIssue?: string
   id: string
   name: string
   root: string
@@ -1851,11 +3088,19 @@ export type DeploymentDetectionCandidate = {
   buildMethod: DeploymentBuildMethod
   confidence: "high" | "medium" | "low"
   framework?: string
-  recipe?: "node" | "go" | "python"
+  recipe?: DeploymentRecipe
   buildCommand?: string
   startCommand?: string
   outputDirectory?: string
   port?: number
+  schemaTool?: string
+  schemaCommand?: string
+  schemaInStart?: boolean
+  spaFallback?: boolean
+  pythonVersion?: string
+  unpinnedDependencies?: boolean
+  variables?: DeploymentDetectedVariable[]
+  databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
 }
@@ -1908,15 +3153,71 @@ export type DeploymentBuildMethod =
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
+/** A container port published on the host next to the routed one: Gitea's SSH, Syncthing's sync protocol. */
+export type DeploymentPublishedPort = {
+  hostPort: number
+  containerPort: number
+  protocol?: "tcp" | "udp"
+  bindAddress?: string
+}
+
+export type DeploymentRestartPolicy = "unless-stopped" | "always" | "on-failure" | "no"
+
+export type NotificationChannelKind = "webhook" | "discord" | "slack" | "telegram" | "email"
+
+export type NotificationEvent = "run.started" | "run.succeeded" | "run.failed" | "run.cancelled"
+
+export type NotificationChannel = {
+  id: number
+  name: string
+  kind: NotificationChannelKind
+  url: string
+  target: string
+  events: string[]
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type NotificationChannelConfig = {
+  webhookUrl?: string
+  botToken?: string
+  chatId?: string
+  smtpHost?: string
+  smtpPort?: number
+  smtpUsername?: string
+  smtpPassword?: string
+  smtpSecurity?: "starttls" | "tls" | "none"
+  from?: string
+  to?: string[]
+}
+
+export type NotificationDelivery = {
+  id: number
+  channelId: number
+  runId?: number
+  event: string
+  attempt: number
+  status: string
+  responseClass: string
+  nextAttemptAt?: string
+  createdAt: string
+  completedAt?: string
+}
+
 export type DeploymentConfiguration = {
   build: {
     method: DeploymentBuildMethod
-    recipe?: "node" | "go" | "python"
+    recipe?: DeploymentRecipe
+    goVersion?: string
+    pythonVersion?: string
+    packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string
     buildCommand?: string
     startCommand?: string
     outputDirectory?: string
+    spaFallback?: boolean
     targetPlatform?: string
     noCache?: boolean
     secrets?: { variable: string; step: "install" | "build" }[]
@@ -1929,16 +3230,22 @@ export type DeploymentConfiguration = {
     }[]
   }
   runtime: {
+    previewIsolation?: boolean
     image?: string
     command?: string[]
     internalPort?: number
     hostPort?: number
+    ports?: DeploymentPublishedPort[]
     bindAddress?: string
     strategy: "blue_green" | "stop_first"
     privileged?: boolean
     hostNetwork?: boolean
     capabilities?: string[]
     devices?: string[]
+    memoryMb?: number
+    cpus?: number
+    pidsLimit?: number
+    restartPolicy?: DeploymentRestartPolicy
     mounts?: {
       source: string
       target: string
@@ -1952,6 +3259,10 @@ export type DeploymentConfiguration = {
     scopes: string[]
     required?: boolean
     reference?: string
+    // A plain literal a blueprint input became; secrets never travel here.
+    value?: string
+    // Length of a secret the server generates when the deployment is saved.
+    generate?: number
   }[]
   dependencies: {
     kind: string
@@ -1967,8 +3278,21 @@ export type DeploymentConfiguration = {
     required: boolean
     config?: Record<string, unknown>
   }[]
-  domains: { hostname: string; https: boolean; ownership: "managed" | "linked" }[]
-  autoDeploy?: boolean
+  domains: DeploymentPlannedDomain[]
+}
+
+/** A password in front of the route: the hash is what the plan keeps, the password is write-only. */
+export type DeploymentDomainProtection = {
+  username: string
+  password?: string
+  hash?: string
+}
+
+export type DeploymentPlannedDomain = {
+  hostname: string
+  https: boolean
+  ownership: "managed" | "linked"
+  protection?: DeploymentDomainProtection
 }
 
 export type DeploymentVariable = {
@@ -2002,13 +3326,13 @@ export type DeploymentPendingState = {
   changes: DeploymentPendingChange[]
 }
 
-export type DeploymentEnvironmentConfiguration = Omit<
-  DeploymentConfiguration,
-  "variables" | "autoDeploy"
-> & {
+export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "variables"> & {
   revision: number
   variables: DeploymentVariable[]
   pending: DeploymentPendingState
+  /** Present once the backend fills it in; until then the Source card falls back to the summary. */
+  source?: DeploymentDraftSource
+  identity?: SourceIdentity
 }
 
 export type DeploymentRemovalTarget = {
@@ -2048,6 +3372,10 @@ export type DeploymentBackupGateEvidence = {
   endedAt?: string
   fresh: boolean
   restoreTested: boolean
+  databaseDumps?: number[]
+  restoreVerificationId?: number
+  restoreApplicationImage?: string
+  restoreSchemaVersion?: string
   detail?: string
 }
 
@@ -2101,6 +3429,7 @@ export type DeploymentPreflight = {
 
 export type DeployRun = {
   id: number
+  runNumber: number
   projectId: number
   startedAt: string
   endedAt?: string
@@ -2120,6 +3449,45 @@ export type DeployCommit = {
   author: string
   date: string
   subject: string
+}
+
+/** A token or key the server holds so it can reach a private repository or registry. */
+export type DeploymentCredentialKind =
+  "git_bearer" | "git_ssh" | "registry" | "provider_token" | "github_app"
+
+export type DeploymentCredential = {
+  id: number
+  name: string
+  kind: DeploymentCredentialKind
+  /** A host, e.g. "github.com" or "ghcr.io" — empty when the kind has none. */
+  target: string
+  username?: string
+  createdAt: string
+  updatedAt: string
+  lastUsedAt?: string
+  /** How many non-archived projects' current source uses it — 0 means safe to remove. */
+  usedBy: number
+}
+
+/**
+ * What a source actually resolved to the last time it was validated — the
+ * adapter's own facts, not what was typed. Same shape as `DeploymentDetection`'s
+ * `source`, which the same resolution path already produces.
+ */
+export type SourceIdentity = {
+  kind: DeploymentSourceKind
+  remote?: string
+  repository?: string
+  ref?: string
+  revision?: string
+  digest?: string
+  os?: string
+  architecture?: string
+  platforms?: string[]
+  localPath?: string
+  dirty?: boolean
+  composeFiles?: string[]
+  services?: string[]
 }
 
 export type EnvVar = {
@@ -2177,24 +3545,45 @@ export type GitRepo = {
   name: string
   branch: string
   remote?: string
+  /** The branch this one tracks, e.g. origin/main. */
+  upstream?: string
   head?: string
   subject?: string
   author?: string
   commitAt?: string
   dirty: boolean
   changes: number
+  staged: number
+  untracked: number
+  conflicts: number
   ahead: number
   behind: number
   detached: boolean
-  untracked: number
+  /** The upstream is configured but no longer exists on the remote. */
+  gone?: boolean
+  /** No commits yet. */
+  empty?: boolean
 }
 
+/**
+ * One entry of `git status`. A file staged and then edited again is one
+ * entry with both `staged` and `unstaged` set, and is listed under both
+ * headings; `index` and `worktree` carry each side's status letter.
+ */
 export type GitFileChange = {
   path: string
   index: string
   worktree: string
   label: string
   staged: boolean
+  unstaged: boolean
+  /** The previous name of a renamed or copied path. */
+  from?: string
+}
+
+export type GitIdentity = {
+  name?: string
+  email?: string
 }
 
 export type GitStatus = {
@@ -2202,6 +3591,61 @@ export type GitStatus = {
   files: GitFileChange[]
   clean: boolean
   stashes: number
+  identity: GitIdentity
+  /** A merge, rebase, revert, cherry-pick or bisect a shell left half-finished. */
+  operation?: string
+}
+
+export type GitChangedFile = {
+  path: string
+  from?: string
+  status: string
+  insertions: number
+  deletions: number
+  binary?: boolean
+}
+
+/** One commit with its message and what it changed — the diff is fetched per file. */
+export type GitCommitDetail = GitCommit & {
+  body?: string
+  committer?: string
+  committedAt?: string
+  changes: GitChangedFile[]
+}
+
+export type GitTag = {
+  name: string
+  commit?: string
+  at?: string
+  message?: string
+  annotated: boolean
+  tagger?: string
+}
+
+export type GitStash = {
+  index: number
+  sha: string
+  at?: string
+  branch?: string
+  message: string
+}
+
+export type GitRemote = {
+  name: string
+  fetchUrl: string
+  pushUrl?: string
+}
+
+/** What merging `head` into `base` would bring. */
+export type GitComparison = {
+  base: string
+  head: string
+  ahead: number
+  behind: number
+  commits: GitCommit[]
+  files: number
+  insertions: number
+  deletions: number
 }
 
 export type GitCommit = {
@@ -2241,6 +3685,13 @@ export type GitBranch = {
   /** Another worktree that has this branch checked out; git refuses to delete
    *  or switch it even with -D. */
   worktree?: string
+  /** A local branch whose upstream no longer exists on the remote. */
+  gone?: boolean
+  /** Every commit is already reachable from HEAD: safe to delete. */
+  merged?: boolean
+  /** A remote-tracking branch's two halves: the remote, and the local name. */
+  remoteName?: string
+  local?: string
 }
 
 export type GitResult = {
@@ -2290,6 +3741,31 @@ export type GitHubRepo = {
   permission?: string
 }
 
+/**
+ * One repository the signed-in account can deploy, as the chooser lists them.
+ * Distinct from GitHubRepo, which describes the checkout a page is already in.
+ */
+export type GitHubRepoSummary = {
+  nameWithOwner: string
+  name: string
+  owner: string
+  description?: string
+  url: string
+  cloneUrl: string
+  defaultBranch?: string
+  language?: string
+  private: boolean
+  fork: boolean
+  archived: boolean
+  pushedAt?: string
+}
+
+export type GitHubBranch = {
+  name: string
+  protected?: boolean
+  default?: boolean
+}
+
 /** The code to type into github.com, and where to type it. */
 export type GitHubDeviceStart = {
   id: string
@@ -2316,6 +3792,29 @@ export type GitPullRequest = {
   author?: string
   createdAt?: string
   comments: number
+  /** approved, changes_requested, review_required, or empty. */
+  review?: string
+  /** success, failure, pending, or empty where there are no checks. */
+  checks?: string
+  /** mergeable, conflicting, or unknown — only on the detail read. */
+  mergeable?: string
+  additions?: number
+  deletions?: number
+  files?: number
+  body?: string
+}
+
+export type GitHubWorkflowRun = {
+  id: number
+  name: string
+  workflow?: string
+  status: string
+  conclusion?: string
+  url: string
+  branch?: string
+  sha?: string
+  event?: string
+  createdAt?: string
 }
 
 /**
@@ -2489,25 +3988,39 @@ export type Exposure = {
   interfaces: string[]
   tailscaleIp?: string
   recommendation?: string
+  /** The address this browser is reaching the dashboard from — the one every lockout guard protects. */
+  client?: string
 }
 
-/**
- * One terminal as the operator thinks of it: a named, filed piece of work that
- * may or may not have a PTY attached right now.
- *
- * `id` is present only while the dashboard is holding one; without it the
- * session is still running on the host and selecting it costs a reattach.
- */
+/** One address folded across the failed-login record: who is trying, and how hard. */
+export type Attacker = {
+  address: string
+  attempts: number
+  /** The account names tried from this address, most tried first. */
+  users: string[]
+  first: string
+  last: string
+}
+
+export type AttackSummary = {
+  attempts: number
+  addresses: number
+  windowHours: number
+  /** The sample ran out inside the window, so every figure is a floor. */
+  capped: boolean
+  attackers: Attacker[]
+  since?: string
+}
+
+/** One named, filed in-memory workspace containing one or more direct PTYs. */
 export type TerminalWorkspace = {
-  id?: string
-  tmuxName?: string
+  id: string
   title: string
+  /** Whether the operator chose the title. A default one follows the shell. */
+  named?: boolean
   folder?: string
   favourite: boolean
-  /** One of TAG_COLOURS, or absent for "take the folder's". */
-  colour?: string
   live: boolean
-  persisted: boolean
   cwd?: string
   windows: number
   createdAt: string
@@ -2515,49 +4028,55 @@ export type TerminalWorkspace = {
   user?: string
   shell?: string
   owner?: string
+  /** Whether any window has a program in the foreground. */
+  busy?: boolean
+  /** Whether any window is working, and when the last one finished (ms since the epoch). */
+  working?: boolean
+  finishedAt?: number
+  /** The window that stands for the session: the one last shown, else the newest. */
+  current?: TerminalWindowSummary
 }
 
 /**
- * A folder in the rail. Unlike a session it has no tmux object of its own, so
- * the server keeps the record and reconciles it with what the sessions say.
+ * What a direct PTY is doing, as the backend reads it off the terminal: the
+ * title the foreground program set, whether anything but the prompt holds the
+ * terminal, and what that is. Polled with the window lists and pushed over
+ * the attach socket as a `state` frame whenever it changes.
  */
+export type TerminalActivity = {
+  /** The OSC title, when it was set by whatever is in the foreground now. */
+  title?: string
+  /** A program has held the terminal for longer than a blink. */
+  busy: boolean
+  /** The foreground command, while busy. */
+  process?: string
+  /**
+   * Something is actually happening: output has been arriving for a second
+   * and still is, or the job is burning CPU. An editor or an agent waiting at
+   * its prompt is busy but not working.
+   */
+  working?: boolean
+  /** When the last stretch of work ended, in ms since the epoch, until work starts again. */
+  finishedAt?: number
+}
+
+export type TerminalWindowSummary = {
+  id: string
+  name: string
+  /** Whether the operator named the window rather than it carrying a default. */
+  named?: boolean
+} & Partial<TerminalActivity>
+
+/** A server-backed folder reconciled with live workspace membership. */
 export type TerminalFolder = {
   name: string
-  colour?: string
   collapsed?: boolean
 }
 
-/** A tmux window inside a session — a tab within a tab. */
-export type TerminalWindow = {
+/** An independent direct PTY shown as a window tab inside one session. */
+export type TerminalWindow = TerminalWindowSummary & {
   index: number
-  name: string
-  active: boolean
-  panes: number
   cwd?: string
-  colour?: string
-  /** Flags tmux keeps: something happened here while you were elsewhere. */
-  bell: boolean
-  activity: boolean
-  zoomed: boolean
-  /** Every keystroke goes to every pane at once. */
-  synchronized: boolean
-}
-
-/** One rectangle inside a window — tmux's third level. */
-export type TerminalPane = {
-  index: number
-  active: boolean
-  width: number
-  height: number
-  pid: number
-  command?: string
-  cwd?: string
-  dead: boolean
-  /** Where the rectangle sits in the window, in cells. Right/bottom inclusive. */
-  left: number
-  top: number
-  right: number
-  bottom: number
 }
 
 // --- detected and provisioned database servers ----------------------------
@@ -2584,6 +4103,39 @@ export type DbDetectedServer = {
 }
 
 export type DbDetected = { servers: DbDetectedServer[] }
+
+/**
+ * Where a connection's server can be reached from, as GET /databases/{id}/access
+ * reads it off the container's port binding and the host's firewall.
+ *
+ * `detected` is the fact the Remove row keys off: a server the sync would
+ * connect again on the next page load is not worth a button that forgets it.
+ * `managed` is whether the binding can be changed from here — a container on
+ * this host that is not compose-owned and publishes the engine's port.
+ */
+export type DbAccess = {
+  detected: boolean
+  container?: string
+  composeProject?: string
+  managed: boolean
+  exposure: "local" | "public" | "private" | "remote"
+  port?: number
+  publicAddresses: string[]
+  firewall: {
+    backend?: string
+    active: boolean
+    open: boolean
+    editable: boolean
+  }
+}
+
+/** What PUT /databases/{id}/access did, and the reading afterwards. */
+export type DbAccessChange = {
+  access: DbAccess
+  /** opened, closed, already, none, inactive, read-only or failed. */
+  firewall: string
+  firewallError?: string
+}
 
 /**
  * What POST /databases/sync did.
@@ -2669,6 +4221,16 @@ export type DbSchemaGraph = {
   truncated: boolean
 }
 
+/**
+ * How the operator arranged one schema's diagram, as the server hands it back.
+ * The document itself is decoded by `components/database/diagram/memory.ts`;
+ * the server stores it whole and says only when it was last saved.
+ */
+export type DbDiagramLayoutResponse = {
+  layout: Record<string, unknown> | null
+  updatedAt?: string
+}
+
 // ---------------------------------------------------------------------------
 // The dashboard's own version, its changelog, and updating it in place.
 //
@@ -2750,6 +4312,124 @@ export type SelfUpdateReport = {
     dirty?: string[]
   }
   run?: UpdateRun
+  log?: string
+}
+
+/**
+ * The dashboard's own settings, as internal/selfcfg speaks them.
+ *
+ * Every field here is a line in the `.env` beside the compose file, and
+ * changing one restarts the stack into it. That is why the shape is flat and
+ * small: these are the settings somebody has a reason to change from a
+ * browser, not every variable the backend reads.
+ */
+export type DashboardSettings = {
+  site: string
+  /** The interface to listen on, when that is not the same as `site`. */
+  bind: string
+  tls: "tailscale" | "internal" | "off"
+  port: number
+  frontendPort: number
+  backendPort: number
+  allowedCidrs: string
+  terminalEnabled: boolean
+  require2fa: boolean
+  sessionTtl: string
+  idleTtl: string
+  updateCheck: boolean
+}
+
+/** One setting moving, for the confirmation dialog and the run record. */
+export type DashboardConfigChange = {
+  key: string
+  label: string
+  from: string
+  to: string
+}
+
+export type ConfigRunStatus = "pending" | "running" | "success" | "failed" | "rolled_back"
+export type ConfigPhase = "queued" | "applying" | "waiting" | "rollback" | "finished"
+
+/**
+ * One restart, as recorded on disk by the container that carried it out.
+ *
+ * It outlives the dashboard it restarts, which is the whole point: the browser
+ * follows this record across the moment the API stops answering, and picks the
+ * story up from whatever backend comes back.
+ */
+export type DashboardConfigRun = {
+  id: string
+  status: ConfigRunStatus
+  phase: ConfigPhase
+  action: "apply" | "restart" | "rebuild"
+  changes?: DashboardConfigChange[]
+  dir: string
+  compose: string
+  image: string
+  envPath?: string
+  backup?: string
+  health?: string
+  rollbackHealth?: string
+  /** Where to go once this finishes — the address may have moved. */
+  endpoint?: string
+  container: string
+  /** A caveat about a run that otherwise worked, e.g. a certificate that could not be issued. */
+  note?: string
+  actor: string
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  error?: string
+}
+
+/**
+ * What this machine is on its tailnet, as the dashboard discovered it.
+ *
+ * The settings form fills the address, the listening interface and the
+ * allowlist from this the moment somebody picks a Tailscale certificate. Those
+ * three facts are one `tailscale status` away, and asking an operator to find
+ * them by hand — then rejecting the form when they guessed — is the dashboard
+ * refusing to do its own job.
+ */
+export type TailscaleIdentity = {
+  available: boolean
+  running: boolean
+  state?: string
+  /** MagicDNS name, without the trailing dot. */
+  hostname?: string
+  ip4?: string
+  /** Whether the tailnet will issue certificates at all. */
+  httpsEnabled: boolean
+  /** Why it cannot be used, in a sentence meant for a person. */
+  detail?: string
+}
+
+export type DashboardCertificate = {
+  issued: boolean
+  expires?: string
+}
+
+export type DashboardConfigReport = {
+  /** False on an install with no compose stack to recreate. */
+  supported: boolean
+  reason?: string
+  dir?: string
+  compose?: string
+  envPath?: string
+  settings: DashboardSettings
+  /** The URL this configuration implies. */
+  endpoint: string
+  tailscale: TailscaleIdentity
+  /**
+   * What is actually on disk for the configured address — not the same
+   * question as which mode is set. A Tailscale install with no certificate yet
+   * answers perfectly well on Caddy's internal CA, and saying "trusted"
+   * because the setting says so would contradict the padlock.
+   */
+  certificate: DashboardCertificate
+  /** Settings the file asks for that the running process is not doing. */
+  drift?: DashboardConfigChange[]
+  run?: DashboardConfigRun
   log?: string
 }
 
@@ -3004,6 +4684,8 @@ export type CertbotState = {
   /** Whether anything is scheduled to renew these, and what. */
   autoRenew: boolean
   renewSource?: string
+  /** A certbot timer systemd knows but is not running: the thing to turn on. */
+  renewUnit?: string
   raw?: string
   error?: string
 }
@@ -3017,6 +4699,7 @@ export type SiteLocation = {
 }
 
 export type SiteSpec = {
+  managedAcme?: boolean
   name: string
   domains: string[]
   kind: "proxy" | "static" | "redirect"
@@ -3045,12 +4728,19 @@ export type SiteSpec = {
   custom?: string
 }
 
+/**
+ * The server's own config test. `note` qualifies a verdict nginx could not
+ * actually give — a file outside its include tree passes `nginx -t` without
+ * being read.
+ */
+export type ProxyValidation = { valid: boolean; output: string; command: string; note?: string }
+
 export type SiteResult = {
   name: string
   path: string
   content: string
   warnings: string[]
-  validation?: { valid: boolean; output: string; command: string }
+  validation?: ProxyValidation
   enabled: boolean
   reloaded: boolean
   output?: string
@@ -3064,6 +4754,8 @@ export type DNSProvider = {
   installed: boolean
   credentials: string
   defaultWait: number
+  /** A token is saved for this provider. The token itself is never read back. */
+  hasCredentials: boolean
 }
 
 export type ImportResult = {

@@ -1,0 +1,42 @@
+{
+  "id": "mongodb",
+  "version": "1.0.0",
+  "name": "MongoDB",
+  "category": "database",
+  "profile": "database",
+  "description": "A document database. Like every database here it stays on the Docker network rather than on a published host port.",
+  "iconId": "database",
+  "docsUrl": "https://www.mongodb.com/docs/manual/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "SSPL-1.0",
+    "upstreamUrl": "https://hub.docker.com/_/mongo",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7",
+    "updateNotes": "Reviewed under the SSPL: self-hosting is permitted, offering it as a managed service is not."
+  },
+  "image": { "reference": "mongo:8.0", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "username", "kind": "text", "label": "Root user", "default": "root", "required": true, "variable": "MONGO_INITDB_ROOT_USERNAME", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$" }
+  ],
+  "secrets": [
+    { "name": "password", "variable": "MONGO_INITDB_ROOT_PASSWORD", "label": "Root password", "length": 40 }
+  ],
+  "ports": [
+    { "name": "mongo", "internal": 27017, "protocol": "tcp", "purpose": "Client connections from other containers on this host", "exposure": "internal", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/data/db", "purpose": "Every collection this server holds", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
+  "checks": [
+    { "name": "Accepts connections", "kind": "command", "phase": "readiness", "required": true, "command": ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"], "timeoutSeconds": 90 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "automation": [
+    { "name": "Nightly backup", "description": "Dumps the database every night.", "cron": "0 3 * * *", "timezone": "UTC", "actions": ["backup"], "default": true }
+  ],
+  "update": { "detector": "registry", "backupFirst": true, "notes": "MongoDB upgrades one minor version at a time and cannot be downgraded across a storage format change." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:d0221202303b5fb724721c8a3770ec1bf2d50868ea9ebbd4f99b3b229fcc94e6" }]
+}

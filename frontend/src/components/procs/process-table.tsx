@@ -1,19 +1,20 @@
 "use client"
 
-import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
-import { Cpu, Inspect, SettingsSliders } from "@/components/icons"
-import { useAuth } from "@/hooks/use-auth"
+import { useEffect, useState } from "react"
+import { Cpu, SettingsSliders } from "@/components/icons"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
-import { Detail, DetailList, Metric, MetricStrip, RowLink, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
+import { Metric, MetricStrip, Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ChipCount, FilterChip } from "@/components/tabs"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
+import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -40,49 +41,71 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { get, post, put } from "@/lib/api"
-import { bytes, duration, percent, relativeTime } from "@/lib/format"
-import { notify } from "@/lib/toast"
+import { get } from "@/lib/api"
+import { bytes, duration, percent, plural, relativeTime } from "@/lib/format"
 import type { ProcessList, ProcessRow, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
+import { ProcessDetailSheet } from "@/components/procs/process-detail"
+import {
+  useProcessControl,
+  useProcessVerbs,
+  type ConfirmFn,
+  type PendingMap,
+} from "@/components/procs/process-actions"
+import { cpuTone, managerName, processKey, processStateTone } from "@/components/procs/shared"
 
 type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
 
 const SORT_LABEL: Record<Exclude<ProcessSort, "auto">, string> = {
-  cpu: "CPU",
-  memory: "memory",
-  io: "disk I/O",
-  uptime: "uptime",
+  cpu: "highest CPU",
+  memory: "highest memory",
+  io: "highest disk I/O",
+  uptime: "longest-running",
 }
 
 function automaticFocus(snapshot: Snapshot | undefined): {
   sort: Exclude<ProcessSort, "auto">
   reason: string
 } {
-  if (!snapshot) return { sort: "cpu", reason: "CPU until host metrics arrive" }
+  // Every field is optional here: a snapshot from an older backend lacks the
+  // run queue and the pressure block, and the page must still open.
+  if (!snapshot?.cpu || !snapshot.memory) {
+    return { sort: "cpu", reason: "CPU until host metrics arrive" }
+  }
   const pressure = snapshot.pressure
   if (
-    snapshot.procs.blocked > 0 ||
-    snapshot.cpu.modes.iowait >= 10 ||
-    (pressure.supported && pressure.ioSome >= 10)
+    (snapshot.procs?.blocked ?? 0) > 0 ||
+    (snapshot.cpu.modes?.iowait ?? 0) >= 10 ||
+    (pressure?.supported && pressure.ioSome >= 10)
   ) {
     return { sort: "io", reason: "disk wait is holding work up" }
   }
   const availablePercent =
     snapshot.memory.total > 0 ? (snapshot.memory.available / snapshot.memory.total) * 100 : 100
-  if (availablePercent <= 10 || (pressure.supported && pressure.memSome >= 5)) {
+  if (availablePercent <= 10 || (pressure?.supported && pressure.memSome >= 5)) {
     return { sort: "memory", reason: "available memory is tight" }
   }
   return { sort: "cpu", reason: "the host is not memory- or I/O-bound" }
 }
 
-export function ProcessTableTab() {
+/**
+ * Everything running on the host, and which of it is heavy.
+ *
+ * Readings first, then the table. The four tiles are the answer to "is the
+ * process table itself telling me something" — a zombie count and a blocked
+ * count are what turns a long list into a diagnosis — and they are computed
+ * over the whole snapshot, so a filter narrowing the rows never narrows the
+ * figures. The table's own question is "which rows", and the focus control
+ * answers it by what the host is short of rather than by a fixed column.
+ */
+export function LiveProcesses() {
+  const { confirm, dialog } = useConfirm()
   const [query, setQuery] = useState("")
   const [user, setUser] = useState("")
   const [state, setState] = useState("")
   const [manager, setManager] = useState("")
-  const [selected, setSelected] = useState<ProcessRow | null>(null)
+  const [selectedPid, selectPid] = useQuerySelection("pid")
   const [sort, setSort] = useViewState<ProcessSort>("processes.table.sort.v2", "auto")
   const [limit, setLimit] = useViewState("processes.table.limit", 200)
   const [refreshSeconds, setRefreshSeconds] = useViewState("processes.table.refresh", 4)
@@ -107,43 +130,83 @@ export function ProcessTableTab() {
     refreshSeconds * 1000,
     [appliedQuery, effectiveSort, user, state, manager, limit],
   )
-
-  if (processList.loading && !processList.data) return <LoadingPanel />
-  if (processList.error && !processList.data) return <ErrorState error={processList.error} />
+  const { pending, signal } = useProcessControl(processList.refresh)
 
   const data = processList.data
-  const memTotal = snapshot?.memory.total ?? 0
-  const focusDescription =
-    sort === "auto"
-      ? automatic.sort === "io" && data && !data.ratesReady
-        ? `Automatic focus: sampling disk I/O because ${automatic.reason}`
-        : `Automatic focus: ${SORT_LABEL[automatic.sort]} because ${automatic.reason}`
-      : `Focused by ${SORT_LABEL[effectiveSort]}`
+  const memTotal = snapshot?.memory?.total ?? 0
+  const facet = (list: ProcessList["states"] | undefined, value: string) =>
+    list?.find((f) => f.value === value)?.count ?? 0
+  const running = facet(data?.states, "running")
+  const blocked = facet(data?.states, "blocked")
+  const zombies = facet(data?.states, "zombie")
+  const unmanaged = facet(data?.managers, "unmanaged")
+  const managed = (data?.managers ?? [])
+    .filter((f) => f.value !== "unmanaged" && f.value !== "kernel")
+    .map((f) => `${f.count} ${f.label.toLowerCase()}`)
+    .join(" · ")
+  const pid = selectedPid ? Number(selectedPid) : null
 
   return (
-    <>
-      <Panel>
+    <Page className="animate-rise">
+      <PageHeader
+        eyebrow="Processes"
+        title="Live"
+        actions={
+          snapshot?.cpu &&
+          snapshot.memory && (
+            <MetricStrip>
+              <Metric label="CPU" value={percent(snapshot.cpu.totalPercent, 0)} />
+              <Metric label="Available" value={bytes(snapshot.memory.available)} />
+              <Metric label="Load" value={snapshot.cpu.loadAvg1.toFixed(2)} />
+              <Metric label="Uptime" value={duration(snapshot.uptimeSeconds)} />
+            </MetricStrip>
+          )
+        }
+      />
+
+      {data && (
+        <StatGrid columns={4} key="figures" className="animate-rise">
+          <StatTile
+            label="Processes"
+            value={data.available}
+            hint={`${running} running · ${facet(data.states, "sleeping")} sleeping`}
+            trailing={<span className="text-hint text-muted-foreground">on this host</span>}
+          />
+          <StatTile
+            label="Blocked"
+            value={blocked}
+            tone={blocked > 0 ? "warning" : "default"}
+            hint={blocked > 0 ? "waiting on a disk or a lock" : "nothing waiting on a disk"}
+          />
+          <StatTile
+            label="Zombies"
+            value={zombies}
+            tone={zombies > 0 ? "danger" : "default"}
+            hint={zombies > 0 ? "exited, but the parent has not reaped them" : "none to reap"}
+          />
+          <StatTile
+            label="Unmanaged"
+            value={unmanaged}
+            hint={managed ? `supervised: ${managed}` : "nothing is supervised"}
+            trailing={
+              <span className="text-hint text-muted-foreground">would not survive a reboot</span>
+            }
+          />
+        </StatGrid>
+      )}
+
+      {/* The table is the whole of the page below the figures: a title and a
+          hairline, no box. */}
+      <Panel plain>
         <PanelHeader
-          icon={Cpu}
-          title="Live processes"
-          description={
-            data
-              ? data.truncated
-                ? `Showing ${data.processes.length} of ${data.total} matches · ${focusDescription}`
-                : `${data.total} matches from ${data.available} processes · ${focusDescription}`
-              : "Reading the host process table"
-          }
+          title="Process table"
           actions={
-            snapshot && (
-              <MetricStrip>
-                <Metric label="CPU" value={percent(snapshot.cpu.totalPercent, 0)} />
-                <Metric label="Available" value={bytes(snapshot.memory.available)} />
-                <Metric
-                  label="Run / blocked"
-                  value={`${snapshot.procs?.running ?? 0} / ${snapshot.procs?.blocked ?? 0}`}
-                />
-              </MetricStrip>
-            )
+            <ProcessTableSettings
+              limit={limit}
+              setLimit={setLimit}
+              refreshSeconds={refreshSeconds}
+              setRefreshSeconds={setRefreshSeconds}
+            />
           }
         />
         <PanelToolbar>
@@ -151,157 +214,323 @@ export function ProcessTableTab() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Name, command, PID, user or owner"
-            containerClassName="sm:w-80"
+            containerClassName="sm:w-72"
           />
-          <FacetSelect
-            label="All owners"
-            value={manager}
-            onChange={setManager}
-            options={data?.managers ?? []}
-          />
-          <FacetSelect
-            label="All users"
-            value={user}
-            onChange={setUser}
-            options={data?.users ?? []}
-          />
-          <FacetSelect
-            label="All states"
-            value={state}
-            onChange={setState}
-            options={data?.states ?? []}
-          />
-          <Select value={sort} onValueChange={(value) => setSort(value as ProcessSort)}>
-            <SelectTrigger size="sm" className="w-40" aria-label="Process focus">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Automatic focus</SelectItem>
-              <SelectItem value="cpu">Highest CPU</SelectItem>
-              <SelectItem value="memory">Highest memory</SelectItem>
-              <SelectItem value="io">Highest disk I/O</SelectItem>
-              <SelectItem value="uptime">Longest-running</SelectItem>
-            </SelectContent>
-          </Select>
-          <ProcessTableSettings
-            limit={limit}
-            setLimit={setLimit}
-            refreshSeconds={refreshSeconds}
-            setRefreshSeconds={setRefreshSeconds}
-          />
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            <FilterChip selected={manager === ""} onClick={() => setManager("")}>
+              All <ChipCount>{data?.available ?? 0}</ChipCount>
+            </FilterChip>
+            {data?.managers.map((option) => (
+              <FilterChip
+                key={option.value}
+                selected={manager === option.value}
+                onClick={() => setManager(manager === option.value ? "" : option.value)}
+              >
+                {option.label} <ChipCount>{option.count}</ChipCount>
+              </FilterChip>
+            ))}
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <FacetSelect
+              label="All users"
+              value={user}
+              onChange={setUser}
+              options={data?.users ?? []}
+            />
+            <FacetSelect
+              label="All states"
+              value={state}
+              onChange={setState}
+              options={data?.states ?? []}
+            />
+            <Select value={sort} onValueChange={(value) => setSort(value as ProcessSort)}>
+              <SelectTrigger size="sm" className="w-44" aria-label="Process focus">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Automatic focus</SelectItem>
+                <SelectItem value="cpu">Highest CPU</SelectItem>
+                <SelectItem value="memory">Highest memory</SelectItem>
+                <SelectItem value="io">Highest disk I/O</SelectItem>
+                <SelectItem value="uptime">Longest-running</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </PanelToolbar>
         <PanelBody flush>
-          <Table containerClassName="max-h-[calc(100svh-23rem)]">
-            <TableHeader className={stickyTableHeader}>
-              <TableRow>
-                <TableHead className="w-20">PID</TableHead>
-                <TableHead className="w-full">Process</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead className="text-right">CPU</TableHead>
-                <TableHead className="text-right">Memory</TableHead>
-                <TableHead className="text-right">Disk I/O</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.processes.map((process) => (
-                <TableRow
-                  key={`${process.pid}-${process.createTime}`}
-                  className="group"
-                  onActivate={() => setSelected(process)}
-                >
-                  <TableCell className="numeric font-mono text-xs">{process.pid}</TableCell>
-                  <TableCell>
-                    <div className="max-w-[28rem] min-w-0">
-                      <RowLink onClick={() => setSelected(process)}>{process.name}</RowLink>
-                      <p
-                        className="truncate font-mono text-[11px] text-muted-foreground"
-                        title={process.cmdline}
-                      >
-                        {process.cmdline || "Kernel worker"}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="max-w-40 min-w-0">
-                      <Badge variant="outline" className="font-normal">
-                        {managerName(process.manager)}
-                      </Badge>
-                      {process.managerName && (
-                        <p
-                          className="mt-0.5 truncate text-[11px] text-muted-foreground"
-                          title={process.managerName}
-                        >
-                          {process.managerName}
-                        </p>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-xs">{process.username || "—"}</TableCell>
-                  <TableCell>
-                    <Status state={processStateTone(process.state)} label={process.state} />
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      "numeric text-right font-mono text-xs",
-                      process.cpuPercent >= 50
-                        ? "font-medium text-destructive"
-                        : process.cpuPercent >= 10
-                          ? "text-warning"
-                          : "text-muted-foreground",
-                    )}
-                  >
-                    {percent(process.cpuPercent)}
-                  </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
-                    {bytes(process.rss)}
-                    {memTotal > 0 && (
-                      <span className="ml-1 text-muted-foreground">
-                        {((process.rss / memTotal) * 100).toFixed(0)}%
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs text-muted-foreground">
-                    {!data.ratesReady
-                      ? "Sampling…"
-                      : (process.ioReadRate ?? 0) + (process.ioWriteRate ?? 0) > 0
-                        ? `${bytes((process.ioReadRate ?? 0) + (process.ioWriteRate ?? 0))}/s`
-                        : "—"}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {relativeTime(process.createTime)}
-                  </TableCell>
-                  <TableCell>
-                    <IconAction label="Inspect process" onClick={() => setSelected(process)}>
-                      <Inspect />
-                    </IconAction>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {data?.processes.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={10} className="p-0">
-                    <EmptyState
-                      icon={Cpu}
-                      title="No processes match"
-                      description="Clear a filter or search for a different command, PID, user or owner."
-                    />
-                  </TableCell>
-                </TableRow>
+          {processList.loading && !data && <LoadingPanel />}
+          {processList.error && !data && <ErrorState error={processList.error} />}
+          {data && (
+            <>
+              {/* Bled by the cells' own padding, so the first column starts
+                  where the title does. */}
+              <div className="-mx-4 hidden min-w-0 lg:block">
+                <ProcessTableWide
+                  rows={data.processes}
+                  ratesReady={data.ratesReady}
+                  memTotal={memTotal}
+                  pending={pending}
+                  confirm={confirm}
+                  signal={signal}
+                  onOpen={(p) => selectPid(String(p.pid))}
+                />
+              </div>
+              {/* Below `lg` the same rows are drawn down the row instead of
+                  across it: a ten-column table keeps three on a phone, and
+                  what is left is the remains of a table. Nothing is dropped —
+                  the PID, the owner, both readings and the state are all
+                  part of "is the thing I just deployed alive". */}
+              <div className="lg:hidden">
+                <ProcessTableNarrow
+                  rows={data.processes}
+                  memTotal={memTotal}
+                  pending={pending}
+                  confirm={confirm}
+                  signal={signal}
+                  onOpen={(p) => selectPid(String(p.pid))}
+                />
+              </div>
+              {data.processes.length === 0 && (
+                <EmptyState
+                  icon={Cpu}
+                  title="No processes match"
+                  description="Clear a filter or search for a different command, PID, user or owner."
+                  className="mt-4"
+                />
               )}
-            </TableBody>
-          </Table>
+            </>
+          )}
         </PanelBody>
+        {data && (
+          <PanelFooter className="text-hint text-muted-foreground">
+            <span className="numeric">
+              {data.truncated
+                ? `Showing the ${data.processes.length} heaviest of ${data.total} matching`
+                : `${plural(data.total, "process", "processes")} matching`}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>
+              sorted by {SORT_LABEL[effectiveSort]}
+              {sort === "auto" && ` because ${automatic.reason}`}
+            </span>
+            {!data.ratesReady && (
+              <>
+                <span className="text-muted-foreground/40">·</span>
+                <span>disk rates arrive with the second sample</span>
+              </>
+            )}
+          </PanelFooter>
+        )}
       </Panel>
+
       <ProcessDetailSheet
-        process={selected}
-        onOpenChange={(open) => !open && setSelected(null)}
+        pid={pid}
+        memTotal={memTotal}
+        onOpenChange={(open) => !open && selectPid(null)}
+        onSelect={(next) => selectPid(String(next))}
         onChanged={processList.refresh}
       />
-    </>
+      {dialog}
+    </Page>
+  )
+}
+
+type RowsProps = {
+  rows: ProcessRow[]
+  memTotal: number
+  pending: PendingMap
+  confirm: ConfirmFn
+  signal: Parameters<typeof useProcessVerbs>[0]["signal"]
+  onOpen: (process: ProcessRow) => void
+}
+
+function ProcessTableWide({
+  rows,
+  ratesReady,
+  memTotal,
+  ...rest
+}: RowsProps & { ratesReady: boolean }) {
+  return (
+    <Table containerClassName="max-h-[calc(100svh-22rem)]">
+      <TableHeader className={stickyTableHeader}>
+        <TableRow>
+          <TableHead className="w-20">PID</TableHead>
+          <TableHead className="w-full">Process</TableHead>
+          <TableHead>Owner</TableHead>
+          <TableHead className="hidden xl:table-cell">User</TableHead>
+          <TableHead>State</TableHead>
+          <TableHead className="text-right">CPU</TableHead>
+          <TableHead className="text-right">Memory</TableHead>
+          <TableHead className="hidden text-right xl:table-cell">Disk I/O</TableHead>
+          <TableHead className="hidden 2xl:table-cell">Started</TableHead>
+          <TableHead className="w-px" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((process) => (
+          <ProcessTableRow
+            key={processKey(process)}
+            process={process}
+            ratesReady={ratesReady}
+            memTotal={memTotal}
+            {...rest}
+          />
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+function ProcessTableRow({
+  process,
+  ratesReady,
+  memTotal,
+  pending,
+  confirm,
+  signal,
+  onOpen,
+}: Omit<RowsProps, "rows"> & { process: ProcessRow; ratesReady: boolean }) {
+  const verbs = useProcessVerbs({ process, confirm, signal, onInspect: () => onOpen(process) })
+  const busy = pending[processKey(process)]
+  const io = (process.ioReadRate ?? 0) + (process.ioWriteRate ?? 0)
+  return (
+    <TableRow className="group" onActivate={() => onOpen(process)}>
+      <TableCell className="numeric font-mono text-muted-foreground">{process.pid}</TableCell>
+      <TableCell>
+        <div className="max-w-[28rem] min-w-0">
+          <RowLink title={process.name} onClick={() => onOpen(process)}>
+            {process.name}
+          </RowLink>
+          <p className="truncate font-mono text-hint text-muted-foreground" title={process.cmdline}>
+            {process.cmdline || "Kernel worker"}
+          </p>
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="max-w-40 min-w-0">
+          <Tag>{managerName(process.manager)}</Tag>
+          {process.managerName && (
+            <p className="truncate text-hint text-muted-foreground" title={process.managerName}>
+              {process.managerName}
+            </p>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="hidden xl:table-cell">{process.username || "—"}</TableCell>
+      <TableCell>
+        <Status
+          state={busy ? "activating" : processStateTone(process.state)}
+          label={busy ? `${busy}…` : process.state}
+        />
+      </TableCell>
+      <TableCell
+        className={cn(
+          "numeric text-right font-mono",
+          cpuTone(process.cpuPercent) === "danger"
+            ? "font-medium text-destructive"
+            : cpuTone(process.cpuPercent) === "warning"
+              ? "text-warning"
+              : "text-muted-foreground",
+        )}
+      >
+        {percent(process.cpuPercent)}
+      </TableCell>
+      <TableCell className="numeric text-right font-mono">
+        {bytes(process.rss)}
+        {memTotal > 0 && (
+          <span className="ml-1 text-muted-foreground">
+            {((process.rss / memTotal) * 100).toFixed(0)}%
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="numeric hidden text-right font-mono text-muted-foreground xl:table-cell">
+        {!ratesReady ? "—" : io > 0 ? `${bytes(io)}/s` : "—"}
+      </TableCell>
+      <TableCell className="hidden text-muted-foreground 2xl:table-cell">
+        {relativeTime(process.createTime)}
+      </TableCell>
+      <TableCell>
+        {/* Always drawn, quiet until the row is hovered: these own their
+            column, and a reserved column left empty reads as a layout bug. */}
+        <VerbActions dim verbs={verbs} />
+      </TableCell>
+    </TableRow>
+  )
+}
+
+function ProcessTableNarrow({ rows, memTotal, ...rest }: RowsProps) {
+  return (
+    <ul className="divide-y divide-hairline">
+      {rows.map((process) => (
+        <ProcessNarrowRow
+          key={processKey(process)}
+          process={process}
+          memTotal={memTotal}
+          {...rest}
+        />
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * A row drawn down rather than across. Still a row, not a card: no frame,
+ * a hairline to the next, a wash under the pointer. The title is the real
+ * button; the surrounding click is a convenience for the pointer that skips
+ * any press landing on a control of its own.
+ */
+function ProcessNarrowRow({
+  process,
+  memTotal,
+  pending,
+  confirm,
+  signal,
+  onOpen,
+}: Omit<RowsProps, "rows"> & { process: ProcessRow }) {
+  const verbs = useProcessVerbs({ process, confirm, signal, onInspect: () => onOpen(process) })
+  const busy = pending[processKey(process)]
+  return (
+    <li
+      className={cn(
+        "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
+      )}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("a, button, [role='menuitem']")) return
+        onOpen(process)
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <RowLink onClick={() => onOpen(process)}>{process.name}</RowLink>
+          <span className="numeric font-mono text-hint text-muted-foreground">{process.pid}</span>
+          <Tag>{managerName(process.manager)}</Tag>
+        </div>
+        <p className="truncate font-mono text-hint text-muted-foreground">
+          {process.cmdline || "Kernel worker"}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-hint">
+          <Status
+            state={busy ? "activating" : processStateTone(process.state)}
+            label={busy ? `${busy}…` : process.state}
+          />
+          <span
+            className={cn(
+              "numeric font-mono",
+              cpuTone(process.cpuPercent) !== "default" && "text-warning",
+            )}
+          >
+            {percent(process.cpuPercent)} CPU
+          </span>
+          <span className="numeric font-mono text-muted-foreground">
+            {bytes(process.rss)}
+            {memTotal > 0 && ` · ${((process.rss / memTotal) * 100).toFixed(0)}%`}
+          </span>
+          {process.username && <span className="text-muted-foreground">{process.username}</span>}
+        </div>
+      </div>
+      <VerbActions verbs={verbs} className="shrink-0" />
+    </li>
   )
 }
 
@@ -349,7 +578,7 @@ function ProcessTableSettings({
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="xs" className="text-muted-foreground">
           <SettingsSliders className="size-3.5" />
-          Configure
+          Every {refreshSeconds}s · {limit} rows
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
@@ -379,299 +608,6 @@ function ProcessTableSettings({
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-function ProcessDetailSheet({
-  process,
-  onOpenChange,
-  onChanged,
-}: {
-  process: ProcessRow | null
-  onOpenChange: (open: boolean) => void
-  onChanged: () => void
-}) {
-  return (
-    <SidePanel
-      open={process !== null}
-      onOpenChange={onOpenChange}
-      icon={Cpu}
-      title={process?.name ?? "Process"}
-      description={
-        process ? `PID ${process.pid} · ${process.username || "unknown user"}` : undefined
-      }
-      width="md"
-      bodyClassName="p-4"
-    >
-      {process && (
-        <ProcessDetail
-          key={`${process.pid}-${process.createTime}`}
-          process={process}
-          onClosed={() => onOpenChange(false)}
-          onChanged={onChanged}
-        />
-      )}
-    </SidePanel>
-  )
-}
-
-function ProcessDetail({
-  process,
-  onClosed,
-  onChanged,
-}: {
-  process: ProcessRow
-  onClosed: () => void
-  onChanged: () => void
-}) {
-  const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
-  const [signal, setSignal] = useState("SIGTERM")
-  const [nice, setNice] = useState(process.nice)
-  const [openedAt] = useState(() => Date.now())
-  const detail = usePoll(
-    (abort) => get<ProcessRow>(`/processes/${process.pid}`, undefined, abort),
-    4000,
-    [process.pid],
-  )
-  const row = detail.data ?? process
-  const uptime = useMemo(() => {
-    const started = new Date(row.createTime).getTime()
-    return Number.isFinite(started) ? duration(Math.max(0, (openedAt - started) / 1000)) : "—"
-  }, [openedAt, row.createTime])
-
-  const sendSignal = () => {
-    const label = signalLabel(signal)
-    confirm({
-      title: `${label} process`,
-      confirmLabel: `Send ${signal}`,
-      description: (
-        <div className="space-y-2">
-          <p>
-            Sends {signal} to <b>{row.name}</b> (PID {row.pid}). The process may stop or be
-            restarted by {managerName(row.manager)}.
-          </p>
-          <Well className="max-h-24 break-all whitespace-pre-wrap">{row.cmdline || row.name}</Well>
-        </div>
-      ),
-      action: async (confirmation) => {
-        await post(
-          `/processes/${row.pid}/signal`,
-          { signal, startedAt: row.createTime },
-          { confirm: confirmation },
-        )
-        notify.success(`${signal} sent to ${row.name}`)
-        onChanged()
-        if (["SIGTERM", "SIGKILL", "SIGINT"].includes(signal)) onClosed()
-        else detail.refresh()
-      },
-    })
-  }
-
-  const savePriority = async () => {
-    await put(`/processes/${row.pid}/priority`, { nice, startedAt: row.createTime })
-    notify.success(`Priority updated for ${row.name}`)
-    detail.refresh()
-    onChanged()
-  }
-
-  if (detail.loading && !detail.data) return <Spinner />
-  if (detail.error && !detail.data) {
-    return (
-      <EmptyState
-        icon={Cpu}
-        title="This process is no longer running"
-        description="Short-lived processes can exit between opening the row and reading its details."
-      />
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Panel>
-        <PanelHeader
-          title="Identity"
-          description="What started it and where its code lives"
-          actions={<Status state={processStateTone(row.state)} label={row.state} />}
-        />
-        <PanelBody>
-          <DetailList>
-            <Detail label="Managed by">
-              {managerName(row.manager)}
-              {row.managerName ? ` · ${row.managerName}` : ""}
-            </Detail>
-            <Detail label="Parent PID" className="font-mono">
-              {row.ppid || "—"}
-            </Detail>
-            <Detail label="Executable" className="break-all font-mono">
-              {row.exe || "Not reported"}
-            </Detail>
-            <Detail label="Working directory" className="break-all font-mono">
-              {row.cwd || "Not reported"}
-            </Detail>
-            <Detail label="Started">{relativeTime(row.createTime)}</Detail>
-            <Detail label="Uptime">{uptime}</Detail>
-          </DetailList>
-          <Well className="mt-4 max-h-36 whitespace-pre-wrap">{row.cmdline || row.name}</Well>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {row.cwd && (
-              <Button asChild size="xs" variant="outline">
-                <Link href={`/files?path=${encodeURIComponent(row.cwd)}`}>
-                  Open working directory
-                </Link>
-              </Button>
-            )}
-            {row.exe && (
-              <Button asChild size="xs" variant="outline">
-                <Link href={`/files?path=${encodeURIComponent(row.exe)}`}>Open executable</Link>
-              </Button>
-            )}
-          </div>
-        </PanelBody>
-      </Panel>
-
-      <Panel>
-        <PanelHeader title="Resources" description="Current counters from the host kernel" />
-        <PanelBody>
-          <DetailList>
-            <Detail label="CPU">{percent(row.cpuPercent)}</Detail>
-            <Detail label="Resident memory">{bytes(row.rss)}</Detail>
-            <Detail label="Virtual memory">{bytes(row.vms)}</Detail>
-            <Detail label="Disk read">{bytes(row.ioReadBytes ?? 0)}</Detail>
-            <Detail label="Disk written">{bytes(row.ioWriteBytes ?? 0)}</Detail>
-            <Detail label="Threads">{row.threads}</Detail>
-            <Detail label="Child processes">{row.children ?? 0}</Detail>
-            <Detail label="File descriptors">{row.fileDescriptors ?? "Not reported"}</Detail>
-            <Detail label="Nice value">{row.nice}</Detail>
-          </DetailList>
-        </PanelBody>
-      </Panel>
-
-      {(can("system.admin") || can("destructive")) && (
-        <Panel>
-          <PanelHeader
-            title="Control"
-            description="Scheduling priority is reversible; signals act immediately"
-          />
-          <PanelBody className="space-y-4">
-            {can("system.admin") && (
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="min-w-44 flex-1 space-y-1 text-xs">
-                  <span className="font-medium">Scheduling priority</span>
-                  <Select value={String(nice)} onValueChange={(value) => setNice(Number(value))}>
-                    <SelectTrigger size="sm" aria-label="Scheduling priority">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 40 }, (_, index) => index - 20).map((value) => (
-                        <SelectItem key={value} value={String(value)}>
-                          {value}{" "}
-                          {value < 0
-                            ? "· higher priority"
-                            : value > 0
-                              ? "· lower priority"
-                              : "· normal"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={nice === row.nice}
-                  onClick={() => savePriority().catch((error) => notify.error(String(error)))}
-                >
-                  Save priority
-                </Button>
-              </div>
-            )}
-            {can("destructive") && (
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="min-w-44 flex-1 space-y-1 text-xs">
-                  <span className="font-medium">Signal</span>
-                  <Select value={signal} onValueChange={setSignal}>
-                    <SelectTrigger size="sm" aria-label="Signal process">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[
-                        "SIGTERM",
-                        "SIGHUP",
-                        "SIGINT",
-                        "SIGUSR1",
-                        "SIGUSR2",
-                        "SIGSTOP",
-                        "SIGCONT",
-                        "SIGKILL",
-                      ].map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {signalLabel(value)} · {value}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <Button
-                  size="sm"
-                  variant={signal === "SIGKILL" ? "destructive" : "outline"}
-                  onClick={sendSignal}
-                >
-                  Send signal
-                </Button>
-              </div>
-            )}
-          </PanelBody>
-        </Panel>
-      )}
-      {dialog}
-    </div>
-  )
-}
-
-function managerName(manager: ProcessRow["manager"]): string {
-  switch (manager) {
-    case "pm2":
-      return "PM2"
-    case "systemd":
-      return "systemd"
-    case "container":
-      return "Container"
-    case "session":
-      return "Login session"
-    case "kernel":
-      return "Kernel"
-    default:
-      return "Unmanaged"
-  }
-}
-
-function processStateTone(state: ProcessRow["state"]): string {
-  if (state === "blocked" || state === "zombie") return "failed"
-  if (state === "sleeping") return "inactive"
-  return state
-}
-
-function signalLabel(signal: string): string {
-  switch (signal) {
-    case "SIGTERM":
-      return "Terminate"
-    case "SIGKILL":
-      return "Force kill"
-    case "SIGINT":
-      return "Interrupt"
-    case "SIGHUP":
-      return "Reload"
-    case "SIGSTOP":
-      return "Pause"
-    case "SIGCONT":
-      return "Resume"
-    case "SIGUSR1":
-      return "User signal 1"
-    case "SIGUSR2":
-      return "User signal 2"
-    default:
-      return signal
-  }
 }
 
 function useDebounced<T>(value: T, delay: number): T {

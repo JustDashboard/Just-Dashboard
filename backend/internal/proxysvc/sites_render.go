@@ -48,7 +48,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	l.blank()
 
 	if spec.TLS && spec.ForceHTTPS {
-		renderRedirectServer(l, names)
+		renderRedirectServer(l, names, spec.ManagedACME)
 		l.blank()
 	}
 
@@ -108,7 +108,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 }
 
 // renderRedirectServer is the plain-HTTP half of a TLS site.
-func renderRedirectServer(l *lines, names string) {
+func renderRedirectServer(l *lines, names string, managedACME bool) {
 	l.add("server {")
 	l.add("    listen 80;")
 	l.add("    listen [::]:80;")
@@ -118,7 +118,11 @@ func renderRedirectServer(l *lines, names string) {
 	l.add("    # challenge path has to survive the redirect or renewal stops working")
 	l.add("    # in sixty days and nobody finds out until the certificate expires.")
 	l.add("    location %s {", acmeChallengePath)
-	l.add("        root /var/www/html;")
+	root := "/var/www/html"
+	if managedACME {
+		root = deploymentACMEWebroot
+	}
+	l.add("        root %s;", root)
 	l.add("    }")
 	l.blank()
 	l.add("    location / {")

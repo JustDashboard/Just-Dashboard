@@ -1,16 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 // The file manager's read surface, driven through the whole chain with a real
@@ -208,5 +213,71 @@ func TestBookmarksAreAWriteAndAreStored(t *testing.T) {
 	}
 	if w := readonly.do(http.MethodPut, "/api/v1/files/bookmarks", body, nil); w.Code != http.StatusForbidden {
 		t.Fatalf("a reader rearranged the rail: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The write verbs refuse to clobber unless told to. An upload used to
+// overwrite by default and a move replaced the destination through rename(2),
+// so "upload logo.png" and "move a.txt here" both quietly ate whatever held
+// the name already; the page now hears 409 and asks.
+func TestFileWritesRefuseToClobberWithoutOverwrite(t *testing.T) {
+	c, s := newClient(t)
+	root := fileFixture(t, s)
+
+	upload := func(overwrite bool) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		part, err := mw.CreateFormFile("file", "../../index.html")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("<b>replaced</b>")); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		path := query("/api/v1/files/upload", map[string]string{"path": root, "overwrite": strconv.FormatBool(overwrite)})
+		req := httptest.NewRequest(http.MethodPost, path, &body)
+		req.RemoteAddr = "127.0.0.1:5555"
+		req.Header.Set("Cookie", c.cookie)
+		req.Header.Set(httpx.CSRFHeader, "1")
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		w := httptest.NewRecorder()
+		c.h.ServeHTTP(w, req)
+		return w
+	}
+	if w := upload(false); w.Code != http.StatusConflict {
+		t.Fatalf("uploading over index.html without overwrite: %d %s", w.Code, w.Body.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "index.html")); string(b) != "<script>alert(1)</script>" {
+		t.Fatalf("a refused upload changed the file: %q", b)
+	}
+	if w := upload(true); w.Code != http.StatusCreated {
+		t.Fatalf("uploading with overwrite: %d %s", w.Code, w.Body.String())
+	}
+	// The filename's directory part was dropped rather than honoured.
+	if b, _ := os.ReadFile(filepath.Join(root, "index.html")); string(b) != "<b>replaced</b>" {
+		t.Fatalf("upload landed somewhere else: %q", b)
+	}
+
+	body := `{"from":"` + filepath.Join(root, "etc/nginx/nginx.conf") + `","to":"` + filepath.Join(root, "index.html") + `"}`
+	if w := c.do(http.MethodPost, "/api/v1/files/move", body, nil); w.Code != http.StatusConflict {
+		t.Fatalf("move onto an occupied name: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPost, "/api/v1/files/move", `{"from":"","to":""}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("move with empty paths: %d", w.Code)
+	}
+	if w := c.do(http.MethodPost, "/api/v1/files/touch", `{"path":"`+filepath.Join(root, "index.html")+`"}`, nil); w.Code != http.StatusConflict {
+		t.Fatalf("touch on an existing file: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPost, "/api/v1/files/mkdir", `{"path":"`+filepath.Join(root, "etc")+`"}`, nil); w.Code != http.StatusConflict {
+		t.Fatalf("mkdir on an existing folder: %d %s", w.Code, w.Body.String())
+	}
+	// An archive member outside its base is refused before any byte streams.
+	archive := "/api/v1/files/archive?base=" + url.QueryEscape(filepath.Join(root, "etc")) +
+		"&path=" + url.QueryEscape(filepath.Join(root, "index.html"))
+	if w := c.do(http.MethodGet, archive, "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("archive member outside base: %d", w.Code)
 	}
 }

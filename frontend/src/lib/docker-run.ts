@@ -19,8 +19,24 @@ import type { ContainerSpec, MountSpec, PortMapping } from "@/lib/types"
 
 export type ParsedRun = {
   spec: ContainerSpec
-  /** Flags recognised but not representable, and anything ignored. */
+  /** What could not be read, and what was read and had to be filled in by hand. */
   warnings: string[]
+  /**
+   * Real Docker flags the visual form has nowhere to put.
+   *
+   * Kept apart from `warnings` because it is a different statement. A warning
+   * says "this could not be read"; this says "this was understood and the
+   * editor cannot represent it" — which is the operator's cue that the
+   * container they are about to create is not the one the command describes.
+   * Silently dropping `--gpus all` produces a container that starts and then
+   * has no GPU, which is the worst possible way to find out.
+   */
+  unsupported: string[]
+  /**
+   * The command as it was pasted. Kept so the operator can go back to it: the
+   * form is a reading of the command, not a replacement for it.
+   */
+  original: string
 }
 
 const emptySpec = (): ContainerSpec => ({
@@ -200,13 +216,27 @@ export function parseDockerRun(input: string): ParsedRun {
 
   // Tolerate `sudo docker run …`, `podman run …`, and a bare flag list with no
   // command in front of it — all three turn up in READMEs.
-  while (tokens.length && ["sudo", "docker", "podman", "run", "container", "-"].includes(tokens[0])) {
+  while (
+    tokens.length &&
+    ["sudo", "docker", "podman", "run", "container", "-"].includes(tokens[0])
+  ) {
     tokens = tokens.slice(1)
   }
   if (tokens.length === 0) {
-    return { spec, warnings: ["Nothing to read in that command."] }
+    return {
+      spec,
+      warnings: ["Nothing to read in that command."],
+      unsupported: [],
+      original: input,
+    }
   }
 
+  // Flags recognised as real Docker flags that the visual form has nowhere to
+  // put. Collected separately from parse warnings because they are a different
+  // statement: not "this could not be read" but "this was understood and the
+  // editor cannot represent it", which is the operator's cue to keep the
+  // original command.
+  const unsupported: string[] = []
   const health: string[] = []
   let healthInterval: number | undefined
   let healthRetries: number | undefined
@@ -236,7 +266,13 @@ export function parseDockerRun(input: string): ParsedRun {
     }
 
     if (BOOLEAN_FLAGS.has(flag)) {
-      applyBoolean(spec, flag, () => (noHealth = true))
+      if (inlineValue !== undefined && !/^(true|false|t|f|1|0)$/i.test(inlineValue)) {
+        warnings.push(`\`${token}\` has an invalid boolean value and has been ignored.`)
+        unsupported.push(token)
+        continue
+      }
+      const enabled = inlineValue === undefined || /^(true|t|1)$/i.test(inlineValue)
+      applyBoolean(spec, flag, enabled, () => (noHealth = enabled))
       continue
     }
 
@@ -246,7 +282,7 @@ export function parseDockerRun(input: string): ParsedRun {
       continue
     }
     if (!VALUE_FLAGS.has(flag)) {
-      warnings.push(`\`${flag}\` is not something this form covers; it has been left out.`)
+      unsupported.push(`${flag} ${value}`)
       continue
     }
 
@@ -289,7 +325,9 @@ export function parseDockerRun(input: string): ParsedRun {
         // `-e FOO` with no value means "pass FOO through from the shell",
         // which cannot survive a paste into a form.
         if (rest.length === 0) {
-          warnings.push(`\`${name}\` was passed through from the shell's own environment, so its value is not in this command. Fill it in below.`)
+          warnings.push(
+            `\`${name}\` was passed through from the shell's own environment, so its value is not in this command. Fill it in below.`,
+          )
           spec.env!.push({ name, value: "" })
         } else {
           spec.env!.push({ name, value: rest.join("=") })
@@ -297,7 +335,9 @@ export function parseDockerRun(input: string): ParsedRun {
         break
       }
       case "--env-file":
-        warnings.push(`Variables from \`${value}\` are not included — that file is read at run time. Add the ones you need below.`)
+        warnings.push(
+          `Variables from \`${value}\` are not included — that file is read at run time. Add the ones you need below.`,
+        )
         break
       case "-l":
       case "--label": {
@@ -389,10 +429,31 @@ export function parseDockerRun(input: string): ParsedRun {
         healthRetries = Number(value) || undefined
         break
       case "--pull":
-        spec.pull = value === "always" ? "always" : "missing"
+        if (value === "always" || value === "missing") spec.pull = value
+        else {
+          unsupported.push(`--pull=${value}`)
+          warnings.push(
+            `The visual form cannot preserve \`--pull=${value}\`. Keep the original command.`,
+          )
+        }
         break
+      case "--log-driver":
+        spec.logging = { ...spec.logging, driver: value }
+        break
+      case "--log-opt": {
+        const [name, ...rest] = value.split("=")
+        spec.logging = {
+          ...spec.logging,
+          options: { ...spec.logging?.options, [name]: rest.join("=") },
+        }
+        break
+      }
+      // `--gpus all` and `--security-opt` change what the container is allowed
+      // to do, so they cannot quietly vanish: the form has nowhere to put them
+      // and the warning says exactly that rather than leaving the operator to
+      // discover it when the container starts without a GPU.
       default:
-        warnings.push(`\`${flag} ${value}\` is not something this form covers; it has been left out.`)
+        unsupported.push(`${flag} ${value}`)
     }
   }
 
@@ -402,7 +463,9 @@ export function parseDockerRun(input: string): ParsedRun {
     if (command.length) spec.command = command
   }
   if (!spec.image) {
-    warnings.push("No image name found. A `docker run` command ends with the image and, optionally, a command.")
+    warnings.push(
+      "No image name found. A `docker run` command ends with the image and, optionally, a command.",
+    )
   }
   if (noHealth) {
     spec.health = { test: [], disable: true }
@@ -425,40 +488,45 @@ export function parseDockerRun(input: string): ParsedRun {
     // both more useful and what most people would have typed.
     spec.name = suggestName(spec.image)
   }
-  return { spec, warnings }
+  return { spec, warnings, unsupported, original: input }
 }
 
-function applyBoolean(spec: ContainerSpec, flag: string, noHealthcheck: () => void) {
+function applyBoolean(
+  spec: ContainerSpec,
+  flag: string,
+  enabled: boolean,
+  noHealthcheck: () => void,
+) {
   switch (flag) {
     case "--rm":
-      spec.autoRemove = true
+      spec.autoRemove = enabled
       break
     case "-t":
     case "--tty":
-      spec.tty = true
+      spec.tty = enabled
       break
     case "-i":
     case "--interactive":
-      spec.openStdin = true
+      spec.openStdin = enabled
       break
     case "-it":
     case "-ti":
-      spec.tty = true
-      spec.openStdin = true
+      spec.tty = enabled
+      spec.openStdin = enabled
       break
     case "-itd":
     case "-dit":
-      spec.tty = true
-      spec.openStdin = true
+      spec.tty = enabled
+      spec.openStdin = enabled
       break
     case "--privileged":
-      spec.privileged = true
+      spec.privileged = enabled
       break
     case "--init":
-      spec.init = true
+      spec.init = enabled
       break
     case "--read-only":
-      spec.readOnlyRootfs = true
+      spec.readOnlyRootfs = enabled
       break
     case "--no-healthcheck":
       noHealthcheck()
@@ -510,7 +578,10 @@ function parseVolumeFlag(value: string): MountSpec | null {
   const [source, target, ...options] = parts
   if (!target) return null
   return {
-    type: source.startsWith("/") || source.startsWith("./") || source.startsWith("~") ? "bind" : "volume",
+    type:
+      source.startsWith("/") || source.startsWith("./") || source.startsWith("~")
+        ? "bind"
+        : "volume",
     source,
     target,
     readOnly: options.includes("ro"),

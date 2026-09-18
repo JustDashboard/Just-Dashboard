@@ -1,8 +1,20 @@
 "use client"
 
-import { ChevronLeft, ChevronRight, MagnifyingGlassMinus } from "@/components/icons"
+import {
+  ChevronLeft,
+  ChevronRight,
+  Link as LinkIcon,
+  MagnifyingGlassMinus,
+} from "@/components/icons"
 import { timestamp } from "@/lib/format"
-import { RANGES, windowLabel, type MetricsWindow, type RangeKey, type RangeSpec } from "@/lib/metrics-range"
+import { notify } from "@/lib/toast"
+import {
+  RANGES,
+  windowLabel,
+  type MetricsWindow,
+  type RangeKey,
+  type RangeSpec,
+} from "@/lib/metrics-range"
 import type { WindowControls } from "@/hooks/use-metrics-window"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -34,7 +46,7 @@ export function RangePicker({
     <div className="flex flex-wrap items-center gap-1.5">
       {zoomed && (
         <>
-          <span className="numeric rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
+          <span className="numeric rounded-md border border-rule-primary bg-wash-primary px-2 py-1 text-hint font-medium text-primary">
             {windowLabel(win)} window
           </span>
           <Button
@@ -69,6 +81,22 @@ export function RangePicker({
             </TooltipTrigger>
             <TooltipContent>Back to the previous window</TooltipContent>
           </Tooltip>
+          {/* The span is already in the address bar (see `useMetricsWindow`);
+              this is the affordance that says so. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Copy link to this window"
+                className="text-muted-foreground"
+                onClick={() => copyWindowLink()}
+              >
+                <LinkIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Copy a link to exactly this span</TooltipContent>
+          </Tooltip>
         </>
       )}
       <ToggleGroup
@@ -84,13 +112,22 @@ export function RangePicker({
         aria-label="Chart time range"
       >
         {ranges.map((option) => (
-          <ToggleGroupItem key={option.key} value={option.key} className="px-2.5 text-[11px]">
+          <ToggleGroupItem key={option.key} value={option.key} className="px-2.5 text-hint">
             {option.label}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
     </div>
   )
+}
+
+async function copyWindowLink() {
+  try {
+    await navigator.clipboard.writeText(globalThis.location.href)
+    notify.success("Link copied", { description: "It opens the charts on this exact span." })
+  } catch (err) {
+    notify.error("Could not copy the link", err)
+  }
 }
 
 /** The exact span on screen, for the caption under a zoomed set of charts. */

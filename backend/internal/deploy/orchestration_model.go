@@ -18,15 +18,18 @@ func (s SlotClass) valid() bool { return s == SlotLight || s == SlotHeavy }
 // caller receives its run id. RequestDigest must describe the normalized plan
 // and request, not the raw JSON bytes, so semantically identical retries join.
 type RunRequest struct {
-	ProjectID      int64
-	EnvironmentID  int64
-	Operation      Operation
-	Trigger        TriggerKind
-	Actor          string
-	IdempotencyKey string
-	RequestDigest  string
-	PlanRevision   int
-	RetryOfRunID   int64
+	ProjectID            int64
+	EnvironmentID        int64
+	Operation            Operation
+	Trigger              TriggerKind
+	Actor                string
+	IdempotencyKey       string
+	RequestDigest        string
+	PlanRevision         int
+	SourceRevision       string
+	ExpectedPlanRevision int
+	ExpectedGitPolicy    string
+	RetryOfRunID         int64
 	// VariableSnapshotRunID is internal retry provenance. A normal enqueue
 	// captures the environment's active revisions; a retry copies this run's
 	// already-frozen set instead of observing later rotations.
@@ -39,6 +42,8 @@ type RunRequest struct {
 
 type EngineRun struct {
 	ID                 int64           `json:"id"`
+	RunNumber          int64           `json:"runNumber"`
+	SourceRevision     string          `json:"sourceRevision,omitempty"`
 	ProjectID          int64           `json:"projectId"`
 	EnvironmentID      int64           `json:"environmentId"`
 	State              RunState        `json:"state"`

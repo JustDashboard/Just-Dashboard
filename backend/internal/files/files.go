@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -481,6 +482,11 @@ func (s *Service) Write(path, content string) error {
 	return os.Rename(tmpName, full)
 }
 
+// Mkdir is the "New folder" verb. Missing parents are created on the way,
+// but the folder itself has to be new: MkdirAll alone answered "Created x"
+// for a folder that was already there, which is a success message about
+// nothing having happened, and the same name typed twice is the common way
+// to arrive here.
 func (s *Service) Mkdir(path string, mode os.FileMode) error {
 	full, err := s.Resolve(path)
 	if err != nil {
@@ -489,16 +495,23 @@ func (s *Service) Mkdir(path string, mode os.FileMode) error {
 	if mode == 0 {
 		mode = 0o755
 	}
+	if _, err := os.Lstat(full); err == nil {
+		return fmt.Errorf("%w: %s", fs.ErrExist, path)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	return os.MkdirAll(full, mode)
 }
 
+// Touch is the "New file" verb, not the shell command of the same name: an
+// existing path is a conflict, because the page opens whatever this creates
+// in the editor, and bumping the timestamp of a file that was already there
+// handed the operator somebody else's contents under the name they had just
+// typed as new.
 func (s *Service) Touch(path string) error {
 	full, err := s.Resolve(path)
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(full); err == nil {
-		return os.Chtimes(full, time.Now(), time.Now())
 	}
 	f, err := os.OpenFile(full, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
@@ -523,7 +536,11 @@ func (s *Service) Delete(path string, recursive bool) error {
 	return os.Remove(full)
 }
 
-func (s *Service) Move(from, to string) error {
+// Move renames an entry, or moves it into a directory when the destination
+// names one. The destination has to be free unless overwrite says otherwise:
+// rename(2) replaces a file silently, which is how "move a.txt here" used to
+// eat the a.txt that was already there without a word.
+func (s *Service) Move(from, to string, overwrite bool) error {
 	src, err := s.ResolveEntry(from)
 	if err != nil {
 		return err
@@ -532,81 +549,79 @@ func (s *Service) Move(from, to string) error {
 	if err != nil {
 		return err
 	}
-	if st, err := os.Stat(dst); err == nil && st.IsDir() {
+	if st, err := os.Stat(dst); err == nil && st.IsDir() && dst != src {
+		dst, err = s.Resolve(dst)
+		if err != nil {
+			return err
+		}
 		dst = filepath.Join(dst, filepath.Base(src))
 	}
-	if err := os.Rename(src, dst); err != nil {
-		// Rename fails across filesystems; fall back to copy-then-remove so
-		// moving between / and a mounted volume works as the user expects.
+	if dst == src {
+		return nil
+	}
+	// rename(2) answers this with EINVAL, which reaches the operator as
+	// "invalid argument" for the most ordinary mis-drop there is.
+	if strings.HasPrefix(dst, src+string(filepath.Separator)) {
+		return fmt.Errorf("cannot move %s into itself", filepath.Base(src))
+	}
+	if !overwrite {
+		if _, err := os.Lstat(dst); err == nil {
+			return fmt.Errorf("%w: %s", fs.ErrExist, dst)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	root, source, err := s.openRootEntry(src)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	target, err := filepath.Rel(root.Name(), dst)
+	if err != nil {
+		return err
+	}
+	if target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		if err := s.copyPath(src, dst); err != nil {
+			return err
+		}
+		return root.RemoveAll(source)
+	}
+	if err := root.Rename(source, target); err != nil {
 		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err == syscall.EXDEV {
-			if err := copyPath(src, dst); err != nil {
+			if err := s.copyPath(src, dst); err != nil {
 				return err
 			}
-			return os.RemoveAll(src)
+			return root.RemoveAll(source)
 		}
 		return err
 	}
 	return nil
 }
 
-func (s *Service) Copy(from, to string) error {
-	// ResolveEntry, so copying a symlink copies the link — which is what
-	// copyPath's os.ModeSymlink branch has always been written to do and could
-	// never reach while its input arrived already dereferenced.
+// Copy duplicates an entry, into a directory when the destination names one.
+// Like Move it refuses an occupied destination unless told to replace it —
+// the replacement itself, when asked for, is the atomic one copyRootEntry
+// does.
+func (s *Service) Copy(from, to string, overwrite bool) error {
 	src, err := s.ResolveEntry(from)
 	if err != nil {
 		return err
 	}
-	dst, err := s.ResolveEntry(to)
+	dst, err := s.Resolve(to)
 	if err != nil {
 		return err
 	}
 	if st, err := os.Stat(dst); err == nil && st.IsDir() {
 		dst = filepath.Join(dst, filepath.Base(src))
 	}
-	return copyPath(src, dst)
-}
-
-func copyPath(src, dst string) error {
-	st, err := os.Lstat(src)
-	if err != nil {
-		return err
+	if !overwrite {
+		if _, err := os.Lstat(dst); err == nil {
+			return fmt.Errorf("%w: %s", fs.ErrExist, dst)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
-	switch {
-	case st.Mode()&os.ModeSymlink != 0:
-		target, err := os.Readlink(src)
-		if err != nil {
-			return err
-		}
-		return os.Symlink(target, dst)
-	case st.IsDir():
-		if err := os.MkdirAll(dst, st.Mode().Perm()); err != nil {
-			return err
-		}
-		entries, err := os.ReadDir(src)
-		if err != nil {
-			return err
-		}
-		for _, e := range entries {
-			if err := copyPath(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
-				return err
-			}
-		}
-		return nil
-	default:
-		in, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, st.Mode().Perm())
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
-	}
+	return s.copyPath(src, dst)
 }
 
 func (s *Service) Chmod(path string, mode string, recursive bool) error {
@@ -730,15 +745,64 @@ func (s *Service) Open(path string) (*os.File, os.FileInfo, error) {
 	return f, st, nil
 }
 
-// Create opens a destination for upload, refusing to clobber unless asked.
-func (s *Service) Create(path string, overwrite bool) (*os.File, error) {
+// Upload writes r to path: a new file, or a replacement for an existing
+// regular file when overwrite is set.
+//
+// The bytes land in a temporary sibling and are renamed into place, the same
+// way Write works, and for the same reason with the stakes higher: an upload
+// is the one write that arrives over a network at the browser's pace, so a
+// transfer that is cancelled, times out or trips the request size limit
+// halfway through used to leave a truncated file where a whole one had been.
+// An existing file keeps its owner and mode across the replacement, which is
+// what lets the image editor save over a picture the web server owns.
+func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error) {
 	full, err := s.Resolve(path)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
-	if !overwrite {
-		flags = os.O_CREATE | os.O_WRONLY | os.O_EXCL
+	perm := os.FileMode(0o644)
+	uid, gid := -1, -1
+	if st, err := os.Lstat(full); err == nil {
+		if st.IsDir() {
+			return 0, ErrIsDir
+		}
+		if !overwrite {
+			return 0, fmt.Errorf("%w: %s", fs.ErrExist, path)
+		}
+		if !st.Mode().IsRegular() {
+			return 0, fmt.Errorf("refusing to replace %s: it is not a regular file", path)
+		}
+		perm = st.Mode().Perm()
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+			uid, gid = int(sys.Uid), int(sys.Gid)
+		}
+	} else if !os.IsNotExist(err) {
+		return 0, err
 	}
-	return os.OpenFile(full, flags, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(full), ".jd-upload-*")
+	if err != nil {
+		return 0, err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	n, err := io.Copy(tmp, r)
+	if err != nil {
+		tmp.Close()
+		return n, err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return n, err
+	}
+	if err := tmp.Close(); err != nil {
+		return n, err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return n, err
+	}
+	if uid >= 0 {
+		os.Chown(tmpName, uid, gid)
+	}
+	return n, os.Rename(tmpName, full)
 }

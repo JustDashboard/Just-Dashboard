@@ -289,6 +289,14 @@ func (s *OrchestrationStore) TransitionRun(
 	if affected, _ := result.RowsAffected(); affected != 1 {
 		return nil, ErrLeaseLost
 	}
+	if _, failing := candidateFailureStates[to]; failing {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE deploy_releases SET state = 'failed'
+			 WHERE state = 'candidate' AND id = (SELECT candidate_release_id FROM deploy_runs WHERE id = ?)`,
+			runID); err != nil {
+			return nil, err
+		}
+	}
 	event, err := appendEventTx(ctx, tx, now, runID, 0, EventRunState, "status", "",
 		mustJSON(map[string]any{"from": from, "state": to, "code": detail.Code, "reason": detail.Reason}))
 	if err != nil {

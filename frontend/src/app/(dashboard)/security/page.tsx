@@ -1,117 +1,275 @@
 "use client"
 
-import Link from "next/link"
+import { useMemo } from "react"
 import {
   Bug,
-  Connection,
-  Crosshair,
+  FirewallCheck,
   NetworkDevice,
-  Shield,
-  TerminalWindow,
-  Users,
+  SecureConnection,
+  SignIn,
 } from "@/components/icons"
-import type { SecurityFinding } from "@/lib/types"
-import { Page, PageHeader, Section } from "@/components/page"
-import { Panel, PanelBody } from "@/components/panel"
-import { StatusDot, type Tone } from "@/components/status-dot"
-import { ExposurePanel } from "@/components/security/exposure-panel"
-import { PosturePanel } from "@/components/security/posture-panel"
+import { get } from "@/lib/api"
+import { relativeTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import type { Connections, Fail2banJail, LoginSession, SecurityFinding } from "@/lib/types"
+import type { Tone } from "@/components/tone"
+import { usePoll } from "@/hooks/use-poll"
+import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
+import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
+import { Notice } from "@/components/state"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ExposureFacts } from "@/components/security/exposure-panel"
+import { PosturePanel, worstLevel } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
 
-type Area = SecurityFinding["area"]
+type Fail2banReply = { available: boolean; running: boolean; jails: Fail2banJail[] }
 
-const FIREWALL_HREF = "/security/firewall"
-
-const AREAS: { area: Area | Area[]; href: string; title: string; icon: typeof Shield; blurb: string }[] =
-  [
-    { area: "firewall", href: FIREWALL_HREF, title: "Firewall", icon: Shield, blurb: "Inbound rules and default policy" },
-    { area: "ssh", href: "/security/ssh", title: "SSH", icon: TerminalWindow, blurb: "sshd's effective configuration" },
-    { area: "intrusion", href: "/security/intrusion", title: "Intrusion", icon: Bug, blurb: "fail2ban jails and ban activity" },
-    { area: "ports", href: "/security/connections", title: "Connections", icon: NetworkDevice, blurb: "Live TCP connections in and out" },
-    { area: [], href: "/security/logins", title: "Logins", icon: Users, blurb: "Who is on the host, and who has been" },
-    { area: [], href: "/security/network", title: "Network", icon: Connection, blurb: "Interfaces, routes and listeners" },
-    { area: [], href: "/security/tools", title: "Tools", icon: Crosshair, blurb: "Port scan and TLS probe" },
-  ]
-
+/**
+ * Is this machine in reasonable shape, and where is it not?
+ *
+ * The page answers in the order the host Overview does: what the machine is
+ * (how this browser reaches it, and from where), five readings — one per area
+ * that has a figure — each a way into its page, and the findings, worst first,
+ * with the remedy on the ones the dashboard can carry out itself. The section
+ * strip above already names every page, so there is no second list of them
+ * here: the tiles carry the verdicts that used to sit beside seven links.
+ */
 export default function SecurityOverviewPage() {
-  const { posture, postureLoading, firewall, applyFix } = useSecurity()
+  const { posture, postureLoading, firewall, exposure, applyFix } = useSecurity()
 
-  const countFor = (area: Area | Area[]) => {
-    const list = Array.isArray(area) ? area : [area]
-    if (list.length === 0) return null
-    return posture?.findings.filter((f) => list.includes(f.area)) ?? []
-  }
+  const fail2ban = usePoll<Fail2banReply>(
+    (signal) => get("/fail2ban/", undefined, signal),
+    20_000,
+  )
+  const connections = usePoll<Connections>(
+    (signal) => get("/connections", undefined, signal),
+    10_000,
+  )
+  const sessions = usePoll<LoginSession[]>(
+    (signal) => get("/ssh-sessions", undefined, signal),
+    10_000,
+  )
+
+  const ssh = useMemo(() => areaFindings(posture?.findings, "ssh"), [posture])
+  const grade = exposure ? worstLevel(areaFindings(posture?.findings, "exposure")) : "ok"
+
+  const bannedNow = fail2ban.data?.jails.reduce((n, j) => n + j.currentlyBanned, 0) ?? 0
+  const fromInternet = connections.data?.peers.filter((p) => !p.private).length ?? 0
+  const remote = sessions.data?.filter((s) => s.isSsh).length ?? 0
 
   return (
-    <Page>
+    <Page className="animate-rise">
       <PageHeader
-        eyebrow="Network"
+        eyebrow="Protection"
         title="Security"
-        description="Exposure, firewall, SSH, intrusion prevention and who is connected"
+        actions={
+          posture && (
+            <MetricStrip>
+              <Metric label="Checks" value={posture.checks} />
+              <Metric
+                label="Not checked"
+                value={posture.skipped.length}
+                hint={posture.skipped.length > 0 ? posture.skipped.join(", ") : undefined}
+              />
+              <Metric label="Checked" value={relativeTime(posture.checkedAt)} />
+            </MetricStrip>
+          )
+        }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-        <ExposurePanel />
-        <PosturePanel posture={posture} loading={postureLoading} onFix={applyFix} />
-      </div>
+      {/* What this machine is, from a security point of view: how the panel
+          is reachable, and from where this reader is reaching it. This was a
+          framed panel with a sentence, a labelled list and a recommendation;
+          the grade is a reading and its inputs are facts, so they sit in the
+          row the host Overview keeps its platform and kernel in. */}
+      <ExposureFacts exposure={exposure} />
 
-      <Section title="Jump to">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
-          {AREAS.map(({ area, href, title, icon: Icon, blurb }) => {
-            const findings = countFor(area)
-            const worst = worstLevel(findings)
-            const isFirewall = href === FIREWALL_HREF
-            const tone: Tone =
-              isFirewall && firewall && !firewall.enabled
+      {/* The recommendation only where no finding already carries it: a
+          public or open allowlist is a finding below, and saying it twice on
+          one screen is what taught people to skip both. */}
+      {exposure?.recommendation && grade === "ok" && (
+        <Notice title="A quieter arrangement is available">{exposure.recommendation}</Notice>
+      )}
+
+      <StatGrid columns={5}>
+        <AreaTile
+          icon={FirewallCheck}
+          title="Firewall"
+          href="/security/firewall"
+          loading={!firewall}
+          value={
+            !firewall
+              ? undefined
+              : !firewall.available
+                ? "None"
+                : firewall.enabled
+                  ? firewall.backend
+                  : "Not enabled"
+          }
+          tone={!firewall || !firewall.available ? "warning" : firewall.enabled ? "default" : "danger"}
+          hint={
+            !firewall || !firewall.available
+              ? "install ufw or firewalld"
+              : `${firewall.rules.filter((r) => !r.ipv6).length} rules · inbound ${firewall.policy.incoming ?? "—"}`
+          }
+        />
+        <AreaTile
+          icon={SecureConnection}
+          title="SSH"
+          href="/security/ssh"
+          loading={postureLoading && !posture}
+          value={
+            !posture
+              ? undefined
+              : posture.skipped.includes("ssh")
+                ? "Not checked"
+                : ssh.length === 0
+                  ? "Hardened"
+                  : `${ssh.length} finding${ssh.length === 1 ? "" : "s"}`
+          }
+          tone={toneFor(worstLevel(ssh))}
+          hint={
+            !posture || posture.skipped.includes("ssh")
+              ? "no sshd on this host"
+              : (ssh[0]?.title ?? "keys, root login and attempts in order")
+          }
+        />
+        <AreaTile
+          icon={Bug}
+          title="Intrusion"
+          href="/security/intrusion"
+          loading={fail2ban.loading && !fail2ban.data}
+          value={
+            !fail2ban.data
+              ? undefined
+              : !fail2ban.data.available
+                ? "No fail2ban"
+                : !fail2ban.data.running
+                  ? "Not running"
+                  : `${bannedNow} banned now`
+          }
+          tone={
+            !fail2ban.data
+              ? "default"
+              : !fail2ban.data.available || !fail2ban.data.running
                 ? "warning"
-                : worst
-                  ? LEVEL_TONE[worst]
-                  : "running"
-            const detail =
-              isFirewall && firewall
-                ? firewall.enabled
-                  ? `${firewall.backend} · ${firewall.rules.length} rules`
-                  : `${firewall.backend} · not enabled`
-                : findings === null
-                  ? blurb
-                  : findings.length > 0
-                    ? `${findings.length} finding${findings.length === 1 ? "" : "s"}`
-                    : "nothing outstanding"
+                : bannedNow > 0
+                  ? "warning"
+                  : "default"
+          }
+          hint={
+            fail2ban.data?.running
+              ? `${fail2ban.data.jails.length} jail${fail2ban.data.jails.length === 1 ? "" : "s"} watching`
+              : "nothing is blocking repeated failures"
+          }
+        />
+        <AreaTile
+          icon={NetworkDevice}
+          title="Connections"
+          href="/security/connections"
+          loading={connections.loading && !connections.data}
+          value={connections.data ? fromInternet : connections.error ? "Unreadable" : undefined}
+          trailing={connections.data ? "from the internet" : undefined}
+          tone={fromInternet > 0 ? "warning" : "default"}
+          hint={
+            connections.data
+              ? `${connections.data.peers.length} remote address${connections.data.peers.length === 1 ? "" : "es"} · ${connections.data.total} sockets`
+              : undefined
+          }
+        />
+        <AreaTile
+          icon={SignIn}
+          title="Logins"
+          href="/security/logins"
+          loading={sessions.loading && !sessions.data}
+          value={
+            sessions.data
+              ? sessions.data.length === 0
+                ? "Nobody in"
+                : `${sessions.data.length} session${sessions.data.length === 1 ? "" : "s"}`
+              : sessions.error
+                ? "Unreadable"
+                : undefined
+          }
+          hint={
+            sessions.data
+              ? remote > 0
+                ? `${remote} over ssh`
+                : "nobody holds a shell right now"
+              : undefined
+          }
+        />
+      </StatGrid>
 
-            return (
-              <Link key={href} href={href} className="block min-w-0">
-                <Panel className="h-full transition-colors hover:border-primary/30">
-                  <PanelBody className="flex items-start gap-3">
-                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                      <Icon className="size-4 text-muted-foreground" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-medium">{title}</p>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <StatusDot tone={tone} />
-                        <span className="truncate">{detail}</span>
-                      </p>
-                    </div>
-                  </PanelBody>
-                </Panel>
-              </Link>
-            )
-          })}
-        </div>
-      </Section>
+      <PosturePanel posture={posture} loading={postureLoading} onFix={applyFix} />
     </Page>
   )
 }
 
-const LEVEL_TONE: Record<SecurityFinding["level"], Tone> = {
-  critical: "critical",
-  warning: "warning",
-  notice: "notice",
+function areaFindings(findings: SecurityFinding[] | undefined, area: SecurityFinding["area"]) {
+  return findings?.filter((f) => f.area === area) ?? []
 }
 
-function worstLevel(findings: SecurityFinding[] | null): SecurityFinding["level"] | null {
-  if (!findings || findings.length === 0) return null
-  if (findings.some((f) => f.level === "critical")) return "critical"
-  if (findings.some((f) => f.level === "warning")) return "warning"
-  return "notice"
+function toneFor(level: ReturnType<typeof worstLevel>): Tone {
+  if (level === "critical") return "danger"
+  if (level === "warning") return "warning"
+  return "default"
+}
+
+/**
+ * One area, its headline figure, and the way to its page — a `StatTile`
+ * behind a `StatLink`, exactly as the host Overview draws its Services row.
+ * The glyph before the name is wayfinding, not decoration: it is the mark the
+ * sidebar entry carries, so the eye finds "Firewall" without reading. The
+ * figure rises once when its poll lands, so a row of five fills in rather than
+ * flickering from bone to number.
+ */
+function AreaTile({
+  icon: Icon,
+  title,
+  href,
+  value,
+  hint,
+  trailing,
+  tone = "default",
+  loading,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  href: string
+  value?: React.ReactNode
+  hint?: React.ReactNode
+  /** The figure's unit, set beside it rather than folded into it. */
+  trailing?: React.ReactNode
+  tone?: Tone
+  loading?: boolean
+}) {
+  const settled = !loading
+  return (
+    <StatLink href={href} label={title}>
+      <StatTile
+        className="h-full transition-colors group-hover:bg-row-hover"
+        label={
+          <>
+            <Icon aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
+            {title}
+          </>
+        }
+        value={
+          <span
+            key={settled ? "figure" : "skeleton"}
+            className={cn(
+              "inline-block max-w-full truncate align-bottom",
+              settled && "animate-rise",
+            )}
+          >
+            {loading ? <Skeleton className="my-1.5 h-5 w-24" /> : (value ?? "—")}
+          </span>
+        }
+        tone={value == null ? "default" : tone}
+        trailing={loading ? undefined : trailing}
+        hint={hint}
+      />
+    </StatLink>
+  )
 }

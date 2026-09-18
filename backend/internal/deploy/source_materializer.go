@@ -18,7 +18,86 @@ type MaterializedSource struct {
 	Root      string `json:"root"`
 	Revision  string `json:"revision,omitempty"`
 	Digest    string `json:"digest,omitempty"`
+	// Commit summarizes the exact commit a Git source resolved to, so the run
+	// metadata can carry a subject and author next to the sha it already
+	// records. It is only ever set for a Git source, and only on a best-effort
+	// basis: an unreadable history never fails materialization.
+	Commit *CommitMetadata `json:"commit,omitempty"`
 }
+
+// CommitMetadata is the human-readable summary of the commit a Git run built.
+type CommitMetadata struct {
+	SHA        string `json:"sha"`
+	Subject    string `json:"subject"`
+	Author     string `json:"author"`
+	AuthoredAt string `json:"authoredAt"`
+}
+
+// gitSourceMode reports whether a source mode resolves to a real Git
+// checkout on disk, which is what a commit summary can be read from.
+func gitSourceMode(mode SourceMode) bool {
+	switch mode {
+	case SourceModeGitURL, SourceModeConnectedRepository, SourceModeComposeGit,
+		SourceModeLocalCheckout, SourceModeExistingCheckout:
+		return true
+	default:
+		return false
+	}
+}
+
+// commitMetadataForSource reads the recorded revision's subject, author and
+// date from whichever repository the materializer already has open. It is
+// best-effort: the caller logs and moves on rather than failing the step when
+// history cannot be read, exactly like an unavailable digest would be for any
+// other UI affordance sourced from Git.
+func commitMetadataForSource(ctx context.Context, mode SourceMode, repository, revision string) *CommitMetadata {
+	if !gitSourceMode(mode) || revision == "" {
+		return nil
+	}
+	commit, err := readCommitMetadata(ctx, repository, revision)
+	if err != nil {
+		return nil
+	}
+	return commit
+}
+
+// unitSeparator delimits the git log fields below. Commit subjects and author
+// names are free text but never contain the ASCII unit separator.
+const unitSeparator = "\x1f"
+
+// readCommitMetadata reads one commit's summary with a single, cheap `git
+// log`. The repository is expected to already hold the object locally —
+// either a materialized workspace or a release mirror — so this performs no
+// network access of its own.
+func readCommitMetadata(ctx context.Context, repository, revision string) (*CommitMetadata, error) {
+	// revision reaches git log as a bare argv element; refusing anything that
+	// is not an immutable object id before it gets there closes the same
+	// argument-injection door a leading "-" would otherwise open.
+	if !validGitObjectID(revision) {
+		return nil, fmt.Errorf("%w: commit metadata revision is not an immutable Git object id", ErrInvalidRef)
+	}
+	// The trailing bare "--" disambiguates revision from a pathspec without
+	// filtering by path; putting it before revision would do the opposite and
+	// make git search history for a path named after the sha.
+	output, err := runPlanningGit(ctx, repository, nil, "log", "-1",
+		"--format=%H"+unitSeparator+"%s"+unitSeparator+"%an"+unitSeparator+"%aI", revision, "--")
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.SplitN(strings.TrimRight(output, "\n"), unitSeparator, 4)
+	if len(fields) != 4 || fields[0] == "" {
+		return nil, fmt.Errorf("unexpected git log output for %s", revision)
+	}
+	subject := fields[1]
+	if runes := []rune(subject); len(runes) > 200 {
+		subject = string(runes[:200])
+	}
+	return &CommitMetadata{SHA: fields[0], Subject: subject, Author: fields[2], AuthoredAt: fields[3]}, nil
+}
+
+// releaseWorkspaceRef names the one ref a materialized workspace carries, so
+// the fetched objects stay reachable for the life of the run.
+const releaseWorkspaceRef = "refs/just-dashboard/release"
 
 type materializedSourceMarker struct {
 	Source   DraftSourceConfig `json:"source"`
@@ -40,7 +119,7 @@ func (a *HostSourceAnalyzer) Materialize(
 		return nil, fmt.Errorf("%w: materialization workspace is invalid", ErrInvalidSource)
 	}
 	source = canonicalSourceConfig(source)
-	if err := source.Validate(); err != nil {
+	if err := source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
 	if err := makePrivateDirectory(workspaceRoot); err != nil {
@@ -56,6 +135,7 @@ func (a *HostSourceAnalyzer) Materialize(
 				return &MaterializedSource{
 					Workspace: workspace, Root: root,
 					Revision: immutableSourceRevision(identity), Digest: identity.Digest,
+					Commit: commitMetadataForSource(ctx, source.Mode, sourceRoot, identity.Revision),
 				}, nil
 			}
 		}
@@ -116,8 +196,9 @@ func (a *HostSourceAnalyzer) Materialize(
 		_ = os.RemoveAll(workspace)
 		return nil, fmt.Errorf("%w: observed imports must be adopted before materialization", ErrUnsupportedSource)
 	case SourceModeBlueprint:
-		_ = os.RemoveAll(workspace)
-		return nil, fmt.Errorf("%w: blueprint materialization is owned by checkpoint C9", ErrUnsupportedSource)
+		// A blueprint release is an image release with reviewed defaults; it
+		// has no filesystem source either. Blueprints that would need files
+		// written here are refused by ValidateForDeployment above.
 	default:
 		_ = os.RemoveAll(workspace)
 		return nil, ErrUnsupportedSource
@@ -136,6 +217,7 @@ func (a *HostSourceAnalyzer) Materialize(
 	return &MaterializedSource{
 		Workspace: workspace, Root: root,
 		Revision: immutableSourceRevision(identity), Digest: identity.Digest,
+		Commit: commitMetadataForSource(ctx, source.Mode, sourceRoot, identity.Revision),
 	}, nil
 }
 
@@ -168,7 +250,11 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 
 	a.gitMu.Lock()
 	defer a.gitMu.Unlock()
-	mirrorRoot := filepath.Join(cacheRoot, "git-mirrors")
+	// Planning keeps its own shallow, blob-filtered mirror so inspection stays
+	// bounded. A release needs every object of one revision, and those two
+	// shapes cannot share a mirror: a later planning fetch re-shallows it and
+	// the promisor configuration keeps large blobs absent for good.
+	mirrorRoot := filepath.Join(cacheRoot, "git-release-mirrors")
 	if err := makePrivateDirectory(mirrorRoot); err != nil {
 		return err
 	}
@@ -188,10 +274,7 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 			return fmt.Errorf("%w: source ref moved after preflight; refusing a different revision", ErrSourceUnavailable)
 		}
 	}
-	if err := cloneExactGit(ctx, mirror, target, identity.Revision, nil); err != nil {
-		return err
-	}
-	if _, err := runPlanningGit(ctx, target, environment, "remote", "set-url", "origin", remote); err != nil {
+	if err := fetchExactGit(ctx, mirror, remote, target, identity.Revision, nil); err != nil {
 		return err
 	}
 	return materializeGitExtras(ctx, target, environment, source)
@@ -210,26 +293,41 @@ func (a *HostSourceAnalyzer) materializeLocalGit(
 	if _, err := runPlanningGit(ctx, local, nil, "cat-file", "-e", identity.Revision+"^{commit}"); err != nil {
 		return fmt.Errorf("%w: recorded local Git object is unavailable", ErrSourceUnavailable)
 	}
-	if err := cloneExactGit(ctx, local, target, identity.Revision, nil); err != nil {
+	if err := fetchExactGit(ctx, local, local, target, identity.Revision, nil); err != nil {
 		return err
 	}
 	return materializeGitExtras(ctx, target, nil, source)
 }
 
-func cloneExactGit(
+// fetchExactGit materializes exactly one revision into a fresh workspace
+// repository. Cloning is deliberately avoided: `git clone --local` silently
+// ignores the local copy when its source is shallow and falls back to the wire
+// protocol, which returns nothing from a mirror that publishes no branch refs
+// and leaves the failure to surface as an unreadable tree at checkout.
+func fetchExactGit(
 	ctx context.Context,
-	repository, target, revision string,
+	repository, origin, target, revision string,
 	environment []string,
 ) error {
 	if err := os.RemoveAll(target); err != nil {
 		return err
 	}
-	cloneCtx, cancelClone := context.WithTimeout(ctx, 10*time.Minute)
-	_, err := runPlanningGit(cloneCtx, "", environment,
-		"clone", "--local", "--no-hardlinks", "--no-checkout", "--", repository, target)
-	cancelClone()
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return err
+	}
+	if _, err := runPlanningGit(ctx, "", environment, "init", "--quiet", "--", target); err != nil {
+		return fmt.Errorf("%w: contained release workspace could not be created", ErrSourceUnavailable)
+	}
+	if _, err := runPlanningGit(ctx, target, environment, "remote", "add", "origin", origin); err != nil {
+		return fmt.Errorf("%w: contained release workspace could not be created", ErrSourceUnavailable)
+	}
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Minute)
+	_, err := runPlanningGit(fetchCtx, target, environment,
+		"fetch", "--force", "--no-tags", "--depth=1", "--", repository,
+		"+"+revision+":"+releaseWorkspaceRef)
+	cancelFetch()
 	if err != nil {
-		return fmt.Errorf("%w: contained release clone failed", ErrSourceUnavailable)
+		return fmt.Errorf("%w: exact release fetch failed", ErrSourceUnavailable)
 	}
 	checkoutCtx, cancelCheckout := context.WithTimeout(ctx, 10*time.Minute)
 	_, err = runPlanningGit(checkoutCtx, target, environment, "checkout", "--detach", "--force", revision)

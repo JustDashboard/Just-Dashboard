@@ -1,12 +1,11 @@
 "use client"
 
-import { Page, PageHeader } from "@/components/page"
+import { Page } from "@/components/page"
 import { NetworkPanel } from "@/components/security/network-panel"
 
 export default function SecurityNetworkPage() {
   return (
-    <Page>
-      <PageHeader eyebrow="Security" title="Network" />
+    <Page className="animate-rise">
       <NetworkPanel />
     </Page>
   )

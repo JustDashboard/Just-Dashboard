@@ -2,5 +2,8 @@
   "semi": false,
   "singleQuote": false,
   "printWidth": 100,
-  "trailingComma": "all"
+  "trailingComma": "all",
+  "plugins": ["prettier-plugin-tailwindcss"],
+  "tailwindStylesheet": "./src/app/globals.css",
+  "tailwindFunctions": ["cn", "cva", "choiceCardClasses", "rowReveal", "tabClasses"]
 }

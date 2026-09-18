@@ -39,10 +39,7 @@ export function DiffView({
 }) {
   return (
     <pre
-      className={cn(
-        "overflow-auto p-3 font-mono text-[11px] leading-relaxed sm:text-xs",
-        className,
-      )}
+      className={cn("overflow-auto p-3 font-mono text-hint leading-relaxed sm:text-xs", className)}
     >
       {rows(body, singleFile).map((row, i) =>
         row.heading ? (
@@ -78,8 +75,7 @@ function rows(body: string, singleFile?: boolean): Row[] {
   const lines = body.split("\n")
   // A file heading is only worth drawing where a reader could lose track of
   // which file they are in.
-  const showHeadings =
-    !singleFile && lines.filter((l) => l.startsWith("diff --git ")).length > 1
+  const showHeadings = !singleFile && lines.filter((l) => l.startsWith("diff --git ")).length > 1
 
   const out: Row[] = []
   let inHeader = false

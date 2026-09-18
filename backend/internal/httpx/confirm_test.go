@@ -3,6 +3,7 @@ package httpx
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -52,6 +53,35 @@ func TestRequireTypedConfirmation(t *testing.T) {
 					apiErr.Phrase, c.phrase)
 			}
 		})
+	}
+}
+
+func TestEncodedConfirmationPreservesObjectIdentity(t *testing.T) {
+	for _, phrase := range []string{"目录", " folder ", "😀", "name+percent%", "line\nbreak"} {
+		r := httptest.NewRequest(http.MethodDelete, "/api/v1/files", nil)
+		r.Header.Set(ConfirmHeader, url.PathEscape(phrase))
+		r.Header.Set(ConfirmEncodingHeader, "uri")
+		if err := RequireTypedConfirmation(httptest.NewRecorder(), r, phrase); err != nil {
+			t.Errorf("encoded %q rejected: %v", phrase, err)
+		}
+		if err := RequireTypedConfirmation(httptest.NewRecorder(), r, phrase+"different"); err == nil {
+			t.Errorf("encoded %q accepted for a different object", phrase)
+		}
+		ws := httptest.NewRequest(http.MethodGet, "/socket?confirm="+url.QueryEscape(phrase), nil)
+		if err := RequireTypedConfirmationWS(httptest.NewRecorder(), ws, phrase); err != nil {
+			t.Errorf("WS %q rejected: %v", phrase, err)
+		}
+		if err := RequireTypedConfirmation(httptest.NewRecorder(), ws, phrase); err == nil {
+			t.Fatal("ordinary request accepted query confirmation")
+		}
+	}
+	for _, value := range []string{"%zz", "%FF"} {
+		r := httptest.NewRequest(http.MethodDelete, "/api/v1/files", nil)
+		r.Header.Set(ConfirmHeader, value)
+		r.Header.Set(ConfirmEncodingHeader, "uri")
+		if err := RequireTypedConfirmation(httptest.NewRecorder(), r, value); err == nil {
+			t.Errorf("invalid encoding %q accepted", value)
+		}
 	}
 }
 

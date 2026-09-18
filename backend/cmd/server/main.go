@@ -27,7 +27,10 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
@@ -44,9 +47,37 @@ func main() {
 	// the work cannot be a child process of the server.
 	selfUpdate := flag.Bool("self-update", false,
 		"carry out the dashboard upgrade recorded in -state-dir, then exit")
+	// The settings half of the same idea: applying a port change or a restart
+	// recreates the container that asked for it, so a sibling does the work
+	// and this is the flag that makes this binary that sibling.
+	selfRestart := flag.Bool("self-restart", false,
+		"carry out the dashboard restart recorded in -state-dir, then exit")
 	stateDir := flag.String("state-dir", "",
 		"directory holding the upgrade record and its transcript (the value of JD_DATA_DIR)")
+	preparePorts := flag.String("prepare-ports", "", "select available dashboard ports in the checkout before starting Compose")
+	startStack := flag.Bool("start-stack", false, "start and verify Compose after preparing ports")
 	flag.Parse()
+	if *preparePorts != "" {
+		dir, err := filepath.Abs(*preparePorts)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if *startStack {
+				err = stackports.Start(ctx, dir, "docker-compose.yml", os.Stdout, func() error {
+					command := hostexec.CommandInDir(ctx, dir, "docker", "compose", "up", "-d", "--wait", "--wait-timeout", "90")
+					command.Stdout, command.Stderr = os.Stdout, os.Stderr
+					return command.Run()
+				}, nil)
+			} else {
+				_, err = stackports.Reconcile(ctx, dir, "docker-compose.yml", os.Stdout)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "port selection failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *healthcheck {
 		if err := probe(); err != nil {
 			fmt.Fprintln(os.Stderr, "unhealthy:", err)
@@ -70,6 +101,24 @@ func main() {
 		}
 		if err := selfupdate.RunUpdater(dir); err != nil {
 			fmt.Fprintln(os.Stderr, "update failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *selfRestart {
+		// Before config.Load, for the reason -self-update is: this process is
+		// given no master key, no database and nothing from the environment of
+		// the process that started it. The record on disk is the whole job.
+		dir := *stateDir
+		if dir == "" {
+			dir = config.Env("JD_DATA_DIR")
+		}
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, "fatal: -self-restart needs -state-dir (the dashboard's JD_DATA_DIR)")
+			os.Exit(2)
+		}
+		if err := selfcfg.RunRestart(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "restart failed:", err)
 			os.Exit(1)
 		}
 		return
@@ -105,7 +154,7 @@ func run(agentFlag, agentReset bool) error {
 	if err != nil {
 		return err
 	}
-	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL)
+	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
 	aud := audit.New(st, log)
 
 	var identity *agent.Identity
@@ -265,10 +314,13 @@ func janitor(ctx context.Context, svc *auth.Service, log *slog.Logger) {
 	}
 }
 
-// bootstrapAdmin creates the first admin on an empty database. The generated
-// password is printed once to the process log and must be changed at first
-// login; two-factor enrollment is then forced before the account can do
-// anything at all.
+// bootstrapAdmin creates the first admin on an empty database.
+//
+// A password nobody chose — one this process generated and printed to its own
+// log — must be changed at first login. A password the operator set through
+// the installer is theirs already, and asking for a new one thirty seconds
+// after they typed it is a demand with nothing behind it. Two-factor
+// enrollment is a separate matter, decided by JD_REQUIRE_2FA.
 func bootstrapAdmin(ctx context.Context, svc *auth.Service, st *store.Store, log *slog.Logger) error {
 	users, err := svc.ListUsers(ctx)
 	if err != nil {
@@ -286,7 +338,7 @@ func bootstrapAdmin(ctx context.Context, svc *auth.Service, st *store.Store, log
 	if generated {
 		password = auth.RandomToken(18)
 	}
-	if _, err := svc.CreateUser(ctx, username, password, auth.RoleAdmin, true); err != nil {
+	if _, err := svc.CreateUser(ctx, username, password, auth.RoleAdmin, generated); err != nil {
 		return fmt.Errorf("bootstrap admin: %w", err)
 	}
 	if generated {

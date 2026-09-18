@@ -1,0 +1,9 @@
+=== RUN   TestLiveCutoverTrafficContinuity
+    deployment_cutover_live_test.go:161: fast HTTP: 54448 requests, 0 failed
+    deployment_cutover_live_test.go:162: long request: 60 requests, 0 failed
+    deployment_cutover_live_test.go:163: new WebSocket: 228 requests, 0 failed
+    deployment_cutover_live_test.go:164: completed 100 transitions in 35.853s; slowest activation 442ms
+    deployment_cutover_live_test.go:172: cutover evidence written to /home/ubuntu/Just-Dashboard/docs/audits/2026-09-16-deployments/implementation-evidence/cutover-traffic.json
+--- PASS: TestLiveCutoverTrafficContinuity (39.51s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	39.515s

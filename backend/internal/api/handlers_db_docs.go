@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,7 +49,10 @@ func (s *Server) handleRedisScan(w http.ResponseWriter, r *http.Request) error {
 	}
 	defer client.Close()
 	q := r.URL.Query()
-	cursor := uint64(atoiDefault(q.Get("cursor"), 0))
+	cursor, err := parseRedisCursor(q.Get("cursor"))
+	if err != nil {
+		return httpx.BadRequest("invalid Redis cursor")
+	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	page, err := dbx.RedisScan(ctx, client, q.Get("pattern"), cursor, atoiDefault(q.Get("count"), 100))
@@ -490,4 +494,11 @@ func (s *Server) handleRedisRename(w http.ResponseWriter, r *http.Request) error
 		map[string]any{"from": req.Key, "to": req.To})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	return nil
+}
+
+func parseRedisCursor(raw string) (uint64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return strconv.ParseUint(raw, 10, 64)
 }

@@ -1,0 +1,18 @@
+$ playwright test tests/browser/security-regressions.spec.ts
+
+Running 10 tests using 1 worker
+
+(node:1705497) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls require administrator access (1.6s)
+  ✓   2 [chromium] › tests/browser/security-regressions.spec.ts:26:7 › Compose controls remain available to administrators (1.4s)
+  ✓   3 [chromium] › tests/browser/security-regressions.spec.ts:157:5 › database selections cannot follow a different sort or a loading table (1.1s)
+  ✓   4 [chromium] › tests/browser/security-regressions.spec.ts:173:5 › the row editor submits exact BIGINT digits (1.2s)
+  ✓   5 [chromium] › tests/browser/security-regressions.spec.ts:183:5 › slow polling has only one request in flight (625ms)
+  ✓   6 [chromium] › tests/browser/security-regressions.spec.ts:235:5 › a reset password is changed only after the account's second factor (777ms)
+  ✓   7 [chromium] › tests/browser/security-regressions.spec.ts:271:5 › same-name PM2 applications use trusted daemon and process identities (1.9s)
+  ✓   8 [chromium] › tests/browser/security-regressions.spec.ts:351:5 › Redis scan cursors retain all unsigned 64-bit digits in requests (757ms)
+  ✓   9 [chromium] › tests/browser/security-regressions.spec.ts:392:5 › resource filters keep focus while stale responses are discarded (882ms)
+  ✓  10 [chromium] › tests/browser/security-regressions.spec.ts:435:5 › saving enrollment recovery codes advances to the required password change (679ms)
+
+  10 passed (12.1s)

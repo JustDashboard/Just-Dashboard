@@ -150,6 +150,12 @@ type Snapshot struct {
 	Pressure Pressure   `json:"pressure"`
 	Sockets  Sockets    `json:"sockets"`
 	Procs    ProcCounts `json:"procs"`
+
+	// Files and Sensors are live-only readings: neither survives a
+	// downsampled chart, so the recorder does not keep them, and the page
+	// reads both from the newest frame.
+	Files   FileHandles `json:"files"`
+	Sensors []Sensor    `json:"sensors"`
 }
 
 // ProcCounts is the run queue, straight from /proc/stat.
@@ -257,6 +263,8 @@ func (c *Collector) Collect(ctx context.Context) (*Snapshot, error) {
 	// would decide whether to bother.
 	snap.Pressure = ReadPressure()
 	snap.Sockets = ReadSockets()
+	snap.Files = ReadFileHandles()
+	snap.Sensors = ReadSensors(ctx)
 	if misc, err := load.MiscWithContext(ctx); err == nil {
 		snap.Procs = ProcCounts{
 			Running: misc.ProcsRunning,

@@ -1,12 +1,11 @@
 "use client"
 
-import { Page, PageHeader } from "@/components/page"
+import { Page } from "@/components/page"
 import { LoginsPanels } from "@/components/security/logins-panels"
 
 export default function SecurityLoginsPage() {
   return (
-    <Page>
-      <PageHeader eyebrow="Security" title="Logins" />
+    <Page className="animate-rise">
       <LoginsPanels />
     </Page>
   )

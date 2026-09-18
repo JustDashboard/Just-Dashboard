@@ -40,6 +40,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
+    const requirePasswordChange = () => {
+      setStatus((current) =>
+        current ? { ...current, authenticated: false, needsPasswordChange: true } : current,
+      )
+      router.replace("/login")
+    }
+    window.addEventListener("jd:password-change-required", requirePasswordChange)
+    return () => window.removeEventListener("jd:password-change-required", requirePasswordChange)
+  }, [router])
+
+  useEffect(() => {
     // Establishing who the caller is on mount: the canonical case for an
     // effect, since it subscribes this app to state the server owns.
     let cancelled = false

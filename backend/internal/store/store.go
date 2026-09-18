@@ -32,12 +32,17 @@ CREATE TABLE IF NOT EXISTS users (
   role           TEXT NOT NULL,
   totp_secret    TEXT NOT NULL DEFAULT '',
   totp_enabled   INTEGER NOT NULL DEFAULT 0,
+  totp_last_step INTEGER NOT NULL DEFAULT -1,
   disabled       INTEGER NOT NULL DEFAULT 0,
   must_change_pw INTEGER NOT NULL DEFAULT 0,
   failed_count   INTEGER NOT NULL DEFAULT 0,
   locked_until   INTEGER NOT NULL DEFAULT 0,
   last_login_at  INTEGER NOT NULL DEFAULT 0,
-  created_at     INTEGER NOT NULL
+  created_at     INTEGER NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  avatar         BLOB NOT NULL DEFAULT x'',
+  avatar_type    TEXT NOT NULL DEFAULT '',
+  avatar_at      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS recovery_codes (
@@ -129,6 +134,21 @@ CREATE TABLE IF NOT EXISTS db_query_history (
 );
 CREATE INDEX IF NOT EXISTS idx_db_history_conn ON db_query_history(connection_id, ran_at DESC);
 
+-- How an operator arranged one schema's diagram: where each table sits, which
+-- are hidden, the notes and colours they added. One JSON document per
+-- (connection, schema) rather than a row per table, because the diagram reads
+-- and writes it as a whole and nothing else reads it at all. The server only
+-- checks that it is a JSON object under a size cap; every field in it is a
+-- decision about a picture, and the picture is the only thing that decodes it.
+-- Nothing in it is secret — it names tables the reader can already list.
+CREATE TABLE IF NOT EXISTS db_diagram_layouts (
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  schema_name   TEXT NOT NULL DEFAULT '',
+  layout        TEXT NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (connection_id, schema_name)
+);
+
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
@@ -140,6 +160,11 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   schedule    TEXT NOT NULL DEFAULT '',
   retention   INTEGER NOT NULL DEFAULT 7,
   enabled     INTEGER NOT NULL DEFAULT 1,
+  recovery_json TEXT NOT NULL DEFAULT 'null',
+  sqlite_paths TEXT NOT NULL DEFAULT '[]',
+  database_dumps TEXT NOT NULL DEFAULT '[]',
+  retention_days INTEGER NOT NULL DEFAULT 0,
+  pause_containers TEXT NOT NULL DEFAULT '[]',
   created_at  INTEGER NOT NULL
 );
 
@@ -152,9 +177,20 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   artifact   TEXT NOT NULL DEFAULT '',
   size_bytes INTEGER NOT NULL DEFAULT 0,
   log        TEXT NOT NULL DEFAULT '',
-  trigger    TEXT NOT NULL DEFAULT 'manual'
+  trigger    TEXT NOT NULL DEFAULT 'manual',
+  manifest_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_backup_runs_job ON backup_runs(job_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS backup_restore_tests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES backup_runs(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  owner_key TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  record_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_backup_restore_tests_run ON backup_restore_tests(run_id,id DESC);
 
 CREATE TABLE IF NOT EXISTS deploy_projects (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,7 +206,8 @@ CREATE TABLE IF NOT EXISTS deploy_projects (
   enabled       INTEGER NOT NULL DEFAULT 1,
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL DEFAULT 0,
-  archived_at   INTEGER NOT NULL DEFAULT 0
+  archived_at   INTEGER NOT NULL DEFAULT 0,
+  archived_name TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS deploy_env (
@@ -185,6 +222,8 @@ CREATE TABLE IF NOT EXISTS deploy_env (
 CREATE TABLE IF NOT EXISTS deploy_runs (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id           INTEGER NOT NULL REFERENCES deploy_projects(id) ON DELETE CASCADE,
+  run_number           INTEGER NOT NULL DEFAULT 0,
+  source_revision      TEXT NOT NULL DEFAULT '',
   environment_id       INTEGER NOT NULL DEFAULT 0,
   started_at           INTEGER NOT NULL,
   ended_at             INTEGER NOT NULL DEFAULT 0,
@@ -246,6 +285,18 @@ CREATE TABLE IF NOT EXISTS deploy_credentials (
   secret_enc  TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS github_app (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  app_id     INTEGER NOT NULL,
+  slug       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  owner      TEXT NOT NULL DEFAULT '',
+  html_url   TEXT NOT NULL DEFAULT '',
+  client_id  TEXT NOT NULL DEFAULT '',
+  secret_enc TEXT NOT NULL,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS deploy_sources (
@@ -567,6 +618,48 @@ BEGIN
   SELECT RAISE(ABORT, 'deployment run plan snapshot is immutable');
 END;
 
+CREATE TABLE IF NOT EXISTS deploy_git_watches (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  source_key     TEXT NOT NULL,
+  revision       TEXT NOT NULL DEFAULT '',
+  generation     INTEGER NOT NULL DEFAULT 0,
+  run_id         INTEGER NOT NULL DEFAULT 0,
+  status         TEXT NOT NULL DEFAULT 'watching',
+  reason         TEXT NOT NULL DEFAULT '',
+  policy_key     TEXT NOT NULL DEFAULT '',
+  baseline_revision TEXT NOT NULL DEFAULT '',
+  checked_at     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS deploy_git_policies (
+  environment_id  INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  automatic       INTEGER NOT NULL DEFAULT 1,
+  include_json    TEXT NOT NULL DEFAULT '[]',
+  exclude_json    TEXT NOT NULL DEFAULT '[]',
+  commit_statuses INTEGER NOT NULL DEFAULT 1,
+  revision        INTEGER NOT NULL DEFAULT 1,
+  updated_at      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS deploy_database_networks (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  network_name TEXT NOT NULL UNIQUE,
+  network_id TEXT NOT NULL DEFAULT '',
+  owner_key TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deploy_database_bindings (
+  environment_id INTEGER NOT NULL REFERENCES deploy_database_networks(environment_id) ON DELETE CASCADE,
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE RESTRICT,
+  container_name TEXT NOT NULL,
+  compose_project TEXT NOT NULL DEFAULT '',
+  compose_service TEXT NOT NULL DEFAULT '',
+  container_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  checked_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(environment_id, connection_id)
+);
+
 CREATE TABLE IF NOT EXISTS deploy_blueprint_installs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id    INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
@@ -660,9 +753,12 @@ CREATE TABLE IF NOT EXISTS deploy_schedule_steps (
 CREATE TABLE IF NOT EXISTS deploy_notification_channels (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
+  kind        TEXT NOT NULL DEFAULT 'webhook',
   url         TEXT NOT NULL,
+  target      TEXT NOT NULL DEFAULT '',
   headers_enc TEXT NOT NULL DEFAULT '',
   secret_enc  TEXT NOT NULL DEFAULT '',
+  config_enc  TEXT NOT NULL DEFAULT '',
   events      TEXT NOT NULL DEFAULT '',
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  INTEGER NOT NULL,
@@ -691,6 +787,28 @@ CREATE TABLE IF NOT EXISTS deploy_preview_refs (
   state          TEXT NOT NULL DEFAULT 'open',
   updated_at     INTEGER NOT NULL,
   UNIQUE(trigger_id, provider_ref)
+);
+
+CREATE TABLE IF NOT EXISTS deploy_preview_approvals (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  trigger_id   INTEGER NOT NULL REFERENCES deploy_triggers(id) ON DELETE CASCADE,
+  provider_ref TEXT NOT NULL,
+  revision     TEXT NOT NULL,
+  event_json   TEXT NOT NULL,
+  state        TEXT NOT NULL DEFAULT 'pending',
+  approved_by  TEXT NOT NULL DEFAULT '',
+  generation   INTEGER NOT NULL DEFAULT 1,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  UNIQUE(trigger_id, provider_ref, revision)
+);
+
+CREATE TABLE IF NOT EXISTS deploy_preview_quarantines (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL DEFAULT 'pending',
+  reason         TEXT NOT NULL DEFAULT '',
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS watched_domains (
@@ -777,6 +895,42 @@ CREATE TABLE IF NOT EXISTS metric_samples (
   disk_percent   REAL NOT NULL DEFAULT 0,
   uptime_seconds INTEGER NOT NULL DEFAULT 0
 );
+
+-- What a compose stack looked like before somebody changed it.
+--
+-- Docker keeps no history. Bringing a compose project up replaces what was
+-- running, and the previous configuration is gone unless it happened to be
+-- committed -- so "what changed" and "put it back" are questions nothing on
+-- the server can answer. This is the smallest record that makes both
+-- answerable: the compose file as it was, the image digests that were
+-- actually running, and who did it.
+--
+-- Deliberately not one of the deploy_* tables above. Those describe this
+-- dashboard's own deployment pipeline, with projects, environments and
+-- releases; this describes a compose stack somebody brought up by hand, which
+-- most stacks on most servers are. Rows are append-only and pruned by count
+-- per project.
+CREATE TABLE IF NOT EXISTS docker_stack_deployments (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  project       TEXT NOT NULL,
+  working_dir   TEXT NOT NULL DEFAULT '',
+  config_hash   TEXT NOT NULL DEFAULT '',
+  config        TEXT NOT NULL DEFAULT '',
+  services      TEXT NOT NULL DEFAULT '[]',
+  image_digests TEXT NOT NULL DEFAULT '{}',
+  env_hash      TEXT NOT NULL DEFAULT '',
+  git_commit    TEXT NOT NULL DEFAULT '',
+  git_branch    TEXT NOT NULL DEFAULT '',
+  git_dirty     INTEGER NOT NULL DEFAULT 0,
+  actor         TEXT NOT NULL DEFAULT '',
+  source        TEXT NOT NULL DEFAULT '',
+  action        TEXT NOT NULL DEFAULT '',
+  result        TEXT NOT NULL DEFAULT '',
+  detail        TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stack_deployments_project
+  ON docker_stack_deployments(project, created_at DESC);
 `
 
 // Indexes that name added columns must run after applyAddedColumns. Putting
@@ -784,6 +938,30 @@ CREATE TABLE IF NOT EXISTS metric_samples (
 // to a 0.6.6 deploy_runs table; a fresh database reaches the same final shape
 // through this second block.
 const postColumnSchema = `
+CREATE TRIGGER IF NOT EXISTS deploy_run_source_revision_immutable
+BEFORE UPDATE OF source_revision ON deploy_runs
+BEGIN
+  SELECT RAISE(ABORT, 'deployment run source revision is immutable');
+END;
+WITH numbered AS MATERIALIZED (
+  SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY id) AS number
+  FROM deploy_runs
+)
+UPDATE deploy_runs SET run_number = (SELECT number FROM numbered WHERE numbered.id = deploy_runs.id)
+WHERE run_number = 0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_project_number
+  ON deploy_runs(project_id, run_number) WHERE run_number > 0;
+-- Both legacy and persistent-engine inserts allocate inside the same SQLite write.
+CREATE TRIGGER IF NOT EXISTS deploy_run_number_allocate
+AFTER INSERT ON deploy_runs WHEN NEW.run_number = 0
+BEGIN
+  UPDATE deploy_runs SET run_number = (
+    SELECT COALESCE(MAX(run_number), 0) + 1 FROM deploy_runs
+    WHERE project_id = NEW.project_id AND run_number > 0
+  ) WHERE id = NEW.id;
+END;
+CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
+  ON metric_container_samples(container_id, ts);
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
@@ -817,6 +995,36 @@ END;
 // list of steps between every shipped schema and the current one, and dropping
 // one strands whichever installs stopped at that version.
 var addedColumns = []struct{ table, column, spec string }{
+	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
+	// An account gained a name to show and a picture beside it. The sign-in
+	// name stays the lower-cased key it always was; the display name is what
+	// the operator typed, case and all.
+	{"users", "display_name", "TEXT NOT NULL DEFAULT ''"},
+	{"users", "avatar", "BLOB NOT NULL DEFAULT x''"},
+	{"users", "avatar_type", "TEXT NOT NULL DEFAULT ''"},
+	{"users", "avatar_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"backup_runs", "manifest_json", "TEXT NOT NULL DEFAULT '{}'"},
+	{"backup_jobs", "recovery_json", "TEXT NOT NULL DEFAULT 'null'"},
+	{"backup_jobs", "sqlite_paths", "TEXT NOT NULL DEFAULT '[]'"},
+	// Backup jobs learned to capture native database dumps beside their files.
+	{"backup_jobs", "database_dumps", "TEXT NOT NULL DEFAULT '[]'"},
+	// Backup jobs learned to prune by age and to freeze containers while
+	// they archive the volumes those containers write to.
+	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
+	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
+	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
+	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// Notification channels grew provider kinds beside the signed webhook.
+	// Existing rows are webhooks whose URL is also their display target.
+	{"deploy_notification_channels", "kind", "TEXT NOT NULL DEFAULT 'webhook'"},
+	{"deploy_notification_channels", "target", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_notification_channels", "config_enc", "TEXT NOT NULL DEFAULT ''"},
+	// Commit statuses default on: an environment that already deploys from
+	// GitHub gains them without an edit, and the policy editor can turn them off.
+	{"deploy_git_policies", "commit_statuses", "INTEGER NOT NULL DEFAULT 1"},
 	// 0.6.7 keeps the shipped project/run rows as stable compatibility
 	// identities while normalized environments, releases, steps and events
 	// grow beside them. Every legacy row receives a usable zero/default before
@@ -824,7 +1032,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "profile", "TEXT NOT NULL DEFAULT 'compose'"},
 	{"deploy_projects", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_projects", "archived_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_runs", "run_number", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_runs", "source_revision", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "state", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "operation", "TEXT NOT NULL DEFAULT 'deploy'"},
 	{"deploy_runs", "requested_at", "INTEGER NOT NULL DEFAULT 0"},
@@ -885,6 +1096,13 @@ var addedColumns = []struct{ table, column, spec string }{
 	// sampled for the live view but never kept.
 	{"metric_container_samples", "block_read", "INTEGER NOT NULL DEFAULT 0"},
 	{"metric_container_samples", "block_write", "INTEGER NOT NULL DEFAULT 0"},
+	// The writable layer, sampled alongside everything else. A static figure
+	// cannot tell a container that has held 38 GB for six months from one that
+	// gained 12 GB today, and only the second is a disk about to fill.
+	{"metric_container_samples", "size_rw", "INTEGER NOT NULL DEFAULT 0"},
+	// Name continuity serves Docker charts; release attribution needs the exact
+	// observed container identity. Old samples deliberately remain unattributed.
+	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
 
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
@@ -951,7 +1169,14 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	path := filepath.Join(dataDir, DatabaseFile)
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	// Transactions begin IMMEDIATE: a transaction that reads first and writes
+	// later under a deferred BEGIN fails at once with SQLITE_BUSY_SNAPSHOT
+	// when any other connection commits in between, and the busy timeout never
+	// applies to that failure. Taking the write lock up front makes the second
+	// writer wait instead. A deployment worker's step transition racing a
+	// notification delivery or an operator's settings save is exactly that
+	// case, and a lost transition used to end the run as unrecoverable.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
@@ -968,6 +1193,14 @@ func Open(dataDir string) (*Store, error) {
 	if err := applyAddedColumns(context.Background(), db); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// Retain historical names separately while releasing the unique live name.
+	// This also repairs projects archived before name reuse was supported.
+	if _, err := db.ExecContext(context.Background(), `UPDATE deploy_projects
+		SET archived_name = name, name = '__jd_archived_' || id || '_' || lower(hex(randomblob(16)))
+		WHERE archived_at > 0 AND archived_name = ''`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("release archived deployment names: %w", err)
 	}
 	if _, err := db.ExecContext(context.Background(), postColumnSchema); err != nil {
 		db.Close()

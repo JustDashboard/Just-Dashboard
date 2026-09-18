@@ -1,14 +1,11 @@
 "use client"
 
-import { Globe, ShieldCheck, ShieldOff } from "@/components/icons"
-import { get } from "@/lib/api"
 import type { Exposure } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Status, type Verdict } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { Skeleton } from "@/components/ui/skeleton"
 
-const GRADE: Record<Exposure["grade"], { label: string; verdict: Verdict }> = {
+export const EXPOSURE_GRADE: Record<Exposure["grade"], { label: string; verdict: Verdict }> = {
   tailscale: { label: "Tailscale only", verdict: "ok" },
   tunnel: { label: "SSH tunnel only", verdict: "ok" },
   private: { label: "Private network", verdict: "ok" },
@@ -21,50 +18,74 @@ const GRADE: Record<Exposure["grade"], { label: string; verdict: Verdict }> = {
  * rests on, and the one that lives in an env file nobody opens again after
  * install day. On screen it stays true: a machine that quietly became
  * reachable from the internet says so here instead of waiting to be found.
+ *
+ * A row of facts under the page title rather than a framed panel, the way the
+ * host Overview states its platform and kernel: the grade is a reading, the
+ * allowlist and the interfaces are what it was read from, and the address this
+ * browser arrived from is the one every lockout guard on these pages compares
+ * against — worth knowing before blocking anything.
  */
-export function ExposurePanel({ className }: { className?: string }) {
-  const { data } = usePoll<Exposure>((signal) => get("/exposure", undefined, signal), 60_000)
-
-  if (!data) {
+export function ExposureFacts({ exposure }: { exposure: Exposure | undefined }) {
+  if (!exposure) {
     return (
-      <Panel className={className}>
-        <PanelHeader icon={Globe} title="Reachable from" />
-        <PanelBody className="space-y-2">
-          <Skeleton className="h-4 w-56" />
-          <Skeleton className="h-4 w-40" />
-        </PanelBody>
-      </Panel>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <Skeleton className="h-4 w-36" />
+        <Skeleton className="h-4 w-64" />
+      </div>
     )
   }
-
-  const grade = GRADE[data.grade]
-  const ok = grade.verdict === "ok"
-
+  const grade = EXPOSURE_GRADE[exposure.grade]
   return (
-    <Panel className={className}>
-      <PanelHeader
-        icon={ok ? ShieldCheck : ShieldOff}
-        title="Reachable from"
-        description={grade.label}
-        actions={<Status verdict={grade.verdict} label={grade.label} />}
-      />
-      <PanelBody className="space-y-3">
-        <p className="text-[13px] text-muted-foreground">{data.summary}</p>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="eyebrow">allowlist</span>
-          {data.allowlist.map((cidr) => (
-            <code
-              key={cidr}
-              className="rounded border border-hairline bg-surface-sunken px-1.5 py-0.5 font-mono text-[11px]"
-            >
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-body text-muted-foreground">
+      <Status verdict={grade.verdict} label={grade.label} className="text-body" />
+      <Dot />
+      <span className="min-w-0">{exposure.summary}</span>
+      <Dot />
+      <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+        <span>allowed</span>
+        {exposure.allowlist.length === 0 ? (
+          <span className="text-foreground">every address</span>
+        ) : (
+          exposure.allowlist.map((cidr) => (
+            <Tag key={cidr} mono>
               {cidr}
-            </code>
-          ))}
-        </div>
-        {data.recommendation && (
-          <p className="text-[13px] font-medium text-foreground">{data.recommendation}</p>
+            </Tag>
+          ))
         )}
-      </PanelBody>
-    </Panel>
+      </span>
+      {exposure.interfaces.length > 0 && (
+        <>
+          <Dot />
+          <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+            <span>via</span>
+            {exposure.interfaces.map((name) => (
+              <Tag key={name} mono>
+                {name}
+              </Tag>
+            ))}
+            {exposure.tailscaleIp && (
+              <Tag mono title="This host's tailnet address">
+                {exposure.tailscaleIp}
+              </Tag>
+            )}
+          </span>
+        </>
+      )}
+      {exposure.client && (
+        <>
+          <Dot />
+          <span className="inline-flex items-center gap-1">
+            <span>you</span>
+            <Tag mono title="The address this browser is reaching the dashboard from">
+              {exposure.client}
+            </Tag>
+          </span>
+        </>
+      )}
+    </div>
   )
+}
+
+function Dot() {
+  return <span className="text-muted-foreground/40">·</span>
 }

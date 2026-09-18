@@ -206,6 +206,11 @@ type ContainerPoint struct {
 	MemBytesPeak uint64 `json:"memBytesPeak"`
 	MemLimit     uint64 `json:"memLimit"`
 
+	// SizeRw is the writable layer at the end of the bucket — the maximum
+	// rather than the mean, because what is wanted from it is the shape of the
+	// growth and an average across an hour blunts exactly that.
+	SizeRw uint64 `json:"sizeRw"`
+
 	PIDs float64 `json:"pids"`
 
 	// Bytes per second, derived in SQL from the cumulative counters Docker
@@ -567,8 +572,8 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
-		   block_read, block_write)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		   block_read, block_write, container_id, size_rw)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -578,7 +583,9 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		  net_tx      = excluded.net_tx,
 		  pids        = excluded.pids,
 		  block_read  = excluded.block_read,
-		  block_write = excluded.block_write`)
+		  block_write = excluded.block_write,
+		  container_id = excluded.container_id,
+		  size_rw     = excluded.size_rw`)
 	if err != nil {
 		return err
 	}
@@ -592,7 +599,7 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if _, err := stmt.ExecContext(ctx, ts, st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
-			int64(st.BlockRead), int64(st.BlockWrite)); err != nil {
+			int64(st.BlockRead), int64(st.BlockWrite), st.ID, st.SizeRw); err != nil {
 			return err
 		}
 	}
@@ -869,7 +876,8 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 		       MAX(mem_limit),
 		       AVG(pids),
 		       MAX(net_rx) - MIN(net_rx), MAX(net_tx) - MIN(net_tx),
-		       MAX(block_read) - MIN(block_read), MAX(block_write) - MIN(block_write)
+		       MAX(block_read) - MIN(block_read), MAX(block_write) - MIN(block_write),
+		       MAX(size_rw)
 		  FROM metric_container_samples
 		 WHERE name = ? AND ts >= ? AND ts <= ?
 		 GROUP BY bucket
@@ -885,16 +893,18 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 		var p ContainerPoint
 		var memBytes, memBytesPeak, memLimit float64
 		var rxSpan, txSpan, readSpan, writeSpan float64
+		var sizeRw float64
 		if err := rows.Scan(&bucket, &p.Samples,
 			&p.CPU, &p.CPUPeak,
 			&p.Mem, &p.MemPeak,
 			&memBytes, &memBytesPeak, &memLimit,
 			&p.PIDs,
-			&rxSpan, &txSpan, &readSpan, &writeSpan); err != nil {
+			&rxSpan, &txSpan, &readSpan, &writeSpan, &sizeRw); err != nil {
 			return nil, err
 		}
 		p.TS = time.Unix(bucket, 0).UTC()
 		p.MemBytes, p.MemBytesPeak, p.MemLimit = uint64(memBytes), uint64(memBytesPeak), uint64(memLimit)
+		p.SizeRw = uint64(sizeRw)
 		p.CPU, p.CPUPeak = round2(p.CPU), round2(p.CPUPeak)
 		p.Mem, p.MemPeak = round1(p.Mem), round1(p.MemPeak)
 		p.PIDs = round1(p.PIDs)

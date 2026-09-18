@@ -79,3 +79,41 @@ func TestValidateBranchRefusesAnOption(t *testing.T) {
 		}
 	}
 }
+
+// The status rollup mixes GitHub's two check shapes, and one failure has to
+// outrank any number of passes.
+func TestPullRequestFoldsChecksAndReview(t *testing.T) {
+	var p ghPull
+	p.ReviewDecision = "APPROVED"
+	p.Rollup = []struct {
+		State      string `json:"state"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	}{
+		{State: "SUCCESS"},
+		{Status: "COMPLETED", Conclusion: "SUCCESS"},
+	}
+	pr := p.pullRequest()
+	if pr.Checks != "success" || pr.Review != "approved" {
+		t.Fatalf("all passing = checks %q review %q", pr.Checks, pr.Review)
+	}
+	p.Rollup = append(p.Rollup, struct {
+		State      string `json:"state"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	}{Status: "IN_PROGRESS"})
+	if pr := p.pullRequest(); pr.Checks != "pending" {
+		t.Fatalf("one pending among passes = %q, want pending", pr.Checks)
+	}
+	p.Rollup = append(p.Rollup, struct {
+		State      string `json:"state"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	}{Status: "COMPLETED", Conclusion: "FAILURE"})
+	if pr := p.pullRequest(); pr.Checks != "failure" {
+		t.Fatalf("one failure among the rest = %q, want failure", pr.Checks)
+	}
+	if pr := (ghPull{}).pullRequest(); pr.Checks != "" || pr.Review != "" {
+		t.Fatalf("no checks and no review should be empty, got %q / %q", pr.Checks, pr.Review)
+	}
+}

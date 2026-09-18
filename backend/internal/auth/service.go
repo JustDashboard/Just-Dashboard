@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
-	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -17,7 +16,9 @@ var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrAccountLocked      = errors.New("account temporarily locked after repeated failed logins")
 	ErrAccountDisabled    = errors.New("account disabled")
+	ErrTOTPAlreadyEnabled = errors.New("two-factor authentication is already enabled")
 	ErrInvalidTOTP        = errors.New("invalid verification code")
+	ErrTOTPRequired       = errors.New("this dashboard requires two-factor authentication, so it cannot be turned off")
 	ErrNotFound           = errors.New("not found")
 	ErrLastAdmin          = errors.New("cannot remove the last enabled admin")
 )
@@ -33,25 +34,41 @@ type Service struct {
 	sealer     *Sealer
 	sessionTTL time.Duration
 	idleTTL    time.Duration
+	require2FA bool
 }
 
-func NewService(st *store.Store, sealer *Sealer, sessionTTL, idleTTL time.Duration) *Service {
-	return &Service{st: st, sealer: sealer, sessionTTL: sessionTTL, idleTTL: idleTTL}
+func NewService(st *store.Store, sealer *Sealer, sessionTTL, idleTTL time.Duration, require2FA bool) *Service {
+	return &Service{st: st, sealer: sealer, sessionTTL: sessionTTL, idleTTL: idleTTL, require2FA: require2FA}
 }
 
-// Require2FA remains in the status contract so existing frontends can render
-// the login flow, but it is a security invariant rather than configuration.
-func (s *Service) Require2FA() bool { return true }
+// Require2FA reports whether an account with no authenticator is allowed in.
+//
+// The policy is a setting rather than a constant, and the two states differ
+// only in what happens to an account that has not enrolled: with it on, a
+// password buys a session that reaches the enrolment routes and nothing else;
+// with it off, that account is signed in and invited to enrol later. What it
+// never does is weaken an account that *has* enrolled — a user with an
+// authenticator is always asked for a code, whatever this says.
+func (s *Service) Require2FA() bool { return s.require2FA }
 
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	// DisplayName is the name the account shows as. It is the username as it
+	// was typed when the account was made — case kept — until somebody sets
+	// it; the sign-in key underneath stays lower case so a login is never
+	// refused over a capital letter.
+	DisplayName  string    `json:"displayName"`
 	Role         Role      `json:"role"`
 	TOTPEnabled  bool      `json:"totpEnabled"`
 	Disabled     bool      `json:"disabled"`
 	MustChangePW bool      `json:"mustChangePassword"`
 	LastLoginAt  time.Time `json:"lastLoginAt"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// AvatarVersion is when the picture was last set, or zero for none. It is
+	// the cache key a client appends to the avatar URL, so a new upload shows
+	// at once and an unchanged one is not fetched again.
+	AvatarVersion int64 `json:"avatarVersion"`
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, int64, error) {
@@ -68,9 +85,12 @@ func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, 
 		lastLogin  int64
 		created    int64
 	)
-	err := row.Scan(&u.ID, &u.Username, &pwHash, &role, &totpSecret, &totpOK, &disabled, &mustChange, &failed, &locked, &lastLogin, &created)
+	err := row.Scan(&u.ID, &u.Username, &pwHash, &role, &totpSecret, &totpOK, &disabled, &mustChange, &failed, &locked, &lastLogin, &created, &u.DisplayName, &u.AvatarVersion)
 	if err != nil {
 		return nil, "", "", 0, 0, err
+	}
+	if u.DisplayName == "" {
+		u.DisplayName = u.Username
 	}
 	u.Role = Role(role)
 	u.TOTPEnabled = totpOK == 1
@@ -83,7 +103,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, 
 	return &u, pwHash, totpSecret, failed, locked, nil
 }
 
-const userCols = `id, username, password_hash, role, totp_secret, totp_enabled, disabled, must_change_pw, failed_count, locked_until, last_login_at, created_at`
+const userCols = `id, username, password_hash, role, totp_secret, totp_enabled, disabled, must_change_pw, failed_count, locked_until, last_login_at, created_at, display_name, avatar_at`
 
 func (s *Service) UserByID(ctx context.Context, id int64) (*User, error) {
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id)
@@ -112,9 +132,15 @@ func (s *Service) ListUsers(ctx context.Context) ([]*User, error) {
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password string, role Role, mustChange bool) (*User, error) {
-	username = strings.TrimSpace(strings.ToLower(username))
-	if username == "" {
-		return nil, errors.New("username required")
+	// The name as typed is the one the account shows as; the lower-cased
+	// form is only the key it signs in with.
+	displayName, err := normaliseDisplayName(username)
+	if err != nil {
+		return nil, err
+	}
+	username, err = normaliseUsername(username)
+	if err != nil {
+		return nil, err
 	}
 	if !role.Valid() {
 		return nil, fmt.Errorf("unknown role %q", role)
@@ -131,8 +157,8 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 		mc = 1
 	}
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO users(username, password_hash, role, must_change_pw, created_at) VALUES(?,?,?,?,?)`,
-		username, hash, string(role), mc, time.Now().Unix())
+		`INSERT INTO users(username, password_hash, role, must_change_pw, created_at, display_name) VALUES(?,?,?,?,?,?)`,
+		username, hash, string(role), mc, time.Now().Unix(), displayName)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, fmt.Errorf("user %q already exists", username)
@@ -141,6 +167,129 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 	}
 	id, _ := res.LastInsertId()
 	return s.UserByID(ctx, id)
+}
+
+const maxNameLen = 64
+
+// normaliseUsername is the sign-in key: trimmed, lower-cased, one word. The
+// rule is deliberately loose about characters — every username that already
+// exists must keep working — and strict only about the two things that would
+// make a name unusable as a key: whitespace inside it, and nothing at all.
+func normaliseUsername(raw string) (string, error) {
+	name := strings.TrimSpace(strings.ToLower(raw))
+	if name == "" {
+		return "", errors.New("username required")
+	}
+	if len(name) > maxNameLen {
+		return "", fmt.Errorf("username must be at most %d characters", maxNameLen)
+	}
+	for _, r := range name {
+		if r < 0x21 || r == 0x7f {
+			return "", errors.New("username cannot contain spaces or control characters")
+		}
+	}
+	return name, nil
+}
+
+// normaliseDisplayName is the name shown: trimmed, one line, case kept.
+func normaliseDisplayName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", errors.New("name required")
+	}
+	if len(name) > maxNameLen {
+		return "", fmt.Errorf("name must be at most %d characters", maxNameLen)
+	}
+	if strings.ContainsAny(name, "\r\n\t") {
+		return "", errors.New("name must be one line")
+	}
+	return name, nil
+}
+
+// Profile is the part of an account its holder can rewrite: the sign-in name
+// and the name shown. A nil field is left alone.
+type Profile struct {
+	Username    *string
+	DisplayName *string
+}
+
+// SetProfile renames an account. The sign-in name is unique across the
+// dashboard and lower-cased like every lookup; a rename that collides with
+// another account is refused rather than silently adjusted.
+func (s *Service) SetProfile(ctx context.Context, userID int64, p Profile) error {
+	if p.Username != nil {
+		name, err := normaliseUsername(*p.Username)
+		if err != nil {
+			return err
+		}
+		if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET username = ? WHERE id = ?`, name, userID); err != nil {
+			if strings.Contains(err.Error(), "UNIQUE") {
+				return fmt.Errorf("user %q already exists", name)
+			}
+			return err
+		}
+	}
+	if p.DisplayName != nil {
+		name, err := normaliseDisplayName(*p.DisplayName)
+		if err != nil {
+			return err
+		}
+		if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET display_name = ? WHERE id = ?`, name, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MaxAvatarBytes bounds a stored picture. The client resizes to a small
+// square before upload, so anything near this is not a photo of a face.
+const MaxAvatarBytes = 512 << 10
+
+// SetAvatar stores an account's picture. The bytes are stored as sent — the
+// caller has already decoded them to prove they are an image of the declared
+// type — and the version stamp changes so every cached copy is replaced.
+func (s *Service) SetAvatar(ctx context.Context, userID int64, data []byte, mimeType string) error {
+	if len(data) == 0 {
+		return errors.New("empty image")
+	}
+	if len(data) > MaxAvatarBytes {
+		return fmt.Errorf("image must be at most %d KB", MaxAvatarBytes>>10)
+	}
+	res, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET avatar = ?, avatar_type = ?, avatar_at = ? WHERE id = ?`,
+		data, mimeType, time.Now().Unix(), userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearAvatar removes the picture; the account falls back to its initials.
+func (s *Service) ClearAvatar(ctx context.Context, userID int64) error {
+	_, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET avatar = x'', avatar_type = '', avatar_at = 0 WHERE id = ?`, userID)
+	return err
+}
+
+// Avatar is the stored picture and its type, or ErrNotFound when the account
+// has none — an absence, not a failure, which is why it is the same error a
+// missing account returns.
+func (s *Service) Avatar(ctx context.Context, userID int64) ([]byte, string, error) {
+	var (
+		data     []byte
+		mimeType string
+	)
+	err := s.st.DB.QueryRowContext(ctx, `SELECT avatar, avatar_type FROM users WHERE id = ?`, userID).Scan(&data, &mimeType)
+	if err == sql.ErrNoRows || (err == nil && len(data) == 0) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return data, mimeType, nil
 }
 
 func ValidatePasswordStrength(pw string) error {
@@ -304,17 +453,30 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 	}
 	s.st.DB.ExecContext(ctx, `UPDATE users SET failed_count = 0, locked_until = 0 WHERE id = ?`, u.ID)
 
-	// A session always starts un-elevated. Nothing beyond the 2FA endpoints
-	// accepts it until the second factor is proved.
-	sess, token, err := s.newSession(ctx, u.ID, ip, userAgent, false)
+	// A session starts un-elevated whenever a second factor is still owed —
+	// an enrolled authenticator, or an unenrolled account on an install that
+	// demands one. Nothing beyond the 2FA endpoints accepts it until that
+	// factor is proved. The one case that starts complete is the account with
+	// nothing left to prove: no authenticator, and no policy requiring one.
+	complete := !u.TOTPEnabled && !s.require2FA
+	sess, token, err := s.newSession(ctx, u.ID, ip, userAgent, complete)
 	if err != nil {
 		return nil, err
 	}
 	res := &LoginResult{User: u, Token: token, SessionID: sess.ID, ExpiresAt: sess.ExpiresAt}
-	if u.TOTPEnabled {
+	switch {
+	case u.TOTPEnabled:
 		res.NeedsTOTP = true
-	} else {
+	case s.require2FA:
 		res.NeedsEnroll = true
+	default:
+		// elevate() is what stamps last_login_at everywhere else; a session
+		// that never passes through it would leave that column reading
+		// "never" for the accounts that sign in most often.
+		if _, err := s.st.DB.ExecContext(ctx,
+			`UPDATE users SET last_login_at = ? WHERE id = ?`, now.Unix(), u.ID); err != nil {
+			return nil, err
+		}
 	}
 	return res, nil
 }
@@ -341,25 +503,21 @@ func (s *Service) BeginTOTPEnrollment(ctx context.Context, userID int64) (*Enrol
 	}
 	// Stored but not yet enabled: enrollment only completes once the user
 	// proves they can generate a code from it.
-	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?`, sealed, userID); err != nil {
+	res, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET totp_secret = ?, totp_last_step = -1 WHERE id = ? AND totp_enabled = 0`, sealed, userID)
+	if err != nil {
 		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, ErrTOTPAlreadyEnabled
 	}
 	return &EnrollmentSecret{Secret: key.Secret(), URL: key.URL()}, nil
 }
 
 func (s *Service) ConfirmTOTPEnrollment(ctx context.Context, userID int64, code string) ([]string, error) {
-	secret, err := s.totpSecret(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if !totp.Validate(code, secret) {
-		return nil, ErrInvalidTOTP
-	}
-	if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET totp_enabled = 1 WHERE id = ?`, userID); err != nil {
-		return nil, err
-	}
-	return s.regenerateRecoveryCodes(ctx, userID)
+	return s.ConfirmTOTPEnrollmentForSession(ctx, userID, "", code)
 }
 
 func (s *Service) totpSecret(ctx context.Context, userID int64) (string, error) {
@@ -380,21 +538,7 @@ func (s *Service) totpSecret(ctx context.Context, userID int64) (string, error) 
 // VerifySecondFactor accepts either a live TOTP code or a single-use recovery
 // code, and elevates the session on success.
 func (s *Service) VerifySecondFactor(ctx context.Context, sessionID string, userID int64, code string) error {
-	code = strings.TrimSpace(strings.ReplaceAll(code, " ", ""))
-	if secret, err := s.totpSecret(ctx, userID); err == nil {
-		// Skew of one step tolerates ordinary clock drift between the server
-		// and the authenticator without widening the window meaningfully.
-		ok, err := totp.ValidateCustom(code, secret, time.Now(), totp.ValidateOpts{
-			Period: 30, Skew: 1, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
-		})
-		if err == nil && ok {
-			return s.elevate(ctx, sessionID, userID)
-		}
-	}
-	if s.consumeRecoveryCode(ctx, userID, code) {
-		return s.elevate(ctx, sessionID, userID)
-	}
-	return ErrInvalidTOTP
+	return s.verifySecondFactor(ctx, sessionID, userID, code)
 }
 
 func (s *Service) elevate(ctx context.Context, sessionID string, userID int64) error {
@@ -406,10 +550,31 @@ func (s *Service) elevate(ctx context.Context, sessionID string, userID int64) e
 	return err
 }
 
+// DisableTOTP removes the caller's own authenticator.
+//
+// Separate from ResetTOTP, which is the administrator's lever for a locked-out
+// account and revokes every session with it. This one is the account holder
+// turning off something they turned on, so the session they are doing it from
+// survives — being signed out for tidying your own settings is a punishment
+// for the wrong action. It refuses outright when the install requires 2FA:
+// the check belongs here rather than only in the handler, because this is the
+// function that would otherwise leave an account unable to sign in at all.
+func (s *Service) DisableTOTP(ctx context.Context, userID int64) error {
+	if s.require2FA {
+		return ErrTOTPRequired
+	}
+	if _, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1 WHERE id = ?`, userID); err != nil {
+		return err
+	}
+	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID)
+	return err
+}
+
 // ResetTOTP clears an enrollment so a locked-out user can re-enroll. Admin only.
 func (s *Service) ResetTOTP(ctx context.Context, userID int64) error {
 	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '' WHERE id = ?`, userID); err != nil {
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1 WHERE id = ?`, userID); err != nil {
 		return err
 	}
 	if _, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
@@ -424,17 +589,9 @@ func (s *Service) regenerateRecoveryCodes(ctx context.Context, userID int64) ([]
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
+	codes, err := regenerateRecoveryCodesTx(ctx, tx, userID)
+	if err != nil {
 		return nil, err
-	}
-	codes := make([]string, 0, 10)
-	for i := 0; i < 10; i++ {
-		c := RandomToken(6)
-		codes = append(codes, c)
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO recovery_codes(user_id, code_hash) VALUES(?, ?)`, userID, HashToken(c)); err != nil {
-			return nil, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -444,15 +601,4 @@ func (s *Service) regenerateRecoveryCodes(ctx context.Context, userID int64) ([]
 
 func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
 	return s.regenerateRecoveryCodes(ctx, userID)
-}
-
-func (s *Service) consumeRecoveryCode(ctx context.Context, userID int64, code string) bool {
-	res, err := s.st.DB.ExecContext(ctx,
-		`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at = 0`,
-		time.Now().Unix(), userID, HashToken(code))
-	if err != nil {
-		return false
-	}
-	n, _ := res.RowsAffected()
-	return n == 1
 }

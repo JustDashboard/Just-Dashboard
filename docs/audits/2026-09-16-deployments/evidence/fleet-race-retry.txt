@@ -1,0 +1,5 @@
+=== RUN   TestFleetReadStaysWithinItsBudgetAtReferenceScale
+    performance_test.go:62: fleet p95 305.513868ms over 100 deployments, 10 statements per read
+--- PASS: TestFleetReadStaysWithinItsBudgetAtReferenceScale (9.51s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	10.578s

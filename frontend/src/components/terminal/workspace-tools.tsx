@@ -1,15 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import {
-  Code,
-  Cross,
-  FloppyDisk,
-  FolderOpen,
-  GitBranch,
-  GitMerge,
-  SidebarRight,
-} from "@/components/icons"
+import { Cross, FloppyDisk, FolderOpen, GitMerge, SidebarRight } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -19,13 +11,15 @@ import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
 import { DiffView } from "@/components/files/diff-view"
 import { GitTools } from "@/components/terminal/git-tools"
+import { Tag } from "@/components/tag"
+import { ChipCount, tabClasses } from "@/components/tabs"
+import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay =
   | { kind: "file"; path: string }
@@ -110,13 +104,19 @@ export function WorkspaceTools({
     status.refresh()
   }
 
+  const changed = status.data?.files.length ?? 0
+
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-      <div className="flex shrink-0 items-center gap-0.5 border-b border-hairline bg-surface-header px-1.5 py-1">
+    <Pane flush className="relative flex-1">
+      {/* The two halves are section tabs: the brand underline says which one
+          you are in, the way it does under the top bar. No glyph beside the
+          word — a folder in front of "Files" is the label twice — and the one
+          fact worth carrying across is the count of changed files, which is
+          what decides whether the git half needs a visit. */}
+      <PaneHeader className="gap-0 px-1 py-0">
         <TabButton
           active={tab === "files"}
           onClick={() => showTab("files")}
-          icon={FolderOpen}
           hint="The files under the shell's working directory"
         >
           Files
@@ -124,23 +124,10 @@ export function WorkspaceTools({
         <TabButton
           active={tab === "git"}
           onClick={() => showTab("git")}
-          icon={GitBranch}
           hint="Stage, commit and push the repository the shell is in"
         >
           Git
-          {(status.data?.files.length ?? 0) > 0 && (
-            <span className="ml-1 rounded bg-warning/20 px-1 font-mono text-[10px] text-warning">
-              {status.data?.files.length}
-            </span>
-          )}
-          {detect.data?.inRoots && detect.data.repo && !status.data?.files.length && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="ml-1 size-1.5 rounded-full bg-success" />
-              </TooltipTrigger>
-              <TooltipContent>Working tree clean</TooltipContent>
-            </Tooltip>
-          )}
+          {changed > 0 && <ChipCount>{changed}</ChipCount>}
         </TabButton>
         <span className="flex-1" />
         {onClose && (
@@ -151,7 +138,7 @@ export function WorkspaceTools({
                 size="sm"
                 variant="ghost"
                 aria-label="Hide this panel"
-                className="size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                className="mr-1 size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
                 onClick={onClose}
               >
                 <SidebarRight className="size-3.5" />
@@ -160,7 +147,7 @@ export function WorkspaceTools({
             <TooltipContent>Hide files &amp; git</TooltipContent>
           </Tooltip>
         )}
-      </div>
+      </PaneHeader>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {!treeRoot ? (
@@ -235,20 +222,18 @@ export function WorkspaceTools({
       </div>
 
       {confirm && <InlineConfirm request={confirm} onClose={() => setConfirm(null)} />}
-    </div>
+    </Pane>
   )
 }
 
 function TabButton({
   active,
   onClick,
-  icon: Icon,
   hint,
   children,
 }: {
   active: boolean
   onClick: () => void
-  icon: React.ComponentType<{ className?: string }>
   /** What the tab shows — the label is one word and the count beside it is
    *  the only other clue. */
   hint: string
@@ -258,13 +243,11 @@ function TabButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
+          aria-current={active ? "page" : undefined}
           onClick={onClick}
-          className={cn(
-            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
-            active ? "bg-primary/12 text-primary" : "text-muted-foreground hover:text-foreground",
-          )}
+          className={tabClasses(active, "h-9")}
         >
-          <Icon className="size-3.5" />
           {children}
         </button>
       </TooltipTrigger>
@@ -323,11 +306,11 @@ function InlineFile({
     return () => controller.abort()
   }, [path])
 
-  // A file that git knows nothing about has nothing to compare against, and
-  // one that is only staged has its change in the index rather than the
-  // working tree — asking for the wrong one of those returns an empty diff and
-  // reads as "no changes" for a file the list says is modified.
-  const diffable = Boolean(change && repoPath && change.label !== "untracked")
+  // A file that is only staged has its change in the index rather than the
+  // working tree — asking for the wrong one returns an empty diff and reads
+  // as "no changes" for a file the list says is modified. An untracked file
+  // diffs too: the server shows it against nothing, as the addition it is.
+  const diffable = Boolean(change && repoPath)
   const staged = Boolean(change?.staged && !change?.worktree)
 
   // Re-read on every entry to the diff, and after every save: the point of
@@ -370,16 +353,11 @@ function InlineFile({
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-card">
-      <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-header px-2 py-1.5">
-        <Code className="size-3.5 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={path}>
+      <PaneHeader className="gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
           {path.split("/").pop()}
         </span>
-        {dirty && (
-          <Badge variant="warning" className="font-normal">
-            unsaved
-          </Badge>
-        )}
+        {dirty && <Tag tone="warning">unsaved</Tag>}
         {change && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -388,7 +366,7 @@ function InlineFile({
                 size="xs"
                 variant={showDiff ? "secondary" : "ghost"}
                 aria-pressed={showDiff}
-                className="shrink-0 gap-1 px-1.5 text-[11px]"
+                className="shrink-0 gap-1 px-1.5 text-hint"
                 onClick={() => setShowDiff((v) => !v)}
               >
                 <GitMerge className="size-3.5" />
@@ -398,10 +376,10 @@ function InlineFile({
             <TooltipContent>
               {showDiff
                 ? "Back to the file"
-                : !diffable
-                  ? "Untracked — there is no earlier version to compare against"
-                  : staged
-                    ? "Show what is staged for the next commit"
+                : staged
+                  ? "Show what is staged for the next commit"
+                  : change?.label === "untracked"
+                    ? "Show the whole file as the addition it will be"
                     : "Show what changed since the last commit"}
             </TooltipContent>
           </Tooltip>
@@ -409,12 +387,8 @@ function InlineFile({
         {file && !file.binary && canWrite && !showDiff && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="xs" onClick={save} disabled={!dirty || saving}>
-                {saving ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <FloppyDisk className="size-3.5" />
-                )}
+              <Button size="xs" onClick={save} disabled={!dirty || saving} pending={saving}>
+                <FloppyDisk className="size-3.5" />
                 Save
               </Button>
             </TooltipTrigger>
@@ -435,20 +409,10 @@ function InlineFile({
           </TooltipTrigger>
           <TooltipContent>Close this file (Esc)</TooltipContent>
         </Tooltip>
-      </div>
+      </PaneHeader>
       <div className="min-h-0 flex-1">
         {showDiff ? (
-          // An untracked file is not a failed diff, and saying so beats a
-          // disabled button: a control that cannot be pressed also cannot be
-          // hovered, so the one place with room for the explanation is the
-          // place the explanation would have gone.
-          !diffable ? (
-            <div className="p-4 text-xs text-muted-foreground">
-              git is not tracking this file yet, so there is no earlier version to compare it
-              against — every line in it is new. Stage it from the Git tab and the diff appears
-              here.
-            </div>
-          ) : current?.error ? (
+          current?.error ? (
             <ErrorState error={current.error} className="m-3" />
           ) : current?.body === undefined ? (
             <LoadingRows className="p-3" rows={6} />
@@ -505,12 +469,12 @@ function InlineDiff({
 }) {
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-card">
-      <div className="flex shrink-0 items-start gap-2 border-b border-hairline bg-surface-header px-2 py-1.5">
+      <PaneHeader className="items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[12px]" title={title}>
+          <p className="truncate font-mono text-xs" title={title}>
             {title}
           </p>
-          {subtitle && <p className="truncate text-[10px] text-muted-foreground">{subtitle}</p>}
+          {subtitle && <p className="truncate text-micro text-muted-foreground">{subtitle}</p>}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -526,7 +490,7 @@ function InlineDiff({
           </TooltipTrigger>
           <TooltipContent>Close the diff (Esc)</TooltipContent>
         </Tooltip>
-      </div>
+      </PaneHeader>
       <DiffView body={body} singleFile={singleFile} className="min-h-0 flex-1" />
     </div>
   )
@@ -562,8 +526,8 @@ function InlineConfirm({ request, onClose }: { request: ConfirmRequest; onClose:
   }, [])
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/70 p-3 backdrop-blur-sm">
-      <div className="raised [--raise-drop:var(--shadow-lg)] w-full max-w-sm rounded-xl border bg-card p-4">
-        <p className="text-[13px] font-medium">{request.title}</p>
+      <div className="w-full max-w-sm rounded-xl border bg-card p-4 shadow-lg">
+        <p className="text-body font-medium">{request.title}</p>
         {request.body && (
           <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{request.body}</div>
         )}
@@ -575,9 +539,8 @@ function InlineConfirm({ request, onClose }: { request: ConfirmRequest; onClose:
             size="sm"
             variant={request.danger ? "destructive" : "default"}
             onClick={runIt}
-            disabled={busy}
+            pending={busy}
           >
-            {busy && <Spinner className="size-3.5" />}
             {request.confirmLabel ?? "Confirm"}
           </Button>
         </div>

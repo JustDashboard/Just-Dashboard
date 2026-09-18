@@ -81,6 +81,23 @@ func TestHostAddressesExcludesPrivateRanges(t *testing.T) {
 	}
 }
 
+func TestPublicAddressExcludesCGNAT(t *testing.T) {
+	for _, address := range []string{
+		"100.64.0.0", "100.110.34.31", "100.127.255.255", "::ffff:100.110.34.31",
+		"10.0.0.1", "172.16.0.1", "192.168.1.1", "127.0.0.1", "169.254.1.1",
+		"fd7a:115c:a1e0::1", "fe80::1", "::1", "0.0.0.0", "224.0.0.1", "invalid",
+	} {
+		if IsPublicAddress(net.ParseIP(address)) {
+			t.Errorf("non-public address accepted: %s", address)
+		}
+	}
+	for _, address := range []string{"100.63.255.255", "100.128.0.0", "8.8.8.8", "2606:4700::1111"} {
+		if !IsPublicAddress(net.ParseIP(address)) {
+			t.Errorf("public address rejected: %s", address)
+		}
+	}
+}
+
 // Every VPS behind provider NAT — AWS, Google Cloud, Azure and Oracle all hand
 // the instance a private address and map a public one in front of it — has no
 // routable address of its own to compare against. Reporting "does not point

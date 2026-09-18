@@ -50,19 +50,23 @@ func (postgresDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, e
 	return scanDatabases(rows)
 }
 
-func (postgresDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([]Table, error) {
-	rows, err := db.QueryContext(ctx, `SELECT n.nspname, c.relname,
+// The catalogue snapshot can still contain a relation concurrently dropped
+// by another session. PostgreSQL returns NULL for its size in that case.
+const postgresTablesQuery = `SELECT n.nspname, c.relname,
 	                CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view'
 	                               WHEN 'm' THEN 'materialized view' ELSE c.relkind::text END,
 	                COALESCE(c.reltuples::bigint, 0),
-	                pg_total_relation_size(c.oid),
+	                COALESCE(pg_total_relation_size(c.oid), 0),
 	                COALESCE(obj_description(c.oid), '')
 	         FROM pg_class c
 	         JOIN pg_namespace n ON n.oid = c.relnamespace
 	         WHERE c.relkind IN ('r','v','m','p')
 	           AND n.nspname NOT IN ('pg_catalog','information_schema')
 	           AND ($1 = '' OR n.nspname = $1)
-	         ORDER BY 1, 2`, schema)
+	         ORDER BY 1, 2`
+
+func (postgresDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([]Table, error) {
+	rows, err := db.QueryContext(ctx, postgresTablesQuery, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +178,11 @@ func (postgresDialect) BeforeDropColumn(context.Context, *sql.DB, string, string
 
 // EXPLAIN without ANALYZE plans the statement and does not run it.
 func (postgresDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := ExplainStatement(query)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	query = checked
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 
@@ -218,22 +227,25 @@ func (postgresDialect) Kill(ctx context.Context, db *sql.DB, pid string) error {
 	return err
 }
 
+// reltuples is the planner's estimate, refreshed by ANALYZE. A table never
+// analysed reports -1, which would render as a negative row count, so it is
+// floored here rather than in the UI. Size functions return NULL if another
+// session drops a relation still visible in this catalogue snapshot.
+const postgresTableSizesQuery = `
+		SELECT n.nspname, c.relname,
+		       GREATEST(c.reltuples, 0)::bigint,
+		       COALESCE(pg_total_relation_size(c.oid), 0),
+		       COALESCE(pg_table_size(c.oid), 0),
+		       COALESCE(pg_indexes_size(c.oid), 0)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relkind IN ('r', 'p') AND n.nspname = $1`
+
 func (postgresDialect) TableSizes(ctx context.Context, db *sql.DB, schema string) ([]TableSize, error) {
 	if schema == "" {
 		schema = "public"
 	}
-	// reltuples is the planner's estimate, refreshed by ANALYZE. A table never
-	// analysed reports -1, which would render as a negative row count, so it is
-	// floored here rather than in the UI.
-	rows, err := db.QueryContext(ctx, `
-		SELECT n.nspname, c.relname,
-		       GREATEST(c.reltuples, 0)::bigint,
-		       pg_total_relation_size(c.oid),
-		       pg_table_size(c.oid),
-		       pg_indexes_size(c.oid)
-		FROM pg_class c
-		JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE c.relkind IN ('r', 'p') AND n.nspname = $1`, schema)
+	rows, err := db.QueryContext(ctx, postgresTableSizesQuery, schema)
 	if err != nil {
 		return nil, err
 	}

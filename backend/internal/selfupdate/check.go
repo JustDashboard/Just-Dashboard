@@ -30,7 +30,7 @@ import (
 const (
 	// DefaultRepo is the project this build is a copy of. A fork changes it
 	// with JD_UPDATE_REPO and starts describing its own releases.
-	DefaultRepo = "Wayy01/Just-Dashboard"
+	DefaultRepo = "JustDashboard/Just-Dashboard"
 	// DefaultRef is the branch releases land on. The manifest at its head is
 	// the newest published version by definition, which is why nothing here
 	// needs to read tags.

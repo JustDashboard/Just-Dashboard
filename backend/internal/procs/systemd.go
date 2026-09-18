@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/shirou/gopsutil/v4/host"
 )
 
@@ -220,6 +221,9 @@ const (
 	UnitReload  UnitAction = "reload"
 	UnitEnable  UnitAction = "enable"
 	UnitDisable UnitAction = "disable"
+	// ResetFailed clears a unit's failed state without starting it, so a
+	// service that was fixed by hand stops being counted as broken.
+	UnitResetFailed UnitAction = "reset-failed"
 )
 
 func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (*CommandResult, error) {
@@ -227,11 +231,21 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 		return nil, err
 	}
 	switch action {
-	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable:
+	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable, UnitResetFailed:
 	default:
 		return nil, fmt.Errorf("unknown systemd action %q", action)
 	}
 	return run(ctx, 90*time.Second, "systemctl", string(action), name)
+}
+
+// DaemonReload asks systemd to re-read its unit files. It is the step after
+// editing a unit in the file manager that nobody remembers, and until it runs
+// the unit page keeps describing the old file.
+func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
+	if !s.Available() {
+		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	}
+	return run(ctx, 90*time.Second, "systemctl", "daemon-reload")
 }
 
 // JournalEntry is one record from journalctl's JSON output. The interesting
@@ -329,7 +343,13 @@ func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, er
 	if opts.Follow {
 		args = append(args, "-f")
 	}
-	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	// The journal is host state, not container state: this image mounts
+	// /var/log but not the volatile /run/log/journal where the current boot's
+	// records live, so a container-local journalctl returns the previous
+	// boot's flushed entries and follows nothing new. Crossing into the host's
+	// namespaces reads the live journal; on a bare-metal install this runs
+	// directly and behaves as before.
+	cmd := hostexec.CommandOnHost(ctx, "journalctl", args...)
 	// Same host-PID-namespace chroot detection that run() works around.
 	cmd.Env = append(os.Environ(), "SYSTEMD_IGNORE_CHROOT=1")
 	return cmd, nil

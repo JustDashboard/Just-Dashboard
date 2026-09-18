@@ -1,19 +1,22 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import { ChartActivity, Rss, Status, Stop } from "@/components/icons"
+import Link from "next/link"
+import { ChartActivity, DotMark, Stop } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { relativeTime, timestamp } from "@/lib/format"
 import type { DockerEvent, DockerEventFeed } from "@/lib/types"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
 import { Hint } from "@/components/docker/explain"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { ChipCount, FilterChip } from "@/components/tabs"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 /**
  * What the daemon did, including while nobody was looking.
@@ -21,14 +24,23 @@ import { Button } from "@/components/ui/button"
  * Docker emits an event for everything it does and keeps none of them:
  * `docker events` shows you what happens from the moment you run it, so the
  * answer to "why did this restart at 04:00" is nowhere. The dashboard is a
- * long-running process already connected to the thing producing the record,
- * so it listens and keeps the recent past — the same argument the metrics
- * recorder makes about samples.
+ * long-running process already connected to the thing producing the record, so
+ * it listens and keeps the recent past.
  *
- * Two of these events are worth the whole feature on their own: `oom`, which
- * is the only place the kernel killing a container is written down, and
- * `health_status: unhealthy`, which is where "it went bad and came back"
- * leaves a trace that the current state cannot.
+ * Two changes over the version this replaces, both about being able to trust
+ * what you are looking at:
+ *
+ * The filter opened on Containers with no way to say "everything" and no
+ * indication that anything was being hidden, so an image pull simply did not
+ * appear and the feed looked broken. There is an All chip now, it is the
+ * default, and the selected chip is filled rather than outlined — the outline
+ * was also what keyboard focus used, so a keyboard user could not tell which
+ * filters were on.
+ *
+ * And every row now says who did it. Docker records what happened and never
+ * who asked, so "container removed" was equally consistent with a colleague
+ * pressing a button and with something on the host nobody knows about. The
+ * server correlates against the audit log to tell those apart.
  */
 
 const KINDS = [
@@ -39,14 +51,14 @@ const KINDS = [
 ]
 
 export function EventsTab() {
-  const [kinds, setKinds] = useState<string[]>(["container"])
+  // Empty means everything, which is what the server does with no `kinds` —
+  // so "All" is a real state rather than "every box ticked", and the two
+  // cannot disagree.
+  const [kinds, setKinds] = useState<string[]>([])
   const [search, setSearch] = useState("")
   const [live, setLive] = useState<DockerEvent[]>([])
 
-  const query = useMemo(
-    () => ({ limit: 300, kinds: kinds.join(","), search }),
-    [kinds, search],
-  )
+  const query = useMemo(() => ({ limit: 300, kinds: kinds.join(","), search }), [kinds, search])
 
   const { data, error, loading } = usePoll<DockerEventFeed>(
     (signal) => get<DockerEventFeed>("/docker/events", query, signal),
@@ -66,32 +78,35 @@ export function EventsTab() {
   }, [])
   useSocket("/docker/events/stream", { onMessage })
 
-  if (loading && !data) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
+  const all = useMemo(() => dedupe([...live, ...(data?.events ?? [])]), [live, data])
+
+  const counts = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const e of all) out[e.type] = (out[e.type] ?? 0) + 1
+    return out
+  }, [all])
 
   const wanted = new Set(kinds)
   const needle = search.trim().toLowerCase()
-  const merged = dedupe([...live, ...(data?.events ?? [])]).filter(
+  const merged = all.filter(
     (e) =>
       (wanted.size === 0 || wanted.has(e.type)) &&
       (!needle || `${e.message} ${e.name} ${e.image ?? ""}`.toLowerCase().includes(needle)),
   )
+  const groups = groupByDay(merged)
 
   return (
-    <Panel>
+    // Plain: the feed is the page, and a title, a hairline and the day
+    // markers are what structure it.
+    <Panel plain>
       <PanelHeader
-        icon={ChartActivity}
         title="Events"
-        description={
-          data?.listening
-            ? `Listening since ${relativeTime(data.since)} · ${data.buffered} kept`
-            : "Not connected to the daemon's event stream"
-        }
         actions={
-          <Badge variant={data?.listening ? "success" : "secondary"} className="gap-1.5 font-normal">
-            <Rss className="size-3" />
-            {data?.listening ? "live" : "offline"}
-          </Badge>
+          <Status
+            state={data?.listening ? "connected" : "disconnected"}
+            live={Boolean(data?.listening)}
+            label={data?.listening ? "Live" : "Offline"}
+          />
         }
       />
       <PanelToolbar>
@@ -101,11 +116,14 @@ export function EventsTab() {
           placeholder="Filter events"
         />
         <div className="flex flex-wrap gap-1">
+          <FilterChip selected={kinds.length === 0} onClick={() => setKinds([])}>
+            All
+            <ChipCount>{all.length}</ChipCount>
+          </FilterChip>
           {KINDS.map((k) => (
-            <Button
+            <FilterChip
               key={k.id}
-              size="xs"
-              variant={kinds.includes(k.id) ? "secondary" : "ghost"}
+              selected={kinds.includes(k.id)}
               onClick={() =>
                 setKinds((prev) =>
                   prev.includes(k.id) ? prev.filter((x) => x !== k.id) : [...prev, k.id],
@@ -113,36 +131,55 @@ export function EventsTab() {
               }
             >
               {k.label}
-            </Button>
+              {counts[k.id] ? <ChipCount>{counts[k.id]}</ChipCount> : null}
+            </FilterChip>
           ))}
         </div>
       </PanelToolbar>
       <PanelBody flush>
-        {merged.length === 0 ? (
+        {loading && !data ? (
+          <LoadingRows className="py-3" />
+        ) : error ? (
+          <ErrorState error={error} />
+        ) : merged.length === 0 ? (
           <EmptyState
             icon={ChartActivity}
-            title="Nothing yet"
+            title={kinds.length || needle ? "Nothing matches that filter" : "Nothing yet"}
             description={
-              data?.listening
-                ? "The daemon has done nothing worth recording since the dashboard started listening. Events appear here as they happen."
-                : "The dashboard is not connected to Docker's event stream, so nothing is being kept."
+              kinds.length || needle
+                ? "The daemon has done nothing of that kind since the dashboard started listening."
+                : data?.listening
+                  ? "The daemon has done nothing worth recording since the dashboard started listening. Events appear here as they happen."
+                  : "The dashboard is not connected to Docker's event stream, so nothing is being kept."
             }
           />
         ) : (
-          <div className="max-h-[calc(100svh-26rem)] overflow-auto">
-            {merged.map((event, i) => (
-              <EventRow key={`${event.time}-${event.id}-${i}`} event={event} />
+          /* Padded by the rows' bleed, so the hover wash has room without the
+             container growing a sideways scrollbar. Rises once when the feed
+             lands. */
+          <div className="-mx-3 max-h-[calc(100svh-26rem)] animate-rise overflow-auto px-3">
+            {groups.map(([day, events]) => (
+              <section key={day}>
+                <h3 className="sticky top-0 z-10 border-b border-hairline bg-background/90 py-1 text-hint font-medium text-muted-foreground backdrop-blur">
+                  {day}
+                </h3>
+                <ul className="divide-y divide-hairline">
+                  {events.map((event, i) => (
+                    <EventRow key={`${event.time}-${event.id}-${i}`} event={event} />
+                  ))}
+                </ul>
+              </section>
             ))}
           </div>
         )}
       </PanelBody>
       {merged.length > 0 && (
-        <div className="border-t border-hairline bg-surface-header/60 px-4 py-2">
+        <PanelFooter>
           <Hint>
             Kept in memory and bounded, so this is the recent past rather than a permanent record.
             Everything the dashboard itself did is in the audit log, which survives a restart.
           </Hint>
-        </div>
+        </PanelFooter>
       )}
     </Panel>
   )
@@ -165,27 +202,138 @@ function dedupe(events: DockerEvent[]): DockerEvent[] {
   return out.sort((a, b) => b.time.localeCompare(a.time))
 }
 
+/**
+ * Grouped by day, with the timestamp reduced to a time.
+ *
+ * A column of full dates on a feed where nine tenths of the rows are from
+ * today is nine tenths noise; the date belongs on the group and the time on
+ * the row.
+ */
+function groupByDay(events: DockerEvent[]): [string, DockerEvent[]][] {
+  const out = new Map<string, DockerEvent[]>()
+  for (const event of events) {
+    const label = dayLabel(new Date(event.time))
+    const bucket = out.get(label)
+    if (bucket) bucket.push(event)
+    else out.set(label, [event])
+  }
+  return [...out.entries()]
+}
+
+function dayLabel(date: Date): string {
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
+  if (sameDay(date, today)) return "Today"
+  if (sameDay(date, yesterday)) return "Yesterday"
+  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+}
+
 const LEVEL_ICON = {
   error: { icon: Stop, tone: "text-destructive" },
-  notice: { icon: Status, tone: "text-primary" },
-  info: { icon: Status, tone: "text-muted-foreground/50" },
+  notice: { icon: DotMark, tone: "text-primary" },
+  info: { icon: DotMark, tone: "text-muted-foreground/50" },
+} as const
+
+/**
+ * Where an event came from. "Docker removed a container" and "somebody in this
+ * dashboard removed a container" are the same event and completely different
+ * news, and the second is the one that stops an operator hunting for an
+ * intruder.
+ */
+const SOURCE = {
+  dashboard: { label: "Just Dashboard", tone: "text-primary" },
+  compose: { label: "Compose", tone: "text-muted-foreground" },
+  daemon: { label: "Docker daemon", tone: "text-muted-foreground" },
+  docker: { label: "External", tone: "text-warning" },
 } as const
 
 function EventRow({ event }: { event: DockerEvent }) {
   const meta = LEVEL_ICON[event.level] ?? LEVEL_ICON.info
   const Icon = meta.icon
+  const source = SOURCE[event.source as keyof typeof SOURCE] ?? SOURCE.docker
+
   return (
-    <div className="flex min-w-0 items-baseline gap-3 border-b border-hairline px-4 py-1.5 text-xs last:border-0 hover:bg-[var(--row-hover)]">
-      <Icon className={cn("size-2.5 shrink-0 translate-y-0.5", meta.tone)} />
-      <span className="w-32 shrink-0 font-mono text-[11px] text-muted-foreground">
-        {timestamp(event.time)}
-      </span>
-      <span className="min-w-0 flex-1 break-words">{event.message}</span>
-      {event.stack && (
-        <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
-          {event.stack}
-        </Badge>
-      )}
-    </div>
+    <li className="min-w-0">
+      <div
+        className={cn(
+          "flex min-w-0 items-baseline gap-3 px-4 py-1.5 text-xs transition-colors hover:bg-row-hover",
+          ROW_BLEED,
+        )}
+      >
+        <Icon className={cn("size-2.5 shrink-0 translate-y-0.5", meta.tone)} />
+        <span className="numeric w-20 shrink-0 font-mono text-hint whitespace-nowrap text-muted-foreground">
+          {new Date(event.time).toLocaleTimeString(undefined, {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
+        </span>
+        <span className="min-w-0 flex-1 break-words">{event.message}</span>
+
+        <HoverCard openDelay={150}>
+          <HoverCardTrigger asChild>
+            <button
+              type="button"
+              title="Where this event came from"
+              className={cn(
+                "shrink-0 cursor-help rounded-sm text-micro whitespace-nowrap focus-ring",
+                source.tone,
+              )}
+            >
+              {source.label}
+            </button>
+          </HoverCardTrigger>
+          <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
+            {event.trigger ? (
+              <>
+                <p className="text-body font-medium">Triggered by this dashboard</p>
+                <p className="text-muted-foreground">
+                  An audit entry for <b>{event.trigger.action}</b> by{" "}
+                  <b>{event.trigger.actor || "an unnamed session"}</b> names the same object within
+                  a minute of this event. That is a likely cause rather than a recorded one — Docker
+                  does not say who asked.
+                </p>
+                <Link
+                  href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
+                  className="inline-block text-primary hover:underline"
+                >
+                  Open the audit log
+                </Link>
+              </>
+            ) : event.source === "compose" ? (
+              <>
+                <p className="text-body font-medium">Compose owns this object</p>
+                <p className="text-muted-foreground">
+                  It carries the labels compose writes, so this is part of the <b>{event.stack}</b>{" "}
+                  project. Nothing in the audit log matches it, so it was run from a shell rather
+                  than from here.
+                </p>
+              </>
+            ) : event.source === "daemon" ? (
+              <>
+                <p className="text-body font-medium">Docker did this on its own</p>
+                <p className="text-muted-foreground">
+                  Nobody asked for it — a restart policy firing, a health check changing verdict, or
+                  the kernel stopping a container.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-body font-medium">External Docker action</p>
+                <p className="text-muted-foreground">
+                  Nothing in this dashboard&apos;s audit log matches this event, so it came from
+                  somewhere else: a shell on this server, a CI job, or another tool holding the
+                  Docker socket.
+                </p>
+              </>
+            )}
+          </HoverCardContent>
+        </HoverCard>
+
+        {event.stack && <Tag>{event.stack}</Tag>}
+      </div>
+    </li>
   )
 }

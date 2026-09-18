@@ -1,430 +1,192 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import {
-  Bell,
-  BlendMode,
-  Cross,
-  Footer,
-  Fullscreen,
-  GridSquare,
-  Linked,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  SidebarRight,
-  Slash,
-  TerminalWindow as TerminalWindowIcon,
-  Warning,
-} from "@/components/icons"
+import { Cross, Pencil, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { TerminalPane, TerminalWindow } from "@/lib/types"
+import type { TerminalActivity, TerminalWindow as Window } from "@/lib/types"
+import { useFinished, windowActivity, windowLabel } from "@/lib/terminal-activity"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { IconAction } from "@/components/icon-action"
-import { ColourMenuItems, TagSwatch, tagStyle, tagVar } from "@/components/terminal/tags"
-import { beginDrag, carries, endDrag, readDrop } from "@/components/terminal/dnd"
+import { IconAction, rowReveal } from "@/components/icon-action"
+import { ActivityMark } from "@/components/terminal/activity-mark"
 
-/**
- * The windows inside the active session — tmux's own tabs, which have always
- * been there and were unreachable without knowing `C-b c`.
- *
- * Selecting one is a write, not a view change: tmux redraws every attached
- * client when the active window changes, so the pane already showing follows
- * along without reconnecting.
- *
- * Three things here are not decoration:
- *
- *   - **The activity and bell flags.** tmux has tracked them since forever and
- *     nothing in this class surfaces them. They answer the only question a tab
- *     strip cannot otherwise answer — which of these five did something while I
- *     was looking at a different one — and a build that finished in a window
- *     you are not watching is exactly the case.
- *   - **The colour**, inherited from the session unless the window overrides,
- *     for the same reason the rail has colours: five tabs called `bash` are
- *     five tabs called `bash`.
- *   - **Dragging.** Along the strip to reorder, or out onto a session in the
- *     rail to move the window there — which is how work opened in the wrong
- *     place gets put right without losing what is scrolled back in it.
- */
+/** Compact direct-PTY windows for the terminal title bar. */
 export function WindowStrip({
+  sessionId,
   windows,
-  sessionColour,
+  activeId,
+  activity,
   onSelect,
   onRename,
-  onColour,
   onNew,
   onClose,
   onReorder,
-  onSplit,
-  onLayout,
-  onSynchronize,
-  sessionName,
 }: {
-  windows: TerminalWindow[]
-  sessionColour?: string
-  sessionName: string
-  onSelect: (index: number) => void
-  onRename: (index: number, name: string) => void
-  onColour: (index: number, colour: string) => void
+  /** The session the windows belong to, which keys what has been seen. */
+  sessionId: string
+  windows: Window[]
+  activeId: string | null
+  /** The state each window's own socket last pushed, keyed by window id. */
+  activity: Record<string, TerminalActivity>
+  onSelect: (id: string) => void
+  onRename: (id: string, name: string) => void
   onNew: () => void
-  onClose: (index: number) => void
-  onReorder: (index: number, position: number) => void
-  onSplit: (index: number, vertical: boolean) => void
-  onLayout: (index: number, layout: string) => void
-  onSynchronize: (index: number, on: boolean) => void
+  onClose: (id: string) => void
+  onReorder: (id: string, position: number) => void
 }) {
-  const [renaming, setRenaming] = useState<number | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
-  const active = windows.find((w) => w.active)
-
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
-      <div
-        className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-hairline bg-muted/25 p-1"
-        aria-label="Terminal windows"
-      >
-        {windows.map((win, position) =>
-          renaming === win.index ? (
-            <WindowNameInput
-              key={win.index}
-              value={win.name}
-              onCommit={(value) => {
-                if (value) onRename(win.index, value)
-                setRenaming(null)
-              }}
-              onCancel={() => setRenaming(null)}
-            />
-          ) : (
-            <WindowChip
-              key={win.index}
-              win={win}
-              position={position}
-              sessionName={sessionName}
-              colour={win.colour || sessionColour}
-              inserting={dropAt === position}
-              closable
-              onSelect={() => onSelect(win.index)}
-              onStartRename={() => setRenaming(win.index)}
-              onColour={(colour) => onColour(win.index, colour)}
-              onClose={() => onClose(win.index)}
-              onSplit={(vertical) => onSplit(win.index, vertical)}
-              onLayout={(layout) => onLayout(win.index, layout)}
-              onSynchronize={(on) => onSynchronize(win.index, on)}
-              onDragOverChip={() => setDropAt(position)}
-              onDropChip={(event) => {
-                setDropAt(null)
-                const payload = readDrop(event, "window")
-                endDrag()
-                if (payload?.kind !== "window" || payload.session !== sessionName) return
-                if (payload.position !== position) onReorder(payload.index, position)
-              }}
-              onDragEndChip={() => setDropAt(null)}
-            />
-          ),
-        )}
-
-        <IconAction label="New window" className="size-10 shrink-0" onClick={onNew}>
-          <Plus />
-        </IconAction>
-      </div>
-
-      {/*
-        Synchronised input is drawn as a standing warning rather than as a
-        checkbox somewhere: it is the one setting that turns a typo into the
-        same typo on four servers, and the operator has to be able to see that
-        it is on without going to look.
-      */}
-      {active?.synchronized && (
-        <button
-          className="raised flex items-center gap-1 rounded-md border border-warning/50 bg-warning/12 px-1.5 py-0.5 text-[10px] text-warning"
-          onClick={() => onSynchronize(active.index, false)}
-        >
-          <Warning className="size-3" />
-          Typing goes to every pane
-          <Slash className="size-3" />
-        </button>
+    <div
+      className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+      aria-label="Terminal windows"
+    >
+      {windows.map((window, position) =>
+        renaming === window.id ? (
+          <WindowNameInput
+            key={window.id}
+            value={window.name}
+            onCommit={(value) => {
+              if (value) onRename(window.id, value)
+              setRenaming(null)
+            }}
+            onCancel={() => setRenaming(null)}
+          />
+        ) : (
+          <WindowTab
+            key={window.id}
+            sessionId={sessionId}
+            window={window}
+            live={activity[window.id]}
+            active={window.id === activeId}
+            inserting={dropAt === position}
+            onSelect={() => onSelect(window.id)}
+            onRename={() => setRenaming(window.id)}
+            onClose={() => onClose(window.id)}
+            onDragOver={(event) => {
+              event.preventDefault()
+              setDropAt(position)
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              setDropAt(null)
+              const id = event.dataTransfer.getData("application/x-jd-terminal-window")
+              if (id && id !== window.id) onReorder(id, position)
+            }}
+            onDragEnd={() => setDropAt(null)}
+          />
+        ),
       )}
+      <IconAction label="New window" className="size-7 shrink-0" onClick={onNew}>
+        <Plus />
+      </IconAction>
     </div>
   )
 }
 
-function WindowChip({
-  win,
-  position,
-  sessionName,
-  colour,
+function WindowTab({
+  sessionId,
+  window,
+  live,
+  active,
   inserting,
-  closable,
   onSelect,
-  onStartRename,
-  onColour,
+  onRename,
   onClose,
-  onSplit,
-  onLayout,
-  onSynchronize,
-  onDragOverChip,
-  onDropChip,
-  onDragEndChip,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: {
-  win: TerminalWindow
-  position: number
-  sessionName: string
-  colour?: string
+  sessionId: string
+  window: Window
+  live?: TerminalActivity
+  active: boolean
   inserting: boolean
-  closable: boolean
   onSelect: () => void
-  onStartRename: () => void
-  onColour: (colour: string) => void
+  onRename: () => void
   onClose: () => void
-  onSplit: (vertical: boolean) => void
-  onLayout: (layout: string) => void
-  onSynchronize: (on: boolean) => void
-  onDragOverChip: () => void
-  onDropChip: (event: React.DragEvent) => void
-  onDragEndChip: () => void
+  onDragOver: (event: React.DragEvent) => void
+  onDrop: (event: React.DragEvent) => void
+  onDragEnd: () => void
 }) {
-  const tag = tagVar(colour)
-  const chipRef = useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (win.active) chipRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }, [win.active])
+    if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [active])
+  // The tab reads like a desktop terminal's title bar: the program's own
+  // title while one runs, the directory at the prompt, and a name the operator
+  // typed over both. The mark in front says whether anything is happening in
+  // it right now, or has just stopped — the reason to glance at a tab you are
+  // not in.
+  const label = windowLabel(window, live)
+  const state = windowActivity(window, live)
+  const working = Boolean(state.working)
+  const finished = useFinished(`${sessionId}/${window.id}`, active, state.finishedAt)
+  const hint = working
+    ? `${label} — working`
+    : finished
+      ? `${label} — finished`
+      : state.busy && state.process
+        ? `${label} — running ${state.process}`
+        : label
   return (
     <div
-      ref={chipRef}
+      ref={ref}
       draggable
-      data-active={win.active}
-      data-window={win.index}
-      onDragStart={(event) =>
-        beginDrag(
-          event,
-          {
-            kind: "window",
-            session: sessionName,
-            index: win.index,
-            position,
-            name: win.name,
-          },
-          tag,
-        )
-      }
-      onDragEnd={() => {
-        endDrag()
-        onDragEndChip()
+      data-window={window.id}
+      data-active={active}
+      data-busy={state.busy || undefined}
+      data-working={working || undefined}
+      data-finished={finished || undefined}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move"
+        event.dataTransfer.setData("application/x-jd-terminal-window", window.id)
       }}
-      onDragOver={(event) => {
-        if (!carries(event, "window")) return
-        event.preventDefault()
-        event.dataTransfer.dropEffect = "move"
-        onDragOverChip()
-      }}
-      onDrop={(event) => {
-        if (!carries(event, "window")) return
-        event.preventDefault()
-        onDropChip(event)
-      }}
-      style={tagStyle(colour)}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
       className={cn(
-        "group flex h-10 min-w-36 max-w-64 flex-1 shrink-0 items-center gap-1 rounded-lg border px-2 text-sm transition-colors",
-        win.active
-          ? "raised border-hairline bg-[var(--control)] text-foreground"
-          : "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-        inserting && "border-l-2 border-l-primary",
+        "group flex h-7 max-w-44 min-w-24 shrink-0 items-center rounded-md border border-transparent pr-0.5 pl-2.5 transition-colors",
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
+        inserting && "border-l-primary",
       )}
     >
       <button
-        aria-current={win.active ? "page" : undefined}
-        title={win.name}
-        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-current={active ? "page" : undefined}
+        title={hint}
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-sm focus-ring-inset"
         onClick={onSelect}
-        onDoubleClick={onStartRename}
+        onDoubleClick={onRename}
       >
-        {tag ? (
-          <TagSwatch colour={colour} className="size-1.5" />
-        ) : (
-          <TerminalWindowIcon className="size-3" />
-        )}
-        <span className="min-w-0 flex-1 truncate font-medium">{win.name}</span>
-        {win.panes > 1 && <span className="numeric text-[9px] opacity-70">{win.panes}p</span>}
-        {win.zoomed && <Fullscreen className="size-2.5 text-primary" />}
-        {win.synchronized && <Linked className="size-2.5 text-warning" />}
-        {/*
-          A bell is louder than activity because it is the shell asking for
-          attention rather than merely producing output. Neither is shown on
-          the window you are looking at: tmux clears the flag on select, and a
-          dot that is always lit on the active tab teaches you to ignore it.
-        */}
-        {!win.active && win.bell && <Bell className="size-2.5 text-warning" />}
-        {!win.active && !win.bell && win.activity && (
-          <span className="size-1.5 rounded-full bg-primary/70" />
-        )}
+        <ActivityMark working={working} finished={finished} />
+        <span className="truncate text-xs font-medium">{label}</span>
       </button>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={`More for window ${win.name}`}
-            className="size-7 shrink-0 text-muted-foreground [&_svg:not([class*='size-'])]:size-3.5"
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-52">
-          <DropdownMenuItem className="gap-2 text-xs" onSelect={onStartRename}>
-            <Pencil className="size-3.5" />
-            Rename window
-          </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-2 text-xs">
-              <BlendMode className="size-3.5" />
-              Colour
-              <span className="flex-1" />
-              <TagSwatch colour={colour} />
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-44">
-              <ColourMenuItems colour={win.colour} inherited="session" onPick={onColour} />
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="gap-2 text-xs" onSelect={() => onSplit(true)}>
-            <SidebarRight className="size-3.5" />
-            Split side by side
-          </DropdownMenuItem>
-          <DropdownMenuItem className="gap-2 text-xs" onSelect={() => onSplit(false)}>
-            <Footer className="size-3.5" />
-            Split top and bottom
-          </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-2 text-xs">
-              <GridSquare className="size-3.5" />
-              Arrange panes
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-44">
-              {LAYOUTS.map((layout) => (
-                <DropdownMenuItem
-                  key={layout.id}
-                  className="text-xs"
-                  onSelect={() => onLayout(layout.id)}
-                >
-                  {layout.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuItem
-            className="gap-2 text-xs"
-            onSelect={() => onSynchronize(!win.synchronized)}
-          >
-            {win.synchronized ? <Slash className="size-3.5" /> : <Linked className="size-3.5" />}
-            {win.synchronized ? "Stop synchronised typing" : "Type into every pane at once"}
-          </DropdownMenuItem>
-          {closable && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" className="gap-2 text-xs" onSelect={onClose}>
-                <Cross className="size-3.5" />
-                Close window
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {closable && (
-        <button
-          type="button"
-          aria-label={`Close window ${win.name}`}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring"
-          onClick={onClose}
-        >
-          <Cross className="size-3.5" />
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** tmux's named arrangements, in the order they are worth reaching for. */
-const LAYOUTS = [
-  { id: "even-horizontal", label: "Even columns" },
-  { id: "even-vertical", label: "Even rows" },
-  { id: "main-vertical", label: "Main + side column" },
-  { id: "main-horizontal", label: "Main + bottom row" },
-  { id: "tiled", label: "Tiled" },
-] as const
-
-/**
- * The panes of the active window.
- *
- * Shown only once there is more than one, because a single pane is the
- * ordinary case and a bar saying "1 pane" is noise. What it earns its place
- * with is the command in each: "pane 2" tells you nothing, `pg_dump` tells you
- * which half of the screen not to close.
- */
-export function PaneBar({
-  panes,
-  onSelect,
-  onZoom,
-  onClose,
-}: {
-  panes: TerminalPane[]
-  onSelect: (index: number) => void
-  onZoom: (index: number) => void
-  onClose: (index: number) => void
-}) {
-  if (panes.length < 2) return null
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-lg bg-surface-header px-2 py-1">
-      <span className="eyebrow pr-1 text-[9px]">Panes</span>
-      {panes.map((pane) => (
-        <div
-          key={pane.index}
-          // Named in the DOM for the same reason a session row and a window
-          // chip are: which pane has the focus is state the page acts on, and
-          // reading it back out of a class name is guesswork.
-          data-pane={pane.index}
-          data-active={pane.active}
-          className={cn(
-            "group flex min-h-8 items-center gap-2 rounded-md px-2 text-xs transition-colors",
-            pane.active ? "bg-primary/12 text-foreground" : "text-muted-foreground hover:bg-accent",
-          )}
-        >
-          <button className="flex items-center gap-1" onClick={() => onSelect(pane.index)}>
-            <span className="numeric opacity-60">{pane.index}</span>
-            <span className="max-w-28 truncate font-mono">
-              {pane.dead ? "exited" : (pane.command ?? "shell")}
-            </span>
-            <span className="numeric text-[9px] opacity-50">
-              {pane.width}×{pane.height}
-            </span>
-          </button>
-          <IconAction
-            label="Zoom this pane to fill the window"
-            className="size-7 [&_svg:not([class*='size-'])]:size-3"
-            onClick={() => onZoom(pane.index)}
-          >
-            <Fullscreen />
-          </IconAction>
-          <IconAction
-            label="Close this pane"
-            className="size-7 text-destructive [&_svg:not([class*='size-'])]:size-3"
-            onClick={() => onClose(pane.index)}
-          >
-            <Cross />
-          </IconAction>
-        </div>
-      ))}
+      {/* Rename and close sit on the tab itself rather than in a menu — but
+          they appear under the pointer, as a browser's do. Drawn on every tab
+          all the time, two glyphs beside a five-letter name were the tab. */}
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label={`Rename window ${label}`}
+        className={cn("size-6 shrink-0 text-muted-foreground hover:text-foreground", rowReveal())}
+        onClick={onRename}
+      >
+        <Pencil className="size-3" />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label={`Close window ${label}`}
+        className={cn(
+          "size-6 shrink-0 text-muted-foreground hover:text-destructive",
+          !active && rowReveal(),
+        )}
+        onClick={onClose}
+      >
+        <Cross className="size-3" />
+      </Button>
     </div>
   )
 }
@@ -439,24 +201,16 @@ function WindowNameInput({
   onCancel: () => void
 }) {
   const [draft, setDraft] = useState(value)
-  const cancelled = useRef(false)
   return (
     <Input
       autoFocus
-      aria-label="Window name"
       value={draft}
-      spellCheck={false}
-      className="h-11 w-44 shrink-0 text-sm"
-      onChange={(e) => setDraft(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onCommit(draft.trim())
-        if (e.key === "Escape") {
-          cancelled.current = true
-          onCancel()
-        }
-      }}
-      onBlur={() => {
-        if (!cancelled.current) onCommit(draft.trim())
+      className="h-7 w-36 shrink-0 text-xs"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => onCommit(draft.trim())}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onCommit(draft.trim())
+        if (event.key === "Escape") onCancel()
       }}
     />
   )

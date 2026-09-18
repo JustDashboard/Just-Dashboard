@@ -7,7 +7,11 @@ export type ProxyStatus = {
   caddy: boolean
   nginxVersion?: string
   caddyVersion?: string
+  nginxDir: string
+  caddyFile: string
   certbot: boolean
+  /** The public Caddy container deployments share, where one owns ports 80 and 443. */
+  ingressContainer?: string
 }
 
 /**
@@ -23,6 +27,7 @@ export type ProxyContextValue = {
   status: ProxyStatus | undefined
   loading: boolean
   hasNginx: boolean
+  refresh: () => void
 }
 
 const ProxyContext = createContext<ProxyContextValue | null>(null)
@@ -33,4 +38,24 @@ export function useProxy() {
   const value = useContext(ProxyContext)
   if (!value) throw new Error("useProxy must be used inside the proxy layout")
   return value
+}
+
+/**
+ * The systemd unit behind the engine, where there is one. A Caddy that runs
+ * as the shared Docker ingress has no unit on the host — its lifecycle is the
+ * container's — so the overview offers no service controls for it.
+ */
+export function engineUnit(status: ProxyStatus | undefined): string | undefined {
+  if (!status) return undefined
+  if (status.nginx) return "nginx.service"
+  if (status.caddy && !status.ingressContainer) return "caddy.service"
+  return undefined
+}
+
+/** The engine's name and version as one label: "nginx/1.26.3", "Caddy v2.8". */
+export function engineLabel(status: ProxyStatus | undefined): string {
+  if (!status) return "—"
+  if (status.nginx) return `nginx ${status.nginxVersion ?? ""}`.trim()
+  if (status.caddy) return `Caddy ${status.caddyVersion ?? ""}`.trim()
+  return "none detected"
 }

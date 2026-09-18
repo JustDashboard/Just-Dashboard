@@ -12,26 +12,28 @@ import {
   TerminalWindow,
   Warning,
 } from "@/components/icons"
-import { relativeTime } from "@/lib/format"
 import type { Posture, SecurityFinding } from "@/lib/types"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Metric, MetricStrip } from "@/components/page"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { FindingList, type Finding } from "@/components/metrics/finding-list"
+import { FindingList, type Finding } from "@/components/finding-list"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
  * Whether this machine is in reasonable shape, as a verdict.
  *
- * Everything else on this page shows what is configured — a rule list, a jail,
- * a table of open ports — and leaves the reading to somebody who already knows
- * how. The people who most need the answer are exactly the ones who do not.
- * Cockpit and Webmin show the facts and stop; the hosting panels sell a score
- * out of a hundred, which is a number to optimise rather than a thing to fix.
+ * Everything else in this section shows what is configured — a rule list, a
+ * jail, a table of open ports — and leaves the reading to somebody who already
+ * knows how. The people who most need the answer are exactly the ones who do
+ * not. Cockpit and Webmin show the facts and stop; the hosting panels sell a
+ * score out of a hundred, which is a number to optimise rather than a thing to
+ * fix.
  *
  * So each finding carries three separate things — what was measured, what it
  * means, and what to do — and where the dashboard can carry the remedy out
  * itself, a button. Rendered through `FindingList`, the same list the health
- * verdict uses, rather than a wall of tinted alert boxes.
+ * verdict uses, and plain like it: the findings are the first thing to read
+ * after the figures, and a frame around them made the page open with a box.
  */
 export function PosturePanel({
   posture,
@@ -46,8 +48,8 @@ export function PosturePanel({
 }) {
   if (loading && !posture) {
     return (
-      <Panel className={className}>
-        <PanelHeader icon={ShieldOff} title="Security posture" />
+      <Panel plain className={className}>
+        <PanelHeader title="Findings" />
         <PanelBody className="space-y-2">
           <Skeleton className="h-4 w-48" />
           <Skeleton className="h-4 w-72" />
@@ -57,29 +59,49 @@ export function PosturePanel({
   }
   if (!posture) return null
 
-  const ok = posture.findings.length === 0
+  const count = (level: SecurityFinding["level"]) =>
+    posture.findings.filter((f) => f.level === level).length
 
   return (
-    <Panel className={className}>
-      <PanelHeader
-        icon={ok ? ShieldCheck : Bug}
-        title="Security posture"
-        description={`${posture.checks} checks · ${relativeTime(posture.checkedAt)}${
-          posture.skipped.length > 0 ? ` · not checked: ${posture.skipped.join(", ")}` : ""
-        }`}
-        actions={<PostureBadge status={posture.status} />}
-      />
+    <Panel plain className={className}>
+      <PanelHeader title="Findings" actions={<PostureBadge status={posture.status} />} />
+      {/* The severity split as figures rather than as a sentence: three
+          findings and three critical findings are not the same morning, and
+          the header used to read identically either way. */}
+      {posture.findings.length > 0 && (
+        <PanelToolbar>
+          <MetricStrip>
+            <Metric label="critical" value={count("critical")} />
+            <Metric label="warning" value={count("warning")} />
+            <Metric label="notice" value={count("notice")} />
+            <Metric
+              label="not checked"
+              value={posture.skipped.length}
+              hint={posture.skipped.length > 0 ? posture.skipped.join(", ") : undefined}
+            />
+          </MetricStrip>
+        </PanelToolbar>
+      )}
       <PanelBody>
         <FindingList
           findings={posture.findings.map((f) => toFinding(f, onFix))}
-          emptyLabel="Exposure, firewall, SSH, intrusion prevention, open ports, certificates and pending security updates all check out"
+          emptyLabel={
+            posture.skipped.length > 0
+              ? `Everything that could be checked is in order — ${posture.skipped.join(", ")} could not be`
+              : "Exposure, firewall, SSH, intrusion prevention, open ports, certificates and pending security updates all check out"
+          }
         />
       </PanelBody>
     </Panel>
   )
 }
 
-/** Findings filtered to one area, for rendering next to the panel that fixes them. */
+/**
+ * Findings filtered to one area, for rendering above the block that fixes
+ * them. Plain, like the health list on the host Overview: the findings are the
+ * first thing to read on the page, and a frame around them put a box above
+ * the thing they are about.
+ */
 export function AreaFindings({
   posture,
   area,
@@ -95,10 +117,29 @@ export function AreaFindings({
   const findings = posture?.findings.filter((f) => areas.includes(f.area)) ?? []
   if (findings.length === 0) return null
   return (
-    <div className={className}>
-      <FindingList findings={findings.map((f) => toFinding(f, onFix))} />
-    </div>
+    <Panel plain className={className}>
+      <PanelHeader
+        title="Needs attention"
+        actions={
+          <Status
+            verdict={worstLevel(findings)}
+            label={`${findings.length} finding${findings.length === 1 ? "" : "s"}`}
+          />
+        }
+      />
+      <PanelBody>
+        <FindingList findings={findings.map((f) => toFinding(f, onFix))} />
+      </PanelBody>
+    </Panel>
   )
+}
+
+/** The most severe level in a set of findings, for the one dot that summarises them. */
+export function worstLevel(findings: SecurityFinding[]): SecurityFinding["level"] | "ok" {
+  if (findings.some((f) => f.level === "critical")) return "critical"
+  if (findings.some((f) => f.level === "warning")) return "warning"
+  if (findings.length > 0) return "notice"
+  return "ok"
 }
 
 /** A `SecurityFinding` as the shape `FindingList` renders: area on the right, fix as a button. */

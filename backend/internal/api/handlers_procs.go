@@ -23,16 +23,37 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/save", s.handle(s.handlePM2Save))
 			r.Method(http.MethodPost, "/{name}/start", s.handle(s.pm2Action(procs.PM2Start)))
 			r.Method(http.MethodPost, "/{name}/reload", s.handle(s.pm2Action(procs.PM2Reload)))
+			r.Method(http.MethodPost, "/{name}/reset", s.handle(s.pm2Action(procs.PM2Reset)))
+			r.Method(http.MethodPost, "/{name}/scale", s.handle(s.handlePM2Scale))
+			// Every process of one account's daemon. The literal `daemons`
+			// segment wins over `{name}` in chi, and PM2 itself reserves
+			// `all`, so neither can be an application's name.
+			r.Method(http.MethodPost, "/daemons/{user}/start", s.handle(s.pm2AllAction(procs.PM2Start)))
+			r.Method(http.MethodPost, "/daemons/{user}/reload", s.handle(s.pm2AllAction(procs.PM2Reload)))
+		})
+		r.Group(func(r chi.Router) {
+			// Starting a program that is not yet under PM2 runs whatever file
+			// the operator names, as the chosen host account. That is code
+			// execution rather than service control, and is gated like the
+			// other things that are: the terminal, host accounts, cron.
+			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+			r.Method(http.MethodPost, "/start", s.handle(s.handlePM2Start))
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/{name}/stop", s.handle(s.pm2Action(procs.PM2Stop)))
 			r.Method(http.MethodPost, "/{name}/restart", s.handle(s.pm2Action(procs.PM2Restart)))
+			// Flushing empties the log files; that is the only thing on this
+			// page that loses data outright.
+			r.Method(http.MethodPost, "/{name}/flush", s.handle(s.pm2Action(procs.PM2Flush)))
 			r.Method(http.MethodDelete, "/{name}", s.handle(s.pm2Action(procs.PM2Delete)))
+			r.Method(http.MethodPost, "/daemons/{user}/stop", s.handle(s.pm2AllAction(procs.PM2Stop)))
+			r.Method(http.MethodPost, "/daemons/{user}/restart", s.handle(s.pm2AllAction(procs.PM2Restart)))
 		})
 	})
 
 	r.Route("/systemd", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleUnitList))
+		r.Method(http.MethodGet, "/timers", s.handle(s.handleTimerList))
 		r.Method(http.MethodGet, "/{name}", s.handle(s.handleUnitShow))
 		r.Method(http.MethodGet, "/{name}/journal", s.handle(s.handleUnitJournal))
 		r.Method(http.MethodGet, "/{name}/journal/stream", s.handle(s.handleUnitJournalStream))
@@ -40,9 +61,11 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{name}/start", s.handle(s.unitAction(procs.UnitStart)))
 			r.Method(http.MethodPost, "/{name}/reload", s.handle(s.unitAction(procs.UnitReload)))
+			r.Method(http.MethodPost, "/{name}/reset-failed", s.handle(s.unitAction(procs.UnitResetFailed)))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+			r.Method(http.MethodPost, "/daemon-reload", s.handle(s.handleDaemonReload))
 			r.Method(http.MethodPost, "/{name}/enable", s.handle(s.unitAction(procs.UnitEnable)))
 			r.Method(http.MethodPost, "/{name}/disable", s.handle(s.unitAction(procs.UnitDisable)))
 		})
@@ -56,6 +79,7 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleProcessList))
 		r.Method(http.MethodGet, "/inventory", s.handle(s.handleProcessInventory))
 		r.Method(http.MethodGet, "/{pid}", s.handle(s.handleProcessDetail))
+		r.Method(http.MethodGet, "/{pid}/tree", s.handle(s.handleProcessTree))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPut, "/{pid}/priority", s.handle(s.handleProcessPriority))
@@ -110,7 +134,74 @@ func (s *Server) handlePM2List(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapProcsError(err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"available": true, "processes": list})
+	for index := range list {
+		if err := s.checkPM2LogPaths(list[index].OutLogPath, list[index].ErrLogPath); err != nil {
+			list[index].LogsUnavailableReason = "Ask an administrator to include this process's log directory in JD_LOG_ROOTS."
+		} else {
+			list[index].LogsAvailable = true
+		}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"available": true, "processes": list, "daemons": s.modules.pm2.Daemons(),
+	})
+	return nil
+}
+
+func (s *Server) pm2AllAction(action procs.PM2Action) httpx.Handler {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		account := chi.URLParam(r, "user")
+		res, err := s.modules.pm2.ControlAll(r.Context(), account, action)
+		if err != nil {
+			return mapProcsError(err)
+		}
+		httpx.SetAudit(r, "pm2."+string(action)+".all", account, map[string]any{"exitCode": res.ExitCode})
+		httpx.JSON(w, http.StatusOK, res)
+		return nil
+	}
+}
+
+type pm2ScaleRequest struct {
+	Instances int `json:"instances"`
+}
+
+func (s *Server) handlePM2Scale(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	daemon, id, err := pm2TargetQuery(r)
+	if err != nil {
+		return err
+	}
+	var req pm2ScaleRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	res, err := s.modules.pm2.Scale(r.Context(), name, daemon, id, req.Instances)
+	if err != nil {
+		return mapProcsError(err)
+	}
+	httpx.SetAudit(r, "pm2.scale", name, map[string]any{
+		"exitCode": res.ExitCode, "daemonId": daemon, "id": id, "instances": req.Instances,
+	})
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) handlePM2Start(w http.ResponseWriter, r *http.Request) error {
+	var req procs.PM2StartRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Account == "" || req.Script == "" {
+		return httpx.BadRequest("account and script are required")
+	}
+	res, err := s.modules.pm2.Start(r.Context(), req)
+	if err != nil {
+		return mapProcsError(err)
+	}
+	httpx.SetAudit(r, "pm2.start.new", req.Script, map[string]any{
+		"exitCode": res.ExitCode, "account": req.Account, "name": req.Name, "cwd": req.Cwd,
+		"instances": req.Instances, "watch": req.Watch,
+	})
+	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 
@@ -120,11 +211,15 @@ func (s *Server) pm2Action(action procs.PM2Action) httpx.Handler {
 		// No typed phrase: starting, stopping and restarting a process is what
 		// a process manager is for, and pm2 delete removes it from pm2's list
 		// rather than from disk. The dialog names the process.
-		res, err := s.modules.pm2.Control(r.Context(), name, action)
+		daemon, id, err := pm2TargetQuery(r)
+		if err != nil {
+			return err
+		}
+		res, err := s.modules.pm2.ControlTarget(r.Context(), name, daemon, id, action)
 		if err != nil {
 			return mapProcsError(err)
 		}
-		httpx.SetAudit(r, "pm2."+string(action), name, map[string]any{"exitCode": res.ExitCode})
+		httpx.SetAudit(r, "pm2."+string(action), name, map[string]any{"exitCode": res.ExitCode, "daemonId": daemon, "id": id})
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}
@@ -135,16 +230,18 @@ func (s *Server) pm2Action(action procs.PM2Action) httpx.Handler {
 // process and reports which stream each line came from.
 func (s *Server) handlePM2LogStream(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
-	outPath, errPath, err := s.modules.pm2.LogPaths(r.Context(), name)
+	daemon, id, err := pm2TargetQuery(r)
+	if err != nil {
+		return err
+	}
+	outPath, errPath, err := s.modules.pm2.LogPathsTarget(r.Context(), name, daemon, id)
 	if err != nil {
 		return mapProcsError(err)
 	}
-	// PM2 puts its logs where the ecosystem file says, routinely outside
-	// JD_LOG_ROOTS. Registering the two files PM2 itself just named is what
-	// makes them tailable; doing it here rather than relying on someone having
-	// loaded /logs/sources first is why opening this page directly works.
-	s.modules.logs.AllowSource(outPath)
-	s.modules.logs.AllowSource(errPath)
+	if err := s.checkPM2LogPaths(outPath, errPath); err != nil {
+		return err
+	}
+
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
 		return nil
@@ -235,6 +332,29 @@ func (s *Server) handleUnitList(w http.ResponseWriter, r *http.Request) error {
 		units = filtered
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"available": true, "units": units})
+	return nil
+}
+
+func (s *Server) handleTimerList(w http.ResponseWriter, r *http.Request) error {
+	if !s.modules.systemd.Available() {
+		httpx.JSON(w, http.StatusOK, map[string]any{"available": false, "timers": []any{}})
+		return nil
+	}
+	timers, err := s.modules.systemd.Timers(r.Context())
+	if err != nil {
+		return mapProcsError(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"available": true, "timers": timers})
+	return nil
+}
+
+func (s *Server) handleDaemonReload(w http.ResponseWriter, r *http.Request) error {
+	res, err := s.modules.systemd.DaemonReload(r.Context())
+	if err != nil {
+		return mapProcsError(err)
+	}
+	httpx.SetAudit(r, "systemd.daemon-reload", "systemd", map[string]any{"exitCode": res.ExitCode})
+	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 
@@ -444,6 +564,21 @@ func (s *Server) handleProcessDetail(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
+func (s *Server) handleProcessTree(w http.ResponseWriter, r *http.Request) error {
+	pid, err := strconv.ParseInt(chi.URLParam(r, "pid"), 10, 32)
+	if err != nil {
+		return httpx.BadRequest("invalid pid")
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	tree, err := s.modules.table.Tree(ctx, int32(pid))
+	if err != nil {
+		return httpx.ErrNotFound
+	}
+	httpx.JSON(w, http.StatusOK, tree)
+	return nil
+}
+
 type priorityRequest struct {
 	Nice      *int   `json:"nice"`
 	StartedAt string `json:"startedAt,omitempty"`
@@ -585,4 +720,16 @@ func (s *Server) handleCronUserPut(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "cron.update", user, map[string]any{"jobs": len(ct.Jobs)})
 	httpx.JSON(w, http.StatusOK, ct)
 	return nil
+}
+
+func pm2TargetQuery(r *http.Request) (string, int, error) {
+	daemon, raw := r.URL.Query().Get("user"), r.URL.Query().Get("id")
+	if daemon == "" && raw == "" {
+		return "", -1, nil
+	}
+	id, err := strconv.Atoi(raw)
+	if daemon == "" || err != nil || id < 0 {
+		return "", -1, httpx.BadRequest("PM2 account and non-negative process id are required together")
+	}
+	return daemon, id, nil
 }

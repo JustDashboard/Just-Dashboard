@@ -4,6 +4,14 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * A cell is one step denser than body text. A table is a grid of values being
+ * compared down a column, not prose being read across a line, and that step is
+ * what keeps a forty-row process list on one screen.
+ *
+ * The base was `text-sm`, which no table in the product actually wanted: 109
+ * cells re-specified `text-xs` on top of it, one cell at a time.
+ */
 function Table({
   className,
   containerClassName,
@@ -23,7 +31,7 @@ function Table({
     >
       <table
         data-slot="table"
-        className={cn("w-full caption-bottom text-sm", className)}
+        className={cn("w-full caption-bottom text-xs", className)}
         {...props}
       />
     </div>
@@ -83,8 +91,12 @@ function TableRow({
       data-slot="table-row"
       tabIndex={onActivate ? 0 : undefined}
       className={cn(
-        "border-b border-hairline transition-colors hover:bg-[var(--row-hover)] has-aria-expanded:bg-[var(--row-hover)] data-[state=selected]:bg-[var(--row-hover)]",
-        onActivate && "cursor-pointer outline-none focus-visible:bg-[var(--row-hover)]",
+        // Hover is a wash, selection is a fill, focus is a ring — three
+        // mechanisms, so a row that is all three at once still reads. These
+        // were all `bg-row-hover`, which meant a keyboard user could not tell
+        // the row they had arrived at from the one under the pointer.
+        "border-b border-hairline transition-colors hover:bg-row-hover has-aria-expanded:bg-row-hover data-[state=selected]:bg-accent",
+        onActivate && "cursor-pointer focus-ring-inset",
         className,
       )}
       onClick={(event) => {
@@ -110,7 +122,10 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-9 px-3 text-left align-middle text-[11px] font-semibold tracking-[0.08em] whitespace-nowrap text-muted-foreground uppercase [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        // Column names are a quiet row of labels, not small caps: at 10px
+        // tracked-out caps a nine-column header was the loudest line in the
+        // table, above rows it exists only to name.
+        "h-10 px-4 text-left align-middle text-hint font-medium whitespace-nowrap text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className,
       )}
       {...props}
@@ -123,7 +138,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "px-3 py-2.5 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "px-4 py-3 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className,
       )}
       {...props}
@@ -135,7 +150,7 @@ function TableCaption({ className, ...props }: React.ComponentProps<"caption">) 
   return (
     <caption
       data-slot="table-caption"
-      className={cn("mt-4 text-sm text-muted-foreground", className)}
+      className={cn("mt-4 text-xs text-muted-foreground", className)}
       {...props}
     />
   )

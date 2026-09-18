@@ -107,3 +107,36 @@ func TestAddedColumnsAllDeclareADefault(t *testing.T) {
 		}
 	}
 }
+
+func TestReopenReleasesPreviouslyArchivedDeploymentNames(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at, archived_at) VALUES('same-repository', '/srv/app', 'sealed', 'old-hook', 1, 2)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var historical, reserved string
+	if err := st.DB.QueryRow(`SELECT archived_name, name FROM deploy_projects WHERE hook_id = 'old-hook'`).Scan(&historical, &reserved); err != nil {
+		t.Fatal(err)
+	}
+	if historical != "same-repository" || reserved == historical {
+		t.Fatalf("history=%q reserved=%q", historical, reserved)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('same-repository', '/srv/app', 'sealed', 'new-hook', 3)`); err != nil {
+		t.Fatalf("name reuse after upgrade: %v", err)
+	}
+	var count int
+	st.DB.QueryRow(`SELECT COUNT(*) FROM deploy_projects`).Scan(&count)
+	if count != 2 {
+		t.Fatal("migration erased project history")
+	}
+}

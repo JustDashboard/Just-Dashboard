@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,18 +23,25 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v1"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v2"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
 var recipeBaseCatalogue = map[string][]string{
-	"node:npm":  {"node:22-alpine"},
-	"node:pnpm": {"node:22-alpine"},
-	"node:yarn": {"node:22-alpine"},
-	"node:bun":  {"oven/bun:1-alpine"},
-	"go":        {"golang:1.25-alpine", "alpine:3.22"},
-	"python":    {"python:3.13-slim"},
-	"static":    {"nginx:1.29-alpine"},
+	"node:npm":     {"node:22-alpine"},
+	"node:pnpm":    {"node:22-alpine"},
+	"node:yarn":    {"node:22-alpine"},
+	"node:bun":     {"oven/bun:1-alpine"},
+	"go":           {"golang:1.26-alpine", "alpine:3.22"},
+	"python":       {"python:3.13-slim"},
+	"static":       {"nginx:1.29-alpine"},
+	"rust":         {"rust:1-alpine", "alpine:3.22"},
+	"java:maven":   {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
+	"java:gradle":  {"gradle:8-jdk21", "eclipse-temurin:21-jre-alpine"},
+	"dotnet":       {"mcr.microsoft.com/dotnet/sdk:8.0", "mcr.microsoft.com/dotnet/aspnet:8.0"},
+	"deno":         {"denoland/deno:alpine"},
+	"php":          {"dunglas/frankenphp:1-php8.3-alpine"},
+	"php:composer": {"composer:2"},
 }
 
 type ResolvedImage struct {
@@ -75,9 +84,14 @@ type BuildBackend interface {
 }
 
 type PreparedBuild struct {
-	Method               BuildMethod              `json:"method"`
-	Recipe               string                   `json:"recipe,omitempty"`
-	RecipeVersion        string                   `json:"recipeVersion,omitempty"`
+	Method        BuildMethod `json:"method"`
+	Recipe        string      `json:"recipe,omitempty"`
+	RecipeVersion string      `json:"recipeVersion,omitempty"`
+	GoVersion     string      `json:"goVersion,omitempty"`
+	PythonVersion string      `json:"pythonVersion,omitempty"`
+	// Toolchain names the language release the other recipes built with,
+	// for the build evidence: "rust 1.85", "java 21 (maven)", "dotnet 8.0".
+	Toolchain            string                   `json:"toolchain,omitempty"`
 	Dockerfile           string                   `json:"dockerfile,omitempty"`
 	DockerfileDigest     string                   `json:"dockerfileDigest,omitempty"`
 	DockerfilePreview    string                   `json:"dockerfilePreview,omitempty"`
@@ -86,6 +100,7 @@ type PreparedBuild struct {
 	TargetPlatform       string                   `json:"targetPlatform,omitempty"`
 	CachePolicy          string                   `json:"cachePolicy"`
 	SecretIDs            []string                 `json:"secretIds"`
+	SecretBindings       []BuildSecretConfig      `json:"secretBindings,omitempty"`
 	SecretLayerGuarantee string                   `json:"secretLayerGuarantee"`
 	ComposeServices      []PreparedComposeService `json:"composeServices,omitempty"`
 }
@@ -131,11 +146,18 @@ func (b *ArtifactBuilder) Prepare(
 	config BuildPlanConfig,
 	forceNoCache bool,
 	tag string,
+	buildVariableNames ...string,
 ) (PreparedBuild, error) {
+	bindings, err := recipeBuildBindings(config, buildVariableNames)
+	if err != nil {
+		return PreparedBuild{}, err
+	}
+	config.Secrets = bindings
 	prepared := PreparedBuild{
 		Method: config.Method, Recipe: config.Recipe, BuildArgv: []string{},
 		BaseImages: []ResolvedImage{}, TargetPlatform: strings.ToLower(config.TargetPlatform),
 		CachePolicy: "reuse", SecretIDs: []string{}, SecretLayerGuarantee: "not_applicable",
+		SecretBindings: bindings,
 	}
 	if config.NoCache || forceNoCache {
 		prepared.CachePolicy = "no_cache"
@@ -157,6 +179,39 @@ func (b *ArtifactBuilder) Prepare(
 		prepared.Recipe = recipe.kind
 		prepared.RecipeVersion = AutomaticRecipeVersion
 		baseRefs := append([]string(nil), recipeBaseCatalogue[recipe.catalogueKey]...)
+		if recipe.kind == "go" {
+			prepared.GoVersion = recipe.goVersion
+			baseRefs[0] = "golang:" + recipe.goVersion + "-alpine"
+		}
+		if recipe.kind == "python" {
+			prepared.PythonVersion = recipe.pythonVersion
+			baseRefs[0] = "python:" + recipe.pythonVersion + "-slim"
+		}
+		switch recipe.kind {
+		case "rust":
+			prepared.Toolchain = "rust " + recipe.rust.version
+			baseRefs[0] = "rust:" + recipe.rust.version + "-alpine"
+		case "java":
+			prepared.Toolchain = "java " + recipe.java.version + " (" + recipe.java.tool + ")"
+			if recipe.java.tool == "maven" {
+				baseRefs[0] = "maven:3-eclipse-temurin-" + recipe.java.version
+			} else {
+				baseRefs[0] = "gradle:8-jdk" + recipe.java.version
+			}
+			baseRefs[1] = "eclipse-temurin:" + recipe.java.version + "-jre-alpine"
+		case "dotnet":
+			prepared.Toolchain = "dotnet " + recipe.dotnet.version
+			baseRefs[0] = "mcr.microsoft.com/dotnet/sdk:" + recipe.dotnet.version
+			baseRefs[1] = "mcr.microsoft.com/dotnet/aspnet:" + recipe.dotnet.version
+			if !recipe.dotnet.web {
+				baseRefs[1] = "mcr.microsoft.com/dotnet/runtime:" + recipe.dotnet.version
+			}
+		case "deno":
+			prepared.Toolchain = "deno"
+		case "php":
+			prepared.Toolchain = "php " + recipe.php.version
+			baseRefs = phpRecipeBases(recipe.php)
+		}
 		if recipe.kind == "node" && config.OutputDirectory != "" {
 			baseRefs = append(baseRefs, recipeBaseCatalogue["static"]...)
 		}
@@ -243,8 +298,21 @@ func (b *ArtifactBuilder) Build(
 	}
 	switch config.Method {
 	case BuildRecipe, BuildDockerfile, BuildStatic:
-		secrets := make([]BuildSecretValue, 0, len(config.Secrets))
-		for _, requested := range config.Secrets {
+		bindings := prepared.SecretBindings
+		if bindings == nil {
+			bindings = config.Secrets
+		}
+		if config.Method == BuildRecipe {
+			expected, err := recipeBuildBindings(config, buildVariableNames(variables))
+			if err != nil {
+				return result, err
+			}
+			if !slices.Equal(expected, bindings) {
+				return result, fmt.Errorf("%w: build variable bindings changed after preparation; prepare the build with its frozen variable names", ErrArtifactMissing)
+			}
+		}
+		secrets := make([]BuildSecretValue, 0, len(bindings))
+		for _, requested := range bindings {
 			value, ok := variables[requested.Variable]
 			if !ok {
 				return result, fmt.Errorf("%w: build variable %s is unavailable", ErrArtifactMissing, requested.Variable)
@@ -378,6 +446,19 @@ func (b *ArtifactBuilder) Build(
 type selectedRecipe struct {
 	kind, catalogueKey, lockfile string
 	mainPackage                  string
+	node                         nodeRecipeFramework
+	goVersion                    string
+	python                       pythonInstall
+	pythonVersion                string
+	pythonFramework              string
+	// pythonServers are the process managers the start command runs that no
+	// manifest declares; the recipe installs each one.
+	pythonServers []string
+	rust          rustRecipe
+	java          javaRecipe
+	dotnet        dotnetProject
+	deno          denoRecipe
+	php           phpRecipe
 }
 
 func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -388,50 +469,166 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 			requested = "node"
 		case regularExists(root, "go.mod"):
 			requested = "go"
-		case regularExists(root, "uv.lock") || regularExists(root, "poetry.lock") || regularExists(root, "requirements.txt"):
+		case regularExists(root, "uv.lock") || regularExists(root, "poetry.lock") || regularExists(root, "requirements.txt") || regularExists(root, "pyproject.toml"):
 			requested = "python"
+		case regularExists(root, "Cargo.toml"):
+			requested = "rust"
+		case regularExists(root, "pom.xml") || regularExists(root, "build.gradle") || regularExists(root, "build.gradle.kts"):
+			requested = "java"
+		case len(listContainedFiles(root, ".csproj")) > 0:
+			requested = "dotnet"
+		case regularExists(root, "deno.json") || regularExists(root, "deno.jsonc"):
+			requested = "deno"
+		case regularExists(root, "composer.json") || regularExists(root, "index.php") || regularExists(root, "public/index.php"):
+			requested = "php"
 		}
 	}
 	switch requested {
 	case "node":
-		locks := []struct{ path, manager string }{
-			{"bun.lock", "bun"}, {"bun.lockb", "bun"}, {"package-lock.json", "npm"},
-			{"pnpm-lock.yaml", "pnpm"}, {"yarn.lock", "yarn"},
-		}
-		found := []struct{ path, manager string }{}
-		for _, lock := range locks {
+		present := []string{}
+		for _, lock := range nodeLockfiles {
 			if regularExists(root, lock.path) {
-				found = append(found, lock)
+				present = append(present, lock.path)
 			}
 		}
-		if len(found) != 1 {
-			return selectedRecipe{}, fmt.Errorf("%w: Node recipes require exactly one supported lockfile; found %d", ErrUnsupportedBuilder, len(found))
+		manifest, err := readContainedRegular(root, "package.json", 512<<10)
+		if err != nil {
+			return selectedRecipe{}, fmt.Errorf("%w: Node recipe requires package.json", ErrUnsupportedBuilder)
 		}
-		return selectedRecipe{kind: "node", catalogueKey: "node:" + found[0].manager, lockfile: found[0].path}, nil
+		manager, lockfile, err := resolveNodePackageManager(present, declaredNodePackageManager(manifest), config.PackageManager)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		files := nodeRootFiles{}
+		if regularExists(root, "angular.json") {
+			files.angularJSON, _ = readContainedRegular(root, "angular.json", 512<<10)
+		}
+		if regularExists(root, "Procfile") {
+			files.procfile, _ = readContainedRegular(root, "Procfile", 64<<10)
+		}
+		framework, err := validateNodeRecipeContent(manifest, files, BuildPlanConfig{
+			Method: config.Method, Recipe: config.Recipe, PackageManager: manager,
+			BuildCommand: config.BuildCommand, StartCommand: config.StartCommand, OutputDirectory: config.OutputDirectory,
+		})
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "node", catalogueKey: "node:" + manager, lockfile: lockfile, node: framework}, nil
 	case "go":
 		if !regularExists(root, "go.mod") {
 			return selectedRecipe{}, fmt.Errorf("%w: Go recipe requires go.mod", ErrUnsupportedBuilder)
+		}
+		module, err := readContainedRegular(root, "go.mod", 512<<10)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		var versionFile []byte
+		if regularExists(root, ".go-version") {
+			versionFile, err = readContainedRegular(root, ".go-version", 1024)
+			if err != nil {
+				return selectedRecipe{}, err
+			}
+		}
+		goVersion, err := chooseGoRecipeVersion(config.GoVersion, string(versionFile), module)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		if cgoEnabledCommandRE.MatchString(config.BuildCommand) {
+			return selectedRecipe{}, fmt.Errorf("%w: CGO requires a Dockerfile with a C toolchain", ErrUnsupportedBuilder)
 		}
 		mains, err := findGoMainPackages(root, 10_000)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		if len(mains) != 1 {
+		if len(mains) != 1 && (strings.TrimSpace(config.BuildCommand) == "" || config.BuildCommand == "go build ./...") {
 			return selectedRecipe{}, fmt.Errorf("%w: Go recipe requires exactly one detected main package; found %d", ErrUnsupportedBuilder, len(mains))
 		}
-		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: mains[0]}, nil
+		main := "."
+		if len(mains) == 1 {
+			main = mains[0]
+		}
+		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion}, nil
 	case "python":
-		lock, err := selectPythonLock(root)
+		files := map[string][]byte{}
+		for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
+			if content, err := readContainedRegular(root, name, 2<<20); err == nil {
+				files[name] = content
+			} else if regularExists(root, name) {
+				files[name] = []byte("locked")
+			}
+		}
+		versionFile, _ := readContainedRegular(root, ".python-version", 4096)
+		runtimeFile, _ := readContainedRegular(root, "runtime.txt", 4096)
+		version, err := choosePythonRecipeVersion(config.PythonVersion, string(versionFile), string(runtimeFile), string(files["pyproject.toml"]))
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		install, err := selectPythonInstall(root, version)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
 		if strings.TrimSpace(config.StartCommand) == "" {
-			return selectedRecipe{}, fmt.Errorf("%w: Python recipe requires an explicit ASGI/WSGI start command", ErrUnsupportedBuilder)
+			return selectedRecipe{}, fmt.Errorf("%w: Python recipe requires a start command; detection proposes one for Django, FastAPI, Flask, Streamlit and Gradio", ErrUnsupportedBuilder)
 		}
-		return selectedRecipe{kind: "python", catalogueKey: "python", lockfile: lock}, nil
+		deps := readPythonDependencies(files)
+		recipe := selectedRecipe{
+			kind: "python", catalogueKey: "python", lockfile: install.kind, python: install, pythonVersion: version,
+			pythonServers: undeclaredPythonServers(config.StartCommand, deps),
+		}
+		if framework := matchPythonFramework(deps); framework != nil {
+			recipe.pythonFramework = framework.Name
+		}
+		return recipe, nil
+	case "rust":
+		rust, err := selectRustRecipe(root, config)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust}, nil
+	case "java":
+		java, err := selectJavaRecipe(root)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "java", catalogueKey: "java:" + java.tool, java: java}, nil
+	case "dotnet":
+		project, err := selectDotnetRecipe(root)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "dotnet", catalogueKey: "dotnet", dotnet: project}, nil
+	case "deno":
+		deno, err := selectDenoRecipe(root, config)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno}, nil
+	case "php":
+		php, err := selectPHPRecipe(root, config)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "php", catalogueKey: "php", php: php}, nil
 	default:
 		return selectedRecipe{}, fmt.Errorf("%w: no supported automatic recipe was selected", ErrUnsupportedBuilder)
 	}
+}
+
+// listContainedFiles names the regular files directly under a root with the
+// given suffix, sorted, for the recipes whose manifest has no fixed name.
+func listContainedFiles(root, suffix string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), suffix) {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) (string, error) {
@@ -455,17 +652,30 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		if command := strings.TrimSpace(config.BuildCommand); command != "" {
 			lines = append(lines, "RUN "+buildSecrets+command)
 		}
+		defaults := recipe.node.resolution.nodeFrameworkDefaults
+		if strings.TrimSpace(config.OutputDirectory) == "" && defaults.Entry != "" && frameworkDefaultStart(config.StartCommand, defaults.Start) {
+			// The framework's own entrypoint is what the start command runs, so
+			// a build that did not write it is a wrong output path, and that
+			// is a build failure with a name rather than a readiness timeout.
+			lines = append(lines, "RUN test -f /app/"+defaults.Entry+" || (echo '"+recipe.node.label+" must produce "+defaults.Entry+"; configure its output and start command together' >&2; exit 1)")
+		}
 		if output := strings.TrimSpace(config.OutputDirectory); output != "" {
 			static, err := resolveCatalogueImage(bases, recipeBaseCatalogue["static"][0])
 			if err != nil {
 				return "", err
 			}
-			lines = append(lines, "FROM "+immutableImageReference(static), "COPY --from=build /app/"+filepath.ToSlash(output)+"/ /usr/share/nginx/html/")
+			lines = append(lines, "FROM "+immutableImageReference(static))
+			lines = append(lines, staticServerLines(config.SPAFallback)...)
+			lines = append(lines, "COPY --from=build /app/"+filepath.ToSlash(output)+"/ /usr/share/nginx/html/")
 		} else {
 			if strings.TrimSpace(config.StartCommand) == "" {
 				return "", fmt.Errorf("%w: Node service recipe requires a start command", ErrUnsupportedBuilder)
 			}
-			lines = append(lines, "FROM "+base, "WORKDIR /app", "ENV NODE_ENV=production", "COPY --from=build /app /app", shellCMD(config.StartCommand))
+			lines = append(lines, "FROM "+base, "WORKDIR /app", "ENV NODE_ENV=production")
+			for _, env := range defaults.Env {
+				lines = append(lines, "ENV "+env)
+			}
+			lines = append(lines, "COPY --from=build /app /app", shellCMD(config.StartCommand))
 		}
 	case "go":
 		if len(bases) != 2 {
@@ -477,25 +687,64 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		}
 		lines = append(lines,
 			"FROM "+immutableImageReference(bases[0])+" AS build", "WORKDIR /src", "COPY . .",
+			"ENV CGO_ENABLED=0 GOTOOLCHAIN=local",
 			"RUN "+installSecrets+"go mod download",
-			"RUN "+buildSecrets+"CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app "+packagePath,
-			"FROM "+immutableImageReference(bases[1]), "RUN adduser -D -u 10001 app", "USER app", "COPY --from=build /out/app /app", `ENTRYPOINT ["/app"]`,
 		)
+		command := strings.TrimSpace(config.BuildCommand)
+		if command == "go build ./..." {
+			// Old detection saved this literal default without an output path.
+			// Execute it, then produce the runtime binary under the current contract.
+			lines = append(lines, "RUN "+buildSecrets+command)
+			command = ""
+		}
+		if command == "" {
+			command = "go build -trimpath -ldflags='-s -w' -o /out/app " + packagePath
+		}
+		lines = append(lines, "RUN "+buildSecrets+command,
+			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`,
+			"FROM "+immutableImageReference(bases[1]), "RUN adduser -D -u 10001 app", "USER app", "COPY --from=build /out/app /app")
+		if strings.TrimSpace(config.StartCommand) == "" {
+			lines = append(lines, `ENTRYPOINT ["/app"]`)
+		} else {
+			lines = append(lines, shellCMD(config.StartCommand))
+		}
 	case "python":
 		base := immutableImageReference(bases[0])
-		lines = append(lines, "FROM "+base, "WORKDIR /app", "COPY . .")
-		switch recipe.lockfile {
-		case "requirements.txt":
-			lines = append(lines, "RUN "+installSecrets+"pip install --no-cache-dir --requirement requirements.txt")
-		case "uv.lock":
-			lines = append(lines, "RUN "+installSecrets+"pip install --no-cache-dir uv && uv sync --frozen --no-dev")
-		case "poetry.lock":
-			lines = append(lines, "RUN "+installSecrets+"pip install --no-cache-dir poetry && poetry install --only main --no-root --no-interaction")
+		lines = append(lines, "FROM "+base, "WORKDIR /app",
+			"ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore")
+		for _, env := range recipe.python.env {
+			lines = append(lines, "ENV "+env)
+		}
+		lines = append(lines, "COPY . .", "RUN "+installSecrets+recipe.python.command)
+		for _, server := range recipe.pythonServers {
+			lines = append(lines, "RUN "+installSecrets+recipe.python.serverInstall+" "+pythonServerPackages[server])
 		}
 		if command := strings.TrimSpace(config.BuildCommand); command != "" {
 			lines = append(lines, "RUN "+buildSecrets+command)
 		}
+		for _, env := range pythonFrameworkEnv(recipe.pythonFramework) {
+			lines = append(lines, "ENV "+env)
+		}
 		lines = append(lines, shellCMD(config.StartCommand))
+	case "rust", "java", "dotnet", "deno", "php":
+		var rendered []string
+		var err error
+		switch recipe.kind {
+		case "rust":
+			rendered, err = renderRustDockerfile(recipe.rust, config, bases, installSecrets, buildSecrets)
+		case "java":
+			rendered, err = renderJavaDockerfile(recipe.java, config, bases, installSecrets, buildSecrets)
+		case "dotnet":
+			rendered, err = renderDotnetDockerfile(recipe.dotnet, config, bases, installSecrets, buildSecrets)
+		case "php":
+			rendered, err = renderPHPDockerfile(recipe.php, config, bases, installSecrets, buildSecrets)
+		default:
+			rendered, err = renderDenoDockerfile(recipe.deno, config, bases, installSecrets, buildSecrets)
+		}
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, rendered...)
 	default:
 		return "", ErrUnsupportedBuilder
 	}
@@ -509,8 +758,28 @@ func renderStaticDockerfile(config BuildPlanConfig, base ResolvedImage) (string,
 	} else if !safeRelativePath(output) {
 		return "", fmt.Errorf("%w: static output directory is invalid", ErrUnsupportedBuilder)
 	}
-	return "# syntax=docker/dockerfile:1.10\nFROM " + immutableImageReference(base) +
-		"\nCOPY " + filepath.ToSlash(output) + "/ /usr/share/nginx/html/\n", nil
+	lines := append([]string{"# syntax=docker/dockerfile:1.10", "FROM " + immutableImageReference(base)}, staticServerLines(config.SPAFallback)...)
+	lines = append(lines, "COPY "+filepath.ToSlash(output)+"/ /usr/share/nginx/html/")
+	return strings.Join(lines, "\n") + "\n", nil
+}
+
+// staticServerLines configures nginx for a site whose client owns its routes:
+// a path with no file behind it is answered with index.html so a deep link
+// into the application opens instead of 404ing. Without the fallback the
+// image keeps nginx's own default configuration, byte for byte.
+func staticServerLines(spaFallback bool) []string {
+	if !spaFallback {
+		return nil
+	}
+	conf := []string{
+		"server {", "    listen 80;", "    server_name _;", "    root /usr/share/nginx/html;",
+		"    index index.html;", "    location / {", "        try_files $uri $uri/ /index.html;", "    }", "}",
+	}
+	quoted := make([]string, 0, len(conf))
+	for _, line := range conf {
+		quoted = append(quoted, "'"+line+"'")
+	}
+	return []string{"RUN printf '%s\\n' " + strings.Join(quoted, " ") + " > /etc/nginx/conf.d/default.conf"}
 }
 
 func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string) ([]ResolvedImage, error) {
@@ -552,7 +821,7 @@ func buildSecretMounts(secrets []BuildSecretConfig, step string) string {
 	sort.Strings(ids)
 	parts := make([]string, 0, len(ids))
 	for _, id := range ids {
-		parts = append(parts, "--mount=type=secret,id="+id+",env="+id)
+		parts = append(parts, "--mount=type=secret,id="+id+",env="+id+",required=true")
 	}
 	if len(parts) == 0 {
 		return ""
@@ -590,6 +859,7 @@ func imageArtifact(image ResolvedImage, prepared PreparedBuild) ReleaseArtifactI
 	metadata := mustJSON(map[string]any{
 		"configDigest": image.ConfigDigest, "os": image.OS, "architecture": image.Architecture,
 		"platforms": image.Platforms, "dockerfileDigest": prepared.DockerfileDigest,
+		"goVersion": prepared.GoVersion,
 	})
 	return ReleaseArtifactInput{
 		Kind: ArtifactImage, Reference: image.Reference, Digest: image.Digest,
@@ -648,16 +918,28 @@ func redactBuildEmitter(values map[string]string, emit func(BuildLog) error) fun
 }
 
 func writeGeneratedDockerfile(root, content string) error {
-	directory := filepath.Join(root, ".just-dashboard")
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	directory, err := os.OpenRoot(root)
+	if err != nil {
 		return err
 	}
-	path := filepath.Join(directory, "Dockerfile")
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
+	defer directory.Close()
+	if err := directory.MkdirAll(".just-dashboard", 0o700); err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	// The checkout can contain symlinks. Root-relative operations and an
+	// exclusive temporary file keep generated output inside this build context.
+	temporary := ".just-dashboard/.Dockerfile-" + rand.Text()
+	file, err := directory.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer directory.Remove(temporary)
+	_, writeErr := file.WriteString(content)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return err
+	}
+	return directory.Rename(temporary, ".just-dashboard/Dockerfile")
 }
 
 func readContainedRegular(root, relative string, limit int64) ([]byte, error) {
@@ -746,6 +1028,9 @@ func findGoMainPackages(root string, maxFiles int) ([]string, error) {
 		if err != nil {
 			return err
 		}
+		if sourceUsesCGO(content) {
+			return fmt.Errorf("CGO source requires a Dockerfile with the required C toolchain")
+		}
 		if strings.Contains(string(content), "package main") {
 			directory := filepath.ToSlash(filepath.Dir(rel))
 			seen[directory] = true
@@ -761,33 +1046,6 @@ func findGoMainPackages(root string, maxFiles int) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
-}
-
-func selectPythonLock(root string) (string, error) {
-	for _, candidate := range []string{"uv.lock", "poetry.lock"} {
-		if regularExists(root, candidate) {
-			return candidate, nil
-		}
-	}
-	requirements, err := readContainedRegular(root, "requirements.txt", 2<<20)
-	if err != nil {
-		return "", fmt.Errorf("%w: Python recipe requires uv.lock, poetry.lock, or pinned requirements.txt", ErrUnsupportedBuilder)
-	}
-	seen := false
-	for _, raw := range strings.Split(string(requirements), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "--") {
-			continue
-		}
-		seen = true
-		if !strings.Contains(line, "==") && !strings.Contains(line, "@") {
-			return "", fmt.Errorf("%w: requirements.txt entry %q is not pinned", ErrUnsupportedBuilder, line)
-		}
-	}
-	if !seen {
-		return "", fmt.Errorf("%w: requirements.txt has no pinned dependencies", ErrUnsupportedBuilder)
-	}
-	return "requirements.txt", nil
 }
 
 func digestText(value string) string {

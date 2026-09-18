@@ -65,6 +65,14 @@ export function timestamp(iso: string | undefined | null): string {
   })
 }
 
+/** The day alone — for when something happened, not the second it did. */
+export function calendarDate(iso: string | undefined | null): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+}
+
 /** Zero-padded clock time, for dense log and metric rows. */
 export function clock(iso: string | undefined | null): string {
   if (!iso) return "—"

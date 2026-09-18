@@ -1,0 +1,123 @@
+{
+  "id": "healthchecks",
+  "version": "1.0.0",
+  "name": "Healthchecks",
+  "category": "http",
+  "profile": "web",
+  "description": "Cron and heartbeat monitoring: a job pings a URL, and an alert goes out when it stops. Runs on SQLite here; create the first account from the sign-up page.",
+  "iconId": "monitoring",
+  "docsUrl": "https://healthchecks.io/docs/self_hosted/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "BSD-3-Clause",
+    "upstreamUrl": "https://github.com/healthchecks/healthchecks",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "healthchecks/healthchecks:v4.4",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Ping URLs and alert links are built from it."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8000,
+      "protocol": "tcp",
+      "purpose": "The web interface and ping endpoints",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "The SQLite database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Status endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v3/status/",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "SITE_ROOT",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "ALLOWED_HOSTS",
+        "value": "*"
+      },
+      {
+        "kind": "set_variable",
+        "name": "DEBUG",
+        "value": "False"
+      },
+      {
+        "kind": "set_variable",
+        "name": "DB",
+        "value": "sqlite"
+      },
+      {
+        "kind": "set_variable",
+        "name": "DB_NAME",
+        "value": "/data/hc.sqlite"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Healthchecks migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "checks.example.test"
+      },
+      "digest": "sha256:ab28c82567d174b8f582f6d6c3c6ccf864d62b824a05974aee45abeedcab86b6"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "secret-key",
+      "variable": "SECRET_KEY",
+      "label": "Django secret key",
+      "length": 48,
+      "description": "Signs sessions and tokens."
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "id": "typesense",
+  "version": "1.0.0",
+  "name": "Typesense",
+  "category": "database",
+  "profile": "web",
+  "description": "A typo-tolerant search engine with an API applications call directly.",
+  "iconId": "database",
+  "docsUrl": "https://typesense.org/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/typesense/typesense",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "typesense/typesense:30.2",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; applications on this host reach it over the Docker network without one."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8108,
+      "protocol": "tcp",
+      "purpose": "The search API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "Collections and documents",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "TYPESENSE_DATA_DIR",
+        "value": "/data"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Typesense reads older data directories; downgrading needs a backup.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:ff3459e85518c63b751f904af08b829632da61a65db6a018ef2282a4f48f88df"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "api-key",
+      "variable": "TYPESENSE_API_KEY",
+      "label": "Admin API key",
+      "length": 32
+    }
+  ]
+}

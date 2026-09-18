@@ -1,0 +1,4593 @@
+{
+  "name": "deployment-race",
+  "command": [
+    "/tmp/jd-go1.26.8/bin/go",
+    "test",
+    "-race",
+    "-json",
+    "-count=1",
+    "./internal/deploy",
+    "./internal/api",
+    "./internal/proxysvc",
+    "./internal/backups",
+    "./internal/store"
+  ],
+  "cwd": "backend",
+  "started": "2026-09-16T01:22:58.570495+00:00",
+  "elapsed_seconds": 352.639,
+  "exit_code": 1,
+  "packages": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Action": "pass",
+      "Elapsed": 4.608
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Action": "pass",
+      "Elapsed": 6.6129999999999995
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Action": "pass",
+      "Elapsed": 14.634
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Action": "fail",
+      "Elapsed": 201.318
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Action": "pass",
+      "Elapsed": 339.496
+    }
+  ],
+  "tests": [
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestHTTPSActivationWithoutExistingCertificateStopsCandidateBeforeCutover",
+      "Action": "pass",
+      "Elapsed": 1.7
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters",
+      "Action": "skip",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProviderVerifierMatrixRejectsWrongSignatureAndParsesIdentity/github",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProviderVerifierMatrixRejectsWrongSignatureAndParsesIdentity/gitea",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProviderVerifierMatrixRejectsWrongSignatureAndParsesIdentity/bitbucket",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProviderVerifierMatrixRejectsWrongSignatureAndParsesIdentity",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDeliveryReplayAndWatchPathSimulation",
+      "Action": "pass",
+      "Elapsed": 1.33
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPreviewLifecycleIsIsolatedFromProduction",
+      "Action": "pass",
+      "Elapsed": 1.45
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestScheduleClaimAdvancesBeforeDispatch",
+      "Action": "pass",
+      "Elapsed": 1.77
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestScheduleTimezoneDSTAndInvalidExpressions",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSignedNotificationPersistsOnlyResponseClass",
+      "Action": "pass",
+      "Elapsed": 1.25
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestNotificationFailureCannotChangeReleaseOutcome",
+      "Action": "pass",
+      "Elapsed": 1.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRequiredBackupGateRunsBeforeStatefulChangeAndPersistsSafeEvidence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRequiredBackupFailureBlocksBeforeCandidateStart",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseCertbotCertificates",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseCertbotCertificatesOnNothing",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseDaysLeft",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLastMeaningfulLine",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestCertbotErrorPreservesCauseBeforeHelpFooter",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/no_domains",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/bad_domain",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/no_email",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/bad_email",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/unknown_method",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/webroot_with_no_path",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation/domain_carrying_an_argument",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueValidation",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenewAndRevokeValidateTheName",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Test": "TestArtifactNamesSeparateSameSecondJobsAndRuns",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueArgsShape",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenewArgsShape",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestCertbotAuthenticatorsReadsOnlyPluginsThatCanAnswerAChallenge",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Test": "TestBackupDoesNotReplaceAnEarlierArtifact",
+      "Action": "pass",
+      "Elapsed": 0.03
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Test": "TestArtifactPublicationRefusesExistingFilesAndSymlinks",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Test": "TestBackupPathsAreContainedBeforeSaving",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentCertificateReusesPrivateNameBeforeDNSOrCertbot",
+      "Action": "pass",
+      "Elapsed": 0.42
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains/reported_hostname",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains/private",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains/mixed_records",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains/public",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains/empty",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains/DNS_error",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentHTTPDomains",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRequiredBackupFailureStopsRunBeforeRuntimeAndLeavesLivePointerUntouched",
+      "Action": "pass",
+      "Elapsed": 2.34
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentRouteReloadFailureRestoresExactPriorSpec",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentRouteRendersExistingTLSCertificateAndRedirect",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRemoveDeploymentRouteDeletesOnlyNamedRoute",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestResolveDeploymentCertificateRequiresOneExistingPairCoveringEveryDomain",
+      "Action": "pass",
+      "Elapsed": 0.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDeploymentWebroot",
+      "Action": "skip",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/free",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/host_nginx",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/caddy",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/unknown",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/mixed_owners",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/different_port",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership/udp",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengeUsesListenerOwnership",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentChallengePreservesBindScope",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentACMEWebrootSurvivesSiteEditing",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeploymentWebrootRestoresOnCancellation",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestCompareAddresses",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIsKnownProxyAddress",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDescribeDomainCheck",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestHostAddressesExcludesPrivateRanges",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestPublicAddressExcludesCGNAT",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDomainCheckSaysSoWhenTheHostHasNoPublicAddress",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDockerCaddySelectionRequiresPublicOwnershipAndPersistence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDockerCaddyRouteRejectsInjectionAndHostPathTraversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyProvisionAndRestart",
+      "Action": "skip",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute",
+      "Action": "skip",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestSetAuthUserRejectsBadInput",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestAuthUserPattern",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Test": "TestExistingBackupRechecksRootsAndCanBeRepaired",
+      "Action": "pass",
+      "Elapsed": 1.51
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestUpgradeAddsReplayCounterWithoutChangingEnrollment",
+      "Action": "pass",
+      "Elapsed": 1.55
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestUnsupportedBlueprintStopsBeforeDraftSaveAndPreflight",
+      "Action": "pass",
+      "Elapsed": 1.38
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestBlueprintVolumeSlugsCannotCollide",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestBlueprintPreviewKeepsSocketReadOnlyAndUDPExplicit",
+      "Action": "pass",
+      "Elapsed": 0.06
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters",
+      "Action": "skip",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCertificateStepSkipsAndReusesWithoutOrdering",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCertificateStepRecordsAnIssuedCertificate",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCertificateStepSeparatesUnavailableFromRefused",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/backups",
+      "Test": "TestBackupArtifactReadsRespectCurrentRoots",
+      "Action": "pass",
+      "Elapsed": 1.93
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestOpenAddsColumnsToAPreExistingDatabase",
+      "Action": "pass",
+      "Elapsed": 1.97
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestHashesAreBcryptAndVerify",
+      "Action": "pass",
+      "Elapsed": 3.46
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRemoveAuthUserRejectsBadFileNames",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTemporaryPasswordRestrictsRoutesUntilChanged",
+      "Action": "pass",
+      "Elapsed": 4.5
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCertificateFailureStopsTheRunBeforeAnythingStarts",
+      "Action": "pass",
+      "Elapsed": 2.95
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestHTTPReadinessFollowsOnlyCandidateRedirects",
+      "Action": "pass",
+      "Elapsed": 0.03
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestReadinessFollowsAllocatedRuntimePortAndPreservesExplicitTargets",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestReadinessFailureReportsSafeCause",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestParseDotenvSupportsMultilineAndRejectsDuplicates",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestVariableReferenceGraphDetectsMissingAndCycles",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestAuthFilesLiveUnderTheConfiguredNginxDir",
+      "Action": "pass",
+      "Elapsed": 1.24
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseCertChain",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseCertChainRejectsRubbish",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestKeyMatchesCertificate",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestKeyMatchesCertificateAcceptsPKCS1",
+      "Action": "pass",
+      "Elapsed": 0.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestNormalisePEM",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestImportCertificateRejectsABadName",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueRefusesAWildcardOverHTTP",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIssueDNSRequiresAKnownProvider",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDNSIssueArgs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestWriteDNSCredentialsRejectsUnknownProviders",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestListDNSProvidersPutsInstalledFirst",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestEnabledLinkRollbackRestoresPreviousTarget",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRoute53CredentialsBecomeAValidDefaultProfile",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestCertbotEnvironmentSelectsSavedProfileWithoutExposingKeys",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestExistingRoute53CredentialsAreNormalizedBeforeCertbot",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseNginxVersion",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseCaddyVersion",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecAcceptsATypicalSite",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/no_domains",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/bad_domain",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/name_with_a_slash",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/upstream_with_a_semicolon",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/upstream_with_no_scheme",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/TLS_with_no_certificate",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/relative_certificate_path",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/upload_limit_that_is_not_a_size",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/timeout_out_of_range",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/acl_entry_that_is_not_an_address",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/unknown_kind",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/unbalanced_braces_in_the_escape_hatch",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/location_with_nowhere_to_go",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections/location_path_that_is_not_a_path",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRejections",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateSpecRefusesNewlinesInScalars",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderNginxProxySite",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderUsesTheHTTP2Directive",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderKeepsTheACMEChallengeReachable",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderStaticSite",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderRedirectSite",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderAccessControls",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderExtraLocations",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestSpecWarnings",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIsPublicUpstream",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestOpenIsIdempotent",
+      "Action": "pass",
+      "Elapsed": 1.89
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestAddedColumnsAllDeclareADefault",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseSiteSpecRoundTrip",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseSiteSpecIgnoresTheGeneratedACMELocation",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseSiteSpecOnAHandWrittenFile",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseSiteSpecStaticSite",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestAllowListIsFencedWithDenyAll",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestExplicitDenialsComeBeforeTheAllowList",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDenyAllRoundTripsWithoutDoubling",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestNoFenceWithoutAnAllowList",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestBackupsAndEditorLeftoversAreNotSites",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDeleteSiteKeepsABackupAndRefusesToBackUpABackup",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestConfDLayoutSitesCanBeDeleted",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestConfDOnlyCountsDotConfAsActive",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestVHostToggleExplainsItselfOnAConfDHost",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestCustomConfigurationSurvivesARoundTrip",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLocationAllowIsNotHoistedToTheServer",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestDuplicateLocationsAreRefused",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/bad_name",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/port_out_of_range",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/unknown_protocol",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/upstream_with_no_port",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/upstream_with_an_injected_directive",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/acl_entry_that_is_not_an_address",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream/timeout_out_of_range",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStream",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestValidateStreamDefaultsToTCP",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderStreamTCP",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderStreamMakesALegalUpstreamName",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestRenderStreamUDP",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestStreamRoundTrip",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseStreamSpecReadsOnePort",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestStreamWarnings",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestStreamIncludeIgnoresACommentedOutInclude",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestStreamsLiveUnderTheConfiguredNginxDir",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestApplyStreamRefusesToReplaceWithoutOverwrite",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestParseHSTS",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestColonHex",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeAPlus",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeADropsToAWithoutHSTS",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeExpiredIsF",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeUntrustedIsF",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeNameMismatchIsF",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeOldProtocolIsC",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeMissingIntermediateIsB",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeNoRedirectIsB",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeDoesNotPenaliseAClosedPort80",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeWeakRSAKeyIsF",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeDoesNotPenaliseSmallECDSAKeys",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestGradeUnreachableIsF",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestFindingsAreSortedWorstFirst",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestUnknownProtocolStatusIsNotTreatedAsRefused",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestIsLocalVersionRefusal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestScopedVariablesResolveFeatureOwnerReferencesAndFreezeRunDomains",
+      "Action": "pass",
+      "Elapsed": 1.89
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestReopenReleasesPreviouslyArchivedDeploymentNames",
+      "Action": "pass",
+      "Elapsed": 1.44
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestEnrolledAccountCannotUseEnrollmentToAvoidOTPBudget",
+      "Action": "pass",
+      "Elapsed": 2.72
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestVariableMutationAdvancesDesiredWithoutChangingLiveAndFreezesRuns",
+      "Action": "pass",
+      "Elapsed": 1.72
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestStackDetailOnlyEvaluatesComposeForAdmin/readonly",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestStackDetailOnlyEvaluatesComposeForAdmin/limited",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestStackDetailOnlyEvaluatesComposeForAdmin/admin",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestStackDetailOnlyEvaluatesComposeForAdmin",
+      "Action": "pass",
+      "Elapsed": 1.72
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestOpenMigratesPopulated066DeploymentsIdempotently",
+      "Action": "pass",
+      "Elapsed": 2.65
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSavingEnvironmentConfigurationCreatesDesiredRevisionOnly",
+      "Action": "pass",
+      "Elapsed": 1.73
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestReadOnlyExplainCannotMutateSQLite",
+      "Action": "pass",
+      "Elapsed": 1.39
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPendingStateClearsAppliedRevisionButKeepsChangeSavedAfterEnqueue",
+      "Action": "pass",
+      "Elapsed": 1.62
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRunTransitionTableExhaustivelyAllowsOnlyFrozenEdges",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestTerminalRunStatesHaveNoOutgoingEdge",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestStepTransitionTableExhaustivelyAllowsOnlyFrozenEdges",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDefaultReleasePathHasEveryFrozenStepOnce",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentBackupGateUsesBackupsOwnerAndReturnsOnlySafeEvidence",
+      "Action": "pass",
+      "Elapsed": 1.48
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection",
+      "Action": "skip",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestApplicationConnectionURLPreservesCredentialsAndDatabase/postgres",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestApplicationConnectionURLPreservesCredentialsAndDatabase/mysql",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestApplicationConnectionURLPreservesCredentialsAndDatabase/mongodb",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestApplicationConnectionURLPreservesCredentialsAndDatabase/redis",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestApplicationConnectionURLPreservesCredentialsAndDatabase",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestDeploymentRunNumbersMigrateAndSurviveReopen",
+      "Action": "pass",
+      "Elapsed": 2.42
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDatabaseURLTargetIsExplicitAndDoesNotChangeSavedConnection",
+      "Action": "pass",
+      "Elapsed": 1.46
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/store",
+      "Test": "TestContainerIdentityMigrationPreservesUnattributedHistory",
+      "Action": "pass",
+      "Elapsed": 1.54
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestEngineExecutesPersistentReleasePathToSuccess",
+      "Action": "pass",
+      "Elapsed": 2.9
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDatabaseApplicationURLRefusesUnreachableHostLoopback",
+      "Action": "pass",
+      "Elapsed": 1.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestApplicationConnectionURLKeepsRemoteDiscoveryAndTransport",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDatabaseLoopbackBindingMatchesSavedAddress",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecRefusesPrivilegedBelowAdmin",
+      "Action": "pass",
+      "Elapsed": 1.59
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestEngineFailureStopsBeforeLaterStepsAndPreservesTerminalEvidence",
+      "Action": "pass",
+      "Elapsed": 2.27
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecRefusesBindMountBelowAdmin",
+      "Action": "pass",
+      "Elapsed": 1.35
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestEngineMarksVerifiedActivationRecoveryAsRolledBack",
+      "Action": "pass",
+      "Elapsed": 1.52
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecRefusesCapabilitiesAndDevicesBelowAdmin",
+      "Action": "pass",
+      "Elapsed": 1.27
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestEngineCancellationInterruptsAdapterAndRecordsStepCleanup",
+      "Action": "pass",
+      "Elapsed": 1.6
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecAllowsNamedVolumeForLimited",
+      "Action": "pass",
+      "Elapsed": 1.59
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecConfinesAdminBindMountsToFileRoots",
+      "Action": "pass",
+      "Elapsed": 1.53
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestComposeDestructiveSet",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestOnlyComposeDownAsksForAPhrase",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestStackNameValidation",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestUnderAnyRoot",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/resolve_source",
+      "Action": "pass",
+      "Elapsed": 2.87
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecRejectsBlankBindSource",
+      "Action": "pass",
+      "Elapsed": 1.15
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPruneAllTypesOnlyForTheVolumeSweep",
+      "Action": "pass",
+      "Elapsed": 2.31
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/acquire_source",
+      "Action": "pass",
+      "Elapsed": 3.24
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestBuildCachePruneIsMountedAndUntyped",
+      "Action": "pass",
+      "Elapsed": 2.18
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/analyze_plan",
+      "Action": "pass",
+      "Elapsed": 2.39
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTheReclaimSweepIsNotTyped",
+      "Action": "pass",
+      "Elapsed": 2.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/prepare_context",
+      "Action": "pass",
+      "Elapsed": 2.74
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestReclaimRoutesRequireTheDestructiveCapability",
+      "Action": "pass",
+      "Elapsed": 2.27
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/plain",
+      "Action": "pass",
+      "Elapsed": 1.51
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/build_artifact",
+      "Action": "pass",
+      "Elapsed": 2.82
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/new",
+      "Action": "pass",
+      "Elapsed": 1.48
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/render_runtime",
+      "Action": "pass",
+      "Elapsed": 2.14
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/bind",
+      "Action": "pass",
+      "Elapsed": 1.38
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/plugin",
+      "Action": "pass",
+      "Elapsed": 1.28
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/release_task",
+      "Action": "pass",
+      "Elapsed": 1.61
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/unavailable",
+      "Action": "pass",
+      "Elapsed": 1.26
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited",
+      "Action": "pass",
+      "Elapsed": 6.91
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/backup_gate",
+      "Action": "pass",
+      "Elapsed": 2.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeCustomDriversAndOptionsRequireAdmin",
+      "Action": "pass",
+      "Elapsed": 1.27
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/relative_bind",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/relative_recursive_bind",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/none_without_bind_flag",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/empty_bind",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/relative_block_device",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/outside_root",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/inside_root",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/nfs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/nfs4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/cifs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/smb3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/tmpfs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/bind_overrides_nfs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices/recursive_bind_overrides_cifs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestVolumeBackingPathsAndRemoteDevices",
+      "Action": "pass",
+      "Elapsed": 1.19
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/provision_certificate",
+      "Action": "pass",
+      "Elapsed": 1.97
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestComposeAndCustomVolumeRoutesRefuseLimitedBeforeExecution",
+      "Action": "pass",
+      "Elapsed": 2.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/start_candidate",
+      "Action": "pass",
+      "Elapsed": 2.36
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNetworkIDs",
+      "Action": "pass",
+      "Elapsed": 1.55
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/verify_readiness",
+      "Action": "pass",
+      "Elapsed": 3.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRecreateAuthorisesAnOmittedSpec",
+      "Action": "pass",
+      "Elapsed": 2.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/verify_smoke",
+      "Action": "pass",
+      "Elapsed": 2.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestBlueprintCatalogueIsReadableAndNamesItsProvenance",
+      "Action": "pass",
+      "Elapsed": 2.82
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/activate",
+      "Action": "pass",
+      "Elapsed": 2.93
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestBlueprintRenderRequiresAdminSessionAndRefusesUndeclaredInput",
+      "Action": "pass",
+      "Elapsed": 2.71
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/retire_previous",
+      "Action": "pass",
+      "Elapsed": 1.98
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestBlueprintRenderNeverReturnsAGeneratedSecretValue",
+      "Action": "pass",
+      "Elapsed": 1.89
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/record_release",
+      "Action": "pass",
+      "Elapsed": 1.99
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestBlueprintVersionsAnswerPerProfileAndNeverInventAVersion",
+      "Action": "pass",
+      "Elapsed": 2.05
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects/notify",
+      "Action": "pass",
+      "Elapsed": 2.08
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects",
+      "Action": "pass",
+      "Elapsed": 38.83
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestGameConsoleRefusesWithoutControlCapabilityOnANonGameDeploymentOrWithAShellString",
+      "Action": "pass",
+      "Elapsed": 2.97
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestEngineCompletesWhenRunningStepsDiscoverNothingToDo",
+      "Action": "pass",
+      "Elapsed": 2.63
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestGamePlayerActionsAreClosedAtTheRoute",
+      "Action": "pass",
+      "Elapsed": 2.18
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestGitWatcherDefaultsPinCommitsAndRememberFailedAttempts",
+      "Action": "pass",
+      "Elapsed": 1.91
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestGitWatcherErrorsAndConcurrentProviderDeliveryDoNotDuplicateRuns",
+      "Action": "pass",
+      "Elapsed": 1.88
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestGitWatcherRecoversEnqueueBeforeCursorWrite",
+      "Action": "pass",
+      "Elapsed": 1.83
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestResolveGitRevisionOnlyReadsExactBranch",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLegacyCompatibilityPipelineRunsThroughPersistentEngine",
+      "Action": "pass",
+      "Elapsed": 3.18
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIMongo",
+      "Action": "skip",
+      "Elapsed": 9.31
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestArchivePreservesResourcesAndRemovalPlanNamesOnlyManagedTargets",
+      "Action": "pass",
+      "Elapsed": 1.62
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProjectValidateUsesSymlinkAwareDeploymentResolver",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProjectValidateCanonicalizesRepositoryAndComposePaths",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProjectValidateRejectsParentComposePath",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProjectValidateRejectsComposeSymlinkOutsideDeploymentRoots",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRuntimeServicesScopeAvailabilityAndSecretFreeProjection",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestEnqueuePersistsRequestStepsEventsAndIdempotency",
+      "Action": "pass",
+      "Elapsed": 1.74
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIRedis",
+      "Action": "skip",
+      "Elapsed": 3.53
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestClaimFencesRunAndStepTransitions",
+      "Action": "pass",
+      "Elapsed": 1.88
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIPostgres",
+      "Action": "skip",
+      "Elapsed": 1.81
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestQueueEnforcesPriorityEnvironmentAndHostBudgets",
+      "Action": "pass",
+      "Elapsed": 2.23
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIDeveloperSurface",
+      "Action": "skip",
+      "Elapsed": 1.55
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSyncReportsADatabaseItCannotReach",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSyncSaysNothingAboutADatabaseItCanAdopt",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSyncNeverReportsABlankReason",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSyncIgnoresNothing",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestIrreversibleDatabaseRoutesDemandAPhrase",
+      "Action": "pass",
+      "Elapsed": 1.45
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestConcurrentClaimsCannotExceedHeavyBudget",
+      "Action": "pass",
+      "Elapsed": 1.99
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRoutineDatabaseRoutesDoNotAskForAPhrase",
+      "Action": "pass",
+      "Elapsed": 1.37
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCancellationAndCompletionRaceConvergesToOneFencedOutcome",
+      "Action": "pass",
+      "Elapsed": 1.63
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestImportChecksDestructivenessByContent",
+      "Action": "pass",
+      "Elapsed": 1.5
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticEnqueueSupersedesOnlyCoveredUnclaimedRuns",
+      "Action": "pass",
+      "Elapsed": 1.6
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDriverCatalogueCoversEveryEngine",
+      "Action": "pass",
+      "Elapsed": 1.49
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestQueuedAndClaimedCancellationHaveDistinctCleanup",
+      "Action": "pass",
+      "Elapsed": 1.45
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestORMTargetCatalogueCoversEveryGenerator",
+      "Action": "pass",
+      "Elapsed": 1.36
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRetryCreatesAJoinedIdempotentRunOnlyForFailedOrCancelledInput",
+      "Action": "pass",
+      "Elapsed": 1.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRowSQLDoesNotTouchTheDatabase",
+      "Action": "pass",
+      "Elapsed": 1.27
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSubscriptionReconnectIsSequencedWithoutCommitPublishDuplicates",
+      "Action": "pass",
+      "Elapsed": 1.49
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSearchRequiresANeedle",
+      "Action": "pass",
+      "Elapsed": 1.45
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSlowSubscriberIsDroppedWithoutStallingAppend",
+      "Action": "pass",
+      "Elapsed": 1.88
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSQLiteConnectionsAreContainedByFileRoots",
+      "Action": "pass",
+      "Elapsed": 1.37
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestProvisionTemplatesAreCoherent",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestProvisionTemplatesBindLoopback",
+      "Action": "pass",
+      "Elapsed": 1.37
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestTerminalLogCompactionForcesResyncAndBoundsPayloads",
+      "Action": "pass",
+      "Elapsed": 1.69
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSavedReadinessFailureExplainsRetainedAttempt",
+      "Action": "pass",
+      "Elapsed": 1.5
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentAutomationRoutesFenceProviderDeliveriesAndSecrets",
+      "Action": "pass",
+      "Elapsed": 3.54
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestScopedGenericHookAndAPIIdempotencyCreateOneRun",
+      "Action": "pass",
+      "Elapsed": 2.72
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestScheduledChainRecordsRequiredUnavailableAction",
+      "Action": "pass",
+      "Elapsed": 1.9
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAutomationConfigurationRoutesRequireAdminSessionAndAuditNamesOnly",
+      "Action": "pass",
+      "Elapsed": 3.3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentConfigurationRoutesEnforceSessionCapabilityConfirmationAndAudit",
+      "Action": "pass",
+      "Elapsed": 3.29
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetReadStaysWithinItsBudgetAtReferenceScale",
+      "Action": "fail",
+      "Elapsed": 13.81
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentLifecycleRoutesUseSharedDestructiveBudget",
+      "Action": "pass",
+      "Elapsed": 2.53
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentRunRoutesPersistBeforeAcceptedAndResumeByID",
+      "Action": "pass",
+      "Elapsed": 2.94
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestWorkspaceReadStaysWithinItsBudgetAtReferenceScale",
+      "Action": "pass",
+      "Elapsed": 6.89
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentRunMutationsRequireServiceControl",
+      "Action": "pass",
+      "Elapsed": 2.13
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLegacyRunRouteQueuesPersistentCompatibilityStep",
+      "Action": "pass",
+      "Elapsed": 1.98
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNormalizedActionsUseDistinctImmutableReleaseSemantics",
+      "Action": "pass",
+      "Elapsed": 2.58
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentReadModelsExposeFleetDetailAndEngineRuns",
+      "Action": "pass",
+      "Elapsed": 2.22
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentRunStreamSendsSnapshotBacklogLiveTerminalAndAuditsOpen",
+      "Action": "pass",
+      "Elapsed": 2.95
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAutomaticGitDeploymentsAreDefaultAuditedAndFenced",
+      "Action": "pass",
+      "Elapsed": 2.33
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestHostnameSlugIsALegalUniqueLabel",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFirstIPv4SkipsUnusableAddresses",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestCertificateDetailDistinguishesTheThreeStates",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestCertificateDetailPreservesChallengeFailure",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetCostDoesNotGrowWithTheFleet",
+      "Action": "pass",
+      "Elapsed": 12.35
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionEvidenceWithCredentialShapeIsRedacted",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/remote_mismatch",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/short_revision",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/invalid_confidence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/candidate_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/credential_command",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/foreign_Compose_evidence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/inconsistent_truncation",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence/secret_observed_evidence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectionResultValidationRejectsTamperedEvidence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/http_git",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/git_password",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/git_username",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/ref_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/ref_option",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/ref_reflog",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/ref_double_slash",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/ref_arbitrary_namespace",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/git_query",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/git_encoded_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/subdirectory_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/local_relative",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/local_remote_ref",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/image_malformed",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/image_Git_field",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/image_bad_platform",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_path",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_noncanonical_path",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_inline_Git_content",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_upload_credential",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_build_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_dynamic_build_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_Dockerfile_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_mount_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_dynamic_mount",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_command_credential",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_env_file_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_secret_file_traversal",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_embedded_URL_credential_fallback",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_password",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_fallback_password",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_inherited_password",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/compose_blank_password",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/non-Gitea_base_URL",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials/import_extra_path",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestComposeAnalysisAndAdapterPreserveMultiFileOrder",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLocalGitImageAndImportSourceAdapters",
+      "Action": "pass",
+      "Elapsed": 0.09
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRemoteGitAdapterUsesContainedMirrorWorktreeAndEphemeralCredentialFile",
+      "Action": "pass",
+      "Elapsed": 0.32
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPlanningGitMirrorCreatesDetachedWorktreeAtExactRevision",
+      "Action": "pass",
+      "Elapsed": 0.07
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPreflightIsPureStableAndSecretFree",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestHostPreflightObserverDoesNotCreateOrChangeRequestedPaths",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPreflightBlocksBuildAdapterWhenBuildxIsUnavailable",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPreflightCoversGitChoicesImageArchitectureAndDomains",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestComposePreflightCoversVariablesPortsStorageAndAdvancedFields",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDraftRevisionOwnershipExpiryAndAtomicIdempotentCommit",
+      "Action": "pass",
+      "Elapsed": 1.44
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying",
+      "Action": "pass",
+      "Elapsed": 2.43
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCommitRequiresWarningAcknowledgementAndRollsBackNameConflict",
+      "Action": "pass",
+      "Elapsed": 1.48
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentDraftRoutesRequireSessionsAndHideOtherOwners",
+      "Action": "pass",
+      "Elapsed": 2.73
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRegistryCredentialIsPassedOutOfBandAndNotReturned",
+      "Action": "pass",
+      "Elapsed": 1.64
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestProviderRemoteNormalization",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCanonicalConfigurationOrdering",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFollowTheLockfile/bun.lock",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFollowTheLockfile/bun.lockb",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFollowTheLockfile/pnpm-lock.yaml",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFollowTheLockfile/yarn.lock",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFollowTheLockfile/package-lock.json",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFollowTheLockfile",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDetectedJavaScriptCommandsFallBackToNpm",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestC6PreflightSurfacesNetworkFirewallAndDependencyGates",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPreflightBlocksHTTPSOnAHostThatCannotIssue",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestExecutionPreflightAllowsRemappablePortConflict",
+      "Action": "pass",
+      "Elapsed": 1.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestExecutionObservationExcludesOnlyItsOwnManagedProxySiteFromConflicts",
+      "Action": "pass",
+      "Elapsed": 0.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestExecutionObservationRecognizesPortHeldByItsLiveContainer",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentImportAdoptionUsesDedicatedConfirmedDraftPathWithoutRuntimeSideEffects",
+      "Action": "pass",
+      "Elapsed": 2.16
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/requested",
+      "Action": "pass",
+      "Elapsed": 1.56
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPlanningValidationUsesClosedSecretSafeErrors/git_credentials",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPlanningValidationUsesClosedSecretSafeErrors/image",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPlanningValidationUsesClosedSecretSafeErrors/plan_secret",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPlanningValidationUsesClosedSecretSafeErrors",
+      "Action": "pass",
+      "Elapsed": 2.42
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPreviewURLValidation",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/validating",
+      "Action": "pass",
+      "Elapsed": 1.75
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/queued",
+      "Action": "pass",
+      "Elapsed": 1.32
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPreviewFramesOnlyRecordedOrigin",
+      "Action": "pass",
+      "Elapsed": 1.97
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/preparing",
+      "Action": "pass",
+      "Elapsed": 1.46
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostResources",
+      "Action": "pass",
+      "Elapsed": 2.62
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvMasksOnlyCredentials",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvSurvivesUnexpectedShapes/no_config",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvSurvivesUnexpectedShapes/config_not_a_map",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvSurvivesUnexpectedShapes/env_not_a_list",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvSurvivesUnexpectedShapes/env_of_numbers",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvSurvivesUnexpectedShapes/empty",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedactRawEnvSurvivesUnexpectedShapes",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/running",
+      "Action": "pass",
+      "Elapsed": 1.65
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/verifying",
+      "Action": "pass",
+      "Elapsed": 1.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader/places",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader/complete",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader/find",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader/preview",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader/usage",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader/checksum",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFileBrowsingRoutesAnswerAReader",
+      "Action": "pass",
+      "Elapsed": 2.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/activating",
+      "Action": "pass",
+      "Elapsed": 1.48
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPlacesStartsSomewhereListable",
+      "Action": "pass",
+      "Elapsed": 1.92
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/failed_activation",
+      "Action": "pass",
+      "Elapsed": 1.53
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRawRefusesAnythingButMedia",
+      "Action": "pass",
+      "Elapsed": 2.15
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/restoring_previous",
+      "Action": "pass",
+      "Elapsed": 1.56
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/cancelling",
+      "Action": "pass",
+      "Elapsed": 1.7
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNewFileRoutesRefusePathsOutsideTheRoots",
+      "Action": "pass",
+      "Elapsed": 2.26
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/succeeded",
+      "Action": "pass",
+      "Elapsed": 1.51
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/failed",
+      "Action": "pass",
+      "Elapsed": 1.86
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestBookmarksAreAWriteAndAreStored",
+      "Action": "pass",
+      "Elapsed": 3.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/cancelled",
+      "Action": "pass",
+      "Elapsed": 1.66
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJobListAndGet",
+      "Action": "pass",
+      "Elapsed": 2.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/rolled_back",
+      "Action": "pass",
+      "Elapsed": 1.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJobGetRejectsAnUnknownID",
+      "Action": "pass",
+      "Elapsed": 2.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/superseded",
+      "Action": "pass",
+      "Elapsed": 1.47
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState/unknown-future-state",
+      "Action": "pass",
+      "Elapsed": 1.29
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedChecksEveryRunState",
+      "Action": "pass",
+      "Elapsed": 24.74
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJobCancel",
+      "Action": "pass",
+      "Elapsed": 1.96
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestPurgeArchivedPreservesLegacyRunUntilItFinishes",
+      "Action": "pass",
+      "Elapsed": 1.25
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestUpdatesApplyStartsAJob",
+      "Action": "pass",
+      "Elapsed": 1.68
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestUpdatesApplyStillDemandsTheTypedPhrase",
+      "Action": "pass",
+      "Elapsed": 1.72
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetReadModelStatementCountDoesNotGrowWithTheFleet",
+      "Action": "pass",
+      "Elapsed": 4.11
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSSHApplyRefusesALockoutBeforeStartingAJob",
+      "Action": "pass",
+      "Elapsed": 2.07
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDeploymentSummaryReadsOnlyTheRequestedDeployment",
+      "Action": "pass",
+      "Elapsed": 2.69
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSecretWriterRedactsEveryChunkBoundaryAndSharedPrefix",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLegacyEnvFileCannotFollowPredictableTemporarySymlink",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestSecretWriterDefersShortMatchWhenLongerSecretIsIncomplete",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRunLogHandoffUsesRunActivationAndExactPreviewRelease",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestCertIssueStartsAJob",
+      "Action": "pass",
+      "Elapsed": 2.48
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRunMetricsUsesRetainedIdentitiesAndDisjointActivationWindows",
+      "Action": "pass",
+      "Elapsed": 1.87
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestComposeMetricIdentityCaptureExcludesOtherReleasesAndOneoffs",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJobRoutesRespectCapabilities",
+      "Action": "pass",
+      "Elapsed": 2.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRunNumbersBelongToProjectAcrossEnvironmentsAndWriters",
+      "Action": "pass",
+      "Elapsed": 1.61
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRuntimeImagesAndComposeOverridesUseImmutableIdentities",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestImmutableRuntimeFileRejectsDifferentRetryBytes",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRuntimePortDefaultPreservesExplicitVariables",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestC0AdapterTranscriptsCoverEveryExecutionOwner",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestMissingCertificateInventorySilencesHTTPSWithoutSuppressingRouteFindings",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestInlineComposeMaterializationPreservesFileOrderAndPrivacy",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestBlueprintPlansCarryGeneratedSecretsByNameOnly",
+      "Action": "pass",
+      "Elapsed": 0.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisStaysSilentWhenEveryOwnerReportsHealthyEvidence",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestExactGitMaterializationSurvivesAShallowBlobFilteredMirror",
+      "Action": "pass",
+      "Elapsed": 0.55
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestUnavailableOwnersProduceSilencesAndNeverClaims",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJobStreamDeliversOutputAndTheFinalState",
+      "Action": "pass",
+      "Elapsed": 2.27
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJobStreamResumesAfterASequence",
+      "Action": "pass",
+      "Elapsed": 2.36
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogSourcesListWhatCanActuallyBeOpened",
+      "Action": "pass",
+      "Elapsed": 3.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCandidateReleaseIsAtomicIdempotentImmutableAndSecretFree",
+      "Action": "pass",
+      "Elapsed": 7.61
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCheckConfigurationRejectsUnknownFieldsCredentialURLsAndSecretArgv",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestReleaseUpdateStatusUsesTheRecordedReferenceAndDegradesHonestly",
+      "Action": "pass",
+      "Elapsed": 7.62
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCheckRunnerCoversHTTPRetriesTCPDockerCommandAndClosedOutcomes",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestQueuedRunAndRetryKeepExactVariableRevisionsAcrossRotation",
+      "Action": "pass",
+      "Elapsed": 7.68
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestArtifactCleanupUsesTagOnlyWhileItNamesRecordedImage/tag_still_exact",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestArtifactCleanupUsesTagOnlyWhileItNamesRecordedImage/tag_moved",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestArtifactCleanupUsesTagOnlyWhileItNamesRecordedImage/tag_moved_without_config_metadata",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestArtifactCleanupUsesTagOnlyWhileItNamesRecordedImage",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestMovingImageIdentityCreatesDistinctReleaseAndComparison",
+      "Action": "pass",
+      "Elapsed": 7.84
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDeploymentWithoutLiveReleaseClaimsNothingAboutRuntime",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFindingsAreOrderedBySeverityAndCarryAnActionableOwner",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestStoredReleaseTaskRejectsEscapingOrMissingWorkingDirectory",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestOperationsSummaryDetectsForeignProxyOwnershipOfADeploymentDomain",
+      "Action": "pass",
+      "Elapsed": 7.8
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestComposeMaterializationCopiesContainedTreeAndRejectsEscapingSymlink",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestUnsafeRecipeInputsFailClosed",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestOperationsSummaryForUndeployedProjectNamesItsMissingReleaseInsteadOfGuessing",
+      "Action": "pass",
+      "Elapsed": 7.89
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLocalGitMaterializationUsesRecordedRevisionWithoutChangingWorkbench",
+      "Action": "pass",
+      "Elapsed": 0.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestReleaseBuildFingerprintIncludesEveryComposeService",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestComposeAdapterBuildsContainedServiceContexts",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFailedReadinessLeavesLiveRuntimeAndRouteUntouched",
+      "Action": "pass",
+      "Elapsed": 8.05
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestComposeAdapterRejectsEscapingBuildSymlink",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestOperationsSummaryReportsOwnerObservedFailuresAsDiagnosableFindings",
+      "Action": "pass",
+      "Elapsed": 7.55
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestBlueprintDefaultSchedulesTranslateExactlyOrNotAtAll",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestImageAndComposeAdaptersPinResolvedDigests",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestUnrecordedRuntimeSilencesInsteadOfClaimingAnAbsentContainer",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRecipeBuildSecretsUseNamedMountsAndAreRedacted",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestStoredReleaseTaskUsesExplicitScopeAndRedactsOutput",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestStoredReleaseTaskCancellationTerminatesProcessGroup",
+      "Action": "pass",
+      "Elapsed": 0.11
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCheckRunnerTimeoutIsBoundedAndEvidenceDoesNotExposeTransportError",
+      "Action": "pass",
+      "Elapsed": 1
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestWildcardRuntimeBindingsUseLoopbackForChecksAndProxy",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogSearchReturnsContextAndAHistogram",
+      "Action": "pass",
+      "Elapsed": 2.51
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogSearchReadsRotatedArchives",
+      "Action": "pass",
+      "Elapsed": 2.34
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogExportCarriesTheFilter",
+      "Action": "pass",
+      "Elapsed": 2.06
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestOperationsSummaryReadsEveryOwnerOnceAndDiagnosesNothing",
+      "Action": "pass",
+      "Elapsed": 6.93
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDatabaseBlueprintsNeverPublishAPortIntoThePlan",
+      "Action": "pass",
+      "Elapsed": 0.03
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestOperationsSummaryRendersUnavailableEvidenceForEveryAbsentModule",
+      "Action": "pass",
+      "Elapsed": 7.19
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestGameBlueprintsAreHonestlyStopFirstAndPublishTheirOwnPort",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestTwoDeploymentsOfOneBlueprintGetSeparateData",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestReleaseComparisonNamesEveryChangedFieldAndHidesVariableValues",
+      "Action": "pass",
+      "Elapsed": 7.18
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestMinecraftPlanRecordsTheExactAcceptedAgreement",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestChangingServerSoftwareOrVersionNeverMovesTheWorldVolume",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCandidatePortLeaseIsLoopbackScopedAndReleasedByToken",
+      "Action": "pass",
+      "Elapsed": 6.97
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/saved_changes_are_not_live",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/expiring_certificate",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/expired_certificate",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/stale_optional_backup_is_not_a_claim",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/stale_required_backup",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/two_sites_claim_the_hostname",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/deleted_backup_job",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/another_site_owns_the_hostname",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/unavailable_database_dependency",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/missing_persistent_storage",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/plain_HTTP_domain_wants_no_certificate",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/missing_certificate_for_an_HTTPS_domain",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/no_container_for_the_live_release",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/stopped_live_container",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation/unhealthy_live_container",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestDiagnosisClaimsAreExactlyPinnedPerObservation",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans/node_static",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans/dockerfile",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans/python",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCandidateRuntimeActivationAndRetirementAreAtomicAndImmutable",
+      "Action": "pass",
+      "Elapsed": 7.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans/static",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans/node_npm",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans/go",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/disabled",
+      "Action": "pass",
+      "Elapsed": 6.92
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCloneCandidateReleaseReusesOnlyAvailableImmutableArtifacts",
+      "Action": "pass",
+      "Elapsed": 7.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogRoutesRefuseABadExpressionUpFront",
+      "Action": "pass",
+      "Elapsed": 2.55
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogRoutesRefusePathsOutsideTheRoots",
+      "Action": "pass",
+      "Elapsed": 2.11
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestStopFirstExecutorNeverStartsStatefulCandidateConcurrently",
+      "Action": "pass",
+      "Elapsed": 7.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestRestartReusesLiveRuntimeWithoutCreatingARelease",
+      "Action": "pass",
+      "Elapsed": 4.11
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCancellationAfterCandidateStartRestoresStopFirstRuntime",
+      "Action": "pass",
+      "Elapsed": 4.36
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestArtifactRetentionProtectsRollbackSetPinsSharedDigestsAndLeases",
+      "Action": "pass",
+      "Elapsed": 4.1
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/unavailable",
+      "Action": "pass",
+      "Elapsed": 3.89
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogRetentionAnswersForAFile",
+      "Action": "pass",
+      "Elapsed": 2.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLogTargetParsing",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestJournalPriorityNarrowing",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDockerLineSplitsTheTimestampOut",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/warning",
+      "Action": "pass",
+      "Elapsed": 1.54
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/passed",
+      "Action": "pass",
+      "Elapsed": 1.34
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct",
+      "Action": "pass",
+      "Elapsed": 13.68
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#0",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#1",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#2",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#5",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#6",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#7",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#8",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#9",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#10",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv/seed#11",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseDotenv",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#0",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#1",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#2",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#5",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#6",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#7",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#8",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference/seed#9",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzParseVariableReference",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#0",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#1",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#2",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#5",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#6",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#7",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#8",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#9",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference/seed#10",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzNormalizeImageReference",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#0",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#1",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#2",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#5",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets/seed#6",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzRedactSecrets",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#0",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#1",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#2",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#5",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#6",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#7",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#8",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#9",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath/seed#10",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzSafeRelativePath",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#0",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#1",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#2",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#3",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#4",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#5",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID/seed#6",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "FuzzOperationTargetReleaseID",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPackageReadRoutesAnswerOnAnyHost",
+      "Action": "pass",
+      "Elapsed": 9.88
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPackageSearchIsReadableByEveryRole",
+      "Action": "pass",
+      "Elapsed": 2.4
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestInstallingAndRemovingNeedSystemAdmin",
+      "Action": "pass",
+      "Elapsed": 2.14
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestOnlyAPurgeAsksForTheTypedPhrase",
+      "Action": "pass",
+      "Elapsed": 2.31
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestInstallRefusesWhatIsNotAPackageName",
+      "Action": "pass",
+      "Elapsed": 1.9
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPackageUpdatesReportNamesTheManager",
+      "Action": "pass",
+      "Elapsed": 3.87
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestProcessListReportsTheWholeInventoryBehindAFilter",
+      "Action": "pass",
+      "Elapsed": 3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestOriginalProcessListResponseRemainsAnArray",
+      "Action": "pass",
+      "Elapsed": 2.92
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestProcessIdentityRefusesAReusedPID",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestProcessPriorityNeedsSystemAdmin",
+      "Action": "pass",
+      "Elapsed": 2.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestProcessPriorityRequiresANiceValue",
+      "Action": "pass",
+      "Elapsed": 2.14
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/security/posture",
+      "Action": "pass",
+      "Elapsed": 2.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/security/services",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/firewall/",
+      "Action": "pass",
+      "Elapsed": 0.08
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/firewall/apps",
+      "Action": "pass",
+      "Elapsed": 0.12
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/connections",
+      "Action": "pass",
+      "Elapsed": 0.07
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/network",
+      "Action": "pass",
+      "Elapsed": 0.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/ssh/config",
+      "Action": "pass",
+      "Elapsed": 0.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/ssh-sessions",
+      "Action": "pass",
+      "Elapsed": 0.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/ssh-sessions/",
+      "Action": "pass",
+      "Elapsed": 0.14
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/fail2ban/",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/proxy/streams/",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/proxy/auth-files/",
+      "Action": "pass",
+      "Elapsed": 0.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost//api/v1/certificates/dns-providers",
+      "Action": "pass",
+      "Elapsed": 0.03
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSecurityReadRoutesSurviveABareHost",
+      "Action": "pass",
+      "Elapsed": 4.63
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPostureAnswersOnABareHost",
+      "Action": "pass",
+      "Elapsed": 4.33
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestServiceCatalogueIsServed",
+      "Action": "pass",
+      "Elapsed": 2.15
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNetworkProbeRejectsABadTarget",
+      "Action": "pass",
+      "Elapsed": 2.25
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNetworkProbeExtendedTools",
+      "Action": "pass",
+      "Elapsed": 2.17
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNetworkProbeResolvesLocalhost",
+      "Action": "pass",
+      "Elapsed": 1.86
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNewDestructiveRoutesDemandTheTypedPhrase//api/v1/firewall/reset",
+      "Action": "pass",
+      "Elapsed": 2.05
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNewDestructiveRoutesDemandTheTypedPhrase//api/v1/firewall/policy",
+      "Action": "pass",
+      "Elapsed": 2.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNewDestructiveRoutesDemandTheTypedPhrase//api/v1/ssh/config",
+      "Action": "pass",
+      "Elapsed": 2.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNewDestructiveRoutesDemandTheTypedPhrase//api/v1/certificates/revoke",
+      "Action": "pass",
+      "Elapsed": 1.9
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNewDestructiveRoutesDemandTheTypedPhrase",
+      "Action": "pass",
+      "Elapsed": 7.96
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRecoverableSecurityRoutesDoNotDemandAPhrase//api/v1/proxy/sites/example",
+      "Action": "pass",
+      "Elapsed": 2.23
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRecoverableSecurityRoutesDoNotDemandAPhrase//api/v1/proxy/streams/example",
+      "Action": "pass",
+      "Elapsed": 1.94
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRecoverableSecurityRoutesDoNotDemandAPhrase//api/v1/proxy/auth-files/staging",
+      "Action": "pass",
+      "Elapsed": 2.01
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRecoverableSecurityRoutesDoNotDemandAPhrase//api/v1/ssh-sessions/4242/disconnect",
+      "Action": "pass",
+      "Elapsed": 2.1
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRecoverableSecurityRoutesDoNotDemandAPhrase",
+      "Action": "pass",
+      "Elapsed": 8.28
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDestructiveRoutesShareATighterBudget",
+      "Action": "pass",
+      "Elapsed": 3.69
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSSHApplyRefusesACertainLockout",
+      "Action": "pass",
+      "Elapsed": 2.04
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSitePreviewRendersNginx",
+      "Action": "pass",
+      "Elapsed": 2.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSitePreviewRejectsAnInjectedDirective",
+      "Action": "pass",
+      "Elapsed": 1.83
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSiteSpecRoundTripsThroughTheAPI",
+      "Action": "pass",
+      "Elapsed": 1.8
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestCertbotReportsItselfUnavailable",
+      "Action": "skip",
+      "Elapsed": 2.95
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTLSScanReportsAnUnreachableHost",
+      "Action": "pass",
+      "Elapsed": 2.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestReadonlyCannotUseServerSideDomainProbes",
+      "Action": "pass",
+      "Elapsed": 2.18
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestReadonlyCannotChangeSSH",
+      "Action": "pass",
+      "Elapsed": 4.02
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestUpdatesReportIsHonestAboutTheManager",
+      "Action": "pass",
+      "Elapsed": 3.65
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFirewallRuleEditIsMountedAndNeedsNoPhrase",
+      "Action": "pass",
+      "Elapsed": 2.32
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSessionListAndDisconnectCoexist",
+      "Action": "pass",
+      "Elapsed": 2.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestInstallingAnUpdateDemandsTheVersionBeTyped",
+      "Action": "pass",
+      "Elapsed": 1.39
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestInstallRefusesAVersionThatHasMovedOn",
+      "Action": "pass",
+      "Elapsed": 1.38
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestOnlyAnAdminCanInstallAnUpdate/readonly",
+      "Action": "pass",
+      "Elapsed": 1.6
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestOnlyAnAdminCanInstallAnUpdate/limited",
+      "Action": "pass",
+      "Elapsed": 1.51
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestOnlyAnAdminCanInstallAnUpdate",
+      "Action": "pass",
+      "Elapsed": 3.11
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAnInstallWithNothingToRebuildSaysSo",
+      "Action": "pass",
+      "Elapsed": 1.26
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestHealthURLIsSomethingTheUpdaterCanActuallyAsk",
+      "Action": "pass",
+      "Elapsed": 1.3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestMetricsHistoryWindow",
+      "Action": "pass",
+      "Elapsed": 1.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestMetricsHistoryRefusesAnUnreadableWindow",
+      "Action": "pass",
+      "Elapsed": 1.2
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestMetricsHistorySaysWhenItIsNotRecording",
+      "Action": "pass",
+      "Elapsed": 1.28
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalSizeQuery",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalAttachSynchronizesPTYBeforeRawIO",
+      "Action": "pass",
+      "Elapsed": 1.74
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDirectPTYAttachRetainsBestEffortShellHistory",
+      "Action": "pass",
+      "Elapsed": 1.69
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSessionCreatedInAFolderIsInThatFolderImmediately",
+      "Action": "pass",
+      "Elapsed": 1.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPartialMetaUpdateKeepsTheRest",
+      "Action": "pass",
+      "Elapsed": 1.26
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRenamingAFolderMovesItsSessions",
+      "Action": "pass",
+      "Elapsed": 1.3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDeletingAFolderUnfilesItsSessions",
+      "Action": "pass",
+      "Elapsed": 1.41
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFolderNamesAreUnique",
+      "Action": "pass",
+      "Elapsed": 1.4
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFolderOrderIsKept",
+      "Action": "pass",
+      "Elapsed": 1.37
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDirectPTYWindowsCanBeNamedReorderedAndClosed",
+      "Action": "pass",
+      "Elapsed": 1.3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalClipboardUploadUsesSessionDirectoryAndIgnoresMultipartPath",
+      "Action": "pass",
+      "Elapsed": 1.35
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalClipboardUploadRejectsUnsupportedTypeAndMissingSession",
+      "Action": "pass",
+      "Elapsed": 1.21
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalClipboardUploadRejectsOversizedRequest",
+      "Action": "pass",
+      "Elapsed": 2.34
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalClipboardUploadEnforcesDashboardSessionOwnership",
+      "Action": "pass",
+      "Elapsed": 1.51
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestPM2MetadataCannotAuthorizeAnExternalLogPath",
+      "Action": "pass",
+      "Elapsed": 2.59
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestUnifiedPM2LogIdentityPreservesDaemonAndProcess",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestRedisCursorAcceptsFullUnsignedRange",
+      "Action": "pass",
+      "Elapsed": 0
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDegradedInstallServesEveryDeploymentReadWithNamedUnavailability",
+      "Action": "pass",
+      "Elapsed": 2.44
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestUpgradedLegacyProjectKeepsItsHookEnvironmentAndHistory",
+      "Action": "pass",
+      "Elapsed": 2.03
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestReadOnlyAccountCannotChangeAnyDeploymentState",
+      "Action": "pass",
+      "Elapsed": 1.85
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestReleaseCatalogueLoadsAndEveryEntryNamesItsLicence",
+      "Action": "pass",
+      "Elapsed": 1.86
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestEveryAPIRouteIsBehindTheNetworkAllowlist",
+      "Action": "pass",
+      "Elapsed": 1.33
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestNoAPIRouteAnswersWithoutAuthentication",
+      "Action": "pass",
+      "Elapsed": 1.31
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestTerminalClipboardUploadRequiresAuthentication",
+      "Action": "pass",
+      "Elapsed": 1.3
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestHealthzIsReachable",
+      "Action": "pass",
+      "Elapsed": 1.71
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestSessionMutationsRequireCSRFHeaderAndJSONContentType",
+      "Action": "pass",
+      "Elapsed": 1.79
+    },
+    {
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestDiskUsageRespectsConfiguredFileRoots",
+      "Action": "pass",
+      "Elapsed": 2.01
+    }
+  ],
+  "failure_markers": [
+    {
+      "Time": "2026-09-16T01:24:58.100046958Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetReadStaysWithinItsBudgetAtReferenceScale",
+      "Output": "--- FAIL: TestFleetReadStaysWithinItsBudgetAtReferenceScale (13.81s)\n"
+    }
+  ],
+  "skip_output": [
+    {
+      "Time": "2026-09-16T01:23:02.624627924Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC5ActivationAdapters",
+      "Output": "--- SKIP: TestLiveC5ActivationAdapters (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:12.41107715Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDeploymentWebroot",
+      "Output": "--- SKIP: TestLiveDeploymentWebroot (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:12.427496655Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyProvisionAndRestart",
+      "Output": "--- SKIP: TestLiveDockerCaddyProvisionAndRestart (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:12.427621289Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc",
+      "Test": "TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute",
+      "Output": "--- SKIP: TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:13.625427158Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestLiveC4ArtifactAdapters",
+      "Output": "--- SKIP: TestLiveC4ArtifactAdapters (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:13.6264041Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCertificateStepSkipsAndReusesWithoutOrdering",
+      "Output": "=== RUN   TestCertificateStepSkipsAndReusesWithoutOrdering\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:13.626439278Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestCertificateStepSkipsAndReusesWithoutOrdering",
+      "Output": "--- PASS: TestCertificateStepSkipsAndReusesWithoutOrdering (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:23.586893322Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveDeploymentDatabaseConnection",
+      "Output": "--- SKIP: TestLiveDeploymentDatabaseConnection (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:23:50.878484214Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/unavailable",
+      "Output": "--- PASS: TestAuthoriseSpecInspectsNamedVolumeBackingForLimited/unavailable (1.26s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:23.196562029Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIMongo",
+      "Output": "    handlers_db_live_test.go:102: mongodb unreachable: server selection error: server selection timeout, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:1, Type: Unknown, Last error: dial tcp 127.0.0.1:1: connect: connection refused }, ] }\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:23.208495932Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIMongo",
+      "Output": "--- SKIP: TestLiveAPIMongo (9.31s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:26.724233869Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIRedis",
+      "Output": "    handlers_db_live_test.go:212: redis unreachable: dial tcp 127.0.0.1:1: connect: connection refused\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:26.744734351Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIRedis",
+      "Output": "--- SKIP: TestLiveAPIRedis (3.53s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:28.542262533Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIPostgres",
+      "Output": "    handlers_db_live_test.go:280: postgres unreachable: failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:28.560507113Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIPostgres",
+      "Output": "--- SKIP: TestLiveAPIPostgres (1.81s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:30.093874737Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIDeveloperSurface",
+      "Output": "    handlers_db_live_test.go:357: postgres unreachable: failed to connect to `user=audit database=audit`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused\n"
+    },
+    {
+      "Time": "2026-09-16T01:24:30.113338384Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestLiveAPIDeveloperSurface",
+      "Output": "--- SKIP: TestLiveAPIDeveloperSurface (1.55s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:25:17.150780736Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFirstIPv4SkipsUnusableAddresses",
+      "Output": "=== RUN   TestFirstIPv4SkipsUnusableAddresses\n"
+    },
+    {
+      "Time": "2026-09-16T01:25:17.15078479Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestFirstIPv4SkipsUnusableAddresses",
+      "Output": "--- PASS: TestFirstIPv4SkipsUnusableAddresses (0.00s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:26:19.249331705Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/deploy",
+      "Test": "TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/unavailable",
+      "Output": "--- PASS: TestFleetKeepsDisabledUnavailableWarningAndPassedHealthDistinct/unavailable (3.89s)\n"
+    },
+    {
+      "Time": "2026-09-16T01:27:41.23394505Z",
+      "Action": "output",
+      "Package": "github.com/Wayy01/Just-Dashboard/backend/internal/api",
+      "Test": "TestCertbotReportsItselfUnavailable",
+      "Output": "--- SKIP: TestCertbotReportsItselfUnavailable (2.95s)\n"
+    }
+  ],
+  "non_json_output": []
+}

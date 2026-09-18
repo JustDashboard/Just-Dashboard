@@ -14,6 +14,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { rowReveal } from "@/components/icon-action"
+import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
 const clean = (p: string) => p.replace(/\/+$/, "") || "/"
 
@@ -30,16 +32,23 @@ const clean = (p: string) => p.replace(/\/+$/, "") || "/"
  * The separators are not decoration either: each one lists the folders beside
  * the crumb after it, which is how you get from `/var/www/site-a/public` to
  * `site-b` without walking back up three levels.
+ *
+ * Every crumb is also a drop target, so a row dragged up onto `www` lands in
+ * /var/www — the one move a tree beside the listing does not make easy.
  */
 export function PathBar({
   path,
   home,
   onNavigate,
+  onDropPaths,
+  onDropFiles,
   className,
 }: {
   path: string
   home?: string
   onNavigate: (path: string) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
   className?: string
 }) {
   const [editing, setEditing] = useState(false)
@@ -49,6 +58,9 @@ export function PathBar({
       if (event.key.toLowerCase() !== "l" || !(event.metaKey || event.ctrlKey) || event.shiftKey) {
         return
       }
+      // A dialog open anywhere owns the keyboard; the editor's own Ctrl+L
+      // must not flip a path bar the operator cannot see into a text field.
+      if (document.querySelector("[role='dialog']")) return
       event.preventDefault()
       setEditing(true)
     }
@@ -101,16 +113,14 @@ export function PathBar({
         <SiblingMenu dir="/" onNavigate={onNavigate} />
         {crumbs.map((crumb, i) => (
           <div key={crumb.href} className="flex shrink-0 items-center">
-            <button
-              type="button"
-              className={cn(
-                "rounded-md px-1.5 py-0.5 text-[13px] transition-colors hover:bg-accent hover:text-accent-foreground",
-                i === crumbs.length - 1 && "font-medium",
-              )}
-              onClick={() => onNavigate(crumb.href)}
-            >
-              {crumb.label}
-            </button>
+            <Crumb
+              href={crumb.href}
+              label={crumb.label}
+              last={i === crumbs.length - 1}
+              onNavigate={onNavigate}
+              onDropPaths={onDropPaths}
+              onDropFiles={onDropFiles}
+            />
             <SiblingMenu dir={crumb.href} onNavigate={onNavigate} />
           </div>
         ))}
@@ -121,7 +131,7 @@ export function PathBar({
           <Button
             size="icon-xs"
             variant="ghost"
-            className="shrink-0 text-muted-foreground opacity-0 group-hover/path:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+            className={cn("shrink-0 text-muted-foreground", rowReveal("path"))}
             onClick={() => setEditing(true)}
             aria-label="Type a path"
           >
@@ -131,6 +141,39 @@ export function PathBar({
         <TooltipContent>Type a path (Ctrl+L)</TooltipContent>
       </Tooltip>
     </div>
+  )
+}
+
+function Crumb({
+  href,
+  label,
+  last,
+  onNavigate,
+  onDropPaths,
+  onDropFiles,
+}: {
+  href: string
+  label: string
+  last: boolean
+  onNavigate: (path: string) => void
+  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
+  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+}) {
+  // The folder being browsed is not a target for its own rows.
+  const drop = useDropTarget({ dir: last ? null : href, onDropPaths, onDropFiles })
+  return (
+    <button
+      type="button"
+      {...drop.handlers}
+      className={cn(
+        "rounded-md px-1.5 py-0.5 text-body transition-colors hover:bg-accent hover:text-accent-foreground",
+        last && "font-medium",
+        drop.over && "bg-wash-brand",
+      )}
+      onClick={() => onNavigate(href)}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -157,7 +200,7 @@ function SiblingMenu({ dir, onNavigate }: { dir: string; onNavigate: (path: stri
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-accent hover:text-accent-foreground"
           aria-label={`Folders in ${dir}`}
         >
           <ChevronRight className="size-3.5" />
@@ -286,7 +329,7 @@ function PathInput({
         placeholder="/var/www"
         className="h-7 pr-16 font-mono text-xs"
       />
-      <span className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 text-[10px] text-muted-foreground">
+      <span className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 text-micro text-muted-foreground">
         Tab completes
         <CornerDownLeft className="size-3" />
       </span>
@@ -301,7 +344,7 @@ function PathInput({
               type="button"
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-xs",
-                i === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+                i === highlight ? "bg-accent text-accent-foreground" : "hover:bg-menu-hover",
               )}
               onMouseEnter={() => setHighlight(i)}
               onClick={() => (entry.isDir ? accept(entry) : onSubmit(entry.path))}

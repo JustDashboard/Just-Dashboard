@@ -1,0 +1,35 @@
+{
+  "id": "uptime-kuma",
+  "version": "1.0.0",
+  "name": "Uptime Kuma",
+  "category": "http",
+  "profile": "web",
+  "description": "Self-hosted uptime monitoring with a web dashboard, notifications and status pages.",
+  "iconId": "monitoring",
+  "docsUrl": "https://github.com/louislam/uptime-kuma/wiki",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/louislam/uptime-kuma",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "louislam/uptime-kuma:1.23.16", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Where the dashboard will be reachable." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 3001, "protocol": "tcp", "purpose": "The monitoring dashboard", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/app/data", "purpose": "Monitors, history and notification settings", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 512, "minMemoryMb": 256 },
+  "checks": [
+    { "name": "Dashboard answers", "kind": "http", "phase": "readiness", "required": true, "path": "/", "timeoutSeconds": 60 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "Uptime Kuma migrates its database on first start after an upgrade." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "domain": "status.example.test" }, "digest": "sha256:e741140fc9dcd18812936f1ef22427ff71acb1aada1962ad4224ca8f67c4c2bb" }]
+}

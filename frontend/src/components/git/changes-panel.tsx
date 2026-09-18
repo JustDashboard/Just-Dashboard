@@ -2,28 +2,40 @@
 
 import { useState } from "react"
 import {
+  Archive,
   Check,
   CloudUpload,
   GitCommit,
   Minus,
   Plus,
   RotateCounterClockwise,
+  Trash,
+  Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
+import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { describeChange, gitLetter, gitStyle, gitTone } from "@/lib/git-status"
-import type { GitFileChange, GitResult, GitStatus } from "@/lib/types"
+import { describeChange, gitLetter, gitStyle, gitTone, type GitSide } from "@/lib/git-status"
+import type { GitFileChange, GitResult, GitStash, GitStatus } from "@/lib/types"
 import type { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { GitExplain } from "@/components/git/help"
+import { IdentityDialog } from "@/components/git/identity-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
+import type { GitRun } from "@/components/git/run"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-
-type GitRun = (label: string, fn: () => Promise<GitResult>) => Promise<GitResult>
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 /**
  * The staging-and-commit half of the workspace, written to be legible to
@@ -31,45 +43,55 @@ type GitRun = (label: string, fn: () => Promise<GitResult>) => Promise<GitResult
  * be committed, and what is not yet chosen — and a commit box that spells the
  * step out. Each file carries the one or two actions that make sense for where
  * it is, and clicking its name shows the diff in the preview column.
+ *
+ * A file staged and then edited again appears in both lists, once per side,
+ * with the letter for that side: it used to appear once, under "ready to
+ * commit", and the second edit was invisible until the commit went out
+ * without it. Stashes sit at the top, because "where did my changes go" is
+ * answered here or nowhere.
  */
 export function ChangesPanel({
   repoPath,
   status,
+  stashes,
   busy,
   canControl,
   canDestruct,
   run,
   confirm,
-  onSelectDiff,
-  activePath,
-  committer,
+  onSelect,
+  active,
+  onChanged,
 }: {
   repoPath: string
   status: ReturnType<typeof usePoll<GitStatus>>
+  stashes: GitStash[]
   busy?: string
   canControl: boolean
   canDestruct: boolean
   run: GitRun
   confirm: (req: ConfirmRequest) => void
-  onSelectDiff: (p: GitPreview) => void
-  activePath?: string
-  /** The identity git will record, when the page knows it. */
-  committer?: string
+  onSelect: (p: GitPreview) => void
+  /** What the preview column is showing, so the row that opened it reads as chosen. */
+  active?: string
+  onChanged: () => void
 }) {
   const [message, setMessage] = useState("")
+  const [amend, setAmend] = useState(false)
+  const [identityOpen, setIdentityOpen] = useState(false)
   const q = { path: repoPath }
 
-  const showDiff = async (file: GitFileChange, staged: boolean) => {
+  const showDiff = async (file: GitFileChange, side: GitSide) => {
     try {
       const res = await get<{ diff: string }>("/git/diff", {
         path: repoPath,
         file: file.path,
-        staged: staged ? "true" : undefined,
+        staged: side === "staged" ? "true" : undefined,
       })
-      onSelectDiff({
+      onSelect({
         kind: "diff",
         title: file.path,
-        subtitle: staged ? "staged — ready to commit" : `working tree — ${file.label}`,
+        subtitle: side === "staged" ? "staged — ready to commit" : `working tree — ${file.label}`,
         body: res.diff || "No textual diff (binary file, or no line changes).",
         singleFile: true,
       })
@@ -89,50 +111,69 @@ export function ChangesPanel({
 
   const commit = async (thenPush: boolean) => {
     const msg = message.trim()
-    if (!msg) {
+    if (!msg && !amend) {
       notify.error("Write a short message describing your changes first")
       return
     }
     try {
-      await run("Committed", () => post<GitResult>("/git/commit", { message: msg }, { query: q }))
+      await run("Committed", () =>
+        post<GitResult>("/git/commit", { message: msg, amend }, { query: q }),
+      )
       setMessage("")
+      setAmend(false)
       if (thenPush) await run("Pushed", () => post<GitResult>("/git/push", undefined, { query: q }))
     } catch {
       /* run already surfaced it */
     }
   }
 
-  const discard = (file: GitFileChange) =>
+  const discard = (file: GitFileChange) => {
+    const untracked = file.label === "untracked"
     confirm({
-      title: `Discard changes to ${file.path.split("/").pop()}`,
+      title: untracked
+        ? `Delete ${file.path.split("/").pop()}`
+        : `Discard changes to ${file.path.split("/").pop()}`,
       phrase: "discard changes",
-      confirmLabel: "Discard",
+      confirmLabel: untracked ? "Delete" : "Discard",
       description: (
         <p className="text-destructive">
-          Puts <span className="font-mono break-all">{file.path}</span> back the way it was at the
-          last commit. The current edits are not recoverable.
+          {untracked ? (
+            <>
+              <span className="font-mono break-all">{file.path}</span> has never been committed, so
+              discarding it deletes it. It is not recoverable.
+            </>
+          ) : (
+            <>
+              Puts <span className="font-mono break-all">{file.path}</span> back the way it was at
+              the last commit. The current edits are not recoverable.
+            </>
+          )}
         </p>
       ),
       action: async (c) => {
         await post("/git/discard", { file: file.path }, { confirm: c, query: q })
-        status.refresh()
+        onChanged()
       },
     })
+  }
 
-  const discardAll = () =>
+  const discardAll = (clean: boolean) =>
     confirm({
-      title: "Discard every change",
+      title: clean ? "Discard everything" : "Discard every change",
       phrase: "reset hard",
       confirmLabel: "Discard all",
       description: (
         <p className="text-destructive">
-          Every tracked file is put back to the last commit. Untracked files are left alone. This
-          cannot be undone.
+          Every tracked file is put back to the last commit.{" "}
+          {clean
+            ? "Untracked files are deleted as well."
+            : "Untracked files are left alone."}{" "}
+          This cannot be undone.
         </p>
       ),
       action: async (c) => {
-        await post("/git/reset", { ref: "HEAD", hard: true }, { confirm: c, query: q })
-        status.refresh()
+        await post("/git/reset", { ref: "HEAD", hard: true, clean }, { confirm: c, query: q })
+        onChanged()
       },
     })
 
@@ -141,12 +182,48 @@ export function ChangesPanel({
 
   const files = status.data?.files ?? []
   const staged = files.filter((f) => f.staged)
-  const unstaged = files.filter((f) => !f.staged)
-  const canCommit = staged.length > 0 && message.trim().length > 0
+  const unstaged = files.filter((f) => f.unstaged)
+  const conflicts = files.filter((f) => f.label === "conflicted").length
+  const identity = status.data?.identity
+  const hasIdentity = Boolean(identity?.name && identity?.email)
+  const canCommit =
+    staged.length > 0 && (message.trim().length > 0 || amend) && conflicts === 0 && hasIdentity
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
+        {stashes.length > 0 && (
+          <Group label="Set aside" explain="stash" count={stashes.length}>
+            {stashes.map((s) => (
+              <StashRow
+                key={s.sha}
+                stash={s}
+                active={active === `stash:${s.sha}`}
+                onClick={() => onSelect({ kind: "stash", stash: s })}
+                actions={
+                  canControl && (
+                    <RowAction
+                      label="Pop this stash"
+                      disabled={!!busy}
+                      onClick={() =>
+                        void run("Stash popped", () =>
+                          post<GitResult>(
+                            "/git/stash/apply",
+                            { index: s.index, pop: true },
+                            { query: q },
+                          ),
+                        ).catch(() => {})
+                      }
+                    >
+                      <RotateCounterClockwise className="size-3.5" />
+                    </RowAction>
+                  )
+                }
+              />
+            ))}
+          </Group>
+        )}
+
         {files.length === 0 ? (
           <div className="p-4">
             <EmptyState
@@ -162,7 +239,6 @@ export function ChangesPanel({
                 label="Ready to commit"
                 explain="stage"
                 count={staged.length}
-                tone="success"
                 action={
                   canControl && (
                     <GroupAction
@@ -179,8 +255,9 @@ export function ChangesPanel({
                   <FileRow
                     key={"s" + f.path}
                     file={f}
-                    active={activePath === f.path}
-                    onClick={() => showDiff(f, true)}
+                    side="staged"
+                    active={active === `staged:${f.path}`}
+                    onClick={() => showDiff(f, "staged")}
                     actions={
                       canControl && (
                         <RowAction
@@ -202,18 +279,49 @@ export function ChangesPanel({
                 label="Changes"
                 explain="changes"
                 count={unstaged.length}
-                tone="warning"
                 action={
                   <>
                     {canDestruct && (
-                      <GroupAction
-                        danger
-                        disabled={!!busy}
-                        hint="Restore every tracked file to HEAD — untracked files are left alone"
-                        onClick={discardAll}
-                      >
-                        Discard all
-                      </GroupAction>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            disabled={!!busy}
+                            className="rounded-sm px-1.5 py-0.5 text-hint text-destructive transition-colors hover:bg-wash-danger disabled:opacity-40"
+                          >
+                            Discard all
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-72">
+                          <DropdownMenuItem
+                            className="items-start gap-2.5 py-1.5"
+                            onSelect={() => discardAll(false)}
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-body leading-tight font-medium">
+                                Discard tracked changes
+                              </span>
+                              <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
+                                Every edited file goes back to the last commit. New files stay.
+                              </span>
+                            </span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            className="items-start gap-2.5 py-1.5"
+                            onSelect={() => discardAll(true)}
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-body leading-tight font-medium">
+                                Discard everything
+                              </span>
+                              <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
+                                Edited files go back, and new files are deleted too.
+                              </span>
+                            </span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                     {canControl && (
                       <GroupAction
@@ -231,21 +339,26 @@ export function ChangesPanel({
                   <FileRow
                     key={"u" + f.path}
                     file={f}
-                    active={activePath === f.path}
-                    onClick={() => showDiff(f, false)}
+                    side="unstaged"
+                    active={active === `unstaged:${f.path}`}
+                    onClick={() => showDiff(f, "unstaged")}
                     actions={
                       <>
-                        {canDestruct && f.label !== "untracked" && (
+                        {canDestruct && f.label !== "conflicted" && (
                           <RowAction
-                            label="Discard"
+                            label={f.label === "untracked" ? "Delete" : "Discard"}
                             className="text-destructive"
                             disabled={!!busy}
                             onClick={() => discard(f)}
                           >
-                            <RotateCounterClockwise className="size-3.5" />
+                            {f.label === "untracked" ? (
+                              <Trash className="size-3.5" />
+                            ) : (
+                              <RotateCounterClockwise className="size-3.5" />
+                            )}
                           </RowAction>
                         )}
-                        {canControl && (
+                        {canControl && f.label !== "conflicted" && (
                           <RowAction
                             label="Stage"
                             disabled={!!busy}
@@ -266,6 +379,13 @@ export function ChangesPanel({
 
       {canControl && (
         <div className="shrink-0 space-y-2 border-t border-hairline bg-surface-header/60 p-3">
+          {conflicts > 0 && (
+            <p className="flex items-center gap-1.5 text-hint text-destructive">
+              <Warning className="size-3.5 shrink-0" />
+              {conflicts} conflicted file{conflicts === 1 ? "" : "s"} must be resolved in a shell
+              before anything can be committed.
+            </p>
+          )}
           <Textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -275,15 +395,42 @@ export function ChangesPanel({
                 void commit(false)
               }
             }}
-            placeholder="Describe what you changed…"
+            placeholder={
+              amend ? "New message — leave empty to keep the old one" : "Describe what you changed…"
+            }
             rows={3}
-            className="resize-none font-mono text-[12px]"
+            className="resize-none font-mono text-xs"
           />
-          <div className="flex items-center gap-2">
-            {committer && (
-              <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                as {committer}
-              </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-hint text-muted-foreground">
+              <Checkbox
+                checked={amend}
+                onCheckedChange={(v) => setAmend(Boolean(v))}
+                aria-label="Amend the previous commit"
+                className="size-3.5"
+              />
+              Amend
+            </label>
+            {/* Who the commit is recorded as. Missing is said plainly, with
+                the fix beside it, because git's own refusal arrives after
+                the message is written — the worst moment to learn it. */}
+            {hasIdentity ? (
+              <button
+                type="button"
+                onClick={() => setIdentityOpen(true)}
+                className="min-w-0 truncate text-left text-hint text-muted-foreground hover:text-foreground hover:underline"
+                title={`${identity?.name} <${identity?.email}> — change who commits are recorded as`}
+              >
+                as {identity?.name}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIdentityOpen(true)}
+                className="min-w-0 truncate text-left text-hint text-warning hover:underline"
+              >
+                git has no name and address here — set them
+              </button>
             )}
             <span className="flex-1" />
             <Tooltip>
@@ -307,6 +454,7 @@ export function ChangesPanel({
                 <Button
                   size="sm"
                   disabled={!!busy || !canCommit}
+                  pending={busy === "Committed"}
                   onClick={() => void commit(false)}
                 >
                   <GitCommit className="size-3.5" />
@@ -316,41 +464,48 @@ export function ChangesPanel({
               <TooltipContent>Commit the staged changes (Ctrl+Enter)</TooltipContent>
             </Tooltip>
           </div>
-          {staged.length === 0 && (
-            <p className="text-[11px] text-muted-foreground">
+          {staged.length === 0 && files.length > 0 && (
+            <p className="text-hint text-muted-foreground">
               Stage at least one change above before committing.
             </p>
           )}
         </div>
       )}
+      <IdentityDialog
+        open={identityOpen}
+        onOpenChange={setIdentityOpen}
+        repoPath={repoPath}
+        identity={identity}
+        onSaved={onChanged}
+      />
     </div>
   )
 }
 
+/**
+ * A titled run of rows. The title is an eyebrow with its count and its
+ * definition one hover away; the tone that used to sit in a dot before it
+ * said nothing the title did not.
+ */
 function Group({
   label,
   explain,
   count,
-  tone,
   action,
   children,
 }: {
   label: string
   explain: string
   count: number
-  tone: "success" | "warning"
   action?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <div>
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-hairline bg-surface-header/95 px-3 py-1.5 backdrop-blur">
-        <span
-          className={cn("size-1.5 rounded-full", tone === "success" ? "bg-success" : "bg-warning")}
-        />
-        <span className="text-[12px] font-medium">{label}</span>
+      <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
+        <span className="eyebrow">{label}</span>
+        <span className="numeric text-hint text-muted-foreground">{count}</span>
         <GitExplain name={explain} />
-        <span className="numeric text-[11px] text-muted-foreground">{count}</span>
         <span className="flex-1" />
         {action}
       </div>
@@ -359,50 +514,93 @@ function Group({
   )
 }
 
+/**
+ * One changed file: its status letter in the status's own colour, and its
+ * path in the ordinary ink. The row used to carry a tinted band and a coloured
+ * edge as well as the coloured letter and a coloured path — four ways of
+ * saying "modified" on a list in which every row is, by definition, modified.
+ */
 function FileRow({
   file,
+  side,
   active,
   onClick,
   actions,
 }: {
   file: GitFileChange
+  side: GitSide
   active?: boolean
   onClick: () => void
   actions?: React.ReactNode
 }) {
-  const tone = gitTone(file)
+  const tone = gitTone(file, side)
   return (
     <div
       className={cn(
-        "group relative flex min-w-0 items-center gap-2 bg-(--git-tint) px-3 py-1.5",
-        "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-['']",
-        "hover:bg-[var(--row-hover)]",
-        active && "bg-primary/10",
+        "group flex min-w-0 items-center gap-2 py-1 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+        active && "bg-accent",
       )}
       style={gitStyle(tone)}
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="w-5 shrink-0 text-center font-mono text-[10px] text-(--git-colour)">
-            {gitLetter(file)}
+          <span className="w-3 shrink-0 text-center font-mono text-micro font-medium text-(--git-colour)">
+            {gitLetter(file, side)}
           </span>
         </TooltipTrigger>
-        <TooltipContent>{describeChange(file)}</TooltipContent>
+        <TooltipContent>{describeChange(file, side)}</TooltipContent>
       </Tooltip>
-      {/* The name carries no tooltip — see the same row in the terminal's git
-          tab for why. */}
+      {/* No tooltip on the name: the row is a list of paths and clicking one
+          to see its diff is the only thing it does. */}
       <button
+        type="button"
         onClick={onClick}
+        aria-pressed={active}
         className={cn(
-          "min-w-0 flex-1 truncate text-left font-mono text-[12px] text-(--git-colour) hover:underline",
-          file.label === "deleted" && "line-through",
+          "min-w-0 flex-1 truncate text-left font-mono text-xs focus-ring-inset hover:underline",
+          file.label === "deleted" && "text-muted-foreground line-through",
+          file.label === "conflicted" && "text-(--git-colour)",
         )}
       >
         {file.path}
       </button>
-      <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-        {actions}
-      </div>
+      <RowActions className="gap-0">{actions}</RowActions>
+    </div>
+  )
+}
+
+function StashRow({
+  stash,
+  active,
+  onClick,
+  actions,
+}: {
+  stash: GitStash
+  active?: boolean
+  onClick: () => void
+  actions?: React.ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "group flex min-w-0 items-center gap-2 py-1 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+        active && "bg-accent",
+      )}
+    >
+      <Archive className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className="min-w-0 flex-1 truncate text-left text-xs focus-ring-inset hover:underline"
+      >
+        {stash.message}
+        <span className="text-muted-foreground">
+          {stash.branch ? ` · ${stash.branch}` : ""}
+          {stash.at ? ` · ${relativeTime(stash.at)}` : ""}
+        </span>
+      </button>
+      <RowActions className="gap-0">{actions}</RowActions>
     </div>
   )
 }
@@ -449,13 +647,11 @@ function RowAction({
  */
 function GroupAction({
   disabled,
-  danger,
   hint,
   onClick,
   children,
 }: {
   disabled?: boolean
-  danger?: boolean
   hint: string
   onClick: () => void
   children: React.ReactNode
@@ -464,14 +660,10 @@ function GroupAction({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           disabled={disabled}
           onClick={onClick}
-          className={cn(
-            "rounded px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
-            danger
-              ? "text-destructive hover:bg-destructive/10"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
+          className="rounded-sm px-1.5 py-0.5 text-hint text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
         >
           {children}
         </button>

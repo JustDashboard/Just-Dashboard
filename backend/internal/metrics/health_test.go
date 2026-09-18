@@ -166,3 +166,50 @@ func findByID(t *testing.T, h Health, id string) Finding {
 	t.Fatalf("no finding %q in %+v", id, h.Findings)
 	return Finding{}
 }
+
+// A leaking service exhausts file handles while every utilisation chart reads
+// idle, so the ceiling is judged where the kernel reports a real one.
+func TestAssessFlagsFileHandleExhaustion(t *testing.T) {
+	r := testRecorder(t, DefaultInterval, DefaultRetention)
+	h := r.Assess(context.Background(), &sysinfo.Snapshot{
+		Files: sysinfo.FileHandles{Open: 85_000, Max: 100_000},
+	})
+	if len(h.Findings) != 1 || h.Findings[0].ID != "files" || h.Findings[0].Level != "warning" {
+		t.Fatalf("findings = %+v, want one file-handle warning", h.Findings)
+	}
+}
+
+// An unbounded ceiling reads as Max 0, and a percentage of nothing is not a
+// finding.
+func TestAssessIgnoresFileHandlesWithoutACeiling(t *testing.T) {
+	r := testRecorder(t, DefaultInterval, DefaultRetention)
+	h := r.Assess(context.Background(), &sysinfo.Snapshot{
+		Files: sysinfo.FileHandles{Open: 85_000, Max: 0},
+	})
+	if len(h.Findings) != 0 {
+		t.Fatalf("findings = %+v, want none", h.Findings)
+	}
+}
+
+// A sensor is judged against its own limits only: a reading with no
+// thresholds is a fact, not a verdict, and one past its critical mark ranks
+// above one past its high-water mark.
+func TestAssessJudgesSensorsByTheirOwnThresholds(t *testing.T) {
+	r := testRecorder(t, DefaultInterval, DefaultRetention)
+	h := r.Assess(context.Background(), &sysinfo.Snapshot{
+		Sensors: []sysinfo.Sensor{
+			{Name: "nvme", TempC: 71, High: 70, Critical: 85},
+			{Name: "coretemp_Package id 0", TempC: 101, High: 95, Critical: 100},
+			{Name: "acpitz", TempC: 90},
+		},
+	})
+	if h.Status != "critical" {
+		t.Fatalf("status = %q with %+v, want critical", h.Status, h.Findings)
+	}
+	if len(h.Findings) != 2 {
+		t.Fatalf("findings = %+v, want the two sensors past their limits", h.Findings)
+	}
+	if h.Findings[0].ID != "temp:coretemp_Package id 0" || h.Findings[1].ID != "temp:nvme" {
+		t.Fatalf("order = %q, %q; want critical first", h.Findings[0].ID, h.Findings[1].ID)
+	}
+}

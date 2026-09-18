@@ -20,6 +20,9 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/ping", s.handle(s.handleDockerPing))
 		r.Method(http.MethodGet, "/info", s.handle(s.handleDockerInfo))
 		r.Method(http.MethodGet, "/disk-usage", s.handle(s.handleDockerDiskUsage))
+		// Starting points for the container form, rendered from the same
+		// reviewed blueprint catalogue Deployments uses.
+		r.Method(http.MethodGet, "/templates", s.handle(s.handleDockerTemplates))
 
 		// What is wrong with Docker on this host, in sentences. Read-only: it
 		// only reports, and every remedy it suggests is a separate route with
@@ -38,6 +41,14 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/{id}/raw", s.handle(s.handleContainerRaw))
 			r.Method(http.MethodGet, "/{id}/spec", s.handle(s.handleContainerSpec))
 			r.Method(http.MethodGet, "/{id}/changes", s.handle(s.handleContainerChanges))
+			// Where the writable layer went, and why it keeps failing. Both
+			// are lazy by design: the first walks a filesystem and the second
+			// reads the event log, and neither belongs in a listing that
+			// polls.
+			r.Method(http.MethodGet, "/{id}/writable-layer", s.handle(s.handleWritableLayer))
+			r.Method(http.MethodGet, "/{id}/migration-plan", s.handle(s.handleMigrationPlan))
+			r.Method(http.MethodGet, "/{id}/failure", s.handle(s.handleContainerFailure))
+			r.Method(http.MethodGet, "/{id}/anomalies", s.handle(s.handleContainerAnomalies))
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))
@@ -140,8 +151,13 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/{name}", s.handle(s.handleStackDetail))
 			r.Method(http.MethodGet, "/{name}/config", s.handle(s.handleStackConfig))
 			r.Method(http.MethodGet, "/{name}/logs/stream", s.handle(s.handleStackLogStream))
+			// What a deploy would do, and what the last few did. Read-only:
+			// the preview changes nothing and the history is a record.
+			r.Method(http.MethodGet, "/{name}/preview", s.handle(s.handleStackPreview))
+			r.Method(http.MethodGet, "/{name}/deployments", s.handle(s.handleStackDeployments))
+			r.Method(http.MethodGet, "/{name}/deployments/{id}", s.handle(s.handleStackDeployment))
 			r.Group(func(r chi.Router) {
-				r.Use(httpx.RequireCapability(auth.CapServiceControl))
+				r.Use(httpx.RequireCapability(auth.CapServiceControl), httpx.RequireCapability(auth.CapSystemAdmin))
 				r.Method(http.MethodPost, "/{name}/up", s.handle(s.stackAction(dockerx.ComposeUp)))
 				r.Method(http.MethodPost, "/{name}/start", s.handle(s.stackAction(dockerx.ComposeStart)))
 				r.Method(http.MethodPost, "/{name}/pull", s.handle(s.stackAction(dockerx.ComposePull)))
@@ -158,7 +174,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				// Editing a compose file is editing a file on the server, and
 				// is gated as one. Creating a stack writes a new one.
-				r.Use(httpx.RequireCapability(auth.CapFileWrite))
+				r.Use(httpx.RequireCapability(auth.CapFileWrite), httpx.RequireCapability(auth.CapSystemAdmin))
 				r.Method(http.MethodPut, "/{name}/config", s.handle(s.handleStackConfigWrite))
 				r.Method(http.MethodPost, "/", s.handle(s.handleStackCreate))
 			})
@@ -171,21 +187,88 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			})
 		})
 
+		// What each category of cleanup holds and what removing it costs.
+		// Reading it is safe for anyone who can read the disk page.
+		r.Method(http.MethodGet, "/cleanup/preview", s.handle(s.handleCleanupPreview))
+
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/prune", s.handle(s.handlePruneAll))
 			r.Method(http.MethodPost, "/build-cache/prune", s.handle(s.handleBuildCachePrune))
+			// The category-selected sweep. Same gate as prune, and the
+			// handler additionally requires the typed phrase when volumes are
+			// among the categories — that is the one selection here that
+			// destroys data.
+			r.Method(http.MethodPost, "/cleanup", s.handle(s.handleCleanupRun))
 		})
 	})
 }
 
+// dockerErr turns a daemon error into something a person can act on.
+//
+// Docker's own messages are precise and frequently unreadable — "invalid
+// reference format: repository name (library/sha256…) must be lowercase" is
+// four true statements none of which is "you asked for an image by its id and
+// something treated it as a name". The raw text is always kept, because an
+// operator debugging this needs exactly what the daemon said; what is added is
+// the reading of it.
 func (s *Server) dockerErr(err error) error {
-	if errors.Is(err, dockerx.ErrUnavailable) {
-		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", err.Error())
+	raw := err.Error()
+	lower := strings.ToLower(raw)
+
+	switch {
+	case errors.Is(err, dockerx.ErrUnavailable):
+		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable",
+			"The Docker daemon is not reachable from this dashboard.").
+			Because("The socket is not there, or this process cannot read it. On most hosts that is the daemon being stopped, or the dashboard's container not having /var/run/docker.sock mounted.", raw).
+			Retry()
+
+	case strings.Contains(lower, "no such"):
+		return httpx.Err(http.StatusNotFound, "not_found",
+			"Docker does not have that object.").
+			Because("It may have been removed since this page last loaded — by a compose deploy, a cleanup, or somebody in a shell.", raw).
+			Retry()
+
+	case strings.Contains(lower, "invalid reference format"):
+		return httpx.Err(http.StatusBadRequest, "invalid_reference",
+			"That image name is not one Docker will accept.").
+			Because("A Docker reference is lower-case, and an image id (sha256:…) is not a name — asking for one as though it were produces exactly this message, with 'library/' prepended by the daemon.", raw)
+
+	case strings.Contains(lower, "conflict") && strings.Contains(lower, "in use"):
+		return httpx.Err(http.StatusConflict, "in_use",
+			"Docker will not remove that while something is using it.").
+			Because("Removing it would leave whatever depends on it broken, so the daemon refuses. The panel lists what is using it.", raw)
+
+	case strings.Contains(lower, "already in use") || strings.Contains(lower, "conflict"):
+		return httpx.Err(http.StatusConflict, "conflict",
+			"Something with that name already exists.").
+			Because("Docker names are unique per kind. Pick another name, or remove the existing object first.", raw)
+
+	case strings.Contains(lower, "port is already allocated") || strings.Contains(lower, "address already in use"):
+		return httpx.Err(http.StatusConflict, "port_taken",
+			"That host port is already taken.").
+			Because("Another container or a process on the host is bound to it. The Ports page lists what holds each one.", raw)
+
+	case strings.Contains(lower, "no space left"):
+		return httpx.Err(http.StatusInsufficientStorage, "no_space",
+			"The server has run out of disk.").
+			Because("Docker could not write what it needed. The Disk panel shows what is reclaimable, and the cleanup preview shows what removing each part would cost.", raw)
+
+	case strings.Contains(lower, "permission denied"), strings.Contains(lower, "access denied"):
+		return httpx.Err(http.StatusForbidden, "denied",
+			"Docker refused the operation.").
+			Because("Either the daemon's own permissions, or a registry asking for credentials this dashboard does not hold.", raw)
+
+	case strings.Contains(lower, "context deadline exceeded"), strings.Contains(lower, "timeout"):
+		return httpx.Err(http.StatusGatewayTimeout, "timeout",
+			"Docker did not answer in time.").
+			Because("A daemon walking a large layer or a slow registry can take longer than the request allows. Nothing was necessarily left half-done — check the object's current state before retrying.", raw).
+			Retry()
+
+	default:
+		return httpx.Err(http.StatusBadGateway, "docker_error",
+			"Docker refused the operation.").
+			Because("The daemon's own explanation is below.", raw)
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "no such") {
-		return httpx.ErrNotFound
-	}
-	return httpx.Wrap(http.StatusBadGateway, "docker_error", err)
 }
 
 func (s *Server) handleDockerPing(w http.ResponseWriter, r *http.Request) error {
@@ -222,7 +305,7 @@ func (s *Server) handleContainerList(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleContainerInspect(w http.ResponseWriter, r *http.Request) error {
-	detail, err := s.modules.docker.Inspect(r.Context(), chi.URLParam(r, "id"))
+	detail, err := s.modules.docker.Inspect(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -284,7 +367,7 @@ func (s *Server) handleContainerStatsHistory(w http.ResponseWriter, r *http.Requ
 		return httpx.Err(http.StatusServiceUnavailable, "metrics_history_disabled",
 			"metrics history is not being recorded on this host (JD_METRICS_RETENTION=0)")
 	}
-	name := s.containerName(r.Context(), chi.URLParam(r, "id"))
+	name := s.containerName(r.Context(), httpx.URLParam(r, "id"))
 	if name == "" {
 		return httpx.BadRequest("a container id or name is required")
 	}
@@ -395,7 +478,7 @@ func (s *Server) handleContainerStream(w http.ResponseWriter, r *http.Request) e
 
 func (s *Server) handleContainerLogs(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	ch, closer, err := s.modules.docker.Logs(r.Context(), chi.URLParam(r, "id"), dockerx.LogOptions{
+	ch, closer, err := s.modules.docker.Logs(r.Context(), httpx.URLParam(r, "id"), dockerx.LogOptions{
 		Tail:       defaultStr(q.Get("tail"), "500"),
 		Since:      q.Get("since"),
 		Until:      q.Get("until"),
@@ -428,7 +511,7 @@ func (s *Server) handleContainerLogStream(w http.ResponseWriter, r *http.Request
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
-	ch, closer, err := s.modules.docker.Logs(ctx, chi.URLParam(r, "id"), dockerx.LogOptions{
+	ch, closer, err := s.modules.docker.Logs(ctx, httpx.URLParam(r, "id"), dockerx.LogOptions{
 		Tail:       defaultStr(q.Get("tail"), "500"),
 		Timestamps: q.Get("timestamps") == "true",
 		Follow:     true,
@@ -488,7 +571,7 @@ func (s *Server) handleContainerStatStream(w http.ResponseWriter, r *http.Reques
 	out := make(chan dockerx.ContainerStats, 8)
 	go func() {
 		defer close(out)
-		if err := s.modules.docker.StatsStream(ctx, chi.URLParam(r, "id"), out); err != nil {
+		if err := s.modules.docker.StatsStream(ctx, httpx.URLParam(r, "id"), out); err != nil {
 			conn.SendError(err.Error())
 		}
 	}()
@@ -502,7 +585,7 @@ func (s *Server) handleContainerStatStream(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) containerLifecycle(action dockerx.LifecycleAction) httpx.Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		id := chi.URLParam(r, "id")
+		id := httpx.URLParam(r, "id")
 		detail, err := s.modules.docker.Inspect(r.Context(), id)
 		if err != nil {
 			return s.dockerErr(err)
@@ -528,7 +611,7 @@ func (s *Server) containerLifecycle(action dockerx.LifecycleAction) httpx.Handle
 }
 
 func (s *Server) handleContainerRemove(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	detail, err := s.modules.docker.Inspect(r.Context(), id)
 	if err != nil {
 		return s.dockerErr(err)
@@ -564,7 +647,7 @@ func (s *Server) handleContainerPrune(w http.ResponseWriter, r *http.Request) er
 // session is logged the moment it opens rather than at close, when a crashed
 // process might have swallowed the record.
 func (s *Server) handleContainerExec(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	detail, err := s.modules.docker.Inspect(r.Context(), id)
 	if err != nil {
 		return s.dockerErr(err)
@@ -687,7 +770,7 @@ func (s *Server) handleImagePull(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleImageRemove(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	// No typed phrase: an image is reproducible — it came from a registry or a
 	// Dockerfile this dashboard can rebuild. Pruning many at once still asks,
 	// because that is the sweep nobody can enumerate in advance.
@@ -733,7 +816,7 @@ func (s *Server) handleVolumeList(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *Server) handleVolumeInspect(w http.ResponseWriter, r *http.Request) error {
-	v, err := s.modules.docker.VolumeDetail(r.Context(), chi.URLParam(r, "name"))
+	v, err := s.modules.docker.VolumeDetail(r.Context(), httpx.URLParam(r, "name"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -742,7 +825,7 @@ func (s *Server) handleVolumeInspect(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleVolumeRemove(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	// Typed, unlike the container, image and network beside it: a volume is the
 	// one Docker object that *is* the data. Everything else on this page can be
 	// rebuilt from a registry or a spec; this cannot be rebuilt from anything.
@@ -791,7 +874,7 @@ func (s *Server) handleNetworkList(w http.ResponseWriter, r *http.Request) error
 // other" is the commonest Docker problem there is and its answer is nearly
 // always here.
 func (s *Server) handleNetworkInspect(w http.ResponseWriter, r *http.Request) error {
-	n, err := s.modules.docker.NetworkDetail(r.Context(), chi.URLParam(r, "id"))
+	n, err := s.modules.docker.NetworkDetail(r.Context(), httpx.URLParam(r, "id"))
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -800,7 +883,7 @@ func (s *Server) handleNetworkInspect(w http.ResponseWriter, r *http.Request) er
 }
 
 func (s *Server) handleNetworkRemove(w http.ResponseWriter, r *http.Request) error {
-	id := chi.URLParam(r, "id")
+	id := httpx.URLParam(r, "id")
 	n, err := s.modules.docker.InspectNetwork(r.Context(), id)
 	if err != nil {
 		return s.dockerErr(err)
@@ -850,7 +933,7 @@ func (s *Server) handleStackList(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleStackConfig(w http.ResponseWriter, r *http.Request) error {
-	stack, err := s.findStack(r, chi.URLParam(r, "name"))
+	stack, err := s.findStack(r, httpx.URLParam(r, "name"))
 	if err != nil {
 		return err
 	}
@@ -880,7 +963,10 @@ func (s *Server) findStack(r *http.Request, name string) (*dockerx.ComposeStack,
 
 func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		name := chi.URLParam(r, "name")
+		if err := requireComposeAdmin(r); err != nil {
+			return err
+		}
+		name := httpx.URLParam(r, "name")
 		stack, err := s.findStack(r, name)
 		if err != nil {
 			return err
@@ -896,6 +982,10 @@ func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 				return err
 			}
 		}
+		// Written down before it is replaced, for the same reason the
+		// streaming runner does it: after the deploy the previous state is
+		// gone and there is nothing left to roll back to.
+		s.recordStackDeployment(r, stack, string(action))
 		res, err := s.modules.docker.RunCompose(r.Context(), stack.WorkingDir, action, r.URL.Query().Get("service"))
 		if err != nil {
 			return httpx.Wrap(http.StatusBadGateway, "compose_failed", err)

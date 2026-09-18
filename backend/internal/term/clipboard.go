@@ -64,6 +64,12 @@ func newClipboardStore(root string) *clipboardStore {
 	return &clipboardStore{root: filepath.Clean(root)}
 }
 
+// SetClipboardRootForTest isolates handler tests from a running dashboard's
+// host-mounted clipboard directory. Production never calls this.
+func (m *Manager) SetClipboardRootForTest(root string) {
+	m.clipboard = newClipboardStore(root)
+}
+
 // SaveClipboard stores one image for a live session owned by owner.
 //
 // The ownership check and the second existence check belong beside the

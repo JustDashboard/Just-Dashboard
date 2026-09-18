@@ -1,0 +1,93 @@
+{
+  "id": "jupyter",
+  "version": "1.0.0",
+  "name": "Jupyter Notebook",
+  "category": "tool",
+  "profile": "tool",
+  "description": "JupyterLab with a minimal Python environment. Notebooks are kept in the work volume; the token is what the browser signs in with.",
+  "iconId": "bolt",
+  "docsUrl": "https://jupyter-docker-stacks.readthedocs.io/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "BSD-3-Clause",
+    "upstreamUrl": "https://github.com/jupyter/docker-stacks",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "quay.io/jupyter/minimal-notebook:python-3.13.15",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8888,
+      "protocol": "tcp",
+      "purpose": "JupyterLab",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "work",
+      "target": "/home/jovyan/work",
+      "purpose": "Notebooks and data",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "API answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Packages installed inside the container are lost on update; keep environment files in the work volume."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:053dafa82dfbb659ceb75c70453d8c63670bc9c7dc373c0d5f8d7eed56f6762d"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "token",
+      "variable": "JUPYTER_TOKEN",
+      "label": "Sign-in token",
+      "length": 32,
+      "description": "Reveal it from the Variables tab; JupyterLab asks for it once per browser."
+    }
+  ]
+}

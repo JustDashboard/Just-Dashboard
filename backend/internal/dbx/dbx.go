@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -306,6 +307,10 @@ func RunQuery(ctx context.Context, db *sql.DB, query string, maxRows int, args .
 	if maxRows <= 0 || maxRows > 5000 {
 		maxRows = 500
 	}
+	args, err := sqlArguments(args)
+	if err != nil {
+		return nil, err
+	}
 	start := time.Now()
 	res := &QueryResult{Columns: []string{}, Types: []string{}, Rows: [][]any{}, Statement: query}
 
@@ -397,10 +402,28 @@ func normaliseValue(v any) any {
 			return string(t)
 		}
 		return hexPreview(t)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case uint64:
+		return strconv.FormatUint(t, 10)
+	case int:
+		return strconv.FormatInt(int64(t), 10)
+	case uint:
+		return strconv.FormatUint(uint64(t), 10)
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return strconv.FormatFloat(t, 'g', -1, 64)
+		}
+		return t
+	case float32:
+		if math.IsNaN(float64(t)) || math.IsInf(float64(t), 0) {
+			return strconv.FormatFloat(float64(t), 'g', -1, 32)
+		}
+		return t
 	case time.Time:
 		return t.UTC().Format(time.RFC3339Nano)
 	default:
-		return v
+		return normaliseNumericContainer(v)
 	}
 }
 
@@ -551,6 +574,23 @@ var readOnlyLeaders = map[string]bool{
 }
 
 func Classify(query string) Risk {
+	statements, err := sqlStatements(query)
+	if err != nil {
+		return Risk{Level: "high", Destructive: true, Reasons: []string{err.Error()}}
+	}
+	result := Risk{Level: "read", Reasons: []string{}}
+	for _, statement := range statements {
+		risk := classifyStatement(statement)
+		if rank(risk.Level) > rank(result.Level) {
+			result.Level = risk.Level
+		}
+		result.Reasons = append(result.Reasons, risk.Reasons...)
+	}
+	result.Destructive = result.Level == "high" || result.Level == "critical"
+	return result
+}
+
+func classifyStatement(query string) Risk {
 	q := normaliseSQL(query)
 	risk := Risk{Level: "read", Reasons: []string{}}
 	for _, p := range riskPatterns {
@@ -576,20 +616,12 @@ func Classify(query string) Risk {
 
 // readOnly reports whether every statement in q leads with a read-only verb.
 func readOnly(q string) bool {
-	for _, stmt := range strings.Split(q, ";") {
-		stmt = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(stmt), "("))
-		if stmt == "" {
-			continue
-		}
-		word := strings.ToLower(stmt)
-		if i := strings.IndexAny(word, " \t(\""); i >= 0 {
-			word = word[:i]
-		}
-		if !readOnlyLeaders[word] {
-			return false
-		}
+	// Classify already split the input with the quote-aware boundary parser.
+	word := strings.ToLower(strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(q), "(")))
+	if i := strings.IndexAny(word, " \t\r\n(\""); i >= 0 {
+		word = word[:i]
 	}
-	return true
+	return readOnlyLeaders[word]
 }
 
 func rank(level string) int {

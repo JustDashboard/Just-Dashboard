@@ -12,6 +12,9 @@ import type { LogRetention } from "@/lib/types"
  * the question they would have been consulted for. The file with no rule
  * governing it is the one that fills the disk at 3am, and it is precisely the
  * entry a rule list cannot show — it is the one that is not there.
+ *
+ * One line in the pane's footer, tinted only when it is a warning: a reading of
+ * state, next to the stream's state and the line count.
  */
 export function RetentionNote({ retention }: { retention: LogRetention }) {
   const Icon =
@@ -20,28 +23,26 @@ export function RetentionNote({ retention }: { retention: LogRetention }) {
       : retention.level === "unknown"
         ? Question
         : RotateClockwise
+  const detail = [
+    retention.pattern &&
+      `Rule matches ${retention.pattern}${retention.rule?.configFile ? ` in ${retention.rule.configFile}` : ""}.`,
+    retention.lastRun && retention.level !== "warn"
+      ? `logrotate last ran ${relativeTime(retention.lastRun)}.`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+
   return (
-    <div
+    <span
       className={cn(
-        "flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-hairline px-3 py-1.5 text-[11px]",
-        retention.level === "warn"
-          ? "bg-warning/10 text-warning"
-          : "bg-surface-header text-muted-foreground",
+        "flex min-w-0 items-center gap-1.5",
+        retention.level === "warn" ? "text-warning" : "text-muted-foreground",
       )}
+      title={detail || undefined}
     >
       <Icon className="size-3 shrink-0" />
-      <span>{retention.summary}</span>
-      {retention.pattern && (
-        <span className="text-muted-foreground/70">
-          Rule matches <code className="font-mono">{retention.pattern}</code>
-          {retention.rule?.configFile && ` in ${retention.rule.configFile}`}.
-        </span>
-      )}
-      {retention.lastRun && retention.level !== "warn" && (
-        <span className="text-muted-foreground/70">
-          logrotate last ran {relativeTime(retention.lastRun)}.
-        </span>
-      )}
-    </div>
+      <span className="truncate">{retention.summary}</span>
+    </span>
   )
 }

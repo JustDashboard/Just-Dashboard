@@ -1,0 +1,37 @@
+{
+  "id": "dozzle",
+  "version": "1.0.0",
+  "name": "Dozzle",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A live log viewer for Docker containers. It needs the Docker socket read-only, which is a real grant of access to every container on this host.",
+  "iconId": "logs",
+  "docsUrl": "https://dozzle.dev/guide/getting-started",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/amir20/dozzle",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "amir20/dozzle:v8.11.7", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Anyone who reaches this reads every container's logs. Restrict it at the proxy." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 8080, "protocol": "tcp", "purpose": "The log viewer", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "socket", "target": "/var/run/docker.sock", "purpose": "Read-only access to the Docker daemon", "data": false, "backup": false, "readOnly": true }
+  ],
+  "resources": { "memoryMb": 128, "minMemoryMb": 64 },
+  "checks": [
+    { "name": "Viewer answers", "kind": "http", "phase": "readiness", "required": true, "path": "/healthcheck", "timeoutSeconds": 30 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "update": { "detector": "registry", "notes": "Dozzle keeps no state of its own." },
+  "security": {
+    "reason": "Reading container logs requires the Docker socket. It is mounted read-only, and anything that can read the socket can enumerate every container on this host."
+  },
+  "fixtures": [{ "name": "default", "inputs": { "domain": "logs.example.test" }, "digest": "sha256:e3cd791e6f0f913c521ec082c615856c4697f6122b610803b76ef4e405f05821" }]
+}

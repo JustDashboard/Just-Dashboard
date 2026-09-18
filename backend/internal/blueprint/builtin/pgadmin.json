@@ -1,0 +1,103 @@
+{
+  "id": "pgadmin",
+  "version": "1.0.0",
+  "name": "pgAdmin",
+  "category": "tool",
+  "profile": "tool",
+  "description": "The PostgreSQL administration app. It manages the databases you point it at; the servers it knows are kept in its own volume.",
+  "iconId": "database",
+  "docsUrl": "https://www.pgadmin.org/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "PostgreSQL",
+    "upstreamUrl": "https://github.com/pgadmin-org/pgadmin4",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "dpage/pgadmin4:9.18.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "admin-email",
+      "kind": "text",
+      "label": "Sign-in e-mail",
+      "variable": "PGADMIN_DEFAULT_EMAIL",
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "description": "The first administrator's sign-in. pgAdmin refuses reserved domains such as example.com."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/lib/pgadmin",
+      "purpose": "Saved servers, preferences and query history",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Ping answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/misc/ping",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "pgAdmin keeps its settings across versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "admin-email": "catalogue@just-dashboard.dev"
+      },
+      "digest": "sha256:1cd877e61ded270a366c5e5f4727e7573cbb6653acbcca78d5a2a94f530cf9e4"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "PGADMIN_DEFAULT_PASSWORD",
+      "label": "Sign-in password",
+      "length": 24
+    }
+  ]
+}

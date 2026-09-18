@@ -72,7 +72,7 @@ func TestDetectBuildsAUsableDSN(t *testing.T) {
 			name: "mongo", image: "mongo:7",
 			env:       map[string]string{"MONGO_INITDB_ROOT_USERNAME": "root", "MONGO_INITDB_ROOT_PASSWORD": "pw"},
 			published: ports(27017, 27017), driver: DriverMongo,
-			dsn: "mongodb://root:pw@127.0.0.1:27017/admin",
+			dsn: "mongodb://root:pw@127.0.0.1:27017/admin?authSource=admin",
 		},
 		{
 			name: "sql server", image: "mcr.microsoft.com/mssql/server:2022-latest",
@@ -222,4 +222,17 @@ func TestCandidateCarriesNoPassword(t *testing.T) {
 func jsonMarshal(v any) (string, error) {
 	b, err := json.Marshal(v)
 	return string(b), err
+}
+
+func TestMongoApplicationDatabaseAuthenticatesAgainstAdmin(t *testing.T) {
+	candidate, password := Detect("mongo", "mongo:7", map[string]string{
+		"MONGO_INITDB_ROOT_USERNAME": "jd", "MONGO_INITDB_ROOT_PASSWORD": "secret", "MONGO_INITDB_DATABASE": "app",
+	}, []PublishedPort{{ContainerPort: 27017, HostIP: "127.0.0.1", HostPort: 27017}}, nil)
+	if candidate == nil {
+		t.Fatal("Mongo was not detected")
+	}
+	got := BuildDSN(*candidate, password)
+	if got != "mongodb://jd:secret@127.0.0.1:27017/app?authSource=admin" {
+		t.Fatalf("incorrect auth database: %s", got)
+	}
 }

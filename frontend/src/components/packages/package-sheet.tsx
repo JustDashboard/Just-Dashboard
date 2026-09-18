@@ -4,14 +4,10 @@ import { useCallback, useState } from "react"
 import Link from "next/link"
 import {
   ArrowCircleUp,
-  BookOpen,
   Copy,
   Download,
   External,
-  FileText,
-  Play,
   Puzzle,
-  SettingsGear,
   Terminal,
   Trash,
 } from "@/components/icons"
@@ -25,18 +21,15 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList } from "@/components/page"
 import { Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { SidePanel } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ROW_REVEAL } from "@/components/icon-action"
+import { cn } from "@/lib/utils"
+import { copyText } from "@/lib/clipboard"
 
 /**
  * One package, and the question every panel in this class leaves unanswered.
@@ -158,115 +151,25 @@ export function PackageSheet({
   return (
     <>
       {dialog}
-      <Sheet open={Boolean(name)} onOpenChange={onOpenChange}>
-        <SheetContent className="flex w-full flex-col gap-0 sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="truncate font-mono">{name}</span>
-              {detail?.installed && (
-                <Badge variant="success" className="font-normal">
-                  Installed
-                </Badge>
-              )}
-              {upgradable && (
-                <Badge variant="warning" className="font-normal">
-                  {upgradable} available
-                </Badge>
-              )}
-            </SheetTitle>
-            <SheetDescription>{detail?.summary ?? " "}</SheetDescription>
-          </SheetHeader>
-
-          <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
-            {error && <ErrorState error={error} />}
-            {loading && <LoadingRows rows={6} />}
-
-            {detail && (
-              <Tabs value={tab} onValueChange={setTab} className="gap-3">
-                <TabsList>
-                  <TabsTrigger value="about">About</TabsTrigger>
-                  <TabsTrigger value="usage">How to use it</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="about" className="space-y-4">
-                  {detail.description && (
-                    <p className="text-[13px] leading-relaxed whitespace-pre-line text-muted-foreground">
-                      {detail.description}
-                    </p>
-                  )}
-
-                  <DetailList>
-                    <Detail label="Version">
-                      <span className="font-mono">
-                        {detail.installedVersion ?? detail.version ?? "—"}
-                      </span>
-                    </Detail>
-                    {detail.installedVersion && detail.version &&
-                      detail.version !== detail.installedVersion && (
-                        <Detail label="In the repository">
-                          <span className="font-mono">{detail.version}</span>
-                        </Detail>
-                      )}
-                    {detail.repository && <Detail label="Repository">{detail.repository}</Detail>}
-                    {detail.section && <Detail label="Section">{detail.section}</Detail>}
-                    {detail.arch && <Detail label="Architecture">{detail.arch}</Detail>}
-                    {detail.size ? <Detail label="Size">{bytes(detail.size)}</Detail> : null}
-                    {detail.license && <Detail label="Licence">{detail.license}</Detail>}
-                    {detail.maintainer && (
-                      <Detail label="Maintainer" className="truncate">
-                        {detail.maintainer}
-                      </Detail>
-                    )}
-                    {detail.homepage && (
-                      <Detail label="Homepage">
-                        <a
-                          href={detail.homepage}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="inline-flex min-w-0 items-center gap-1 truncate text-primary hover:underline"
-                        >
-                          <span className="truncate">{detail.homepage}</span>
-                          <External className="size-3 shrink-0" />
-                        </a>
-                      </Detail>
-                    )}
-                  </DetailList>
-
-                  {detail.protected && (
-                    <Notice title="This one cannot be removed from here">{detail.protected}</Notice>
-                  )}
-
-                  {detail.dependencies && detail.dependencies.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="eyebrow">Depends on</p>
-                      <div className="flex flex-wrap gap-1">
-                        {detail.dependencies.slice(0, 40).map((dep) => (
-                          <Badge key={dep} variant="notice" className="font-mono font-normal">
-                            {dep}
-                          </Badge>
-                        ))}
-                        {detail.dependencies.length > 40 && (
-                          <Badge variant="ghost" className="text-muted-foreground">
-                            +{detail.dependencies.length - 40} more
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="usage">
-                  <UsageView usage={usage} installed={detail.installed} />
-                </TabsContent>
-              </Tabs>
-            )}
-          </div>
-
-          {detail && canManage && (
-            <SheetFooter className="flex-row flex-wrap justify-end gap-2 border-t border-hairline">
+      <SidePanel
+        open={Boolean(name)}
+        onOpenChange={onOpenChange}
+        width="md"
+        title={
+          <>
+            <span className="truncate font-mono">{name}</span>
+            {detail?.installed && <Status verdict="ok" label="Installed" />}
+            {upgradable && <Status verdict="warning" label={`${upgradable} available`} />}
+          </>
+        }
+        description={detail?.summary || undefined}
+        footer={
+          detail &&
+          canManage && (
+            <>
               {!detail.installed && (
-                <Button size="sm" disabled={busy} onClick={install}>
-                  {busy ? <Spinner className="size-4" /> : <Download className="size-4" />}
+                <Button size="sm" onClick={install} pending={busy}>
+                  <Download className="size-4" />
                   Install
                 </Button>
               )}
@@ -300,10 +203,94 @@ export function PackageSheet({
                   </Button>
                 </>
               )}
-            </SheetFooter>
-          )}
-        </SheetContent>
-      </Sheet>
+            </>
+          )
+        }
+      >
+        {error && <ErrorState error={error} />}
+        {loading && <LoadingRows rows={6} />}
+
+        {detail && (
+          <Tabs value={tab} onValueChange={setTab} className="gap-3">
+            <TabsList>
+              <TabsTrigger value="about">About</TabsTrigger>
+              <TabsTrigger value="usage">How to use it</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="about" className="space-y-4">
+              {detail.description && (
+                <p className="text-body leading-relaxed whitespace-pre-line text-muted-foreground">
+                  {detail.description}
+                </p>
+              )}
+
+              <DetailList>
+                <Detail label="Version">
+                  <span className="font-mono">
+                    {detail.installedVersion ?? detail.version ?? "—"}
+                  </span>
+                </Detail>
+                {detail.installedVersion &&
+                  detail.version &&
+                  detail.version !== detail.installedVersion && (
+                    <Detail label="In the repository">
+                      <span className="font-mono">{detail.version}</span>
+                    </Detail>
+                  )}
+                {detail.repository && <Detail label="Repository">{detail.repository}</Detail>}
+                {detail.section && <Detail label="Section">{detail.section}</Detail>}
+                {detail.arch && <Detail label="Architecture">{detail.arch}</Detail>}
+                {detail.size ? <Detail label="Size">{bytes(detail.size)}</Detail> : null}
+                {detail.license && <Detail label="Licence">{detail.license}</Detail>}
+                {detail.maintainer && (
+                  <Detail label="Maintainer" className="truncate">
+                    {detail.maintainer}
+                  </Detail>
+                )}
+                {detail.homepage && (
+                  <Detail label="Homepage">
+                    <a
+                      href={detail.homepage}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex min-w-0 items-center gap-1 truncate text-primary hover:underline"
+                    >
+                      <span className="truncate">{detail.homepage}</span>
+                      <External className="size-3 shrink-0" />
+                    </a>
+                  </Detail>
+                )}
+              </DetailList>
+
+              {detail.protected && (
+                <Notice title="This one cannot be removed from here">{detail.protected}</Notice>
+              )}
+
+              {detail.dependencies && detail.dependencies.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="eyebrow">Depends on</p>
+                  <div className="flex flex-wrap gap-1">
+                    {detail.dependencies.slice(0, 40).map((dep) => (
+                      <Tag key={dep} mono>
+                        {dep}
+                      </Tag>
+                    ))}
+                    {detail.dependencies.length > 40 && (
+                      <span className="numeric self-center text-hint text-muted-foreground">
+                        +{detail.dependencies.length - 40} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="usage">
+              <UsageView usage={usage} installed={detail.installed} />
+            </TabsContent>
+          </Tabs>
+        )}
+      </SidePanel>
     </>
   )
 }
@@ -313,40 +300,35 @@ function CommandChip({ command }: { command: string }) {
   return (
     <button
       type="button"
-      title="Copy"
-      onClick={() => {
-        void navigator.clipboard
-          .writeText(command)
-          .then(() => notify.success(`Copied ${command}`))
-          .catch(() => notify.error("Could not copy", "the browser refused clipboard access"))
-      }}
-      className="raised group inline-flex items-center gap-1.5 rounded-md border border-hairline bg-muted/40 px-2 py-1 font-mono text-xs transition-colors hover:bg-muted"
+      aria-label={`Copy ${command}`}
+      onClick={() => void copyText(command, `Copied ${command}`)}
+      className="group inline-flex items-center gap-1.5 rounded-md border border-hairline bg-control px-2 py-1 font-mono text-xs transition-colors hover:bg-control-hover active:bg-control-active"
     >
       <Terminal className="size-3 text-muted-foreground" />
       {command}
-      <Copy className="size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      <Copy className={cn("size-3 text-muted-foreground", ROW_REVEAL)} />
     </button>
   )
 }
 
+/**
+ * One part of the answer, opened by its eyebrow alone. Each used to carry a
+ * glyph in front of the word — a terminal before "Commands", a book before
+ * "Manual" — which was the label twice (design-system §14).
+ */
 function UsageSection({
-  icon: Icon,
   title,
   hint,
   children,
 }: {
-  icon: React.ComponentType<{ className?: string }>
   title: string
   hint?: string
   children: React.ReactNode
 }) {
   return (
     <section className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        <Icon className="size-3.5 text-muted-foreground" />
-        <p className="eyebrow">{title}</p>
-      </div>
-      {hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
+      <p className="eyebrow">{title}</p>
+      {hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>}
       {children}
     </section>
   )
@@ -377,7 +359,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
     <div className="space-y-5">
       {usage.commands && usage.commands.length > 0 && (
         <UsageSection
-          icon={Terminal}
           title="Commands"
           hint="What this package actually put on your path — which is very often not its own name."
         >
@@ -391,7 +372,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
 
       {usage.services && usage.services.length > 0 && (
         <UsageSection
-          icon={Play}
           title="Services"
           hint="Installing a package rarely starts it. These are the units it registered."
         >
@@ -408,7 +388,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
 
       {usage.configFiles && usage.configFiles.length > 0 && (
         <UsageSection
-          icon={SettingsGear}
           title="Configuration"
           hint="What it put in /etc. Each opens in the file manager."
         >
@@ -428,7 +407,7 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
       )}
 
       {usage.docs && usage.docs.length > 0 && (
-        <UsageSection icon={FileText} title="Documentation on this machine">
+        <UsageSection title="Documentation on this machine">
           <ul className="space-y-0.5">
             {usage.docs.map((file) => (
               <li key={file}>
@@ -450,7 +429,6 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
 
       {usage.manual && (
         <UsageSection
-          icon={BookOpen}
           title={`Manual — ${usage.manualFor}`}
           hint={`The same page as \`man ${usage.manualFor}\`, rendered here so you do not have to open a shell to read it.`}
         >
@@ -459,12 +437,10 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
               it belongs to. It scrolls sideways inside the well instead, which
               is the rule every wide block in this product follows. */}
           <Well className="max-h-[26rem] overflow-auto p-3">
-            <pre className="font-mono text-[11px] leading-relaxed whitespace-pre">
-              {usage.manual}
-            </pre>
+            <pre className="font-mono text-hint leading-relaxed whitespace-pre">{usage.manual}</pre>
           </Well>
           {usage.truncated && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-hint text-muted-foreground">
               Cut off here — the rest is in `man {usage.manualFor}` from a terminal.
             </p>
           )}
@@ -472,17 +448,12 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
       )}
 
       {usage.manPages && usage.manPages.length > 1 && (
-        <UsageSection icon={BookOpen} title="Other manual pages">
+        <UsageSection title="Other manual pages">
           <div className="flex flex-wrap gap-1">
             {usage.manPages.map((page) => (
-              <Badge
-                key={page.path}
-                variant="notice"
-                className="font-mono font-normal"
-                title={page.path}
-              >
+              <Tag key={page.path} mono title={page.path}>
                 {page.name}({page.section})
-              </Badge>
+              </Tag>
             ))}
           </div>
         </UsageSection>

@@ -1,0 +1,43 @@
+{
+  "id": "mariadb",
+  "version": "1.0.0",
+  "name": "MariaDB",
+  "category": "database",
+  "profile": "database",
+  "description": "A MySQL-compatible relational database, kept off the network like every database here.",
+  "iconId": "database",
+  "docsUrl": "https://mariadb.com/kb/en/documentation/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-2.0",
+    "upstreamUrl": "https://hub.docker.com/_/mariadb",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "mariadb:11.4", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "database", "kind": "text", "label": "Database name", "default": "app", "required": true, "variable": "MARIADB_DATABASE", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$" },
+    { "name": "username", "kind": "text", "label": "Database user", "default": "app", "required": true, "variable": "MARIADB_USER", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$" }
+  ],
+  "secrets": [
+    { "name": "password", "variable": "MARIADB_PASSWORD", "label": "Database password", "length": 40 },
+    { "name": "root-password", "variable": "MARIADB_ROOT_PASSWORD", "label": "Root password", "length": 48 }
+  ],
+  "ports": [
+    { "name": "mysql", "internal": 3306, "protocol": "tcp", "purpose": "SQL connections from other containers on this host", "exposure": "internal", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/var/lib/mysql", "purpose": "Every table this server holds", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 512, "minMemoryMb": 256 },
+  "checks": [
+    { "name": "Accepts connections", "kind": "command", "phase": "readiness", "required": true, "command": ["healthcheck.sh", "--connect", "--innodb_initialized"], "timeoutSeconds": 90 }
+  ],
+  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
+  "automation": [
+    { "name": "Nightly backup", "description": "Dumps the database every night before most people are awake.", "cron": "0 3 * * *", "timezone": "UTC", "actions": ["backup"], "default": true }
+  ],
+  "update": { "detector": "registry", "backupFirst": true, "notes": "MariaDB upgrades run mariadb-upgrade on first start; a restore needs the pre-update dump." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:b86a8bc528b88837e1faa95a7ae26649d3e0c95a848baed64cb2f84fbe1bb8c1" }]
+}

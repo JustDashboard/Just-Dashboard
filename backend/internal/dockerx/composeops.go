@@ -111,13 +111,19 @@ func (c *Client) RunComposeStream(ctx context.Context, dir string, action Compos
 		if len(steps) > 1 {
 			out <- LogLine{Stream: "status", Text: fmt.Sprintf("[%d/%d] %s", i+1, len(steps), step.Label)}
 		}
-		cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, step.Args...)...)
-		cmd.Dir = dir
-		// Plain progress for the same reason the build runner asks for it:
-		// compose's default renderer redraws with cursor movement, which in a
-		// list of lines produces a screenful of half-written words.
-		cmd.Env = append(os.Environ(), "COMPOSE_PROGRESS=plain", "DOCKER_CLI_HINTS=false", "BUILDKIT_PROGRESS=plain")
-		code, err := streamCommand(ctx, cmd, out)
+		environment := append(os.Environ(), "COMPOSE_PROGRESS=plain", "DOCKER_CLI_HINTS=false", "BUILDKIT_PROGRESS=plain")
+		base, err := composePortBase(dir, environment)
+		if err != nil {
+			return -1, err
+		}
+		code, err := runComposePorts(ctx, dir, base, step.Args, environment, filepath.Join(dir, ".just-dashboard-ports.yml"), func(line LogLine) error {
+			select {
+			case out <- line:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
 		if err != nil {
 			return code, err
 		}
@@ -186,6 +192,8 @@ func (c *Client) RunComposeRelease(
 	}
 	defer os.Remove(envFile)
 	args = append(args, "--env-file", envFile)
+	base := append([]string{}, args...)
+	args = nil
 	switch action {
 	case ComposeReleaseUp:
 		args = append(args, "up", "-d", "--no-build", "--remove-orphans")
@@ -203,26 +211,8 @@ func (c *Client) RunComposeRelease(
 
 	commandCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(commandCtx, "docker", args...)
-	command.Dir = spec.ProjectDirectory
-	command.Env = composeReleaseProcessEnvironment(c.host, spec.ProjectDirectory)
-	lines := make(chan LogLine, 64)
-	done := make(chan struct{})
-	var emitErr error
-	go func() {
-		defer close(done)
-		for line := range lines {
-			if emit != nil && emitErr == nil {
-				emitErr = emit(line)
-			}
-		}
-	}()
-	code, runErr := streamCommand(commandCtx, command, lines)
-	close(lines)
-	<-done
-	if emitErr != nil {
-		return emitErr
-	}
+	code, runErr := runComposePorts(commandCtx, spec.ProjectDirectory, base, args,
+		composeReleaseProcessEnvironment(c.host, spec.ProjectDirectory), spec.OverrideFile+".ports.yml", emit)
 	if runErr != nil {
 		return runErr
 	}

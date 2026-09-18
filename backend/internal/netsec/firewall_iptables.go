@@ -59,7 +59,7 @@ func (iptablesBackend) Status(ctx context.Context) (*FirewallStatus, error) {
 					// the kind of thing that panics a handler.
 					if fields := strings.Fields(trimmed[idx+len("policy "):]); len(fields) > 0 {
 						st.Default = strings.Trim(fields[0], "()")
-						st.Policy = DefaultPolicy{Incoming: strings.ToLower(st.Default)}
+						st.Policy = DefaultPolicy{Incoming: iptablesPolicyWord(st.Default)}
 					}
 				}
 			}
@@ -95,6 +95,27 @@ func (iptablesBackend) Status(ctx context.Context) (*FirewallStatus, error) {
 	// "enabled" for raw iptables, which has no on/off switch of its own.
 	st.Enabled = st.Default == "DROP" || len(st.Rules) > 0
 	return st, nil
+}
+
+// iptablesPolicyWord folds a chain's verdict onto the three words every
+// reader of DefaultPolicy speaks. The verdict itself stays verbatim in Default.
+//
+// The structured field is compared against "allow" by the posture rules, by
+// the grading of an exposed port and by the sshd port guard, and "accept"
+// matched none of them: an iptables host with an ACCEPT policy was never told
+// its inbound default was allow, had its exposed databases graded as though a
+// firewall were refusing them, and was refused an SSH port move as a lockout
+// that policy could never have caused.
+func iptablesPolicyWord(verdict string) string {
+	switch strings.ToUpper(verdict) {
+	case "ACCEPT":
+		return "allow"
+	case "DROP":
+		return "deny"
+	case "REJECT":
+		return "reject"
+	}
+	return strings.ToLower(verdict)
 }
 
 // Everything below refuses, for the reason on the type.

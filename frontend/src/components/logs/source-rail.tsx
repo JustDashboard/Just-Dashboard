@@ -1,20 +1,26 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Archive, Box, Cpu, FileText, Globe, Logs, Monorepo } from "@/components/icons"
+import { Archive, Box, Cpu, FileText, Globe, Monorepo, RefreshClockwise } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
 import { SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Pane, PaneHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
+import { IconAction } from "@/components/icon-action"
+import { ChipCount } from "@/components/tabs"
 
 /**
  * The groups, in the order somebody actually looks. The raw kind strings are
  * the API's vocabulary, not a reader's: "nginx" is a group of two files that a
  * person thinks of as their web server, and "app" is whatever was dropped into
  * the log roots.
+ *
+ * The glyph before each group is wayfinding — the same mark the sidebar and
+ * the Overview use for the module the logs belong to — so the eye finds
+ * "Containers" in the rail without reading down it.
  */
 const GROUPS: { kind: LogSource["kind"]; label: string; icon: typeof FileText }[] = [
   { kind: "system", label: "System", icon: Cpu },
@@ -25,20 +31,42 @@ const GROUPS: { kind: LogSource["kind"]; label: string; icon: typeof FileText }[
   { kind: "app", label: "Applications", icon: FileText },
 ]
 
+/** What one source is, as a word beside its name. */
+export const KIND_TAG: Record<LogSource["kind"], string> = {
+  system: "system log",
+  journal: "journal",
+  docker: "container",
+  nginx: "web server",
+  pm2: "pm2 process",
+  app: "application",
+}
+
+/**
+ * Every log on the host, grouped by what writes it.
+ *
+ * One column of the logs workbench, sharing its frame with the lines beside
+ * it: a rail with its own border next to a console with its own was two
+ * boxes floating on the page, and the screen is one working surface.
+ */
 export function SourceRail({
   index,
   loading,
   error,
   selectedId,
   onSelect,
+  onRescan,
+  className,
 }: {
   index: LogSourceIndex | undefined
   loading: boolean
   error: Error | undefined
   selectedId: string | null
   onSelect: (source: LogSource) => void
+  onRescan: () => void
+  className?: string
 }) {
   const [filter, setFilter] = useState("")
+  const total = index?.sources.length ?? 0
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -60,67 +88,79 @@ export function SourceRail({
     }).filter((g) => g.items.length > 0 || (index?.missing[g.kind] && !needle))
   }, [index, filter])
 
-  const total = index?.sources.length ?? 0
-
   return (
-    // Below lg the grid stacks, and an uncapped source list would take half the
-    // window from the lines you came to read.
-    <Panel className="max-h-64 min-h-0 lg:max-h-full">
-      <PanelHeader
-        icon={Logs}
-        title="Sources"
-        description={total ? `${total} on this host` : "Scanning…"}
-      />
-      <PanelToolbar>
-        <SearchInput
-          containerClassName="w-full"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter sources"
-        />
-      </PanelToolbar>
-      <PanelBody flush scroll className="p-2">
-        {loading && !index && <LoadingRows className="p-2" />}
-        {error && <ErrorState error={error} className="m-2" />}
-        <div className="space-y-3">
-          {groups.map((group) => (
-            <div key={group.kind}>
-              <p className="eyebrow mb-1 flex items-center gap-1.5 px-2">
-                <group.icon className="size-3" />
-                {group.label}
-                {group.items.length > 0 && (
-                  <span className="numeric font-normal opacity-60">{group.items.length}</span>
-                )}
-              </p>
-              {group.items.length === 0 ? (
-                // An absent kind explains itself rather than simply not being
-                // there: "no containers" and "no Docker on this host" call for
-                // completely different next moves.
-                <p className="px-2 pb-1 text-[11px] leading-snug text-muted-foreground">
-                  {index?.missing[group.kind]}
-                </p>
-              ) : (
-                <div className="space-y-0.5">
-                  {group.items.map((source) => (
-                    <SourceRow
-                      key={source.id}
-                      source={source}
-                      selected={selectedId === source.id}
-                      onSelect={() => onSelect(source)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-          {!loading && groups.length === 0 && (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-              Nothing matches that filter.
-            </p>
-          )}
+    <Pane flush aria-label="Log sources" className={cn("w-full", className)}>
+      <PaneHeader className="gap-1.5 pl-3">
+        <span className="text-xs font-medium">Sources</span>
+        {total > 0 && <ChipCount>{total}</ChipCount>}
+        <span className="flex-1" />
+        <IconAction
+          label="Rescan sources"
+          className="size-7"
+          pending={loading && Boolean(index)}
+          onClick={onRescan}
+        >
+          <RefreshClockwise />
+        </IconAction>
+      </PaneHeader>
+      {/* A filter over five sources is a box with nothing to do. It appears
+          once the list is long enough that scanning it stops being faster
+          than typing. */}
+      {(total > 5 || filter) && (
+        <div className="border-b border-hairline px-2 py-1.5">
+          <SearchInput
+            dense
+            value={filter}
+            spellCheck={false}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter sources"
+            aria-label="Filter sources"
+            containerClassName="sm:w-full"
+          />
         </div>
-      </PanelBody>
-    </Panel>
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+        {loading && !index && <LoadingRows className="p-1" />}
+        {error && <ErrorState error={error} className="m-1" />}
+        {index && (
+          <div className="animate-rise space-y-3">
+            {groups.map((group) => (
+              <div key={group.kind}>
+                <p className="eyebrow mb-0.5 flex items-center gap-1.5 px-2 py-1">
+                  <group.icon aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">{group.label}</span>
+                  {group.items.length > 0 && <ChipCount>{group.items.length}</ChipCount>}
+                </p>
+                {group.items.length === 0 ? (
+                  // An absent kind explains itself rather than simply not being
+                  // there: "no containers" and "no Docker on this host" call for
+                  // completely different next moves.
+                  <p className="px-2 pb-1 text-hint leading-snug text-muted-foreground">
+                    {index.missing[group.kind]}
+                  </p>
+                ) : (
+                  <div className="space-y-px">
+                    {group.items.map((source) => (
+                      <SourceRow
+                        key={source.id}
+                        source={source}
+                        selected={selectedId === source.id}
+                        onSelect={() => onSelect(source)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {groups.length === 0 && (
+              <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                Nothing matches that filter.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </Pane>
   )
 }
 
@@ -135,21 +175,26 @@ function SourceRow({
 }) {
   return (
     <button
+      type="button"
       onClick={onSelect}
       title={source.detail ?? source.path}
-      // The selected source says so the same way the active nav item does —
-      // one "you are here" language for both.
+      aria-current={selected ? "true" : undefined}
+      // The chosen source is the neutral fill every selection in the product
+      // takes — the terminal's active session, a table's chosen row — so
+      // "you are here" reads the same way on every rail.
       className={cn(
-        "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
-        selected ? "bg-primary/12 font-medium text-foreground" : "hover:bg-accent",
+        "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
+        selected ? "bg-accent text-foreground" : "hover:bg-row-hover",
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5">
         {source.status && <StatusDot state={source.status} />}
-        <span className="truncate text-[13px]">{source.label}</span>
+        <span className={cn("truncate text-body leading-tight", selected && "font-medium")}>
+          {source.label}
+        </span>
         {(source.archives ?? 0) > 0 && (
           <span
-            className="ml-auto flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+            className="numeric ml-auto flex shrink-0 items-center gap-0.5 text-micro text-muted-foreground"
             title={`${source.archives} rotated archives, ${bytes(source.archiveBytes)} — searchable`}
           >
             <Archive className="size-2.5" />
@@ -157,7 +202,7 @@ function SourceRow({
           </span>
         )}
       </span>
-      <span className="truncate text-[11px] text-muted-foreground">
+      <span className="truncate text-hint text-muted-foreground">
         {source.size !== undefined && source.size > 0
           ? `${bytes(source.size)} · ${relativeTime(source.modified)}`
           : (source.detail ?? source.status)}

@@ -2,8 +2,10 @@
 
 import { Inbox, LoaderCircle, Slash, Warning } from "@/components/icons"
 import { ApiError } from "@/lib/api"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import type { Tone } from "@/components/tone"
 
 export function Spinner({ className }: { className?: string }) {
   return <LoaderCircle className={cn("size-4 animate-spin", className)} />
@@ -28,13 +30,13 @@ export function LoadingRows({ rows = 5, className }: { rows?: number; className?
  */
 export function LoadingPanel({ rows = 6, className }: { rows?: number; className?: string }) {
   return (
-    <div className={cn("raised min-w-0 overflow-hidden rounded-xl border bg-card", className)}>
-      <div className="border-b border-hairline bg-surface-header px-4 py-2.5">
+    <div className={cn("min-w-0 overflow-hidden rounded-xl border bg-card", className)}>
+      <div className="flex min-h-12 items-center border-b border-hairline px-5 py-3">
         <Skeleton className="h-4 w-40" />
       </div>
       <div className="divide-y divide-hairline">
         {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3">
+          <div key={i} className="flex items-center gap-3 px-5 py-3.5">
             <Skeleton className="h-3.5 flex-1" style={{ maxWidth: `${34 + ((i * 13) % 26)}%` }} />
             <Skeleton className="h-3.5 w-16" />
             <Skeleton className="h-3.5 w-24" />
@@ -42,6 +44,25 @@ export function LoadingPanel({ rows = 6, className }: { rows?: number; className
         ))}
       </div>
     </div>
+  )
+}
+
+/**
+ * "Nothing here" for a region that is already inside something — a rail's list
+ * of tables, a panel body under a filter, the saved-queries column.
+ *
+ * `EmptyState` would draw a dashed frame and an icon plot inside a box that
+ * already has a frame, so those places had each written their own sentence
+ * instead: eleven of them, at four different sizes and five different paddings.
+ * One sentence, centred in the space it was given.
+ */
+export function EmptyNote({ className, ...props }: React.ComponentProps<"p">) {
+  return (
+    <p
+      data-slot="empty-note"
+      className={cn("px-3 py-6 text-center text-body text-muted-foreground", className)}
+      {...props}
+    />
   )
 }
 
@@ -70,7 +91,7 @@ export function EmptyState({
         <Icon className="size-4.5" />
       </span>
       <div className="space-y-1">
-        <p className="text-[13px] font-medium">{title}</p>
+        <p className="text-body font-medium">{title}</p>
         {description && (
           <p className="mx-auto max-w-md text-xs leading-relaxed text-muted-foreground">
             {description}
@@ -91,7 +112,16 @@ export function EmptyState({
  * the same block either way so the page's shape does not change with the
  * severity — only its colour and its title do.
  */
-export function ErrorState({ error, className }: { error: Error; className?: string }) {
+export function ErrorState({
+  error,
+  className,
+  onRetry,
+}: {
+  error: Error
+  className?: string
+  /** Offered only when the server said the failure is worth trying again. */
+  onRetry?: () => void
+}) {
   const api = error instanceof ApiError ? error : undefined
   const unavailable =
     api?.code === "docker_unavailable" ||
@@ -104,23 +134,57 @@ export function ErrorState({ error, className }: { error: Error; className?: str
       role="alert"
       className={cn(
         "flex min-w-0 items-start gap-3 rounded-xl border p-4",
-        unavailable ? "border-hairline bg-card" : "border-destructive/30 bg-destructive/[0.06]",
+        unavailable ? "border-hairline bg-card" : "border-rule-danger bg-wash-danger",
         className,
       )}
     >
       <span
         className={cn(
           "flex size-8 shrink-0 items-center justify-center rounded-lg",
-          unavailable ? "bg-muted text-muted-foreground" : "bg-destructive/12 text-destructive",
+          unavailable ? "bg-muted text-muted-foreground" : "bg-plot-danger text-destructive",
         )}
       >
         {unavailable ? <Slash className="size-4" /> : <Warning className="size-4" />}
       </span>
-      <div className="min-w-0 space-y-0.5">
-        <p className="text-[13px] font-medium">
-          {unavailable ? "Not available on this host" : "Something went wrong"}
+      <div className="min-w-0 flex-1 space-y-1">
+        {/*
+          "Something went wrong" is the fallback, not the headline. Where the
+          server said what was being attempted and why it failed, that is what
+          is shown — and the subsystem's own words go behind a disclosure so
+          they are available without being the first thing read.
+        */}
+        <p className="text-body font-medium">
+          {unavailable
+            ? "Not available on this host"
+            : api?.operation && api?.resource
+              ? `Could not ${api.operation} ${api.resource}`
+              : (api?.message ?? "Something went wrong")}
         </p>
-        <p className="text-xs leading-relaxed break-words text-muted-foreground">{error.message}</p>
+        {(api?.operation || !api) && (
+          <p className="text-xs leading-relaxed break-words text-muted-foreground">
+            {error.message}
+          </p>
+        )}
+        {api?.reason && (
+          <p className="text-xs leading-relaxed break-words text-muted-foreground">{api.reason}</p>
+        )}
+        <div className="flex flex-wrap items-center gap-3 pt-0.5">
+          {api?.raw && api.raw !== api.message && (
+            <details className="min-w-0 basis-full text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                What the server said
+              </summary>
+              <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
+                {api.raw}
+              </pre>
+            </details>
+          )}
+          {onRetry && api?.retryable && (
+            <Button size="xs" variant="outline" onClick={onRetry}>
+              Try again
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -141,7 +205,7 @@ export function Notice({
 }: {
   title: React.ReactNode
   icon?: React.ComponentType<{ className?: string }>
-  tone?: "default" | "warning" | "danger" | "success"
+  tone?: Tone
   children?: React.ReactNode
   className?: string
 }) {
@@ -150,9 +214,9 @@ export function Notice({
       className={cn(
         "flex min-w-0 items-start gap-3 rounded-xl border p-3.5",
         tone === "default" && "border-hairline bg-card",
-        tone === "warning" && "border-warning/30 bg-warning/[0.07]",
-        tone === "danger" && "border-destructive/30 bg-destructive/[0.06]",
-        tone === "success" && "border-success/30 bg-success/[0.07]",
+        tone === "warning" && "border-rule-warning bg-wash-warning",
+        tone === "danger" && "border-rule-danger bg-wash-danger",
+        tone === "success" && "border-rule-success bg-wash-success",
         className,
       )}
     >
@@ -161,16 +225,16 @@ export function Notice({
           className={cn(
             "flex size-7 shrink-0 items-center justify-center rounded-lg",
             tone === "default" && "bg-muted text-muted-foreground",
-            tone === "warning" && "bg-warning/15 text-warning",
-            tone === "danger" && "bg-destructive/12 text-destructive",
-            tone === "success" && "bg-success/15 text-success",
+            tone === "warning" && "bg-plot-warning text-warning",
+            tone === "danger" && "bg-plot-danger text-destructive",
+            tone === "success" && "bg-plot-success text-success",
           )}
         >
           <Icon className="size-3.5" />
         </span>
       )}
       <div className="min-w-0 space-y-1">
-        <p className="text-[13px] leading-tight font-medium">{title}</p>
+        <p className="text-body leading-tight font-medium">{title}</p>
         {children && (
           <div className="text-xs leading-relaxed text-muted-foreground">{children}</div>
         )}

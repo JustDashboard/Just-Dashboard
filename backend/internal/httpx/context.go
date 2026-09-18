@@ -21,6 +21,12 @@ type Principal struct {
 	Kind      string // "session" | "token"
 	IP        string
 	UserAgent string
+	// Elevated is whether this credential has passed its second factor. It is
+	// always true behind Authenticate, which refuses anything else; only the
+	// partial routes see it false, and only one of them cares — enrolling an
+	// authenticator means something different when the session that asked is
+	// already signed in.
+	Elevated bool
 
 	// FailureReason is filled in by the error writer so the audit middleware
 	// can record why a request was rejected.

@@ -2,7 +2,9 @@ package httpx
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
+	"unicode/utf8"
 )
 
 // ConfirmHeader carries the phrase a client must echo back before an
@@ -10,6 +12,8 @@ import (
 // field) means the same guard applies uniformly to DELETE and POST alike,
 // and a replayed URL alone can never trigger destruction.
 const ConfirmHeader = "X-Confirm"
+
+const ConfirmEncodingHeader = "X-Confirm-Encoding"
 
 // ConfirmParam is the same phrase carried as a query parameter, accepted only
 // by RequireTypedConfirmationWS.
@@ -62,9 +66,25 @@ func RequireTypedConfirmationWS(w http.ResponseWriter, r *http.Request, phrase s
 }
 
 func requireConfirmation(r *http.Request, phrase string, allowQuery bool) error {
-	got := strings.TrimSpace(r.Header.Get(ConfirmHeader))
+	got := r.Header.Get(ConfirmHeader)
+	switch r.Header.Get(ConfirmEncodingHeader) {
+	case "uri":
+		var err error
+		got, err = url.PathUnescape(got)
+		if err != nil || !utf8.ValidString(got) {
+			return BadRequest("invalid confirmation encoding")
+		}
+	case "":
+		// Preserve old scripts' whitespace tolerance only when whitespace is
+		// not part of the object's identity. Encoded phrases are always exact.
+		if strings.TrimSpace(phrase) == phrase {
+			got = strings.TrimSpace(got)
+		}
+	default:
+		return BadRequest("unsupported confirmation encoding")
+	}
 	if got == "" && allowQuery {
-		got = strings.TrimSpace(r.URL.Query().Get(ConfirmParam))
+		got = r.URL.Query().Get(ConfirmParam)
 	}
 	if got == "" {
 		return &APIError{

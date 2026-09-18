@@ -62,7 +62,16 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 	// systemd is genuinely reachable over the mounted D-Bus socket, so the
 	// check is telling us about the mount layout, not about reachability.
 	cmd.Env = append(os.Environ(), "SYSTEMD_IGNORE_CHROOT=1")
-	var stdout, stderr bytes.Buffer
+	return runPrepared(ctx, cmd, timeout, name, args...)
+}
+
+func binaryExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func runPrepared(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, name string, args ...string) (*CommandResult, error) {
+	var stdout, stderr commandBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -82,13 +91,30 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 	if ctx.Err() == context.DeadlineExceeded {
 		return res, fmt.Errorf("%s timed out after %s", name, timeout)
 	}
+	if stdout.truncated || stderr.truncated {
+		return res, fmt.Errorf("%s output exceeded 4 MiB", name)
+	}
 	if err != nil {
 		return res, fmt.Errorf("%s exited %d: %s", name, res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	return res, nil
 }
 
-func binaryExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
+// User-owned PM2 executables must not be able to exhaust dashboard memory by
+// writing an unbounded listing. Excess output is drained until the timeout.
+type commandBuffer struct {
+	buffer    bytes.Buffer
+	truncated bool
 }
+
+func (b *commandBuffer) Write(p []byte) (int, error) {
+	const limit = 4 << 20
+	remaining := limit - b.buffer.Len()
+	if len(p) > remaining {
+		b.truncated = true
+	}
+	_, _ = b.buffer.Write(p[:min(len(p), remaining)])
+	return len(p), nil
+}
+
+func (b *commandBuffer) String() string { return b.buffer.String() }

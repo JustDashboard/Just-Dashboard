@@ -33,8 +33,6 @@ import { SeriesLegend } from "@/components/metrics/series-legend"
  */
 export const ChartPanel = memo(function ChartPanel({
   title,
-  description,
-  icon,
   actions,
   rows,
   series,
@@ -50,12 +48,11 @@ export const ChartPanel = memo(function ChartPanel({
   thresholds,
   note,
   legend = true,
+  plain,
   className,
   footer,
 }: {
   title: string
-  description?: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
   actions?: React.ReactNode
   rows: ChartRowLike[]
   series: Series[]
@@ -73,6 +70,8 @@ export const ChartPanel = memo(function ChartPanel({
   /** What to say when there is nothing to draw. */
   note?: string
   legend?: boolean
+  /** No frame: title, hairline, plot — for a chart that is its own block on the page. */
+  plain?: boolean
   className?: string
   footer?: React.ReactNode
 }) {
@@ -91,11 +90,29 @@ export const ChartPanel = memo(function ChartPanel({
   const empty = rows.length === 0 || present.length === 0
 
   return (
-    <Panel className={className}>
-      <PanelHeader icon={icon} title={title} description={description} actions={actions} />
-      <PanelBody className="flex flex-1 flex-col gap-3">
+    <Panel plain={plain} className={className}>
+      <PanelHeader title={title} actions={actions} />
+      {/* Tighter than a panel's default padding, and deliberately so: a chart
+          brings its own margins — recharts reserves a gutter for the axis and
+          a strip under it for the ticks — so the body's `p-4` was drawing a
+          second inset around one that already existed. Ten of these on a page
+          is most of a screen of nothing.
+
+          The body remounts when the first rows land so the plot rises once
+          on arrival (§11), and never again while the window refreshes. */}
+      <PanelBody
+        key={empty ? "empty" : "data"}
+        className={cn(
+          "flex flex-1 flex-col gap-2.5 px-4 pt-3 pb-4 group-data-[plain]/panel:px-0 group-data-[plain]/panel:pt-2",
+          !empty && "animate-rise",
+        )}
+      >
         {empty ? (
-          <ChartPlaceholder note={note ?? "Nothing recorded in this window."} height={height} />
+          <ChartPlaceholder
+            note={note ?? "Nothing recorded in this window."}
+            height={height}
+            plain={plain}
+          />
         ) : (
           <>
             <MetricChart
@@ -113,7 +130,18 @@ export const ChartPanel = memo(function ChartPanel({
               stacked={stacked}
               thresholds={thresholds}
             />
-            {legend && <SeriesLegend rows={rows} series={present} unit={unit} format={format} />}
+            {legend && (
+              <SeriesLegend
+                rows={rows}
+                series={present}
+                unit={unit}
+                format={format}
+                // A hairline, not a gap: the numbers belong to the plot above
+                // them, and a rule says "same object, second part" where more
+                // empty space would only say "two things".
+                className="border-t border-hairline pt-2"
+              />
+            )}
           </>
         )}
         {footer}
@@ -125,17 +153,21 @@ export const ChartPanel = memo(function ChartPanel({
 export function ChartPlaceholder({
   note,
   height = 180,
+  plain,
   className,
 }: {
   note: string
   height?: number
+  /** Inside a plain panel the sentence sits on the page's ground: a dashed box would be the only frame on it. */
+  plain?: boolean
   className?: string
 }) {
   return (
     <div
       style={{ minHeight: height }}
       className={cn(
-        "flex w-full flex-1 items-center justify-center rounded-lg border border-dashed border-hairline bg-surface-sunken px-4 text-center text-xs text-muted-foreground",
+        "flex w-full flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground",
+        !plain && "rounded-lg border border-dashed border-hairline bg-surface-sunken",
         className,
       )}
     >

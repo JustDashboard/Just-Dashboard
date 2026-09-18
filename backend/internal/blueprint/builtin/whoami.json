@@ -1,0 +1,76 @@
+{
+  "id": "whoami",
+  "version": "1.0.0",
+  "name": "whoami",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A tiny HTTP server that answers with the request it received: the hostname, the headers, the client address. The right first deployment for checking that a domain, a certificate and the proxy line up before anything real depends on them.",
+  "iconId": "globe",
+  "docsUrl": "https://github.com/traefik/whoami",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/traefik/whoami",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "traefik/whoami:v1.12.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "Echoes every request",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 64,
+    "minMemoryMb": 32
+  },
+  "checks": [
+    {
+      "name": "Answers requests",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 20
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless; any version answers the same way."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:51690b71cc85a92b59cc92263ea1d57efa71d0834c483aef8bfd8d1c1322a97d"
+    }
+  ]
+}

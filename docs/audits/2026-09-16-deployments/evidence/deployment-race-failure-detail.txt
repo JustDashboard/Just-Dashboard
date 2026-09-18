@@ -1,0 +1,3 @@
+{"Time":"2026-09-16T01:24:58.096372412Z","Action":"output","Package":"github.com/Wayy01/Just-Dashboard/backend/internal/deploy","Test":"TestFleetReadStaysWithinItsBudgetAtReferenceScale","Output":"    performance_test.go:56: fleet p95 = 530.574017ms, budget is 500ms\n"}
+{"Time":"2026-09-16T01:24:58.10008145Z","Action":"fail","Package":"github.com/Wayy01/Just-Dashboard/backend/internal/deploy","Test":"TestFleetReadStaysWithinItsBudgetAtReferenceScale","Elapsed":13.81}
+{"Time":"2026-09-16T01:26:22.166614033Z","Action":"fail","Package":"github.com/Wayy01/Just-Dashboard/backend/internal/deploy","Elapsed":201.318}

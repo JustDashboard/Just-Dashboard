@@ -1,0 +1,6 @@
+=== RUN   TestLiveSQLiteApplicationRecoveryVerification
+    backup_recovery_live_test.go:115: source application never served its canary
+--- FAIL: TestLiveSQLiteApplicationRecoveryVerification (16.74s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/api	16.778s
+FAIL

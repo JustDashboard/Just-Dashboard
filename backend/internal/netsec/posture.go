@@ -276,7 +276,7 @@ func assessFirewall(in AssessInput) []SecurityFinding {
 		out = append(out, SecurityFinding{
 			ID: "firewall.logging-off", Level: "notice", Area: "firewall",
 			Title:  "The firewall is not logging",
-			Detail: "ufw logging is off, so refused connections leave no record.",
+			Detail: string(fw.Backend) + " logging is off, so refused connections leave no record.",
 			Advice: "Turn logging on at low. It costs almost nothing and it is the only way to answer what was being attempted after the fact.",
 		})
 	}

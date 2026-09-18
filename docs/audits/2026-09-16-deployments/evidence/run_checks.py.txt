@@ -1,0 +1,120 @@
+import datetime
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+
+ROOT = Path('/home/ubuntu/Just-Dashboard')
+OUT = ROOT / 'docs/audits/2026-09-16-deployments/evidence'
+TMP = Path('/tmp/jd-deployment-audit-20260916')
+GO = '/tmp/jd-go1.26.8/bin/go'
+env = dict(os.environ)
+env['PATH'] = '/tmp/jd-go1.26.8/bin:' + env['PATH']
+env['GOTOOLCHAIN'] = 'local'
+# The ordinary suite must not discover operator-owned database services.
+env.update({
+    'JD_TEST_POSTGRES_DSN': 'postgres://audit:audit@127.0.0.1:1/audit?sslmode=disable',
+    'JD_TEST_MYSQL_DSN': 'audit:audit@tcp(127.0.0.1:1)/audit',
+    'JD_TEST_MSSQL_DSN': 'sqlserver://audit:audit@127.0.0.1:1?database=audit',
+    'JD_TEST_ORACLE_DSN': 'oracle://audit:audit@127.0.0.1:1/audit',
+    'JD_TEST_CLICKHOUSE_DSN': 'clickhouse://audit:audit@127.0.0.1:1/audit',
+    'JD_TEST_MONGO_DSN': 'mongodb://127.0.0.1:1/audit?serverSelectionTimeoutMS=500',
+    'JD_TEST_REDIS_DSN': 'redis://127.0.0.1:1/0',
+})
+env.pop('JD_DOCKER_PRUNE_LIVE', None)
+env.pop('JD_DEPLOY_LIVE', None)
+
+def run(name, argv, cwd, extra=None, is_json=False, timeout=1200):
+    active = dict(env)
+    active.update(extra or {})
+    start = time.monotonic()
+    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    target = TMP / (name + '.jsonl') if is_json else OUT / (name + '.txt')
+    print('START', name, stamp, flush=True)
+    with target.open('w') as stream:
+        try:
+            proc = subprocess.run(argv, cwd=ROOT / cwd, env=active,
+                                  stdout=stream, stderr=subprocess.STDOUT, timeout=timeout)
+            code = proc.returncode
+        except subprocess.TimeoutExpired:
+            code = 124
+            stream.write('\nAUDIT TIMEOUT\n')
+    elapsed = round(time.monotonic() - start, 3)
+    result = dict(name=name, command=argv, cwd=cwd, started=stamp,
+                  elapsed_seconds=elapsed, exit_code=code)
+    if is_json:
+        tests, packages, failures, skips, other = [], [], [], [], []
+        for line in target.read_text().splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                other.append(line)
+                continue
+            action = item.get('Action')
+            if action in ('pass', 'fail', 'skip'):
+                entry = {k:item[k] for k in ('Package', 'Test', 'Action', 'Elapsed') if k in item}
+                (tests if 'Test' in item else packages).append(entry)
+            if action == 'output':
+                content = item.get('Output', '')
+                if '--- FAIL' in content or 'panic:' in content or 'WARNING: DATA RACE' in content:
+                    failures.append(item)
+                if 'skip' in content.lower() or 'unreachable' in content or 'unavailable (' in content:
+                    skips.append(item)
+        result.update(packages=packages, tests=tests, failure_markers=failures,
+                      skip_output=skips, non_json_output=other)
+        (OUT / (name + '.txt')).write_text(
+            'Command: ' + ' '.join(argv) + '\nExit code: ' + str(code) + '\n' +
+            '\n'.join(f"{x['Action']} {x['Package']} {x.get('Elapsed', '')}" for x in packages) +
+            '\n\nSkipped tests:\n' + '\n'.join(x.get('Output', '').rstrip() for x in skips) +
+            '\n\nNon-JSON output:\n' + '\n'.join(other) + '\n')
+    (OUT / (name + '.json')).write_text(json.dumps(result, indent=2) + '\n')
+    print('DONE', name, 'exit', code, 'seconds', elapsed, flush=True)
+    return code
+
+mode = sys.argv[1]
+if mode == 'backend':
+    run('backend-build', [GO, 'build', './...'], 'backend')
+    run('backend-vet', [GO, 'vet', './...'], 'backend')
+    run('backend-tests', [GO, 'test', '-json', '-count=1', './...'], 'backend', is_json=True)
+elif mode == 'race':
+    run('deployment-race', [GO, 'test', '-race', '-json', '-count=1', './internal/deploy',
+        './internal/api', './internal/proxysvc', './internal/backups', './internal/store'],
+        'backend', is_json=True)
+elif mode == 'live':
+    for name, package, pattern in [
+        ('live-artifacts-activation', './internal/deploy', 'TestLiveC[45]'),
+        ('live-ingress', './internal/proxysvc', 'TestLive(DockerCaddy|DeploymentWebroot)'),
+        ('live-database-connections', './internal/api', 'TestLiveDeploymentDatabaseConnection'),
+    ]:
+        run(name, [GO, 'test', '-json', '-count=1', package, '-run', pattern],
+            'backend', extra={'JD_DEPLOY_LIVE':'1'}, is_json=True)
+elif mode == 'frontend':
+    run('frontend-lint', ['bun', 'run', 'lint'], 'frontend')
+    run('frontend-build', ['bun', 'run', 'build'], 'frontend')
+    run('frontend-unit', ['bun', 'run', 'test'], 'frontend')
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    with (OUT / 'browser-server.txt').open('w') as stream:
+        server = subprocess.Popen(['bun', 'run', 'dev', '--hostname', '127.0.0.1', '--port', str(port)],
+            cwd=ROOT / 'frontend', env=env, stdout=stream, stderr=subprocess.STDOUT,
+            start_new_session=True)
+        try:
+            import urllib.request
+            for _ in range(120):
+                try:
+                    urllib.request.urlopen(f'http://127.0.0.1:{port}/login', timeout=2)
+                    break
+                except Exception:
+                    if server.poll() is not None:
+                        break
+                    time.sleep(1)
+            run('frontend-browser', ['bun', 'run', 'test:browser'], 'frontend',
+                extra={'JD_BROWSER_BASE_URL':f'http://127.0.0.1:{port}', 'CI':'1'})
+        finally:
+            import signal
+            os.killpg(server.pid, signal.SIGTERM)
+            server.wait(timeout=15)

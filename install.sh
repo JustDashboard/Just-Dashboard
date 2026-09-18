@@ -2,7 +2,7 @@
 #
 # One-command setup for Just Dashboard.
 #
-#   git clone https://github.com/Wayy01/Just-Dashboard.git
+#   git clone https://github.com/JustDashboard/Just-Dashboard.git
 #   cd Just-Dashboard && sudo ./install.sh
 #
 # It asks a handful of questions, writes .env, builds the stack and leaves you
@@ -72,6 +72,11 @@ say "${DIM}Self-hosted management for a single Linux server.${RESET}"
 [ "$(id -u)" -eq 0 ] || die "run this with sudo — the dashboard manages the host, so setup needs root."
 [ -f docker-compose.yml ] || die "run this from inside the cloned repository (docker-compose.yml is not here)."
 
+step "Installing and checking required host tools"
+source scripts/install-dependencies.sh
+source scripts/dotenv.sh
+jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
+
 step "Checking what this machine already has"
 
 need_docker=0
@@ -94,8 +99,7 @@ else
 	COMPOSE="docker compose"
 fi
 
-command -v openssl >/dev/null 2>&1 || die "openssl is required to generate the master key. Install it and re-run."
-ok "openssl"
+ok "curl, openssl and certbot are ready"
 
 if [ "$need_docker" -eq 1 ]; then
 	say ""
@@ -171,10 +175,8 @@ if [ "$KEEP_ENV" -eq 0 ]; then
 step "How will you reach the dashboard?"
 say ""
 say "  This dashboard is ${BOLD}root-equivalent${RESET}: anyone who reaches it with a valid"
-say "  session effectively has root on this machine. Pick how it is exposed."
-say ""
-say "  ${DIM}Whatever you pick, an SSH tunnel always works as well — it costs nothing${RESET}"
-say "  ${DIM}to leave available, and it is what gets you in if the rest ever fails.${RESET}"
+say "  session effectively has root on this machine. There are two ways in, and"
+say "  neither of them puts anything on the public internet."
 say ""
 
 # The proxy binds loopback in every configuration, so the allowlist has to
@@ -182,29 +184,37 @@ say ""
 # then dies at the backend's perimeter check.
 LOOPBACK="127.0.0.1/32,::1/128"
 
+# tailscale_hostname prints this machine's MagicDNS name, or nothing.
+#
+# --json is the stable place to read it from; the same field taken from the
+# human output would depend on column alignment. Self comes before Peer in that
+# document, so the first DNSName is this machine's. The trailing dot is
+# stripped because it is a DNS-correct FQDN and nobody types one into a browser.
+tailscale_hostname() {
+	tailscale status --json 2>/dev/null |
+		sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' | head -1 | sed 's/\.$//' || true
+}
+
 TS_IP=""
-WG_IP=""
-command -v tailscale >/dev/null 2>&1 && TS_IP="$(tailscale ip -4 2>/dev/null | head -1 || true)"
-WG_IF="$(ip -o link show 2>/dev/null | awk -F': ' '/wg[0-9]/{print $2; exit}' || true)"
-[ -n "$WG_IF" ] && WG_IP="$(ip -4 -o addr show "$WG_IF" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)"
+TS_NAME=""
+if command -v tailscale >/dev/null 2>&1; then
+	TS_IP="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+	TS_NAME="$(tailscale_hostname)"
+fi
 
 say "  ${BOLD}1${RESET}) ${GREEN}Tailscale${RESET} ${BOLD}— recommended${RESET}${TS_IP:+  ${GREEN}already connected: $TS_IP${RESET}}"
 say "     ${DIM}Reach it from your laptop or phone anywhere, with nothing exposed to${RESET}"
-say "     ${DIM}the internet. Set up for you if you do not have it.${RESET}"
+say "     ${DIM}the internet. With HTTPS enabled on your tailnet it also gets a real,${RESET}"
+say "     ${DIM}publicly trusted certificate — so the browser shows an ordinary padlock${RESET}"
+say "     ${DIM}rather than a warning. Set up for you if you do not have it.${RESET}"
 say ""
-say "  ${BOLD}2${RESET}) SSH tunnel only"
-say "     ${DIM}No new software, no account, nothing listening beyond loopback. Needs${RESET}"
-say "     ${DIM}an ssh -L command open the whole time you use it.${RESET}"
-say ""
-say "  ${BOLD}3${RESET}) A private network you already run${WG_IP:+  ${GREEN}WireGuard detected: $WG_IP${RESET}}"
-say "     ${DIM}WireGuard, an internal LAN, any interface you already trust.${RESET}"
-say ""
-say "  ${BOLD}4${RESET}) Public address with an allowlist ${YELLOW}— discouraged${RESET}"
-say "     ${DIM}A root-equivalent panel on the open internet. Only the allowlist${RESET}"
-say "     ${DIM}stands in front of it.${RESET}"
+say "  ${BOLD}2${RESET}) SSH tunnel"
+say "     ${DIM}No new software, no account, nothing listening beyond loopback. Served${RESET}"
+say "     ${DIM}over plain HTTP on localhost, which browsers treat as secure — the ssh${RESET}"
+say "     ${DIM}connection is already the encryption. Needs an ssh -L command open.${RESET}"
 say ""
 
-CHOICE="$(ask "Choose 1-4" 1)"
+CHOICE="$(ask "Choose 1 or 2" 1)"
 
 case "$CHOICE" in
 1)
@@ -226,54 +236,66 @@ case "$CHOICE" in
 	fi
 	if [ -z "$TS_IP" ]; then
 		warn "Tailscale is not available; falling back to an SSH tunnel."
-		warn "You can switch later by editing JD_SITE and JD_ALLOWED_CIDRS in .env."
+		warn "You can switch later from the dashboard's own settings page."
 		SITE="localhost"
+		BIND=""
+		TLS_MODE="off"
 		CIDRS="$LOOPBACK"
 		ACCESS_KIND="tunnel"
 	else
-		SITE="$TS_IP"
+		TS_NAME="$(tailscale_hostname)"
+		BIND="$TS_IP"
 		CIDRS="100.64.0.0/10,$LOOPBACK"
 		ACCESS_KIND="tailscale"
+		# A certificate is worth trying for before anything else is decided:
+		# it is the difference between an address the browser trusts and one it
+		# complains about every time, and the failure is entirely recoverable.
+		if [ -n "$TS_NAME" ]; then
+			step "Asking Tailscale for a certificate"
+			say "  ${DIM}A real Let's Encrypt certificate for $TS_NAME, issued through your${RESET}"
+			say "  ${DIM}tailnet. It needs HTTPS turned on for the tailnet — one switch in the${RESET}"
+			say "  ${DIM}admin console, under DNS.${RESET}"
+			say ""
+			mkdir -p /var/lib/just-dashboard/certs
+			if tailscale cert \
+				--cert-file /var/lib/just-dashboard/certs/site.crt \
+				--key-file /var/lib/just-dashboard/certs/site.key \
+				"$TS_NAME" >/dev/null 2>&1; then
+				chmod 0644 /var/lib/just-dashboard/certs/site.crt
+				chmod 0640 /var/lib/just-dashboard/certs/site.key
+				SITE="$TS_NAME"
+				TLS_MODE="tailscale"
+				ok "certificate issued — the browser will show a normal padlock"
+			else
+				SITE="$TS_NAME"
+				TLS_MODE="internal"
+				warn "Tailscale would not issue a certificate for $TS_NAME."
+				warn "That is almost always HTTPS being off for the tailnet: turn it on at"
+				warn "https://login.tailscale.com/admin/dns and re-run this, or switch it on"
+				warn "later from the dashboard's own settings page."
+				warn "Until then the dashboard uses its own CA and the browser warns once."
+			fi
+		else
+			SITE="$TS_IP"
+			TLS_MODE="internal"
+			warn "This machine has no MagicDNS name, so a trusted certificate is not"
+			warn "possible; using the tailnet address with the dashboard's own CA."
+		fi
 	fi
 	;;
 2)
 	SITE="localhost"
+	BIND=""
+	# Plain HTTP on loopback, deliberately. The tunnel is already encrypted
+	# and authenticated, and http://localhost is a secure context in every
+	# browser — so this is the one configuration with no warning to click
+	# through and no certificate to explain.
+	TLS_MODE="off"
 	CIDRS="$LOOPBACK"
 	ACCESS_KIND="tunnel"
 	;;
-3)
-	[ -n "$WG_IP" ] || WG_IP="$(ask "The address of this machine on that network" "")"
-	[ -n "$WG_IP" ] || die "an address is required for this option."
-	SITE="$WG_IP"
-	DEFAULT_NET="$(printf '%s' "$WG_IP" | awk -F. '{print $1"."$2"."$3".0/24"}')"
-	CIDRS="$(ask "Which addresses may reach it" "$DEFAULT_NET"),$LOOPBACK"
-	ACCESS_KIND="private"
-	;;
-4)
-	say ""
-	warn "${YELLOW}This puts a root-equivalent panel on the public internet.${RESET}"
-	warn "The address allowlist is the only thing in front of it, and it is"
-	warn "checked before authentication — so get it right."
-	say ""
-	# The dashboard makes irreversible actions typed rather than clicked, on the
-	# grounds that a yes/no prompt is answered reflexively. Putting a
-	# root-equivalent panel on the internet deserves at least the same friction.
-	say "  To continue, type: ${BOLD}expose to the internet${RESET}"
-	PHRASE="$(ask "Confirm" "")"
-	[ "$PHRASE" = "expose to the internet" ] \
-		|| die "not confirmed. Re-run and pick option 1 (Tailscale) or 2 (SSH tunnel)."
-	PUB_IP="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1 || true)"
-	SITE="$(ask "This machine's public address" "${PUB_IP:-}")"
-	[ -n "$SITE" ] || die "an address is required."
-	say ""
-	say "  ${DIM}Your current address, as seen from here:${RESET} $(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo 'could not detect')"
-	CIDRS="$(ask "Which addresses may reach it (comma separated, e.g. 203.0.113.7/32)" "")"
-	[ -n "$CIDRS" ] || die "an allowlist is required; the backend refuses to start without one."
-	CIDRS="$CIDRS,$LOOPBACK"
-	ACCESS_KIND="public"
-	;;
 *)
-	die "pick 1, 2, 3 or 4."
+	die "pick 1 or 2."
 	;;
 esac
 
@@ -304,20 +326,36 @@ step "Behaviour"
 TERMINAL=true
 yes_no "Enable the web terminal? (a real shell with this process's privileges)" y || TERMINAL=false
 
+# Two-factor is offered to every account and demanded of none by default.
+#
+# It used to be compulsory, and on a dashboard reachable only over a tailnet or
+# an ssh tunnel that was a decision made on the operator's behalf rather than
+# with them: the network is already authenticated, and the first ninety seconds
+# of the product were an authenticator app you could not skip. Enrolment is one
+# button on the account page whenever you want it, and an account that has
+# enrolled is always asked for its code whatever this says.
+REQUIRE_2FA=false
+yes_no "Require an authenticator app for every account? (you can enrol later either way)" n && REQUIRE_2FA=true
+
 # ── ports ───────────────────────────────────────────────────────────────────
 #
-# The three defaults are the three most contested ports on a Linux server:
-# 3000 is every Node app ever started, 8080 is every second Java or Go
-# service, and 8443 is the obvious alternative HTTPS port. A machine that
-# already uses one of them is the normal case.
+# Only one of these three is ever typed by a person: JD_PORT, the one in the
+# URL. The other two are internal — the frontend and the backend are bound to
+# loopback and reached only by the proxy — and they used to default to 3000 and
+# 8080, which are the two most contested numbers on a Linux server. 3000 in
+# particular is every Node app ever started, so a machine that already uses it
+# is the normal case rather than the exotic one.
 #
-# It is checked here rather than left to fail at start-up because of *how* it
-# used to fail. Only the frontend and backend would refuse to bind; the proxy
-# in front of them comes up perfectly clean and forwards to whatever already
-# holds the port — so the operator opens the dashboard, gets somebody else's
-# application over the dashboard's own certificate, and has nothing anywhere
-# that says why. Ninety seconds of confusion at install time is worth avoiding
-# by three lines of ss.
+# It mattered more than a collision usually does because of *how* it failed.
+# Only the frontend and backend would refuse to bind; the proxy in front of
+# them comes up perfectly clean and forwards to whatever already holds the
+# port — so the operator opens the dashboard, gets somebody else's application
+# over the dashboard's own certificate, and has nothing anywhere that says why.
+#
+# So the two internal ports are now picked at random from the high range, out
+# of the way of anything an operator would deliberately run, and checked free
+# before they are written. The one port a person has to remember keeps its
+# memorable default and only moves if something is already there.
 
 step "Ports"
 
@@ -343,33 +381,25 @@ who_has() {
 	return 0
 }
 
-# pick_port keeps the default when it is free and otherwise walks upward. The
-# step is 100 rather than 1 so the number it lands on still reads as a
-# deliberate choice — 3100, 8180, 8543 — instead of looking like the default
-# with a typo.
-# Sets PICKED rather than echoing it: ok() and warn() write to stdout, so a
-# version of this that returned the port through a command substitution would
-# capture its own progress messages into the number.
+# Reserve choices across the three services before any container is started.
 PICKED=""
+ALLOCATED_PORTS=" "
 pick_port() {
-	local want="$1" name="$2" p="$1" tries=0 owner=""
-	while port_taken "$p"; do
-		tries=$((tries + 1))
-		[ "$tries" -gt 20 ] && die "could not find a free port for $name near $want"
-		p=$((p + 100))
-	done
-	if [ "$p" != "$want" ]; then
-		owner="$(who_has "$want")"
-		warn "$name: $want is in use${owner:+ by $owner} — using $p instead"
-	else
-		ok "$name: $p"
-	fi
-	PICKED="$p"
+ local want="$1" name="$2" p="$1" tries=0
+ while port_taken "$p" || [[ "$ALLOCATED_PORTS" == *" $p "* ]]; do
+  tries=$((tries + 1))
+  [ "$tries" -ge 64512 ] && die "no available dashboard port remains for $name"
+  p=$((1024 + (p - 1024 + 1) % 64512))
+ done
+ if [ "$p" != "$want" ]; then warn "$name: $want is in use; using $p instead"; else ok "$name: $p"; fi
+ PICKED="$p"
+ ALLOCATED_PORTS="$ALLOCATED_PORTS$p "
 }
+random_port() { pick_port "$((20000 + RANDOM % 40000))" "$1"; }
 
 pick_port 8443 "dashboard (the port you connect to)"; JD_PORT="$PICKED"
-pick_port 8080 "backend API";                         JD_BACKEND_PORT="$PICKED"
-pick_port 3000 "frontend";                            JD_FRONTEND_PORT="$PICKED"
+random_port "backend API (internal)";                 JD_BACKEND_PORT="$PICKED"
+random_port "frontend (internal)";                    JD_FRONTEND_PORT="$PICKED"
 
 # ── write .env ──────────────────────────────────────────────────────────────
 
@@ -389,10 +419,30 @@ JD_MASTER_KEY=$MASTER_KEY
 # The single address the stack answers on, and the name on its certificate.
 JD_SITE=$SITE
 
-# The port you connect to, and the two loopback ports behind it. Chosen at
-# install time from what was free: 3000, 8080 and 8443 are contested enough
-# that the defaults collide on a great many servers, and a collision here used
-# to surface as the dashboard proxying you to somebody else's application.
+# The interface it listens on, when that is not the same string as the address
+# above. Blank in every configuration but Tailscale, where the certificate is
+# issued to a MagicDNS name and the socket is opened on the tailnet IP behind
+# it — the proxy container resolves names through Docker's resolver rather than
+# the host's, so it must not be asked to resolve that name itself.
+JD_BIND=$BIND
+
+# How the connection is trusted:
+#
+#   tailscale  a real, publicly trusted certificate from your tailnet. No
+#              browser warning. Renewed automatically by the dashboard.
+#   internal   Caddy's own CA. Encrypted, but the browser says "not secure"
+#              because nothing off this machine has heard of the issuer.
+#   off        plain HTTP, loopback only. The ssh tunnel is already the
+#              encryption, and browsers treat http://localhost as secure, so
+#              this is the configuration with nothing to click through.
+JD_TLS=$TLS_MODE
+
+# The port you connect to, and the two behind it. The dashboard port keeps a
+# memorable default and moves only if something already holds it. The other two
+# are internal, reached only by the proxy over loopback, and are picked at
+# random from the high range: their old defaults (3000 and 8080) collide on a
+# great many servers, and the collision used to surface as the dashboard
+# proxying you to somebody else's application.
 JD_PORT=$JD_PORT
 JD_BACKEND_PORT=$JD_BACKEND_PORT
 JD_FRONTEND_PORT=$JD_FRONTEND_PORT
@@ -405,9 +455,13 @@ JD_ALLOWED_ORIGINS=
 
 JD_TERMINAL_ENABLED=$TERMINAL
 
+# Whether an account with no authenticator may sign in. An account that has
+# enrolled one is always asked for its code, whatever this says.
+JD_REQUIRE_2FA=$REQUIRE_2FA
+
 # Used once, to create the first account. Safe to remove afterwards.
 JD_BOOTSTRAP_USER=$ADMIN_USER
-JD_BOOTSTRAP_PASSWORD=$ADMIN_PW
+JD_BOOTSTRAP_PASSWORD=$(jd_dotenv_literal "$ADMIN_PW")
 
 JD_COMPOSE_ROOTS=/opt,/srv,/home
 JD_GIT_ROOTS=/opt,/srv,/home,/root
@@ -422,7 +476,7 @@ ok ".env written (mode 600)"
 
 fi  # KEEP_ENV
 
-# ── ports, on an install that kept its .env ─────────────────────────────────
+# ── settings an older .env has never heard of ───────────────────────────────
 #
 # A re-run that keeps an existing .env skipped the port checks entirely, which
 # left the one case that most needs them unserved: an install made before the
@@ -436,46 +490,92 @@ fi  # KEEP_ENV
 # non-default is left exactly as it is — it was a deliberate choice, and this
 # is not the place to second-guess it.
 if [ "$KEEP_ENV" -eq 1 ]; then
-	step "Ports"
+	# The freshly built backend fills missing port values and reconciles
+	# existing owners immediately before startup below.
 
-	# set_env_port writes NAME=value into .env, replacing the line if it is
-	# there and appending it if it is not.
-	set_env_port() {
-		if grep -qE "^$1=" .env; then
-			sed -i "s|^$1=.*|$1=$2|" .env
-		else
-			printf '%s=%s\n' "$1" "$2" >> .env
-		fi
-	}
+	# Settings that did not exist when this .env was written.
+	#
+	# Two of them are filled in with the behaviour the install already had, so a
+	# re-run never changes how a working dashboard behaves: JD_TLS=internal is
+	# what every install before this one did, and an empty JD_BIND means the
+	# proxy binds exactly what it bound yesterday.
+	#
+	# The third is not that kind of setting. Two-factor used to be compulsory
+	# and is now a policy whose default is *optional*, so an upgrade changes it
+	# unless somebody decides otherwise — and a security setting that changes
+	# under an operator without being mentioned is the thing this whole block
+	# exists to avoid. It is asked rather than assumed, and the answer is
+	# written down, so this install and one upgraded by `docker compose up`
+	# differ only where the operator said they should.
+	step "Settings this .env predates"
 
-	# Fills a gap; never moves a port that is already recorded.
-	#
-	# The tempting version of this also re-checks an existing value and moves
-	# it when something else has taken the port. It cannot: on a re-run against
-	# a dashboard that is currently up, the thing holding the port *is* this
-	# dashboard, and every way of telling that apart from a squatter is a guess
-	# — one that, when it guesses wrong, moves the ports out from under a
-	# working install. That is a worse failure than the one being fixed.
-	#
-	# A recorded port was chosen deliberately, by a previous run or by the
-	# operator. If something else really has taken it, `docker compose up` now
-	# stops and names it, which is the honest answer and needs no guessing.
-	check_kept_port() {
-		local var="$1" default="$2" name="$3" current
-		# `|| true` for the reason env_port carries one: absent is normal here.
-		current="$(grep -E "^$var=" .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"
-		if [ -n "$current" ]; then
-			ok "$name: $current (already set)"
+	fill_env() {
+		local var="$1" value="$2" note="$3"
+		if grep -qE "^$var=" .env; then
 			return
 		fi
-		pick_port "$default" "$name"
-		set_env_port "$var" "$PICKED"
-		ok "$var was not set; using $PICKED"
+		printf '%s=%s\n' "$var" "$value" >> .env
+		ok "$var=$value  ${DIM}($note)${RESET}"
 	}
 
-	check_kept_port JD_PORT 8443 "dashboard (the port you connect to)"
-	check_kept_port JD_BACKEND_PORT 8080 "backend API"
-	check_kept_port JD_FRONTEND_PORT 3000 "frontend"
+	fill_env JD_TLS internal "how the connection is trusted; the settings page can change it"
+	fill_env JD_BIND "" "the interface to listen on, when it differs from JD_SITE"
+
+	if ! grep -qE '^JD_REQUIRE_2FA=' .env; then
+		say ""
+		say "  ${BOLD}Two-factor is no longer compulsory by default.${RESET}"
+		say "  ${DIM}An account that has enrolled an authenticator is still asked for its${RESET}"
+		say "  ${DIM}code at every sign-in — that does not change. What changes is whether${RESET}"
+		say "  ${DIM}an account with no authenticator can sign in at all. Your install has${RESET}"
+		say "  ${DIM}required one until now.${RESET}"
+		say ""
+		KEEP_REQUIRE_2FA=false
+		yes_no "Keep requiring an authenticator for every account?" n && KEEP_REQUIRE_2FA=true
+		printf 'JD_REQUIRE_2FA=%s\n' "$KEEP_REQUIRE_2FA" >> .env
+		ok "JD_REQUIRE_2FA=$KEEP_REQUIRE_2FA"
+	fi
+fi
+
+# ── web terminal shell ──────────────────────────────────────────────────────
+#
+# The terminal runs a real shell on the host, so whatever it can do at the
+# prompt is whatever the host's shell can do. Out of the box that is bash with
+# Tab completion. What people miss from a fresh server is the grey ghost text
+# that finishes a command from history, and that is zsh with two packaged
+# plugins — so they are installed here, and the dashboard is pointed at zsh
+# for its terminal only. ssh keeps the account's login shell exactly as chsh
+# left it: JD_TERMINAL_SHELL overrides the shell the *dashboard* opens, and
+# blanking it in .env goes back to honouring chsh.
+#
+# On a re-run this is an upgrade to how a working terminal behaves, so it is
+# asked rather than assumed, and a .env that already names a shell — even an
+# empty one — is a decision that stands.
+TERMINAL_ON="$(grep -E '^JD_TERMINAL_ENABLED=' .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"
+if [ "${TERMINAL_ON:-true}" != "false" ]; then
+	WANT_ZSH=1
+	if [ "$KEEP_ENV" -eq 1 ]; then
+		if grep -qE '^JD_TERMINAL_SHELL=' .env; then
+			WANT_ZSH=0
+		else
+			step "Web terminal"
+			say "  ${DIM}The terminal can open zsh with inline history suggestions and command${RESET}"
+			say "  ${DIM}colouring. ssh keeps using the account's own shell either way.${RESET}"
+			say ""
+			yes_no "Use zsh with history suggestions in the web terminal?" y || WANT_ZSH=0
+		fi
+	fi
+	if [ "$WANT_ZSH" -eq 1 ]; then
+		step "Setting up the web terminal's shell"
+		if jd_install_terminal_extras; then
+			ZSH_BIN="$(command -v zsh)"
+			printf '\n# The shell the web terminal opens. ssh still uses the account'"'"'s own login\n# shell; leave this empty to honour chsh in the terminal as well.\nJD_TERMINAL_SHELL=%s\n' "$ZSH_BIN" >> .env
+			ok "zsh with history suggestions and command colouring ($ZSH_BIN)"
+		else
+			warn "zsh and its plugins could not be installed; the terminal opens the account's own shell."
+			warn "Install zsh, zsh-autosuggestions and zsh-syntax-highlighting by hand and set"
+			warn "JD_TERMINAL_SHELL in .env to the zsh path to get suggestions later."
+		fi
+	fi
 fi
 
 # ── build and start ─────────────────────────────────────────────────────────
@@ -501,11 +601,29 @@ if [ ! -d "$CLIPBOARD_ROOT" ] || [ -L "$CLIPBOARD_ROOT" ]; then
 fi
 chmod 0711 "$CLIPBOARD_ROOT"
 
+# A half-configured dpkg state — almost always an interrupted docker-ce
+# upgrade, whose postinst restarts the daemon — breaks everything after it in
+# a confusing way: every apt invocation fails with "dpkg was interrupted",
+# and finishing it later restarts dockerd mid-build, which surfaces as
+# `failed to receive status: ... EOF` from BuildKit, or drops the running
+# dashboard for a minute. Fail fast here instead of 100s into the build.
+if command -v dpkg >/dev/null 2>&1 && dpkg --audit 2>/dev/null | grep -q .; then
+	step "Package manager needs attention"
+	dpkg --audit 2>/dev/null | sed 's/^/  /'
+	die "dpkg reports half-configured packages. Finish them first with 'sudo dpkg --configure -a' (it restarts Docker, so the dashboard drops for a couple of minutes — run it from SSH, not the web terminal), then re-run this script."
+fi
+
 step "Building and starting the stack"
 say "  ${DIM}First build compiles the Go backend and the Next.js frontend; give it a few minutes.${RESET}"
 say ""
 
-$COMPOSE up -d --build
+$COMPOSE build
+# Use the freshly built backend so installs and in-app lifecycle operations
+# share port ownership detection and update every consumer through .env.
+docker run --rm --network host --pid host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD:$PWD" \
+  just-dashboard-backend:latest -prepare-ports "$PWD" -start-stack
 
 step "Waiting for the dashboard to answer"
 
@@ -557,8 +675,27 @@ tunnel_fallback() {
 	say ""
 	say "  ${DIM}If that is ever unreachable, an SSH tunnel still works:${RESET}"
 	say "    ${DIM}ssh -N -L $JD_PORT:localhost:$JD_PORT $(logname 2>/dev/null || echo root)@${PUBLIC_HOST:-YOUR_SERVER}${RESET}"
-	say "    ${DIM}then open https://localhost:$JD_PORT${RESET}"
+	say "    ${DIM}then open $SCHEME://localhost:$JD_PORT${RESET}"
 }
+
+# A re-run that kept its .env never entered the block that chose these, so they
+# are read back from the file rather than defaulted — printing tunnel
+# instructions to somebody whose dashboard is on a tailnet is how an operator
+# concludes the installer has reconfigured something behind their back.
+if [ "${KEEP_ENV:-0}" -eq 1 ]; then
+	TLS_MODE="$(env_port JD_TLS)"; TLS_MODE="${TLS_MODE:-internal}"
+	if [ "$SITE_ADDR" = "localhost" ] || [ "$SITE_ADDR" = "127.0.0.1" ]; then
+		ACCESS_KIND="tunnel"
+	else
+		ACCESS_KIND="tailscale"
+	fi
+fi
+
+# The scheme follows the certificate: the tunnel configuration is deliberately
+# plain HTTP on loopback, and printing an https:// URL for it would send the
+# operator to a port that answers nothing.
+SCHEME="https"
+[ "${TLS_MODE:-internal}" = "off" ] && SCHEME="http"
 
 case "${ACCESS_KIND:-tunnel}" in
 tunnel)
@@ -566,34 +703,35 @@ tunnel)
 	say ""
 	say "    ${BLUE}ssh -N -L $JD_PORT:localhost:$JD_PORT $(logname 2>/dev/null || echo root)@${PUBLIC_HOST:-YOUR_SERVER}${RESET}"
 	say ""
-	say "  Then open ${BOLD}https://localhost:$JD_PORT${RESET} while that stays open."
+	say "  Then open ${BOLD}$SCHEME://localhost:$JD_PORT${RESET} while that stays open."
 	;;
 tailscale)
 	say "  ${BOLD}Reach it from any device on your tailnet:${RESET}"
 	say ""
-	say "    ${BLUE}https://$SITE_ADDR:$JD_PORT${RESET}"
-	tunnel_fallback
-	;;
-private)
-	say "  ${BOLD}Reach it over your private network:${RESET}"
-	say ""
-	say "    ${BLUE}https://$SITE_ADDR:$JD_PORT${RESET}"
-	tunnel_fallback
-	;;
-public)
-	say "  ${BOLD}Reach it at:${RESET}"
-	say ""
-	say "    ${BLUE}https://$SITE_ADDR:$JD_PORT${RESET}"
-	say ""
-	warn "This is on the public internet. Only the addresses you allowlisted"
-	warn "can reach it. Consider moving to Tailscale when you get a moment."
+	say "    ${BLUE}$SCHEME://$SITE_ADDR:$JD_PORT${RESET}"
 	tunnel_fallback
 	;;
 esac
 
 say ""
-say "  ${DIM}The certificate is signed by Caddy's own CA, so the browser warns once.${RESET}"
-say "  ${DIM}That is expected: the link is already encrypted by the tunnel or VPN.${RESET}"
+case "${TLS_MODE:-internal}" in
+tailscale)
+	say "  ${GREEN}The certificate is a real one${RESET}, issued to $SITE_ADDR through your tailnet."
+	say "  ${DIM}No browser warning, and the dashboard renews it before it expires.${RESET}"
+	;;
+off)
+	say "  ${DIM}Served over plain HTTP on loopback. That is not a downgrade: the ssh${RESET}"
+	say "  ${DIM}tunnel is already encrypted and authenticated, and browsers treat${RESET}"
+	say "  ${DIM}http://localhost as a secure origin — so there is no warning to click${RESET}"
+	say "  ${DIM}through and no certificate to explain.${RESET}"
+	;;
+*)
+	say "  ${DIM}The certificate is signed by Caddy's own CA, so the browser warns once.${RESET}"
+	say "  ${DIM}That is expected: the link is already encrypted by the tunnel or tailnet.${RESET}"
+	say "  ${DIM}Turn HTTPS on for your tailnet to replace it with a trusted one — the${RESET}"
+	say "  ${DIM}dashboard's own settings page can then switch to it without a re-install.${RESET}"
+	;;
+esac
 
 if [ "${KEEP_ENV:-0}" -eq 0 ]; then
 	say ""
@@ -602,17 +740,26 @@ if [ "${KEEP_ENV:-0}" -eq 0 ]; then
 	if [ "${GENERATED_PW:-0}" -eq 1 ]; then
 		say "    password  ${BOLD}$ADMIN_PW${RESET}"
 		say ""
-		warn "Save that password now — it is shown once, and you must change it at first login."
+		warn "Save that password now — it is shown once. Change it from Account → Security whenever you like."
 	else
 		say "    password  ${DIM}(the one you chose)${RESET}"
 	fi
 	say ""
-	say "  You will be asked to enrol an authenticator app before anything else works."
+	if [ "${REQUIRE_2FA:-false}" = "true" ]; then
+		say "  You will be asked to enrol an authenticator app before anything else works."
+	else
+		say "  ${DIM}Two-factor is off by default. Turn it on for your account from${RESET}"
+		say "  ${DIM}Account → Two-factor authentication whenever you want it.${RESET}"
+	fi
 fi
 
 say ""
 say "  ${DIM}Useful from here:${RESET}"
 say "    $COMPOSE logs -f backend    ${DIM}# what the server is doing${RESET}"
-say "    $COMPOSE restart            ${DIM}# after editing .env${RESET}"
+say "    $COMPOSE restart            ${DIM}# after editing .env by hand${RESET}"
 say "    $COMPOSE down               ${DIM}# stop it${RESET}"
+say ""
+say "  ${DIM}Ports, address, certificate and two-factor are all editable from the${RESET}"
+say "  ${DIM}dashboard itself, under Operations → Dashboard → Configuration. It${RESET}"
+say "  ${DIM}restarts into a change and puts the old one back if it does not come up.${RESET}"
 say ""

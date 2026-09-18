@@ -28,6 +28,10 @@ var (
 	ErrNoProxy     = errors.New("neither nginx nor Caddy was found on this host")
 	ErrInvalidConf = errors.New("configuration failed validation")
 	ErrUnsafePath  = errors.New("path is outside the proxy configuration directory")
+	// ErrProtectedFile is a file inside the proxy directory that the config
+	// editor must not show: a password file. Its hashes are offline-crackable,
+	// and the editor's read route is open to every signed-in account.
+	ErrProtectedFile = errors.New("this file holds password hashes and is not shown by the config editor")
 )
 
 type Kind string
@@ -38,8 +42,9 @@ const (
 )
 
 type Service struct {
-	nginxDir  string
-	caddyFile string
+	dockerIngress bool
+	nginxDir      string
+	caddyFile     string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -52,14 +57,30 @@ func New(nginxDir, caddyFile string) *Service {
 	return &Service{nginxDir: filepath.Clean(nginxDir), caddyFile: filepath.Clean(caddyFile)}
 }
 
+// NewWithDockerIngress enables discovery of the host's existing public Caddy.
+// Isolated services and tests use New without inspecting unrelated containers.
+func NewWithDockerIngress(nginxDir, caddyFile string) *Service {
+	s := New(nginxDir, caddyFile)
+	s.dockerIngress = true
+	return s
+}
+
+func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
+	if !s.dockerIngress {
+		return nil, nil
+	}
+	return discoverDockerCaddy(ctx)
+}
+
 type Availability struct {
-	Nginx     bool   `json:"nginx"`
-	Caddy     bool   `json:"caddy"`
-	NginxVer  string `json:"nginxVersion,omitempty"`
-	CaddyVer  string `json:"caddyVersion,omitempty"`
-	NginxDir  string `json:"nginxDir"`
-	CaddyFile string `json:"caddyFile"`
-	Certbot   bool   `json:"certbot"`
+	IngressContainer string `json:"ingressContainer,omitempty"`
+	Nginx            bool   `json:"nginx"`
+	Caddy            bool   `json:"caddy"`
+	NginxVer         string `json:"nginxVersion,omitempty"`
+	CaddyVer         string `json:"caddyVersion,omitempty"`
+	NginxDir         string `json:"nginxDir"`
+	CaddyFile        string `json:"caddyFile"`
+	Certbot          bool   `json:"certbot"`
 }
 
 func (s *Service) Availability(ctx context.Context) Availability {
@@ -70,19 +91,62 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	if hostexec.Available("nginx") {
 		a.Nginx = true
 		if out, err := hostexec.Command(ctx, "nginx", "-v").CombinedOutput(); err == nil || len(out) > 0 {
-			a.NginxVer = strings.TrimSpace(string(out))
+			a.NginxVer = parseNginxVersion(string(out))
 		}
 	}
 	if hostexec.Available("caddy") {
 		a.Caddy = true
 		if out, err := hostexec.Command(ctx, "caddy", "version").Output(); err == nil {
-			a.CaddyVer = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+			a.CaddyVer = parseCaddyVersion(string(out))
 		}
 	}
 	if hostexec.Available("certbot") {
 		a.Certbot = true
 	}
+	if edge, err := s.dockerCaddy(ctx); err == nil && edge != nil {
+		a.Caddy = true
+		a.IngressContainer = edge.Name
+	} else if err == nil && s.canProvisionIngress(ctx) {
+		a.Caddy = true
+		a.IngressContainer = managedIngressName
+	}
 	return a
+}
+
+// nginxVersionLine matches what `nginx -v` writes to stderr:
+// "nginx version: nginx/1.26.3 (Ubuntu)". The build name is kept because it is
+// not always "nginx" — openresty and tengine identify themselves here, and an
+// operator debugging a module that only one of them ships needs to see which.
+var nginxVersionLine = regexp.MustCompile(`(?i)version:\s*(\S+)`)
+
+// parseNginxVersion reduces that line to the part a caller can put beside a
+// label. The whole line is what the binary emits, and printing it under a
+// "Reverse proxy" heading reads "nginx nginx version: nginx/1.26.3" — the
+// label, the build and the word "version" three times over.
+//
+// Anything unrecognised is returned trimmed rather than dropped: a version
+// this does not know the shape of is still more useful on screen than nothing.
+func parseNginxVersion(out string) string {
+	out = strings.TrimSpace(out)
+	if m := nginxVersionLine.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	return firstLine(out)
+}
+
+// parseCaddyVersion takes the version from `caddy version`, whose first line is
+// "v2.7.6 h1:w1dLC…" — a version followed by a module hash that means nothing
+// to a reader and pushes the version itself off a narrow tile.
+func parseCaddyVersion(out string) string {
+	line := firstLine(out)
+	if field, _, found := strings.Cut(line, " "); found {
+		return field
+	}
+	return line
+}
+
+func firstLine(s string) string {
+	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
 }
 
 // VHost is one virtual host. For nginx the enabled state is the presence of a
@@ -115,6 +179,15 @@ func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
 	out = append(out, s.nginxVHosts()...)
 	if caddy, err := s.caddySites(); err == nil {
 		out = append(out, caddy...)
+	}
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return nil, err
+	} else if edge != nil {
+		sites, err := edge.vhosts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sites...)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
@@ -228,23 +301,52 @@ func (s *Service) caddySites() ([]VHost, error) {
 		ServerNames: []string{}, Listen: []string{}, Upstreams: []string{},
 	}
 	if b, err := os.ReadFile(s.caddyFile); err == nil {
-		for _, line := range strings.Split(string(b), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			if strings.HasSuffix(trimmed, "{") && !strings.HasPrefix(trimmed, "reverse_proxy") {
-				name := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
-				if name != "" && !strings.ContainsAny(name, "()") {
-					v.ServerNames = append(v.ServerNames, strings.Fields(name)...)
-				}
-			}
-			if after, ok := strings.CutPrefix(trimmed, "reverse_proxy "); ok {
-				v.Upstreams = append(v.Upstreams, strings.TrimSpace(strings.TrimSuffix(after, "{")))
-			}
-		}
+		v.ServerNames, v.Upstreams = parseCaddyfile(string(b))
 	}
 	return []VHost{v}, nil
+}
+
+// parseCaddyfile pulls the site addresses and the reverse_proxy targets out
+// of a Caddyfile without being a Caddyfile parser.
+//
+// Only a block opened at the top level is a site address. Every directive
+// that takes a block — handle, route, tls, header, encode, log — opens one
+// too, and reading those as names put "header" and "handle" in the server
+// list of every Caddyfile that used them. Brace depth is tracked line by
+// line, which is enough for the files Caddy's own formatter produces; a
+// global options block, which opens with a bare `{`, is skipped by the same
+// rule since it has no name.
+func parseCaddyfile(content string) (names, upstreams []string) {
+	names, upstreams = []string{}, []string{}
+	depth := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if after, ok := strings.CutPrefix(trimmed, "reverse_proxy "); ok {
+			target := strings.TrimSpace(strings.TrimSuffix(after, "{"))
+			if target != "" {
+				upstreams = append(upstreams, target)
+			}
+		}
+		opens := strings.HasSuffix(trimmed, "{")
+		if opens && depth == 0 {
+			name := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
+			if name != "" && !strings.ContainsAny(name, "()") {
+				for _, field := range strings.Split(name, ",") {
+					names = append(names, strings.Fields(field)...)
+				}
+			}
+		}
+		if opens {
+			depth++
+		}
+		if trimmed == "}" && depth > 0 {
+			depth--
+		}
+	}
+	return names, upstreams
 }
 
 // allowedPath keeps the config editor pointed at the proxy's own directories.
@@ -287,10 +389,56 @@ func (s *Service) confdPath(name string) string {
 func (s *Service) authDir() string   { return filepath.Join(s.nginxDir, "jd-auth") }
 func (s *Service) streamDir() string { return filepath.Join(s.nginxDir, "stream.d") }
 
+// isPasswordFile recognises an htpasswd file by where it is or what it is
+// called. The dashboard's own live under authDir; the ones written by hand
+// are `.htpasswd` by near-universal convention. The config editor's read
+// route is held by every signed-in account, and a list of bcrypt hashes is
+// not configuration.
+func (s *Service) isPasswordFile(full string) bool {
+	if strings.HasPrefix(full, s.authDir()+string(os.PathSeparator)) {
+		return true
+	}
+	base := strings.ToLower(filepath.Base(full))
+	return strings.HasPrefix(base, ".ht") || strings.Contains(base, "htpasswd")
+}
+
+// nginxIncluded reports whether nginx reads this file at all, and whether
+// that can be known. `nginx -t` says nothing about a file outside the include
+// tree, so a candidate for a disabled site tests "valid" whatever it says; the
+// answer here is what turns that silence into a sentence.
+func (s *Service) nginxIncluded(full string) (included, known bool) {
+	dir, name := filepath.Split(full)
+	switch filepath.Clean(dir) {
+	case filepath.Join(s.nginxDir, "sites-available"):
+		_, err := os.Lstat(filepath.Join(s.nginxDir, "sites-enabled", name))
+		return err == nil, true
+	case filepath.Join(s.nginxDir, "sites-enabled"):
+		return true, true
+	case filepath.Join(s.nginxDir, "conf.d"):
+		return strings.HasSuffix(name, ".conf"), true
+	case s.streamDir():
+		return strings.HasSuffix(name, ".conf") && streamIncludeFound(s.nginxDir, s.streamDir()), true
+	}
+	return false, false
+}
+
+// includeNote is the sentence a validation result carries when the test
+// could not have seen the file.
+func (s *Service) includeNote(full string) string {
+	included, known := s.nginxIncluded(full)
+	if !known || included {
+		return ""
+	}
+	return "nginx does not include this file at the moment, so the test could not see it: enable the site (or, for a stream, include the stream directory in nginx.conf) before trusting this result."
+}
+
 func (s *Service) ReadConfig(path string) (string, error) {
 	full, err := s.allowedPath(path)
 	if err != nil {
 		return "", err
+	}
+	if s.isPasswordFile(full) {
+		return "", fmt.Errorf("%w: %s", ErrProtectedFile, path)
 	}
 	b, err := os.ReadFile(full)
 	if err != nil {
@@ -303,6 +451,10 @@ type ValidationResult struct {
 	Valid   bool   `json:"valid"`
 	Output  string `json:"output"`
 	Command string `json:"command"`
+	// Note qualifies the verdict: an nginx file outside the include tree
+	// passes `nginx -t` without being read, and saying so is the difference
+	// between a dry run and a false reassurance.
+	Note string `json:"note,omitempty"`
 }
 
 // Validate runs the server's own config test and leaves the host exactly as it
@@ -335,6 +487,7 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 	// Unconditional: the caller asked whether this content would be accepted,
 	// not for it to be installed.
 	restore()
+	res.Note = s.includeNote(full)
 	return res, nil
 }
 
@@ -462,6 +615,16 @@ func writeAtomic(path, content string) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// Test runs the server's own config test against what is on disk right now.
+// It stages nothing and reloads nothing: it is the answer to "would a reload
+// succeed", asked before pressing the button that finds out the hard way.
+func (s *Service) Test(ctx context.Context, kind Kind) *ValidationResult {
+	if kind == KindCaddy {
+		return runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+	}
+	return runValidator(ctx, "nginx", "-t")
+}
+
 type ReloadResult struct {
 	Validation *ValidationResult `json:"validation"`
 	Reloaded   bool              `json:"reloaded"`
@@ -512,13 +675,12 @@ func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool
 		return fmt.Errorf("no such vhost: %s", name)
 	}
 	if enabled {
-		if _, err := os.Lstat(link); err == nil {
-			return nil
-		}
-		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-			return err
-		}
-		return os.Symlink(available, link)
+		// linkEnabled rather than a bare Symlink: a link already present but
+		// pointing somewhere else — the previous file of a renamed site, a
+		// dangling target — used to be reported as "enabled" and left as it
+		// was, so the switch said on while nginx read nothing.
+		_, err := linkEnabled(link, available)
+		return err
 	}
 	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
 		return err

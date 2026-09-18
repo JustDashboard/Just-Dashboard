@@ -199,10 +199,19 @@ func lastField(s string) string {
 // Anything else there is an address or an application profile name.
 var bareUFWPortRe = regexp.MustCompile(`^\d{1,5}(:\d{1,5})?(,\d{1,5}(:\d{1,5})?)*$`)
 
-func (ufwBackend) AddRule(ctx context.Context, req RuleRequest) (string, error) {
+func (b ufwBackend) AddRule(ctx context.Context, req RuleRequest) (string, error) {
 	args := []string{}
-	if req.Position > 0 {
-		args = append(args, "insert", strconv.Itoa(req.Position))
+	position := req.Position
+	if position == 0 && blocksASource(req) {
+		// ufw stops at the first match, so a deny appended after `allow 22`
+		// never sees the SSH traffic it was written to refuse — and the rule
+		// list shows a block that is doing nothing. A source-only deny or
+		// reject, which is what "block this address" writes, goes in front
+		// unless the caller chose a place for it.
+		position = b.frontPosition(ctx, req.From)
+	}
+	if position > 0 {
+		args = append(args, "insert", strconv.Itoa(position))
 	}
 	args = append(args, req.Action, req.Direction)
 	// An application profile names a *destination* port, and ufw only reads it
@@ -253,6 +262,46 @@ func (ufwBackend) AddRule(ctx context.Context, req RuleRequest) (string, error) 
 		return out, errRuleExists
 	}
 	return out, nil
+}
+
+// blocksASource reports a rule that refuses an address wherever it knocks:
+// inbound, deny or reject, a source and neither a port nor a profile.
+func blocksASource(req RuleRequest) bool {
+	return req.Direction == "in" && (req.Action == "deny" || req.Action == "reject") &&
+		req.Port == "" && req.App == "" && req.From != "" && !strings.EqualFold(req.From, "any")
+}
+
+// frontPosition is where a rule that has to run before every allow goes: ahead
+// of the first rule of its own family.
+//
+// Checked against ufw itself with --dry-run: it numbers the IPv6 rules after
+// the IPv4 ones and refuses an insert outside the family's own range, so a v6
+// block goes in at one past the last v4 rule. It also refuses `insert 1` into
+// an empty list — where there is nothing to be shadowed by, so appending is
+// right, and 0 says so.
+func (b ufwBackend) frontPosition(ctx context.Context, from string) int {
+	st, err := b.Status(ctx)
+	if err != nil || st.Error != "" {
+		return 0
+	}
+	v4, v6 := 0, 0
+	for _, r := range st.Rules {
+		if r.IPv6 {
+			v6++
+		} else {
+			v4++
+		}
+	}
+	if strings.Contains(from, ":") {
+		if v6 == 0 {
+			return 0
+		}
+		return v4 + 1
+	}
+	if v4 == 0 {
+		return 0
+	}
+	return 1
 }
 
 // ufwAdded reports whether ufw's output claims it wrote something.

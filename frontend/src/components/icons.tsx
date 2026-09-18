@@ -129,6 +129,7 @@ import {
   StopCircleIcon,
   SunIcon,
   SwatchIcon,
+  TagIcon,
   TableCellsIcon,
   TrashIcon,
   UnderlineIcon,
@@ -297,13 +298,47 @@ export const Code: Icon = adapt(CodeBracketSquareIcon, "Code")
  * the square in a ring. Getting these two the wrong way round puts a warning
  * triangle on the button that stops a container.
  *
- * `Status` is the radio/dot indicator, always rendered tiny with a fill — the
- * small dash reads as a dot at that size. `Slash` is prohibition, the
+ * `DotMark` is the radio/dot indicator, always rendered tiny with a fill — the
+ * small dash reads as a dot at that size. It is not `Status` in
+ * `components/status-dot.tsx`, which is the dot *and* its label; the two names
+ * collided in every file that wanted both. `Slash` is prohibition, the
  * circle-with-a-line, for "not available on this host". */
-export const LoaderCircle: Icon = adapt(ArrowPathIcon, "LoaderCircle")
+
+/* The busy indicator, drawn inline rather than adapted from the set. Every
+   other icon here is a static glyph; this is the one always in motion, and an
+   arrow-path — two arrowheads chasing each other — turns into a pinwheel at
+   14px rather than reading as a rotation. A third of the ring drawn bright
+   over the faint whole stays one moving thing at the 14px most rows spin it
+   at — a shorter head thins out and stops reading — and it leaves
+   `RefreshClockwise` as the only two-arrow glyph, where the arrows mean the
+   action rather than the wait. Callers supply the turn with `animate-spin`;
+   the drawing is centred in its box so it spins on its own axis. */
+export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
+  { size = 16, ...props }: Omit<IconProps, "ref">,
+  ref: Ref<SVGSVGElement>,
+) {
+  return (
+    <svg
+      ref={ref}
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.25}
+      strokeLinecap="round"
+      aria-hidden
+      {...props}
+    >
+      <circle cx="12" cy="12" r="9" opacity={0.3} />
+      <path d="M21 12A9 9 0 0 0 7.5 4.2" />
+    </svg>
+  )
+})
+
 export const CheckCircle: Icon = adapt(CheckCircleIcon, "CheckCircle")
 export const CrossCircle: Icon = adapt(XCircleIcon, "CrossCircle")
-export const Status: Icon = adapt(MinusSmallIcon, "Status")
+export const DotMark: Icon = adapt(MinusSmallIcon, "DotMark")
 export const Slash: Icon = adapt(NoSymbolIcon, "Slash")
 export const Question: Icon = adapt(QuestionMarkCircleIcon, "Question")
 export const Information: Icon = adapt(InformationCircleIcon, "Information")
@@ -340,6 +375,7 @@ export const Route: Icon = adapt(MapIcon, "Route")
 export const Globe: Icon = adapt(GlobeAltIcon, "Globe")
 export const Database: Icon = adapt(CircleStackIcon, "Database")
 export const Layout: Icon = adapt(RectangleGroupIcon, "Layout")
+export const Table: Icon = adapt(TableCellsIcon, "Table")
 export const SidebarLeft: Icon = adapt(ViewColumnsIcon, "SidebarLeft")
 export const SidebarRight: Icon = adapt(ViewColumnsIcon, "SidebarRight")
 export const Footer: Icon = adapt(Bars3Icon, "Footer")
@@ -366,6 +402,28 @@ export const GitCommit: Icon = adapt(HashtagIcon, "GitCommit")
 export const GitMerge: Icon = adapt(ArrowsPointingInIcon, "GitMerge")
 export const GitPullRequest: Icon = adapt(ChatBubbleLeftRightIcon, "GitPullRequest")
 export const BranchPlus: Icon = adapt(SquaresPlusIcon, "BranchPlus")
+export const GitTag: Icon = adapt(TagIcon, "GitTag")
+
+/* GitHub's own brand mark, drawn inline — no icon set ships brand logos, and
+   a generic glyph beside the word "GitHub" reads as a different product. */
+export const GitHubMark: Icon = forwardRef(function GitHubMark(
+  { size = 16, ...props }: Omit<IconProps, "ref">,
+  ref: Ref<SVGSVGElement>,
+) {
+  return (
+    <svg
+      ref={ref}
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="currentColor"
+      aria-hidden
+      {...props}
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  )
+})
 
 /* Security. There is one shield drawing with a check and one with an
    exclamation — `Shield`, `ShieldCheck` and `FirewallCheck` are the former,

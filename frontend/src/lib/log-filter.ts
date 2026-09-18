@@ -1,4 +1,5 @@
 import type { LogFilterState, LogTimeRange } from "@/components/logs/types"
+import type { Tone } from "@/components/tone"
 
 /**
  * The filter vocabulary, worst first. `unknown` is not a level any log writes —
@@ -30,20 +31,61 @@ export const LEVEL_HINT: Record<LogLevel, string> = {
   unknown: "No level in the line — including the continuation lines of a stack trace.",
 }
 
+/**
+ * The colour of the line's *message*. Only the two ends of the scale take one:
+ * a critical line is the one that must be found across a screen of others, and
+ * debug recedes. An error's message stays ink — the edge and the level mark
+ * beside it are already red, and a page of red paragraphs stops being scannable
+ * exactly when it matters.
+ */
 export const LEVEL_TEXT: Record<string, string> = {
   critical: "text-destructive",
-  error: "text-destructive",
-  warn: "text-warning",
+  error: "text-foreground",
+  warn: "text-foreground",
   info: "text-foreground",
   debug: "text-muted-foreground",
 }
 
+/** The rule down a line's left edge. Only the levels that need finding draw one. */
 export const LEVEL_EDGE: Record<string, string> = {
   critical: "bg-destructive",
   error: "bg-destructive/70",
   warn: "bg-warning",
   info: "bg-transparent",
   debug: "bg-transparent",
+}
+
+/**
+ * The word in the level column, short enough to be a column. `unknown` is
+ * blank rather than "other": most of a syslog carries no level, and a column
+ * that says so on every line says nothing.
+ */
+export const LEVEL_MARK: Record<LogLevel, string> = {
+  critical: "crit",
+  error: "err",
+  warn: "warn",
+  info: "info",
+  debug: "dbg",
+  unknown: "",
+}
+
+export const LEVEL_TONE: Record<LogLevel, Tone> = {
+  critical: "danger",
+  error: "danger",
+  warn: "warning",
+  info: "default",
+  debug: "default",
+  unknown: "default",
+}
+
+/** The dot on a level chip, the legend and the histogram's stack — one swatch per level. */
+export const LEVEL_DOT: Record<LogLevel, string> = {
+  critical: "bg-destructive",
+  error: "bg-destructive/70",
+  warn: "bg-warning",
+  info: "bg-foreground/70",
+  debug: "bg-muted-foreground/60",
+  unknown: "bg-muted-foreground/30",
 }
 
 export const EMPTY_FILTER: LogFilterState = {
@@ -83,6 +125,28 @@ export const TIME_RANGES: { id: LogTimeRange; label: string; minutes: number | n
   { id: "all", label: "Everything on disk", minutes: null },
   { id: "custom", label: "Custom range", minutes: null },
 ]
+
+export function readLogWindow(params: Pick<URLSearchParams, "get">) {
+  const since = params.get("since") ?? ""
+  const until = params.get("until") ?? ""
+  const valid = (value: string) =>
+    !value ||
+    (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+      Number.isFinite(Date.parse(value)))
+  const error =
+    !valid(since) || !valid(until) || (since && until && Date.parse(since) >= Date.parse(until))
+      ? "The log link has an invalid time window. Choose a new window before searching."
+      : undefined
+  return { since, until, error }
+}
+
+/** Display in local time without replacing the original instant used by search. */
+export function logTimeInput(value: string) {
+  if (!value || !/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return value
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ""
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 23)
+}
 
 /**
  * Resolves the window to the pair of instants the server takes. Presets are

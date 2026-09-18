@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { RotateClockwise, Warning } from "@/components/icons"
+import { RotateClockwise } from "@/components/icons"
 import { Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
@@ -43,9 +43,7 @@ export default function DashboardError({
       <PageHeader eyebrow="Error" title="This page stopped rendering" />
       <Panel>
         <PanelHeader
-          icon={Warning}
           title="Something in this page threw"
-          description="The rest of the dashboard is unaffected — the sidebar still works."
           actions={
             <Button size="sm" onClick={reset}>
               <RotateClockwise className="size-3.5" />
@@ -54,7 +52,7 @@ export default function DashboardError({
           }
         />
         <PanelBody className="space-y-3">
-          <p className="text-[13px] leading-relaxed">
+          <p className="text-body leading-relaxed">
             This is a bug in the dashboard rather than a problem with your server. Trying again is
             worth one attempt — most of these come from a single bad response that the next request
             replaces.

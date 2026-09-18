@@ -1,35 +1,32 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
-import { FolderOpen, Plus, Servers, Trash } from "@/components/icons"
+import { FolderOpen, Servers, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, truncateMiddle } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { VolumeDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
-import { EmptyState, ErrorState, LoadingPanel, LoadingRows, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList, RowLink } from "@/components/page"
+import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
+import { ChipCount, FilterChip } from "@/components/tabs"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Hint, Term } from "@/components/docker/explain"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  stickyTableHeader,
   Table,
   TableBody,
   TableCell,
@@ -48,40 +45,57 @@ import {
  * was in it. The list joins against every container, running or not, on the
  * server rather than in the browser.
  */
-export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
+export function VolumesTab({
+  confirm,
+  creating: externalCreating,
+  onCreatingChange,
+}: {
+  confirm: ConfirmFn
+  creating?: boolean
+  onCreatingChange?: (open: boolean) => void
+}) {
   const { can } = useAuth()
-  const [selected, setSelected] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  // In the URL so a deployment can link straight at the volume it depends on.
+  const [selected, setSelected] = useQuerySelection("volume")
+  const [internalCreating, setInternalCreating] = useState(false)
+  const creating = externalCreating ?? internalCreating
+  const setCreating = onCreatingChange ?? setInternalCreating
+  const [filter, setFilter] = useState("")
+  const [state, setState] = useState<"all" | "used" | "unused">("all")
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<VolumeDetail[]>("/docker/volumes/", undefined, signal),
     30000,
   )
+  const volumes = useMemo(() => data ?? [], [data])
+  const visible = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    return volumes.filter((v) => {
+      if (state === "used" && !v.inUse) return false
+      if (state === "unused" && v.inUse) return false
+      if (!needle) return true
+      return v.name.toLowerCase().includes(needle)
+    })
+  }, [volumes, filter, state])
+  const counts = useMemo(
+    () => ({
+      all: volumes.length,
+      used: volumes.filter((v) => v.inUse).length,
+      unused: volumes.filter((v) => !v.inUse).length,
+    }),
+    [volumes],
+  )
   if (loading) return <LoadingPanel />
   if (error) return <ErrorState error={error} />
 
-  const unused = (data ?? []).filter((v) => !v.inUse)
-  const reclaimable = unused.reduce((s, v) => s + v.size, 0)
-
   return (
     <div className="space-y-4">
-      <Panel>
+      {/* Plain: the list is the page. */}
+      <Panel plain className="animate-rise">
         <PanelHeader
-          icon={Servers}
           title="Volumes"
-          description={
-            unused.length > 0
-              ? `${data?.length ?? 0} volumes · ${unused.length} attached to nothing, holding ${bytes(reclaimable)}`
-              : `${data?.length ?? 0} volumes, all in use`
-          }
           actions={
             <>
-              {can("service.control") && (
-                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-                  <Plus className="size-4" />
-                  New volume
-                </Button>
-              )}
               {can("destructive") && (
                 <Button
                   size="sm"
@@ -124,96 +138,156 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
             </>
           }
         />
-        <PanelBody flush>
-          <Table containerClassName="max-h-[calc(100svh-24rem)]">
-            <TableHeader className={stickyTableHeader}>
-              <TableRow>
-                <TableHead className="w-full">Name</TableHead>
-                <TableHead className="text-right">Size</TableHead>
-                <TableHead>Used by</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.map((volume) => (
-                <TableRow
-                  key={volume.name}
-                  className="group"
-                  onActivate={() => setSelected(volume.name)}
-                >
-                  <TableCell>
-                    <div className="max-w-[24rem] min-w-0">
-                      <RowLink mono onClick={() => setSelected(volume.name)}>
-                        {truncateMiddle(volume.name, 40)}
-                      </RowLink>
-                      <p className="truncate font-mono text-[11px] text-muted-foreground">
-                        {volume.mountpoint}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="numeric text-right font-mono text-xs">
-                    {volume.size ? bytes(volume.size) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <UsedByCell volume={volume} />
-                  </TableCell>
-                  <TableCell>
-                    {can("destructive") && (
-                      <IconAction
-                        label="Remove"
-                        className="text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                        onClick={() =>
-                          confirm({
-                            title: "Delete volume",
-                            phrase: volume.name,
-                            confirmLabel: "Delete",
-                            description: (
-                              <>
-                                <p className="text-destructive">
-                                  Everything stored in <b>{volume.name}</b> is destroyed
-                                  permanently.
-                                </p>
-                                {volume.usedBy.length > 0 && (
-                                  <p>
-                                    {volume.usedBy.length} container(s) mount it:{" "}
-                                    {volume.usedBy.map((u) => u.name).join(", ")}.
-                                  </p>
-                                )}
-                              </>
-                            ),
-                            action: async (c) => {
-                              await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, {
-                                confirm: c,
-                              })
-                              refresh()
-                            },
-                          })
-                        }
-                      >
-                        <Trash />
-                      </IconAction>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!data?.length && (
-                <TableRow>
-                  <TableCell colSpan={4} className="p-0">
-                    <EmptyState
-                      icon={Servers}
-                      title="No volumes"
-                      description={
-                        <>
-                          A <Term name="volume">volume</Term> is storage Docker manages, kept
-                          outside a container so it survives being recreated.
-                        </>
-                      }
-                    />
-                  </TableCell>
-                </TableRow>
+        {volumes.length > 0 && (
+          <PanelToolbar>
+            <SearchInput
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search volumes"
+            />
+            <div className="flex min-w-0 flex-wrap gap-1">
+              {(["all", "used", "unused"] as const).map((key) =>
+                key === "all" || counts[key] > 0 ? (
+                  <FilterChip key={key} selected={state === key} onClick={() => setState(key)}>
+                    {key === "all" ? "All" : key === "used" ? "Used" : "Unused"}
+                    <ChipCount>{counts[key]}</ChipCount>
+                  </FilterChip>
+                ) : null,
               )}
-            </TableBody>
-          </Table>
+            </div>
+          </PanelToolbar>
+        )}
+        <PanelBody flush>
+          {volumes.length === 0 ? (
+            <EmptyState
+              icon={Servers}
+              title="No volumes"
+              description={
+                <>
+                  A <Term name="volume">volume</Term> is storage Docker manages, kept outside a
+                  container so it survives being recreated.
+                </>
+              }
+            />
+          ) : visible.length === 0 ? (
+            <EmptyState
+              icon={Servers}
+              title="Nothing matches those filters"
+              description="Clear the search, or look under a different state."
+              action={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setFilter("")
+                    setState("all")
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              <ul className="divide-y divide-hairline lg:hidden">
+                {visible.map((volume) => (
+                  <VolumeListItem
+                    key={volume.name}
+                    volume={volume}
+                    confirm={confirm}
+                    onOpen={() => setSelected(volume.name)}
+                    onChanged={refresh}
+                  />
+                ))}
+              </ul>
+
+              <div className="-mx-4 hidden min-w-0 lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-full">Name</TableHead>
+                      <TableHead className="text-right">Size</TableHead>
+                      <TableHead>Used by</TableHead>
+                      <TableHead className="w-px text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visible.map((volume) => (
+                      <TableRow
+                        key={volume.name}
+                        className="group"
+                        onActivate={() => setSelected(volume.name)}
+                      >
+                        <TableCell>
+                          <RowLink mono onClick={() => setSelected(volume.name)}>
+                            {truncateMiddle(volume.name, 40)}
+                          </RowLink>
+                        </TableCell>
+                        <TableCell className="numeric text-right font-mono">
+                          <VolumeSize volume={volume} />
+                        </TableCell>
+                        <TableCell>
+                          <UsedByCell volume={volume} />
+                        </TableCell>
+                        <TableCell>
+                          <span className="flex w-10 justify-end">
+                            {can("destructive") &&
+                              (volume.usedBy.length > 0 ? (
+                                <IconAction
+                                  label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
+                                  className="text-muted-foreground opacity-40"
+                                  onClick={() => setSelected(volume.name)}
+                                >
+                                  <Trash />
+                                </IconAction>
+                              ) : (
+                                <IconAction
+                                  reveal
+                                  label="Remove"
+                                  className="text-destructive"
+                                  onClick={() =>
+                                    confirm({
+                                      title: "Delete volume",
+                                      phrase: volume.name,
+                                      confirmLabel: "Delete",
+                                      description: (
+                                        <>
+                                          <p className="text-destructive">
+                                            Everything stored in <b>{volume.name}</b> is destroyed
+                                            permanently.
+                                          </p>
+                                          <p>
+                                            Nothing mounts it right now. A volume outlives the
+                                            container that created it, so this is often the data
+                                            from something that was removed and rebuilt — check what
+                                            is in it first if you are not sure.
+                                          </p>
+                                        </>
+                                      ),
+                                      action: async (c) => {
+                                        await del(
+                                          `/docker/volumes/${encodeURIComponent(volume.name)}`,
+                                          {
+                                            confirm: c,
+                                          },
+                                        )
+                                        refresh()
+                                      },
+                                    })
+                                  }
+                                >
+                                  <Trash />
+                                </IconAction>
+                              ))}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
         </PanelBody>
       </Panel>
 
@@ -223,23 +297,144 @@ export function VolumesTab({ confirm }: { confirm: ConfirmFn }) {
   )
 }
 
+/**
+ * One volume on a screen too narrow for the table.
+ *
+ * A row and not a card, mirroring `ContainerCard`: no frame of its own, a
+ * hairline between it and the next, a wash under the pointer, and the name as
+ * a real `<button>` so the row is announced as its name rather than as
+ * everything inside it. The removal control is drawn at rest rather than
+ * revealed, because a row whose controls appear only on hover is a row whose
+ * controls a phone cannot reach.
+ */
+function VolumeListItem({
+  volume,
+  confirm,
+  onOpen,
+  onChanged,
+}: {
+  volume: VolumeDetail
+  confirm: ConfirmFn
+  onOpen: () => void
+  onChanged: () => void
+}) {
+  const { can } = useAuth()
+
+  return (
+    <li
+      className={cn(
+        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
+        ROW_BLEED,
+      )}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="block max-w-full truncate rounded-sm text-left font-mono text-body focus-ring hover:text-primary"
+        >
+          {truncateMiddle(volume.name, 40)}
+        </button>
+        {can("destructive") &&
+          (volume.usedBy.length > 0 ? (
+            <IconAction
+              label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
+              className="text-muted-foreground opacity-40"
+              onClick={onOpen}
+            >
+              <Trash />
+            </IconAction>
+          ) : (
+            <IconAction
+              label="Remove"
+              className="text-destructive"
+              onClick={() =>
+                confirm({
+                  title: "Delete volume",
+                  phrase: volume.name,
+                  confirmLabel: "Delete",
+                  description: (
+                    <>
+                      <p className="text-destructive">
+                        Everything stored in <b>{volume.name}</b> is destroyed permanently.
+                      </p>
+                      <p>
+                        Nothing mounts it right now. A volume outlives the container that created
+                        it, so this is often the data from something that was removed and rebuilt —
+                        check what is in it first if you are not sure.
+                      </p>
+                    </>
+                  ),
+                  action: async (c) => {
+                    await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, { confirm: c })
+                    onChanged()
+                  },
+                })
+              }
+            >
+              <Trash />
+            </IconAction>
+          ))}
+      </div>
+
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <UsedByCell volume={volume} />
+        <span className="numeric font-mono text-hint text-muted-foreground">
+          <VolumeSize volume={volume} />
+        </span>
+      </div>
+    </li>
+  )
+}
+
+/**
+ * A volume's size, with "not measured" distinguished from "empty".
+ *
+ * An em dash was doing duty for three different answers — zero bytes, a size
+ * Docker has not walked yet, and a driver that cannot report one — and the
+ * operator deciding whether a volume is safe to delete could not tell which
+ * they were looking at. Docker only fills the figure in for local volumes it
+ * has walked, so the absence is common and worth naming.
+ */
+/**
+ * Whether this volume is likely to hold a database's own files.
+ *
+ * A guess from the mount path and the containers using it, and treated as one:
+ * it decides whether a warning is shown, never whether an action is allowed.
+ * Getting it wrong in one direction costs a sentence somebody did not need; in
+ * the other it costs a corrupted database, so it leans towards warning.
+ */
+function looksLikeDatabase(volume: VolumeDetail): boolean {
+  if (volume.usedBy.length === 0) return false
+  const hints = /(postgres|mysql|mariadb|mongo|redis|elastic|clickhouse|cassandra|influx|couch)/i
+  return (
+    hints.test(volume.name) ||
+    volume.usedBy.some((u) => hints.test(u.name) || hints.test(u.destination))
+  )
+}
+
+function VolumeSize({ volume }: { volume: VolumeDetail }) {
+  if (volume.size > 0) return <>{bytes(volume.size)}</>
+  if (volume.driver !== "local") {
+    return <span className="text-hint text-muted-foreground">not measurable</span>
+  }
+  return <span className="text-hint text-muted-foreground">not measured</span>
+}
+
 function UsedByCell({ volume }: { volume: VolumeDetail }) {
   if (volume.usedBy.length === 0) {
-    return (
-      <Badge variant="secondary" className="font-normal">
-        unused
-      </Badge>
-    )
+    return <Status tone="stopped" label="unused" />
   }
   const running = volume.usedBy.filter((u) => u.state === "running").length
   return (
     <span className="flex flex-wrap items-center gap-1">
-      <Badge variant={running > 0 ? "success" : "warning"} className="font-normal">
-        {volume.usedBy.length} container{volume.usedBy.length === 1 ? "" : "s"}
-      </Badge>
+      <Status
+        tone={running > 0 ? "running" : "warning"}
+        label={`${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"}`}
+      />
       {running === 0 && (
         // The row Docker's own prune would delete while calling it unused.
-        <span className="text-[11px] text-muted-foreground">stopped — prune would delete this</span>
+        <span className="text-hint text-muted-foreground">stopped — prune would delete this</span>
       )}
     </span>
   )
@@ -264,7 +459,6 @@ function VolumeDetailPanel({
     <SidePanel
       open={name !== null}
       onOpenChange={onOpenChange}
-      icon={Servers}
       title={name ?? "Volume"}
       description={data?.mountpoint}
     >
@@ -273,7 +467,9 @@ function VolumeDetailPanel({
       {data && (
         <div className="space-y-5">
           <DetailList>
-            <Detail label="Size">{data.size ? bytes(data.size) : "not measured"}</Detail>
+            <Detail label="Size">
+              <VolumeSize volume={data} />
+            </Detail>
             <Detail label="Driver">{data.driver}</Detail>
             <Detail label="Created">{data.createdAt || "—"}</Detail>
             <Detail label="On disk at">
@@ -286,14 +482,29 @@ function VolumeDetailPanel({
             file manager. Being able to look inside one — to check a backup
             landed, to read a config a container wrote — is the difference
             between a volume being an opaque handle and being storage.
+
+            The warning is not decoration. A database's files are consistent
+            only from the database's point of view; editing one underneath a
+            running Postgres is how a volume stops being restorable, and the
+            file manager gives no hint that this directory is different from
+            any other.
           */}
           {data.mountpoint && (
-            <Button size="sm" variant="outline" asChild>
-              <Link href={`/files?path=${encodeURIComponent(data.mountpoint)}`}>
-                <FolderOpen className="size-3.5" />
-                Browse its contents
-              </Link>
-            </Button>
+            <div className="space-y-1.5">
+              <Button size="sm" variant="outline" asChild>
+                <Link href={`/files?path=${encodeURIComponent(data.mountpoint)}`}>
+                  <FolderOpen className="size-3.5" />
+                  Browse files
+                </Link>
+              </Button>
+              {looksLikeDatabase(data) && (
+                <Hint className="text-warning">
+                  This looks like a database volume and something is using it. Reading is safe;
+                  changing or deleting a file underneath a running database corrupts it in ways that
+                  only show up later. Stop the container first if you need to write here.
+                </Hint>
+              )}
+            </div>
           )}
 
           <section className="space-y-1.5">
@@ -305,34 +516,23 @@ function VolumeDetailPanel({
                 something that was removed and rebuilt.
               </Hint>
             ) : (
-              <div className="space-y-1">
+              <RowList>
                 {data.usedBy.map((u) => (
-                  <div
+                  <Row
                     key={`${u.id}-${u.destination}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline px-2.5 py-1.5 text-xs"
-                  >
-                    <span className="min-w-0">
-                      <span className="truncate font-medium">{u.name}</span>
-                      <span className="ml-2 font-mono text-[11px] text-muted-foreground">
-                        at {u.destination}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 gap-1">
-                      {u.readOnly && (
-                        <Badge variant="outline" className="font-normal">
-                          read-only
-                        </Badge>
-                      )}
-                      <Badge
-                        variant={u.state === "running" ? "success" : "secondary"}
-                        className="font-normal"
-                      >
-                        {u.state}
-                      </Badge>
-                    </span>
-                  </div>
+                    className="px-0 py-2"
+                    title={u.name}
+                    subtitle={`at ${u.destination}${u.stack ? ` · ${u.stack}` : ""}`}
+                    mono
+                    trailing={
+                      <>
+                        {u.readOnly && <Tag>read-only</Tag>}
+                        <Status state={u.state} />
+                      </>
+                    }
+                  />
                 ))}
-              </div>
+              </RowList>
             )}
           </section>
         </div>
@@ -369,46 +569,42 @@ function NewVolumeDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="size-4" />
-            New volume
-          </DialogTitle>
-          <DialogDescription>
-            Storage Docker manages, ready to mount into a container. Empty until something writes to
-            it.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-1.5">
-          <Label htmlFor="volume-name" className="text-xs">
-            Name
-          </Label>
-          <Input
-            id="volume-name"
-            value={name}
-            spellCheck={false}
-            className="font-mono"
-            placeholder="my-app-data"
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && name.trim() && create()}
-          />
-          <Hint>
-            Name it after what will be in it. Volumes outlive the containers that use them, and in
-            six months the name is all you will have to go on.
-          </Hint>
-        </div>
-        <DialogFooter>
+    <Modal
+      open={open}
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      size="sm"
+      title="Create volume"
+      description="Storage Docker manages, ready to mount into a container. Empty until something writes to
+            it."
+      footer={
+        <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={create} disabled={busy || !name.trim()}>
-            {busy && <Spinner className="size-4" />}
+          <Button onClick={create} disabled={busy || !name.trim()} pending={busy}>
             Create
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="volume-name" className="text-xs">
+          Name
+        </Label>
+        <Input
+          id="volume-name"
+          value={name}
+          spellCheck={false}
+          className="font-mono"
+          placeholder="my-app-data"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && create()}
+        />
+        <Hint>
+          Name it after what will be in it. Volumes outlive the containers that use them, and in six
+          months the name is all you will have to go on.
+        </Hint>
+      </div>
+    </Modal>
   )
 }

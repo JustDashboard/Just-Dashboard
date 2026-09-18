@@ -1,15 +1,16 @@
 "use client"
 
 import { createContext, useContext } from "react"
-import type { FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
+import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
 
 /**
- * The two verdicts the whole Security section is built around.
+ * The three verdicts the whole Security section is built around.
  *
- * `posture` (slow) and `firewall` (fast) are read on every sub-page — the
- * Overview shows both, the Firewall page shows the rules and the findings
- * about them, the SSH page shows its findings — so the layout polls each once
- * and the pages read them here rather than each starting its own poll.
+ * `posture` (slow), `firewall` (fast) and `exposure` (how this very browser
+ * reaches the panel) are read on every sub-page — the Overview shows all three,
+ * the Firewall page shows the rules and the findings about them, the jail
+ * sheet offers the caller's own address to the allowlist — so the layout polls
+ * each once and the pages read them here rather than each starting its own.
  *
  * `applyFix` lives here too, not copied into each page: it is the whole
  * difference between a warning and a remedy, and the two on it that can cost
@@ -23,6 +24,7 @@ export type SecurityContextValue = {
   firewall: FirewallStatus | undefined
   firewallLoading: boolean
   firewallError: Error | undefined
+  exposure: Exposure | undefined
   refreshPosture: () => void
   refreshFirewall: () => void
   /** A finding's server-named remedy, wrapped in the confirmation it deserves. */

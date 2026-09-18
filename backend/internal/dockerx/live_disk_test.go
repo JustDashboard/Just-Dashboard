@@ -43,6 +43,15 @@ func liveClient(t *testing.T) (*Client, *dtypes.DiskUsage) {
 	return c, &du
 }
 
+func requireDisposablePruneDaemon(t *testing.T) {
+	t.Helper()
+	// A reachable development daemon may be a real server. Preflight checks
+	// and reserved-space calculations cannot exclude concurrent changes.
+	if os.Getenv("JD_DOCKER_PRUNE_LIVE") != "1" || os.Getenv("DOCKER_HOST") == "" {
+		t.Skip("set JD_DOCKER_PRUNE_LIVE=1 and DOCKER_HOST to an isolated disposable daemon")
+	}
+}
+
 // TestLiveDiskUsageMatchesDockerSystemDF pins every line of the breakdown to
 // the arithmetic `docker system df` performs, because the numbers are the
 // product's claim and getting one backwards is invisible until somebody
@@ -118,6 +127,7 @@ func TestLiveDiskUsageMatchesDockerSystemDF(t *testing.T) {
 // the daemon and comes back as a well-formed report, and a test that proved it
 // by deleting the operator's build cache would be a test nobody dares run.
 func TestLiveBuildCachePruneRoundTrips(t *testing.T) {
+	requireDisposablePruneDaemon(t)
 	c, raw := liveClient(t)
 	cli, err := c.api()
 	if err != nil {
@@ -179,6 +189,7 @@ func TestLiveDiskUsageCacheIsDroppedByAPrune(t *testing.T) {
 // images are left out of the options for the same reason: this proves deletion
 // works, and it can do that with a few kilobytes.
 func TestLivePruneAllActuallyDeletes(t *testing.T) {
+	requireDisposablePruneDaemon(t)
 	c, _ := liveClient(t)
 	ctx := context.Background()
 	cli, err := c.api()

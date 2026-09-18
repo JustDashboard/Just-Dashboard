@@ -133,10 +133,7 @@ func CommandInDir(ctx context.Context, dir, name string, args ...string) *exec.C
 		return cmd
 	}
 	if hostReachable() {
-		full := inDirArgs(dir)
-		full = append(full, name)
-		full = append(full, args...)
-		return exec.CommandContext(ctx, "nsenter", full...)
+		return exec.CommandContext(ctx, "nsenter", hostArgv(dir, name, args)...)
 	}
 	// Nothing can run it; return the direct form so the caller reports the
 	// ordinary "executable not found" rather than an nsenter error.
@@ -157,25 +154,16 @@ func CommandOnHost(ctx context.Context, name string, args ...string) *exec.Cmd {
 
 // CommandOnHostInDir is CommandOnHost starting in a chosen directory.
 //
-// Setting cmd.Dir is not enough and silently does nothing useful: Go applies
-// it in *this* mount namespace, and nsenter then enters the host's and sets
-// the working directory to that namespace's root. Every host command therefore
-// starts in `/` however it was launched — which is why a terminal asked to
-// open in a stack's directory opened in `/` instead. `--wd` is nsenter's own
-// answer, applied after it crosses, and is the only thing that survives.
-//
 // The directory is an argv element, never text for a shell, and the caller is
-// expected to have established that it exists.
+// expected to have established that it exists *on the host* — see hostArgv for
+// why neither cmd.Dir nor nsenter's own --wd can deliver this.
 func CommandOnHostInDir(ctx context.Context, dir, name string, args ...string) *exec.Cmd {
 	if !hostReachable() {
 		cmd := exec.CommandContext(ctx, name, args...)
 		cmd.Dir = dir
 		return cmd
 	}
-	full := inDirArgs(dir)
-	full = append(full, name)
-	full = append(full, args...)
-	return exec.CommandContext(ctx, "nsenter", full...)
+	return exec.CommandContext(ctx, "nsenter", hostArgv(dir, name, args)...)
 }
 
 // RunGroup runs cmd as a new Unix process group. Cancellation signals the
@@ -258,13 +246,38 @@ func groupAlive(pgid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-func inDirArgs(dir string) []string {
+// hostArgv builds nsenter's argument vector for running name in dir on the
+// host. dir may be empty, in which case the command starts wherever nsenter
+// leaves it.
+//
+// The chdir has to happen *after* the namespaces are crossed, which rules out
+// both of the obvious spellings:
+//
+//   - cmd.Dir is applied by Go in *this* mount namespace, and nsenter then
+//     enters the host's and resets the working directory to that namespace's
+//     root. Every host command started in `/` however it was launched.
+//   - `--wd` looks like the answer and is not. nsenter opens the directory
+//     before it crosses, so the path is resolved against the container's
+//     filesystem and the fd it keeps belongs to a mount that does not exist on
+//     the other side. The shell then lands on a dentry unreachable from the
+//     host's root and `getcwd` fails outright — "Failed to get current
+//     directory: path invalid" — which is worse than starting in the wrong
+//     place. A bind mount is not a way out: this container's /home is a
+//     *different mount* of the same directory, so even a path that exists
+//     identically on both sides fails. A host-only path such as /data fails
+//     earlier and louder, with nsenter refusing to start at all.
+//
+// So the chdir is deferred into a shell that only exists on the far side. It
+// execs the real command, leaving no extra process in the tree, and the
+// directory travels as a positional argument rather than as text spliced into
+// the script — a path with a space or a quote in it is still one argument.
+func hostArgv(dir, name string, args []string) []string {
 	full := append([]string{}, nsenterArgs...)
-	if dir != "" {
-		// Inserted before the `--` that ends nsenter's own options.
-		full = append(full[:len(full)-1], "--wd="+dir, "--")
+	if dir == "" {
+		return append(append(full, name), args...)
 	}
-	return full
+	full = append(full, "sh", "-c", `cd "$1" || exit 1; shift; exec "$@"`, "sh", dir, name)
+	return append(full, args...)
 }
 
 // AvailableOnHost reports whether the host has a binary, ignoring this

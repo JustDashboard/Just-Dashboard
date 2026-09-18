@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLocalGitMaterializationUsesRecordedRevisionWithoutChangingWorkbench(t *testing.T) {
@@ -142,4 +143,132 @@ func runPlanningGitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatal(err)
 	}
 	return output
+}
+
+func TestExactGitMaterializationSurvivesAShallowBlobFilteredMirror(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	runPlanningGitFixture(t, repository, "init", "--initial-branch", "main")
+	runPlanningGitFixture(t, repository, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, repository, "config", "user.name", "Fixture")
+	writeBuildFixture(t, repository, "message.txt", "release-one\n")
+	runPlanningGitFixture(t, repository, "add", "message.txt")
+	runPlanningGitFixture(t, repository, "commit", "-m", "release one")
+	large := strings.Repeat("large-release-asset\n", 120_000)
+	writeBuildFixture(t, repository, "public/asset.bin", large)
+	writeBuildFixture(t, repository, "message.txt", "release-two\n")
+	runPlanningGitFixture(t, repository, "add", "-A")
+	runPlanningGitFixture(t, repository, "commit", "-m", "release two")
+	revision := strings.TrimSpace(runPlanningGitOutput(t, repository, "rev-parse", "HEAD"))
+
+	// The planning mirror is shallow, blob filtered, and publishes no branch
+	// ref, which is exactly what made a local clone copy nothing at all.
+	mirror := filepath.Join(t.TempDir(), "mirror.git")
+	runPlanningGitFixture(t, t.TempDir(), "init", "--bare", "--", mirror)
+	runPlanningGitFixture(t, mirror, "config", "remote.origin.url", repository)
+	runPlanningGitFixture(t, mirror, "fetch", "--force", "--depth=1", "--no-tags",
+		"origin", "+refs/heads/main:refs/just-dashboard/planning/one")
+
+	target := filepath.Join(t.TempDir(), "source")
+	if err := fetchExactGit(context.Background(), mirror, repository, target, revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	if head := strings.TrimSpace(runPlanningGitOutput(t, target, "rev-parse", "HEAD")); head != revision {
+		t.Fatalf("materialized head = %q, want %q", head, revision)
+	}
+	content, err := os.ReadFile(filepath.Join(target, "public/asset.bin"))
+	if err != nil || string(content) != large {
+		t.Fatalf("large release asset was not materialized: %v", err)
+	}
+	origin := strings.TrimSpace(runPlanningGitOutput(t, target, "remote", "get-url", "origin"))
+	if origin != repository {
+		t.Fatalf("workspace origin = %q, want %q", origin, repository)
+	}
+}
+
+func TestLocalGitMaterializationRecordsCommitMetadataTruncatingLongSubjects(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	runPlanningGitFixture(t, repository, "init")
+	runPlanningGitFixture(t, repository, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, repository, "config", "user.name", "Fixture Author")
+	writeBuildFixture(t, repository, "message.txt", "release-one\n")
+	runPlanningGitFixture(t, repository, "add", "message.txt")
+	longSubject := strings.Repeat("x", 250)
+	runPlanningGitFixture(t, repository, "commit", "-m", longSubject+"\n\nA longer body line that must not appear in the subject.")
+	revision := strings.TrimSpace(runPlanningGitOutput(t, repository, "rev-parse", "HEAD"))
+
+	workspaces := t.TempDir()
+	analyzer := NewHostSourceAnalyzer([]string{repository}, nil, t.TempDir(), nil, nil)
+	source := DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalCheckout, LocalPath: repository}
+	identity := SourceIdentity{Kind: SourceLocal, LocalPath: repository, Revision: revision}
+	materialized, err := analyzer.Materialize(context.Background(), source, identity, 51, workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if materialized.Commit == nil {
+		t.Fatal("commit metadata is nil for a Git checkout")
+	}
+	if materialized.Commit.SHA != revision {
+		t.Fatalf("commit sha = %q, want %q", materialized.Commit.SHA, revision)
+	}
+	if materialized.Commit.Author != "Fixture Author" {
+		t.Fatalf("commit author = %q", materialized.Commit.Author)
+	}
+	if subjectLen := len([]rune(materialized.Commit.Subject)); subjectLen != 200 {
+		t.Fatalf("commit subject length = %d, want 200 (subject %q)", subjectLen, materialized.Commit.Subject)
+	}
+	if strings.ContainsAny(materialized.Commit.Subject, "\n\r") || strings.Contains(materialized.Commit.Subject, "body line") {
+		t.Fatalf("commit subject leaked the message body: %q", materialized.Commit.Subject)
+	}
+	if _, err := time.Parse(time.RFC3339, materialized.Commit.AuthoredAt); err != nil {
+		t.Fatalf("authoredAt = %q is not RFC3339: %v", materialized.Commit.AuthoredAt, err)
+	}
+
+	// The idempotent reuse path (a retried acquire_source step reopening its
+	// own already-materialized workspace) reports the same commit rather than
+	// leaving it nil.
+	again, err := analyzer.Materialize(context.Background(), source, identity, 51, workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Commit == nil || again.Commit.SHA != revision {
+		t.Fatalf("reused workspace commit = %#v", again.Commit)
+	}
+}
+
+func TestMaterializationOmitsCommitMetadataForNonGitSources(t *testing.T) {
+	t.Parallel()
+	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), nil, nil)
+	source := DraftSourceConfig{
+		Kind: SourceCompose, Mode: SourceModeComposePaste,
+		ComposeFiles: []ComposeDocument{{Path: "compose.yml", Content: "services: {}\n", Order: 0}},
+	}
+	materialized, err := analyzer.Materialize(context.Background(), source,
+		SourceIdentity{Kind: SourceCompose, Digest: fakeContentDigest("inline")}, 52, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if materialized.Commit != nil {
+		t.Fatalf("non-Git source recorded commit metadata: %#v", materialized.Commit)
+	}
+}
+
+func TestReadCommitMetadataFailsClosedOnAnUnreadableRevision(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	runPlanningGitFixture(t, repository, "init")
+	runPlanningGitFixture(t, repository, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, repository, "config", "user.name", "Fixture")
+	writeBuildFixture(t, repository, "message.txt", "content\n")
+	runPlanningGitFixture(t, repository, "add", "message.txt")
+	runPlanningGitFixture(t, repository, "commit", "-m", "only commit")
+
+	missing := strings.Repeat("a", 40)
+	if _, err := readCommitMetadata(context.Background(), repository, missing); err == nil {
+		t.Fatal("expected an error reading a revision the repository does not have")
+	}
+	if commit := commitMetadataForSource(context.Background(), SourceModeLocalCheckout, repository, missing); commit != nil {
+		t.Fatalf("commitMetadataForSource swallowed nothing: %#v", commit)
+	}
 }

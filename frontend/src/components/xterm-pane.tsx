@@ -16,9 +16,7 @@ import {
   FullscreenClose,
   Lightning,
   MagnifyingGlass,
-  Minus,
   MoreHorizontal,
-  Plus,
   RotateClockwise,
   SettingsSliders,
   SlashForward,
@@ -29,7 +27,7 @@ import {
 import { notify } from "@/lib/toast"
 import { wsUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { useTheme } from "@/hooks/use-theme"
+import type { TerminalActivity } from "@/lib/types"
 import { actionFor, formatChord, useKeymap } from "@/lib/terminal-keymap"
 import {
   chooseDroppedImage,
@@ -39,9 +37,6 @@ import {
   uploadTerminalImage,
 } from "@/lib/terminal-upload"
 import {
-  FONT_MAX,
-  FONT_MIN,
-  TERMINAL_FONTS,
   setTerminalSettings,
   terminalSettings,
   useSnippets,
@@ -62,81 +57,41 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ShortcutsDialog } from "@/components/terminal/shortcuts-dialog"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Modal } from "@/components/modal"
+import { Pane } from "@/components/panel"
+import { copyText, copyTextQuietly } from "@/lib/clipboard"
 
 type Query = Record<string, string | number | boolean | undefined | null>
 
 type XtermTheme = NonNullable<Terminal["options"]["theme"]>
 
 /**
- * The last resort when a canvas 2D context is unavailable (a headless or
- * locked-down browser). The runtime resolver below is what actually runs.
+ * The neutral ANSI ramp (colours 0, 8, 7, 15) as a percentage of ink mixed into
+ * paper. Colour 8 (`brightBlack`) is the most-used of the four — git hashes,
+ * vim comments, `ls -l` metadata — so it is lifted far enough off the ground to
+ * stay clearly legible rather than merely present.
  */
-/**
- * The neutral ANSI ramp (colours 0, 8, 7, 15) as a fraction of ink mixed into
- * paper. `--foreground` and `--background` swap roles between modes, so one
- * formula cannot give "a dark grey" in both: in dark mode a little ink lifts
- * off the near-black ground; in light mode colour 0 has to sit near the ink or
- * it vanishes on white. Colour 8 (`brightBlack`) is the most-used of the four —
- * git hashes, vim comments, `ls -l` metadata — so it is kept clearly legible
- * either way.
- */
-const NEUTRAL_INK: Record<"dark" | "light", { black: number; brightBlack: number; white: number }> =
-  {
-    dark: { black: 18, brightBlack: 44, white: 74 },
-    light: { black: 86, brightBlack: 56, white: 44 },
-  }
-
-/** cyan has no near-200° token in the palette, so it is the one hardcoded hue. */
-const TERMINAL_CYAN: Record<"dark" | "light", string> = {
-  dark: "#4cc4cc",
-  light: "#0e7490",
-}
+const NEUTRAL_INK = { black: 18, brightBlack: 44, white: 74 } as const
 
 /**
  * The last resort when a canvas 2D context is unavailable (a headless or
  * locked-down browser). The runtime resolver below is what actually runs.
  */
-const TERMINAL_FALLBACK: Record<"dark" | "light", XtermTheme> = {
-  dark: {
-    background: "#141414",
-    foreground: "#fafafa",
-    cursor: "#fafafa",
-    selectionBackground: "rgba(200,160,60,0.3)",
-    black: "#333333",
-    red: "#e5484d",
-    green: "#46a758",
-    yellow: "#d9a441",
-    blue: "#5b7fdb",
-    magenta: "#8e6fd6",
-    cyan: TERMINAL_CYAN.dark,
-    white: "#c2c2c6",
-    brightBlack: "#6b6b6b",
-    brightWhite: "#fafafa",
-  },
-  light: {
-    background: "#ffffff",
-    foreground: "#0a0a0a",
-    cursor: "#0a0a0a",
-    selectionBackground: "rgba(60,110,220,0.22)",
-    black: "#242424",
-    red: "#c62a2f",
-    green: "#2f7d3a",
-    yellow: "#9a6b1f",
-    blue: "#2f52c4",
-    magenta: "#6b46c1",
-    cyan: TERMINAL_CYAN.light,
-    white: "#8a8a8a",
-    brightBlack: "#6b6b6b",
-    brightWhite: "#0a0a0a",
-  },
+const TERMINAL_FALLBACK: XtermTheme = {
+  background: "#141414",
+  foreground: "#fafafa",
+  cursor: "#fafafa",
+  selectionBackground: "rgba(200,160,60,0.3)",
+  black: "#333333",
+  red: "#e5484d",
+  green: "#46a758",
+  yellow: "#d9a441",
+  blue: "#5b7fdb",
+  magenta: "#8e6fd6",
+  cyan: "#5ec9c3",
+  white: "#c2c2c6",
+  brightBlack: "#6b6b6b",
+  brightWhite: "#fafafa",
 }
 
 /**
@@ -145,15 +100,15 @@ const TERMINAL_FALLBACK: Record<"dark" | "light", XtermTheme> = {
  * probe borrows each token the way any element would — `color: var(--x)` — and
  * its resolved computed colour is normalised through a canvas, which accepts
  * every form `getComputedStyle` returns and hands back `#rrggbb`. The result
- * tracks the active theme in both modes with only cyan hard-coded: the
- * background is the app's, the accents are the chart colours the rest of the
+ * tracks the active theme in both modes: the background and foreground are the
+ * app's surfaces, the accents are the status and chart colours the rest of the
  * UI uses, and the neutral ramp is mixed from foreground and background so it
- * stays legible whichever mode is on.
+ * moves with the palette rather than being a second set of hexes to maintain.
  */
-function resolveTerminalTheme(mode: "dark" | "light"): XtermTheme {
-  if (typeof document === "undefined") return TERMINAL_FALLBACK[mode]
+function resolveTerminalTheme(): XtermTheme {
+  if (typeof document === "undefined") return TERMINAL_FALLBACK
   const ctx = document.createElement("canvas").getContext("2d")
-  if (!ctx) return TERMINAL_FALLBACK[mode]
+  if (!ctx) return TERMINAL_FALLBACK
 
   const probe = document.createElement("span")
   probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"
@@ -186,16 +141,19 @@ function resolveTerminalTheme(mode: "dark" | "light"): XtermTheme {
           .padStart(2, "0")
       : hex
 
-  const fb = TERMINAL_FALLBACK[mode]
-  const n = NEUTRAL_INK[mode]
+  const fb = TERMINAL_FALLBACK
+  const n = NEUTRAL_INK
   const fg = token("--foreground", fb.foreground!)
-  const bg = token("--background", fb.background!)
+  const bg = token("--surface-sunken", token("--background", fb.background!))
   const red = token("--destructive", fb.red!)
   const green = token("--success", fb.green!)
   const yellow = token("--warning", fb.yellow!)
-  const blue = token("--chart-1", fb.blue!)
+  // ANSI blue follows the chart-2 token, not the first chart slot: --chart-1 is
+  // the brand hue, a pale tint, and a terminal whose `ls` paints directories
+  // in it is one nobody can read.
+  const blue = token("--chart-2", fb.blue!)
   const magenta = token("--chart-4", fb.magenta!)
-  const cyan = TERMINAL_CYAN[mode]
+  const cyan = token("--chart-5", fb.cyan!)
 
   const theme = {
     background: bg,
@@ -251,6 +209,7 @@ export function XtermPane({
   className,
   onExit,
   subtitle,
+  headerContent,
   cwd,
   onOpenFiles,
   onCellClick,
@@ -259,13 +218,27 @@ export function XtermPane({
   onToggleFullscreen,
   fullscreenActive,
   terminalSessionId,
+  active = true,
+  flush,
+  onActivity,
 }: {
   path: string
   query?: Query
   className?: string
+  /** No frame of its own: the pane is one column of a framed workbench. */
+  flush?: boolean
   onExit?: () => void
+  /**
+   * What the window is doing, as the server reads it off the PTY: the title
+   * the foreground program set, whether anything is running, and what. Sent
+   * once on attach and again whenever it changes, so the tab that owns this
+   * pane can be titled and marked busy without waiting for a poll.
+   */
+  onActivity?: (activity: TerminalActivity) => void
   /** Shown in the pane header instead of the socket path — e.g. who you are. */
   subtitle?: React.ReactNode
+  /** Session/window controls embedded in the terminal title bar. */
+  headerContent?: React.ReactNode
   /** Where the shell currently is, for the actions that act on that directory. */
   cwd?: string
   onOpenFiles?: (path: string) => void
@@ -307,8 +280,16 @@ export function XtermPane({
    */
   onToggleFullscreen?: () => void
   fullscreenActive?: boolean
-  /** Enables session-scoped image paste/drop on the real terminal page only. */
+  /**
+   * Marks the pane as one of the terminal page's own windows, which enables
+   * session-scoped image paste/drop and the `focus` frame that tells the
+   * server this window is the one on screen. Left unset by the compose
+   * runner, whose socket writes every frame it does not recognise into the
+   * container's stdin.
+   */
   terminalSessionId?: string
+  /** Hidden windows keep parsing output at their last visible grid size. */
+  active?: boolean
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -375,14 +356,12 @@ export function XtermPane({
   // socket effect — so it is a counter the effect depends on rather than
   // anything automatic.
   const [generation, setGeneration] = useState(0)
-  const { mode } = useTheme()
   const settings = useTerminalSettings()
   const snippets = useSnippets()
   const map = useKeymap()
 
-  // The live terminal, kept so that switching theme can re-colour it instead
-  // of tearing down the PTY session behind it. The mode is mirrored into a ref
-  // for the same reason: the connect effect must not depend on it.
+  // The live terminal, kept so settings can be applied to it instead of
+  // tearing down the PTY session behind it.
   const termRef = useRef<Terminal | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const fitRef = useRef<{ fit: () => void } | null>(null)
@@ -391,7 +370,10 @@ export function XtermPane({
   // finishes. It is assigned by the live socket effect so a returned path
   // travels through the same transport and copy-mode handling as typing.
   const inputRef = useRef<((data: string) => boolean) | null>(null)
-  const modeRef = useRef(mode)
+  const activeRef = useRef(active)
+  useEffect(() => {
+    activeRef.current = active
+  }, [active])
   // Settings are read inside the connect effect, which must not re-run when
   // one changes: rebuilding the terminal would drop the scrollback and, on a
   // non-tmux host, the session with it. The effects below apply them to the
@@ -427,6 +409,12 @@ export function XtermPane({
   useEffect(() => {
     onToggleFullscreenRef.current = onToggleFullscreen
   }, [onToggleFullscreen])
+  // The state callback is read from the socket handler, which is installed
+  // once with the connection.
+  const onActivityRef = useRef(onActivity)
+  useEffect(() => {
+    onActivityRef.current = onActivity
+  }, [onActivity])
 
   useEffect(() => {
     const host = hostRef.current
@@ -443,36 +431,32 @@ export function XtermPane({
         { FitAddon },
         { WebLinksAddon },
         { SearchAddon },
+        { Unicode11Addon },
         { WebglAddon },
-        { CanvasAddon },
       ] = await Promise.all([
         import("@xterm/xterm"),
         import("@xterm/addon-fit"),
         import("@xterm/addon-web-links"),
         import("@xterm/addon-search"),
+        import("@xterm/addon-unicode11"),
         import("@xterm/addon-webgl"),
-        import("@xterm/addon-canvas"),
       ])
       await import("@xterm/xterm/css/xterm.css")
       if (disposed) return
 
       const s = settingsRef.current
       const term = new Terminal({
-        fontFamily: s.fontFamily,
-        fontSize: s.fontSize,
-        lineHeight: s.lineHeight,
-        letterSpacing: s.letterSpacing,
-        // Prompt corners, tmux separators and terminal TUIs are structure,
-        // not ordinary font glyphs. Drawing them to the full cell keeps a
-        // vertical rule continuous even when the chosen font or line height
-        // would leave space around the character.
+        // Keep cell metrics deterministic. Browser defaults can resolve to a
+        // proportional fallback for symbols even when ordinary ASCII looks
+        // monospace, which leaves a TUI's logical cursor and painted glyphs
+        // disagreeing. xterm clips fallbacks to the cell; customGlyphs draws
+        // box and block structure to the complete cell boundary.
+        fontFamily:
+          'ui-monospace, "SFMono-Regular", "Cascadia Mono", "Liberation Mono", Menlo, Monaco, Consolas, monospace',
+        fontSize: 14,
+        lineHeight: 1,
+        letterSpacing: 0,
         customGlyphs: true,
-        cursorStyle: s.cursorStyle,
-        cursorBlink: s.cursorBlink,
-        // A cursor that goes hollow when the pane loses focus is the cheapest
-        // possible answer to "am I about to type into the terminal or into the
-        // page", which on a dashboard full of inputs is a real question.
-        cursorInactiveStyle: "outline",
         // `convertEol` is deliberately **off**, and turning it back on breaks
         // the terminal in a way that takes a day to trace.
         //
@@ -509,16 +493,18 @@ export function XtermPane({
         // "none" over a scrollback full of matches, which is worse than not
         // showing a count at all.
         allowProposedApi: true,
-        theme: resolveTerminalTheme(modeRef.current),
+        theme: resolveTerminalTheme(),
       })
       termRef.current = term
       const fit = new FitAddon()
       const search = new SearchAddon()
-      fitRef.current = fit
       searchRef.current = search
       term.loadAddon(fit)
       term.loadAddon(search)
       term.loadAddon(new WebLinksAddon())
+      term.loadAddon(new Unicode11Addon())
+      term.unicode.activeVersion = "11"
+      host.dataset.terminalUnicode = term.unicode.activeVersion
       term.open(host)
       // A plain drag selects, the way it does in every other application.
       //
@@ -531,53 +517,67 @@ export function XtermPane({
       // both said nothing was selected, because as far as the browser was
       // concerned nothing was.
       forcePointerToSelect(term)
-      fit.fit()
 
-      // The WebGL renderer, loaded once the pane has its real size. xterm's
-      // core ships only the DOM renderer, which draws box-drawing and block
-      // characters from the font — and most system monospace fonts space those
-      // wrong, so prompt corners and tmux pane borders come through as stray
-      // underscores and interrupted side rules. Both accelerated renderers
-      // draw those glyphs to the full cell instead. Canvas is the deliberate
-      // fallback when WebGL is unavailable or loses its context; silently
-      // falling all the way back to DOM is the broken-edge pattern this is
-      // here to prevent.
-      //
-      // It tracks dirty rows rather than repainting everything, and misses the
-      // wholesale change when an app switches to the alternate screen — the
-      // first row of a full-screen TUI (Claude Code, vim, less) came through
-      // blank. `onBufferChange` forces the full repaint that the switch needs.
-      // On GPU context loss the addon disposes itself and xterm falls straight
-      // onto the canvas renderer.
       const disposables: IDisposable[] = []
-      const fitAndRefresh = () => {
-        requestAnimationFrame(() => {
-          if (disposed) return
-          fit.fit()
-          term.refresh(0, term.rows - 1)
-        })
-      }
-      const loadCanvasRenderer = () => {
-        if (disposed) return
+
+      // xterm 6's default DOM renderer deliberately does not implement custom
+      // glyphs. That leaves box-drawing and block-element characters to font
+      // fallback, where their edges do not fill the cell and TUI borders/logo
+      // art develop visible gaps. The matching WebGL addon renders those
+      // structural characters itself. Keep DOM as a context-loss fallback and
+      // as an explicit diagnostic A/B override.
+      host.dataset.terminalRenderer = "dom"
+      if (window.localStorage.getItem("jd.terminal.renderer") !== "dom") {
         try {
-          term.loadAddon(new CanvasAddon())
-          fitAndRefresh()
+          const webgl = new WebglAddon()
+          disposables.push(
+            webgl.onContextLoss(() => {
+              webgl.dispose()
+              host.dataset.terminalRenderer = "dom"
+              window.requestAnimationFrame(() => {
+                if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
+              })
+            }),
+          )
+          term.loadAddon(webgl)
+          host.dataset.terminalRenderer = "webgl"
+
+          // Alternate-buffer switches replace the complete rendered surface.
+          // Force one coherent frame so an atlas update cannot leave rows from
+          // the former buffer stale or blank.
+          disposables.push(
+            term.buffer.onBufferChange(() => {
+              window.requestAnimationFrame(() => {
+                if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
+              })
+            }),
+          )
         } catch {
-          // The DOM renderer is xterm's final safety net. It keeps the shell
-          // usable even on a browser that supports neither renderer addon.
+          // Software-only browsers remain usable through xterm's DOM renderer.
+          host.dataset.terminalRenderer = "dom"
         }
       }
-      try {
-        const webgl = new WebglAddon()
-        webgl.onContextLoss(() => {
-          webgl.dispose()
-          loadCanvasRenderer()
-        })
-        term.loadAddon(webgl)
-        disposables.push(term.buffer.onBufferChange(() => term.refresh(0, term.rows - 1)))
-        fitAndRefresh()
-      } catch {
-        loadCanvasRenderer()
+
+      const fitTerminal = () => {
+        if (!activeRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
+        fit.fit()
+        return term.rows > 0 && term.cols > 0
+      }
+      fitTerminal()
+
+      // The size the server was last told. Both xterm's resize event and the
+      // host observer converge here, so a fit cannot emit the same control
+      // message twice.
+      let sent = { rows: 0, cols: 0 }
+      const terminalDebug = window.localStorage.getItem("jd.terminal.debug") === "1"
+      const syncPtySize = (socket: WebSocket) => {
+        if (socket.readyState !== WebSocket.OPEN || term.rows <= 0 || term.cols <= 0) return
+        if (term.rows === sent.rows && term.cols === sent.cols) return
+        sent = { rows: term.rows, cols: term.cols }
+        host.dataset.terminalRows = String(term.rows)
+        host.dataset.terminalCols = String(term.cols)
+        socket.send(JSON.stringify({ type: "resize", rows: term.rows, cols: term.cols }))
+        if (terminalDebug) console.debug(`frontend terminal = ${term.rows}x${term.cols}`)
       }
 
       disposables.push(
@@ -612,21 +612,19 @@ export function XtermPane({
         term.onSelectionChange(() => {
           if (!settingsRef.current.copyOnSelect) return
           const selection = term.getSelection()
-          if (selection) void navigator.clipboard?.writeText(selection).catch(() => {})
+          if (selection) void copyTextQuietly(selection)
         }),
       )
       // The geometry itself is what the PTY has to be told about, so the send
       // hangs off the change rather than off each caller that might cause one
-      // (a fit after the WebGL load, a container resize, a font change). An
+      // (a container resize or a fit after mounting). An
       // Ink-based TUI redraws entirely from the size it was last given, so a
       // fit that nobody forwarded is a full-screen app painting for the wrong
       // window — a blank or garbled first row.
       disposables.push(
-        term.onResize(({ rows, cols }) => {
+        term.onResize(() => {
           const socket = socketRef.current
-          if (socket?.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "resize", rows, cols }))
-          }
+          if (socket) syncPtySize(socket)
         }),
       )
 
@@ -645,11 +643,6 @@ export function XtermPane({
       // for the length of the replay, which is the only window in which they
       // can only be about the past.
       let replaying = false
-
-      // The size the server was last told. A resize is sent when this stops
-      // being true and not otherwise: the observer fires for every frame of a
-      // drag, and most of those frames are the same number of cells.
-      let sent = { rows: 0, cols: 0 }
 
       /**
        * Tell the PTY how big the screen is — **immediately**, never on a
@@ -670,18 +663,30 @@ export function XtermPane({
        * tmux handles a dragged window all day — lag is.
        */
       const sendResize = () => {
-        fit.fit()
-        if (socket.readyState !== WebSocket.OPEN) return
-        if (term.rows === sent.rows && term.cols === sent.cols) return
-        sent = { rows: term.rows, cols: term.cols }
-        socket.send(JSON.stringify({ type: "resize", rows: term.rows, cols: term.cols }))
+        if (!fitTerminal()) return
+        syncPtySize(socket)
       }
+      const refreshTerminal = () => {
+        if (disposed || !activeRef.current || document.visibilityState !== "visible") return
+        sendResize()
+        // Returning to a hidden window may not change its dimensions. Repaint
+        // its retained screen even when the PTY needs no resize notification.
+        if (term.rows > 0) term.refresh(0, term.rows - 1)
+      }
+      fitRef.current = { fit: refreshTerminal }
 
       socket.onopen = () => {
+        if (disposed) return
         setState("open")
         setError(undefined)
         sendResize()
-        term.focus()
+        if (terminalDebug) console.debug("terminal WebSocket connected")
+        if (activeRef.current) term.focus()
+        // The window on screen says so, and only a terminal-page window: the
+        // compose runner's socket would type the frame into the container.
+        if (activeRef.current && terminalSessionId) {
+          socket.send(JSON.stringify({ type: "focus" }))
+        }
         // The session may have been left scrolled back by whoever was here
         // before — copy mode outlives the socket the way everything else in a
         // tmux session does — and a pane that is in a mode reads as a pane
@@ -690,6 +695,7 @@ export function XtermPane({
         if (copyModeRef.current) socket.send(JSON.stringify({ type: "sync-copy" }))
       }
       socket.onmessage = (event) => {
+        if (disposed) return
         if (typeof event.data === "string") {
           // Only control frames arrive as text; an error is the one that
           // matters to the reader, and the scrollback marker says that the
@@ -701,6 +707,8 @@ export function XtermPane({
               term.writeln(`\r\n\x1b[31m${msg.error}\x1b[0m`)
             } else if (msg.type === "scrollback") {
               replaying = true
+            } else if (msg.type === "state") {
+              onActivityRef.current?.(msg.data as TerminalActivity)
             } else if (msg.type === "copy-mode") {
               // The server is the only authority on whether tmux is still
               // scrolled away from the prompt — the browser forwards the wheel
@@ -736,11 +744,15 @@ export function XtermPane({
         })
       }
       socket.onclose = () => {
+        if (disposed) return
         setState("closed")
+        if (terminalDebug) console.debug("terminal WebSocket disconnected")
         term.writeln("\r\n\x1b[90m— disconnected —\x1b[0m")
         onExit?.()
       }
-      socket.onerror = () => setState("closed")
+      socket.onerror = () => {
+        if (!disposed) setState("closed")
+      }
 
       /**
        * Puts the pane back at the prompt before a keystroke is delivered.
@@ -763,8 +775,8 @@ export function XtermPane({
       const insertInput = (data: string) => {
         if (socket.readyState !== WebSocket.OPEN || replaying) return false
         leaveCopyMode()
-        socket.send(data)
-        term.focus()
+        sendTerminalInput(socket, data)
+        if (activeRef.current) term.focus()
         return true
       }
       inputRef.current = insertInput
@@ -795,7 +807,7 @@ export function XtermPane({
             setPendingPaste({ raw: data, text: readablePaste(data) })
             return
           }
-          socket.send(data)
+          sendTerminalInput(socket, data)
         }),
       )
 
@@ -810,6 +822,7 @@ export function XtermPane({
       // confirmation and let Chromium paste into xterm's textarea at the same
       // time — the guarded route and the unguarded one, at once.
       term.attachCustomKeyEventHandler((event) => {
+        if (!activeRef.current) return false
         if (event.type !== "keydown") return true
         const action = actionFor(event, "terminal", keymapRef.current)
         if (!action) return clipboardKey(event, term)
@@ -832,15 +845,6 @@ export function XtermPane({
             if (onToggleFullscreenRef.current) onToggleFullscreenRef.current()
             else void fullscreenRef.current?.()
             break
-          case "terminal.fontIn":
-            setTerminalSettings({ fontSize: Math.min(FONT_MAX, settingsRef.current.fontSize + 1) })
-            break
-          case "terminal.fontOut":
-            setTerminalSettings({ fontSize: Math.max(FONT_MIN, settingsRef.current.fontSize - 1) })
-            break
-          case "terminal.fontReset":
-            setTerminalSettings({ fontSize: 13 })
-            break
           case "terminal.shortcuts":
             setShortcuts(true)
             break
@@ -848,12 +852,6 @@ export function XtermPane({
         return false
       })
 
-      // Ctrl+scroll is the zoom gesture every browser and every terminal
-      // agrees on. Without `passive: false` the browser has already started
-      // zooming the whole page by the time the handler runs, and without
-      // `capture` it never runs at all: xterm binds its own wheel handler to
-      // the viewport *inside* this element and stops the event there, so a
-      // listener on the host only sees the ticks xterm did not want.
       // What the wheel did is tmux's to say, in both directions. Scrolling up
       // moves the history only when the program in the pane has *not* asked
       // for the mouse; scrolling down leaves copy mode only once it reaches
@@ -873,15 +871,6 @@ export function XtermPane({
       }
 
       const onWheel = (event: WheelEvent) => {
-        if (event.ctrlKey) {
-          event.preventDefault()
-          event.stopPropagation()
-          const step = event.deltaY > 0 ? -1 : 1
-          setTerminalSettings({
-            fontSize: Math.min(FONT_MAX, Math.max(FONT_MIN, settingsRef.current.fontSize + step)),
-          })
-          return
-        }
         // The tick itself is xterm's to forward — it goes out as a mouse
         // report and tmux decides what it means. This only notes that one
         // went, so the next keystroke can cancel a mode that may now be on,
@@ -921,11 +910,28 @@ export function XtermPane({
       }
       host.addEventListener("mousedown", onMouseDownCapture, { capture: true })
 
-      const observer = new ResizeObserver(sendResize)
+      let resizeFrame = 0
+      const scheduleResize = () => {
+        if (resizeFrame) return
+        resizeFrame = requestAnimationFrame(() => {
+          resizeFrame = 0
+          refreshTerminal()
+        })
+      }
+      const observer = new ResizeObserver(scheduleResize)
       observer.observe(host)
+      const onVisibility = () => {
+        if (document.visibilityState === "visible") scheduleResize()
+      }
+      document.addEventListener("visibilitychange", onVisibility)
+      window.addEventListener("focus", scheduleResize)
+      void document.fonts?.ready.then(scheduleResize)
 
       cleanup = () => {
         observer.disconnect()
+        cancelAnimationFrame(resizeFrame)
+        document.removeEventListener("visibilitychange", onVisibility)
+        window.removeEventListener("focus", scheduleResize)
         clearTimeout(syncTimer)
         host.removeEventListener("wheel", onWheel, { capture: true })
         host.removeEventListener("mousedown", onMouseDownCapture, { capture: true })
@@ -951,21 +957,31 @@ export function XtermPane({
     scrolledBackRef.current = scrolledBack
   }, [scrolledBack])
 
-  useEffect(() => {
-    modeRef.current = mode
-    if (termRef.current) termRef.current.options.theme = resolveTerminalTheme(mode)
-  }, [mode])
-
   // The caller's way back to the keyboard. Read through `termRef` at call
   // time, so it keeps working across a reconnect rather than capturing the
   // terminal that existed when the pane mounted.
   useEffect(() => {
-    if (!focusRef) return
-    focusRef.current = () => termRef.current?.focus()
-    return () => {
-      focusRef.current = null
+    if (!active) {
+      termRef.current?.blur()
+      return
     }
-  }, [focusRef])
+    const focus = () => {
+      if (activeRef.current) termRef.current?.focus()
+    }
+    if (focusRef) focusRef.current = focus
+    fitRef.current?.fit()
+    focus()
+    // Switching to a window whose socket is already up: the server learns
+    // which window is on screen from this, since the socket itself stays open
+    // while the window is hidden and says nothing.
+    const socket = socketRef.current
+    if (terminalSessionId && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "focus" }))
+    }
+    return () => {
+      if (focusRef?.current === focus) focusRef.current = null
+    }
+  }, [active, focusRef, terminalSessionId])
 
   // Clipboard images and dragged images take an authenticated HTTP path to
   // the server, then only the returned filename goes through the PTY socket.
@@ -1074,18 +1090,8 @@ export function XtermPane({
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    term.options.fontSize = settings.fontSize
-    term.options.fontFamily = settings.fontFamily
-    term.options.lineHeight = settings.lineHeight
-    term.options.letterSpacing = settings.letterSpacing
-    term.options.cursorStyle = settings.cursorStyle
-    term.options.cursorBlink = settings.cursorBlink
     term.options.scrollback = settings.scrollback
     fitRef.current?.fit()
-    const socket = socketRef.current
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "resize", rows: term.rows, cols: term.cols }))
-    }
   }, [settings])
 
   // Fullscreen is the browser's, not a CSS class: only the real thing escapes
@@ -1154,31 +1160,37 @@ export function XtermPane({
       notify.error("Not connected")
       return
     }
-    socket.send(data)
+    sendTerminalInput(socket, data)
     termRef.current?.focus()
   }, [])
 
   return (
-    <div
+    <Pane
       ref={frameRef}
+      inert={!active}
+      // In fullscreen the pane is the whole screen, so the corners and border
+      // would draw a frame around nothing.
+      flush={flush || fullscreen}
       className={cn(
-        "relative flex min-w-0 flex-col overflow-hidden rounded-xl border bg-surface-sunken",
-        // In fullscreen the pane is the whole screen, so the rounded corners
-        // and border would draw a frame around nothing.
-        fullscreen && "rounded-none border-0",
+        "relative bg-surface-sunken",
         copyMode && "terminal-tmux",
         className,
+        !active && "hidden",
       )}
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hairline bg-surface-header px-3 py-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-          {subtitle ?? path}
-          {shellTitle && (
-            <span className="ml-2 rounded bg-muted px-1 py-px text-[10px] text-foreground">
-              {shellTitle}
-            </span>
-          )}
-        </span>
+      <div className="flex shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-1.5">
+        {headerContent ? (
+          <div className="flex min-w-0 flex-1 items-center gap-1">{headerContent}</div>
+        ) : (
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+            {subtitle ?? path}
+            {shellTitle && (
+              <span className="ml-2 rounded-sm bg-muted px-1 py-px text-micro text-foreground">
+                {shellTitle}
+              </span>
+            )}
+          </span>
+        )}
 
         {searching ? (
           <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -1198,7 +1210,7 @@ export function XtermPane({
               placeholder="Find in scrollback"
               className="h-7 w-44 text-xs"
             />
-            <span className="numeric w-14 shrink-0 text-center text-[10px] text-muted-foreground">
+            <span className="numeric w-14 shrink-0 text-center text-micro text-muted-foreground">
               {needle ? (matches.count ? `${matches.index + 1}/${matches.count}` : "none") : ""}
             </span>
             <FindToggle
@@ -1333,7 +1345,7 @@ export function XtermPane({
       )}
 
       {error && (
-        <p className="border-b border-hairline bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <p className="border-b border-hairline bg-wash-danger px-3 py-1.5 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -1343,7 +1355,7 @@ export function XtermPane({
           ref={hostRef}
           className={cn(
             "absolute inset-3 z-0 overflow-hidden transition-colors duration-150 motion-reduce:transition-none",
-            bell && "bg-warning/25",
+            bell && "bg-mark",
           )}
           style={bell ? undefined : { backgroundColor: "var(--background)" }}
           // Click-to-focus-a-pane is a native capture listener installed with
@@ -1404,7 +1416,7 @@ export function XtermPane({
           <Button
             size="xs"
             variant="secondary"
-            className="absolute right-7 bottom-4 z-20 pointer-events-auto shadow-md"
+            className="pointer-events-auto absolute right-7 bottom-4 z-20 shadow-md"
             onClick={() => {
               // Two scrollbacks can be behind this: the emulator's, when
               // there is no tmux, and tmux's own. Ending both is what "the
@@ -1434,15 +1446,17 @@ export function XtermPane({
       {/* The control keys, as buttons. Ctrl+C is unremarkable on a keyboard and
           impossible on a phone, and this panel is reached from a phone more
           often than its author would like. */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-hairline bg-surface-header px-3 py-1.5">
-        <span className="mr-2 hidden text-[11px] text-muted-foreground sm:inline">Keys</span>
+      <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-t border-hairline bg-surface-header px-2 py-1">
+        {/* Words on a strip, not a row of framed keycaps: seven bordered boxes
+            under the emulator were the loudest line on the pane, and the
+            monospace label already says what each one is. */}
         {CONTROL_KEYS.map((key) => (
           <Tooltip key={key.label}>
             <TooltipTrigger asChild>
               <Button
                 size="xs"
                 variant="ghost"
-                className="h-7 shrink-0 rounded-md border border-hairline px-2 font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                className="h-6 shrink-0 rounded-sm px-1.5 font-mono text-hint font-normal text-muted-foreground hover:text-foreground"
                 onClick={() => send(key.bytes)}
               >
                 {key.label}
@@ -1454,7 +1468,7 @@ export function XtermPane({
       </div>
 
       <PasteConfirmation
-        paste={pendingPaste}
+        paste={active ? pendingPaste : null}
         onCancel={() => setPendingPaste(null)}
         onConfirm={() => {
           if (pendingPaste) send(pendingPaste.raw)
@@ -1462,8 +1476,8 @@ export function XtermPane({
         }}
       />
 
-      <ShortcutsDialog open={shortcuts} onOpenChange={setShortcuts} />
-    </div>
+      <ShortcutsDialog open={active && shortcuts} onOpenChange={setShortcuts} />
+    </Pane>
   )
 }
 
@@ -1518,7 +1532,7 @@ function FindToggle({
           aria-pressed={on}
           className={cn(
             "size-7 shrink-0 p-0",
-            on ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+            on ? "bg-plot-primary text-primary" : "text-muted-foreground hover:text-foreground",
           )}
           onClick={onClick}
         >
@@ -1566,7 +1580,7 @@ function SnippetMenu({
             onSelect={() => onSend(snippet.command)}
           >
             <span>{snippet.label}</span>
-            <span className="font-mono text-[10px] text-muted-foreground">{snippet.command}</span>
+            <span className="font-mono text-micro text-muted-foreground">{snippet.command}</span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -1592,83 +1606,9 @@ function SettingsMenu() {
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent>Font, cursor, scrollback and behaviour</TooltipContent>
+        <TooltipContent>Terminal behaviour</TooltipContent>
       </Tooltip>
       <PopoverContent align="end" className="w-72 space-y-3 text-xs">
-        <p className="eyebrow">Appearance</p>
-        <div className="flex items-center justify-between">
-          <span>Text size</span>
-          <div className="flex items-center rounded-md border border-hairline">
-            <PaneButton
-              label="Smaller text"
-              onClick={() =>
-                setTerminalSettings({ fontSize: Math.max(FONT_MIN, settings.fontSize - 1) })
-              }
-            >
-              <Minus className="size-3.5" />
-            </PaneButton>
-            <span className="numeric px-1 text-[10px] text-muted-foreground">
-              {settings.fontSize}
-            </span>
-            <PaneButton
-              label="Larger text"
-              onClick={() =>
-                setTerminalSettings({ fontSize: Math.min(FONT_MAX, settings.fontSize + 1) })
-              }
-            >
-              <Plus className="size-3.5" />
-            </PaneButton>
-          </div>
-        </div>
-        <label className="flex items-center justify-between gap-2">
-          Font
-          <select
-            value={settings.fontFamily}
-            onChange={(e) => setTerminalSettings({ fontFamily: e.target.value })}
-            className="h-7 min-w-0 flex-1 rounded-md border border-input bg-transparent px-1.5 text-xs"
-          >
-            {TERMINAL_FONTS.map((font) => (
-              <option key={font.id} value={font.id}>
-                {font.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center justify-between gap-2">
-          Cursor
-          <select
-            value={settings.cursorStyle}
-            onChange={(e) =>
-              setTerminalSettings({
-                cursorStyle: e.target.value as "block" | "underline" | "bar",
-              })
-            }
-            className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
-          >
-            <option value="block">Block</option>
-            <option value="underline">Underline</option>
-            <option value="bar">Bar</option>
-          </select>
-        </label>
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span>Line height</span>
-            <span className="numeric text-muted-foreground">{settings.lineHeight.toFixed(2)}</span>
-          </div>
-          <Slider
-            min={1}
-            max={2}
-            step={0.05}
-            value={[settings.lineHeight]}
-            onValueChange={([v]) => setTerminalSettings({ lineHeight: v })}
-          />
-        </div>
-        <SettingSwitch
-          label="Blinking cursor"
-          checked={settings.cursorBlink}
-          onChange={(cursorBlink) => setTerminalSettings({ cursorBlink })}
-        />
-
         <p className="eyebrow pt-1">Behaviour</p>
         <SettingSwitch
           label="Copy on select"
@@ -1706,6 +1646,7 @@ function SettingsMenu() {
             </span>
           </div>
           <Slider
+            aria-label="Terminal scrollback"
             min={1000}
             max={200000}
             step={1000}
@@ -1733,9 +1674,14 @@ function SettingSwitch({
     <div className="flex items-start justify-between gap-2">
       <span className="min-w-0">
         <span className="block">{label}</span>
-        {hint && <span className="block text-[10px] text-muted-foreground">{hint}</span>}
+        {hint && <span className="block text-micro text-muted-foreground">{hint}</span>}
       </span>
-      <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5 shrink-0" />
+      <Switch
+        aria-label={label}
+        checked={checked}
+        onCheckedChange={onChange}
+        className="mt-0.5 shrink-0"
+      />
     </div>
   )
 }
@@ -1758,28 +1704,27 @@ function PasteConfirmation({
 }) {
   const lines = paste ? paste.text.replace(/\n$/, "").split("\n") : []
   return (
-    <Dialog open={paste !== null} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Paste {lines.length} lines?</DialogTitle>
-          <DialogDescription>
-            This text contains line breaks that can execute commands as soon as they reach the
-            terminal. Review every line before sending it.
-          </DialogDescription>
-        </DialogHeader>
-        <pre className="max-h-56 overflow-auto rounded-md border bg-surface-sunken p-2 font-mono text-[11px] whitespace-pre-wrap">
-          {paste?.text}
-        </pre>
-        <DialogFooter>
+    <Modal
+      open={paste !== null}
+      onOpenChange={(open) => !open && onCancel()}
+      title={<>Paste {lines.length} lines?</>}
+      description="This text contains line breaks that can execute commands as soon as they reach the
+            terminal. Review every line before sending it."
+      footer={
+        <>
           <Button size="sm" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
           <Button size="sm" onClick={onConfirm}>
             Paste and run
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <pre className="max-h-56 overflow-auto rounded-md border bg-surface-sunken p-2 font-mono text-hint whitespace-pre-wrap">
+        {paste?.text}
+      </pre>
+    </Modal>
   )
 }
 
@@ -1830,12 +1775,7 @@ async function copySelection(term: Terminal) {
 }
 
 async function writeClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    notify.success("Copied")
-  } catch {
-    notify.error("The browser refused clipboard access")
-  }
+  await copyText(text, "Copied")
 }
 
 /**
@@ -1914,13 +1854,20 @@ async function requestPaste(
       ask({ raw: text, text: readablePaste(text) })
       return
     }
-    socket.send(text)
+    sendTerminalInput(socket, text)
   } catch {
     notify.error(
       "The browser refused clipboard access",
       "Ctrl+V pastes into the shell directly if the page has no permission.",
     )
   }
+}
+
+const terminalEncoder = new TextEncoder()
+
+/** Keyboard and paste data use binary frames just like PTY output. */
+function sendTerminalInput(socket: WebSocket, data: string) {
+  socket.send(terminalEncoder.encode(data))
 }
 
 /**

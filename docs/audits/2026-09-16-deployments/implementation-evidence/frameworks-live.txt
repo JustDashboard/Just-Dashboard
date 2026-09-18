@@ -1,0 +1,16 @@
+=== RUN   TestLiveDetectedFrameworkBuildAndServing
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/vite
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/next
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/svelte-node
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/svelte-static
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/html
+=== RUN   TestLiveDetectedFrameworkBuildAndServing/containerfile
+--- PASS: TestLiveDetectedFrameworkBuildAndServing (109.75s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/vite (8.32s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/next (66.47s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/svelte-node (18.52s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/svelte-static (10.03s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/html (3.48s)
+    --- PASS: TestLiveDetectedFrameworkBuildAndServing/containerfile (2.82s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	109.765s

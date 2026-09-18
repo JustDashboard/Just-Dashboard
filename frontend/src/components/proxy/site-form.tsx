@@ -1,20 +1,31 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { CheckCircle, Code, Globe, Plus, Trash, Warning } from "@/components/icons"
+import Link from "next/link"
+import { Code, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { DomainCheck, SiteLocation, SiteResult, SiteSpec } from "@/lib/types"
+import type {
+  AuthFile,
+  Certificate,
+  DomainCheck,
+  SiteLocation,
+  SiteResult,
+  SiteSpec,
+} from "@/lib/types"
+import { usePoll } from "@/hooks/use-poll"
 import { CodeEditor } from "@/components/code-editor"
+import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
+import { Group, Pane } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { EmptyNote, Notice } from "@/components/state"
+import { StatusDot } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -32,16 +43,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
  * exactly one implementation of what a spec means, the form is not a black
  * box, and the file it produces is ordinary nginx that can be committed and
  * edited by hand afterwards.
+ *
+ * The form is built from `components/form.tsx`: a `Field` is a label, a
+ * control and one line; an `OptionRow` is a switch with its sentence. It had
+ * its own Field, Toggle and Section before, which is how a form two clicks
+ * from the databases' dialogs arrived at a different label size.
  */
 export function SiteForm({
   open,
   editing,
+  copyFrom,
+  session,
   onOpenChange,
   onSaved,
 }: {
   open: boolean
   /** The site being edited, or null for a new one. */
   editing: string | null
+  /** A site whose settings a new one starts from. */
+  copyFrom?: string | null
+  /** Bumped on every open, so a closed and reopened form never keeps a stale draft. */
+  session?: number
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
@@ -49,9 +71,10 @@ export function SiteForm({
   // buffer — saving that under the wrong name would be a real outage.
   return (
     <SiteFormBody
-      key={editing ?? "new"}
+      key={`${editing ?? (copyFrom ? `copy:${copyFrom}` : "new")}:${session ?? 0}`}
       open={open}
       editing={editing}
+      copyFrom={copyFrom ?? null}
       onOpenChange={onOpenChange}
       onSaved={onSaved}
     />
@@ -82,11 +105,13 @@ const BLANK: SiteSpec = {
 function SiteFormBody({
   open,
   editing,
+  copyFrom,
   onOpenChange,
   onSaved,
 }: {
   open: boolean
   editing: string | null
+  copyFrom: string | null
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
@@ -97,30 +122,47 @@ function SiteFormBody({
   const [previewError, setPreviewError] = useState("")
   const [managed, setManaged] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [loaded, setLoaded] = useState(editing === null)
+  const source = editing ?? copyFrom
+  const [loaded, setLoaded] = useState(source === null)
 
   const set = useCallback(<K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => {
     setSpec((s) => ({ ...s, [key]: value }))
   }, [])
 
-  // Load an existing site back into the form.
+  // Load an existing site back into the form — as itself, or as the start of
+  // a new one with the name, domains and certificate paths cleared, since
+  // those three are the things a duplicate exists to change.
   useEffect(() => {
-    if (!open || !editing) return
+    if (!open || !source) return
     const controller = new AbortController()
     get<{ spec: SiteSpec; managed: boolean }>(
-      `/proxy/sites/${encodeURIComponent(editing)}`,
+      `/proxy/sites/${encodeURIComponent(source)}`,
       undefined,
       controller.signal,
     )
       .then((r) => {
-        setSpec({ ...BLANK, ...r.spec })
-        setDomainText(r.spec.domains.join(" "))
-        setManaged(r.managed)
+        if (copyFrom && !editing) {
+          setSpec({
+            ...BLANK,
+            ...r.spec,
+            name: "",
+            domains: [],
+            certPath: undefined,
+            keyPath: undefined,
+            managedAcme: false,
+          })
+          setDomainText("")
+          setManaged(true)
+        } else {
+          setSpec({ ...BLANK, ...r.spec })
+          setDomainText(r.spec.domains.join(" "))
+          setManaged(r.managed)
+        }
         setLoaded(true)
       })
       .catch((err) => !controller.signal.aborted && notify.error("Could not load the site", err))
     return () => controller.abort()
-  }, [open, editing])
+  }, [open, source, copyFrom, editing])
 
   // The live preview. Debounced, because it is a request per keystroke
   // otherwise and the answer only matters once typing stops.
@@ -162,6 +204,22 @@ function SiteFormBody({
     }
   }, [open, loaded, spec])
 
+  // What the password field can point at, and whether the certificate the
+  // form names is one this dashboard has seen. Both polled only while the
+  // form is open and the field is in play.
+  const authFiles = usePoll<AuthFile[]>(
+    (signal) => get("/proxy/auth-files/", undefined, signal),
+    0,
+    [],
+    { enabled: open },
+  )
+  const certs = usePoll<Certificate[]>(
+    (signal) => get("/certificates/", undefined, signal),
+    0,
+    [],
+    { enabled: open && spec.tls },
+  )
+
   /**
    * The file name the server will accept: lowercase, starting with a letter or
    * a digit. Stripping the disallowed characters is not enough on its own —
@@ -191,8 +249,7 @@ function SiteFormBody({
       name: s.name || (domains[0] ? fileNameFor(domains[0]) : ""),
       certPath:
         s.certPath || (lineage ? `/etc/letsencrypt/live/${lineage}/fullchain.pem` : undefined),
-      keyPath:
-        s.keyPath || (lineage ? `/etc/letsencrypt/live/${lineage}/privkey.pem` : undefined),
+      keyPath: s.keyPath || (lineage ? `/etc/letsencrypt/live/${lineage}/privkey.pem` : undefined),
     }))
   }
 
@@ -220,14 +277,16 @@ function SiteFormBody({
   }
 
   const ready = spec.domains.length > 0 && spec.name !== "" && preview !== ""
+  const certKnown =
+    !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
+  const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
 
   return (
     <SidePanel
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="xl"
-      icon={Globe}
-      title={editing ? `Edit ${editing}` : "New site"}
+      title={editing ? `Edit ${editing}` : copyFrom ? `New site from ${copyFrom}` : "New site"}
       description={
         spec.domains.length > 0
           ? spec.domains.join(", ")
@@ -236,32 +295,32 @@ function SiteFormBody({
       bodyClassName="flex min-h-0 flex-1 flex-col gap-0 p-0 lg:flex-row"
       footer={
         <>
-          <span className="mr-auto text-[11px] text-muted-foreground">
+          <span className="mr-auto text-hint text-muted-foreground">
             Validated with nginx&rsquo;s own parser before it takes effect, and rolled back if the
             test fails.
           </span>
           <Button size="sm" variant="outline" onClick={() => save(false)} disabled={!ready || busy}>
             Save only
           </Button>
-          <Button size="sm" onClick={() => save(true)} disabled={!ready || busy}>
-            {busy && <Spinner className="size-4" />}
+          <Button size="sm" onClick={() => save(true)} disabled={!ready || busy} pending={busy}>
             Save and reload
           </Button>
         </>
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
-        {editing && !managed && (
-          <Notice tone="warning" icon={Warning} title="This file was written by hand">
-            The form has read what it recognises. Saving replaces the file with what the form
-            produces, so anything it could not represent will be lost — the previous version is
-            kept as <code className="font-mono">.bak</code>.
-          </Notice>
-        )}
+        <div className="space-y-5">
+          {editing && !managed && (
+            <Notice tone="warning" icon={Warning} title="This file was written by hand">
+              The form has read what it recognises. Saving replaces the file with what the form
+              produces, so anything it could not represent will be lost — the previous version is
+              kept as <code className="font-mono">.bak</code>.
+            </Notice>
+          )}
 
-        <div className="space-y-4 pt-1">
           <Field
             label="Domains"
+            htmlFor="site-domains"
             hint={
               spec.name
                 ? `Space-separated. Saved as ${spec.name} in nginx's site directory.`
@@ -269,6 +328,7 @@ function SiteFormBody({
             }
           >
             <Input
+              id="site-domains"
               value={domainText}
               onChange={(e) => commitDomains(e.target.value)}
               placeholder="app.example.com www.app.example.com"
@@ -286,13 +346,13 @@ function SiteFormBody({
               size="sm"
               className="w-full"
             >
-              <ToggleGroupItem value="proxy" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="proxy" className="flex-1 text-hint">
                 An app
               </ToggleGroupItem>
-              <ToggleGroupItem value="static" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="static" className="flex-1 text-hint">
                 Files
               </ToggleGroupItem>
-              <ToggleGroupItem value="redirect" className="flex-1 text-[11px]">
+              <ToggleGroupItem value="redirect" className="flex-1 text-hint">
                 A redirect
               </ToggleGroupItem>
             </ToggleGroup>
@@ -301,9 +361,11 @@ function SiteFormBody({
           {spec.kind === "proxy" && (
             <Field
               label="Send it to"
+              htmlFor="site-upstream"
               hint="Where the application is listening. Usually loopback on this machine."
             >
               <Input
+                id="site-upstream"
                 value={spec.upstream ?? ""}
                 onChange={(e) => set("upstream", e.target.value)}
                 placeholder="http://127.0.0.1:3000"
@@ -312,8 +374,9 @@ function SiteFormBody({
             </Field>
           )}
           {spec.kind === "static" && (
-            <Field label="Directory" hint="The folder holding index.html.">
+            <Field label="Directory" htmlFor="site-root" hint="The folder holding index.html.">
               <Input
+                id="site-root"
                 value={spec.root ?? ""}
                 onChange={(e) => set("root", e.target.value)}
                 placeholder="/var/www/site"
@@ -323,164 +386,231 @@ function SiteFormBody({
           )}
           {spec.kind === "redirect" && (
             <>
-              <Field label="Redirect to" hint="The path and query are carried across.">
+              <Field
+                label="Redirect to"
+                htmlFor="site-redirect"
+                hint="The path and query are carried across."
+              >
                 <Input
+                  id="site-redirect"
                   value={spec.redirectTo ?? ""}
                   onChange={(e) => set("redirectTo", e.target.value)}
                   placeholder="https://new.example.com"
                   className="font-mono text-xs"
                 />
               </Field>
-              <Toggle
-                label="Permanent (301)"
-                hint="Browsers cache a permanent redirect more or less forever. Use 302 while you are still deciding."
-                checked={!!spec.permanent}
-                onChange={(v) => set("permanent", v)}
-              />
+              <OptionList>
+                <OptionRow
+                  title="Permanent (301)"
+                  hint="Browsers cache a permanent redirect more or less forever. Use 302 while you are still deciding."
+                  checked={!!spec.permanent}
+                  onCheckedChange={(v) => set("permanent", v)}
+                />
+              </OptionList>
             </>
           )}
 
-          <Section title="Encryption" />
-          <Toggle
-            label="Serve over HTTPS"
-            hint="Needs a certificate on disk. Issue one from the Certificates tab first."
-            checked={spec.tls}
-            onChange={(v) => set("tls", v)}
-          />
-          {spec.tls && (
-            <>
-              <Field label="Certificate">
-                <Input
-                  value={spec.certPath ?? ""}
-                  onChange={(e) => set("certPath", e.target.value)}
-                  className="font-mono text-[11px]"
-                />
-              </Field>
-              <Field label="Private key">
-                <Input
-                  value={spec.keyPath ?? ""}
-                  onChange={(e) => set("keyPath", e.target.value)}
-                  className="font-mono text-[11px]"
-                />
-              </Field>
-              <Toggle
-                label="Send HTTP visitors to HTTPS"
-                hint="The certificate protects nobody who arrives on the unencrypted port."
-                checked={spec.forceHttps}
-                onChange={(v) => set("forceHttps", v)}
-              />
-              <Toggle
-                label="HSTS"
-                hint="Tells the browser never to use plain HTTP for this name again. Hard to undo — a mistake sticks for six months."
-                checked={spec.hsts}
-                onChange={(v) => set("hsts", v)}
-              />
-              <Toggle
-                label="HTTP/2"
-                hint="Faster for pages with many small assets."
-                checked={spec.http2}
-                onChange={(v) => set("http2", v)}
-              />
-            </>
-          )}
+          <FormSection title="Encryption">
+            <OptionList>
+              <OptionRow
+                title="Serve over HTTPS"
+                hint="Needs a certificate on disk. Issue one from the Certificates tab first."
+                checked={spec.tls}
+                onCheckedChange={(v) => set("tls", v)}
+              >
+                <div className="space-y-3">
+                  <FieldRow>
+                    <Field label="Certificate" htmlFor="site-cert">
+                      <Input
+                        id="site-cert"
+                        value={spec.certPath ?? ""}
+                        onChange={(e) => set("certPath", e.target.value)}
+                        className="font-mono text-hint"
+                      />
+                    </Field>
+                    <Field label="Private key" htmlFor="site-key">
+                      <Input
+                        id="site-key"
+                        value={spec.keyPath ?? ""}
+                        onChange={(e) => set("keyPath", e.target.value)}
+                        className="font-mono text-hint"
+                      />
+                    </Field>
+                  </FieldRow>
+                  {!certKnown && (
+                    <FormNote tone="warning">
+                      No certificate is listed at this path. If it does not exist yet, nginx refuses
+                      the site at reload —{" "}
+                      <Link href={issueHref} className="underline underline-offset-2">
+                        issue one for {spec.domains[0] ?? "these domains"} first
+                      </Link>
+                      .
+                    </FormNote>
+                  )}
+                </div>
+              </OptionRow>
+              {spec.tls && (
+                <>
+                  <OptionRow
+                    title="Send HTTP visitors to HTTPS"
+                    hint="The certificate protects nobody who arrives on the unencrypted port."
+                    checked={spec.forceHttps}
+                    onCheckedChange={(v) => set("forceHttps", v)}
+                  />
+                  <OptionRow
+                    title="HSTS"
+                    hint="Tells the browser never to use plain HTTP for this name again. Hard to undo — a mistake sticks for six months."
+                    checked={spec.hsts}
+                    onCheckedChange={(v) => set("hsts", v)}
+                  />
+                  <OptionRow
+                    title="HTTP/2"
+                    hint="Faster for pages with many small assets."
+                    checked={spec.http2}
+                    onCheckedChange={(v) => set("http2", v)}
+                  />
+                </>
+              )}
+            </OptionList>
+          </FormSection>
 
           {spec.kind === "proxy" && (
-            <>
-              <Section title="Behaviour" />
-              <Toggle
-                label="WebSockets"
-                hint="Needed by anything with live updates: a chat, a terminal, a dashboard."
-                checked={spec.webSockets}
-                onChange={(v) => set("webSockets", v)}
-              />
-              <Field label="Upload limit" hint="nginx refuses a larger request body with a 413.">
-                <Input
-                  value={spec.clientMaxBody ?? ""}
-                  onChange={(e) => set("clientMaxBody", e.target.value)}
-                  placeholder="50m"
-                  className="w-28 font-mono text-xs"
+            <FormSection title="Behaviour">
+              <OptionList>
+                <OptionRow
+                  title="WebSockets"
+                  hint="Needed by anything with live updates: a chat, a terminal, a dashboard."
+                  checked={spec.webSockets}
+                  onCheckedChange={(v) => set("webSockets", v)}
                 />
-              </Field>
-              <Field label="Timeout" hint="Seconds nginx waits for the application to answer.">
-                <Input
-                  value={String(spec.proxyTimeout ?? 60)}
-                  inputMode="numeric"
-                  onChange={(e) => set("proxyTimeout", Number(e.target.value) || 0)}
-                  className="w-28 font-mono text-xs"
-                />
-              </Field>
-            </>
+              </OptionList>
+              <FieldRow>
+                <Field
+                  label="Upload limit"
+                  htmlFor="site-body"
+                  hint="nginx refuses a larger request body with a 413."
+                >
+                  <Input
+                    id="site-body"
+                    value={spec.clientMaxBody ?? ""}
+                    onChange={(e) => set("clientMaxBody", e.target.value)}
+                    placeholder="50m"
+                    className="font-mono text-xs"
+                  />
+                </Field>
+                <Field
+                  label="Timeout"
+                  htmlFor="site-timeout"
+                  hint="Seconds nginx waits for the application to answer."
+                >
+                  <Input
+                    id="site-timeout"
+                    value={String(spec.proxyTimeout ?? 60)}
+                    inputMode="numeric"
+                    onChange={(e) => set("proxyTimeout", Number(e.target.value) || 0)}
+                    className="font-mono text-xs"
+                  />
+                </Field>
+              </FieldRow>
+            </FormSection>
           )}
 
-          <Section title="Hardening" />
-          <Toggle
-            label="Security headers"
-            hint="nosniff, SAMEORIGIN and a referrer policy. Safe defaults for almost any site."
-            checked={spec.securityHeaders}
-            onChange={(v) => set("securityHeaders", v)}
-          />
-          <Toggle
-            label="Block common probes"
-            hint="Refuses requests for dotfiles and backup extensions — the shapes scanners ask for all day."
-            checked={spec.blockExploits}
-            onChange={(v) => set("blockExploits", v)}
-          />
-          <Toggle
-            label="Compress responses"
-            checked={spec.gzip}
-            onChange={(v) => set("gzip", v)}
-          />
-          <Toggle
-            label="Access log"
-            hint="Off keeps the disk quiet; on is what you want when something goes wrong."
-            checked={spec.accessLog}
-            onChange={(v) => set("accessLog", v)}
-          />
+          <FormSection title="Hardening">
+            <OptionList>
+              <OptionRow
+                title="Security headers"
+                hint="nosniff, SAMEORIGIN and a referrer policy. Safe defaults for almost any site."
+                checked={spec.securityHeaders}
+                onCheckedChange={(v) => set("securityHeaders", v)}
+              />
+              <OptionRow
+                title="Block common probes"
+                hint="Refuses requests for dotfiles and backup extensions — the shapes scanners ask for all day."
+                checked={spec.blockExploits}
+                onCheckedChange={(v) => set("blockExploits", v)}
+              />
+              <OptionRow
+                title="Compress responses"
+                hint="gzip for text, JSON, scripts and SVG."
+                checked={spec.gzip}
+                onCheckedChange={(v) => set("gzip", v)}
+              />
+              <OptionRow
+                title="Access log"
+                hint="Off keeps the disk quiet; on is what you want when something goes wrong."
+                checked={spec.accessLog}
+                onCheckedChange={(v) => set("accessLog", v)}
+              />
+            </OptionList>
+          </FormSection>
 
-          <Section title="Who may reach it" />
-          <ListField
-            label="Allow only these"
-            placeholder="10.0.0.0/8"
-            values={spec.allowFrom}
-            onChange={(v) => set("allowFrom", v)}
-            hint="Filling this in refuses everything else. Include however you reach the site yourself."
-          />
-          <ListField
-            label="Deny"
-            placeholder="203.0.113.0/24"
-            values={spec.denyFrom}
-            onChange={(v) => set("denyFrom", v)}
-            hint="Exceptions, checked before the allow list. The fence at the end is written for you."
-          />
-          <Field label="Password file" hint="An htpasswd file. Leave empty for no password.">
-            <Input
-              value={spec.basicAuthFile ?? ""}
-              onChange={(e) => set("basicAuthFile", e.target.value)}
-              placeholder="/etc/nginx/.htpasswd"
-              className="font-mono text-[11px]"
+          <FormSection title="Who may reach it">
+            <ListField
+              id="site-allow"
+              label="Allow only these"
+              placeholder="10.0.0.0/8"
+              values={spec.allowFrom}
+              onChange={(v) => set("allowFrom", v)}
+              hint="Filling this in refuses everything else. Include however you reach the site yourself."
             />
-          </Field>
+            <ListField
+              id="site-deny"
+              label="Deny"
+              placeholder="203.0.113.0/24"
+              values={spec.denyFrom}
+              onChange={(v) => set("denyFrom", v)}
+              hint="Exceptions, checked before the allow list. The fence at the end is written for you."
+            />
+            <Field
+              label="Password file"
+              htmlFor="site-auth"
+              hint={
+                authFiles.data && authFiles.data.length > 0
+                  ? "One of the files managed below, or any htpasswd file. Leave empty for no password."
+                  : "An htpasswd file. Create one in Password files below, or leave empty for no password."
+              }
+            >
+              <Input
+                id="site-auth"
+                value={spec.basicAuthFile ?? ""}
+                onChange={(e) => set("basicAuthFile", e.target.value)}
+                placeholder="/etc/nginx/jd-auth/staging"
+                list="site-auth-files"
+                className="font-mono text-hint"
+              />
+              <datalist id="site-auth-files">
+                {authFiles.data?.map((f) => (
+                  <option key={f.path} value={f.path} />
+                ))}
+              </datalist>
+            </Field>
+          </FormSection>
 
           {spec.kind === "proxy" && (
-            <>
-              <Section title="Paths that go somewhere else" />
-              <LocationsField
-                locations={spec.locations}
-                onChange={(v) => set("locations", v)}
-              />
-            </>
+            <FormSection
+              title="Paths that go somewhere else"
+              hint="Everything not matched by one of these goes to the site's main upstream."
+            >
+              <LocationsField locations={spec.locations} onChange={(v) => set("locations", v)} />
+            </FormSection>
           )}
 
-          <Section title="Anything else" />
-          <Field label="Extra configuration" hint="Added verbatim inside the server block.">
-            <Textarea
-              value={spec.custom ?? ""}
-              onChange={(e) => set("custom", e.target.value)}
-              rows={4}
-              className="font-mono text-[11px]"
-              placeholder="# valid nginx directives"
-            />
-          </Field>
+          <FormSection title="Anything else">
+            <Field
+              label="Extra configuration"
+              htmlFor="site-custom"
+              hint="Added verbatim inside the server block."
+            >
+              <Textarea
+                id="site-custom"
+                value={spec.custom ?? ""}
+                onChange={(e) => set("custom", e.target.value)}
+                rows={4}
+                className="font-mono text-hint"
+                placeholder="# valid nginx directives"
+              />
+            </Field>
+          </FormSection>
         </div>
       </div>
 
@@ -494,39 +624,41 @@ function SiteFormBody({
             <TabsTrigger value="notes">
               Notes
               {warnings.length > 0 && (
-                <Badge variant="warning" className="ml-1 font-normal">
+                <span className="numeric ml-1 text-hint font-medium text-warning">
                   {warnings.length}
-                </Badge>
+                </span>
               )}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="preview" className="min-h-0 flex-1">
-            <div className="h-full min-h-0 overflow-hidden rounded-xl border border-hairline bg-surface-sunken">
+            <Pane className="h-full">
               {previewError ? (
-                <div className="flex h-full items-center justify-center p-6 text-center text-xs text-destructive">
-                  {previewError}
-                </div>
+                <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>
               ) : preview ? (
                 <CodeEditor className="h-full" language="ini" value={preview} readOnly />
               ) : (
-                <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                  Enter a domain and the config appears here, rendered by the server that will
-                  write it.
-                </div>
+                <EmptyNote className="my-auto">
+                  Enter a domain and the config appears here, rendered by the server that will write
+                  it.
+                </EmptyNote>
               )}
-            </div>
+            </Pane>
           </TabsContent>
-          <TabsContent value="notes" className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          <TabsContent value="notes" className="min-h-0 flex-1 overflow-y-auto">
             {warnings.length === 0 ? (
-              <Notice tone="success" icon={CheckCircle} title="Nothing worth flagging">
+              <p className="flex items-center gap-2.5 py-2 text-body text-muted-foreground">
+                <StatusDot tone="running" />
                 Every setting here is one this dashboard would have chosen.
-              </Notice>
+              </p>
             ) : (
-              warnings.map((warning) => (
-                <Notice key={warning} tone="warning" icon={Warning} title="Worth knowing">
-                  {warning}
-                </Notice>
-              ))
+              <ul className="divide-y divide-hairline">
+                {warnings.map((warning) => (
+                  <li key={warning} className="flex items-start gap-2.5 py-2.5 text-body">
+                    <StatusDot tone="warning" className="mt-1.5" />
+                    <span className="min-w-0 leading-relaxed">{warning}</span>
+                  </li>
+                ))}
+              </ul>
             )}
           </TabsContent>
         </Tabs>
@@ -563,88 +695,37 @@ function DNSCheck({ domain }: { domain: string }) {
   }, [domain])
 
   if (loading && !check) {
-    return <p className="text-[11px] text-muted-foreground">Checking where {domain} points…</p>
+    return <FormNote className="-mt-3">Checking where {domain} points…</FormNote>
   }
   if (!check) return null
   return (
-    <p
-      className={cn(
-        "text-[11px] leading-relaxed",
+    <FormNote
+      className="-mt-3"
+      tone={
         check.pointsHere
-          ? "text-success"
+          ? "success"
           : // A host behind provider NAT has no address of its own to compare
             // against, so "cannot tell" is muted like the CDN case rather than
             // warned about — the domain is very probably fine.
             check.behindProxy || !check.hostAddressesKnown
-            ? "text-muted-foreground"
-            : "text-warning",
-      )}
+            ? "default"
+            : "warning"
+      }
     >
       {check.summary}
-    </p>
-  )
-}
-
-function Section({ title }: { title: string }) {
-  return (
-    <p className="eyebrow border-t border-hairline pt-3">{title}</p>
-  )
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string
-  hint?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {children}
-      {hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
-    </div>
-  )
-}
-
-/**
- * A switch with its explanation underneath.
- *
- * The rule the Docker forms established and this one keeps: explanation is
- * quiet. A form that shouts every caveat is as unusable as one that explains
- * nothing.
- */
-function Toggle({
-  label,
-  hint,
-  checked,
-  onChange,
-}: {
-  label: string
-  hint?: string
-  checked: boolean
-  onChange: (value: boolean) => void
-}) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0 space-y-0.5">
-        <Label className="font-normal">{label}</Label>
-        {hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
-      </div>
-      <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5 shrink-0" />
-    </div>
+    </FormNote>
   )
 }
 
 function ListField({
+  id,
   label,
   placeholder,
   values,
   onChange,
   hint,
 }: {
+  id: string
   label: string
   placeholder: string
   values: string[]
@@ -658,26 +739,28 @@ function ListField({
     setDraft("")
   }
   return (
-    <Field label={label} hint={hint}>
-      <div className="space-y-1.5">
-        {values.map((value, i) => (
-          <div key={`${value}-${i}`} className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded border border-hairline bg-surface-sunken px-2 py-1 font-mono text-[11px]">
-              {value}
-            </code>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              className="text-destructive"
-              onClick={() => onChange(values.filter((_, j) => j !== i))}
-              aria-label={`Remove ${value}`}
-            >
-              <Trash className="size-3.5" />
-            </Button>
+    <Field label={label} htmlFor={id} hint={hint}>
+      <div className="space-y-2">
+        {values.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {values.map((value, i) => (
+              <Tag key={`${value}-${i}`} mono className="gap-1.5 pr-0.5">
+                {value}
+                <IconAction
+                  label={`Remove ${value}`}
+                  size="icon-xs"
+                  className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                  onClick={() => onChange(values.filter((_, j) => j !== i))}
+                >
+                  <Trash />
+                </IconAction>
+              </Tag>
+            ))}
           </div>
-        ))}
+        )}
         <div className="flex gap-2">
           <Input
+            id={id}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -689,7 +772,13 @@ function ListField({
             placeholder={placeholder}
             className="font-mono text-xs"
           />
-          <Button size="sm" variant="outline" onClick={add} disabled={!draft.trim()}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={add}
+            disabled={!draft.trim()}
+            aria-label={`Add to ${label.toLowerCase()}`}
+          >
             <Plus className="size-3.5" />
           </Button>
         </div>
@@ -722,28 +811,28 @@ function LocationsField({
   return (
     <div className="space-y-2">
       {locations.map((loc, i) => (
-        <div key={i} className="space-y-1.5 rounded-lg border border-hairline bg-surface-sunken p-2.5">
+        <Group key={i} className={cn("space-y-2")}>
           <div className="flex items-center gap-2">
             <Input
               value={loc.path}
               onChange={(e) => update(i, { path: e.target.value })}
               placeholder="/api"
+              aria-label="Path"
               className="font-mono text-xs"
             />
-            <Button
-              size="icon-xs"
-              variant="ghost"
+            <IconAction
+              label={`Remove ${loc.path || "location"}`}
               className="text-destructive"
-              aria-label={`Remove ${loc.path || "location"}`}
               onClick={() => onChange(locations.filter((_, j) => j !== i))}
             >
-              <Trash className="size-3.5" />
-            </Button>
+              <Trash />
+            </IconAction>
           </div>
           <Input
             value={loc.upstream ?? ""}
             onChange={(e) => update(i, { upstream: e.target.value, root: "" })}
             placeholder="http://127.0.0.1:4000 — or leave empty and give a folder"
+            aria-label="Upstream"
             className="font-mono text-xs"
           />
           {!loc.upstream && (
@@ -751,31 +840,27 @@ function LocationsField({
               value={loc.root ?? ""}
               onChange={(e) => update(i, { root: e.target.value })}
               placeholder="/var/www/assets"
+              aria-label="Folder"
               className="font-mono text-xs"
             />
           )}
-          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <label className="flex items-center gap-2 text-hint text-muted-foreground">
             <Checkbox
               checked={loc.webSockets}
               onCheckedChange={(v) => update(i, { webSockets: Boolean(v) })}
             />
             WebSockets on this path
           </label>
-        </div>
+        </Group>
       ))}
       <Button
         size="sm"
         variant="outline"
-        onClick={() =>
-          onChange([...locations, { path: "", upstream: "", webSockets: false }])
-        }
+        onClick={() => onChange([...locations, { path: "", upstream: "", webSockets: false }])}
       >
         <Plus className="size-3.5" />
         Add a path
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Everything not matched by one of these goes to the site&rsquo;s main upstream.
-      </p>
     </div>
   )
 }

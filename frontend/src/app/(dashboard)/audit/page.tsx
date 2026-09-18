@@ -1,18 +1,21 @@
 "use client"
 
 import { useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { FileText } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { AuditEntry } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageHeader, SearchInput } from "@/components/page"
+import { Metric, MetricStrip, Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ROW_BLEED } from "@/components/row-list"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Status } from "@/components/status-dot"
+import { FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   stickyTableHeader,
   Table,
@@ -26,8 +29,17 @@ import {
 const PAGE_SIZE = 100
 
 export default function AuditPage() {
+  // `?action=` is how the Docker event feed hands off: an event correlated to
+  // an audit entry offers a link, and a link that lands on an unfiltered list
+  // of everything the dashboard has ever done is not the entry it promised.
+  //
+  // Read once as an initial value rather than kept in sync, like the other
+  // deep links in this product — the URL is where the reader arrived, not
+  // where they are now, and re-applying it on every keystroke would fight the
+  // filter box.
+  const initialAction = useSearchParams().get("action") ?? ""
   const [username, setUsername] = useState("")
-  const [action, setAction] = useState("")
+  const [action, setAction] = useState(initialAction)
   const [onlyFailed, setOnlyFailed] = useState(false)
   const [offset, setOffset] = useState(0)
 
@@ -42,147 +54,227 @@ export default function AuditPage() {
     [username, action, onlyFailed, offset],
   )
 
+  // The header's figure outlives a filter change: a new filter empties `data`
+  // while it loads, and a total that blinked out on every keystroke would
+  // read as the log emptying. Adjusted during render rather than in an
+  // effect, so the figure never paints a frame behind the rows.
+  const [total, setTotal] = useState<number>()
+  if (data && data.total !== total) setTotal(data.total)
+
+  const filtered = username !== "" || action !== "" || onlyFailed
+  const entries = data?.entries ?? []
+
   return (
-    <Page>
+    <Page className="animate-rise">
       <PageHeader
-        eyebrow="Operations"
+        eyebrow="System"
         title="Audit log"
-        description="Every state-changing request, with who made it and from where"
+        actions={
+          total !== undefined && (
+            <MetricStrip>
+              <Metric
+                label={filtered ? "Matching" : "Recorded"}
+                value={
+                  <span key={total} className="inline-block animate-rise">
+                    {total.toLocaleString()}
+                  </span>
+                }
+              />
+            </MetricStrip>
+          )
+        }
       />
 
-      {error && <ErrorState error={error} />}
-      {loading && !data && <LoadingPanel rows={8} />}
-
-      {data && (
-        <Panel>
-          <PanelHeader
-            icon={FileText}
-            title="Recorded requests"
-            description={`${data.total.toLocaleString()} entries kept`}
+      {/* The table is the whole of the page: a title, a hairline, no box. The
+          toolbar stays mounted across a filter change so the box being typed
+          into never loses its caret to a skeleton. */}
+      <Panel plain>
+        <PanelHeader title="Recorded requests" />
+        <PanelToolbar>
+          <SearchInput
+            containerClassName="sm:w-48"
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value)
+              setOffset(0)
+            }}
+            placeholder="User"
           />
-          <PanelToolbar>
-            <SearchInput
-              containerClassName="w-40"
-              value={username}
-              onChange={(e) => {
-                setUsername(e.target.value)
-                setOffset(0)
-              }}
-              placeholder="User"
-            />
-            <Input
-              value={action}
-              onChange={(e) => {
-                setAction(e.target.value)
-                setOffset(0)
-              }}
-              placeholder="Action, e.g. docker.container"
-              className="h-8 w-60 text-[13px]"
-            />
-            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Checkbox
-                checked={onlyFailed}
-                onCheckedChange={(v) => {
-                  setOnlyFailed(v === true)
-                  setOffset(0)
-                }}
-              />
-              Failures only
-            </label>
-          </PanelToolbar>
+          <Input
+            value={action}
+            onChange={(e) => {
+              setAction(e.target.value)
+              setOffset(0)
+            }}
+            placeholder="Action, e.g. docker.container"
+            className="h-8 w-full text-body sm:w-64"
+          />
+          <FilterChip
+            selected={onlyFailed}
+            onClick={() => {
+              setOnlyFailed(!onlyFailed)
+              setOffset(0)
+            }}
+          >
+            Failures only
+          </FilterChip>
+        </PanelToolbar>
 
-          <PanelBody flush>
-            <Table containerClassName="max-h-[calc(100svh-22rem)]">
-              <TableHeader className={stickyTableHeader}>
-                <TableRow>
-                  <TableHead className="w-44">When</TableHead>
-                  <TableHead>Who</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead className="w-full">Target</TableHead>
-                  <TableHead className="w-20">Result</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.entries.map((entry) => (
-                  <TableRow
+        <PanelBody flush>
+          {loading && !data && <LoadingPanel rows={8} />}
+          {error && !data && <ErrorState error={error} />}
+          {data && (
+            <div key="rows" className="animate-rise">
+              {/* Bled by the cells' own padding, so the first column starts
+                  where the title does. */}
+              <div className="-mx-4 hidden min-w-0 lg:block">
+                <Table containerClassName="max-h-[calc(100svh-22rem)]">
+                  <TableHeader className={stickyTableHeader}>
+                    <TableRow>
+                      <TableHead className="w-44">When</TableHead>
+                      <TableHead>Who</TableHead>
+                      <TableHead>Action</TableHead>
+                      <TableHead className="w-full">Target</TableHead>
+                      <TableHead>Result</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {entries.map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell>
+                          <div>{timestamp(entry.ts)}</div>
+                          <p className="text-hint text-muted-foreground">
+                            {relativeTime(entry.ts)}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-body">
+                            {entry.username || (
+                              <span className="text-muted-foreground">anonymous</span>
+                            )}
+                          </div>
+                          <p className="font-mono text-hint text-muted-foreground">
+                            {[entry.ip, entry.actor].filter(Boolean).join(" · ")}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-mono text-xs">{entry.action}</div>
+                          <p className="font-mono text-hint text-muted-foreground">
+                            {entry.method} {entry.path}
+                          </p>
+                        </TableCell>
+                        <TableCell className="max-w-xs">
+                          <div className="truncate font-mono text-xs">{entry.target}</div>
+                          {entry.detail && (
+                            <p
+                              className="truncate text-hint text-muted-foreground"
+                              title={entry.detail}
+                            >
+                              {entry.detail}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Result entry={entry} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {/* Below `lg` the same entries are drawn down the row instead of
+                  across it, so the phone still sees who did what to what, and
+                  whether it worked. */}
+              <ul className="divide-y divide-hairline lg:hidden">
+                {entries.map((entry) => (
+                  <li
                     key={entry.id}
-                    className={entry.success ? undefined : "bg-destructive/[0.06]"}
+                    className={cn("flex min-w-0 items-start gap-3 py-3", ROW_BLEED)}
                   >
-                    <TableCell className="text-xs">
-                      <div>{timestamp(entry.ts)}</div>
-                      <p className="text-[11px] text-muted-foreground">{relativeTime(entry.ts)}</p>
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-[13px]">{entry.username || <em>anonymous</em>}</div>
-                      <p className="font-mono text-[11px] text-muted-foreground">
-                        {entry.ip} · {entry.actor}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <span className="truncate font-mono text-xs font-medium">
+                          {entry.action}
+                        </span>
+                        <span className="shrink-0 text-hint text-muted-foreground">
+                          {relativeTime(entry.ts)}
+                        </span>
+                      </div>
+                      <p className="truncate font-mono text-hint text-muted-foreground">
+                        {entry.target}
                       </p>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-mono text-xs">{entry.action}</div>
-                      <p className="font-mono text-[11px] text-muted-foreground">
-                        {entry.method} {entry.path}
+                      <p className="truncate text-hint text-muted-foreground">
+                        {entry.username || "anonymous"}
+                        {entry.ip && ` · ${entry.ip}`}
+                        {entry.detail && ` · ${entry.detail}`}
                       </p>
-                    </TableCell>
-                    <TableCell className="max-w-xs">
-                      <div className="truncate font-mono text-xs">{entry.target}</div>
-                      {entry.detail && (
-                        <p
-                          className="truncate text-[11px] text-muted-foreground"
-                          title={entry.detail}
-                        >
-                          {entry.detail}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={entry.success ? "secondary" : "destructive"}
-                        className="numeric font-normal"
-                      >
-                        {entry.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                    <Result entry={entry} className="shrink-0" />
+                  </li>
                 ))}
-                {data.entries.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="p-0">
-                      <EmptyState icon={FileText} title="No entries match" />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </PanelBody>
-
-          <PanelFooter className="justify-between">
-            <span className="numeric text-xs text-muted-foreground">
-              {data.total === 0
-                ? "Nothing recorded yet"
-                : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total.toLocaleString()}`}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={offset === 0}
-                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-              >
-                Previous
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={offset + PAGE_SIZE >= data.total}
-                onClick={() => setOffset((o) => o + PAGE_SIZE)}
-              >
-                Next
-              </Button>
+              </ul>
+              {entries.length === 0 && (
+                <EmptyState
+                  icon={FileText}
+                  title={
+                    data.total === 0 && !filtered ? "Nothing recorded yet" : "No entries match"
+                  }
+                  description={
+                    data.total === 0 && !filtered
+                      ? "Every request that changes something on this host is written here."
+                      : "Clear a filter, or look further back with the pager."
+                  }
+                  className="mt-4"
+                />
+              )}
             </div>
-          </PanelFooter>
-        </Panel>
-      )}
+          )}
+        </PanelBody>
+
+        <PanelFooter className="justify-between">
+          <span className="numeric text-hint text-muted-foreground">
+            {!data
+              ? "Loading…"
+              : data.total === 0
+                ? filtered
+                  ? "No matching entries"
+                  : "Nothing recorded yet"
+                : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total.toLocaleString()}`}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={offset === 0}
+              onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+            >
+              Previous
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!data || offset + PAGE_SIZE >= data.total}
+              onClick={() => setOffset((o) => o + PAGE_SIZE)}
+            >
+              Next
+            </Button>
+          </div>
+        </PanelFooter>
+      </Panel>
     </Page>
+  )
+}
+
+/**
+ * The outcome as a reading: a dot and the status code. Red arrives only here,
+ * attached to the code that failed, rather than washed across the whole row.
+ */
+function Result({ entry, className }: { entry: AuditEntry; className?: string }) {
+  return (
+    <Status
+      tone={entry.success ? "running" : "danger"}
+      label={<span className="numeric font-mono">{entry.status}</span>}
+      className={className}
+    />
   )
 }

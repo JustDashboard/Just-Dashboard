@@ -1,0 +1,110 @@
+{
+  "id": "wallabag",
+  "version": "1.0.0",
+  "name": "wallabag",
+  "category": "http",
+  "profile": "web",
+  "description": "A read-it-later service that keeps a clean copy of every saved page. Uses its own SQLite database; the domain is baked into every link it sends, so choose it once.",
+  "iconId": "globe",
+  "docsUrl": "https://doc.wallabag.org/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/wallabag/wallabag",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "wallabag/wallabag:2.6.14",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Every share link and the browser extension use it."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web interface and API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/www/wallabag/data",
+      "purpose": "The SQLite database",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "images",
+      "target": "/var/www/wallabag/images",
+      "purpose": "Downloaded article images",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Login page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "SYMFONY__ENV__DOMAIN_NAME",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "wallabag migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "read.example.test"
+      },
+      "digest": "sha256:f15ed070ebe9eb47897a6b880b5e442384875b7af818116f6732e774496befa7"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "app-secret",
+      "variable": "SYMFONY__ENV__SECRET",
+      "label": "Application secret",
+      "length": 40,
+      "description": "Signs sessions and tokens; changing it signs everyone out."
+    }
+  ]
+}

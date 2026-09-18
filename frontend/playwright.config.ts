@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test"
 
-const baseURL = process.env.JD_BROWSER_BASE_URL ?? "http://127.0.0.1:3000"
+const baseURL = process.env.JD_BROWSER_BASE_URL ?? "http://127.0.0.1:43117"
 const externallyManaged = Boolean(process.env.JD_BROWSER_BASE_URL)
 const crossBrowser = process.env.JD_BROWSER_PROJECTS === "all"
 
@@ -20,9 +20,9 @@ export default defineConfig({
   webServer: externallyManaged
     ? undefined
     : {
-        command: "bun dev --hostname 127.0.0.1",
+        command: "bun run start --hostname 127.0.0.1 --port 43117",
         url: baseURL,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
         timeout: 120_000,
       },
   projects: [

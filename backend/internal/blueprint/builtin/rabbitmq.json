@@ -1,0 +1,113 @@
+{
+  "id": "rabbitmq",
+  "version": "1.0.0",
+  "name": "RabbitMQ",
+  "category": "database",
+  "profile": "web",
+  "description": "A message broker with the management interface enabled. Applications connect on the AMQP port over the Docker network; the management page is what the proxy serves.",
+  "iconId": "database",
+  "docsUrl": "https://www.rabbitmq.com/docs",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MPL-2.0",
+    "upstreamUrl": "https://github.com/rabbitmq/rabbitmq-server",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "rabbitmq:4.3-management-alpine",
+    "tagPolicy": "minor",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "The management interface only."
+    },
+    {
+      "name": "user",
+      "kind": "text",
+      "label": "Default user",
+      "variable": "RABBITMQ_DEFAULT_USER",
+      "default": "app",
+      "required": true,
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "amqp",
+      "internal": 5672,
+      "protocol": "tcp",
+      "purpose": "AMQP connections from other containers on this host",
+      "exposure": "internal"
+    },
+    {
+      "name": "management",
+      "internal": 15672,
+      "protocol": "tcp",
+      "purpose": "The management interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/lib/rabbitmq",
+      "purpose": "Queues, messages and definitions",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Node answers ping",
+      "kind": "command",
+      "phase": "readiness",
+      "required": true,
+      "command": [
+        "rabbitmq-diagnostics",
+        "-q",
+        "ping"
+      ],
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "RabbitMQ upgrades one minor at a time; the minor tag policy keeps this blueprint inside one.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:78f79395e5247d4f8a2df4b02b175b5293d6c9fa70daea808f8714b54627aead"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "password",
+      "variable": "RABBITMQ_DEFAULT_PASS",
+      "label": "Default user's password",
+      "length": 32
+    }
+  ]
+}

@@ -1,9 +1,10 @@
 "use client"
 
 import { Warning } from "@/components/icons"
+import { Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import type { ChangeKind, Release } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 
 /**
  * A release, rendered.
@@ -33,10 +34,7 @@ function ChangeLabel({ kind }: { kind: ChangeKind }) {
   const style = KIND_STYLE[kind] ?? { label: kind, className: "text-muted-foreground" }
   return (
     <span
-      className={cn(
-        "eyebrow shrink-0 pt-0.5 text-[10px] leading-4 tracking-wider",
-        style.className,
-      )}
+      className={cn("eyebrow shrink-0 pt-0.5 text-micro leading-4 tracking-wider", style.className)}
     >
       {style.label}
     </span>
@@ -69,23 +67,18 @@ export function ReleaseNotes({
     <section className={cn("space-y-2.5", className)}>
       <header className="space-y-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h3 className="numeric text-[15px] font-semibold tracking-tight">{release.version}</h3>
-          <span className="text-[11px] text-muted-foreground">{releaseDay(release.date)}</span>
-          {installed && (
-            <Badge variant="outline" className="text-[10px]">
-              Installed
-            </Badge>
-          )}
+          <h3 className="numeric text-title font-semibold tracking-tight">{release.version}</h3>
+          <span className="text-hint text-muted-foreground">{releaseDay(release.date)}</span>
+          {installed && <Tag>Installed</Tag>}
           {release.breaking && (
-            <Badge variant="warning" className="text-[10px]">
-              <Warning className="size-3" />
+            <Tag tone="warning" icon={Warning}>
               Needs attention
-            </Badge>
+            </Tag>
           )}
         </div>
-        <p className="text-[13px] font-medium">{release.title}</p>
+        <p className="text-body font-medium">{release.title}</p>
         {release.summary && (
-          <p className="text-[13px] leading-relaxed text-muted-foreground">{release.summary}</p>
+          <p className="text-body leading-relaxed text-muted-foreground">{release.summary}</p>
         )}
       </header>
 
@@ -94,9 +87,9 @@ export function ReleaseNotes({
           and a warning they have to expand to read is a warning they will
           discover afterwards. */}
       {release.breaking && release.breakingNote && (
-        <p className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-[12px] leading-relaxed text-foreground">
+        <Notice title="Before you update" tone="warning">
           {release.breakingNote}
-        </p>
+        </Notice>
       )}
 
       <ul className="space-y-2">
@@ -106,9 +99,9 @@ export function ReleaseNotes({
               <ChangeLabel kind={change.kind} />
             </span>
             <span className="min-w-0 flex-1 space-y-0.5">
-              <span className="block text-[13px] leading-snug">{change.text}</span>
+              <span className="block text-body leading-snug">{change.text}</span>
               {change.detail && (
-                <span className="block text-[12px] leading-relaxed text-muted-foreground">
+                <span className="block text-xs leading-relaxed text-muted-foreground">
                   {change.detail}
                 </span>
               )}

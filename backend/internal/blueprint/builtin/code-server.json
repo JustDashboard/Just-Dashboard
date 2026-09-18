@@ -1,0 +1,93 @@
+{
+  "id": "code-server",
+  "version": "1.0.0",
+  "name": "code-server",
+  "category": "tool",
+  "profile": "tool",
+  "description": "VS Code in the browser, running on this server with its own home directory. Everything the editor installs — extensions, settings, repositories — lives in the volume.",
+  "iconId": "git",
+  "docsUrl": "https://coder.com/docs/code-server",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/coder/code-server",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "codercom/code-server:4.137.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The editor",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "home",
+      "target": "/home/coder",
+      "purpose": "Projects, extensions and settings",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthz",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Extensions carry over; VS Code's own version moves with the image."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:2ee39b3fad7c001870d7a5875cc3b248235230cb8e03de14a3047fca0587a608"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "password",
+      "variable": "PASSWORD",
+      "label": "Editor password",
+      "length": 24,
+      "description": "Asked for on every new browser."
+    }
+  ]
+}

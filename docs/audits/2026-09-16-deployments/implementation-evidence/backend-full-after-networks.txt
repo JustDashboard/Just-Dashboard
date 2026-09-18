@@ -1,0 +1,35 @@
+?   	github.com/Wayy01/Just-Dashboard/backend/cmd/server	[no test files]
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/agent	0.035s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	81.212s
+?   	github.com/Wayy01/Just-Dashboard/backend/internal/audit	[no test files]
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/auth	5.457s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/backups	1.232s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/blueprint	0.072s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/config	0.018s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dbx	47.102s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	16.165s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	31.230s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/files	0.148s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/gameserver	0.094s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/ghx	0.007s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/gitx	0.596s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/hostexec	0.193s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/httpx	0.035s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/jobs	0.239s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers	0.013s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/logsx	0.747s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/metrics	3.233s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	0.559s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/portalloc	0.012s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/procs	0.079s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	1.049s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/safepath	0.082s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg	0.135s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate	1.916s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/stackports	0.168s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	1.308s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo	0.009s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/term	6.107s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/updates	0.035s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/version	0.006s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/wsx	0.010s

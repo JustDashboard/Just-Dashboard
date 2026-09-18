@@ -1,0 +1,435 @@
+{
+  "id": "minecraft-java",
+  "version": "1.0.0",
+  "name": "Minecraft (Java Edition)",
+  "category": "game",
+  "profile": "game",
+  "description": "A Minecraft Java Edition server. Vanilla, Paper, Purpur, Fabric, Forge and NeoForge are the same blueprint with a different server build, so the world, backups and schedules survive changing your mind.",
+  "iconId": "game",
+  "docsUrl": "https://docker-minecraft-server.readthedocs.io/en/latest/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/itzg/docker-minecraft-server",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7",
+    "updateNotes": "The image is pinned; the Minecraft server build is resolved at deployment from the upstream version API and recorded on the release."
+  },
+  "image": {
+    "reference": "itzg/minecraft-server:2026.9.1-java21",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "server-type",
+      "kind": "choice",
+      "label": "Server software",
+      "default": "VANILLA",
+      "required": true,
+      "variable": "TYPE",
+      "description": "Paper and Purpur accept Bukkit plugins. Fabric, Forge and NeoForge accept mods, and mods must match the server and the client.",
+      "choices": [
+        {
+          "value": "VANILLA",
+          "label": "Vanilla",
+          "description": "The official server. No plugins, no mods."
+        },
+        {
+          "value": "PAPER",
+          "label": "Paper",
+          "description": "A faster Vanilla-compatible server that accepts Bukkit plugins."
+        },
+        {
+          "value": "PURPUR",
+          "label": "Purpur",
+          "description": "Paper with more configuration, for people who want to change game rules."
+        },
+        {
+          "value": "FABRIC",
+          "label": "Fabric",
+          "description": "A light mod loader. Players need the same mods."
+        },
+        {
+          "value": "FORGE",
+          "label": "Forge",
+          "description": "The long-standing mod loader for large modpacks."
+        },
+        {
+          "value": "NEOFORGE",
+          "label": "NeoForge",
+          "description": "The maintained continuation of Forge for current versions."
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "kind": "text",
+      "label": "Minecraft version",
+      "default": "LATEST",
+      "required": true,
+      "variable": "VERSION",
+      "pattern": "^(LATEST|SNAPSHOT|[0-9]+\\.[0-9]+(\\.[0-9]+)?)$",
+      "description": "Chosen from the versions the upstream API reports. Clients must be on the same version."
+    },
+    {
+      "name": "server-name",
+      "kind": "text",
+      "label": "Server name",
+      "default": "A Minecraft Server",
+      "variable": "MOTD",
+      "pattern": "^[^\\x00-\\x1f]{1,59}$",
+      "description": "The line players see in their server list."
+    },
+    {
+      "name": "memory",
+      "kind": "memory",
+      "label": "Memory",
+      "default": "2048",
+      "minimum": 1024,
+      "maximum": 65536,
+      "description": "Vanilla is comfortable at 2 GB. Large modpacks want 6 GB or more. This is guidance, not a player count."
+    },
+    {
+      "name": "max-players",
+      "kind": "number",
+      "label": "Maximum players",
+      "default": "20",
+      "minimum": 1,
+      "maximum": 1000,
+      "variable": "MAX_PLAYERS"
+    },
+    {
+      "name": "difficulty",
+      "kind": "choice",
+      "label": "Difficulty",
+      "default": "normal",
+      "variable": "DIFFICULTY",
+      "choices": [
+        {
+          "value": "peaceful",
+          "label": "Peaceful"
+        },
+        {
+          "value": "easy",
+          "label": "Easy"
+        },
+        {
+          "value": "normal",
+          "label": "Normal"
+        },
+        {
+          "value": "hard",
+          "label": "Hard"
+        }
+      ]
+    },
+    {
+      "name": "game-mode",
+      "kind": "choice",
+      "label": "Game mode",
+      "default": "survival",
+      "variable": "MODE",
+      "choices": [
+        {
+          "value": "survival",
+          "label": "Survival"
+        },
+        {
+          "value": "creative",
+          "label": "Creative"
+        },
+        {
+          "value": "adventure",
+          "label": "Adventure"
+        },
+        {
+          "value": "spectator",
+          "label": "Spectator"
+        }
+      ]
+    },
+    {
+      "name": "whitelist",
+      "kind": "boolean",
+      "label": "Whitelist only",
+      "default": "false",
+      "variable": "ENFORCE_WHITELIST",
+      "description": "With this on, only accounts you add can join."
+    },
+    {
+      "name": "online-mode",
+      "kind": "boolean",
+      "label": "Verify accounts with Mojang",
+      "default": "true",
+      "variable": "ONLINE_MODE",
+      "advanced": true,
+      "description": "Turning this off lets anyone claim any username. Only do it behind a proxy that already authenticates."
+    },
+    {
+      "name": "pvp",
+      "kind": "boolean",
+      "label": "Player versus player",
+      "default": "true",
+      "variable": "PVP"
+    },
+    {
+      "name": "view-distance",
+      "kind": "number",
+      "label": "View distance",
+      "default": "10",
+      "minimum": 3,
+      "maximum": 32,
+      "variable": "VIEW_DISTANCE",
+      "advanced": true,
+      "description": "The single biggest lever on memory and CPU."
+    },
+    {
+      "name": "simulation-distance",
+      "kind": "number",
+      "label": "Simulation distance",
+      "default": "10",
+      "minimum": 3,
+      "maximum": 32,
+      "variable": "SIMULATION_DISTANCE",
+      "advanced": true
+    },
+    {
+      "name": "eula",
+      "kind": "accept",
+      "label": "I accept the Minecraft EULA",
+      "required": true,
+      "variable": "EULA",
+      "acceptUrl": "https://aka.ms/MinecraftEULA",
+      "description": "The server refuses to start without this, and the acceptance is recorded with your name and the time."
+    }
+  ],
+  "ports": [
+    {
+      "name": "java",
+      "internal": 25565,
+      "protocol": "tcp",
+      "purpose": "Minecraft Java clients connect here",
+      "exposure": "direct",
+      "primary": true
+    },
+    {
+      "name": "rcon",
+      "internal": 25575,
+      "protocol": "tcp",
+      "purpose": "Console commands from the dashboard",
+      "exposure": "internal"
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "Worlds, server configuration, plugins and mods",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Server process is healthy",
+      "kind": "docker_health",
+      "phase": "readiness",
+      "required": true,
+      "timeoutSeconds": 600
+    },
+    {
+      "name": "Accepts a Minecraft handshake",
+      "kind": "game_handshake",
+      "phase": "smoke",
+      "required": true,
+      "port": "java",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "MEMORY",
+        "value": "{{input.memory}}M"
+      },
+      {
+        "kind": "set_variable",
+        "name": "ENABLE_RCON",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "OVERRIDE_SERVER_PROPERTIES",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "console_command",
+        "value": "say Server stopping in 10 seconds"
+      },
+      {
+        "kind": "console_command",
+        "value": "save-all flush"
+      },
+      {
+        "kind": "console_command",
+        "value": "stop"
+      },
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "/data/server.properties",
+      "label": "Server properties",
+      "format": "properties",
+      "restartRequired": true,
+      "description": "The server's own settings file. The fields below are the ones this dashboard knows how to edit safely; everything else stays in the raw preview.",
+      "properties": [
+        {
+          "key": "motd",
+          "kind": "text",
+          "label": "Server list description"
+        },
+        {
+          "key": "max-players",
+          "kind": "number",
+          "label": "Maximum players",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        {
+          "key": "difficulty",
+          "kind": "choice",
+          "label": "Difficulty",
+          "choices": [
+            {
+              "value": "peaceful",
+              "label": "Peaceful"
+            },
+            {
+              "value": "easy",
+              "label": "Easy"
+            },
+            {
+              "value": "normal",
+              "label": "Normal"
+            },
+            {
+              "value": "hard",
+              "label": "Hard"
+            }
+          ]
+        },
+        {
+          "key": "pvp",
+          "kind": "boolean",
+          "label": "Player versus player"
+        },
+        {
+          "key": "white-list",
+          "kind": "boolean",
+          "label": "Whitelist only"
+        },
+        {
+          "key": "online-mode",
+          "kind": "boolean",
+          "label": "Verify accounts with Mojang"
+        },
+        {
+          "key": "view-distance",
+          "kind": "number",
+          "label": "View distance",
+          "minimum": 3,
+          "maximum": 32
+        },
+        {
+          "key": "simulation-distance",
+          "kind": "number",
+          "label": "Simulation distance",
+          "minimum": 3,
+          "maximum": 32
+        },
+        {
+          "key": "spawn-protection",
+          "kind": "number",
+          "label": "Spawn protection radius",
+          "minimum": 0,
+          "maximum": 256
+        }
+      ]
+    }
+  ],
+  "automation": [
+    {
+      "name": "Nightly world backup",
+      "description": "Saves the world, then backs it up, every night at 04:00.",
+      "cron": "0 4 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "save",
+        "backup"
+      ],
+      "default": true
+    },
+    {
+      "name": "Daily graceful restart",
+      "description": "Warns players, saves, and restarts to clear memory.",
+      "cron": "0 5 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "broadcast",
+        "save",
+        "restart"
+      ]
+    },
+    {
+      "name": "Server update window",
+      "description": "The safe update order: warn, save, back up, update, then verify.",
+      "cron": "0 6 * * 1",
+      "timezone": "UTC",
+      "actions": [
+        "broadcast",
+        "save",
+        "backup",
+        "update"
+      ]
+    }
+  ],
+  "update": {
+    "detector": "minecraft-java",
+    "versionSource": "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
+    "backupFirst": true,
+    "notes": "Updating the server build never replaces the world. Rolling a release back restores the previous server build against the same data volume."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "vanilla",
+      "inputs": {
+        "eula": "true"
+      },
+      "digest": "sha256:3a19f4e11423e3c8e545bafda2a1ee380cbfa4f601be98a8af17e8c9778ad241"
+    },
+    {
+      "name": "modded",
+      "inputs": {
+        "eula": "true",
+        "server-type": "FABRIC",
+        "version": "1.21.4",
+        "memory": "6144"
+      },
+      "digest": "sha256:0364e63262807a4ed3a544c5ccbbca3ac8fdb9ab4318b3eaae139b6d5b8bbf73"
+    }
+  ]
+}

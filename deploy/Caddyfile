@@ -14,9 +14,9 @@
 }
 
 # JD_SITE is the address you actually type into the browser — your Tailscale
-# address, a WireGuard address such as 10.8.0.1, or localhost. It is both an
-# address Caddy binds and a name its certificate is issued for, so those two
-# can never drift apart.
+# machine name (box.tailnet.ts.net) or localhost. It is both an address Caddy
+# binds and a name its certificate is issued for, so those two can never drift
+# apart.
 #
 # Loopback is listed alongside it unconditionally, which is what makes an SSH
 # tunnel work no matter how the dashboard is configured. That is not a second
@@ -35,7 +35,12 @@
 # way that pointed at nothing. Set JD_PORT, JD_FRONTEND_PORT or
 # JD_BACKEND_PORT in .env and every file that needs the number reads it from
 # there; install.sh picks free ones on a machine where the defaults are taken.
-{$JD_SITE:localhost}:{$JD_PORT:8443}, localhost:{$JD_PORT:8443} {
+#
+# The scheme is a variable because one of the three configurations is not
+# HTTPS at all. proxy-entrypoint.sh derives it, and the tls directive below,
+# from the single JD_TLS setting — see that file for why the branch cannot live
+# in this one.
+{$JD_SCHEME:https}://{$JD_SITE:localhost}:{$JD_PORT:8443}, {$JD_SCHEME:https}://localhost:{$JD_PORT:8443} {
 	# The site addresses above decide which Host/SNI this block answers for --
 	# they do NOT decide which interfaces the socket binds. Without an explicit
 	# bind, Caddy listens on every interface, so JD_SITE=localhost would
@@ -43,13 +48,28 @@
 	# by whatever the host firewall happens to be doing. Binding the same
 	# values keeps the two in step: the site address binds only its own
 	# interface, and loopback stays loopback.
-	bind {$JD_SITE:localhost} localhost
+	# JD_BIND rather than JD_SITE: what this listens on and what it answers for
+	# are the same thing on every configuration but Tailscale, where the name on
+	# the certificate is a MagicDNS name and the interface is the tailnet IP
+	# behind it. proxy-entrypoint.sh falls JD_BIND back to JD_SITE.
+	bind {$JD_BIND:localhost} localhost
 
-	# Caddy's own CA signs this. It is enough because the listener is only ever
-	# reached over a VPN tunnel or an SSH forward, both already encrypted and
-	# authenticated — the browser warns once and you accept it once.
-	# Replace with `tls <cert> <key>` to use your own certificate.
-	tls internal
+	# One of three, chosen by JD_TLS and expanded by proxy-entrypoint.sh:
+	#
+	#   tailscale  a Let's Encrypt certificate for this machine's MagicDNS
+	#              name, issued by `tailscale cert` and renewed by the backend.
+	#              The only configuration that produces an ordinary padlock and
+	#              no warning over a network.
+	#   internal   Caddy's own CA. Encrypted but unverifiable, which is what
+	#              the browser's "not secure" is telling you: nothing off this
+	#              machine has heard of the issuer.
+	#   off        no TLS, loopback only. An SSH tunnel already encrypts and
+	#              authenticates the hop, and browsers treat http://localhost
+	#              as a secure context — so there is nothing to warn about.
+	#
+	# Replace this with `tls <cert> <key>` in a copy of this file to use a
+	# certificate of your own.
+	{$JD_TLS_DIRECTIVE:tls internal}
 
 	encode zstd gzip
 
@@ -85,6 +105,8 @@
 		# replacing that nonce-bearing header.
 		?Content-Security-Policy "default-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 		Permissions-Policy "accelerometer=(), ambient-light-sensor=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=()"
+		# Only meaningful on the HTTPS configurations; a browser ignores it
+		# over plain HTTP, which is the one place it would be wrong to honour.
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"

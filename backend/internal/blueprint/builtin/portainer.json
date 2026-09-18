@@ -1,0 +1,95 @@
+{
+  "id": "portainer",
+  "version": "1.0.0",
+  "name": "Portainer CE",
+  "category": "tool",
+  "profile": "tool",
+  "description": "A container management interface over the Docker daemon on this host. It needs the Docker socket, which is full control of every container here; the first visit creates the admin account.",
+  "iconId": "logs",
+  "docsUrl": "https://docs.portainer.io/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Zlib",
+    "upstreamUrl": "https://github.com/portainer/portainer",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "portainer/portainer-ce:2.45.1-alpine",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Anyone who reaches this can manage every container. Put a password in front of it."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 9000,
+      "protocol": "tcp",
+      "purpose": "The web interface",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "Users, settings and stacks",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "socket",
+      "target": "/var/run/docker.sock",
+      "purpose": "Control of the Docker daemon",
+      "data": false,
+      "backup": false,
+      "readOnly": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Status endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/status",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Portainer migrates its database on start and does not migrate back.",
+    "backupFirst": true
+  },
+  "security": {
+    "reason": "Managing containers requires the Docker socket. Even mounted read-only, the daemon's API allows starting and stopping containers, so this is administrator-level access to the host."
+  },
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:8a79ebb80ace9f4aef3e1c712dc9dd2231668103fc7b32969cec3703d078118c"
+    }
+  ]
+}

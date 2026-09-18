@@ -55,7 +55,7 @@ func testServer(t *testing.T) *Server {
 		MetricsRetention: 24 * time.Hour,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL)
+	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
 	s := New(cfg, log, st, svc, sealer, audit.New(st, log), nil)
 	t.Cleanup(s.Shutdown)
 	return s

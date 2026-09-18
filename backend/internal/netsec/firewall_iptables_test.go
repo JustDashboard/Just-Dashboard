@@ -52,8 +52,34 @@ func TestIPTablesReadsTheColumnsItActuallyPrints(t *testing.T) {
 	if second.Action != "ufw-before-input" || second.Direction != "INPUT" {
 		t.Errorf("target/chain misread: %+v", second)
 	}
-	if st.Default != "DROP" || st.Policy.Incoming != "drop" {
-		t.Errorf("policy = %q/%q, want DROP", st.Default, st.Policy.Incoming)
+	if st.Default != "DROP" || st.Policy.Incoming != "deny" {
+		t.Errorf("policy = %q/%q, want DROP read as deny", st.Default, st.Policy.Incoming)
+	}
+}
+
+// The structured policy is compared against "allow" by the posture rules, the
+// exposed-port grading and the sshd port guard, so iptables' own word for it
+// has to arrive as theirs: an ACCEPT policy read as "accept" was never told
+// its inbound default was allow, and had every exposed port graded as though
+// a firewall stood in front of it.
+func TestIPTablesPolicyArrivesInTheSharedWords(t *testing.T) {
+	cases := map[string]string{"ACCEPT": "allow", "DROP": "deny", "REJECT": "reject"}
+	for verdict, want := range cases {
+		withIPTablesOutput(t, "Chain INPUT (policy "+verdict+" 0 packets, 0 bytes)\n"+
+			"num   pkts bytes target     prot opt in     out     source               destination\n")
+		st, err := (iptablesBackend{}).Status(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Default != verdict {
+			t.Errorf("%s: Default = %q, want the verdict verbatim", verdict, st.Default)
+		}
+		if st.Policy.Incoming != want {
+			t.Errorf("%s: Policy.Incoming = %q, want %q", verdict, st.Policy.Incoming, want)
+		}
+	}
+	if got := iptablesPolicyWord("RETURN"); got != "return" {
+		t.Errorf("an unknown verdict is lowered, not invented: %q", got)
 	}
 }
 

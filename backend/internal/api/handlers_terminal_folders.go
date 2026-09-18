@@ -12,26 +12,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Folders are the one piece of terminal organisation that cannot live on tmux.
-//
-// Everything else an operator chooses about a session — its name, its colour,
-// whether it is a favourite — is stored as a user option on the tmux session
-// itself, which is what makes it survive a restart with nothing to migrate.
-// A folder has no tmux object to hang off: it exists because some sessions
-// name it. That was tolerable while a folder was only a string, and stops
-// being tolerable the moment it has properties of its own — an order, a
-// colour, and the ability to exist while empty, which is what "make a folder,
-// then open a shell in it" requires.
-//
-// So folders are the dashboard's own record, in the settings table, and the
-// membership stays on the sessions. The two are reconciled on read: a folder
-// named by a session but absent from the record is still shown, because a
-// session must never become unreachable by losing its group.
+// Folders are the dashboard's ordered record in the settings table, while
+// membership stays on each in-memory workspace. The two are reconciled on
+// read so a workspace cannot become unreachable if the folder record is stale.
 const terminalFoldersKey = "terminal.folders"
 
 type terminalFolder struct {
-	Name   string `json:"name"`
-	Colour string `json:"colour,omitempty"`
+	Name string `json:"name"`
 	// Collapsed is remembered on the server rather than in the browser
 	// because it describes the work, not the screen: a folder of finished
 	// deployments should still be folded on the operator's phone.
@@ -62,7 +49,7 @@ func (s *Server) saveTerminalFolders(ctx context.Context, folders []terminalFold
 			continue
 		}
 		seen[strings.ToLower(name)] = true
-		clean = append(clean, terminalFolder{Name: name, Colour: term.NormaliseColour(f.Colour), Collapsed: f.Collapsed})
+		clean = append(clean, terminalFolder{Name: name, Collapsed: f.Collapsed})
 	}
 	encoded, err := json.Marshal(clean)
 	if err != nil {
@@ -113,12 +100,12 @@ func (s *Server) handleTerminalFolderCreate(w http.ResponseWriter, r *http.Reque
 			return httpx.Err(http.StatusConflict, "folder_exists", fmt.Sprintf("a folder called %q already exists", name))
 		}
 	}
-	folders = append(folders, terminalFolder{Name: name, Colour: term.NormaliseColour(req.Colour)})
+	folders = append(folders, terminalFolder{Name: name})
 	if err := s.saveTerminalFolders(r.Context(), folders); err != nil {
 		return httpx.Internal(err)
 	}
-	httpx.SetAudit(r, "terminal.folder.create", name, map[string]any{"colour": req.Colour})
-	httpx.JSON(w, http.StatusCreated, terminalFolder{Name: name, Colour: term.NormaliseColour(req.Colour)})
+	httpx.SetAudit(r, "terminal.folder.create", name, nil)
+	httpx.JSON(w, http.StatusCreated, terminalFolder{Name: name})
 	return nil
 }
 
@@ -141,7 +128,7 @@ func (s *Server) handleTerminalFolderOrder(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// handleTerminalFolderUpdate renames or recolours a folder.
+// handleTerminalFolderUpdate renames or collapses a folder.
 //
 // A rename has to move every session filed under the old name, and that is
 // done here rather than as a loop in the browser: a page that renames a folder
@@ -150,7 +137,6 @@ func (s *Server) handleTerminalFolderOrder(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleTerminalFolderUpdate(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
 		Name      *string `json:"name"`
-		Colour    *string `json:"colour"`
 		Collapsed *bool   `json:"collapsed"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -166,7 +152,6 @@ func (s *Server) handleTerminalFolderUpdate(w http.ResponseWriter, r *http.Reque
 			return httpx.BadRequest("a folder name is required")
 		}
 	}
-	colour := ""
 	found := false
 	for i, f := range folders {
 		if !strings.EqualFold(f.Name, current) {
@@ -178,32 +163,27 @@ func (s *Server) handleTerminalFolderUpdate(w http.ResponseWriter, r *http.Reque
 		}
 		found = true
 		folders[i].Name = renamed
-		if req.Colour != nil {
-			folders[i].Colour = term.NormaliseColour(*req.Colour)
-		}
 		if req.Collapsed != nil {
 			folders[i].Collapsed = *req.Collapsed
 		}
-		colour = folders[i].Colour
 	}
 	if !found {
 		// A folder that exists only because sessions name it is still a
 		// folder the operator can rename; the record simply has to start
 		// holding it.
-		folders = append(folders, terminalFolder{Name: renamed, Colour: term.NormaliseColour(deref(req.Colour))})
-		colour = term.NormaliseColour(deref(req.Colour))
+		folders = append(folders, terminalFolder{Name: renamed})
 	}
 	if err := s.saveTerminalFolders(r.Context(), folders); err != nil {
 		return httpx.Internal(err)
 	}
 
 	moved := 0
-	if renamed != current || req.Colour != nil {
-		moved = s.refileSessions(r, current, renamed, req.Colour != nil, colour)
+	if renamed != current {
+		moved = s.refileSessions(r, current, renamed)
 	}
 	httpx.SetAudit(r, "terminal.folder.update", current,
-		map[string]any{"name": renamed, "colour": colour, "sessions": moved})
-	httpx.JSON(w, http.StatusOK, map[string]any{"name": renamed, "colour": colour, "sessions": moved})
+		map[string]any{"name": renamed, "sessions": moved})
+	httpx.JSON(w, http.StatusOK, map[string]any{"name": renamed, "sessions": moved})
 	return nil
 }
 
@@ -224,38 +204,25 @@ func (s *Server) handleTerminalFolderDelete(w http.ResponseWriter, r *http.Reque
 	if err := s.saveTerminalFolders(r.Context(), kept); err != nil {
 		return httpx.Internal(err)
 	}
-	moved := s.refileSessions(r, name, "", false, "")
+	moved := s.refileSessions(r, name, "")
 	httpx.SetAudit(r, "terminal.folder.delete", name, map[string]any{"sessions": moved})
 	httpx.JSON(w, http.StatusOK, map[string]any{"sessions": moved})
 	return nil
 }
 
-// refileSessions moves every session filed under one folder to another, and
-// optionally repaints them. Best effort per session: one that has gone away
+// refileSessions moves every session filed under one folder to another. Best
+// effort per session: one that has gone away
 // between the listing and the write must not stop the rest from moving.
-func (s *Server) refileSessions(r *http.Request, from, to string, recolour bool, colour string) int {
+func (s *Server) refileSessions(r *http.Request, from, to string) int {
 	moved := 0
-	// AllMeta and not TmuxSessions: a session opened into this folder moments
-	// ago is the one most likely to be affected by renaming it, and tmux does
-	// not know about that one yet.
-	for name, meta := range s.modules.term.AllMeta(r.Context()) {
+	for name, meta := range s.modules.term.WorkspaceMeta() {
 		if meta.Folder == "" || !strings.EqualFold(meta.Folder, from) {
 			continue
 		}
 		meta.Folder = to
-		if recolour {
-			meta.Colour = colour
-		}
 		if err := s.modules.term.SetMeta(r.Context(), name, meta); err == nil {
 			moved++
 		}
 	}
 	return moved
-}
-
-func deref(v *string) string {
-	if v == nil {
-		return ""
-	}
-	return *v
 }

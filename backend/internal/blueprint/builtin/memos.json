@@ -1,0 +1,85 @@
+{
+  "id": "memos",
+  "version": "1.0.0",
+  "name": "Memos",
+  "category": "http",
+  "profile": "web",
+  "description": "A lightweight notes service: quick notes with tags, Markdown and an API, stored in one SQLite file.",
+  "iconId": "globe",
+  "docsUrl": "https://www.usememos.com/docs",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/usememos/memos",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "neosmemo/memos:0.30.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5230,
+      "protocol": "tcp",
+      "purpose": "The web interface and API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/opt/memos",
+      "purpose": "Notes, attachments and the SQLite database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthz",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Memos migrates its database on start and does not migrate back.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:8744cefd3e00e2114edbed3cd053bf434c735f19007bb0994203b956d63cf2d8"
+    }
+  ]
+}

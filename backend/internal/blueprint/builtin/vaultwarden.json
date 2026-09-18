@@ -1,0 +1,42 @@
+{
+  "id": "vaultwarden",
+  "version": "1.0.0",
+  "name": "Vaultwarden",
+  "category": "http",
+  "profile": "web",
+  "description": "A lightweight Bitwarden-compatible password server. Its data volume holds every secret it stores, so backups are not optional.",
+  "iconId": "key",
+  "docsUrl": "https://github.com/dani-garcia/vaultwarden/wiki",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/dani-garcia/vaultwarden",
+    "reviewedAt": "2026-09-11",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": { "reference": "vaultwarden/server:1.32.7-alpine", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "inputs": [
+    { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Vaultwarden needs its exact public URL; WebAuthn and app links break without it." },
+    { "name": "signups", "kind": "boolean", "label": "Allow new sign-ups", "default": "false", "variable": "SIGNUPS_ALLOWED", "description": "Leave this off and invite users instead, unless the server is not reachable from the internet." }
+  ],
+  "secrets": [
+    { "name": "admin-token", "variable": "ADMIN_TOKEN", "label": "Admin panel token", "length": 48, "description": "Generated here and never displayed again after you copy it. It unlocks the /admin page." }
+  ],
+  "ports": [
+    { "name": "http", "internal": 80, "protocol": "tcp", "purpose": "Web vault and API", "exposure": "proxy", "primary": true }
+  ],
+  "volumes": [
+    { "name": "data", "target": "/data", "purpose": "Vaults, attachments and the server key", "data": true, "backup": true }
+  ],
+  "resources": { "memoryMb": 256, "minMemoryMb": 128 },
+  "checks": [
+    { "name": "Vault answers", "kind": "http", "phase": "readiness", "required": true, "path": "/alive", "timeoutSeconds": 30 }
+  ],
+  "operations": {
+    "startup": [{ "kind": "set_variable", "name": "DOMAIN", "value": "https://{{input.domain}}" }],
+    "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }]
+  },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "Vaultwarden upgrades migrate the database in place; restore needs the pre-update backup." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": { "domain": "vault.example.test" }, "digest": "sha256:5a69f75f15186a3a545e487afd0c8619c63433d107f8f32b7d48aec02bc28cd6" }]
+}

@@ -7,6 +7,13 @@ build/
 .env
 .env.local
 .env.*.local
+# install.sh keeps a timestamped copy before overwriting; the settings page
+# keeps the previous file so a failed restart can be rolled back. Both hold
+# JD_MASTER_KEY, and neither belongs in git.
+.env.backup.*
+.env.jd-previous
+.env.jd-port-previous-*
+.env.jd-tmp
 .DS_Store
 backend/just-dashboard-server
 data/
@@ -16,3 +23,6 @@ data/
 frontend/shot*.mjs
 frontend/playwright-report/
 frontend/test-results/
+
+# Linked worktrees Claude Code creates for parallel branches.
+.claude/worktrees/

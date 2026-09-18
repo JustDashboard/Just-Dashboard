@@ -1,10 +1,9 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import {
   Clock,
   Copy,
-  Database,
   FloppyDisk,
   Key,
   MagnifyingGlass,
@@ -20,13 +19,16 @@ import type { DbConnection, RedisPage, RedisValue } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { Badge } from "@/components/ui/badge"
+import { IconAction, RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingRows, Spinner } from "@/components/state"
+import { EmptyNote, EmptyState, LoadingRows, Spinner } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
+import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
 import {
   Select,
   SelectContent,
@@ -42,13 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { copyText } from "@/lib/clipboard"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 
@@ -71,8 +67,8 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
   const [db, setDb] = useState("0")
   const [pattern, setPattern] = useState("*")
   const [applied, setApplied] = useState("*")
-  const [cursor, setCursor] = useState(0)
-  const [history, setHistory] = useState<number[]>([])
+  const [cursor, setCursor] = useState("0")
+  const [history, setHistory] = useState<string[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -103,7 +99,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
   )
 
   const search = () => {
-    setCursor(0)
+    setCursor("0")
     setHistory([])
     setApplied(pattern.trim() || "*")
   }
@@ -168,9 +164,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
     <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)] [&>*]:min-w-0">
       <Panel>
         <PanelHeader
-          icon={Database}
           title="Keys"
-          description={`${page.data?.keys.length ?? 0} on this page`}
           actions={
             <>
               {canWrite && (
@@ -184,7 +178,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                   value={db}
                   onValueChange={(v) => {
                     setDb(v)
-                    setCursor(0)
+                    setCursor("0")
                     setHistory([])
                     setSelected(null)
                   }}
@@ -221,7 +215,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
               <MagnifyingGlass className="size-3.5" />
             </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-hint text-muted-foreground">
             A glob pattern, matched by the server with SCAN — not a filter over this page.
           </p>
 
@@ -229,9 +223,7 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
             className={cn("max-h-[calc(100svh-30rem)] space-y-0.5 overflow-y-auto", ringSafeScroll)}
           >
             {page.loading && <LoadingRows rows={5} />}
-            {page.data?.keys.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">No keys match this pattern.</p>
-            )}
+            {page.data?.keys.length === 0 && <EmptyNote>No keys match this pattern.</EmptyNote>}
             {page.data?.keys.map((k) => (
               <button
                 key={k.key}
@@ -239,12 +231,12 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                 className={cn(
                   "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
                   selected === k.key
-                    ? "bg-primary/12 font-medium text-foreground"
-                    : "hover:bg-accent",
+                    ? "bg-accent font-medium text-foreground"
+                    : "hover:bg-row-hover",
                 )}
               >
-                <span className="truncate font-mono text-[12px]">{k.key}</span>
-                <span className="truncate text-[10px] text-muted-foreground">
+                <span className="truncate font-mono text-xs">{k.key}</span>
+                <span className="truncate text-micro text-muted-foreground">
                   {k.type} · {k.size.toLocaleString()}
                   {k.ttl >= 0 && ` · ttl ${k.ttl}s`}
                 </span>
@@ -259,21 +251,13 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
           <Button size="sm" variant="outline" disabled={page.data?.done} onClick={next}>
             Next
           </Button>
-          {page.data?.done && (
-            <span className="text-[11px] text-muted-foreground">End of scan</span>
-          )}
+          {page.data?.done && <span className="text-hint text-muted-foreground">End of scan</span>}
         </PanelFooter>
       </Panel>
 
       <Panel>
         <PanelHeader
-          icon={Key}
           title={selected ?? "Pick a key"}
-          description={
-            value.data
-              ? `${value.data.type}${value.data.truncated ? " · truncated" : ""}`
-              : undefined
-          }
           actions={
             selected &&
             canWrite && (
@@ -351,6 +335,7 @@ function NewKeyDialog({
   onClose: () => void
   onCreate: (key: string, type: string, field: string, value: string, ttl: number) => Promise<void>
 }) {
+  const id = useId()
   const [key, setKey] = useState("")
   const [type, setType] = useState("string")
   const [field, setField] = useState("")
@@ -374,81 +359,96 @@ function NewKeyDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New key</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="redis-new-key">Key</Label>
-            <Input
-              id="redis-new-key"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              className="font-mono text-xs"
-              placeholder="app:session:1"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Type</Label>
-              <Select value={type} onValueChange={setType}>
-                <SelectTrigger size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["string", "list", "set", "zset", "hash"].map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="redis-new-ttl">TTL seconds</Label>
-              <Input
-                id="redis-new-ttl"
-                value={ttl}
-                onChange={(e) => setTtl(e.target.value)}
-                className="font-mono text-xs"
-              />
-            </div>
-          </div>
-          {needsField && (
-            <div className="space-y-1.5">
-              <Label htmlFor="redis-new-field">{type === "zset" ? "Score" : "Field"}</Label>
-              <Input
-                id="redis-new-field"
-                value={field}
-                onChange={(e) => setField(e.target.value)}
-                className="font-mono text-xs"
-                placeholder={type === "zset" ? "100" : "name"}
-              />
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="redis-new-value">{type === "zset" ? "Member" : "Value"}</Label>
-            <Textarea
-              id="redis-new-value"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="min-h-24 font-mono text-xs"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+    <Modal
+      open
+      onOpenChange={onClose}
+      title="New key"
+      description="Creates one key of the chosen type. Redis fixes a key's type when it is created."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button disabled={!key.trim() || busy} onClick={submit}>
-            {busy ? <Spinner /> : <Plus className="size-3.5" />}
+          <Button disabled={!key.trim() || busy} onClick={submit} pending={busy}>
+            <Plus />
             Create
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-5">
+        <Field
+          label="Key"
+          htmlFor={`${id}-key`}
+          hint="Colons are a naming convention, not a structure — app:session:1 is one key."
+        >
+          <Input
+            id={`${id}-key`}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            className="font-mono"
+            placeholder="app:session:1"
+            autoFocus
+          />
+        </Field>
+        <FieldRow>
+          <Field label="Type" hint="Fixed once the key exists.">
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger className="w-full font-mono" aria-label="Type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["string", "list", "set", "zset", "hash"].map((t) => (
+                  <SelectItem key={t} value={t} className="font-mono">
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field
+            label="Expiry"
+            htmlFor={`${id}-ttl`}
+            hint="Seconds until the key is deleted. -1 keeps it until something removes it."
+          >
+            <Input
+              id={`${id}-ttl`}
+              value={ttl}
+              onChange={(e) => setTtl(e.target.value)}
+              className="font-mono"
+              inputMode="numeric"
+            />
+          </Field>
+        </FieldRow>
+        {needsField && (
+          <Field
+            label={type === "zset" ? "Score" : "Field"}
+            htmlFor={`${id}-field`}
+            hint={
+              type === "zset"
+                ? "The number the member is sorted by."
+                : "The first field of the hash; more can be added afterwards."
+            }
+          >
+            <Input
+              id={`${id}-field`}
+              value={field}
+              onChange={(e) => setField(e.target.value)}
+              className="font-mono"
+              placeholder={type === "zset" ? "100" : "name"}
+            />
+          </Field>
+        )}
+        <Field label={type === "zset" ? "Member" : "Value"} htmlFor={`${id}-value`}>
+          <Textarea
+            id={`${id}-value`}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="min-h-24 font-mono text-xs"
+          />
+        </Field>
+      </div>
+    </Modal>
   )
 }
 
@@ -461,8 +461,10 @@ function RenameKeyDialog({
   onClose: () => void
   onRename: (to: string) => Promise<void>
 }) {
+  const id = useId()
   const [to, setTo] = useState(from)
   const [busy, setBusy] = useState(false)
+  const valid = to.trim() !== "" && to.trim() !== from
 
   const submit = async () => {
     setBusy(true)
@@ -476,35 +478,46 @@ function RenameKeyDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename key</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-1.5">
-          <Label htmlFor="redis-rename">New name</Label>
-          <Input
-            id="redis-rename"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && to.trim() && to !== from && submit()}
-            className="font-mono text-xs"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Redis renames in place. An existing key of that name is overwritten.
-          </p>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+    <Modal
+      open
+      onOpenChange={onClose}
+      size="sm"
+      title="Rename key"
+      description={`Renames ${from} in place.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button disabled={!to.trim() || to === from || busy} onClick={submit}>
-            {busy ? <Spinner /> : <FloppyDisk className="size-3.5" />}
+          <Button disabled={!valid || busy} onClick={submit} pending={busy}>
+            <FloppyDisk />
             Rename
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-5">
+        <FormFacts>
+          <FormFact label="Key" mono>
+            {from}
+          </FormFact>
+        </FormFacts>
+        <Field
+          label="New name"
+          htmlFor={`${id}-to`}
+          hint="Redis renames in place. An existing key of that name is overwritten."
+        >
+          <Input
+            id={`${id}-to`}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && valid && !busy && void submit()}
+            className="font-mono"
+            autoFocus
+          />
+        </Field>
+      </div>
+    </Modal>
   )
 }
 
@@ -565,18 +578,12 @@ function RedisValueView({
     }
   }
 
-  const copy = (text: string) =>
-    navigator.clipboard
-      .writeText(text)
-      .then(() => notify.success("Copied"))
-      .catch(() => notify.error("Could not copy"))
+  const copy = (text: string) => void copyText(text, "Copied")
 
   return (
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary" className="font-normal">
-          {value.type}
-        </Badge>
+        <Tag>{value.type}</Tag>
         <div className="flex items-center gap-1.5">
           <Clock className="size-3.5 text-muted-foreground" />
           <Input
@@ -585,7 +592,7 @@ function RedisValueView({
             className="h-7 w-24 font-mono text-xs"
             disabled={!canWrite}
           />
-          <span className="text-[11px] text-muted-foreground">seconds (-1 = never)</span>
+          <span className="text-hint text-muted-foreground">seconds (-1 = never)</span>
           {canWrite && (
             <Button size="sm" variant="outline" onClick={saveTtl} disabled={busy}>
               Set
@@ -605,8 +612,8 @@ function RedisValueView({
           />
           <div className="flex items-center gap-1.5">
             {canWrite && (
-              <Button size="sm" onClick={save} disabled={busy}>
-                {busy ? <Spinner /> : <FloppyDisk className="size-3.5" />}
+              <Button size="sm" onClick={save} pending={busy}>
+                <FloppyDisk className="size-3.5" />
                 Save
               </Button>
             )}
@@ -614,7 +621,7 @@ function RedisValueView({
               <Copy className="size-3.5" />
               Copy
             </Button>
-            <span className="text-[11px] text-muted-foreground">{bytes(draft.length)}</span>
+            <span className="text-hint text-muted-foreground">{bytes(draft.length)}</span>
           </div>
         </div>
       )}
@@ -737,37 +744,32 @@ function MemberEditor({
           <TableBody>
             {rows.map((r) => (
               <TableRow key={r.key} className="group">
-                <TableCell className="max-w-[14rem] truncate font-mono text-xs">{r.key}</TableCell>
-                <TableCell className="max-w-md truncate font-mono text-xs">{r.value}</TableCell>
+                <TableCell className="max-w-[14rem] truncate font-mono">{r.key}</TableCell>
+                <TableCell className="max-w-md truncate font-mono">{r.value}</TableCell>
                 {canWrite && editable && (
                   <TableCell className="w-20">
-                    <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-6"
-                        title="Edit"
+                    <RowActions>
+                      <IconAction
+                        label="Edit"
                         onClick={() => setEditing({ field: r.field, value: r.editValue })}
                       >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-6 text-destructive"
-                        title="Remove"
+                        <Pencil />
+                      </IconAction>
+                      <IconAction
+                        label="Remove"
+                        className="text-destructive"
                         onClick={() => remove(r.member, r.key)}
                       >
-                        <Trash className="size-3.5" />
-                      </Button>
-                    </div>
+                        <Trash />
+                      </IconAction>
+                    </RowActions>
                   </TableCell>
                 )}
               </TableRow>
             ))}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={3} className="text-xs text-muted-foreground">
+                <TableCell colSpan={3} className="text-muted-foreground">
                   Nothing in this {value.type}.
                 </TableCell>
               </TableRow>
@@ -877,14 +879,21 @@ function MemberDialog({
   onClose: () => void
   onSave: (field: string, value: string) => Promise<void>
 }) {
+  const id = useId()
   const [field, setField] = useState(initialField)
   const [member, setMember] = useState(initialValue)
   const [busy, setBusy] = useState(false)
 
   const fieldLabel: Record<string, string> = {
     hash: "Field name",
-    list: isNew ? "Position (blank to append)" : "Position",
+    list: isNew ? "Position" : "Position",
     zset: "Score",
+    set: "",
+  }
+  const fieldHint: Record<string, string> = {
+    hash: "",
+    list: isNew ? "Blank appends to the end." : "Fixed — a list edits in place.",
+    zset: "The number the member is sorted by.",
     set: "",
   }
   const label = fieldLabel[type] ?? ""
@@ -904,52 +913,54 @@ function MemberDialog({
   const valid = member !== "" && (!needsField || field !== "")
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            {isNew ? "Add" : "Edit"} {type} member
-          </DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          {label && (
-            <div className="space-y-1.5">
-              <Label>{label}</Label>
-              <Input
-                value={field}
-                onChange={(e) => setField(e.target.value)}
-                className="font-mono text-xs"
-                disabled={type === "list" && !isNew}
-                autoFocus={isNew}
-              />
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label>Value</Label>
-            <Textarea
-              value={member}
-              onChange={(e) => setMember(e.target.value)}
-              className="min-h-24 font-mono text-xs"
-              autoFocus={!isNew}
-            />
-          </div>
-          {type === "set" && !isNew && (
-            <p className="text-xs text-muted-foreground">
-              A set has no positions, so editing a member adds the new value; remove the old one if
-              you meant to replace it.
-            </p>
-          )}
-        </div>
-        <DialogFooter>
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      title={`${isNew ? "Add" : "Edit"} ${type} member`}
+      description={
+        isNew ? `Adds one member to this ${type}.` : `Changes one member of this ${type}.`
+      }
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={!valid || busy}>
-            {busy && <Spinner />}
+          <Button onClick={save} disabled={!valid || busy} pending={busy}>
             Save
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-5">
+        {label && (
+          <Field label={label} htmlFor={`${id}-field`} hint={fieldHint[type] || undefined}>
+            <Input
+              id={`${id}-field`}
+              value={field}
+              onChange={(e) => setField(e.target.value)}
+              className="font-mono"
+              disabled={type === "list" && !isNew}
+              autoFocus={isNew}
+            />
+          </Field>
+        )}
+        <Field label="Value" htmlFor={`${id}-value`}>
+          <Textarea
+            id={`${id}-value`}
+            value={member}
+            onChange={(e) => setMember(e.target.value)}
+            className="min-h-24 font-mono text-xs"
+            autoFocus={!isNew}
+          />
+        </Field>
+        {type === "set" && !isNew && (
+          <FormNote>
+            A set has no positions, so editing a member adds the new value; remove the old one if
+            you meant to replace it.
+          </FormNote>
+        )}
+      </div>
+    </Modal>
   )
 }

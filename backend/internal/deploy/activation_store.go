@@ -13,6 +13,14 @@ import (
 
 var ErrPortUnavailable = errors.New("deployment port is unavailable")
 
+// ErrAlreadyStopped and ErrNotStopped gate stop/start admission before a run
+// is enqueued: stopping an already-stopped runtime or starting one that is
+// not stopped are conflicts with the recorded runtime state, not invalid plans.
+var (
+	ErrAlreadyStopped = errors.New("deployment runtime is already stopped")
+	ErrNotStopped     = errors.New("deployment runtime is not stopped")
+)
+
 type ReleaseRuntime struct {
 	ReleaseID        int64           `json:"releaseId"`
 	EnvironmentID    int64           `json:"environmentId"`
@@ -189,6 +197,39 @@ func (s *OrchestrationStore) LiveRelease(ctx context.Context, environmentID int6
 		return nil, ErrArtifactMissing
 	}
 	return s.Release(ctx, releaseID)
+}
+
+func (s *OrchestrationStore) CompletePreviewRemoval(ctx context.Context, runID int64, claimToken string, releaseID int64) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = assertLeaseTx(ctx, tx, runID, claimToken, s.now().UTC()); err != nil {
+		return err
+	}
+	var environmentID int64
+	var kind string
+	var liveID int64
+	if err = tx.QueryRowContext(ctx, `SELECT r.environment_id,e.kind,e.live_release_id FROM deploy_runs r JOIN deploy_environments e ON e.id=r.environment_id WHERE r.id=?`, runID).Scan(&environmentID, &kind, &liveID); err != nil {
+		return err
+	}
+	if kind != string(EnvironmentPreview) || liveID != releaseID {
+		return fmt.Errorf("%w: preview live release changed during cleanup", ErrInvalidPlan)
+	}
+	now := s.now().UTC().Unix()
+	if _, err = tx.ExecContext(ctx, `UPDATE deploy_release_runtimes SET state='retired',updated_at=? WHERE release_id=?`, now, releaseID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE deploy_releases SET state='retained',retired_at=? WHERE id=?`, now, releaseID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE deploy_environments SET live_release_id=0,archived_at=?,updated_at=? WHERE id=?`, now, now, environmentID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *OrchestrationStore) LinkRunToLiveRelease(

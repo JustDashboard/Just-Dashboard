@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import type { AppProfile, FirewallRule, ServicePreset } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Notice } from "@/components/state"
+import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,15 +31,6 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 /**
  * Opening a port, for somebody who does not already know the numbers.
@@ -63,28 +55,26 @@ export function AddRuleDialog({
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Plus className="size-4" />
-          Add rule
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        {/* Keyed so a second visit never opens with the previous rule still
-            in the boxes — an almost-right rule is worse than a blank one. */}
-        {open && (
-          <RuleForm
-            key="rule-form"
-            hasProfiles={hasProfiles}
-            onDone={() => {
-              setOpen(false)
-              onDone()
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus className="size-4" />
+        Add rule
+      </Button>
+      {/* Keyed so a second visit never opens with the previous rule still in
+          the boxes — an almost-right rule is worse than a blank one. */}
+      {open && (
+        <RuleForm
+          key="rule-form"
+          open={open}
+          onOpenChange={setOpen}
+          hasProfiles={hasProfiles}
+          onDone={() => {
+            setOpen(false)
+            onDone()
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -110,28 +100,30 @@ export function EditRuleDialog({
   onDone: () => void
   hasProfiles?: boolean
 }) {
+  if (!open) return null
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        {open && (
-          <RuleForm
-            key={`edit-${rule.number}`}
-            hasProfiles={hasProfiles}
-            edit={rule}
-            onDone={() => {
-              onOpenChange(false)
-              onDone()
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <RuleForm
+      key={`edit-${rule.number}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      hasProfiles={hasProfiles}
+      edit={rule}
+      onDone={() => {
+        onOpenChange(false)
+        onDone()
+      }}
+    />
   )
 }
 
 const SOURCE_PRESETS = [
   { key: "anywhere", label: "Anywhere", value: "", hint: "Every address on the internet" },
-  { key: "private", label: "Private network", value: "10.0.0.0/8", hint: "RFC1918 — adjust to your range" },
+  {
+    key: "private",
+    label: "Private network",
+    value: "10.0.0.0/8",
+    hint: "RFC1918 — adjust to your range",
+  },
   { key: "tailnet", label: "Tailnet", value: "100.64.0.0/10", hint: "Tailscale's address range" },
   { key: "custom", label: "Specific address", value: "", hint: "One IP or a CIDR" },
 ] as const
@@ -151,8 +143,7 @@ function fieldsOf(rule?: FirewallRule) {
   const from = rule?.from ?? ""
   const anywhere = from === "" || /^anywhere/i.test(from)
   const to = rule?.to ?? ""
-  const profile =
-    rule && !rule.port && to && !/^\d/.test(to) && !/^anywhere/i.test(to) ? to : ""
+  const profile = rule && !rule.port && to && !/^\d/.test(to) && !/^anywhere/i.test(to) ? to : ""
   return {
     action: (rule?.action ?? "allow").toLowerCase(),
     direction: (rule?.direction ?? "in").toLowerCase() === "out" ? "out" : "in",
@@ -167,10 +158,14 @@ function fieldsOf(rule?: FirewallRule) {
 }
 
 function RuleForm({
+  open,
+  onOpenChange,
   onDone,
   hasProfiles,
   edit,
 }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onDone: () => void
   hasProfiles: boolean
   edit?: FirewallRule
@@ -193,9 +188,14 @@ function RuleForm({
     (signal) => get("/security/services", undefined, signal),
     0,
   )
-  const profiles = usePoll<AppProfile[]>((signal) => get("/firewall/apps", undefined, signal), 0, [], {
-    enabled: hasProfiles,
-  })
+  const profiles = usePoll<AppProfile[]>(
+    (signal) => get("/firewall/apps", undefined, signal),
+    0,
+    [],
+    {
+      enabled: hasProfiles,
+    },
+  )
 
   const chosen = useMemo(
     () => services.data?.find((s) => s.key === preset),
@@ -209,7 +209,8 @@ function RuleForm({
     () => chosen ?? services.data?.find((s) => s.port === port && s.protocol === protocol),
     [chosen, services.data, port, protocol],
   )
-  const source = sourceKind === "custom" ? from : (SOURCE_PRESETS.find((p) => p.key === sourceKind)?.value ?? "")
+  const source =
+    sourceKind === "custom" ? from : (SOURCE_PRESETS.find((p) => p.key === sourceKind)?.value ?? "")
   const unrestricted = source === ""
   const dangerous = action === "allow" && unrestricted && !!matched?.danger
 
@@ -257,47 +258,72 @@ function RuleForm({
   const ready = mode === "service" ? port !== "" : profile !== ""
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{edit ? `Edit rule ${edit.number}` : "New inbound rule"}</DialogTitle>
-        <DialogDescription>
-          {edit
-            ? "A firewall has no edit, so this writes the replacement first and removes the original once it is in — the rule keeps its place and the port is never briefly unprotected."
-            : "Rules are checked in order and the first match wins. A rule that would block the address you are connected from is refused before it is applied."}
-        </DialogDescription>
-      </DialogHeader>
-
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={edit ? `Edit rule ${edit.number}` : "New inbound rule"}
+      description={
+        edit
+          ? "A firewall has no edit, so this writes the replacement first and removes the original once it is in — the rule keeps its place and the port is never briefly unprotected."
+          : "Rules are checked in order and the first match wins. A rule that would block the address you are connected from is refused before it is applied."
+      }
+      footer={
+        <>
+          {/* The command sits on the left and wraps: a long `ufw` line in a
+              row that cannot shrink would push the footer wider than the
+              dialog and clip the button on the right. */}
+          <code
+            className={cn(
+              "mr-auto min-w-0 rounded-md border border-hairline px-2 py-1 font-mono text-hint leading-relaxed break-words text-muted-foreground",
+              !ready && "opacity-0",
+            )}
+          >
+            ufw {edit ? `insert ${edit.number} ` : position ? `insert ${position} ` : ""}
+            {action} {direction}
+            {source && ` from ${source}`}
+            {mode === "service"
+              ? ` to any port ${port}${protocol ? ` proto ${protocol}` : ""}`
+              : ` app ${profile}`}
+          </code>
+          <Button onClick={submit} disabled={!ready || busy}>
+            {edit ? "Save changes" : "Add rule"}
+          </Button>
+        </>
+      }
+    >
       <div className="grid gap-3">
         <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-        <div className="space-y-1.5">
-          <Label>Action</Label>
-          <Select value={action} onValueChange={setAction}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="allow">allow — let it through</SelectItem>
-              <SelectItem value="limit">limit — allow, but rate-limit repeat connections</SelectItem>
-              <SelectItem value="deny">deny — drop silently</SelectItem>
-              <SelectItem value="reject">reject — refuse and say so</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Direction</Label>
-          <Select value={direction} onValueChange={setDirection}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="in">inbound</SelectItem>
-              <SelectItem value="out">outbound</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+          <div className="space-y-1.5">
+            <Label>Action</Label>
+            <Select value={action} onValueChange={setAction}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="allow">allow — let it through</SelectItem>
+                <SelectItem value="limit">
+                  limit — allow, but rate-limit repeat connections
+                </SelectItem>
+                <SelectItem value="deny">deny — drop silently</SelectItem>
+                <SelectItem value="reject">reject — refuse and say so</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Direction</Label>
+            <Select value={direction} onValueChange={setDirection}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="in">inbound</SelectItem>
+                <SelectItem value="out">outbound</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         {direction === "out" && (
-          <p className="-mt-1 text-[11px] leading-relaxed text-muted-foreground">
+          <p className="-mt-1 text-hint leading-relaxed text-muted-foreground">
             Outbound rules govern what this server may reach, not who may reach it. Restricting
             egress breaks package updates and certificate renewal unless you allow them first.
           </p>
@@ -347,7 +373,7 @@ function RuleForm({
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              {chosen && <p className="text-[11px] text-muted-foreground">{chosen.detail}</p>}
+              {chosen && <p className="text-hint text-muted-foreground">{chosen.detail}</p>}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
@@ -383,12 +409,8 @@ function RuleForm({
             {/* Searchable rather than a plain select: ufw defines a handful of
                 profiles and firewalld defines several hundred, and the same
                 control has to be usable for both. */}
-            <ProfilePicker
-              profiles={profiles.data ?? []}
-              value={profile}
-              onChange={setProfile}
-            />
-            <p className="text-[11px] text-muted-foreground">
+            <ProfilePicker profiles={profiles.data ?? []} value={profile} onChange={setProfile} />
+            <p className="text-hint text-muted-foreground">
               A profile names its own ports, so the rule keeps meaning what it says if the package
               later adds one.
             </p>
@@ -424,7 +446,7 @@ function RuleForm({
               className="font-mono text-xs"
             />
           ) : (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-hint text-muted-foreground">
               {SOURCE_PRESETS.find((p) => p.key === sourceKind)?.hint}
             </p>
           )}
@@ -439,10 +461,10 @@ function RuleForm({
             onChange={(e) => setPosition(e.target.value)}
             placeholder="leave empty to add at the end"
           />
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Rules are checked in order and the first match wins, so a deny added after a broad
-            allow does nothing at all — which looks exactly like a deny that works. Give a number
-            to put this one in front.
+          <p className="text-hint leading-relaxed text-muted-foreground">
+            Rules are checked in order and the first match wins, so a deny added after a broad allow
+            does nothing at all — which looks exactly like a deny that works. Give a number to put
+            this one in front.
           </p>
         </div>
 
@@ -463,28 +485,7 @@ function RuleForm({
           </Notice>
         )}
       </div>
-
-      <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center">
-        {/* Deliberately not the Badge primitive: it is shrink-0 and nowrap by
-            design, and a long command in a flex row that cannot shrink pushes
-            the dialog wider than its own max-width, clipping the controls on
-            the right-hand side. This wraps instead. */}
-        <code
-          className={cn(
-            "mr-auto min-w-0 rounded-md border px-2 py-1 font-mono text-[11px] leading-relaxed break-words text-muted-foreground",
-            !ready && "opacity-0",
-          )}
-        >
-          ufw {edit ? `insert ${edit.number} ` : position ? `insert ${position} ` : ""}
-          {action} {direction}
-          {source && ` from ${source}`}
-          {mode === "service" ? ` to any port ${port}${protocol ? ` proto ${protocol}` : ""}` : ` app ${profile}`}
-        </code>
-        <Button onClick={submit} disabled={!ready || busy}>
-          {edit ? "Save changes" : "Add rule"}
-        </Button>
-      </DialogFooter>
-    </>
+    </Modal>
   )
 }
 
@@ -514,7 +515,9 @@ function ProfilePicker({
           aria-expanded={open}
           className="w-full justify-between font-normal"
         >
-          {value || <span className="text-muted-foreground">Defined by the host&rsquo;s packages</span>}
+          {value || (
+            <span className="text-muted-foreground">Defined by the host&rsquo;s packages</span>
+          )}
           <ArrowUpDown className="size-3.5 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -533,10 +536,12 @@ function ProfilePicker({
                     setOpen(false)
                   }}
                 >
-                  <Check className={cn("size-3.5", value === p.name ? "opacity-100" : "opacity-0")} />
+                  <Check
+                    className={cn("size-3.5", value === p.name ? "opacity-100" : "opacity-0")}
+                  />
                   <span className="flex-1 truncate">{p.name}</span>
                   {p.ports.length > 0 && (
-                    <span className="font-mono text-[10px] text-muted-foreground">
+                    <span className="font-mono text-micro text-muted-foreground">
                       {p.ports.join(" ")}
                     </span>
                   )}

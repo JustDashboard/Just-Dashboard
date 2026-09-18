@@ -105,7 +105,7 @@ export function ResizeHandle({
       aria-valuemin={min}
       aria-valuemax={max}
       tabIndex={0}
-      title={`${label} — drag, or double-click to reset`}
+      title={`${label} — drag the panel edge, or double-click to reset`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={stop}
@@ -113,23 +113,14 @@ export function ResizeHandle({
       onDoubleClick={onReset}
       onKeyDown={onKeyDown}
       className={cn(
-        // Wider than it looks: the visible rule is one pixel, the target is
-        // eight, which is the difference between a resize you can grab and one
-        // you chase. Hidden below `lg`, where the layout stacks and a vertical
-        // separator resizes nothing.
-        "group relative hidden w-2 shrink-0 cursor-col-resize touch-none select-none lg:block",
-        "focus-visible:ring-ring/60 rounded-full outline-none focus-visible:ring-2",
+        // The panel border is the visual affordance; this transparent target
+        // sits over that edge so no second divider line is drawn. Hidden below
+        // `lg`, where the layout stacks and a vertical edge resizes nothing.
+        "group hidden w-2 shrink-0 cursor-col-resize touch-none select-none lg:block",
+        "rounded-full focus-ring",
         className,
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-colors",
-          "group-hover:bg-primary/60 group-focus-visible:bg-primary",
-          dragging && "bg-primary",
-        )}
-      />
       {dragging && (
         // While a drag is live the pointer is over the terminal half the time,
         // and xterm's own cursor would fight this one.

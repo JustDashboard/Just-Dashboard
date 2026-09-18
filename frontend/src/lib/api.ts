@@ -20,7 +20,28 @@ export function mutationHeaders(): Record<string, string> {
 }
 
 export type ApiErrorBody = {
-  error: { code: string; message: string; phrase?: string }
+  error: {
+    code: string
+    message: string
+    phrase?: string
+    /**
+     * What was being attempted, to what, and why it did not work. All
+     * optional: a route that says nothing beyond a message still works, and a
+     * component that reads only `message` is unaffected.
+     */
+    resource?: string
+    operation?: string
+    reason?: string
+    /** The subsystem's own error, for the expandable details. Never the headline. */
+    raw?: string
+    retryable?: boolean
+    /**
+     * The field a validation refusal is about, as a dotted path into the
+     * request body (`runtime.internalPort`, `checks.2.config.path`), so a
+     * form can attach the message to the control that caused it.
+     */
+    field?: string
+  }
 }
 
 /**
@@ -49,12 +70,37 @@ export class ApiError extends Error {
    */
   confirmPhrase?: string
 
-  constructor(status: number, code: string, message: string, phrase?: string) {
+  /**
+   * The structured half of the error.
+   *
+   * "Something went wrong" is what a client shows when the server sent it a
+   * sentence and nothing else. These are what let it show the sentence a
+   * person would have written: which resource, which operation, the likely
+   * reason, and — behind a disclosure rather than in the headline — exactly
+   * what the subsystem underneath said.
+   */
+  resource?: string
+  operation?: string
+  reason?: string
+  raw?: string
+  retryable?: boolean
+  field?: string
+
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    phrase?: string,
+    detail?: Partial<
+      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field">
+    >,
+  ) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.code = code
     this.confirmPhrase = phrase
+    Object.assign(this, detail)
   }
 
   get needsConfirmation() {
@@ -62,12 +108,28 @@ export class ApiError extends Error {
   }
 
   get isAuthProblem() {
-    return this.status === 401 || this.code === "account_disabled"
+    return (
+      this.status === 401 ||
+      this.code === "account_disabled" ||
+      this.code === "password_change_required"
+    )
   }
 
   get needsTotp() {
     return this.code === "totp_required" || this.code === "totp_enrollment_required"
   }
+}
+
+/**
+ * The array index a validation refusal names, when `ApiError.field` points
+ * into `arrayName` — `checks[2]` or `checks.2`, with or without a deeper
+ * suffix — so a settings form can mark the refused row rather than toast.
+ */
+export function refusedIndex(field: string | undefined, arrayName: string) {
+  if (!field) return undefined
+  const match = new RegExp(`^${arrayName}(?:\\[(\\d+)\\]|\\.(\\d+))`).exec(field)
+  if (!match) return undefined
+  return Number(match[1] ?? match[2])
 }
 
 type RequestOptions = {
@@ -103,7 +165,10 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     Object.assign(headers, mutationHeaders())
   }
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
-  if (options.confirm) headers["X-Confirm"] = options.confirm
+  if (options.confirm !== undefined) {
+    headers["X-Confirm"] = encodeURIComponent(options.confirm)
+    headers["X-Confirm-Encoding"] = "uri"
+  }
 
   const res = await fetch(buildUrl(path, options.query), {
     method,
@@ -131,11 +196,22 @@ async function readResponse<T>(res: Response): Promise<T> {
 
   if (!res.ok) {
     const body = parsed as ApiErrorBody | undefined
+    if (body?.error?.code === "password_change_required" && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("jd:password-change-required"))
+    }
     throw new ApiError(
       res.status,
       body?.error?.code ?? "unknown",
       body?.error?.message ?? res.statusText,
       body?.error?.phrase,
+      {
+        resource: body?.error?.resource,
+        operation: body?.error?.operation,
+        reason: body?.error?.reason,
+        raw: body?.error?.raw,
+        retryable: body?.error?.retryable,
+        field: body?.error?.field,
+      },
     )
   }
   return parsed as T

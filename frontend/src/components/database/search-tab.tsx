@@ -7,10 +7,10 @@ import { plural } from "@/lib/format"
 import { get } from "@/lib/api"
 import type { DbConnection, DbSearchResult } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, Notice, Spinner } from "@/components/state"
+import { EmptyState, Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
 import {
   Table,
   TableBody,
@@ -62,12 +62,8 @@ export function SearchTab({
   }
 
   return (
-    <Panel>
-      <PanelHeader
-        icon={Inspect}
-        title="Find a value"
-        description="Search every table in the schema for a value, without knowing where it lives"
-      />
+    <Panel plain className="animate-rise">
+      <PanelHeader title="Find a value" />
       <PanelToolbar>
         <SearchInput
           placeholder="An id, an email, an order number…"
@@ -76,8 +72,8 @@ export function SearchTab({
           onKeyDown={(e) => e.key === "Enter" && run()}
           containerClassName="sm:w-96"
         />
-        <Button size="sm" onClick={run} disabled={busy || !needle.trim()}>
-          {busy ? <Spinner /> : <MagnifyingGlass className="size-3.5" />}
+        <Button size="sm" onClick={run} disabled={busy || !needle.trim()} pending={busy}>
+          <MagnifyingGlass className="size-3.5" />
           Search
         </Button>
         {result && (
@@ -98,13 +94,13 @@ export function SearchTab({
         {result && (
           <>
             {result.truncated && (
-              <Notice tone="warning" className="m-3" title="Results are incomplete">
+              <Notice tone="warning" className="mb-3" title="Results are incomplete">
                 The scan stopped at its limit. Narrow the value or search a specific table from the
                 Browse tab&apos;s filter row for the full picture.
               </Notice>
             )}
             {result.tablesSkipped && result.tablesSkipped.length > 0 && (
-              <Notice tone="default" className="m-3" title="Some tables were skipped">
+              <Notice tone="default" className="mb-3" title="Some tables were skipped">
                 {result.tablesSkipped.join(", ")} could not be read — usually a permission on that
                 table. Everything else was searched.
               </Notice>
@@ -116,7 +112,7 @@ export function SearchTab({
                 description={`Searched ${plural(result.tablesScanned, "table")}.`}
               />
             ) : (
-              <div className="min-w-0 overflow-x-auto">
+              <div className="-mx-4 min-w-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -129,9 +125,9 @@ export function SearchTab({
                   <TableBody>
                     {result.matches.map((m, i) => (
                       <TableRow key={`${m.table}-${m.column}-${i}`}>
-                        <TableCell className="font-mono text-xs">{m.table}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {m.column || <Badge variant="outline">row match</Badge>}
+                        <TableCell className="font-mono">{m.table}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">
+                          {m.column || <Tag>row match</Tag>}
                         </TableCell>
                         <TableCell className="max-w-0">
                           <code

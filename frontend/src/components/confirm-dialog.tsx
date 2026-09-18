@@ -1,21 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/state"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+
+import { Modal } from "@/components/modal"
 
 export type ConfirmRequest = {
   /** Short title, e.g. "Remove container". */
@@ -103,17 +95,33 @@ function ConfirmBody({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !busy && onOpenChange(open)}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {request.phrase && <Warning className="size-4 text-destructive" />}
-            {request.title}
-          </DialogTitle>
-          <DialogDescription asChild>
-            <div className="space-y-2 text-sm">{request.description}</div>
-          </DialogDescription>
-        </DialogHeader>
+    <Modal
+      open
+      onOpenChange={(open) => !busy && onOpenChange(open)}
+      title={request.title}
+      footer={
+        <>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          {/*
+            Always destructive, not only when a phrase is typed for. This
+            dialog exists at all because the action behind it changes state in
+            a way that is awkward to undo — most of them delete something — and
+            once most deletions stopped asking for a phrase, keying the red
+            button to the phrase meant "Delete row" and "Stop container" came
+            up wearing the same blue as a Save. The typed ones stay louder by
+            the phrase the reader has to type above, which is the difference
+            that should carry.
+          */}
+          <Button variant="destructive" onClick={run} disabled={!matches || busy} pending={busy}>
+            {request.confirmLabel ?? request.title}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="space-y-2 text-body leading-relaxed">{request.description}</div>
 
         {request.phrase && (
           <div className="space-y-2">
@@ -134,28 +142,8 @@ function ConfirmBody({
             />
           </div>
         )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
-          </Button>
-          {/*
-            Always destructive, not only when a phrase is typed for. This
-            dialog exists at all because the action behind it changes state in
-            a way that is awkward to undo — most of them delete something — and
-            once most deletions stopped asking for a phrase, keying the red
-            button to the phrase meant "Delete row" and "Stop container" came
-            up wearing the same blue as a Save. The typed ones stay louder by
-            the warning icon and the input above, which is the difference that
-            should carry.
-          */}
-          <Button variant="destructive" onClick={run} disabled={!matches || busy}>
-            {busy && <Spinner className="size-4" />}
-            {request.confirmLabel ?? request.title}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </Modal>
   )
 }
 

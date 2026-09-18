@@ -46,11 +46,107 @@ func has(f []DockerFinding, prefix string) *DockerFinding {
 	return nil
 }
 
-func TestDiagnoseHealthyContainerIsQuiet(t *testing.T) {
+// A container that is doing its job raises nothing that reads as a problem.
+// It may still collect recommendations — a health check it does not define, a
+// memory limit it does not set — and those are deliberately a different
+// severity, because a panel that paints "you could add a health check" the
+// same colour as "this is looping" is a panel nobody reads twice.
+func TestDiagnoseHealthyContainerRaisesNothingAlarming(t *testing.T) {
 	ct := Container{ID: "abc", Name: "web", State: "running"}
 	got := diagnoseContainer(ct, inspect(nil))
+	for _, f := range got {
+		if f.Severity == SeverityCritical || f.Severity == SeverityWarning {
+			t.Fatalf("a healthy container raised %q at %s", f.ID, f.Severity)
+		}
+	}
+}
+
+// A container with a health check that passes and a memory limit set has
+// nothing at all to say about it.
+func TestDiagnoseWellConfiguredContainerIsSilent(t *testing.T) {
+	ct := Container{ID: "abc", Name: "web", State: "running"}
+	got := diagnoseContainer(ct, inspect(func(i *container.InspectResponse) {
+		i.State.Health = &container.Health{Status: "healthy"}
+		i.HostConfig.Memory = 512 * 1024 * 1024
+	}))
 	if len(got) != 0 {
-		t.Fatalf("a healthy container should produce no findings, got %s", findingIDs(got))
+		t.Fatalf("a well-configured container should produce no findings, got %s", findingIDs(got))
+	}
+}
+
+// The split this whole model exists for: security and storage findings are not
+// runtime health, so a container that is up and serving does not turn the
+// runtime summary red by being badly configured.
+func TestAttentionAndRuntimeAreCountedApart(t *testing.T) {
+	findings := []DockerFinding{
+		normalizeFinding(DockerFinding{ID: "a", Severity: SeverityCritical, Class: ClassSecurity}),
+		normalizeFinding(DockerFinding{ID: "b", Severity: SeverityWarning, Class: ClassStorage}),
+		normalizeFinding(DockerFinding{ID: "c", Severity: SeverityRecommendation, Class: ClassConfiguration}),
+		normalizeFinding(DockerFinding{ID: "d", Severity: SeverityCritical, Class: ClassRuntime}),
+	}
+	a := summarizeAttention(findings)
+	if a.Total != 3 {
+		t.Errorf("attention counts everything that is not runtime, got %d", a.Total)
+	}
+	if a.Issues != 2 || a.Recommendations != 1 {
+		t.Errorf("issues and recommendations are separate counts: %+v", a)
+	}
+
+	// The runtime summary is built from container states, never from the
+	// findings, so it can say how many things are fine.
+	rt := summarizeRuntime([]Container{
+		{ID: "1", State: "running"},
+		{ID: "2", State: "running"},
+		{ID: "3", State: "exited"},
+	}, map[string]healthFacts{
+		"1": {hasCheck: true, status: "healthy"},
+		"2": {},
+	})
+	if rt.Running != 2 || rt.Healthy != 1 || rt.NoHealthchk != 1 || rt.Exited != 1 {
+		t.Fatalf("runtime summary miscounted: %+v", rt)
+	}
+	if rt.Status != "notice" {
+		t.Errorf("a stopped container is worth a look, not an alarm: %q", rt.Status)
+	}
+	if !strings.Contains(rt.Summary, "without a health check") {
+		t.Errorf("the summary must not let unchecked containers read as healthy: %q", rt.Summary)
+	}
+}
+
+func TestRuntimeStatusIsCriticalOnlyForRuntimeFailures(t *testing.T) {
+	unhealthy := summarizeRuntime(
+		[]Container{{ID: "1", State: "running"}},
+		map[string]healthFacts{"1": {hasCheck: true, status: "unhealthy"}},
+	)
+	if unhealthy.Status != "critical" {
+		t.Errorf("a failing health check is a runtime failure, got %q", unhealthy.Status)
+	}
+	quiet := summarizeRuntime([]Container{{ID: "1", State: "running"}},
+		map[string]healthFacts{"1": {hasCheck: true, status: "healthy"}})
+	if quiet.Status != "ok" {
+		t.Errorf("everything up and passing is ok, got %q", quiet.Status)
+	}
+	if empty := summarizeRuntime(nil, nil); empty.Status != "ok" || empty.Total != 0 {
+		t.Errorf("no containers is not a problem: %+v", empty)
+	}
+}
+
+func TestHealthFactsSeparateNoCheckFromNotYetRun(t *testing.T) {
+	none := healthFactsOf(inspect(nil))
+	if none.hasCheck {
+		t.Error("a container with no healthcheck block defines no check")
+	}
+	declared := healthFactsOf(inspect(func(i *container.InspectResponse) {
+		i.Config.Healthcheck = &container.HealthConfig{Test: []string{"CMD", "true"}}
+	}))
+	if !declared.hasCheck || declared.status != "" {
+		t.Errorf("a declared check that has not run yet: %+v", declared)
+	}
+	disabled := healthFactsOf(inspect(func(i *container.InspectResponse) {
+		i.Config.Healthcheck = &container.HealthConfig{Test: []string{"NONE"}}
+	}))
+	if disabled.hasCheck {
+		t.Error("an explicitly disabled check is not a check")
 	}
 }
 

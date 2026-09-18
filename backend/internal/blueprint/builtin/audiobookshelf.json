@@ -1,0 +1,99 @@
+{
+  "id": "audiobookshelf",
+  "version": "1.0.0",
+  "name": "Audiobookshelf",
+  "category": "http",
+  "profile": "web",
+  "description": "An audiobook and podcast server with progress sync and mobile apps.",
+  "iconId": "globe",
+  "docsUrl": "https://www.audiobookshelf.org/docs",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/advplyr/audiobookshelf",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ghcr.io/advplyr/audiobookshelf:2.36.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web player and API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "config",
+      "target": "/config",
+      "purpose": "Users, libraries and the database",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "metadata",
+      "target": "/metadata",
+      "purpose": "Covers, cached streams and backups",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "audiobooks",
+      "target": "/audiobooks",
+      "purpose": "The audiobook files",
+      "data": true,
+      "backup": false
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health check answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthcheck",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Audiobookshelf migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:8779f0ef29f7e0555e1a90d4ba76f091ad1234cdd049ad5ca256d03d881696d0"
+    }
+  ]
+}

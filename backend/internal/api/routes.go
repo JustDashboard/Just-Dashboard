@@ -47,6 +47,16 @@ func (s *Server) Routes() http.Handler {
 			// on the one route reachable without a dashboard session.
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Method(http.MethodPost, "/deploy/{hookID}", s.handle(s.handleDeployWebhook))
+			r.Method(http.MethodPost, "/providers/{provider}/{hookID}", s.handle(s.handleDeploymentProviderWebhook))
+			// The GitHub App's one webhook: signed with the App's own secret
+			// and routed by repository to whichever triggers asked for it.
+			r.Method(http.MethodPost, "/github-app", s.handle(s.handleGitHubAppWebhook))
+			r.Method(http.MethodPost, "/scoped/{hookID}", s.handle(s.handleDeploymentGenericWebhook))
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(s.apiLim.Middleware)
+			r.Use(httpx.AuditMutations(s.Audit))
+			r.Method(http.MethodPost, "/deploy/{id}/hooks/{triggerID}", s.handle(s.handleDeploymentGenericWebhook))
 		})
 
 		if s.Cfg.AgentMode {
@@ -65,6 +75,7 @@ func (s *Server) Routes() http.Handler {
 			// Half-authenticated: password proved, second factor outstanding.
 			r.Group(func(r chi.Router) {
 				r.Use(s.Authn.AuthenticatePartial)
+				r.Use(s.apiLim.ByPrincipal)
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodGet, "/auth/session", s.handle(s.handleSession))
@@ -72,6 +83,14 @@ func (s *Server) Routes() http.Handler {
 				r.Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
 				r.Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
 				r.Method(http.MethodPost, "/auth/logout", s.handle(s.handleLogout))
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(s.Authn.AuthenticatePasswordChange)
+				r.Use(s.apiLim.ByPrincipal)
+				r.Use(httpx.AuditMutations(s.Audit))
+				r.Use(httpx.RequireCSRF)
+				r.Use(httpx.RequireSession)
+				r.Method(http.MethodPost, "/account/password", s.handle(s.handleChangePassword))
 			})
 		}
 
@@ -113,10 +132,18 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) mountAccountRoutes(r chi.Router) {
 	r.Route("/account", func(r chi.Router) {
 		r.Use(httpx.RequireSession)
-		r.Method(http.MethodPost, "/password", s.handle(s.handleChangePassword))
 		r.Method(http.MethodPost, "/recovery-codes", s.handle(s.handleRecoveryCodesRegen))
+		// Enrolling is on the half-authenticated group above, because that is
+		// where an install requiring 2FA sends you. Turning it off is only
+		// ever done by somebody already signed in, so it lives here.
+		r.Method(http.MethodPost, "/2fa/disable", s.handle(s.handleDisableTOTP))
 		r.Method(http.MethodGet, "/sessions", s.handle(s.handleListOwnSessions))
 		r.Method(http.MethodDelete, "/sessions/{id}", s.handle(s.handleRevokeOwnSession))
+		r.Method(http.MethodPost, "/sessions/revoke-others", s.handle(s.handleRevokeOtherSessions))
+		r.Method(http.MethodPatch, "/profile", s.handle(s.handleUpdateProfile))
+		r.Method(http.MethodGet, "/avatar", s.handle(s.handleOwnAvatar))
+		r.Method(http.MethodPost, "/avatar", s.handle(s.handleUploadOwnAvatar))
+		r.Method(http.MethodDelete, "/avatar", s.handle(s.handleDeleteOwnAvatar))
 	})
 
 	r.Route("/tokens", func(r chi.Router) {
@@ -134,6 +161,7 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleListUsers))
 		r.Method(http.MethodPost, "/", s.handle(s.handleCreateUser))
 		r.Method(http.MethodPatch, "/{id}", s.handle(s.handleUpdateUser))
+		r.Method(http.MethodGet, "/{id}/avatar", s.handle(s.handleUserAvatar))
 		r.Method(http.MethodPost, "/{id}/reset-totp", s.handle(s.handleResetUserTOTP))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDeleteUser))

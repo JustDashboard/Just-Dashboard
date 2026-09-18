@@ -1,0 +1,12 @@
+=== RUN   TestLiveC5ActivationAdapters
+=== RUN   TestLiveC5ActivationAdapters/immutable_container_and_all_C5_checks
+=== RUN   TestLiveC5ActivationAdapters/selected_application_port_survives_a_host_collision
+=== RUN   TestLiveC5ActivationAdapters/SIGTERM_escalates_to_bounded_SIGKILL
+=== RUN   TestLiveC5ActivationAdapters/Compose_uses_pinned_override_and_removes_private_env_file
+--- PASS: TestLiveC5ActivationAdapters (9.61s)
+    --- PASS: TestLiveC5ActivationAdapters/immutable_container_and_all_C5_checks (2.11s)
+    --- PASS: TestLiveC5ActivationAdapters/selected_application_port_survives_a_host_collision (1.87s)
+    --- PASS: TestLiveC5ActivationAdapters/SIGTERM_escalates_to_bounded_SIGKILL (1.39s)
+    --- PASS: TestLiveC5ActivationAdapters/Compose_uses_pinned_override_and_removes_private_env_file (1.92s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	9.631s

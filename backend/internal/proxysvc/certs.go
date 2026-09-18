@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,10 @@ type Certificate struct {
 	SelfSigned bool      `json:"selfSigned"`
 	Source     string    `json:"source"`
 	Error      string    `json:"error,omitempty"`
+	// UsedBy names the nginx sites whose ssl_certificate points at this file,
+	// which is the answer to the question the list used to leave open: what
+	// breaks when this one expires.
+	UsedBy []string `json:"usedBy"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -37,52 +42,70 @@ const expiryWarningDays = 30
 // referenced by the proxy config, so a manually installed certificate is not
 // invisible just because certbot does not know about it.
 func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
-	seen := map[string]bool{}
+	return listCertificates(letsencryptLiveDir, importedDir, s.nginxVHosts()), nil
+}
+
+const letsencryptLiveDir = "/etc/letsencrypt/live"
+
+// listCertificates is ListCertificates with its directories as arguments, so
+// the join between certificates and the sites that use them can be tested
+// without /etc.
+func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
+	index := map[string]int{}
 	out := []Certificate{}
 
-	add := func(path, source string) {
+	// The same file reached by two paths — certbot's symlink and the target
+	// a site names directly — is one certificate, and the sites that name it
+	// are gathered onto that one entry rather than producing a second.
+	add := func(path, source string, usedBy string) {
 		resolved := path
 		if r, err := filepath.EvalSymlinks(path); err == nil {
 			resolved = r
 		}
-		if seen[resolved] {
+		if i, ok := index[resolved]; ok {
+			if usedBy != "" {
+				out[i].UsedBy = append(out[i].UsedBy, usedBy)
+			}
 			return
 		}
-		seen[resolved] = true
+		index[resolved] = len(out)
 		cert, err := readCertificate(path)
 		if err != nil {
-			out = append(out, Certificate{
-				Name: filepath.Base(filepath.Dir(path)), Path: path,
-				Source: source, Error: err.Error(), Domains: []string{},
-			})
-			return
+			cert = &Certificate{
+				Name: certificateName(path), Path: path,
+				Error: err.Error(), Domains: []string{},
+			}
 		}
 		cert.Source = source
+		cert.UsedBy = []string{}
+		if usedBy != "" {
+			cert.UsedBy = append(cert.UsedBy, usedBy)
+		}
 		out = append(out, *cert)
 	}
 
-	if entries, err := os.ReadDir("/etc/letsencrypt/live"); err == nil {
+	if entries, err := os.ReadDir(liveDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
-			add(filepath.Join("/etc/letsencrypt/live", e.Name(), "fullchain.pem"), "certbot")
+			add(filepath.Join(liveDir, e.Name(), "fullchain.pem"), "certbot", "")
 		}
 	}
 	// Imported certificates live outside certbot's tree on purpose — a
 	// renewal run must never be able to prune one it did not issue — which
 	// means they have to be looked for separately or they would be invisible
 	// until a vhost happened to reference one.
-	if entries, err := os.ReadDir(importedDir); err == nil {
+	if entries, err := os.ReadDir(imported); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
-				add(filepath.Join(importedDir, e.Name(), "fullchain.pem"), "imported")
+				add(filepath.Join(imported, e.Name(), "fullchain.pem"), "imported", "")
 			}
 		}
 	}
-	for _, v := range s.nginxVHosts() {
+	for _, v := range vhosts {
 		if v.CertPath != "" {
-			add(v.CertPath, "nginx:"+v.Name)
+			add(v.CertPath, "nginx:"+v.Name, v.Name)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -91,7 +114,26 @@ func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out
+}
+
+// genericCertDirs are directory names that say where a certificate is kept
+// rather than what it is for. certbot names the directory after the lineage,
+// so its parent is the right name; a file dropped into /etc/nginx/ssl is
+// better named after itself than after "ssl".
+var genericCertDirs = map[string]bool{
+	"ssl": true, "certs": true, "certificates": true, "tls": true, "pki": true,
+	"private": true, "nginx": true, "conf.d": true, "etc": true, "": true,
+}
+
+// certificateName is the name a certificate shows under in the list.
+func certificateName(path string) string {
+	parent := filepath.Base(filepath.Dir(path))
+	if genericCertDirs[strings.ToLower(parent)] || parent == "." || parent == "/" {
+		base := filepath.Base(path)
+		return strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	return parent
 }
 
 func readCertificate(path string) (*Certificate, error) {
@@ -107,7 +149,7 @@ func readCertificate(path string) (*Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	return summarise(parsed, filepath.Base(filepath.Dir(path)), path), nil
+	return summarise(parsed, certificateName(path), path), nil
 }
 
 func summarise(c *x509.Certificate, name, path string) *Certificate {
@@ -117,6 +159,7 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 		Issuer:    c.Issuer.CommonName,
 		NotBefore: c.NotBefore.UTC(),
 		NotAfter:  c.NotAfter.UTC(),
+		UsedBy:    []string{},
 	}
 	if len(cert.Domains) == 0 && c.Subject.CommonName != "" {
 		cert.Domains = []string{c.Subject.CommonName}

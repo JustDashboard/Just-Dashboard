@@ -132,7 +132,21 @@ func (d *Deployer) execute(ctx context.Context, projectID int64, trigger, actor,
 	return d.store.Run(ctx, runID)
 }
 
-func (d *Deployer) pipeline(ctx context.Context, p *Project, targetCommit string, logBuf io.Writer) (string, error) {
+func (d *Deployer) pipeline(ctx context.Context, p *Project, targetCommit string, logBuf io.Writer) (commit string, runErr error) {
+	envVars, err := d.store.EnvMap(ctx, p.ID)
+	if err != nil {
+		return "", err
+	}
+	redacted := newSecretWriter(logBuf, envVars)
+	logBuf = redacted
+	defer func() {
+		if err := redacted.Close(); err != nil && runErr == nil {
+			runErr = err
+		}
+		if runErr != nil {
+			runErr = fmt.Errorf("%s", redacted.sanitize(runErr.Error()))
+		}
+	}()
 	if _, err := os.Stat(filepath.Join(p.RepoPath, ".git")); err != nil {
 		return "", fmt.Errorf("%s is not a git repository", p.RepoPath)
 	}
@@ -165,10 +179,6 @@ func (d *Deployer) pipeline(ctx context.Context, p *Project, targetCommit string
 		fmt.Fprintf(logBuf, "now at %s\n", sha)
 	}
 
-	envVars, err := d.store.EnvMap(ctx, p.ID)
-	if err != nil {
-		return sha, err
-	}
 	if len(envVars) > 0 {
 		envPath := filepath.Join(p.RepoPath, ".env")
 		if err := writeEnvFile(envPath, envVars); err != nil {
@@ -302,13 +312,23 @@ func writeEnvFile(path string, vars map[string]string) error {
 		v = strings.ReplaceAll(v, `\`, `\\`)
 		v = strings.ReplaceAll(v, `"`, `\"`)
 		v = strings.ReplaceAll(v, "\n", `\n`)
+		v = strings.ReplaceAll(v, "\r", `\r`)
+		v = strings.ReplaceAll(v, "$", "$$")
 		fmt.Fprintf(&b, "%s=\"%s\"\n", k, v)
 	}
-	tmp := path + ".vpsd-tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".env-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(b.String()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // History lists recent commits so the rollback picker shows what it is

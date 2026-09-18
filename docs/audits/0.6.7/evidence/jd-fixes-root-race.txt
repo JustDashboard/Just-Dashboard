@@ -1,0 +1,6 @@
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/auth	13.569s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/httpx	1.037s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg	1.355s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate	1.598s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/updates	1.045s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	9.153s

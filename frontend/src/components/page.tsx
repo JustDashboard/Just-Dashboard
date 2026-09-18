@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { MagnifyingGlass } from "@/components/icons"
+import { ErrorState, LoadingPanel } from "@/components/state"
 
 /**
  * The frame every page renders into.
@@ -36,7 +37,7 @@ export function Page({
     <div
       data-slot="page"
       className={cn(
-        "mx-auto flex w-full min-w-0 max-w-[1600px] flex-col gap-4 px-4 py-4 md:gap-5 md:px-6 md:py-5",
+        "mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
         fill && "h-full min-h-0 overflow-hidden",
         className,
       )}
@@ -47,21 +48,26 @@ export function Page({
 
 /**
  * The title band at the top of a page: where it sits in the product, what it
- * is called, what it is, and what you can do to it.
+ * is called, and what you can do to it.
  *
  * The eyebrow repeats the nav group rather than the page name, so the band
  * answers "where am I" without restating the sidebar item directly above it.
+ *
+ * There is no description. Every page carried a sentence under its heading
+ * explaining what the page was, which is a caption for a title the reader has
+ * already read and understood — it pushed the first real row of every page a
+ * line and a half down the screen and was never looked at twice. What a page
+ * actually needs said goes in a `Notice`, where it is a fact rather than a
+ * subtitle; what it does not need said goes nowhere.
  */
 export function PageHeader({
   eyebrow,
   title,
-  description,
   actions,
   className,
 }: {
   eyebrow?: React.ReactNode
   title: React.ReactNode
-  description?: React.ReactNode
   actions?: React.ReactNode
   className?: string
 }) {
@@ -70,41 +76,42 @@ export function PageHeader({
       data-slot="page-header"
       className={cn("flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}
     >
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 space-y-1.5">
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1 className="truncate text-xl leading-tight font-semibold">{title}</h1>
-        {description && (
-          <div className="text-[13px] leading-snug text-muted-foreground">{description}</div>
-        )}
+        {/* The largest type on the page, by a clear step: the title is the one
+            thing that has to be found without reading, and at 20px it sat two
+            pixels from the panel titles it was meant to rank above. */}
+        <h1 className="truncate text-2xl leading-tight font-semibold tracking-tight">{title}</h1>
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+      )}
     </div>
   )
 }
 
 /**
  * A labelled group of panels inside a page, for the pages that hold more than
- * one idea (appearance, account, certificates).
+ * one idea (account, certificates, the dashboard's own configuration).
  */
 export function Section({
   title,
-  description,
   actions,
   className,
   children,
 }: {
   title: React.ReactNode
-  description?: React.ReactNode
   actions?: React.ReactNode
   className?: string
   children: React.ReactNode
 }) {
   return (
-    <section className={cn("flex min-w-0 flex-col gap-3", className)}>
+    <section className={cn("flex min-w-0 flex-col gap-4", className)}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="min-w-0">
-          <h2 className="text-[13px] font-medium">{title}</h2>
-          {description && <p className="text-xs text-muted-foreground">{description}</p>}
+          <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold tracking-tight">
+            <span className="truncate">{title}</span>
+          </h2>
         </div>
         {actions}
       </div>
@@ -124,14 +131,31 @@ export function Toolbar({ className, ...props }: React.ComponentProps<"div">) {
  * icon offset, sometimes no icon at all.
  */
 export function SearchInput({
+  dense,
+  trailing,
   className,
   containerClassName,
   ...props
-}: React.ComponentProps<typeof Input> & { containerClassName?: string }) {
+}: React.ComponentProps<typeof Input> & {
+  /** The filter box inside a pane's own chrome, where 32px is too tall. */
+  dense?: boolean
+  /** Controls pinned inside the box — a clear button, a regex toggle. */
+  trailing?: React.ReactNode
+  containerClassName?: string
+}) {
   return (
-    <div className={cn("relative w-full sm:w-72", containerClassName)}>
-      <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input className={cn("h-8 pl-8 text-[13px]", className)} {...props} />
+    <div className={cn("relative flex w-full items-center sm:w-72", containerClassName)}>
+      <MagnifyingGlass
+        className={cn(
+          "pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground",
+          dense ? "left-2" : "left-2.5",
+        )}
+      />
+      <Input
+        className={cn(dense ? "h-7 pl-7 text-xs" : "h-8 pl-8 text-body", className)}
+        {...props}
+      />
+      {trailing && <div className="absolute right-1 flex items-center gap-0.5">{trailing}</div>}
     </div>
   )
 }
@@ -156,7 +180,7 @@ export function Metric({
     <div className={cn("min-w-0", className)}>
       <p className="eyebrow truncate">{label}</p>
       <p className="numeric mt-0.5 truncate text-sm font-medium">{value}</p>
-      {hint && <p className="truncate text-[11px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
     </div>
   )
 }
@@ -187,11 +211,14 @@ export function MetricStrip({ className, ...props }: React.ComponentProps<"div">
 export function RowLink({
   onClick,
   mono,
+  title,
   className,
   children,
 }: {
   onClick: () => void
   mono?: boolean
+  /** For a title long enough to ellipse — the secondary line beside it has one. */
+  title?: string
   className?: string
   children: React.ReactNode
 }) {
@@ -199,8 +226,14 @@ export function RowLink({
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={cn(
-        "truncate text-left text-[13px] font-medium hover:underline",
+        // `truncate` alone does nothing on a button: it is inline-block, so it
+        // sizes to its text and a process whose name is a 200-character command
+        // line paints straight across Owner, CPU and Memory. `max-w-full` binds
+        // it to the title column's cap, `min-w-0` lets it shrink where the row
+        // lays its title out with flex.
+        "max-w-full min-w-0 truncate text-left text-body font-medium hover:underline",
         mono && "font-mono text-xs",
         className,
       )}
@@ -237,5 +270,42 @@ export function Detail({
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className={cn("min-w-0 text-xs", className)}>{children}</dd>
     </>
+  )
+}
+
+/**
+ * A page that has not got its data yet, or cannot get it.
+ *
+ * Five pages wrote the frame two or three times — once for the error branch,
+ * once for the skeleton, once for the real thing — and Overview shows why that
+ * is not merely repetitive: its loading branch titled the page "Overview" and
+ * its loaded branch titled it with the hostname, so the heading visibly changed
+ * under the reader a second after they arrived. A page's identity does not
+ * depend on whether its data has landed.
+ *
+ * `skeleton` takes the silhouette of what is coming rather than a spinner,
+ * because the point of a placeholder is that the page does not jump when the
+ * content arrives. Pages whose shape is a stack of panels can leave it out and
+ * get `LoadingPanel`.
+ */
+export function PageState({
+  eyebrow,
+  title,
+  error,
+  onRetry,
+  skeleton,
+}: {
+  eyebrow?: React.ReactNode
+  title: React.ReactNode
+  /** When set, the page failed; otherwise it is still loading. */
+  error?: Error
+  onRetry?: () => void
+  skeleton?: React.ReactNode
+}) {
+  return (
+    <Page>
+      <PageHeader eyebrow={eyebrow} title={title} />
+      {error ? <ErrorState error={error} onRetry={onRetry} /> : (skeleton ?? <LoadingPanel />)}
+    </Page>
   )
 }

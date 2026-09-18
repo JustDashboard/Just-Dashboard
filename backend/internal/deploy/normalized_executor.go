@@ -55,6 +55,14 @@ type NormalizedStepExecutor struct {
 	preflight     PreflightObserver
 	proxy         ActivationProxy
 	workspaceRoot string
+	notifications *AutomationStore
+
+	certificates CertificateIssuer
+}
+
+func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
+	e.notifications = store
+	return e
 }
 
 // WithBackupGate attaches the existing Backups feature through its narrow
@@ -134,6 +142,29 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	var environmentKind EnvironmentKind
+	if err := e.store.db.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, execution.Run.EnvironmentID).Scan(&environmentKind); err != nil {
+		return normalizedStepFailure(err)
+	}
+	if environmentKind == EnvironmentPreview && execution.Run.Operation != OperationPreviewRemove {
+		var quarantined int
+		if err := e.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_preview_quarantines WHERE environment_id=? AND status<>'cleared'`, execution.Run.EnvironmentID).Scan(&quarantined); err != nil {
+			return normalizedStepFailure(err)
+		}
+		if quarantined != 0 {
+			return normalizedStepFailure(ErrPreviewIsolation)
+		}
+		if err := validatePreviewPlan(execution.Run.EnvironmentID, plan.Build, plan.Runtime); err != nil {
+			return normalizedStepFailure(err)
+		}
+		approved, err := reviewedPreviewRevisionTx(ctx, e.store.db, execution.Run.EnvironmentID, plan.SourceIdentity.Revision)
+		if err != nil {
+			return normalizedStepFailure(err)
+		}
+		if !approved {
+			return normalizedStepFailure(ErrPreviewApproval)
+		}
+	}
 	switch execution.Step.Key {
 	case StepResolveSource:
 		if err := validateImmutableExecutionSource(plan); err != nil {
@@ -145,12 +176,7 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 			"sourceDigest": plan.SourceDigest,
 		})}
 	case StepAcquireSource:
-		source, err := e.sources.Materialize(ctx, plan.SourceConfig, plan.SourceIdentity, execution.Run.ID, e.workspaceRoot)
-		if err != nil {
-			return normalizedStepFailure(err)
-		}
-		_ = stepLog(execution, "status", "Materialized the recorded source in a private release workspace")
-		return StepResult{State: StepPassed, Evidence: mustJSON(source)}
+		return e.acquireSource(ctx, execution, plan)
 	case StepAnalyzePlan:
 		if err := validateStoredExecutionPlan(plan); err != nil {
 			return normalizedStepFailure(err)
@@ -165,7 +191,9 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 	case StepReleaseTask:
 		return e.runReleaseTasks(ctx, execution, plan)
 	case StepBackupGate:
-		return e.backupGate(ctx, plan)
+		return e.backupGate(ctx, execution, plan)
+	case StepProvisionCertificate:
+		return e.provisionCertificate(ctx, execution)
 	case StepStartCandidate:
 		return e.startCandidate(ctx, execution, plan)
 	case StepVerifyReadiness:
@@ -175,17 +203,111 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 	case StepActivate:
 		return e.activate(ctx, execution, plan)
 	case StepRetirePrevious:
+		if execution.Run.Operation == OperationPreviewRemove {
+			return e.removePreview(ctx, execution)
+		}
 		return e.retirePrevious(ctx, execution, plan)
 	case StepRecordRelease:
 		return e.recordRelease(ctx, execution)
 	case StepNotify:
-		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "no notification policy configured"})}
+		return e.notify(ctx, execution)
 	default:
 		return StepResult{
 			State: StepUnavailable, ErrorCode: "unsupported_runtime",
 			ErrorMessage: fmt.Sprintf("normalized runtime step %s is not implemented yet", execution.Step.Key),
 		}
 	}
+}
+
+// acquireSource materializes the frozen source identity into a private
+// workspace and, for a Git source, records the commit it resolved to on the
+// run's metadata — the same subject/author/date a Vercel-style history would
+// show next to the sha the run already carries. Reading that commit is
+// best-effort: an unreadable history logs a transcript line and the step
+// still passes, since acquiring the source itself already succeeded.
+func (e *NormalizedStepExecutor) acquireSource(
+	ctx context.Context,
+	execution StepExecution,
+	plan *StoredExecutionPlan,
+) StepResult {
+	source, err := e.sources.Materialize(ctx, plan.SourceConfig, plan.SourceIdentity, execution.Run.ID, e.workspaceRoot)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
+	_ = stepLog(execution, "status", "Materialized the recorded source in a private release workspace")
+	if gitSourceMode(plan.SourceConfig.Mode) {
+		if source.Commit != nil {
+			if _, mergeErr := e.store.MergeRunMetadata(ctx, execution.Run.ID,
+				map[string]any{"commit": source.Commit}); mergeErr != nil {
+				_ = stepLog(execution, "warning", "Could not record commit metadata: "+mergeErr.Error())
+			}
+		} else {
+			_ = stepLog(execution, "warning",
+				"Could not read commit metadata for the recorded source; continuing without it")
+		}
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(source)}
+}
+
+func (e *NormalizedStepExecutor) notify(ctx context.Context, execution StepExecution) StepResult {
+	var schedule struct {
+		Marker bool   `json:"scheduleMarker"`
+		Status string `json:"chainStatus"`
+	}
+	_ = json.Unmarshal(execution.Run.Metadata, &schedule)
+	terminalState := string(RunSucceeded)
+	if schedule.Marker && schedule.Status == "failed" {
+		terminalState = string(RunFailed)
+	}
+	if e.notifications == nil {
+		if schedule.Marker && schedule.Status == "failed" {
+			return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"reason": "no notification service configured"})}
+		}
+		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "no notification service configured"})}
+	}
+	channels, err := e.notifications.ListNotificationChannels(ctx)
+	if err != nil {
+		if schedule.Marker && schedule.Status == "failed" {
+			return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"reason": "notification channels unavailable"})}
+		}
+		return StepResult{State: StepWarning, Evidence: mustJSON(map[string]any{"reason": "notification channels unavailable"})}
+	}
+	// Delivery itself happens after the run reaches its terminal state, from
+	// the engine's run observers, so failed and cancelled runs are announced
+	// through the same channels as successful ones. This step records which
+	// channels will hear about the outcome and keeps the scheduled-chain gate.
+	selected := 0
+	for _, channel := range channels {
+		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForState(RunState(terminalState))) {
+			selected++
+		}
+	}
+	if schedule.Marker && schedule.Status == "failed" {
+		return StepResult{State: StepFailed, ErrorCode: "schedule_chain_failed", ErrorMessage: "a required scheduled action failed", Evidence: mustJSON(map[string]any{"channels": selected, "deliveredBy": "run observers"})}
+	}
+	if selected == 0 {
+		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"channels": 0, "reason": "no enabled channel selects this outcome"})}
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{"channels": selected, "deliveredBy": "run observers"})}
+}
+
+// notificationEventSelected decides whether a channel's event list wants an
+// event. An empty list means everything. The historical "run.finished" value
+// stays valid as "every terminal outcome", so channels created before failure
+// notifications existed start receiving them without being edited.
+func notificationEventSelected(events []string, want string) bool {
+	if len(events) == 0 {
+		return true
+	}
+	for _, event := range events {
+		if event == want {
+			return true
+		}
+		if event == NotificationEventFinished && want != NotificationEventStarted {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *NormalizedStepExecutor) analyzePlan(
@@ -219,7 +341,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 		Configuration: &configuration,
 	}}
 	request := preflightObservationRequest(draft, configuration)
-	request.ExistingProxySite = fmt.Sprintf("just-dashboard-env-%d.conf", execution.Run.EnvironmentID)
+	request.ExistingProxySite = deploymentRouteName(execution.Run.EnvironmentID)
 	live, liveErr := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
 	if liveErr == nil {
 		runtime, runtimeErr := e.store.RuntimeForRelease(ctx, live.Release.ID)
@@ -262,12 +384,16 @@ func (e *NormalizedStepExecutor) prepareContext(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
 	source, buildRoot, err := e.materializedBuildRoot(ctx, execution.Run, plan)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
-	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag)
+	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
@@ -296,7 +422,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 		return normalizedStepFailure(err)
 	}
 	registryAuth := ""
-	if plan.SourceKind == SourceImage {
+	if plan.SourceKind == SourceImage || plan.SourceKind == SourceBlueprint {
 		registryAuth, err = e.sources.registryAuth(ctx, plan.SourceConfig.CredentialID, plan.SourceIdentity.Repository)
 		if err != nil {
 			return normalizedStepFailure(err)
@@ -531,8 +657,13 @@ func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {
 		if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) && plan.SourceIdentity.Revision == "" {
 			return fmt.Errorf("%w: Compose source has no immutable identity", ErrInvalidPlan)
 		}
-	case SourceBlueprint, SourceImport:
-		return fmt.Errorf("%w: source must be rendered or adopted before execution", ErrUnsupportedSource)
+	case SourceBlueprint:
+		if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) || plan.SourceIdentity.Repository == "" ||
+			!contentDigestRE.MatchString(plan.SourceIdentity.Revision) {
+			return fmt.Errorf("%w: blueprint source has no immutable image digest and render digest", ErrInvalidPlan)
+		}
+	case SourceImport:
+		return fmt.Errorf("%w: source must be adopted before execution", ErrUnsupportedSource)
 	default:
 		return ErrUnsupportedSource
 	}
@@ -598,8 +729,9 @@ func decodeStoredPlanInputs(
 			continue
 		}
 		var config struct {
-			Hostname string `json:"hostname"`
-			HTTPS    bool   `json:"https"`
+			Hostname   string            `json:"hostname"`
+			HTTPS      bool              `json:"https"`
+			Protection *DomainProtection `json:"protection"`
 		}
 		if stored.ResourceKind != "proxy_site" || json.Unmarshal(stored.Config, &config) != nil ||
 			!strings.EqualFold(strings.TrimSpace(config.Hostname), strings.TrimSpace(stored.ResourceID)) {
@@ -607,6 +739,7 @@ func decodeStoredPlanInputs(
 		}
 		domains = append(domains, PlannedDomain{
 			Hostname: config.Hostname, HTTPS: config.HTTPS, Ownership: stored.Ownership,
+			Protection: canonicalDomainProtection(config.Protection),
 		})
 	}
 	checks := make([]PlannedCheck, 0, len(plan.Checks))

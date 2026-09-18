@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
-  Code,
+  ArrowLeftRight,
   CodeWrap,
   FloppyDisk,
+  Fullscreen,
+  FullscreenClose,
   Location,
   MagnifyingGlass,
   RotateCounterClockwise,
@@ -12,17 +14,20 @@ import {
   Sparkles,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { downloadUrl, get, post, put } from "@/lib/api"
+import { get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileContent } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
+import { DiffView } from "@/components/files/diff-view"
+import { unifiedDiff } from "@/components/files/diff"
+import { isImage, rawUrl } from "@/components/files/media"
 import { SidePanel } from "@/components/side-panel"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -41,9 +46,33 @@ import {
  * The server guesses one; this is how you override it.
  */
 const LANGUAGES = [
-  "plaintext", "shell", "ini", "yaml", "json", "markdown", "nginx", "dockerfile",
-  "javascript", "typescript", "go", "python", "sql", "html", "css", "xml", "toml",
-  "rust", "ruby", "php", "java", "c", "cpp", "lua", "perl", "powershell", "diff",
+  "plaintext",
+  "shell",
+  "ini",
+  "yaml",
+  "json",
+  "markdown",
+  "nginx",
+  "dockerfile",
+  "javascript",
+  "typescript",
+  "go",
+  "python",
+  "sql",
+  "html",
+  "css",
+  "xml",
+  "toml",
+  "rust",
+  "ruby",
+  "php",
+  "java",
+  "c",
+  "cpp",
+  "lua",
+  "perl",
+  "powershell",
+  "diff",
 ]
 
 export function FileEditorSheet({
@@ -86,12 +115,17 @@ function FileEditorPanel({
   const [language, setLanguage] = useState<string>()
   const [cursor, setCursor] = useState({ line: 1, column: 1, selected: 0 })
   const [format, setFormat] = useState<(() => void) | null>(null)
+  // Reviewing swaps the editor for a diff of the draft against the disk. It
+  // is the last look before Save on a file that keeps a server up, and it is
+  // not remembered: it is a question about this edit, not about the editor.
+  const [reviewing, setReviewing] = useState(false)
 
   // How the editor is set up is furniture — it belongs to the person, not to
   // the file — so it is remembered across files and across visits.
   const [wrap, setWrap] = useViewState("files.editor.wrap", false)
   const [minimap, setMinimap] = useViewState("files.editor.minimap", false)
   const [fontSize, setFontSize] = useViewState("files.editor.fontSize", 13)
+  const [fullscreen, setFullscreen] = useViewState("files.editor.fullscreen", false)
 
   const load = useCallback(
     (signal?: AbortSignal) => {
@@ -116,6 +150,8 @@ function FileEditorPanel({
 
   const dirty = file !== undefined && draft !== file.content
   const canEdit = can("file.write")
+  const name = path?.split("/").pop() ?? "file"
+  const review = reviewing && file ? unifiedDiff(file.content, draft, name) : undefined
 
   const save = useCallback(
     async (target?: string) => {
@@ -141,6 +177,7 @@ function FileEditorPanel({
     try {
       await post("/files/chmod", { path, mode })
       notify.success(`Mode set to ${mode}`)
+      setFile((f) => (f ? { ...f, modeOctal: mode } : f))
       onSaved?.(path)
     } catch (err) {
       notify.error("Could not change mode", err)
@@ -183,15 +220,14 @@ function FileEditorPanel({
       open={path !== null}
       onOpenChange={requestClose}
       width="xl"
-      icon={Code}
+      // The whole window, for the file that is the afternoon's work: a
+      // sheet that leaves a strip of the listing showing is right for a
+      // glance at a config and wrong for editing one.
+      className={cn(fullscreen && "sm:max-w-none")}
       title={
         <>
           {path?.split("/").pop() ?? "File"}
-          {dirty && (
-            <Badge variant="warning" className="font-normal">
-              unsaved
-            </Badge>
-          )}
+          {dirty && <Tag tone="warning">unsaved</Tag>}
         </>
       }
       description={path ?? undefined}
@@ -221,10 +257,10 @@ function FileEditorPanel({
             {/* Two glyphs that differ only in size read as one button drawn
                 twice, so each says which way it goes. */}
             <Toggle label="Smaller text" onClick={() => setFontSize((v) => Math.max(10, v - 1))}>
-              <span className="text-[11px] leading-none font-semibold">A−</span>
+              <span className="text-hint leading-none font-semibold">A−</span>
             </Toggle>
             <Toggle label="Larger text" onClick={() => setFontSize((v) => Math.min(22, v + 1))}>
-              <span className="text-[13px] leading-none font-semibold">A+</span>
+              <span className="text-body leading-none font-semibold">A+</span>
             </Toggle>
             {canEdit && (
               <Toggle label="Format this document" onClick={() => format?.()}>
@@ -236,9 +272,29 @@ function FileEditorPanel({
                 <RotateCounterClockwise className="size-3.5" />
               </Toggle>
             )}
-            <span className="flex items-center gap-1 pl-1 text-[11px] text-muted-foreground">
+            {dirty && (
+              <Toggle
+                label={reviewing ? "Back to editing" : "Review the changes before saving"}
+                active={reviewing}
+                onClick={() => setReviewing((v) => !v)}
+              >
+                <ArrowLeftRight className="size-3.5" />
+              </Toggle>
+            )}
+            <Toggle
+              label={fullscreen ? "Leave full screen" : "Full screen"}
+              active={fullscreen}
+              onClick={() => setFullscreen((v) => !v)}
+            >
+              {fullscreen ? (
+                <FullscreenClose className="size-3.5" />
+              ) : (
+                <Fullscreen className="size-3.5" />
+              )}
+            </Toggle>
+            <span className="flex items-center gap-1 pl-1 text-hint text-muted-foreground">
               <MagnifyingGlass className="size-3" />
-              Ctrl+F find · Ctrl+H replace · Ctrl+G go to line
+              Ctrl+S save · Ctrl+F find · Ctrl+H replace · Ctrl+G go to line
             </span>
           </div>
         )
@@ -283,8 +339,13 @@ function FileEditorPanel({
                   disabled={saving}
                   onSave={(target) => void save(target)}
                 />
-                <Button size="sm" onClick={() => void save()} disabled={!dirty || saving}>
-                  {saving ? <Spinner className="size-4" /> : <FloppyDisk className="size-4" />}
+                <Button
+                  size="sm"
+                  onClick={() => void save()}
+                  disabled={!dirty || saving}
+                  pending={saving}
+                >
+                  <FloppyDisk className="size-4" />
                   Save
                 </Button>
               </>
@@ -296,27 +357,45 @@ function FileEditorPanel({
       {error && <ErrorState error={error} className="m-4" />}
       {!file && !error && <LoadingRows className="p-4" />}
 
-      {/* An image is shown rather than refused: the download endpoint streams
-          the bytes, so the panel that says "binary, not shown" can just show it. */}
-      {file?.binary && isImage(path) && (
-        <div className="checkerboard flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+      {/* An image is shown rather than refused. It comes from the raw route,
+          which serves it with a content type the browser will draw: the
+          download route's octet-stream is refused by nosniff. */}
+      {file?.binary && path && isImage(path) && (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto checkerboard p-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={downloadUrl("/files/download", { path: path ?? "" })}
-            alt={path ?? ""}
-            className="max-h-full max-w-full rounded-md object-contain shadow-sm"
+            src={rawUrl(path)}
+            alt={path}
+            className="max-h-full max-w-full rounded-md object-contain"
           />
         </div>
       )}
 
-      {file?.binary && !isImage(path) && (
+      {file?.binary && !(path && isImage(path)) && (
         <Notice className="m-4" tone="warning" title="Binary file" icon={ShieldOff}>
           This looks like a binary file ({bytes(file.size)}); it is not shown in the editor. Use
           Download to open it locally.
         </Notice>
       )}
 
-      {file && !file.binary && (
+      {file && !file.binary && reviewing && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {review === null ? (
+            <Notice className="m-4" title="Too many changes to summarise">
+              The draft differs from the file on disk in more places than can be aligned here. Save
+              writes the whole draft; Discard goes back to the disk.
+            </Notice>
+          ) : review === "" ? (
+            <Notice className="m-4" title="No changes">
+              The draft is identical to the file on disk.
+            </Notice>
+          ) : (
+            <DiffView body={review ?? ""} singleFile className="min-h-0 flex-1" />
+          )}
+        </div>
+      )}
+
+      {file && !file.binary && !reviewing && (
         <CodeEditor
           className="flex-1"
           value={draft}
@@ -390,10 +469,15 @@ function SaveAsButton({
 
   if (!open) {
     return (
-      <Button size="sm" variant="outline" disabled={disabled} onClick={() => {
-        setName(`${base}.bak`)
-        setOpen(true)
-      }}>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled}
+        onClick={() => {
+          setName(`${base}.bak`)
+          setOpen(true)
+        }}
+      >
         Save as
       </Button>
     )
@@ -407,7 +491,7 @@ function SaveAsButton({
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false)
-          if (e.key === "Enter" && name.trim()) {
+          if (e.key === "Enter" && name.trim() && !name.includes("/")) {
             onSave(target)
             setOpen(false)
           }
@@ -427,13 +511,4 @@ function SaveAsButton({
       </Button>
     </span>
   )
-}
-
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg"])
-
-/** Whether a path names an image the browser can render inline. */
-function isImage(path: string | null): boolean {
-  if (!path) return false
-  const ext = path.split(".").pop()?.toLowerCase()
-  return ext !== undefined && IMAGE_EXTS.has(ext)
 }

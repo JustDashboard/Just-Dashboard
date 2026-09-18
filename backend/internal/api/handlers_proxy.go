@@ -24,6 +24,10 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 			// writing it, so it is gated the same way.
 			r.Method(http.MethodPost, "/validate", s.handle(s.handleProxyValidate))
 			r.Method(http.MethodPut, "/config", s.handle(s.handleProxyConfigWrite))
+			// A test of what is on disk touches nothing, but it runs the
+			// host's own binary and is the same sentence of trust as a
+			// reload, so it is gated with it.
+			r.Method(http.MethodPost, "/test", s.handle(s.handleProxyTest))
 			r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
 			s.destructive(r, func(r chi.Router) {
 				// Disabling a vhost takes a site offline, and the handler
@@ -53,6 +57,9 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
 			r.Method(http.MethodPost, "/renew", s.handle(s.handleCertRenew))
 			s.destructive(r, func(r chi.Router) {
+				// Removing a saved DNS token is recoverable — paste it again
+				// — so it takes the ordinary confirmation and no phrase.
+				r.Method(http.MethodDelete, "/dns-credentials/{provider}", s.handle(s.handleDNSCredentialsRemove))
 				// Revocation cannot be undone: the authority publishes that
 				// the certificate is no longer to be trusted, and every
 				// client holding it starts refusing the site.
@@ -185,6 +192,22 @@ type reloadRequest struct {
 	Kind proxysvc.Kind `json:"kind"`
 }
 
+// handleProxyTest answers "would a reload succeed right now" without
+// reloading: the server's own config test against the files on disk.
+func (s *Server) handleProxyTest(w http.ResponseWriter, r *http.Request) error {
+	var req reloadRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Kind == "" {
+		req.Kind = proxysvc.KindNginx
+	}
+	res := s.modules.proxy.Test(r.Context(), req.Kind)
+	httpx.SetAudit(r, "proxy.config.test", string(req.Kind), map[string]any{"valid": res.Valid})
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
 func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error {
 	var req reloadRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -210,6 +233,8 @@ func mapProxyError(err error) error {
 	switch {
 	case errors.Is(err, proxysvc.ErrUnsafePath):
 		return httpx.Err(http.StatusForbidden, "outside_root", err.Error())
+	case errors.Is(err, proxysvc.ErrProtectedFile):
+		return httpx.Err(http.StatusForbidden, "protected_file", err.Error())
 	case errors.Is(err, proxysvc.ErrNoProxy):
 		return httpx.Err(http.StatusServiceUnavailable, "no_proxy", err.Error())
 	default:

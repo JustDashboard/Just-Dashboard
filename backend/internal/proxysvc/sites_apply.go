@@ -36,30 +36,16 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	rootLocationWS := false
 	sawTLSListen := false
 	sawPlainRedirect := false
+	sawAccessLog := false
 	var custom []string
 	inCustom := false
 
-	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 8192), 1<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		raw := strings.TrimSpace(line)
-		// Everything after the custom marker belongs to the operator, so it is
-		// collected verbatim rather than parsed. Without this the "extra
-		// configuration" box was written to the file and silently dropped the
-		// next time anybody opened the form and saved — the form's own escape
-		// hatch was the one field an edit destroyed.
-		if inCustom {
-			custom = append(custom, strings.TrimPrefix(line, "    "))
-			continue
-		}
-		if raw == customMarker {
-			inCustom = true
-			continue
-		}
-		if raw == "" || strings.HasPrefix(raw, "#") {
-			continue
-		}
+	// read handles one statement. It is a closure over the reader's state so
+	// that a line carrying several statements — `location / { proxy_pass
+	// http://x; }` is common in hand-written files — can be split and each
+	// piece read in turn, where the line reader used to swallow everything
+	// after the opening brace.
+	read := func(raw string) {
 		if m := locationOpenRe.FindStringSubmatch(raw); m != nil {
 			depth++
 			location = m[1]
@@ -82,16 +68,16 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else {
 				current = nil
 			}
-			continue
+			return
 		}
 		if strings.HasSuffix(raw, "{") {
 			depth++
-			continue
+			return
 		}
 		if raw == "}" {
 			depth--
 			location, current = "", nil
-			continue
+			return
 		}
 
 		directive, value := cutDirective(raw)
@@ -99,15 +85,21 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "server_name":
 			for _, d := range strings.Fields(value) {
 				if d == "_" || seenDomains[d] {
-					continue
+					return
 				}
 				seenDomains[d] = true
 				spec.Domains = append(spec.Domains, d)
 			}
 		case "listen":
-			if strings.Contains(value, "ssl") || strings.HasPrefix(value, "443") {
+			if listenIsTLS(value) {
 				spec.TLS = true
 				sawTLSListen = true
+			}
+			// The pre-1.25 spelling. A file written when `listen 443 ssl http2`
+			// was the only form read back as HTTP/2 off, and saving it then
+			// turned HTTP/2 off for real.
+			if hasField(value, "http2") {
+				spec.HTTP2 = true
 			}
 		case "http2":
 			spec.HTTP2 = value == "on"
@@ -120,6 +112,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "gzip":
 			spec.Gzip = value == "on"
 		case "access_log":
+			sawAccessLog = true
 			spec.AccessLog = value != "off"
 		case "auth_basic":
 			spec.BasicAuthRealm = strings.Trim(value, `"`)
@@ -145,7 +138,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				spec.SecurityHeaders = true
 			}
 		case "root":
-			if location == "" || location == "/" {
+			if location == acmeChallengePath && value == deploymentACMEWebroot {
+				spec.ManagedACME = true
+			} else if location == "" || location == "/" {
 				spec.Root = value
 			} else if current != nil {
 				current.Root = value
@@ -181,8 +176,42 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 	}
 
+	sc := bufio.NewScanner(strings.NewReader(content))
+	sc.Buffer(make([]byte, 0, 8192), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		raw := strings.TrimSpace(line)
+		// Everything after the custom marker belongs to the operator, so it is
+		// collected verbatim rather than parsed. Without this the "extra
+		// configuration" box was written to the file and silently dropped the
+		// next time anybody opened the form and saved — the form's own escape
+		// hatch was the one field an edit destroyed.
+		if inCustom {
+			custom = append(custom, strings.TrimPrefix(line, "    "))
+			continue
+		}
+		if raw == customMarker {
+			inCustom = true
+			continue
+		}
+		if raw == "" || strings.HasPrefix(raw, "#") {
+			continue
+		}
+		for _, piece := range splitInline(raw) {
+			read(piece)
+		}
+	}
+
 	spec.Upstream = rootLocationUpstream
 	spec.WebSockets = rootLocationWS
+	// A hand-written file with no access_log line is logging to nginx's
+	// default, not to nowhere. Reading it back as "off" meant the first save
+	// from the form silently wrote `access_log off;` into a site that had been
+	// logging all along. Managed files always carry the directive, so this
+	// only ever decides for the ones the form did not write.
+	if !managed && !sawAccessLog {
+		spec.AccessLog = true
+	}
 	if spec.Kind != "redirect" {
 		if spec.Upstream == "" && spec.Root != "" {
 			spec.Kind = "static"
@@ -230,6 +259,102 @@ const (
 )
 
 var locationOpenRe = regexp.MustCompile(`^location\s+(?:[~^=*]+\s+)?(\S+)\s*\{`)
+
+// listenIsTLS reads a listen directive's value the way nginx does: the first
+// field is the address, and `ssl` is a parameter after it. `listen 4430` and
+// `listen 127.0.0.1:8443` used to count as TLS because the check was a string
+// prefix and a substring, which turned a plain-HTTP site on an odd port into
+// one the form insisted needed a certificate.
+func listenIsTLS(value string) bool {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return false
+	}
+	if hasField(value, "ssl") {
+		return true
+	}
+	address := fields[0]
+	if i := strings.LastIndex(address, ":"); i >= 0 {
+		address = address[i+1:]
+	}
+	return address == "443"
+}
+
+func hasField(value, want string) bool {
+	for _, field := range strings.Fields(value) {
+		if field == want {
+			return true
+		}
+	}
+	return false
+}
+
+// splitInline breaks a line holding several statements into one statement
+// per element: `location / { proxy_pass http://x; }` becomes the opener,
+// the directive and the closing brace. Quotes are respected, since a
+// Content-Security-Policy value carries semicolons of its own. A line with
+// nothing after its brace, or no brace at all, is returned as it came.
+func splitInline(raw string) []string {
+	i := braceOutsideQuotes(raw)
+	if i < 0 || strings.TrimSpace(raw[i+1:]) == "" {
+		return []string{raw}
+	}
+	out := []string{strings.TrimSpace(raw[:i+1])}
+	var cur strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(cur.String()); s != "" {
+			out = append(out, s)
+		}
+		cur.Reset()
+	}
+	var quote byte
+	for j := i + 1; j < len(raw); j++ {
+		c := raw[j]
+		switch {
+		case quote != 0:
+			cur.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+			cur.WriteByte(c)
+		case c == ';':
+			cur.WriteByte(c)
+			flush()
+		case c == '{':
+			cur.WriteByte(c)
+			flush()
+		case c == '}':
+			flush()
+			out = append(out, "}")
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+// braceOutsideQuotes is the index of the first `{` that is not inside a
+// quoted string, or -1.
+func braceOutsideQuotes(raw string) int {
+	var quote byte
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '{':
+			return i
+		}
+	}
+	return -1
+}
 
 func cutDirective(line string) (string, string) {
 	line = strings.TrimSuffix(strings.TrimSpace(line), ";")
@@ -372,10 +497,18 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 // regardless, so a read-only or missing sites-enabled produced a site that had
 // been "enabled" and was serving nothing.
 func linkEnabled(link, target string) (func(), error) {
+	previous := ""
+	restore := func() {
+		_ = os.Remove(link)
+		if previous != "" {
+			_ = os.Symlink(previous, link)
+		}
+	}
 	if existing, err := os.Readlink(link); err == nil {
 		if existing == target {
 			return func() {}, nil
 		}
+		previous = existing
 		if err := os.Remove(link); err != nil {
 			return nil, err
 		}
@@ -385,12 +518,14 @@ func linkEnabled(link, target string) (func(), error) {
 		return nil, fmt.Errorf("%s already exists and is not a symlink — move it aside first", link)
 	}
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		restore()
 		return nil, err
 	}
 	if err := os.Symlink(target, link); err != nil {
+		restore()
 		return nil, err
 	}
-	return func() { os.Remove(link) }, nil
+	return restore, nil
 }
 
 func readIfPresent(path string) (string, bool) {

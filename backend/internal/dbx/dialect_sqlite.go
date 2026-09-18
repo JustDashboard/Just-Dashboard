@@ -261,6 +261,11 @@ func (sqliteDialect) BeforeDropColumn(context.Context, *sql.DB, string, string, 
 }
 
 func (sqliteDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := ExplainStatement(query)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	query = checked
 	// Bare EXPLAIN in SQLite dumps bytecode; QUERY PLAN is the readable form.
 	return RunQuery(ctx, db, "EXPLAIN QUERY PLAN "+query, 500)
 }

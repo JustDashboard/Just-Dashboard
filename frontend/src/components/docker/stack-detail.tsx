@@ -9,7 +9,6 @@ import {
   FloppyDisk,
   FolderOpen,
   GitBranch,
-  Layers,
   Play,
   RefreshClockwise,
   RotateClockwise,
@@ -27,13 +26,20 @@ import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { PortLink, type ConfirmFn } from "@/components/docker/shared"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
+import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
+import { DeployPreviewPanel, DeploymentHistoryPanel } from "@/components/docker/deploy-preview"
+import {
+  COMPOSE_ACTIONS,
+  StackStateBadge,
+  type ComposeActionKey,
+} from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
 import { LogViewer } from "@/components/log-viewer"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingRows, Notice, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -101,7 +107,7 @@ function StackBody({
     // Slower while a command is running: the poll would otherwise fight the
     // console for attention, and the interesting output is in the console.
     runner.running ? 0 : 10000,
-    [name, runner.running],
+    [name],
     // Not while closed: with no name the path is the stack *list*, and this
     // panel would render an array's missing fields.
     { enabled: name !== null },
@@ -143,21 +149,13 @@ function StackBody({
       open={name !== null}
       onOpenChange={onOpenChange}
       width="xl"
-      icon={Layers}
       title={
         <>
           {name}
-          {data && (
-            <Badge
-              variant={data.running === data.total && data.total > 0 ? "success" : "secondary"}
-              className="font-normal"
-            >
-              {data.running}/{data.total} up
-            </Badge>
-          )}
+          {data && <StackStateBadge stack={data} />}
         </>
       }
-      description={data?.workingDir}
+      description={data ? `${data.summary} · ${data.workingDir}` : undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
       actions={
         data && <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
@@ -176,12 +174,14 @@ function StackBody({
               points at anything.
             </Notice>
           )}
+          {data.managed && !can("system.admin") && (
+            <Notice title="Administrator access required">
+              An administrator must create, edit, validate, or run Compose stacks. You can inspect
+              this stack here.
+            </Notice>
+          )}
           {data.declaredError && (
-            <Notice
-              title="This stack's compose file does not parse"
-              icon={Warning}
-              tone="danger"
-            >
+            <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
               {data.declaredError}
             </Notice>
           )}
@@ -197,29 +197,43 @@ function StackBody({
           <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
             <TabsList className="w-fit shrink-0">
               <TabsTrigger value="services">Services</TabsTrigger>
+              {/* What a deploy would change, before it changes it. */}
+              <TabsTrigger value="preview">Deploy preview</TabsTrigger>
               <TabsTrigger value="compose">Compose file</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
-            <TabsContent value="services" className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-              {data.services.map((svc) => (
-                <ServiceRow
-                  key={svc.name}
-                  stack={data.name}
-                  service={svc}
-                  managed={data.managed}
-                  onRun={run}
-                />
-              ))}
-              {data.services.length === 0 && (
+            <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto">
+              {data.services.length === 0 ? (
                 <EmptyState
                   icon={Box}
                   title="Nothing running"
                   description="This stack has a compose file but no containers. Bring it up to start them."
                 />
+              ) : (
+                /* Rows with a hairline between them and nothing around them:
+                   the services are the rows of a table the eye reads down,
+                   and the side panel is already the frame. */
+                <ul className="animate-rise divide-y divide-hairline">
+                  {data.services.map((svc) => (
+                    <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
+                  ))}
+                </ul>
               )}
             </TabsContent>
+            <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "preview" && <DeployPreviewPanel stack={data.name} />}
+            </TabsContent>
             <TabsContent value="compose" className="min-h-0 flex-1">
-              <ComposeEditor stack={data} onSaved={reload} canWrite={can("file.write")} />
+              <ComposeEditor
+                stack={data}
+                onSaved={reload}
+                canWrite={can("system.admin") && can("file.write")}
+                canValidate={can("system.admin")}
+              />
+            </TabsContent>
+            <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
             </TabsContent>
             <TabsContent value="logs" className="min-h-0 flex-1">
               {tab === "logs" && <StackLogs stack={data.name} active />}
@@ -243,98 +257,93 @@ function StackActions({
   runner: ReturnType<typeof useRunConsole>
 }) {
   const { can } = useAuth()
-  if (!data.managed) return null
+  if (!data.managed || !can("system.admin")) return null
   const busy = runner.running
   const quiet = (fn: () => Promise<void>) => () => {
     fn().catch((err) => notify.error(String(err)))
   }
 
+  /**
+   * Compose's verbs, named for what they do to the server.
+   *
+   * `Up` and `Down` are precise and mean nothing without the compose reference
+   * — and `Down` is the worst of the two, because it sounds like the opposite
+   * of `Up` and is not: it deletes the containers and the project network. Two
+   * are pressed often enough to sit inline; the rest are behind one menu, where
+   * each gets its word and its sentence. Every confirmation still carries both
+   * the blast radius and the exact command being run, so an operator who knows
+   * compose can check the translation.
+   */
+  const act = (action: ComposeActionKey, extra?: React.ReactNode) => {
+    const meta = COMPOSE_ACTIONS[action]
+    confirmRun(
+      action,
+      meta.label,
+      <>
+        <p>
+          <b>{data.name}</b> — {meta.blastRadius}
+        </p>
+        {extra}
+        <p className="font-mono text-hint text-muted-foreground">{meta.command}</p>
+      </>,
+    )
+  }
+
+  const verbs: ContainerVerb[] = []
+  if (can("destructive")) {
+    verbs.push({
+      key: "update",
+      label: COMPOSE_ACTIONS.update.label,
+      detail: "Pulls newer images and replaces the containers using them.",
+      icon: ArrowCircleUp,
+      run: () => act("update"),
+    })
+  }
+  if (can("service.control")) {
+    verbs.push({
+      key: "build",
+      label: COMPOSE_ACTIONS.build.label,
+      detail: "Rebuilds the images this stack builds from source. Nothing restarts yet.",
+      icon: Wrench,
+      run: () => act("build"),
+    })
+  }
+  if (can("destructive")) {
+    verbs.push({
+      key: "down",
+      label: COMPOSE_ACTIONS.down.label,
+      detail: "Stops and deletes the containers and the project network. Volumes are kept.",
+      icon: StopCircle,
+      danger: true,
+      run: () =>
+        act(
+          "down",
+          <p>
+            Deploying afterwards brings the stack back from the same compose file, and the volumes
+            it left behind are still there for it.
+          </p>,
+        ),
+    })
+  }
+
   return (
     <>
       {can("service.control") && (
-        <>
-          <Button size="sm" disabled={busy} onClick={quiet(() => run("up"))}>
-            {busy ? <Spinner className="size-3.5" /> : <Play className="size-3.5" />}
-            Up
-          </Button>
-          {/*
-            The one button most self-hosted stacks exist to press. Everywhere
-            else it is two commands and a paragraph explaining the order;
-            here it pulls first, so a registry that is down leaves the running
-            stack alone rather than taking it half down and failing.
-          */}
-          {can("destructive") && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() =>
-                confirmRun(
-                  "update",
-                  "Update this stack",
-                  <>
-                    <p>
-                      Pulls a newer image for every service in <b>{data.name}</b>, then recreates
-                      the ones that changed. Services whose image did not move are left running.
-                    </p>
-                    <p>Anything being recreated is interrupted while it restarts.</p>
-                  </>,
-                )
-              }
-            >
-              <ArrowCircleUp className="size-3.5" />
-              Update
-            </Button>
-          )}
-          <Button size="sm" variant="outline" disabled={busy} onClick={quiet(() => run("build"))}>
-            <Wrench className="size-3.5" />
-            Build
-          </Button>
-        </>
+        /* Deploy is not destructive: it starts what is missing and replaces
+           what changed. It gets no confirmation for the same reason it is the
+           primary button. */
+        <Button size="sm" onClick={quiet(() => run("up"))} pending={busy}>
+          <Play className="size-3.5" />
+          {COMPOSE_ACTIONS.up.label}
+        </Button>
       )}
       {can("destructive") && (
-        <>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              confirmRun(
-                "restart",
-                "Restart this stack",
-                <p>
-                  Every service in <b>{data.name}</b> stops and starts again.
-                </p>,
-              )
-            }
-          >
-            <RotateClockwise className="size-3.5" />
-            Restart
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-destructive"
-            disabled={busy}
-            onClick={() =>
-              confirmRun(
-                "down",
-                "Down this stack",
-                <>
-                  <p>
-                    Stops and removes every container in <b>{data.name}</b>, and the network compose
-                    created for it.
-                  </p>
-                  <p>Named volumes survive — the data is not deleted.</p>
-                </>,
-              )
-            }
-          >
-            <StopCircle className="size-3.5" />
-            Down
-          </Button>
-        </>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => act("restart")}>
+          <RotateClockwise className="size-3.5" />
+          {COMPOSE_ACTIONS.restart.label}
+        </Button>
       )}
+      {verbs.length > 0 && <ContainerMenu verbs={verbs} disabled={busy} />}
     </>
   )
 }
@@ -362,24 +371,27 @@ function StackLinks({ data }: { data: StackDetail }) {
         <Button size="xs" variant="outline" asChild>
           <Link href={`/terminal?cwd=${encodeURIComponent(data.workingDir)}`}>
             <Terminal className="size-3" />
-            Shell here
+            Open shell
           </Link>
         </Button>
       )}
       {data.git && (
         <Button size="xs" variant="outline" asChild>
-          <Link href={`/git?repo=${encodeURIComponent(data.git.path)}`}>
+          <Link
+            href={`/git?repo=${encodeURIComponent(data.git.path)}`}
+            className="inline-flex items-center"
+          >
             <GitBranch className="size-3" />
             {data.git.branch ?? "repository"}
             {data.git.dirty && (
-              <Badge variant="warning" className="ml-1 px-1 py-0 text-[10px] font-normal">
+              <span className="numeric inline-flex items-center text-hint leading-none text-warning">
                 {data.git.changes} uncommitted
-              </Badge>
+              </span>
             )}
             {data.git.behind > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1 py-0 text-[10px] font-normal">
+              <span className="numeric inline-flex items-center text-hint leading-none text-muted-foreground">
                 {data.git.behind} behind
-              </Badge>
+              </span>
             )}
           </Link>
         </Button>
@@ -389,12 +401,10 @@ function StackLinks({ data }: { data: StackDetail }) {
 }
 
 function ServiceRow({
-  stack,
   service,
   managed,
   onRun,
 }: {
-  stack: string
   service: ComposeService
   managed: boolean
   onRun: (action: string, opts?: { confirmPhrase?: string; service?: string }) => Promise<void>
@@ -403,29 +413,25 @@ function ServiceRow({
   const published = service.ports.filter((p) => p.publicPort)
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-hairline px-3 py-2.5">
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[13px] font-medium">{service.name}</span>
+    <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
+      <div className="min-w-0 flex-1 basis-48">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="truncate text-body font-medium">{service.name}</span>
           {service.missing ? (
-            <Badge variant="warning" className="font-normal">
-              not created
-            </Badge>
+            <Status verdict="warning" label="Not created" />
           ) : (
             <Status state={service.state} />
           )}
           {service.health && service.health !== "healthy" && (
-            <Badge
-              variant={service.health === "unhealthy" ? "destructive" : "secondary"}
-              className="font-normal"
-            >
-              {service.health}
-            </Badge>
+            <Status
+              verdict={service.health === "unhealthy" ? "critical" : "notice"}
+              label={service.health.charAt(0).toUpperCase() + service.health.slice(1)}
+            />
           )}
         </div>
-        <p className="truncate font-mono text-[11px] text-muted-foreground">
+        <p className="truncate font-mono text-hint text-muted-foreground">
           {service.missing
-            ? "declared in the compose file, but no container exists for it"
+            ? "defined in the compose file, but no container exists for it"
             : service.image}
         </p>
       </div>
@@ -438,19 +444,20 @@ function ServiceRow({
         </div>
       )}
 
-      {managed && can("service.control") && !service.missing && (
+      {managed && can("system.admin") && can("service.control") && !service.missing && (
         <Button
           size="xs"
           variant="ghost"
+          title="Recreates this service from the compose file without touching the rest of the stack"
           onClick={() =>
             onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
           }
         >
           <RefreshClockwise className="size-3" />
-          Re-apply
+          Recreate service
         </Button>
       )}
-      {managed && can("service.control") && service.missing && (
+      {managed && can("system.admin") && can("service.control") && service.missing && (
         <Button
           size="xs"
           variant="outline"
@@ -462,8 +469,7 @@ function ServiceRow({
           Create it
         </Button>
       )}
-      <span className="sr-only">{stack}</span>
-    </div>
+    </li>
   )
 }
 
@@ -473,10 +479,12 @@ function ComposeEditor({
   stack,
   onSaved,
   canWrite,
+  canValidate,
 }: {
   stack: StackDetail
   onSaved: () => void
   canWrite: boolean
+  canValidate: boolean
 }) {
   const [content, setContent] = useState<string>()
   const [original, setOriginal] = useState("")
@@ -558,20 +566,18 @@ function ComposeEditor({
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <Code className="size-3.5 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground">
           {stack.configPath}
         </span>
-        {dirty && (
-          <Badge variant="warning" className="font-normal">
-            unsaved
-          </Badge>
+        {dirty && <Tag tone="warning">unsaved</Tag>}
+        {canValidate && (
+          <Button size="xs" variant="outline" onClick={check} disabled={busy}>
+            Check
+          </Button>
         )}
-        <Button size="xs" variant="outline" onClick={check} disabled={busy}>
-          Check
-        </Button>
         {canWrite && (
-          <Button size="xs" onClick={() => save()} disabled={busy || !dirty}>
-            {busy ? <Spinner className="size-3" /> : <FloppyDisk className="size-3" />}
+          <Button size="xs" onClick={() => save()} disabled={busy || !dirty} pending={busy}>
+            <FloppyDisk className="size-3" />
             Save
           </Button>
         )}
@@ -587,7 +593,7 @@ function ComposeEditor({
 
       {validation && !validation.valid && (
         <Notice title="Compose will not accept this" icon={Warning} tone="danger">
-          <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{validation.error}</pre>
+          <pre className="mt-1 font-mono text-hint whitespace-pre-wrap">{validation.error}</pre>
           {canWrite && (
             <Button size="xs" variant="outline" className="mt-2" onClick={() => save(true)}>
               Save it anyway
@@ -617,12 +623,14 @@ function StackLogs({ stack, active }: { stack: string; active: boolean }) {
     setLines((prev) => {
       const next = [
         ...prev,
+        // No stream-to-level mapping: services that log everything to stderr
+        // would otherwise paint the whole merged feed red. The viewer colours
+        // lines by their own words instead.
         ...batch.map((l) => ({
           // The service prefix goes into the text rather than a column so the
           // filter box searches it too — "show me only what the database
           // said" is the commonest thing to want from a merged feed.
           text: l.service ? `${l.service} | ${l.text}` : l.text,
-          level: l.stream === "stderr" ? "error" : undefined,
         })),
       ]
       return next.length > 5000 ? next.slice(next.length - 5000) : next

@@ -1,0 +1,99 @@
+{
+  "id": "jellyfin",
+  "version": "1.0.0",
+  "name": "Jellyfin",
+  "category": "http",
+  "profile": "web",
+  "description": "A media server for films, series, music and photos with apps for every screen. Put the media into its volume, or add a bind mount to an existing library under Storage after the first deploy.",
+  "iconId": "globe",
+  "docsUrl": "https://jellyfin.org/docs/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-2.0",
+    "upstreamUrl": "https://github.com/jellyfin/jellyfin",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "jellyfin/jellyfin:12.1",
+    "tagPolicy": "minor",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8096,
+      "protocol": "tcp",
+      "purpose": "The web interface and apps",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "config",
+      "target": "/config",
+      "purpose": "Library metadata, users and settings",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "cache",
+      "target": "/cache",
+      "purpose": "Transcodes and thumbnails",
+      "data": true,
+      "backup": false
+    },
+    {
+      "name": "media",
+      "target": "/media",
+      "purpose": "The media library itself",
+      "data": true,
+      "backup": false
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Jellyfin migrates its database on start.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:96fb3921a567f3c5c918a5ff4883fa7cf2bf2c70e020076e8ec5bd232fbb7cc2"
+    }
+  ]
+}

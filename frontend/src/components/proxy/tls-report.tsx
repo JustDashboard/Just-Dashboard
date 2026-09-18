@@ -1,25 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import {
-  CheckCircle,
-  CrossCircle,
-  Fingerprint,
-  Information,
-  Inspect,
-  LockClosed,
-  ShieldOff,
-  Warning,
-} from "@/components/icons"
-import { notify } from "@/lib/toast"
+import { useSearchParams } from "next/navigation"
+import { CheckCircle, CrossCircle, Inspect } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { ScanFinding, TLSScan } from "@/lib/types"
-import { Detail, DetailList } from "@/components/page"
+import type { TLSScan } from "@/lib/types"
+import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
+import { Detail, DetailList, Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, Notice, Spinner } from "@/components/state"
-import { Badge } from "@/components/ui/badge"
+import { Row, RowList } from "@/components/row-list"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { FindingList } from "@/components/finding-list"
+import { EmptyState, ErrorState, Notice, Spinner } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -35,31 +33,52 @@ import { Input } from "@/components/ui/input"
  *
  * The grade is coarse on purpose and every finding carries its reasoning: a
  * letter with no working is a number to optimise rather than a thing to fix.
+ * The four readings are tiles and the findings are a plain list, as they are
+ * on every other verdict page; the grade used to be a tinted plate, which is
+ * the one decoration this system does not draw.
  */
-export function TLSReport() {
-  const [domain, setDomain] = useState("")
-  const [scan, setScan] = useState<TLSScan | null>(null)
-  const [busy, setBusy] = useState(false)
+export function TLSReportPage() {
+  const { can } = useAuth()
+  const params = useSearchParams()
+  const initial = params.get("domain") ?? ""
+  const [domain, setDomain] = useState(initial)
+  // The domain being reported on. A ?domain= link from a site or a
+  // certificate runs the report on arrival: the link is the question, and a
+  // page that then waits for a second click to ask it is a page that forgot
+  // why it was opened. The scan is a one-shot poll keyed on the target, so
+  // arriving with one and pressing Scan are the same path.
+  const [target, setTarget] = useState(initial.trim())
+  const admin = can("system.admin")
+  const report = usePoll(
+    (signal) => get<TLSScan>("/certificates/scan", { domain: target }, signal),
+    0,
+    [target],
+    { enabled: admin && target !== "" },
+  )
+  const scan = report.data ?? null
+  const busy = report.loading
 
-  const run = async () => {
-    setBusy(true)
-    setScan(null)
-    try {
-      setScan(await get<TLSScan>("/certificates/scan", { domain: domain.trim() }))
-    } catch (err) {
-      notify.error("Could not scan", err)
-    } finally {
-      setBusy(false)
-    }
+  const run = () => {
+    const name = domain.trim()
+    if (!name) return
+    if (name === target) report.refresh()
+    else setTarget(name)
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <Panel>
+    <Page className="animate-rise">
+      <PageHeader eyebrow="Proxy" title="TLS report" />
+
+      <Panel plain>
         <PanelHeader
-          icon={Inspect}
-          title="Live TLS report"
-          description="A handshake, a version probe, the chain as presented and the headers the site actually sends"
+          title="Live report"
+          actions={
+            scan && (
+              <span className="text-hint text-muted-foreground">
+                checked {relativeTime(scan.checkedAt)}
+              </span>
+            )
+          }
         />
         <PanelToolbar>
           <Input
@@ -67,15 +86,26 @@ export function TLSReport() {
             onChange={(e) => setDomain(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && domain.trim() && run()}
             placeholder="app.example.com"
-            className="h-8 w-full text-[13px] sm:w-72"
+            aria-label="Domain to scan"
+            className="h-8 w-full text-body sm:w-72"
           />
-          <Button size="sm" onClick={run} disabled={busy || !domain.trim()}>
-            {busy && <Spinner className="size-4" />}
+          <Button
+            size="sm"
+            onClick={run}
+            disabled={busy || !domain.trim() || !admin}
+            pending={busy}
+          >
             Scan
           </Button>
         </PanelToolbar>
         <PanelBody>
-          {!scan && !busy && (
+          {!admin && (
+            <Notice title="Scanning needs an administrator">
+              The report reaches a domain of your choosing from this server, so it is held to the
+              same account level as the network probes.
+            </Notice>
+          )}
+          {admin && !scan && !busy && (
             <EmptyState
               icon={Inspect}
               title="Nothing scanned yet"
@@ -83,50 +113,106 @@ export function TLSReport() {
             />
           )}
           {busy && (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="flex items-center gap-2 text-body text-muted-foreground">
+              <Spinner className="size-3.5" />
               Handshaking, probing each TLS version separately, and fetching the headers…
             </p>
           )}
-          {scan && <ScanSummary scan={scan} />}
+          {report.error && !busy && <ErrorState error={report.error} />}
+          {scan && !scan.reachable && (
+            <Notice tone="danger" icon={CrossCircle} title={`Nothing answered at ${scan.domain}`}>
+              {scan.error}
+            </Notice>
+          )}
         </PanelBody>
       </Panel>
 
       {scan?.reachable && (
-        <>
-          <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-            <Panel>
-              <PanelHeader icon={LockClosed} title="Protocol versions" />
-              <PanelBody className="space-y-1.5">
-                {scan.protocols.map((protocol) => (
-                  <div
-                    key={protocol.name}
-                    className="flex items-start justify-between gap-3 text-[13px]"
-                  >
-                    <span className="font-mono text-xs">{protocol.name}</span>
-                    <span className="flex min-w-0 flex-col items-end gap-0.5">
-                      <Badge
-                        variant={
-                          protocol.status === "offered"
-                            ? isOldProtocol(protocol.name)
-                              ? "destructive"
-                              : "success"
-                            : protocol.status === "unknown"
-                              ? "secondary"
-                              : "outline"
-                        }
-                        className="font-normal"
-                      >
-                        {protocol.status}
-                      </Badge>
-                      {protocol.detail && (
-                        <span className="max-w-56 text-right text-[11px] leading-tight text-muted-foreground">
-                          {protocol.detail}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-                <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+        <div className="flex min-w-0 animate-rise flex-col gap-6 md:gap-8">
+          <StatGrid columns={4}>
+            <StatTile
+              label={scan.domain}
+              value={scan.grade}
+              tone={gradeTone(scan.grade)}
+              hint={scan.summary}
+            />
+            <StatTile
+              label="Certificate"
+              value={
+                scan.certificate
+                  ? scan.certificate.expired
+                    ? "expired"
+                    : `${scan.certificate.daysLeft}d`
+                  : "none"
+              }
+              tone={
+                !scan.certificate || scan.certificate.expired
+                  ? "danger"
+                  : scan.certificate.daysLeft <= 14
+                    ? "warning"
+                    : "default"
+              }
+              hint={
+                scan.certificate
+                  ? `until ${timestamp(scan.certificate.notAfter)} · ${scan.certificate.issuer}`
+                  : "the handshake completed without one"
+              }
+            />
+            <StatTile
+              label="Negotiated"
+              value={scan.negotiated ?? "—"}
+              hint={scan.cipherSuite}
+              tone={scan.negotiated === "TLS 1.3" ? "success" : "default"}
+            />
+            <StatTile
+              label="Chain"
+              value={scan.trusted ? "trusted" : "untrusted"}
+              tone={scan.trusted ? (scan.chainComplete ? "success" : "warning") : "danger"}
+              hint={
+                scan.chainComplete
+                  ? `${scan.chain.length} certificate${scan.chain.length === 1 ? "" : "s"} presented`
+                  : "the intermediate was not sent"
+              }
+            />
+          </StatGrid>
+
+          <Panel plain>
+            <PanelHeader title="Findings" />
+            <PanelBody>
+              <FindingList
+                findings={scan.findings}
+                emptyLabel="Trusted chain, current protocols, and the headers that matter are in place"
+              />
+            </PanelBody>
+          </Panel>
+
+          <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <Panel plain>
+              <PanelHeader title="Protocol versions" />
+              <PanelBody flush>
+                <RowList>
+                  {scan.protocols.map((protocol) => (
+                    <Row
+                      key={protocol.name}
+                      title={<span className="font-mono text-xs">{protocol.name}</span>}
+                      subtitle={protocol.detail}
+                      trailing={
+                        <Status
+                          verdict={
+                            protocol.status === "offered"
+                              ? isOldProtocol(protocol.name)
+                                ? "critical"
+                                : "ok"
+                              : "notice"
+                          }
+                          label={protocol.status}
+                        />
+                      }
+                      className="py-2"
+                    />
+                  ))}
+                </RowList>
+                <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
                   Each version is asked for on a connection of its own, so the answer is the
                   server&rsquo;s rather than a negotiation. &ldquo;unknown&rdquo; means this
                   dashboard&rsquo;s own TLS library would not make the request — reporting that as
@@ -135,8 +221,8 @@ export function TLSReport() {
               </PanelBody>
             </Panel>
 
-            <Panel>
-              <PanelHeader icon={Fingerprint} title="Certificate" />
+            <Panel plain>
+              <PanelHeader title="Certificate" />
               <PanelBody>
                 <DetailList>
                   <Detail label="Subject">{scan.certificate?.name ?? "—"}</Detail>
@@ -144,22 +230,17 @@ export function TLSReport() {
                   <Detail label="Issuer">{scan.certificate?.issuer ?? "—"}</Detail>
                   <Detail label="Valid until">
                     {scan.certificate ? timestamp(scan.certificate.notAfter) : "—"}
-                    {scan.certificate && (
-                      <span className="ml-2 text-muted-foreground">
-                        {scan.certificate.daysLeft} days left
-                      </span>
-                    )}
                   </Detail>
                   <Detail label="Key">
                     {scan.keyType}
                     {scan.keyBits ? ` ${scan.keyBits} bits` : ""}
                   </Detail>
                   <Detail label="Signature">{scan.signatureAlgorithm ?? "—"}</Detail>
-                  <Detail label="Negotiated">
-                    {scan.negotiated} · {scan.cipherSuite}
+                  <Detail label="Serial" className="font-mono">
+                    {scan.serial ?? "—"}
                   </Detail>
                   <Detail label="OCSP stapled">{scan.ocspStapled ? "yes" : "no"}</Detail>
-                  <Detail label="SHA-256" className="font-mono text-[10px] break-all">
+                  <Detail label="SHA-256" className="font-mono text-micro break-all">
                     {scan.fingerprint}
                   </Detail>
                 </DetailList>
@@ -167,224 +248,121 @@ export function TLSReport() {
             </Panel>
           </div>
 
-          <Panel>
-            <PanelHeader
-              icon={LockClosed}
-              title="Chain as presented"
-              description={
-                scan.chainComplete
-                  ? `${scan.chain.length} certificates sent`
-                  : "Only the leaf was sent — desktop browsers paper over this from cache; phones, curl and payment gateways do not"
-              }
-            />
-            <PanelBody className="space-y-1.5">
-              {scan.chain.map((link, i) => (
-                <div
-                  key={`${link.subject}-${i}`}
-                  className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border border-hairline bg-surface-sunken p-2.5"
-                >
-                  <span className="text-[13px] font-medium">{link.subject}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    issued by {link.issuer}
-                  </span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">
-                    {link.keyType}
-                    {link.keyBits ? ` ${link.keyBits}` : ""} · expires {relativeTime(link.notAfter)}
-                  </span>
-                  {link.isCa && (
-                    <Badge variant="secondary" className="font-normal">
-                      CA
-                    </Badge>
-                  )}
-                </div>
-              ))}
+          <Panel plain>
+            <PanelHeader title="Chain as presented" />
+            <PanelBody flush>
+              <RowList>
+                {scan.chain.map((link, i) => (
+                  <Row
+                    key={`${link.subject}-${i}`}
+                    leading={
+                      <span className="numeric w-4 text-hint text-muted-foreground">{i + 1}</span>
+                    }
+                    title={link.subject}
+                    subtitle={`issued by ${link.issuer}`}
+                    trailing={
+                      <>
+                        {link.isCa && <Tag>CA</Tag>}
+                        {link.selfIssued && <Tag>self-issued</Tag>}
+                        <span className="text-hint text-muted-foreground">
+                          {link.keyType}
+                          {link.keyBits ? ` ${link.keyBits}` : ""} · expires{" "}
+                          {relativeTime(link.notAfter)}
+                        </span>
+                      </>
+                    }
+                    className="py-2"
+                  />
+                ))}
+              </RowList>
             </PanelBody>
           </Panel>
 
           {scan.http && (
-            <Panel>
-              <PanelHeader
-                icon={ShieldOff}
-                title="HTTP behaviour"
-                description={`Answered ${scan.http.statusCode}${scan.http.server ? ` · ${scan.http.server}` : ""}`}
-              />
-              <PanelBody className="space-y-2.5">
-                <div className="flex flex-wrap items-center gap-2 text-[13px]">
-                  <span>Plain HTTP</span>
-                  {scan.http.plainError ? (
-                    <Badge variant="secondary" className="font-normal">
-                      refused connection
-                    </Badge>
-                  ) : scan.http.plainRedirects ? (
-                    <Badge variant="success" className="font-normal">
-                      redirects to HTTPS
-                    </Badge>
-                  ) : (
-                    <Badge variant="destructive" className="font-normal">
-                      answers {scan.http.plainStatus} without redirecting
-                    </Badge>
-                  )}
-                  {scan.http.plainLocation && (
-                    <code className="font-mono text-[11px] text-muted-foreground">
-                      {scan.http.plainLocation}
-                    </code>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 text-[13px]">
-                  <span>HSTS</span>
-                  {scan.http.hsts ? (
-                    <Badge
-                      variant={scan.http.hsts.maxAge >= 15552000 ? "success" : "warning"}
-                      className="font-normal"
-                    >
-                      max-age {scan.http.hsts.maxAge}
-                      {scan.http.hsts.includeSubDomains && " · subdomains"}
-                      {scan.http.hsts.preload && " · preload"}
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="font-normal">
-                      not set
-                    </Badge>
-                  )}
-                </div>
-
-                <div className="space-y-1 pt-1">
-                  {scan.http.headers.map((header) => (
-                    <div key={header.name} className="flex items-start gap-2">
-                      {header.present ? (
-                        <CheckCircle className="mt-0.5 size-3.5 shrink-0 text-success" />
+            <Panel plain>
+              <PanelHeader title="HTTP behaviour" />
+              <PanelBody flush>
+                <RowList>
+                  <Row
+                    title="Plain HTTP"
+                    subtitle={scan.http.plainLocation || "port 80, followed nowhere"}
+                    mono
+                    trailing={
+                      scan.http.plainError ? (
+                        <Status verdict="notice" label="refused connection" />
+                      ) : scan.http.plainRedirects ? (
+                        <Status verdict="ok" label="redirects to HTTPS" />
                       ) : (
-                        <CrossCircle
-                          className={cn(
-                            "mt-0.5 size-3.5 shrink-0",
-                            header.level === "important"
-                              ? "text-warning"
-                              : "text-muted-foreground/60",
-                          )}
+                        <Status
+                          verdict="critical"
+                          label={`answers ${scan.http.plainStatus} without redirecting`}
                         />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="font-mono text-[11px]">
-                          {header.name}
-                          {header.value && (
-                            <span className="ml-2 text-muted-foreground">{header.value}</span>
-                          )}
-                        </p>
-                        {!header.present && (
-                          <p className="text-[11px] leading-relaxed text-muted-foreground">
-                            {header.detail}
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                      )
+                    }
+                    className="py-2"
+                  />
+                  <Row
+                    title="HSTS"
+                    subtitle={scan.http.hsts?.raw ?? "no Strict-Transport-Security header"}
+                    mono
+                    trailing={
+                      scan.http.hsts ? (
+                        <Status
+                          verdict={scan.http.hsts.maxAge >= 15552000 ? "ok" : "warning"}
+                          label={`max-age ${scan.http.hsts.maxAge}${
+                            scan.http.hsts.includeSubDomains ? " · subdomains" : ""
+                          }${scan.http.hsts.preload ? " · preload" : ""}`}
+                        />
+                      ) : (
+                        <Status verdict="notice" label="not set" />
+                      )
+                    }
+                    className="py-2"
+                  />
+                  {scan.http.headers.map((header) => (
+                    <Row
+                      key={header.name}
+                      leading={
+                        header.present ? (
+                          <CheckCircle className="size-3.5 text-success" />
+                        ) : (
+                          <CrossCircle
+                            className={cn(
+                              "size-3.5",
+                              header.level === "important"
+                                ? "text-warning"
+                                : "text-muted-foreground/60",
+                            )}
+                          />
+                        )
+                      }
+                      title={<span className="font-mono text-xs">{header.name}</span>}
+                      subtitle={header.present ? header.value : header.detail}
+                      mono={header.present}
+                      trailing={
+                        !header.present && header.level === "important" ? (
+                          <Tag tone="warning">missing</Tag>
+                        ) : !header.present ? (
+                          <Tag>optional</Tag>
+                        ) : undefined
+                      }
+                      className="py-2"
+                    />
                   ))}
-                </div>
+                </RowList>
               </PanelBody>
             </Panel>
           )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function ScanSummary({ scan }: { scan: TLSScan }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <GradeBadge grade={scan.grade} />
-        <div className="min-w-0">
-          <p className="text-[13px] font-medium">{scan.domain}</p>
-          <p className="text-xs text-muted-foreground">{scan.summary}</p>
-        </div>
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          checked {relativeTime(scan.checkedAt)}
-        </span>
-      </div>
-
-      {!scan.reachable && (
-        <Notice tone="danger" icon={CrossCircle} title="Nothing answered">
-          {scan.error}
-        </Notice>
-      )}
-
-      {scan.findings.length > 0 && (
-        <div className="space-y-2">
-          {scan.findings.map((finding) => (
-            <FindingRow key={finding.id} finding={finding} />
-          ))}
         </div>
       )}
-      {scan.reachable && scan.findings.length === 0 && (
-        <Notice tone="success" icon={CheckCircle} title="Nothing to fix">
-          Trusted chain, current protocols, and the headers that matter are in place.
-        </Notice>
-      )}
-    </div>
+    </Page>
   )
 }
 
-function FindingRow({ finding }: { finding: ScanFinding }) {
-  return (
-    <div
-      className={cn(
-        "flex min-w-0 gap-2.5 rounded-lg border p-2.5",
-        finding.level === "critical"
-          ? "border-destructive/30 bg-destructive/5"
-          : finding.level === "warning"
-            ? "border-warning/30 bg-warning/5"
-            : "border-hairline bg-surface-sunken",
-      )}
-    >
-      <LevelIcon
-        level={finding.level}
-        className={cn(
-          "mt-0.5 size-4 shrink-0",
-          finding.level === "critical"
-            ? "text-destructive"
-            : finding.level === "warning"
-              ? "text-warning"
-              : "text-muted-foreground",
-        )}
-      />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-[13px] font-medium">{finding.title}</p>
-        <p className="text-[11px] leading-relaxed text-muted-foreground">{finding.detail}</p>
-        {finding.advice && (
-          <p className="text-[11px] leading-relaxed text-foreground/80">{finding.advice}</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function LevelIcon({ level, className }: { level: string; className?: string }) {
-  if (level === "critical") return <ShieldOff className={className} />
-  if (level === "warning") return <Warning className={className} />
-  return <Information className={className} />
-}
-
-export function GradeBadge({ grade, className }: { grade: string; className?: string }) {
-  const tone =
-    grade === "A+" || grade === "A"
-      ? "border-success/30 bg-success/10 text-success"
-      : grade === "B"
-        ? "border-warning/30 bg-warning/10 text-warning"
-        : grade === "C"
-          ? "border-warning/40 bg-warning/15 text-warning"
-          : "border-destructive/30 bg-destructive/10 text-destructive"
-  return (
-    <span
-      className={cn(
-        "flex size-11 shrink-0 items-center justify-center rounded-xl border text-base font-semibold",
-        tone,
-        className,
-      )}
-    >
-      {grade}
-    </span>
-  )
+function gradeTone(grade: string): Tone {
+  if (grade === "A+" || grade === "A") return "success"
+  if (grade === "B" || grade === "C") return "warning"
+  return "danger"
 }
 
 function isOldProtocol(name: string) {

@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   AcronymJson,
   Clock,
-  Database,
   Download,
   FloppyDisk,
   Layout,
@@ -17,6 +17,7 @@ import {
 import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
 import { del, get, post } from "@/lib/api"
+import { resultToCSV } from "@/lib/db-export"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
@@ -31,22 +32,17 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { Badge } from "@/components/ui/badge"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Panel, PanelBody, PanelFooter, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, Notice, Spinner } from "@/components/state"
+import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 
 import { ResultGrid } from "@/components/database/result-grid"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
+import { Field } from "@/components/form"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 
@@ -54,7 +50,10 @@ type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
  *  history and saved snippets, and a result you can export. */
 export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: ConfirmFn }) {
   const { can } = useAuth()
-  const [sql, setSql] = useState("SELECT 1;")
+  const params = useSearchParams()
+  // A statement handed over in the URL — the diagram's "query this table" —
+  // opens in the editor; it is not run until Run is pressed.
+  const [sql, setSql] = useState(() => params.get("sql") || "SELECT 1;")
   const [risk, setRisk] = useState<QueryRisk | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [plan, setPlan] = useState<QueryResult | null>(null)
@@ -178,7 +177,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
 
   const exportResult = (format: "csv" | "json") => {
     if (!result) return
-    const text = format === "csv" ? toCSV(result) : toJSON(result)
+    const text = format === "csv" ? resultToCSV(result) : toJSON(result)
     const blob = new Blob([text], { type: format === "csv" ? "text/csv" : "application/json" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -198,11 +197,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] [&>*]:min-w-0">
         <Panel>
-          <PanelHeader
-            icon={Database}
-            title="SQL"
-            description={`${conn.driver} · ${conn.database}`}
-          />
+          <PanelHeader title="SQL" />
           <PanelBody flush>
             <CodeEditor
               className="h-56"
@@ -213,8 +208,13 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
             />
           </PanelBody>
           <PanelFooter>
-            <Button size="sm" onClick={run} disabled={busy || !can("service.control")}>
-              {busy ? <Spinner /> : <Play className="size-3.5" />}
+            <Button
+              size="sm"
+              onClick={run}
+              disabled={busy || !can("service.control")}
+              pending={busy}
+            >
+              <Play className="size-3.5" />
               Run
             </Button>
             <Button size="sm" variant="outline" onClick={explain} disabled={busy || !sql.trim()}>
@@ -230,13 +230,9 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
               <FloppyDisk className="size-3.5" />
               Save
             </Button>
-            {risk && !risk.destructive && (
-              <Badge variant="secondary" className="font-normal">
-                {risk.level}
-              </Badge>
-            )}
+            {risk && !risk.destructive && <Tag>{risk.level}</Tag>}
             {outline.data && (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-hint text-muted-foreground">
                 {plural(Object.keys(outline.data.tables).length, "table")} available to autocomplete
               </span>
             )}
@@ -270,17 +266,15 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
                     ringSafeScroll,
                   )}
                 >
-                  {history.data?.length === 0 && (
-                    <p className="p-3 text-xs text-muted-foreground">No statements yet.</p>
-                  )}
+                  {history.data?.length === 0 && <EmptyNote>No statements yet.</EmptyNote>}
                   {history.data?.map((h) => (
                     <button
                       key={h.id}
                       onClick={() => setSql(h.sql)}
                       className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent"
                     >
-                      <span className="truncate font-mono text-[11px]">{h.sql}</span>
-                      <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className="truncate font-mono text-hint">{h.sql}</span>
+                      <span className="flex items-center gap-1.5 text-micro text-muted-foreground">
                         <span
                           className={cn(
                             "size-1.5 rounded-full",
@@ -300,9 +294,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
                     ringSafeScroll,
                   )}
                 >
-                  {saved.data?.length === 0 && (
-                    <p className="p-3 text-xs text-muted-foreground">No saved queries.</p>
-                  )}
+                  {saved.data?.length === 0 && <EmptyNote>No saved queries.</EmptyNote>}
                   {saved.data?.map((q) => (
                     <div
                       key={q.id}
@@ -313,19 +305,19 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
                         className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
                       >
                         <span className="truncate text-xs font-medium">{q.name}</span>
-                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                        <span className="truncate font-mono text-micro text-muted-foreground">
                           {q.sql}
                         </span>
                       </button>
                       {can("service.control") && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6 shrink-0 text-destructive opacity-0 group-hover:opacity-100"
+                        <IconAction
+                          label={`Delete the saved query ${q.name}`}
+                          reveal
+                          className="shrink-0 text-destructive"
                           onClick={() => deleteSnippet(q)}
                         >
-                          <Trash className="size-3.5" />
-                        </Button>
+                          <Trash />
+                        </IconAction>
                       )}
                     </div>
                   ))}
@@ -338,11 +330,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
 
       {plan && (
         <Panel>
-          <PanelHeader
-            icon={Monorepo}
-            title="Query plan"
-            description="How the engine intends to run this — nothing was executed"
-          />
+          <PanelHeader title="Query plan" />
           <PanelBody flush>
             <ResultGrid result={plan} />
           </PanelBody>
@@ -352,9 +340,7 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
       {result && (
         <Panel>
           <PanelHeader
-            icon={Layout}
             title="Result"
-            description={result.statement}
             actions={
               result.columns.length > 0 && (
                 <>
@@ -371,7 +357,11 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
             }
           />
           <PanelBody flush>
-            <ResultGrid result={result} />
+            <ResultGrid
+              result={result}
+              emptyTitle="The statement ran and matched nothing"
+              emptyDescription="Not an error — the columns below are the shape it would have returned."
+            />
           </PanelBody>
         </Panel>
       )}
@@ -391,6 +381,7 @@ function SaveDialog({
   onOpenChange: (o: boolean) => void
   onSave: (name: string) => Promise<void>
 }) {
+  const id = useId()
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const save = async () => {
@@ -406,45 +397,43 @@ function SaveDialog({
     }
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Save query</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-1.5">
-          <Label htmlFor="snippet-name">Name</Label>
-          <Input
-            id="snippet-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Active users last 30 days"
-            autoFocus
-          />
-        </div>
-        <DialogFooter>
-          <Button onClick={save} disabled={!name.trim() || busy}>
-            {busy && <Spinner />}
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      title="Save query"
+      description="Keeps the statement in the editor against this connection, under a name."
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!name.trim() || busy} pending={busy}>
             Save
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <Field
+        label="Name"
+        htmlFor={`${id}-name`}
+        hint="Saved against this connection, for everyone who can open it."
+      >
+        <Input
+          id={`${id}-name`}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && !busy && void save()}
+          placeholder="Active users last 30 days"
+          autoFocus
+        />
+      </Field>
+    </Modal>
   )
 }
 
 // toCSV / toJSON build a downloadable file from an already-fetched result, so a
 // query result the operator is looking at can be saved without re-running it.
-function toCSV(result: QueryResult): string {
-  const escape = (v: unknown) => {
-    if (v === null || v === undefined) return ""
-    const s = typeof v === "object" ? JSON.stringify(v) : String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const lines = [result.columns.join(",")]
-  for (const row of result.rows) lines.push(row.map(escape).join(","))
-  return lines.join("\n")
-}
-
 function toJSON(result: QueryResult): string {
   const objs = result.rows.map((row) => {
     const o: Record<string, unknown> = {}

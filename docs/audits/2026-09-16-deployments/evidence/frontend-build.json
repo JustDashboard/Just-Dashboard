@@ -1,0 +1,12 @@
+{
+  "name": "frontend-build",
+  "command": [
+    "bun",
+    "run",
+    "build"
+  ],
+  "cwd": "frontend",
+  "started": "2026-09-16T01:21:30.791053+00:00",
+  "elapsed_seconds": 12.934,
+  "exit_code": 0
+}

@@ -1,0 +1,26 @@
+=== RUN   TestLiveC5ActivationAdapters
+=== RUN   TestLiveC5ActivationAdapters/immutable_container_and_all_C5_checks
+=== RUN   TestLiveC5ActivationAdapters/selected_application_port_survives_a_host_collision
+=== RUN   TestLiveC5ActivationAdapters/SIGTERM_escalates_to_bounded_SIGKILL
+=== RUN   TestLiveC5ActivationAdapters/Compose_uses_pinned_override_and_removes_private_env_file
+--- PASS: TestLiveC5ActivationAdapters (10.03s)
+    --- PASS: TestLiveC5ActivationAdapters/immutable_container_and_all_C5_checks (1.73s)
+    --- PASS: TestLiveC5ActivationAdapters/selected_application_port_survives_a_host_collision (2.03s)
+    --- PASS: TestLiveC5ActivationAdapters/SIGTERM_escalates_to_bounded_SIGKILL (1.55s)
+    --- PASS: TestLiveC5ActivationAdapters/Compose_uses_pinned_override_and_removes_private_env_file (2.61s)
+=== RUN   TestLiveC4ArtifactAdapters
+=== RUN   TestLiveC4ArtifactAdapters/automatic_recipe_and_secret_layers
+=== RUN   TestLiveC4ArtifactAdapters/Dockerfile
+=== RUN   TestLiveC4ArtifactAdapters/static
+=== RUN   TestLiveC4ArtifactAdapters/immutable_image
+=== RUN   TestLiveC4ArtifactAdapters/mixed_Compose
+=== RUN   TestLiveC4ArtifactAdapters/failed_build_preserves_live_runtime
+--- PASS: TestLiveC4ArtifactAdapters (29.83s)
+    --- PASS: TestLiveC4ArtifactAdapters/automatic_recipe_and_secret_layers (14.23s)
+    --- PASS: TestLiveC4ArtifactAdapters/Dockerfile (1.90s)
+    --- PASS: TestLiveC4ArtifactAdapters/static (6.43s)
+    --- PASS: TestLiveC4ArtifactAdapters/immutable_image (2.52s)
+    --- PASS: TestLiveC4ArtifactAdapters/mixed_Compose (2.93s)
+    --- PASS: TestLiveC4ArtifactAdapters/failed_build_preserves_live_runtime (1.36s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/deploy	39.893s

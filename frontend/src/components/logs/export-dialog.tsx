@@ -8,18 +8,9 @@ import { bytes } from "@/lib/format"
 import type { LogSource } from "@/lib/types"
 import { filterQuery, isFilterActive, resolveRange, TIME_RANGES } from "@/lib/log-filter"
 import type { LogFilterState, LogTimeRange } from "@/components/logs/types"
+import { Modal } from "@/components/modal"
+import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -49,6 +40,7 @@ export function ExportDialog({
   filter: LogFilterState
   boot: boolean
 }) {
+  const [open, setOpen] = useState(false)
   const [range, setRange] = useState<LogTimeRange>("all")
   const [since, setSince] = useState("")
   const [until, setUntil] = useState("")
@@ -75,27 +67,30 @@ export function ExportDialog({
     .join(", ")
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Download className="size-4" />
-          Export
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Export {source?.label ?? sourceId}</DialogTitle>
-          <DialogDescription>
-            A plain text file, oldest line first. Lines with no parseable timestamp are kept —
-            they continue the record above them.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label>Window</Label>
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Download className="size-4" />
+        Export
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title={<>Export {source?.label ?? sourceId}</>}
+        description="A plain text file, oldest line first. Lines with no parseable timestamp are kept —
+            they continue the record above them."
+        footer={
+          <Button asChild onClick={() => notify.success("Export started")}>
+            <a href={href} download>
+              <Download className="size-4" />
+              Download
+            </a>
+          </Button>
+        }
+      >
+        <div className="grid gap-4">
+          <Field label="Window" htmlFor="export-window">
             <Select value={range} onValueChange={(v) => setRange(v as LogTimeRange)}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="export-window" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -106,60 +101,53 @@ export function ExportDialog({
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </Field>
 
           {range === "custom" && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="export-since">From</Label>
+            <FieldRow>
+              <Field label="From" htmlFor="export-since">
                 <Input
                   id="export-since"
                   type="datetime-local"
                   value={since}
                   onChange={(e) => setSince(e.target.value)}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="export-until">To</Label>
+              </Field>
+              <Field label="To" htmlFor="export-until">
                 <Input
                   id="export-until"
                   type="datetime-local"
                   value={until}
                   onChange={(e) => setUntil(e.target.value)}
                 />
-              </div>
-            </div>
+              </Field>
+            </FieldRow>
           )}
 
-          {isFilterActive(filter) && (
-            <label className="flex items-center gap-2.5 text-sm">
-              <Switch checked={withFilter} onCheckedChange={setWithFilter} />
-              Apply the filter that is on screen
-            </label>
+          {(isFilterActive(filter) || hasArchives) && (
+            <OptionList>
+              {isFilterActive(filter) && (
+                <OptionRow
+                  title="Apply the filter that is on screen"
+                  hint="Only the lines the current search, exclusion and levels keep."
+                  checked={withFilter}
+                  onCheckedChange={setWithFilter}
+                />
+              )}
+              {hasArchives && (
+                <OptionRow
+                  title={`Include ${source?.archives} rotated ${source?.archives === 1 ? "archive" : "archives"}`}
+                  hint={`${bytes(source?.archiveBytes)} of older generations, read in order.`}
+                  checked={archives}
+                  onCheckedChange={setArchives}
+                />
+              )}
+            </OptionList>
           )}
 
-          {hasArchives && (
-            <label className="flex items-center gap-2.5 text-sm">
-              <Switch checked={archives} onCheckedChange={setArchives} />
-              Include {source?.archives} rotated{" "}
-              {source?.archives === 1 ? "archive" : "archives"} ({bytes(source?.archiveBytes)})
-            </label>
-          )}
-
-          <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            Downloads {summary}.
-          </p>
+          <FormNote>Downloads {summary}.</FormNote>
         </div>
-
-        <DialogFooter>
-          <Button asChild onClick={() => notify.success("Export started")}>
-            <a href={href} download>
-              <Download className="size-4" />
-              Download
-            </a>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

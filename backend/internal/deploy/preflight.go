@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,7 @@ type HostObservation struct {
 	Architecture    string                         `json:"architecture"`
 	AvailableMemory int64                          `json:"availableMemoryBytes"`
 	AvailableDisk   int64                          `json:"availableDiskBytes"`
+	CPUCount        int                            `json:"cpuCount,omitempty"`
 	Domains         []DomainObservation            `json:"domains"`
 	Firewall        FirewallObservation            `json:"firewall"`
 	Dependencies    []DependencyObservation        `json:"dependencies"`
@@ -83,10 +85,14 @@ type DependencyObservation struct {
 	ResourceKind string `json:"resourceKind"`
 	ResourceID   string `json:"resourceId"`
 	Available    bool   `json:"available"`
-	Fresh        bool   `json:"fresh,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Detail       string `json:"detail,omitempty"`
-	DeepLink     string `json:"deepLink,omitempty"`
+	// Missing distinguishes "the owner looked and it is not there" from
+	// "the owner could not look". A managed resource the deployment creates
+	// itself is allowed to be missing before its first start.
+	Missing  bool   `json:"missing,omitempty"`
+	Fresh    bool   `json:"fresh,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+	DeepLink string `json:"deepLink,omitempty"`
 }
 
 type ObservationRequest struct {
@@ -202,7 +208,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			proxyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			availability := o.proxy.Availability(proxyCtx)
 			proxyAvailable = availability.Nginx || availability.Caddy
-			certificateAutomation = availability.Certbot
+			certificateAutomation = availability.Certbot || availability.IngressContainer != ""
 			vhosts, err := o.proxy.ListVHosts(proxyCtx)
 			cancel()
 			if err == nil {
@@ -336,6 +342,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		}
 	}
 	observation.AvailableMemory = availableMemory()
+	observation.CPUCount = runtime.NumCPU()
 	diskRoot := o.volumeRoot
 	if diskRoot == "" {
 		diskRoot = "/"
@@ -408,7 +415,7 @@ func PreflightDraft(
 	if err := draft.Data.Intent.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := draft.Data.Source.Validate(); err != nil {
+	if err := draft.Data.Source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
 	if err := validateDetectionResult(draft.Data.Source, *draft.Data.Detection); err != nil {
@@ -462,6 +469,11 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	if configuration.Runtime.HostPort != 0 {
 		request.Ports = append(request.Ports, PortObservation{
 			Address: configuration.Runtime.BindAddress, Port: configuration.Runtime.HostPort, Protocol: "tcp",
+		})
+	}
+	for _, port := range configuration.Runtime.Ports {
+		request.Ports = append(request.Ports, PortObservation{
+			Address: port.BindAddress, Port: port.HostPort, Protocol: port.effectiveProtocol(),
 		})
 	}
 	if draft.Data.Detection != nil && draft.Data.Detection.Compose != nil {
@@ -538,6 +550,41 @@ func preflightFindings(
 		}
 	}
 	selected := selectedDetectionCandidate(detection)
+	if selected != nil && selected.Recipe == "go" && configuration.Build.Method == BuildRecipe && configuration.Build.GoVersion != "" {
+		if _, err := chooseGoRecipeVersion(configuration.Build.GoVersion, "", []byte("go "+selected.GoMinimumVersion)); err != nil {
+			findings = append(findings, finding("go_version_unsupported", PreflightBlocked,
+				"Selected Go version cannot build this source", err.Error(),
+				"The toolchain must satisfy the module's declared language requirement.",
+				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
+		}
+	}
+	if selected != nil && selected.Recipe == "node" && configuration.Build.Method == BuildRecipe {
+		switch chosen := configuration.Build.PackageManager; {
+		case chosen != "" && len(selected.PackageManagers) > 0 && !slices.Contains(selected.PackageManagers, chosen):
+			findings = append(findings, finding("package_manager_lockfile_missing", PreflightBlocked,
+				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(selected.PackageManagers, ", "),
+				"A frozen install needs the selected manager's own lockfile.",
+				"Choose a package manager whose lockfile is committed, or commit its lockfile.", "deploy", "configuration.build.packageManager"))
+		case chosen == "" && selected.PackageManager == "" && len(selected.PackageManagers) > 1:
+			findings = append(findings, finding("package_manager_ambiguous", PreflightBlocked,
+				"Competing lockfiles need a package manager", strings.Join(selected.PackageManagers, ", "),
+				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
+				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
+		}
+	}
+	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
+			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
+			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
+			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
+			"deploy", "configuration.build"))
+	}
+	if selected != nil && selected.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
+		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
+			"Source needs a different build plan", selected.RecipeIssue,
+			"The automatic recipe cannot satisfy the detected source requirements.",
+			"Use a Dockerfile or correct the source adapter/toolchain and run detection again.", "deploy", "configuration.build"))
+	}
 	if selected != nil && selected.BuildMethod != configuration.Build.Method {
 		severity := PreflightPass
 		title := "Detected build method was explicitly overridden"
@@ -661,9 +708,13 @@ func preflightFindings(
 				"Host port belongs to the live deployment", strconv.Itoa(port.Port), port.Detail,
 				"", "docker", "runtime.hostPort"))
 		} else if port.InUse {
-			findings = append(findings, finding("port_conflict", PreflightBlocked,
+			severity, remedy := PreflightBlocked, "Choose another port or import the resource that owns it."
+			if !configuration.Runtime.HostNetwork {
+				severity, remedy = PreflightWarning, "An available host port will be selected automatically; connection details and proxy routes use the actual binding."
+			}
+			findings = append(findings, finding("port_conflict", severity,
 				"Host port is already in use", strconv.Itoa(port.Port), port.Detail,
-				"Choose another port or import the resource that owns it.", "docker", "runtime.hostPort"))
+				remedy, "docker", "runtime.hostPort"))
 		} else {
 			findings = append(findings, finding("port_available", PreflightPass,
 				"Host port is available", strconv.Itoa(port.Port), "No listener currently claims this port.", "", "docker", "runtime.hostPort"))
@@ -736,24 +787,32 @@ func preflightFindings(
 				"The public route and HTTP certificate challenge will not reach this server.",
 				"Update DNS or explicitly accept the delayed cutover.", "proxy", field))
 		}
-		if planned.HTTPS && !observed.CertificateAvailable {
-			severity := PreflightBlocked
-			measured := planned.Hostname
-			means := "HTTPS activation has no valid existing certificate/key pair for this hostname."
-			action := "Issue or import the certificate in Certificates, then retry preflight."
-			if observed.CertificateAutomation {
-				measured += "; certbot available"
-				means = "Certificate automation is installed, but issuance must finish before deployment cutover."
-			}
-			item := finding("certificate_unavailable", severity,
-				"HTTPS certificate is unavailable", measured, means, action, "certificates", field)
-			item.DeepLink = "/certificates"
+		if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
+			// Not a blocker any more, because the release itself closes it:
+			// `provision_certificate` orders one over HTTP-01 before the
+			// candidate starts. What is measured here is the capability — a
+			// certbot this host actually has — and reporting it as a refusal
+			// would block the ordinary first deployment of a name nobody has
+			// published before, which is the case this path exists for.
+			item := finding("certificate_automatic", PreflightPass,
+				"HTTPS certificate will be issued during the release", planned.Hostname+"; certbot available",
+				"No certificate covers this hostname yet; the release orders one before it starts the candidate.",
+				"", "certificates", field)
+			item.DeepLink = "/proxy/certificates"
+			findings = append(findings, item)
+		} else if planned.HTTPS && !observed.CertificateAvailable {
+			item := finding("certificate_unavailable", PreflightBlocked,
+				"HTTPS certificate is unavailable", planned.Hostname,
+				"HTTPS activation has no existing certificate for this hostname and this host cannot issue one.",
+				"Install certbot, or issue and import the certificate in Certificates, then retry preflight.",
+				"certificates", field)
+			item.DeepLink = "/proxy/certificates"
 			findings = append(findings, item)
 		} else if planned.HTTPS {
 			item := finding("certificate_available", PreflightPass,
 				"HTTPS certificate is available", observed.CertificateName,
 				"The certificate inventory contains a valid certificate for this hostname.", "", "certificates", field)
-			item.DeepLink = "/certificates"
+			item.DeepLink = "/proxy/certificates"
 			findings = append(findings, item)
 		}
 	}
@@ -770,21 +829,21 @@ func preflightFindings(
 				"Firewall state is unavailable", observation.Firewall.Detail,
 				"The public port cannot be compared with the host firewall.",
 				"Inspect the firewall before deploying a public bind.", "security", "runtime.hostPort")
-			item.DeepLink = "/security?tab=firewall"
+			item.DeepLink = "/security/firewall"
 			findings = append(findings, item)
 		case !observation.Firewall.Enabled:
 			item := finding("firewall_mismatch", PreflightWarning,
 				"Public port has no active firewall boundary", observation.Firewall.Backend,
 				"The selected direct bind may be reachable from every network interface.",
 				"Enable an allowlisted firewall policy or explicitly accept public exposure.", "security", "runtime.hostPort")
-			item.DeepLink = "/security?tab=firewall"
+			item.DeepLink = "/security/firewall"
 			findings = append(findings, item)
 		case !observation.Firewall.Allows:
 			item := finding("firewall_mismatch", PreflightBlocked,
 				"Firewall does not admit the selected port", observation.Firewall.Backend,
 				"The runtime may start, but clients cannot reach its direct public port.",
 				"Add the port through Firewall or choose a route already admitted.", "security", "runtime.hostPort")
-			item.DeepLink = "/security?tab=firewall"
+			item.DeepLink = "/security/firewall"
 			findings = append(findings, item)
 		default:
 			findings = append(findings, finding("firewall_matches", PreflightPass,
@@ -822,10 +881,10 @@ func preflightFindings(
 				exclusiveStorage = true
 			}
 		}
-		if !eligibleProfile || configuration.Runtime.HostPort != 0 || configuration.Runtime.HostNetwork || exclusiveStorage {
+		if !eligibleProfile || configuration.Runtime.HostPort != 0 || len(configuration.Runtime.Ports) != 0 || configuration.Runtime.HostNetwork || exclusiveStorage {
 			findings = append(findings, finding("strategy_ineligible", PreflightBlocked,
 				"Blue/green activation is not eligible", "",
-				"A fixed host port, host network, non-HTTP profile, or writable exclusive mount prevents two candidates.",
+				"A fixed or published host port, host network, non-HTTP profile, or writable exclusive mount prevents two candidates.",
 				"Use stop-first or remove the exclusive requirement.", "deploy", "runtime.strategy"))
 		} else {
 			findings = append(findings, finding("strategy_blue_green", PreflightPass,
@@ -834,7 +893,9 @@ func preflightFindings(
 		}
 	}
 	for _, variable := range configuration.Variables {
-		if variable.Required && variable.Reference == "" {
+		// A literal value or a generation request satisfies a required
+		// variable as well as a typed reference does.
+		if variable.Required && variable.Reference == "" && variable.Value == "" && variable.Generate == 0 {
 			findings = append(findings, finding("variable_required_"+strings.ToLower(variable.Name), PreflightDecision,
 				"Required variable needs a value", variable.Name, "The runtime would receive an empty required value.",
 				"Set or reference the variable.", "deploy", "variables."+variable.Name))
@@ -844,6 +905,10 @@ func preflightFindings(
 		findings = append(findings, finding("variable_graph_valid", PreflightPass,
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
+	}
+	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
+		configuration.Build.Method == BuildRecipe && hasDatabaseDependency(configuration.Dependencies) {
+		findings = append(findings, schemaStepFinding(selected, configuration.Build))
 	}
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
@@ -879,6 +944,18 @@ func preflightFindings(
 			}
 			continue
 		}
+		if !observed.Available && observed.Missing && dependency.Ownership == OwnershipManaged && dependency.ResourceKind == "docker_volume" {
+			// Docker creates a named volume the first time a container mounts
+			// it. Blocking on its absence made every blueprint with data
+			// storage undeployable on a fresh host.
+			item := finding("storage_pending_creation", PreflightPass,
+				"Managed volume will be created on first start", dependency.ResourceID,
+				"The deployment owns this volume; Docker creates it when the first release starts.",
+				"", dependencyOwner(dependency), field)
+			item.DeepLink = observed.DeepLink
+			findings = append(findings, item)
+			continue
+		}
 		if !observed.Available {
 			severity := PreflightBlocked
 			if dependency.Ownership == OwnershipObserved {
@@ -906,6 +983,20 @@ func preflightFindings(
 			item.DeepLink = observed.DeepLink
 			findings = append(findings, item)
 		}
+	}
+	if limit := configuration.Runtime.MemoryMB; limit > 0 && observation.AvailableMemory > 0 && limit<<20 > observation.AvailableMemory {
+		findings = append(findings, finding("runtime_memory_limit_exceeds_host", PreflightWarning,
+			"Memory limit exceeds available host memory",
+			fmt.Sprintf("%d MiB requested, %d MiB available", limit, observation.AvailableMemory>>20),
+			"The container may be allowed more memory than the host can currently give it.",
+			"Lower the limit or free host memory.", "metrics", "runtime.memoryMb"))
+	}
+	if limit := configuration.Runtime.CPUs; limit > 0 && observation.CPUCount > 0 && limit > float64(observation.CPUCount) {
+		findings = append(findings, finding("runtime_cpu_limit_exceeds_host", PreflightWarning,
+			"CPU limit exceeds host CPUs",
+			fmt.Sprintf("%s CPU requested, %d available", strconv.FormatFloat(limit, 'f', -1, 64), observation.CPUCount),
+			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
+			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
 	if observation.AvailableMemory > 0 && observation.AvailableMemory < 256<<20 {
 		findings = append(findings, finding("host_memory_low", PreflightWarning,
@@ -1130,6 +1221,13 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "run stored release task when configured"
 		case StepBackupGate:
 			action.Action = "verify required backup evidence"
+		case StepProvisionCertificate:
+			action.Action = "resolve or issue the certificate for the planned HTTPS domains"
+			for _, domain := range configuration.Domains {
+				if domain.HTTPS {
+					action.Arguments = append(action.Arguments, domain.Hostname)
+				}
+			}
 		case StepStartCandidate:
 			action.Action = "start candidate release"
 			action.Arguments = append([]string(nil), configuration.Runtime.Command...)
@@ -1184,6 +1282,8 @@ func stepOwner(step StepKey) string {
 		return "docker"
 	case StepActivate:
 		return "proxy/docker"
+	case StepProvisionCertificate:
+		return "certificates"
 	case StepBackupGate:
 		return "backups"
 	default:
@@ -1194,7 +1294,8 @@ func stepOwner(step StepKey) string {
 func stepChangesState(step StepKey) bool {
 	switch step {
 	case StepAcquireSource, StepPrepareContext, StepBuildArtifact, StepReleaseTask,
-		StepStartCandidate, StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify:
+		StepProvisionCertificate, StepStartCandidate, StepActivate, StepRetirePrevious,
+		StepRecordRelease, StepNotify:
 		return true
 	default:
 		return false
@@ -1204,6 +1305,39 @@ func stepChangesState(step StepKey) bool {
 func hasReadinessCheck(checks []PlannedCheck) bool {
 	for _, check := range checks {
 		if check.Phase == "readiness" && check.Required {
+			return true
+		}
+	}
+	return false
+}
+
+// schemaStepFinding is the difference between a database that is linked and
+// one that is usable: a database created here is empty, and the detected
+// tool creates no table until its schema step runs somewhere in the plan.
+func schemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) PreflightFinding {
+	label := candidate.SchemaTool
+	if tool := schemaToolByName(candidate.SchemaTool); tool != nil {
+		label = tool.Label
+	}
+	if schemaStepConfigured(candidate, build) {
+		return finding("schema_step", PreflightPass,
+			"The application's schema is applied before it serves", label,
+			"The linked database receives the "+label+" schema from the start command, a release task or the package's start script.",
+			"", "deploy", "build.startCommand")
+	}
+	action := "Choose how the " + label + " schema reaches the linked database before the application starts."
+	if candidate.SchemaCommand != "" {
+		action = "Run " + candidate.SchemaCommand + " in the start command before the server starts, or apply the schema another way."
+	}
+	return finding("schema_step_missing", PreflightWarning,
+		"The linked database will not receive the application's schema", label,
+		"A database created here is empty, and "+label+" creates no table until its schema step runs; the first request would fail.",
+		action, "deploy", "build.startCommand")
+}
+
+func hasDatabaseDependency(dependencies []PlannedDependency) bool {
+	for _, dependency := range dependencies {
+		if dependency.Kind == "database" {
 			return true
 		}
 	}

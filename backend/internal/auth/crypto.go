@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -24,6 +25,11 @@ var ErrDecrypt = errors.New("decrypt failed")
 // child process the dashboard spawns would inherit it.
 type Sealer struct {
 	aead cipher.AEAD
+	// hmacKey is derived from the master key, not the master key itself:
+	// DeriveHMAC's output reaches request handlers (a suggested hostname), so
+	// it must not be computable from the same bytes that decrypt every secret
+	// sealed at rest.
+	hmacKey []byte
 }
 
 func NewSealer(masterKeyHex string) (*Sealer, error) {
@@ -42,7 +48,22 @@ func NewSealer(masterKeyHex string) (*Sealer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Sealer{aead: aead}, nil
+	derived := sha256.Sum256(append([]byte("jd-derive-v1"), key...))
+	return &Sealer{aead: aead, hmacKey: derived[:]}, nil
+}
+
+// DeriveHMAC returns HMAC-SHA256(derivedKey, label || 0x00 || data), where
+// derivedKey is sha256("jd-derive-v1" || masterKey): a value stable for the
+// life of this install and unique to label+data, without exposing the key
+// that seals secrets at rest. Callers use it where a deterministic
+// per-install secret is needed — a hostname suggestion, for instance, that
+// must propose the same address every time it is asked for the same name.
+func (s *Sealer) DeriveHMAC(label string, data []byte) []byte {
+	mac := hmac.New(sha256.New, s.hmacKey)
+	mac.Write([]byte(label))
+	mac.Write([]byte{0})
+	mac.Write(data)
+	return mac.Sum(nil)
 }
 
 func (s *Sealer) Seal(plaintext string) (string, error) {

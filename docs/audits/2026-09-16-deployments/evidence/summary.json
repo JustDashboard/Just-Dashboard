@@ -1,0 +1,246 @@
+{
+  "source_commit": "d1389e7d58196f147607193307e78b4b802c0b0a",
+  "audit_date_utc": "2026-09-16",
+  "application_version": "0.6.7",
+  "tool_versions": {
+    "go": "1.26.8",
+    "bun": "1.4.0",
+    "declared_bun": "1.3.11",
+    "node": "24.12.0",
+    "docker": "29.8.0",
+    "compose": "5.5.1",
+    "buildx": "0.37.0"
+  },
+  "capabilities": 71,
+  "capability_status_counts": {
+    "Absent": 9,
+    "Component": 27,
+    "Live": 10,
+    "Partial": 22,
+    "Unavailable": 3
+  },
+  "tests": {
+    "backend-build": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "build",
+        "./..."
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:20:39.439435+00:00",
+      "elapsed_seconds": 6.516,
+      "exit_code": 0
+    },
+    "backend-vet": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "vet",
+        "./..."
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:20:45.955726+00:00",
+      "elapsed_seconds": 1.329,
+      "exit_code": 0
+    },
+    "backend-tests": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "test",
+        "-json",
+        "-count=1",
+        "./..."
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:20:47.285656+00:00",
+      "elapsed_seconds": 87.319,
+      "exit_code": 0,
+      "top_level_counts": {
+        "pass": 1235,
+        "fail": 0,
+        "skip": 29
+      },
+      "all_test_counts_including_nested": {
+        "pass": 1869,
+        "fail": 0,
+        "skip": 95
+      }
+    },
+    "deployment-race": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "test",
+        "-race",
+        "-json",
+        "-count=1",
+        "./internal/deploy",
+        "./internal/api",
+        "./internal/proxysvc",
+        "./internal/backups",
+        "./internal/store"
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:22:58.570495+00:00",
+      "elapsed_seconds": 352.639,
+      "exit_code": 1,
+      "top_level_counts": {
+        "pass": 446,
+        "fail": 1,
+        "skip": 11
+      },
+      "all_test_counts_including_nested": {
+        "pass": 719,
+        "fail": 1,
+        "skip": 11
+      }
+    },
+    "frontend-lint": {
+      "command": [
+        "bun",
+        "run",
+        "lint"
+      ],
+      "cwd": "frontend",
+      "started": "2026-09-16T01:20:39.412185+00:00",
+      "elapsed_seconds": 51.378,
+      "exit_code": 0
+    },
+    "frontend-build": {
+      "command": [
+        "bun",
+        "run",
+        "build"
+      ],
+      "cwd": "frontend",
+      "started": "2026-09-16T01:21:30.791053+00:00",
+      "elapsed_seconds": 12.934,
+      "exit_code": 0
+    },
+    "frontend-unit": {
+      "command": [
+        "bun",
+        "run",
+        "test"
+      ],
+      "cwd": "frontend",
+      "started": "2026-09-16T01:21:43.725938+00:00",
+      "elapsed_seconds": 0.166,
+      "exit_code": 0
+    },
+    "frontend-browser": {
+      "command": [
+        "bun",
+        "run",
+        "test:browser"
+      ],
+      "cwd": "frontend",
+      "started": "2026-09-16T01:21:49.937780+00:00",
+      "elapsed_seconds": 518.502,
+      "exit_code": 1
+    },
+    "live-artifacts-activation": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/deploy",
+        "-run",
+        "TestLiveC[45]"
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:21:22.581827+00:00",
+      "elapsed_seconds": 35.766,
+      "exit_code": 0,
+      "top_level_counts": {
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "all_test_counts_including_nested": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "live-ingress": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/proxysvc",
+        "-run",
+        "TestLive(DockerCaddy|DeploymentWebroot)"
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:21:58.349382+00:00",
+      "elapsed_seconds": 8.518,
+      "exit_code": 1,
+      "top_level_counts": {
+        "pass": 2,
+        "fail": 1,
+        "skip": 0
+      },
+      "all_test_counts_including_nested": {
+        "pass": 2,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "live-database-connections": {
+      "command": [
+        "/tmp/jd-go1.26.8/bin/go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/api",
+        "-run",
+        "TestLiveDeploymentDatabaseConnection"
+      ],
+      "cwd": "backend",
+      "started": "2026-09-16T01:22:06.868563+00:00",
+      "elapsed_seconds": 40.102,
+      "exit_code": 0,
+      "top_level_counts": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "all_test_counts_including_nested": {
+        "pass": 6,
+        "fail": 0,
+        "skip": 0
+      }
+    }
+  },
+  "browser": {
+    "total": 98,
+    "passed": 94,
+    "flaky_passed_on_retry": 1,
+    "failed": 3,
+    "engine": "chromium",
+    "api_mode": "mocked",
+    "server_mode": "development"
+  },
+  "fleet_race": {
+    "initial_p95_ms": 530.574017,
+    "budget_ms": 500,
+    "isolated_retry_p95_ms": 305.513868,
+    "full_suite_rerun": false,
+    "data_race_warning_count_in_full_stream": 0
+  },
+  "caddy": {
+    "initial_existing_site_case": "failed at docker port: page not found",
+    "unchanged_retry": "passed",
+    "cause": "unestablished"
+  },
+  "qualifications": [
+    "No universal reliability claim",
+    "Competitors documented, not locally installed/tested",
+    "Go counts include skips; top-level and nested counts are not additive",
+    "Broader DB integrations intentionally isolated/skipped; five quick-setup engines tested separately",
+    "No public ACME or complete real UI-to-public-app acceptance run",
+    "No daemon-wide prune",
+    "No product source edits, commit, push, or production deployment"
+  ]
+}

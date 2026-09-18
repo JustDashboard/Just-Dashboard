@@ -1,0 +1,122 @@
+{
+  "id": "nextcloud",
+  "version": "1.0.0",
+  "name": "Nextcloud",
+  "category": "http",
+  "profile": "web",
+  "description": "Files, calendars, contacts and the apps around them. This runs on SQLite, which is right for a few people; link a PostgreSQL or MariaDB database later for more.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.nextcloud.com/",
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/nextcloud/server",
+    "reviewedAt": "2026-09-18",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "nextcloud:35.0.0-apache",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Nextcloud refuses requests for any other host name."
+    },
+    {
+      "name": "admin-user",
+      "kind": "text",
+      "label": "Admin user",
+      "variable": "NEXTCLOUD_ADMIN_USER",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web interface, WebDAV and sync clients",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "html",
+      "target": "/var/www/html",
+      "purpose": "Files, apps, configuration and the SQLite database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Status page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/status.php",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "NEXTCLOUD_TRUSTED_DOMAINS",
+        "value": "{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "OVERWRITEPROTOCOL",
+        "value": "https"
+      },
+      {
+        "kind": "set_variable",
+        "name": "SQLITE_DATABASE",
+        "value": "nextcloud"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Nextcloud upgrades one major version at a time and rewrites its data on the way; back up first.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "cloud.example.test"
+      },
+      "digest": "sha256:5db1460a2ba429588b55c17538802c3d87c20749aa312d7bcb619fa400786d80"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "NEXTCLOUD_ADMIN_PASSWORD",
+      "label": "Admin password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in the first time."
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
@@ -30,8 +31,9 @@ import (
 // dashboard itself runs as, which is the one every root-owned checkout will
 // use.
 //
-//	read            who is signed in, which repository this is, what is open
-//	service.control opening a pull request
+//	read            who is signed in, which repository this is, what is open,
+//	                what the workflow runs said
+//	service.control opening, merging and checking out a pull request
 //	system.admin    signing in and out — this stores a credential that can push
 //	                to every repository the account can reach, which is a
 //	                larger thing than any one git operation
@@ -39,11 +41,21 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 	r.Route("/github", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleGitHubStatus))
 		r.Method(http.MethodGet, "/repo", s.handle(s.handleGitHubRepo))
+		r.Method(http.MethodGet, "/repos", s.handle(s.handleGitHubRepos))
+		r.Method(http.MethodGet, "/branches", s.handle(s.handleGitHubBranches))
 		r.Method(http.MethodGet, "/pulls", s.handle(s.handleGitHubPulls))
+		r.Method(http.MethodGet, "/pulls/{number}", s.handle(s.handleGitHubPull))
+		r.Method(http.MethodGet, "/runs", s.handle(s.handleGitHubRuns))
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/pulls", s.handle(s.handleGitHubPullCreate))
+			// Merging changes the base branch on GitHub and checking out
+			// fetches somebody else's branch into this working tree: both
+			// are recoverable — a merge is reverted, a checkout switched
+			// away from — so they share the tier with every other git write.
+			r.Method(http.MethodPost, "/pulls/{number}/merge", s.handle(s.handleGitHubPullMerge))
+			r.Method(http.MethodPost, "/pulls/{number}/checkout", s.handle(s.handleGitHubPullCheckout))
 		})
 
 		r.Group(func(r chi.Router) {
@@ -110,17 +122,142 @@ func (s *Server) handleGitHubRepo(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
+// handleGitHubRepos lists what the signed-in account can deploy.
+//
+// Unlike the routes around it this one takes no ?path=: the whole point is to
+// choose a repository that has not been cloned onto this server yet, so the
+// credential consulted is the dashboard's own — the same one every deployment
+// clone will use.
+func (s *Server) handleGitHubRepos(w http.ResponseWriter, r *http.Request) error {
+	httpx.SkipAudit(r)
+	if !s.modules.github.Available() {
+		return httpx.Err(http.StatusServiceUnavailable, "not_installed", ghx.ErrNotInstalled.Error())
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	repos, err := s.modules.github.ListRepos(r.Context(), "", r.URL.Query().Get("query"), limit)
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, repos)
+	return nil
+}
+
+// handleGitHubBranches lists one repository's branches so a deployment can be
+// pointed at something other than the default without typing a ref from memory.
+func (s *Server) handleGitHubBranches(w http.ResponseWriter, r *http.Request) error {
+	httpx.SkipAudit(r)
+	if !s.modules.github.Available() {
+		return httpx.Err(http.StatusServiceUnavailable, "not_installed", ghx.ErrNotInstalled.Error())
+	}
+	repo := strings.TrimSpace(r.URL.Query().Get("repo"))
+	if repo == "" {
+		return httpx.BadRequest("name the repository as owner/name")
+	}
+	branches, err := s.modules.github.ListBranches(r.Context(), "", repo)
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, branches)
+	return nil
+}
+
 func (s *Server) handleGitHubPulls(w http.ResponseWriter, r *http.Request) error {
 	path, err := s.gitRepo(r)
 	if err != nil {
 		return err
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	pulls, err := s.modules.github.ListPulls(r.Context(), path, limit)
+	pulls, err := s.modules.github.ListPulls(r.Context(), path, r.URL.Query().Get("state"), limit)
 	if err != nil {
 		return ghError(err)
 	}
 	httpx.JSON(w, http.StatusOK, pulls)
+	return nil
+}
+
+func pullNumber(r *http.Request) (int, error) {
+	n, err := strconv.Atoi(chi.URLParam(r, "number"))
+	if err != nil || n <= 0 {
+		return 0, httpx.BadRequest("a pull request number is required")
+	}
+	return n, nil
+}
+
+func (s *Server) handleGitHubPull(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	number, err := pullNumber(r)
+	if err != nil {
+		return err
+	}
+	pull, err := s.modules.github.ViewPull(r.Context(), path, number)
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, pull)
+	return nil
+}
+
+type githubMergeRequest struct {
+	Method       string `json:"method"`
+	DeleteBranch bool   `json:"deleteBranch"`
+}
+
+func (s *Server) handleGitHubPullMerge(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	number, err := pullNumber(r)
+	if err != nil {
+		return err
+	}
+	var req githubMergeRequest
+	_ = httpx.DecodeJSON(r, &req)
+	err = s.modules.github.MergePull(r.Context(), path, number, req.Method, req.DeleteBranch)
+	httpx.SetAudit(r, "github.pull.merge", path, map[string]any{
+		"ok": err == nil, "number": number, "method": req.Method, "deleteBranch": req.DeleteBranch,
+	})
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+func (s *Server) handleGitHubPullCheckout(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	number, err := pullNumber(r)
+	if err != nil {
+		return err
+	}
+	err = s.modules.github.CheckoutPull(r.Context(), path, number)
+	httpx.SetAudit(r, "github.pull.checkout", path, map[string]any{"ok": err == nil, "number": number})
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+// handleGitHubRuns lists recent Actions runs — for one branch when asked —
+// so "did CI pass on what I just pushed" is answered beside the push button.
+func (s *Server) handleGitHubRuns(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	runs, err := s.modules.github.ListRuns(r.Context(), path, r.URL.Query().Get("branch"), limit)
+	if err != nil {
+		return ghError(err)
+	}
+	httpx.JSON(w, http.StatusOK, runs)
 	return nil
 }
 

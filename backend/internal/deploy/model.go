@@ -52,6 +52,7 @@ const (
 
 type Run struct {
 	ID         int64      `json:"id"`
+	RunNumber  int64      `json:"runNumber"`
 	ProjectID  int64      `json:"projectId"`
 	StartedAt  time.Time  `json:"startedAt"`
 	EndedAt    *time.Time `json:"endedAt,omitempty"`

@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -73,5 +75,63 @@ func TestProcessPriorityRequiresANiceValue(t *testing.T) {
 	w := c.do(http.MethodPut, "/api/v1/processes/2/priority", `{}`, nil)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("missing nice value = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// Starting a program under PM2 runs an operator-named file as a host account.
+// That is code execution, not service control, and is gated accordingly.
+func TestPM2StartNeedsSystemAdmin(t *testing.T) {
+	s := testServer(t)
+	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "limited-pm2", auth.RoleLimited)}
+	w := c.do(http.MethodPost, "/api/v1/pm2/start", `{"account":"deploy","script":"/srv/a.js"}`, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("limited pm2 start = %d, want 403: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPM2StartRequiresAnAccountAndAScript(t *testing.T) {
+	c, _ := newClient(t)
+	w := c.do(http.MethodPost, "/api/v1/pm2/start", `{"script":"/srv/a.js"}`, nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("missing account = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProcessTreeReportsTheParentChain(t *testing.T) {
+	c, _ := newClient(t)
+	w := c.do(http.MethodGet, "/api/v1/processes/"+strconv.Itoa(os.Getpid())+"/tree", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET process tree: %d: %s", w.Code, w.Body.String())
+	}
+	var got procs.ProcessTree
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Ancestors) == 0 || got.Ancestors[len(got.Ancestors)-1].PID != int32(os.Getppid()) {
+		t.Fatalf("ancestors = %+v, want the chain ending in ppid %d", got.Ancestors, os.Getppid())
+	}
+	if got.Children == nil {
+		t.Fatal("children must be a list, not null")
+	}
+	if w := c.do(http.MethodGet, "/api/v1/processes/2147483000/tree", "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("missing pid = %d, want 404", w.Code)
+	}
+}
+
+func TestProcessDetailReportsSocketsWithoutEnvironment(t *testing.T) {
+	c, _ := newClient(t)
+	w := c.do(http.MethodGet, "/api/v1/processes/"+strconv.Itoa(os.Getpid()), "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET process detail: %d: %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := got["environ"]; leaked {
+		t.Fatal("process detail must never carry the environment")
+	}
+	if got["openFilesLimit"] == nil {
+		t.Fatalf("open files limit missing from %v", got)
 	}
 }

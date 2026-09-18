@@ -9,7 +9,6 @@ import {
   Gauge,
   Layout,
   LockClosed,
-  Servers,
   Slash,
   Stopwatch,
 } from "@/components/icons"
@@ -26,19 +25,13 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Detail, DetailList } from "@/components/page"
-import { notify } from "@/lib/toast"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { Modal } from "@/components/modal"
 import {
   Table,
   TableBody,
@@ -47,6 +40,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Meter } from "@/components/meter"
+import { copyText } from "@/lib/clipboard"
 
 /**
  * The Monitor tab answers the two questions asked at three in the morning, and
@@ -115,24 +110,16 @@ function ActivityPanel({
   const slowest = sessions.reduce((m, s) => Math.max(m, s.seconds), 0)
 
   return (
-    <Panel>
+    <Panel plain className="animate-rise">
       <PanelHeader
-        icon={ChartActivity}
         title="Running now"
-        description={`${sessions.length} session${sessions.length === 1 ? "" : "s"} · refreshed every 5s`}
         actions={
           <>
             {blocked.length > 0 && (
-              <Badge variant="destructive" className="font-normal">
-                <LockClosed className="size-3" />
-                {blocked.length} blocked
-              </Badge>
+              <Status verdict="critical" icon={LockClosed} label={`${blocked.length} blocked`} />
             )}
             {slowest > 60 && (
-              <Badge variant="warning" className="font-normal">
-                <Stopwatch className="size-3" />
-                longest {duration(slowest)}
-              </Badge>
+              <Status verdict="warning" icon={Stopwatch} label={`longest ${duration(slowest)}`} />
             )}
           </>
         }
@@ -145,7 +132,7 @@ function ActivityPanel({
             description="The server reports no active sessions."
           />
         ) : (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="-mx-4 min-w-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -165,23 +152,23 @@ function ActivityPanel({
                     onClick={() => setDetail(s)}
                     className={cn(
                       "cursor-pointer",
-                      s.blockedBy && "bg-destructive/[0.05]",
-                      blockers.has(s.pid) && "bg-warning/[0.06]",
+                      s.blockedBy && "bg-wash-danger",
+                      blockers.has(s.pid) && "bg-wash-warning",
                     )}
                   >
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="font-mono">
                       {s.pid}
                       {s.self && (
-                        <span className="ml-1.5 text-[10px] text-muted-foreground">
+                        <span className="ml-1.5 text-micro text-muted-foreground">
                           this dashboard
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="truncate text-xs text-muted-foreground">
+                    <TableCell className="truncate text-muted-foreground">
                       {s.user || "—"}
                       {s.client ? ` · ${s.client}` : ""}
                     </TableCell>
-                    <TableCell className="text-xs">{s.state || "—"}</TableCell>
+                    <TableCell>{s.state || "—"}</TableCell>
                     <TableCell
                       className={cn(
                         "text-right font-mono text-xs tabular-nums",
@@ -195,7 +182,7 @@ function ActivityPanel({
                         {s.query || "—"}
                       </code>
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell>
                       {s.blockedBy ? (
                         <span className="text-destructive">blocked by {s.blockedBy}</span>
                       ) : (
@@ -229,9 +216,9 @@ function ActivityPanel({
                                     connection will see it drop.
                                   </p>
                                   {s.query && (
-                                    <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">
+                                    <Well className="mt-2 max-h-32 text-hint whitespace-pre-wrap">
                                       {s.query}
-                                    </pre>
+                                    </Well>
                                   )}
                                 </>
                               ),
@@ -313,47 +300,23 @@ function SessionDialog({
   onStop?: () => void
 }) {
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 font-mono">
-            Session {session.pid}
-            {session.self && (
-              <Badge variant="secondary" className="font-normal">
-                this dashboard
-              </Badge>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-
-        <DetailList>
-          <Detail label="User">{session.user || "—"}</Detail>
-          <Detail label="Database">{session.database || "—"}</Detail>
-          <Detail label="State">{session.state || "—"}</Detail>
-          <Detail label="Running for">{duration(session.seconds)}</Detail>
-          <Detail label="Client">{session.client || "—"}</Detail>
-          <Detail label="Waiting on">{session.wait || "nothing"}</Detail>
-          {session.blockedBy && (
-            <Detail label="Blocked by">{`session ${session.blockedBy}`}</Detail>
-          )}
-        </DetailList>
-
-        <div className="space-y-1.5">
-          <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            Statement
-          </p>
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap">
-            {session.query || "No statement reported — this session is idle."}
-          </pre>
-        </div>
-
-        <DialogFooter className="sm:justify-between">
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="lg"
+      title={
+        <>
+          Session {session.pid}
+          {session.self && <Tag>this dashboard</Tag>}
+        </>
+      }
+      footer={
+        <>
           <Button
             size="sm"
             variant="ghost"
             onClick={() => {
-              navigator.clipboard.writeText(session.query ?? "")
-              notify.success("Statement copied")
+              void copyText(session.query ?? "", "Statement copied")
             }}
             disabled={!session.query}
           >
@@ -371,9 +334,30 @@ function SessionDialog({
               </Button>
             )}
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <DetailList className="gap-y-2">
+        <Detail label="User">{session.user || "—"}</Detail>
+        <Detail label="Database">{session.database || "—"}</Detail>
+        <Detail label="State">{session.state || "—"}</Detail>
+        <Detail label="Running for">{duration(session.seconds)}</Detail>
+        <Detail label="Client">{session.client || "—"}</Detail>
+        <Detail label="Waiting on">{session.wait || "nothing"}</Detail>
+        {session.blockedBy && <Detail label="Blocked by">{`session ${session.blockedBy}`}</Detail>}
+      </DetailList>
+
+      <div className="space-y-1.5">
+        <p className="eyebrow">Statement</p>
+        <Well className="max-h-72 text-hint whitespace-pre-wrap">
+          {session.query || (
+            <span className="text-muted-foreground italic">
+              No statement reported — this session is idle.
+            </span>
+          )}
+        </Well>
+      </div>
+    </Modal>
   )
 }
 
@@ -399,51 +383,12 @@ function TableSizeDialog({
   const indexRatio = size.dataBytes > 0 ? size.indexBytes / size.dataBytes : 0
   const perRow = size.rows > 0 ? size.bytes / size.rows : 0
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="font-mono">{size.table}</DialogTitle>
-        </DialogHeader>
-
-        <DetailList>
-          <Detail label="Schema">{size.schema || "—"}</Detail>
-          <Detail label="Rows">
-            <span title="The engine's own estimate, not an exact count">
-              {size.rows.toLocaleString()}
-            </span>
-          </Detail>
-          <Detail label="Data">{size.dataBytes ? bytes(size.dataBytes) : "—"}</Detail>
-          <Detail label="Indexes">{size.indexBytes ? bytes(size.indexBytes) : "—"}</Detail>
-          <Detail label="Total">{size.bytes ? bytes(size.bytes) : "—"}</Detail>
-          {totalBytes > 0 && (
-            <Detail label="Share of schema">{`${((size.bytes / totalBytes) * 100).toFixed(1)}%`}</Detail>
-          )}
-          {perRow > 0 && (
-            <Detail label="Average row">
-              <span title="Total bytes divided by the estimated row count">{bytes(perRow)}</span>
-            </Detail>
-          )}
-          {indexRatio > 0 && (
-            <Detail label="Index to data">
-              <span
-                title={
-                  indexRatio > 1
-                    ? "The indexes on this table are larger than the rows they index"
-                    : undefined
-                }
-              >{`${indexRatio.toFixed(2)}×`}</span>
-            </Detail>
-          )}
-        </DetailList>
-
-        {indexRatio > 1 && (
-          <Notice tone="warning" title="More index than data">
-            Every write to this table maintains more index than row. That is sometimes right — a
-            read-heavy lookup table — and sometimes an index nobody uses.
-          </Notice>
-        )}
-
-        <DialogFooter className="sm:justify-between">
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={size.table}
+      footer={
+        <>
           {onOpen ? (
             <Button size="sm" variant="ghost" onClick={onOpen}>
               <Layout className="size-3.5" />
@@ -455,9 +400,47 @@ function TableSizeDialog({
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <DetailList>
+        <Detail label="Schema">{size.schema || "—"}</Detail>
+        <Detail label="Rows">
+          <span title="The engine's own estimate, not an exact count">
+            {size.rows.toLocaleString()}
+          </span>
+        </Detail>
+        <Detail label="Data">{size.dataBytes ? bytes(size.dataBytes) : "—"}</Detail>
+        <Detail label="Indexes">{size.indexBytes ? bytes(size.indexBytes) : "—"}</Detail>
+        <Detail label="Total">{size.bytes ? bytes(size.bytes) : "—"}</Detail>
+        {totalBytes > 0 && (
+          <Detail label="Share of schema">{`${((size.bytes / totalBytes) * 100).toFixed(1)}%`}</Detail>
+        )}
+        {perRow > 0 && (
+          <Detail label="Average row">
+            <span title="Total bytes divided by the estimated row count">{bytes(perRow)}</span>
+          </Detail>
+        )}
+        {indexRatio > 0 && (
+          <Detail label="Index to data">
+            <span
+              title={
+                indexRatio > 1
+                  ? "The indexes on this table are larger than the rows they index"
+                  : undefined
+              }
+            >{`${indexRatio.toFixed(2)}×`}</span>
+          </Detail>
+        )}
+      </DetailList>
+
+      {indexRatio > 1 && (
+        <Notice tone="warning" title="More index than data">
+          Every write to this table maintains more index than row. That is sometimes right — a
+          read-heavy lookup table — and sometimes an index nobody uses.
+        </Notice>
+      )}
+    </Modal>
   )
 }
 
@@ -486,34 +469,29 @@ function StoragePanel({
 
   const o = overview.data
   const shown = expanded ? o.tables : o.tables.slice(0, 10)
-  const largest = o.tables[0]?.bytes ?? 0
+  // The engine lists by size, but the bar is drawn against the largest table
+  // wherever it sits, so an engine that orders differently still compares.
+  const largest = o.tables.reduce((m, t) => Math.max(m, t.bytes), 0)
   const pool = o.pool
 
   return (
-    <Panel>
+    <Panel plain className="animate-rise">
       <PanelHeader
-        icon={Servers}
         title="Storage"
-        description={
-          o.sizesKnown
-            ? `${bytes(o.totalBytes)} across ${plural(o.tableCount, "table")} in ${o.schema}`
-            : `${plural(o.tableCount, "table")} in ${o.schema}`
-        }
         actions={
-          <Badge
-            variant="outline"
-            className="font-normal"
+          <span
+            className="numeric inline-flex items-center gap-1.5 text-xs text-muted-foreground"
             title="The dashboard's own connection pool"
           >
-            <Gauge className="size-3" />
+            <Gauge className="size-3 shrink-0" />
             pool {pool.inUse}/{pool.open}
             {pool.waitCount > 0 ? ` · ${pool.waitCount} waits` : ""}
-          </Badge>
+          </span>
         }
       />
       <PanelBody flush>
         {!o.sizesKnown && (
-          <Notice tone="default" className="m-3" title="Sizes unavailable on this engine">
+          <Notice tone="default" className="mb-3" title="Sizes unavailable on this engine">
             This build of the engine does not report per-table bytes, so only row counts are shown.
             They are still the fastest way to find the table that grew.
           </Notice>
@@ -521,7 +499,7 @@ function StoragePanel({
         {o.tables.length === 0 ? (
           <EmptyState icon={Database} title="No tables in this schema" />
         ) : (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="-mx-4 min-w-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -540,20 +518,20 @@ function StoragePanel({
                     onClick={() => setDetail(t)}
                     className="cursor-pointer"
                   >
-                    <TableCell className="font-mono text-xs">{t.table}</TableCell>
+                    <TableCell className="font-mono">{t.table}</TableCell>
                     <TableCell
-                      className="text-right font-mono text-xs tabular-nums text-muted-foreground"
+                      className="text-right font-mono text-muted-foreground tabular-nums"
                       title="The engine's own estimate, not an exact count"
                     >
                       {t.rows.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    <TableCell className="text-right font-mono text-muted-foreground tabular-nums">
                       {t.dataBytes ? bytes(t.dataBytes) : "—"}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    <TableCell className="text-right font-mono text-muted-foreground tabular-nums">
                       {t.indexBytes ? bytes(t.indexBytes) : "—"}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs tabular-nums">
+                    <TableCell className="text-right font-mono tabular-nums">
                       {t.bytes ? bytes(t.bytes) : "—"}
                     </TableCell>
                     <TableCell>
@@ -561,12 +539,10 @@ function StoragePanel({
                           the total: the question is "which one is the big one",
                           and against a total every row in a wide schema is a
                           sliver. */}
-                      <span className="block h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                        <span
-                          className="block h-full rounded-full bg-primary/70"
-                          style={{ width: largest ? `${(t.bytes / largest) * 100}%` : "0%" }}
-                        />
-                      </span>
+                      <Meter
+                        value={largest ? (t.bytes / largest) * 100 : 0}
+                        label={`${t.table} relative to the largest table`}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

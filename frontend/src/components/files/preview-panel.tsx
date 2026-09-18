@@ -1,15 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ArrowUpRight,
   Calculator,
   Clipboard,
   Cross,
   Download,
+  Eye,
   Fingerprint,
   FolderOpen,
-  Image,
   Pencil,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -17,29 +17,29 @@ import { downloadUrl, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileChecksum, FileEntry, FilePreview, FileUsage } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Detail, DetailList } from "@/components/page"
-import { PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
+import { PaneHeader, Well } from "@/components/panel"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { FileIcon, kindOfEntry } from "@/components/files/file-icon"
+import { Meter } from "@/components/meter"
+import { copyText } from "@/lib/clipboard"
+import { rawUrl } from "@/components/files/media"
+import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 
-/** The raw URL for a file, cache-busted by its own modification time. */
-export function rawUrl(path: string, modified?: string) {
-  return downloadUrl("/files/raw", { path, v: modified ? Date.parse(modified) : undefined })
-}
+export { rawUrl } from "@/components/files/media"
 
 /**
- * What one click gets you.
+ * The inspector beside the listing: what one click gets you.
  *
  * Opening a file used to mean loading it into the editor — the right answer
  * for a config file and the wrong one for a 200 MB log, a JPEG, a tarball and
  * a binary, three of which arrived at the same sheet only to be refused. A
  * single click now asks the server what the thing *is* and shows that: the
  * first hundred lines, the picture, the contents of the archive, the size of
- * the directory. Opening it — the editor, the image editor, the download — is
- * the deliberate second action.
+ * the directory. Opening it — the viewer, the editor, the image editor, the
+ * download — is the deliberate second action.
  *
  * Nothing here loads a whole file. The text is a head the server trimmed, the
  * image is a URL the browser fetches itself, and the recursive size of a
@@ -49,6 +49,7 @@ export function PreviewPanel({
   entry,
   canWrite,
   onOpen,
+  onView,
   onEditImage,
   onNavigate,
   onClose,
@@ -56,7 +57,10 @@ export function PreviewPanel({
 }: {
   entry: FileEntry | null
   canWrite: boolean
+  /** The editor. */
   onOpen: (path: string) => void
+  /** The full-screen viewer. */
+  onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
   onClose: () => void
@@ -65,11 +69,16 @@ export function PreviewPanel({
   if (!entry) {
     return (
       <div className={cn("flex min-h-0 flex-col", className)}>
-        <EmptyState
-          icon={Image}
-          title="Nothing selected"
-          description="Click a row to see what it is — the first lines of a file, a picture, what is inside an archive."
-        />
+        <PaneHeader className="gap-2 pr-1.5">
+          <span className="min-w-0 flex-1 truncate text-body font-medium">Details</span>
+          <IconAction label="Hide the details" className="size-7" onClick={onClose}>
+            <Cross />
+          </IconAction>
+        </PaneHeader>
+        <EmptyNote className="px-5 py-10 leading-relaxed">
+          Click a file to see what it is — the first lines, the picture, what is inside an archive —
+          without opening it.
+        </EmptyNote>
       </div>
     )
   }
@@ -82,6 +91,7 @@ export function PreviewPanel({
       entry={entry}
       canWrite={canWrite}
       onOpen={onOpen}
+      onView={onView}
       onEditImage={onEditImage}
       onNavigate={onNavigate}
       onClose={onClose}
@@ -94,6 +104,7 @@ function Preview({
   entry,
   canWrite,
   onOpen,
+  onView,
   onEditImage,
   onNavigate,
   onClose,
@@ -102,6 +113,7 @@ function Preview({
   entry: FileEntry
   canWrite: boolean
   onOpen: (path: string) => void
+  onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
   onClose: () => void
@@ -110,37 +122,38 @@ function Preview({
   const [preview, setPreview] = useState<FilePreview>()
   const [error, setError] = useState<Error>()
   const path = entry.path
+  const modified = entry.modified
 
+  // Re-read when the entry's own modification time moves — a saved edit, a
+  // replaced picture — so the head and the facts are the file as it is now.
   useEffect(() => {
     const controller = new AbortController()
     get<FilePreview>("/files/preview", { path }, controller.signal)
       .then(setPreview)
       .catch((err) => !controller.signal.aborted && setError(err))
     return () => controller.abort()
-  }, [path])
+  }, [path, modified])
 
   const kind = kindOfEntry(entry)
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
-      <PanelHeader className="gap-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <FileIcon entry={entry} className="size-7" />
-          <div className="min-w-0">
-            <h2 className="truncate text-[13px] leading-tight font-medium" title={entry.name}>
-              {entry.name}
-            </h2>
-            <p className="truncate text-xs leading-tight text-muted-foreground">
-              {preview?.kind === "dir" ? "Folder" : kind.label}
-              {preview?.width ? ` · ${preview.width}×${preview.height}` : ""}
-            </p>
-          </div>
+      <PaneHeader className="gap-2 pr-1.5">
+        <FileIcon entry={entry} className="size-5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-body leading-tight font-medium" title={entry.name}>
+            {entry.name}
+          </h2>
+          <p className="truncate text-hint leading-tight text-muted-foreground">
+            {preview?.kind === "dir" ? "Folder" : kind.label}
+            {preview?.width ? ` · ${preview.width}×${preview.height}` : ""}
+          </p>
         </div>
-        <IconAction label="Close the preview" onClick={onClose}>
+        <IconAction label="Hide the details" className="size-7" onClick={onClose}>
           <Cross />
         </IconAction>
-      </PanelHeader>
+      </PaneHeader>
 
-      <PanelBody scroll className="space-y-3 p-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         {error && <ErrorState error={error} />}
         {!preview && !error && <LoadingRows rows={3} />}
         {preview && (
@@ -150,14 +163,21 @@ function Preview({
               preview={preview}
               canWrite={canWrite}
               onOpen={onOpen}
+              onView={onView}
               onEditImage={onEditImage}
               onNavigate={onNavigate}
             />
             <Facts entry={entry} preview={preview} />
-            <Actions entry={entry} preview={preview} canWrite={canWrite} onOpen={onOpen} />
+            <Actions
+              entry={entry}
+              preview={preview}
+              canWrite={canWrite}
+              onOpen={onOpen}
+              onView={onView}
+            />
           </>
         )}
-      </PanelBody>
+      </div>
     </div>
   )
 }
@@ -167,6 +187,7 @@ function PreviewBody({
   preview,
   canWrite,
   onOpen,
+  onView,
   onEditImage,
   onNavigate,
 }: {
@@ -174,6 +195,7 @@ function PreviewBody({
   preview: FilePreview
   canWrite: boolean
   onOpen: (path: string) => void
+  onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
 }) {
@@ -181,16 +203,26 @@ function PreviewBody({
     case "image":
       return (
         <div className="space-y-2">
-          <div className="checkerboard flex max-h-72 items-center justify-center overflow-hidden rounded-lg border border-hairline p-2">
+          <button
+            type="button"
+            className="flex max-h-72 w-full items-center justify-center overflow-hidden rounded-lg border border-hairline checkerboard p-2 focus-ring"
+            onClick={() => onView(entry)}
+            title="View full screen"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={rawUrl(entry.path, preview.modified)}
               alt={entry.name}
               className="max-h-64 max-w-full object-contain"
             />
-          </div>
+          </button>
           {canWrite && (
-            <Button size="sm" variant="outline" className="w-full" onClick={() => onEditImage(entry.path)}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => onEditImage(entry.path)}
+            >
               <Pencil className="size-3.5" />
               Crop, rotate, resize
             </Button>
@@ -213,10 +245,10 @@ function PreviewBody({
     case "text":
       return (
         <div className="space-y-2">
-          <Well className="max-h-72 whitespace-pre p-0">
+          <Well className="max-h-72 p-0 whitespace-pre">
             <TextHead text={preview.text ?? ""} />
           </Well>
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-between text-hint text-muted-foreground">
             <span>
               {preview.truncated
                 ? `First ${preview.lines} lines of ${bytes(preview.size)}`
@@ -230,31 +262,7 @@ function PreviewBody({
         </div>
       )
     case "archive":
-      return (
-        <div className="space-y-1.5">
-          <p className="text-[11px] text-muted-foreground">
-            {preview.archiveError
-              ? `Could not read the archive: ${preview.archiveError}`
-              : preview.entries?.length
-                ? `${preview.entryCount}${preview.moreEntries ? "+" : ""} entries inside`
-                : "This archive's format cannot be listed here — download it to unpack."}
-          </p>
-          {preview.entries && preview.entries.length > 0 && (
-            <Well className="max-h-64 space-y-0.5 p-2">
-              {preview.entries.map((item) => (
-                <div key={item.name} className="flex items-center justify-between gap-3">
-                  <span className="truncate" title={item.name}>
-                    {item.name}
-                  </span>
-                  {!item.isDir && (
-                    <span className="numeric shrink-0 text-muted-foreground">{bytes(item.size)}</span>
-                  )}
-                </div>
-              ))}
-            </Well>
-          )}
-        </div>
-      )
+      return <ArchiveListing preview={preview} />
     case "dir":
       return <DirectoryPreview entry={entry} preview={preview} onNavigate={onNavigate} />
     default:
@@ -264,66 +272,6 @@ function PreviewBody({
         </div>
       )
   }
-}
-
-/** The head, with line numbers, because "line 42" is how errors are reported. */
-function TextHead({ text }: { text: string }) {
-  const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text])
-  return (
-    <div className="grid grid-cols-[auto_1fr] gap-x-3 p-2">
-      <div className="numeric shrink-0 text-right text-muted-foreground/60 select-none">
-        {lines.map((_, i) => (
-          <div key={i}>{i + 1}</div>
-        ))}
-      </div>
-      <div className="min-w-0">
-        {lines.map((line, i) => (
-          <div key={i} className="whitespace-pre">
-            {line || " "}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/**
- * A PDF through a blob rather than straight from the API.
- *
- * The API's own responses carry `X-Frame-Options: DENY`, which is what keeps
- * the dashboard out of somebody else's iframe and which a browser applies to
- * the PDF viewer too. Fetching the bytes and framing a blob URL keeps that
- * header exactly as strict as it is and still shows the document.
- */
-function PdfPreview({ path, modified }: { path: string; modified: string }) {
-  const [url, setUrl] = useState<string>()
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let objectUrl: string | undefined
-    const controller = new AbortController()
-    fetch(rawUrl(path, modified), { credentials: "include", signal: controller.signal })
-      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(res.statusText))))
-      .then((blob) => {
-        objectUrl = URL.createObjectURL(blob)
-        setUrl(objectUrl)
-      })
-      .catch(() => !controller.signal.aborted && setFailed(true))
-    return () => {
-      controller.abort()
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [path, modified])
-
-  if (failed) {
-    return (
-      <p className="rounded-lg border border-dashed border-hairline p-4 text-center text-xs text-muted-foreground">
-        This PDF could not be loaded for preview. Download it to read it.
-      </p>
-    )
-  }
-  if (!url) return <LoadingRows rows={2} />
-  return <iframe src={url} title="PDF preview" className="h-72 w-full rounded-lg border border-hairline" />
 }
 
 /** A folder's own row says "—" for size. This is the button that answers it. */
@@ -353,16 +301,21 @@ function DirectoryPreview({
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <Button size="sm" variant="outline" className="flex-1" onClick={() => onNavigate(entry.path)}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          onClick={() => onNavigate(entry.path)}
+        >
           <FolderOpen className="size-3.5" />
           Open
         </Button>
-        <Button size="sm" variant="outline" className="flex-1" onClick={measure} disabled={busy}>
-          {busy ? <Spinner className="size-3.5" /> : <Calculator className="size-3.5" />}
+        <Button size="sm" variant="outline" className="flex-1" onClick={measure} pending={busy}>
+          <Calculator className="size-3.5" />
           Measure
         </Button>
       </div>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-hint text-muted-foreground">
         {preview.childCount ?? 0} item{preview.childCount === 1 ? "" : "s"} directly inside —{" "}
         {preview.dirCount ?? 0} folder{preview.dirCount === 1 ? "" : "s"}, {preview.fileCount ?? 0}{" "}
         file
@@ -377,27 +330,24 @@ function DirectoryPreview({
             </span>
           </p>
           {usage.truncated && (
-            <p className="text-[11px] text-warning">
+            <p className="text-hint text-warning">
               The walk stopped at its budget, so this is a floor rather than the total.
             </p>
           )}
           {usage.largest?.map((item) => (
             <button
               key={item.path}
-              className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-[11px] hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded-sm px-1 py-0.5 text-left text-hint hover:bg-accent"
               onClick={() => item.isDir && onNavigate(item.path)}
             >
               <span className="w-24 shrink-0 truncate" title={item.name}>
                 {item.name}
               </span>
-              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-sunken">
-                <span
-                  className="block h-full rounded-full bg-primary/60"
-                  style={{
-                    width: `${usage.bytes > 0 ? Math.max(2, (item.bytes / usage.bytes) * 100) : 0}%`,
-                  }}
-                />
-              </span>
+              <Meter
+                value={usage.bytes > 0 ? Math.max(2, (item.bytes / usage.bytes) * 100) : 0}
+                label={`${item.name} share of the total`}
+                className="flex-1"
+              />
               <span className="numeric w-14 shrink-0 text-right text-muted-foreground">
                 {bytes(item.bytes)}
               </span>
@@ -432,14 +382,10 @@ function Facts({ entry, preview }: { entry: FileEntry; preview: FilePreview }) {
       {preview.isSymlink && (
         <Detail label="Links to" className="font-mono break-all">
           {preview.symlinkTarget}
-          {preview.linkBroken && (
-            <Badge variant="destructive" className="ml-1 text-[10px] font-normal">
-              broken
-            </Badge>
-          )}
+          {preview.linkBroken && <span className="ml-1 text-destructive">broken</span>}
         </Detail>
       )}
-      <Detail label="Path" className="font-mono break-all text-[11px]">
+      <Detail label="Path" className="font-mono text-hint break-all">
         {entry.path}
       </Detail>
     </DetailList>
@@ -451,11 +397,13 @@ function Actions({
   preview,
   canWrite,
   onOpen,
+  onView,
 }: {
   entry: FileEntry
   preview: FilePreview
   canWrite: boolean
   onOpen: (path: string) => void
+  onView: (entry: FileEntry) => void
 }) {
   const [sum, setSum] = useState<FileChecksum>()
   const [hashing, setHashing] = useState(false)
@@ -478,11 +426,7 @@ function Actions({
     }
   }
 
-  const copy = (text: string, what: string) =>
-    navigator.clipboard
-      ?.writeText(text)
-      .then(() => notify.success(`${what} copied`))
-      .catch(() => notify.error("The browser refused clipboard access"))
+  const copy = (text: string, what: string) => void copyText(text, `${what} copied`)
 
   if (preview.kind === "dir") {
     return (
@@ -498,6 +442,10 @@ function Actions({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
+        <Button size="xs" variant="outline" onClick={() => onView(entry)}>
+          <Eye className="size-3" />
+          View
+        </Button>
         {preview.editable && (
           <Button size="xs" variant="outline" onClick={() => onOpen(entry.path)}>
             <Pencil className="size-3" />
@@ -514,14 +462,14 @@ function Actions({
           <Clipboard className="size-3" />
           Copy path
         </Button>
-        <Button size="xs" variant="outline" onClick={checksum} disabled={hashing}>
-          {hashing ? <Spinner className="size-3" /> : <Fingerprint className="size-3" />}
+        <Button size="xs" variant="outline" onClick={checksum} pending={hashing}>
+          <Fingerprint className="size-3" />
           Checksum
         </Button>
       </div>
       {sum && (
         <button
-          className="w-full rounded-md border border-hairline bg-surface-sunken p-2 text-left font-mono text-[10px] break-all hover:border-primary"
+          className="w-full rounded-md border border-hairline bg-surface-sunken p-2 text-left font-mono text-micro break-all hover:border-primary"
           onClick={() => copy(sum.sum, "Checksum")}
           title="Copy the checksum"
         >
@@ -530,7 +478,7 @@ function Actions({
         </button>
       )}
       {preview.kind === "binary" && (
-        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <p className="flex items-center gap-1 text-hint text-muted-foreground">
           <Fingerprint className="size-3" />
           Compare the checksum against the one you were given, rather than trusting the size.
         </p>

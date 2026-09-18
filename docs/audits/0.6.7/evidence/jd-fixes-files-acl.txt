@@ -1,0 +1,92 @@
+=== RUN   TestZipExtractionEnforcesActualBytesAndEntryCount
+=== RUN   TestZipExtractionEnforcesActualBytesAndEntryCount/expanded_bytes
+=== RUN   TestZipExtractionEnforcesActualBytesAndEntryCount/entries
+--- PASS: TestZipExtractionEnforcesActualBytesAndEntryCount (0.00s)
+    --- PASS: TestZipExtractionEnforcesActualBytesAndEntryCount/expanded_bytes (0.00s)
+    --- PASS: TestZipExtractionEnforcesActualBytesAndEntryCount/entries (0.00s)
+=== RUN   TestZipExtractionHonoursCancellation
+--- PASS: TestZipExtractionHonoursCancellation (0.00s)
+=== RUN   TestExtractRejectsMaliciousArchivePathsBeforeOutsideWrite
+--- PASS: TestExtractRejectsMaliciousArchivePathsBeforeOutsideWrite (0.00s)
+=== RUN   TestExtractRejectsAbsoluteArchiveSymlinkTargetBeforeFollowupWrite
+--- PASS: TestExtractRejectsAbsoluteArchiveSymlinkTargetBeforeFollowupWrite (0.00s)
+=== RUN   TestCopyAndMoveRejectOutwardDestination
+=== RUN   TestCopyAndMoveRejectOutwardDestination/copy/file
+=== RUN   TestCopyAndMoveRejectOutwardDestination/copy/directory
+=== RUN   TestCopyAndMoveRejectOutwardDestination/move/directory
+--- PASS: TestCopyAndMoveRejectOutwardDestination (0.00s)
+    --- PASS: TestCopyAndMoveRejectOutwardDestination/copy/file (0.00s)
+    --- PASS: TestCopyAndMoveRejectOutwardDestination/copy/directory (0.00s)
+    --- PASS: TestCopyAndMoveRejectOutwardDestination/move/directory (0.00s)
+=== RUN   TestMoveReplacesTheSymlinkEntryAndCopyPreservesFileMode
+--- PASS: TestMoveReplacesTheSymlinkEntryAndCopyPreservesFileMode (0.00s)
+=== RUN   TestCopyRejectsSameFileAndDescendant
+--- PASS: TestCopyRejectsSameFileAndDescendant (0.00s)
+=== RUN   TestRecursiveCopyRejectsExistingChildSymlink
+--- PASS: TestRecursiveCopyRejectsExistingChildSymlink (0.00s)
+=== RUN   TestCopyPreservesNormalReplacementAndSourceLinks
+--- PASS: TestCopyPreservesNormalReplacementAndSourceLinks (0.00s)
+=== RUN   TestCopyPreservesExistingAccessACL
+--- PASS: TestCopyPreservesExistingAccessACL (0.00s)
+=== RUN   TestCopyRemovesInheritedACLWhenDestinationHadNone
+--- PASS: TestCopyRemovesInheritedACLWhenDestinationHadNone (0.00s)
+=== RUN   TestCopyAccessACLHelpersFailClosed
+--- PASS: TestCopyAccessACLHelpersFailClosed (0.00s)
+=== RUN   TestResolveContainment
+--- PASS: TestResolveContainment (0.00s)
+=== RUN   TestMutationsRejectOutwardSymlinkBeforeMissingDescendants
+=== RUN   TestMutationsRejectOutwardSymlinkBeforeMissingDescendants/mkdir
+=== RUN   TestMutationsRejectOutwardSymlinkBeforeMissingDescendants/copy
+=== RUN   TestMutationsRejectOutwardSymlinkBeforeMissingDescendants/extract
+--- PASS: TestMutationsRejectOutwardSymlinkBeforeMissingDescendants (0.00s)
+    --- PASS: TestMutationsRejectOutwardSymlinkBeforeMissingDescendants/mkdir (0.00s)
+    --- PASS: TestMutationsRejectOutwardSymlinkBeforeMissingDescendants/copy (0.00s)
+    --- PASS: TestMutationsRejectOutwardSymlinkBeforeMissingDescendants/extract (0.00s)
+=== RUN   TestResolveEntryDoesNotDereference
+--- PASS: TestResolveEntryDoesNotDereference (0.00s)
+=== RUN   TestStatReportsTheSymlinkItself
+--- PASS: TestStatReportsTheSymlinkItself (0.00s)
+=== RUN   TestChmodDoesNotFollowSymlinks
+--- PASS: TestChmodDoesNotFollowSymlinks (0.00s)
+=== RUN   TestSymlinkChecksItsTarget
+--- PASS: TestSymlinkChecksItsTarget (0.00s)
+=== RUN   TestLookupUserIsConcurrencySafe
+--- PASS: TestLookupUserIsConcurrencySafe (0.00s)
+=== RUN   TestFindRanksTheNameAboveThePath
+--- PASS: TestFindRanksTheNameAboveThePath (0.00s)
+=== RUN   TestFindPrefersTheTightestRun
+--- PASS: TestFindPrefersTheTightestRun (0.00s)
+=== RUN   TestFindTermsAreAnded
+--- PASS: TestFindTermsAreAnded (0.00s)
+=== RUN   TestFindSkipsNoiseAndHiddenDirectories
+--- PASS: TestFindSkipsNoiseAndHiddenDirectories (0.00s)
+=== RUN   TestFindStaysInsideTheRoots
+--- PASS: TestFindStaysInsideTheRoots (0.00s)
+=== RUN   TestFindReportsMatchPositionsInTheName
+--- PASS: TestFindReportsMatchPositionsInTheName (0.00s)
+=== RUN   TestFindEmptyQueryFindsNothing
+--- PASS: TestFindEmptyQueryFindsNothing (0.00s)
+=== RUN   TestHomeFallsBackInsideTheRoots
+--- PASS: TestHomeFallsBackInsideTheRoots (0.00s)
+=== RUN   TestPlacesOnlyOffersWhatIsReachable
+--- PASS: TestPlacesOnlyOffersWhatIsReachable (0.00s)
+=== RUN   TestCompleteFiltersAndContains
+--- PASS: TestCompleteFiltersAndContains (0.00s)
+=== RUN   TestPreviewKinds
+--- PASS: TestPreviewKinds (0.00s)
+=== RUN   TestPreviewTruncatesAndRefusesToOfferAnEdit
+--- PASS: TestPreviewTruncatesAndRefusesToOfferAnEdit (0.00s)
+=== RUN   TestPreviewPeeksInsideArchives
+--- PASS: TestPreviewPeeksInsideArchives (0.01s)
+=== RUN   TestMediaTypeIsAnAllowlist
+--- PASS: TestMediaTypeIsAnAllowlist (0.00s)
+=== RUN   TestImageSizeReadsWebPAndSVG
+--- PASS: TestImageSizeReadsWebPAndSVG (0.00s)
+=== RUN   TestUsageCountsATreeAndNamesTheHeaviestChild
+--- PASS: TestUsageCountsATreeAndNamesTheHeaviestChild (0.00s)
+=== RUN   TestChecksumMatchesTheKnownDigest
+--- PASS: TestChecksumMatchesTheKnownDigest (0.00s)
+=== RUN   TestPreviewStaysInsideTheRoots
+--- PASS: TestPreviewStaysInsideTheRoots (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/files	1.077s

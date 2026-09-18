@@ -54,8 +54,15 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDBConnUpdate))
+			r.Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
+			// Where the server is reachable from. Reading it lists containers
+			// and the firewall; changing it recreates the container with a
+			// different port binding, which is the Docker page's Recreate
+			// under another name and sits in the same group.
+			r.Method(http.MethodGet, "/{id}/access", s.handle(s.handleDBAccess))
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
+				r.Method(http.MethodPut, "/{id}/access", s.handle(s.handleDBAccessUpdate))
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.
@@ -76,6 +83,9 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/outline", s.handle(s.handleDBOutline))
 		r.Method(http.MethodGet, "/{id}/relations", s.handle(s.handleDBRelations))
 		r.Method(http.MethodGet, "/{id}/graph", s.handle(s.handleDBGraph))
+		// How the diagram of that graph was arranged. Reading it is part of
+		// reading the schema; only saving sits with the other writes below.
+		r.Method(http.MethodGet, "/{id}/diagram", s.handle(s.handleDBDiagramGet))
 		r.Method(http.MethodGet, "/{id}/activity", s.handle(s.handleDBActivity))
 		r.Method(http.MethodGet, "/{id}/search", s.handle(s.handleDBSearch))
 		r.Method(http.MethodGet, "/{id}/overview", s.handle(s.handleDBOverview))
@@ -99,6 +109,11 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPatch, "/{id}/rows", s.handle(s.handleDBRowUpdate))
 			r.Method(http.MethodPost, "/{id}/queries", s.handle(s.handleDBSavedCreate))
 			r.Method(http.MethodDelete, "/{id}/queries/{qid}", s.handle(s.handleDBSavedDelete))
+			// A saved diagram arrangement is dashboard state, not database state:
+			// resetting one loses nothing that a Tidy cannot redraw, so it sits
+			// with the saved queries rather than in the destructive group.
+			r.Method(http.MethodPut, "/{id}/diagram", s.handle(s.handleDBDiagramPut))
+			r.Method(http.MethodDelete, "/{id}/diagram", s.handle(s.handleDBDiagramDelete))
 			r.Method(http.MethodPost, "/{id}/import", s.handle(s.handleDBImport))
 			// Schema changes that only add: the same capability the query
 			// runner needs for the CREATE it classifies as medium risk, so the
@@ -332,10 +347,14 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	}
 	// No typed phrase: this forgets a connection string, it does not touch the
 	// server at the other end of it. Re-adding one is a form, not a restore.
-	s.modules.dbs.Close(id)
-	if _, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM db_connections WHERE id = ?`, id); err != nil {
+	result, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+	if err != nil {
 		return httpx.Internal(err)
 	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before forgetting this linked connection")
+	}
+	s.modules.dbs.Close(id)
 	httpx.SetAudit(r, "database.connection.delete", conn.Name, nil)
 	httpx.NoContent(w)
 	return nil
@@ -652,6 +671,11 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	if req.Query == "" {
 		return httpx.BadRequest("query is required")
 	}
+	statement, err := dbx.SingleStatement(req.Query)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	req.Query = statement
 	risk := dbx.Classify(req.Query)
 	p := httpx.MustPrincipal(r)
 	if risk.Destructive {
@@ -1041,7 +1065,7 @@ func (s *Server) handleDBRowInsert(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	var req rowRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
@@ -1069,7 +1093,7 @@ func (s *Server) handleDBRowUpdate(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	var req rowRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
@@ -1100,7 +1124,7 @@ func (s *Server) handleDBRowDelete(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	var req rowRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
@@ -1669,7 +1693,7 @@ func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var req rowSQLRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONNumbers(r, &req); err != nil {
 		return err
 	}
 	if req.Table == "" {
