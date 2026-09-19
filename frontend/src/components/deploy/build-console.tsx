@@ -209,7 +209,9 @@ export function BuildConsole({
         ) : (
           <div className="flex h-full min-h-48 items-center justify-center px-6 text-center text-body text-muted-foreground">
             {rows.length
-              ? "No lines match. Try another search or stage."
+              ? selectedStep && !query && !errorsOnly
+                ? `${humanize(steps.find((step) => step.id === selectedStep)?.key ?? "This stage")} wrote nothing to the build log.`
+                : "No lines match. Try another search or stage."
               : active
                 ? "Waiting for build output. New lines appear here automatically."
                 : "No build output was retained for this run."}

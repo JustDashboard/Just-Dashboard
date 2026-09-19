@@ -212,20 +212,57 @@ test("a resync event replaces the snapshot instead of merging into it", async ({
   await expect(header.getByText("Ready", { exact: true })).toBeVisible()
 })
 
-test("selecting a step in Details focuses that stage in the build console", async ({ page }) => {
+test("a step in Details opens to its evidence, and only a step with output leads to the console", async ({
+  page,
+}) => {
   await mockProject(page)
+  const withEvidence = steps.map((step) =>
+    step.key === "backup_gate"
+      ? { ...step, evidence: { reason: "no backup gate configured", routeRemoved: true } }
+      : step,
+  )
   await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
-    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    socket.send(
+      JSON.stringify({ type: "snapshot", data: snapshot({}, withEvidence), ts: Date.now() }),
+    )
+    socket.send(
+      JSON.stringify({
+        type: "events",
+        data: [
+          {
+            seq: 30,
+            type: "step.log",
+            runId: 84,
+            stepId: 111,
+            ts: now,
+            data: { stream: "stdout", text: "smoke: GET / 200\n", truncated: false },
+          },
+        ],
+        ts: Date.now(),
+      }),
+    )
   })
   await page.goto("/deploy/7/runs/84")
 
   const views = page.getByRole("group", { name: "Run views" })
   await views.getByRole("button", { name: "Details", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Deployment steps" })).toBeVisible()
+  const list = page.getByRole("list", { name: "Deployment steps" })
+  await expect(list).toBeVisible()
+  await expect(page.getByText("15 steps · 8 passed · 1 skipped", { exact: true })).toBeVisible()
+
+  // The skipped gate's reason is its second line; open, its evidence is rows.
+  const gate = page.getByRole("button", { name: /Backup Gate/ })
+  await expect(gate).toContainText("no backup gate configured")
+  await gate.click()
+  await expect(page.getByText("Route removed", { exact: true })).toBeVisible()
+  await expect(page.getByText("yes", { exact: true })).toBeVisible()
+  // Nothing was written to the build log for it, so nothing offers the console.
+  await expect(page.getByRole("button", { name: "Build output", exact: true })).toHaveCount(0)
 
   const smoke = page.getByRole("button", { name: /Verify Smoke/ })
   await smoke.focus()
   await page.keyboard.press("Enter")
+  await page.getByRole("button", { name: "Build output", exact: true }).click()
 
   await expect(views.getByRole("button", { name: "Build logs", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -234,6 +271,34 @@ test("selecting a step in Details focuses that stage in the build console", asyn
   const stage = page.getByRole("combobox", { name: "Build log stage" })
   await expect(stage).toHaveText("Verify Smoke")
   await expect(stage).toBeFocused()
+  await expect(page.getByText("smoke: GET / 200", { exact: true })).toBeVisible()
+})
+
+test("a stage with no output says so instead of reporting a failed search", async ({ page }) => {
+  await mockProject(page)
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    socket.send(
+      JSON.stringify({
+        type: "events",
+        data: [
+          {
+            seq: 31,
+            type: "step.log",
+            runId: 84,
+            stepId: 105,
+            ts: now,
+            data: { stream: "stdout", text: "built\n", truncated: false },
+          },
+        ],
+        ts: Date.now(),
+      }),
+    )
+  })
+  await page.goto("/deploy/7/runs/84")
+  await page.getByRole("combobox", { name: "Build log stage" }).click()
+  await page.getByRole("option", { name: "Analyze Plan" }).click()
+  await expect(page.getByText("Analyze Plan wrote nothing to the build log.")).toBeVisible()
 })
 
 test("cancel requests cancellation and shows the toast and notice", async ({ page }) => {

@@ -4,7 +4,7 @@ import { useState } from "react"
 import { LogWorkspace } from "@/components/logs/log-workspace"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { EMPTY_FILTER } from "@/lib/log-filter"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { FilterChip } from "@/components/tabs"
 import {
@@ -44,31 +44,36 @@ export function RunLogs({ projectId, runId }: { projectId: number; runId: number
 
   return (
     <Panel plain>
-      <PanelHeader
-        title="Runtime logs"
-        actions={
-          sources.length > 0 && (
-            <Select
-              value={selected?.containerId ?? ""}
-              onValueChange={(value) => {
-                setPicked(value)
-                setActivation(false)
-              }}
-            >
-              <SelectTrigger size="sm" aria-label="Runtime log source" className="w-56">
-                <SelectValue placeholder="Choose a service" />
-              </SelectTrigger>
-              <SelectContent>
-                {sources.map((source) => (
-                  <SelectItem key={source.containerId} value={source.containerId}>
-                    {source.name || source.containerId}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )
-        }
-      />
+      {/* No title: the tab already says "Runtime logs". What a reader needs
+          told is what these are — the application's own output, not the
+          build's — and where the two views of it look. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+        <p className="max-w-prose text-hint text-muted-foreground">
+          {selected
+            ? `What ${selected.name || selected.containerId.slice(0, 12)} prints while it runs — the container this release started, separate from the build transcript. Live follows it now; Around activation shows the five minutes either side of the release going live.`
+            : "The application's own output from the containers this release started, separate from the build transcript."}
+        </p>
+        {sources.length > 0 && (
+          <Select
+            value={selected?.containerId ?? ""}
+            onValueChange={(value) => {
+              setPicked(value)
+              setActivation(false)
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Runtime log source" className="w-56">
+              <SelectValue placeholder="Choose a service" />
+            </SelectTrigger>
+            <SelectContent>
+              {sources.map((source) => (
+                <SelectItem key={source.containerId} value={source.containerId}>
+                  {source.name || source.containerId}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
       <PanelBody flush className="space-y-3 pt-3">
         {result.error ? (
           <ErrorState error={result.error} />

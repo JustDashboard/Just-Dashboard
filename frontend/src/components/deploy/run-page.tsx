@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import {
@@ -14,7 +14,6 @@ import {
 import { get, post } from "@/lib/api"
 import { timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { Envelope, useSocket } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
@@ -32,13 +31,11 @@ import { Page, PageHeader, Metric, MetricStrip } from "@/components/page"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
+import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
 import {
-  RELEASE_GROUPS,
   RunStatus,
-  StepMark,
   deploymentURL,
   formatDuration,
-  groupedState,
   humanize,
   isActiveRun,
   isCancellable,
@@ -50,10 +47,10 @@ import {
   runTriggerLine,
   shortRevision,
   sourceLine,
-  stepStateLabel,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { BuildConsole, type TranscriptLine } from "@/components/deploy/build-console"
+import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunSteps } from "@/components/deploy/run-steps"
 import { RunLogs } from "@/components/deploy/run-logs"
 import { RunMetrics } from "@/components/deploy/run-metrics"
@@ -164,7 +161,20 @@ export function RunPage() {
   })
 
   const attempts = useMemo(() => latestAttempts(snapshot?.steps ?? []), [snapshot?.steps])
+  const withOutput = useMemo(() => new Set(lines.map((line) => line.stepId)), [lines])
   const now = useNow(1000, isActiveRun(snapshot?.run.state))
+
+  // A release that goes live while somebody is watching it build gets a
+  // burst of paper. Only that: arriving at a page that already succeeded
+  // is not the moment, and neither is a retry that is still running.
+  const confetti = useRef<ConfettiRef>(null)
+  const runState = snapshot?.run.state
+  const wasActive = useRef(isActiveRun(runState))
+  useEffect(() => {
+    const activeNow = isActiveRun(runState)
+    if (wasActive.current && !activeNow && runState === "succeeded") confetti.current?.fire()
+    wasActive.current = activeNow
+  }, [runState])
 
   if (initial.loading && !snapshot) {
     return (
@@ -255,6 +265,7 @@ export function RunPage() {
 
   return (
     <Page>
+      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
       <PageHeader
         eyebrow={
           <Link
@@ -336,14 +347,18 @@ export function RunPage() {
         />
       </MetricStrip>
 
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <ReleasePathWithDurations steps={attempts} />
-        {active && (
-          <p role="status" className="text-body text-muted-foreground">
-            {selected ? `${humanize(selected.key)}…` : "Waiting for a build slot…"}
-          </p>
-        )}
-      </div>
+      {attempts.some((step) => step.key === "legacy_pipeline") ? (
+        <p className="text-body text-muted-foreground">Compatibility pipeline</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <ReleasePipeline steps={attempts} now={now} />
+          {active && (
+            <p role="status" className="text-hint text-muted-foreground">
+              {selected ? `${humanize(selected.key)}…` : "Waiting for a build slot…"}
+            </p>
+          )}
+        </div>
+      )}
 
       {(run.terminalReason || run.cancelRequested) && (
         <Notice
@@ -426,6 +441,7 @@ export function RunPage() {
         <RunSteps
           steps={attempts}
           now={now}
+          withOutput={withOutput}
           onSelectStep={(id) => {
             setSelectedStepId(id)
             setView("build")
@@ -456,60 +472,6 @@ function runSourceFacts(
   // neither — only the git case, handled above, ever reads them.
   const fallback = deployment ? sourceLine(deployment).primary : "—"
   return { label: branch ?? fallback, sha, subject: runSubject(run) }
-}
-
-/**
- * The shared `ReleasePath` has no room for a duration beside its label; this
- * recomposes the same exported primitives (`RELEASE_GROUPS`, `groupedState`,
- * `StepMark`) to add one, since the shared component is out of this agent's
- * scope to edit. A `durations` prop on `ReleasePath` itself is probably the
- * better long-term home if another screen wants this.
- */
-function ReleasePathWithDurations({ steps }: { steps: DeploymentStep[] }) {
-  if (steps.some((step) => step.key === "legacy_pipeline")) {
-    return <p className="text-body text-muted-foreground">Compatibility pipeline</p>
-  }
-  return (
-    <ol aria-label="Release path" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
-      {RELEASE_GROUPS.map((group, index) => {
-        const state = groupedState(steps, group.keys)
-        const seconds = groupDurationSeconds(steps, group.keys)
-        return (
-          <li
-            key={group.label}
-            className="flex min-w-0 items-center gap-2"
-            aria-current={state === "running" ? "step" : undefined}
-          >
-            {index > 0 && <span aria-hidden="true" className="h-px w-3 shrink-0 bg-hairline" />}
-            <span className="inline-flex items-center gap-1.5 text-xs whitespace-nowrap">
-              <StepMark state={state} />
-              <span
-                className={cn(
-                  "font-medium",
-                  state === "pending" && "text-muted-foreground",
-                  (state === "failed" || state === "blocked") && "text-destructive",
-                )}
-              >
-                {group.label}
-              </span>
-              {seconds !== undefined && (
-                <span className="numeric text-muted-foreground">· {formatDuration(seconds)}</span>
-              )}
-              <span className="sr-only">{stepStateLabel(state)}</span>
-            </span>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
-
-function groupDurationSeconds(steps: DeploymentStep[], keys: readonly string[]) {
-  const included = steps.filter((step) => keys.includes(step.key) && step.startedAt)
-  if (included.length === 0 || included.some((step) => !step.endedAt)) return undefined
-  const start = Math.min(...included.map((step) => new Date(step.startedAt!).getTime()))
-  const end = Math.max(...included.map((step) => new Date(step.endedAt!).getTime()))
-  return (end - start) / 1000
 }
 
 /** The most recent attempt of every step, in execution order. */
