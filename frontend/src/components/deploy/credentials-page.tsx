@@ -23,6 +23,7 @@ import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import {
   Select,
   SelectContent,
@@ -33,7 +34,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { GitHubAppPanel, useGitHubApp } from "@/components/deploy/github-app-card"
+import { GitHubAppPanel, githubAppStage, useGitHubApp } from "@/components/deploy/github-app-card"
 
 /**
  * Fleet-level secrets: the tokens and keys the server uses on behalf of every
@@ -260,8 +261,11 @@ export function CredentialsPage() {
   const list = credentials.data
   const inUse = list?.filter((credential) => credential.usedBy > 0).length
   const app = githubApp.data
+  const stage = githubAppStage(app)
+  // A count arrives by counting: the figure rises with its tile and settles on
+  // the value, rather than the value being there before the tile is.
   const figure = (value: number | undefined) =>
-    value === undefined ? <Skeleton className="h-6 w-8" /> : value
+    value === undefined ? <Skeleton className="h-6 w-8" /> : <NumberTicker value={value} />
 
   return (
     <Page>
@@ -293,23 +297,30 @@ export function CredentialsPage() {
         <StatTile
           key={app || githubApp.error ? "app" : "app-loading"}
           label="GitHub App"
+          // The tile reads the same stage the steps below light up, so the
+          // headline never says "Connected" over a step that says "install it".
+          tone={stage === "install" ? "warning" : stage === "import" ? "success" : "default"}
           value={
             githubApp.error ? (
               "Unavailable"
-            ) : app ? (
-              app.configured ? (
-                "Connected"
-              ) : (
+            ) : stage ? (
+              stage === "create" ? (
                 "Not connected"
+              ) : stage === "install" ? (
+                "Not installed"
+              ) : (
+                "Connected"
               )
             ) : (
               <Skeleton className="h-6 w-24" />
             )
           }
           hint={
-            app?.configured
-              ? `installed on ${plural(app.installations.length, "account")}`
-              : "one App in place of a token and a webhook per repository"
+            stage === "import"
+              ? `installed on ${plural(app?.installations.length ?? 0, "account")}`
+              : stage === "install"
+                ? "created on GitHub, waiting for an account to install it"
+                : "one App in place of a token and a webhook per repository"
           }
           className={(app || githubApp.error) && "animate-rise"}
         />
