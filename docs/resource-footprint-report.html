@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Just Dashboard — Resource Footprint</title>
+<style>
+  :root {
+    --bg: #111214;
+    --panel: #17181b;
+    --text: #f2f2f3;
+    --dim: #a3a5aa;
+    --faint: #6f7176;
+    --line: #2a2c30;
+    --ok: #6ee7a8;
+    --warn: #f0c76b;
+    --bad: #f08b8b;
+    --link: #8ab4f8;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 64px 28px 120px; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 44px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; font-weight: bold; letter-spacing: -0.01em; }
+  .sub { color: var(--dim); font-size: 14px; margin: 0; }
+  .meta { color: var(--faint); font-size: 13px; margin-top: 14px; }
+
+  h2 {
+    font-size: 20px; margin: 52px 0 6px; font-weight: bold; letter-spacing: -0.01em;
+    padding-top: 22px; border-top: 1px solid var(--line);
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 { font-size: 15px; margin: 28px 0 8px; font-weight: bold; color: var(--text); }
+  p { margin: 10px 0; color: var(--dim); }
+  p.lead { color: var(--text); }
+
+  ul { margin: 10px 0 10px 0; padding-left: 20px; color: var(--dim); }
+  li { margin: 5px 0; }
+  li strong, p strong { color: var(--text); font-weight: bold; }
+
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: #d9dbe0;
+    white-space: nowrap;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 6px; font-size: 14px; }
+  th {
+    text-align: left; color: var(--faint); font-weight: bold; font-size: 11px;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    padding: 0 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: bottom;
+  }
+  td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--dim); }
+  td:first-child { color: var(--text); }
+  tr:last-child td { border-bottom: none; }
+
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .tag { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: bold; }
+
+  .box {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 18px 22px; margin: 20px 0;
+  }
+  .box p:first-child { margin-top: 0; }
+  .box p:last-child { margin-bottom: 0; }
+
+  .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 6px; }
+  .kpi {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 18px; min-width: 132px; flex: 1 1 132px;
+  }
+  .kpi .n { font-size: 24px; font-weight: bold; color: var(--text); line-height: 1.1; }
+  .kpi .l { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-top: 5px; }
+
+  footer { margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Just Dashboard — Resource Footprint</h1>
+  <p class="sub">Measured idle and loaded CPU/memory, image and disk footprint, database growth model, and build requirements for the running stack.</p>
+  <p class="meta">19 September 2026 · v0.6.7, branch <code>ci/self-hosted-runner</code> · Ubuntu 25.04, kernel 6.14, 8 vCPU / 22 GiB, Docker 29.8.1</p>
+</header>
+
+<div class="kpis">
+  <div class="kpi"><div class="n">110 MB</div><div class="l">RAM, stack idle</div></div>
+  <div class="kpi"><div class="n">9.0%</div><div class="l">of one core, idle</div></div>
+  <div class="kpi"><div class="n">1.49 GB</div><div class="l">Images on disk</div></div>
+  <div class="kpi"><div class="n">2.07 GB</div><div class="l">RAM to build</div></div>
+  <div class="kpi"><div class="n">135 ms</div><div class="l">Backend cold start</div></div>
+</div>
+
+<h2>1. Summary</h2>
+<p class="lead">Running Just Dashboard is genuinely lightweight — 110 MB of RAM and 9% of one core for all three containers. Installing or updating it is not: a cold build peaks at <strong>2.07 GB of RAM</strong>, and because install and update are always <code>docker compose up --build</code> on the target machine, that build requirement — not the runtime — is what decides which servers can host it.</p>
+
+<p>A 1 GB VPS can comfortably <em>run</em> the stack and cannot <em>install</em> it. That gap is the single most important finding here, and it is not mentioned in the README or checked by <code>install.sh</code>.</p>
+
+<p>One fix has been applied since the first draft of this report, in §7: the image build no longer repeats the developer's type-check. That halves build wall time and takes ~320 MB off the peak, and it makes a 2 GB install stop failing <em>intermittently</em> — but it does not reach 1 GB, because a single Turbopack process needs 1.6 GB on its own and no setting in Next 16 reduces it.</p>
+
+<p>Two background pollers dominate idle CPU, and both are larger than the metrics recorder people assume is responsible. The deployment Git watcher spawns a real <code>git ls-remote</code> against every watched project every 5 seconds (88 ms of CPU per call, 17,280 HTTPS calls per day per project), and the deployment queue runs two SQL statements every 250 ms whether or not anything is deploying. Stripped of those, the backend idles at 0.92% of a core instead of 8.14%.</p>
+
+<div class="box">
+  <p><strong>Verified by direct measurement:</strong> per-container cgroup CPU and memory over a 288 s idle window and two load runs; a clean-room backend instance run from the extracted binary with its own data directory; 9,915 + 6,703 real HTTP requests; three timed cold starts; <code>dbstat</code> page accounting on a copy of the live 65 MB database; eleven cold frontend builds with process-tree memory sampling; a measured Go build stage; a byte-level comparison of the two build modes; a rebuilt and smoke-tested frontend image; layer-level image accounting; observed <code>git</code> subprocesses on the host.</p>
+</div>
+
+<div class="box">
+  <p><strong>Not tested, and why.</strong> The backend's authenticated API was not load-tested. Driving it needs the live admin password, and the account already carried <code>failed_count=1</code> against a real lockout policy — a wrong guess would have locked the operator out of their own production dashboard. Backend figures below therefore cover its background work and unauthenticated surface, not authenticated API throughput. <code>dockerd</code>'s own 14.45%-of-a-core draw could not be cleanly attributed to Just Dashboard without stopping the production stack, which I did not do. And the build floor in §6 is stated from measured process peaks rather than from pass/fail under emulated memory caps: <code>os.cpus()</code> ignores cgroup limits, so a capped build on this 8-core host still spawns seven workers and does not behave like the 1–2 vCPU machine it is meant to stand in for.</p>
+</div>
+
+<h2>2. Runtime footprint — the numbers that matter</h2>
+
+<p>All memory figures are cgroup <code>anon</code> (actual anonymous RSS), not <code>docker stats</code> <code>MEM USAGE</code>, which includes reclaimable page cache and overstates the real requirement. CPU is expressed as a percentage of a <em>single</em> core, so it reads the same on a 1-core VPS as on this 8-core host.</p>
+
+<h3>Idle — 288 s window, one browser tab open with an attached terminal, one Git watch active</h3>
+<table>
+  <tr><th>Service</th><th>CPU (1 core)</th><th>Anon RSS avg</th><th>Anon RSS max</th><th>PIDs</th></tr>
+  <tr><td>backend</td><td class="warn">8.14%</td><td>26.4 MB</td><td>39.3 MB</td><td>17</td></tr>
+  <tr><td>frontend</td><td class="ok">0.62%</td><td>59.7 MB</td><td>60.4 MB</td><td>11</td></tr>
+  <tr><td>proxy (Caddy)</td><td class="ok">0.30%</td><td>24.1 MB</td><td>24.6 MB</td><td>13</td></tr>
+  <tr><td><strong>Total</strong></td><td class="warn"><strong>9.05%</strong></td><td><strong>110.2 MB</strong></td><td>—</td><td>41</td></tr>
+</table>
+
+<p>That window is labelled honestly: it is <em>not</em> an unattended server. Four live connections to the backend and an attached terminal session were present throughout, so this is the cost of a dashboard someone is actually looking at.</p>
+
+<h3>True floor — backend binary alone, no clients, no Git watches, fresh database</h3>
+<p>To separate the product's baseline from the session on top of it, I extracted the binary from the image and ran it clean for 223 s with its own data directory, sandboxed roots, and no browser attached.</p>
+<table>
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>CPU</td><td class="ok">0.92% of one core</td></tr>
+  <tr><td>Anon RSS</td><td>17.9 – 19.2 MB (mean 18.6 MB)</td></tr>
+  <tr><td>Total RSS</td><td>47.9 MB (includes the 52 MB binary's mapped pages)</td></tr>
+  <tr><td>Cold start</td><td>131 / 131 / 145 ms to listening; ~200 ms to <code>/healthz</code> 200</td></tr>
+  <tr><td>RSS at ready</td><td>39.8 – 40.9 MB</td></tr>
+</table>
+
+<h3>Under load</h3>
+<p>Two runs against the login page, which is the heaviest thing reachable without a session — a full React SSR render.</p>
+<table>
+  <tr><th>Run</th><th>Throughput</th><th>p50 / p90 / p99</th><th>Errors</th><th>CPU (1 core)</th><th>Anon RSS</th></tr>
+  <tr><td>Direct to frontend, 20 concurrent, 60 s</td><td>165.2 rps</td><td>113 / 155 / 202 ms</td><td class="ok">0 of 9,915</td><td>86.5%</td><td>263 MB</td></tr>
+  <tr><td>Through Caddy over TLS, 10 concurrent, 40 s</td><td>167.4 rps</td><td>56 / 77 / 109 ms</td><td class="ok">0 of 6,703</td><td>108.1%</td><td>270 MB</td></tr>
+</table>
+
+<p>Throughput is identical either way, so Caddy is not the bottleneck — the Next.js render is. Derived per-request cost: <strong>5.2 ms of CPU per SSR request</strong> for the frontend, <strong>0.81 ms per HTTPS request</strong> for Caddy including TLS. A single operator clicking around will never approach 165 rps; this establishes the ceiling, not the expectation.</p>
+
+<div class="box">
+  <p><strong>The frontend's memory is the one to watch.</strong> Node idles at 59.7 MB, peaked at <strong>292 MB</strong> under sustained load, and settled back to 95.5 MB rather than to its original 60 MB. V8 keeps what it grew into. Nothing in <code>docker-compose.yml</code> caps it — there is no <code>mem_limit</code>, no <code>cpus</code>, and no <code>deploy.resources</code> on any of the three services.</p>
+</div>
+
+<h2>3. Where the idle CPU actually goes</h2>
+
+<p>Sampling the backend cgroup once per second showed a clear sawtooth: a ~20–35 ms/s floor with a 130–170 ms spike every 5 seconds. The 5-second period does not match the 15-second metrics interval, so I traced it.</p>
+
+<table>
+  <tr><th>Poller</th><th>Interval</th><th>What it does per tick</th><th>Measured cost</th></tr>
+  <tr><td>Git watcher<br><code>deploy/git_watch.go:15</code></td><td class="warn">5 s</td><td>Spawns <code>git ls-remote --exit-code --refs &lt;repo&gt; refs/heads/main</code> per watched project — a full HTTPS connection and TLS handshake to GitHub</td><td class="warn">88 ms CPU, 453 ms wall per call → <strong>1.76% of a core per project</strong>, 17,280 calls/day</td></tr>
+  <tr><td>Deployment queue<br><code>deploy/engine.go:233</code></td><td class="warn">250 ms</td><td><code>reconcileExpired</code> + <code>claimAvailable</code>, two SQL statements, regardless of whether anything is queued</td><td>~691,200 iterations/day; the bulk of the 20–35 ms/s floor</td></tr>
+  <tr><td>Metrics recorder<br><code>metrics/metrics.go:384</code></td><td>15 s</td><td>One Docker one-shot stats call per running container, then one write per container</td><td class="ok">21.5 ms of <code>dockerd</code> CPU per tick at 15 containers ≈ 0.14% of a core</td></tr>
+  <tr><td>Others</td><td>25–30 s</td><td>Preview quarantine, deploy automation, Caddy maintenance, WS pings, rate-limit sweep, hourly metrics prune</td><td class="ok">Not individually measurable above noise</td></tr>
+</table>
+
+<p>I confirmed the Git watcher empirically rather than only from the source — sampling the host process list caught the subprocesses firing at exactly <code>:23</code>, <code>:28</code>, <code>:33</code>, <code>:38</code>:</p>
+
+<table>
+  <tr><th>Observed process</th></tr>
+  <tr><td><code>git ls-remote --exit-code --refs https://github.com/…/lampino.git refs/heads/main</code></td></tr>
+  <tr><td><code>/usr/lib/git-core/git-remote-https …</code> (one per call, plus a TLS handshake)</td></tr>
+</table>
+
+<p>The decomposition adds up: 0.92% clean floor + ~1.8% for one Git watch + the remainder from the live browser session's WebSocket streams = the 8.14% observed. <code>GitWatchInterval</code> is a compile-time <code>const</code>, not an environment variable, so an operator cannot currently relax it.</p>
+
+<h2>4. Disk — images</h2>
+
+<p>The backend image is the heavy one, and it is heavy by deliberate design: it ships the host tooling the dashboard drives, so the product works rather than shelling out to binaries that may not exist.</p>
+
+<table>
+  <tr><th>Image</th><th>Reported size</th><th>Unique layers</th><th>Shared</th></tr>
+  <tr><td><code>just-dashboard-backend</code></td><td>1.09 GB</td><td class="warn">981 MB</td><td>113.5 MB</td></tr>
+  <tr><td><code>just-dashboard-frontend</code></td><td>460 MB</td><td>346.8 MB</td><td>113.5 MB (same base)</td></tr>
+  <tr><td><code>caddy:2-alpine</code></td><td>88.7 MB</td><td>88.7 MB</td><td>—</td></tr>
+  <tr><td><strong>Actual disk consumed</strong></td><td colspan="3"><strong>1.49 GB</strong> (shared base counted once)</td></tr>
+</table>
+
+<p>Inside the backend image, <code>/usr</code> accounts for 751 MB. The largest single files:</p>
+
+<table>
+  <tr><th>File</th><th>Size</th><th>Why it is there</th></tr>
+  <tr><td><code>docker-buildx</code></td><td>69.7 MB</td><td>Compose v2 delegates builds to it; without it the in-app updater silently falls back to a builder that cannot read this project's Dockerfile</td></tr>
+  <tr><td><code>just-dashboard</code></td><td>52.4 MB</td><td>The product itself — static, <code>CGO_ENABLED=0</code>, already <code>-s -w</code> stripped</td></tr>
+  <tr><td><code>docker</code> CLI</td><td>45.1 MB</td><td>Talks to the host socket</td></tr>
+  <tr><td><code>gh</code></td><td>40.0 MB</td><td>Credential placement for deployments</td></tr>
+  <tr><td><code>docker-compose</code></td><td>30.8 MB</td><td>Stack management and self-update</td></tr>
+  <tr><td>MongoDB tools (7 binaries)</td><td class="warn">132 MB</td><td><code>mongodump</code>/<code>mongorestore</code> plus five others that ship with them</td></tr>
+  <tr><td>PostgreSQL clients 15–18</td><td>15.3 MB</td><td>Four majors in parallel, because <code>pg_dump</code> refuses to dump a newer server</td></tr>
+</table>
+
+<p>The frontend image is 72.2 MB of Next standalone output, 6.9 MB of static chunks and 24.8 MB of <code>public/</code> — almost all of it the bundled Monaco editor, which is deliberate so the Query tab works on installs with no route to a CDN.</p>
+
+<h3>What the browser downloads</h3>
+<table>
+  <tr><th>Surface</th><th>Raw</th><th>Gzipped</th></tr>
+  <tr><td>Login page: HTML + 13 assets</td><td>0.89 MB</td><td class="ok">0.24 MB</td></tr>
+  <tr><td>Whole client bundle surface (160 JS chunks + 4 CSS)</td><td>6.2 MB</td><td>—</td></tr>
+  <tr><td>Monaco, lazy-loaded only on editor/query views</td><td>23 MB</td><td>—</td></tr>
+</table>
+
+<h2>5. Disk — data growth, and the model for it</h2>
+
+<p>The live database is 65 MB holding 2.81 days of history. <strong>85% of it is container metrics</strong> — <code>metric_container_samples</code> is 29.5 MB of rows plus 25.6 MB of indexes across 217,538 rows.</p>
+
+<table>
+  <tr><th>Object</th><th>Rows</th><th>Size incl. indexes</th><th>Bytes/row</th></tr>
+  <tr><td><code>metric_container_samples</code></td><td>217,538</td><td class="warn">55.1 MB</td><td>266 B</td></tr>
+  <tr><td><code>metric_mount_samples</code></td><td>32,290</td><td>2.4 MB</td><td>79 B</td></tr>
+  <tr><td><code>metric_samples</code></td><td>16,145</td><td>3.1 MB</td><td>201 B</td></tr>
+  <tr><td><code>audit_log</code></td><td>929</td><td>0.2 MB</td><td>—</td></tr>
+  <tr><td>Everything else (54 tables)</td><td>—</td><td class="ok">&lt; 0.3 MB</td><td>—</td></tr>
+</table>
+
+<p>Container metrics scale with the number of running containers, not with dashboard usage, which gives a clean model. Fitted to the live data and validated against it — the model predicts 60.7 MB for the observed window against an actual 64.7 MB, a 6% under-read accounting for the non-metric tables:</p>
+
+<div class="box">
+  <p><strong>Database at the 7-day default retention ≈ 14 MB + 10.2 MB per running container.</strong></p>
+</div>
+
+<table>
+  <tr><th>Running containers</th><th>DB at 15 s interval (default)</th><th>DB at 60 s interval</th></tr>
+  <tr><td>3 (just the stack itself)</td><td class="ok">44 MB</td><td class="ok">11 MB</td></tr>
+  <tr><td>10</td><td>116 MB</td><td>29 MB</td></tr>
+  <tr><td>14 (this host)</td><td>157 MB</td><td>39 MB</td></tr>
+  <tr><td>25</td><td class="warn">269 MB</td><td>67 MB</td></tr>
+  <tr><td>50</td><td class="warn">524 MB</td><td>131 MB</td></tr>
+</table>
+
+<p>Raising <code>JD_METRICS_INTERVAL</code> to 60 s cuts this by 4× and is the single most effective disk lever on a busy host.</p>
+
+<p>One caveat on shrinking: the database runs with <code>auto_vacuum=0</code> and <code>prune()</code> only issues <code>DELETE</code>, so the file never returns space to the filesystem. It plateaus at the 7-day high-water mark and reuses freed pages — correct behaviour, but lowering retention or removing containers later will not shrink the file without a manual <code>VACUUM</code>.</p>
+
+<h3>Write volume</h3>
+<table>
+  <tr><th>Measure</th><th>Value</th></tr>
+  <tr><td>Backend container, sustained over a 60 s window</td><td class="warn">29.6 KB/s = 2.5 GB/day</td></tr>
+  <tr><td>WAL growth on the clean instance, before checkpoint</td><td>20.3 MB/h</td></tr>
+</table>
+<p>2.5 GB/day is not a capacity problem, but it is worth knowing on an IOPS-limited or wear-sensitive VPS. It is driven by SQLite writing whole 4 KB pages per transaction every 15 s across three tables and their indexes.</p>
+
+<h3>Current data directory</h3>
+<table>
+  <tr><th>Path</th><th>Size</th><th>Scales with</th></tr>
+  <tr><td><code>deployment-workspaces/</code></td><td>158 MB</td><td>Number and size of deployed projects</td></tr>
+  <tr><td><code>deployment-detection/</code></td><td>96 MB</td><td>Cached source analysis</td></tr>
+  <tr><td><code>vpsd.db</code> + WAL</td><td>69 MB</td><td>Containers × retention</td></tr>
+  <tr><td><strong>Total</strong></td><td><strong>322 MB</strong></td><td>—</td></tr>
+</table>
+
+<h2>6. The build — the real constraint</h2>
+
+<p>There are no prebuilt images. Both install and update are <code>git pull</code> plus <code>docker compose up --build</code> (<code>selfupdate/locate.go:13</code>, <code>selfupdate/install.go:18</code>), so every machine that runs Just Dashboard must also compile it. I measured a cold frontend build — the memory-hungry half, and the one Docker always runs from scratch since <code>.next</code> never exists in the build context.</p>
+
+<table>
+  <tr><th>Build</th><th>Wall time</th><th>Peak single process</th><th>Peak process tree</th></tr>
+  <tr><td>Cold, 7 workers (this 8-core host)</td><td>47–49 s</td><td class="bad">1.94 GB</td><td class="bad">2.62 GB</td></tr>
+  <tr><td>Cold, 1 worker (a 1-vCPU VPS's shape)</td><td>22 s</td><td class="bad">1.57 GB</td><td class="warn">2.07 GB</td></tr>
+  <tr><td>Backend Go stage</td><td>44 s</td><td class="ok">569 MB</td><td class="warn">1.96 GB</td></tr>
+  <tr><td>Warm, Turbopack cache present</td><td class="ok">9.5 s</td><td class="ok">629 MB</td><td>—</td></tr>
+</table>
+
+<div class="box">
+  <p><strong>A correction to the first draft.</strong> The 2.56 GB figure I first reported was measured with 7 parallel page workers, because Next sizes workers from <code>os.cpus()</code> — and <code>os.cpus()</code> reports the <em>host's</em> core count, ignoring cgroup limits. A real 1–2 vCPU VPS spawns one worker, not seven. Re-measured in that shape the peak is <strong>2.07 GB</strong>. The same blind spot makes cgroup emulation of a small VPS unreliable on this box, so the floor below is stated from measured peaks rather than from capped-build pass/fail.</p>
+</div>
+
+<p>The Go stage behaves well on small machines: its 1.96 GB aggregate is many parallel compiler processes, and the largest single one is only 569 MB, so it shrinks with core count. The frontend does not. Its 1.57 GB is <em>one</em> Turbopack process compiling the module graph, and that is the binding constraint on how small a server can install Just Dashboard.</p>
+
+<p>Three ways to reduce it were measured and rejected. <code>experimental.cpus: 1</code> changes the peak by under 2% — workers were never the driver. <code>experimental.memoryBasedWorkersCount</code> looks purpose-built for this but enforces a floor of four workers (<code>build/index.js:374</code>), so it cannot scale down. Building with <code>--webpack</code> and <code>webpackMemoryOptimizations</code> peaks at 2.28 GB and takes 113 s — the same memory, 2.3× slower. Next 16.3.5 exposes no Turbopack memory limit.</p>
+
+<p>Build also leaves cache behind. Of 11.33 GB of BuildKit cache on this host, <strong>4.96 GB across 29 records is attributable to Just Dashboard builds</strong> — the <code>golang:1.26.8-bookworm</code>, <code>oven/bun:1</code> and <code>node:22-bookworm-slim</code> stages and the apt layers. It is reclaimable with <code>docker builder prune</code>, but nothing in the project prunes it, so it accumulates across updates.</p>
+
+<h2>7. What was changed</h2>
+
+<p>One change was applied and verified: the image build no longer repeats work that belongs to the developer. <code>frontend/Dockerfile</code> sets <code>JD_IMAGE_BUILD=1</code>, and <code>next.config.ts</code> reads it to skip the TypeScript pass and the prerender source maps. Nothing else was altered.</p>
+
+<p>The reasoning is that <code>next build</code> runs <code>tsc</code> in a second Node process <em>while the compiler still holds its own graph</em>. That overlap, not the compile, is what pushed a 2 GB machine over the edge — and it did so intermittently, which is worse than failing cleanly. The code being compiled on an operator's server was already type-checked before release, so the check bought nothing there.</p>
+
+<table>
+  <tr><th>Measure</th><th>Before</th><th>After</th></tr>
+  <tr><td>Frontend build, wall time (host, 7 workers)</td><td>47 s</td><td class="ok">21 s</td></tr>
+  <tr><td><code>docker compose build frontend</code>, end to end</td><td>~50 s</td><td class="ok">31 s</td></tr>
+  <tr><td>Peak single process</td><td>1.94 GB</td><td class="ok">1.62 GB</td></tr>
+  <tr><td>TypeScript phase</td><td>28 s, ~1 GB second process</td><td class="ok">config validation only, 10 ms</td></tr>
+  <tr><td>Emitted application</td><td colspan="2" class="ok">Byte-for-byte identical — 76 routes, 160 JS chunks, 6,265,783 bytes, same standalone size, same chunk-size fingerprint</td></tr>
+  <tr><td>Published image size</td><td>460 MB</td><td class="ok">460 MB</td></tr>
+</table>
+
+<div class="box">
+  <p><strong>The developer gate is intact, and that was verified rather than assumed.</strong> A deliberately ill-typed file was added to <code>src/</code>: <code>bun run build</code> failed with <code>TS2322: Type 'string' is not assignable to type 'number'</code>, and the same build with <code>JD_IMAGE_BUILD=1</code> succeeded. The probe was removed. The consequence is documented in <code>CONTRIBUTING.md</code>: <code>bun run build</code> is now the only type-check, so an error missed there ships.</p>
+</div>
+
+<p>What this does not do is reach a 1 GB server. It removes the intermittent failure at 2 GB and halves the wait, but the 1.57 GB Turbopack process is untouched.</p>
+
+<h2>8. Server sizing — what this adds up to</h2>
+
+<table>
+  <tr><th>Server</th><th>Can run it</th><th>Can install/update it</th><th>Notes</th></tr>
+  <tr><td>1 GB RAM</td><td class="ok">Yes</td><td class="bad">No</td><td>110 MB for the stack is fine. The build peaks at 2.07 GB and one process of that is 1.57 GB, so no amount of swap or tuning fits it. Needs a prebuilt image.</td></tr>
+  <tr><td>2 GB RAM</td><td class="ok">Yes</td><td class="warn">Marginal — add swap</td><td>2.07 GB peak against ~1.9 GB available is right at the edge. The §7 change removed the second phase that made this fail intermittently, but swap is still the honest advice.</td></tr>
+  <tr><td>3–4 GB RAM</td><td class="ok">Yes</td><td class="ok">Yes</td><td>Comfortable for both, with room for the managed workloads.</td></tr>
+  <tr><td>1 vCPU</td><td class="ok">Yes</td><td class="ok">Yes, ~2–3 min</td><td>Idle draw is ~9% of that core with a tab open, ~1% unattended. One worker rather than seven, which is also why the peak is lower than on this host.</td></tr>
+  <tr><td>Disk</td><td colspan="3">1.49 GB images + ~5 GB build cache + 322 MB data (growing per the model above). <strong>Plan for 10 GB free</strong>, not counting Docker itself or the workloads being managed.</td></tr>
+</table>
+
+<p>Docker itself is a real part of the bill and is not counted above: <code>dockerd</code> holds 490 MB RSS and <code>containerd</code> 58 MB on this host, though that scales with the 15 containers running here and would be substantially smaller on a machine hosting only the dashboard.</p>
+
+<div class="box">
+  <p><strong>The honest headline:</strong> as a running service Just Dashboard is lighter than most things it manages — 110 MB and a fraction of a core. The claim "runs on any server" holds for running it and breaks for installing it, and the fix is a distribution question (publish prebuilt images) rather than an optimisation one.</p>
+</div>
+
+<h2>9. Known gaps — not fixed, flagged for a decision</h2>
+<ul>
+  <li><strong>No prebuilt images — still the decision with the most leverage.</strong> Every install and every in-app update compiles on the target machine, and after the §7 change that still peaks at 2.07 GB with a single 1.57 GB Turbopack process. Tuning cannot go lower; three approaches were measured and rejected. Publishing images to a registry would make the 1 GB tier viable and turn a weekly update from a minute of compiling into a pull. It needs a registry and a release job, which <code>AGENTS.md</code> says not to add unasked — so it is yours to call.</li>
+  <li><strong>No resource limits in <code>docker-compose.yml</code>.</strong> No <code>mem_limit</code>, <code>cpus</code> or <code>deploy.resources</code> on any service. The frontend has been observed at 292 MB. On a 1 GB box, an unbounded Node process next to an unbounded root-equivalent backend is how the whole machine goes down rather than one container. Decide whether to cap them.</li>
+  <li><strong>The Git watcher's 5-second interval is a <code>const</code>.</strong> <code>GitWatchInterval</code> in <code>deploy/git_watch.go:15</code> is not configurable, costs 1.76% of a core per watched project, and makes 17,280 outbound HTTPS calls per project per day. Decide whether it becomes an environment variable, backs off when nothing changes, or stays as is.</li>
+  <li><strong>The deployment queue polls every 250 ms when idle.</strong> <code>engine.go:103</code> defaults <code>PollEvery</code> to 250 ms and the loop already has a <code>wake</code> channel for event-driven work. Decide whether the idle interval can be much longer given that wake-up exists.</li>
+  <li><strong>No preflight and no documented requirements.</strong> <code>install.sh</code> checks for Docker but never checks RAM or free disk, and the README states no minimum. An install on a 1 GB box fails partway through a build rather than at a check. Decide the supported floor and assert it.</li>
+  <li><strong>Build cache is never pruned.</strong> ~5 GB accumulates and nothing in the update path reclaims it.</li>
+  <li><strong>Metrics default to the expensive end.</strong> 15 s × every container is the dominant DB cost. Worth deciding whether 30 s or 60 s should be the default, given charts are downsampled to at most a few hundred points anyway.</li>
+</ul>
+
+<h2>10. How each number was produced</h2>
+<table>
+  <tr><th>Measurement</th><th>Method</th><th>Window</th></tr>
+  <tr><td>Per-container CPU/memory</td><td><code>cpu.stat usage_usec</code> and <code>memory.stat anon</code> read directly from each container's cgroup, sampled at 5 s</td><td>288 s idle, 91 s + 55 s loaded</td></tr>
+  <tr><td>Spike attribution</td><td>Same counters at 1 s, cross-referenced against <code>ps</code> on the host</td><td>120 s</td></tr>
+  <tr><td>Clean baseline</td><td>Binary extracted from the image, run with its own data dir, sandboxed roots, no clients</td><td>223 s</td></tr>
+  <tr><td>Load</td><td>Threaded keep-alive HTTP client; 9,915 requests direct, 6,703 through Caddy over TLS</td><td>60 s + 40 s</td></tr>
+  <tr><td>Database composition</td><td><code>dbstat</code> page accounting on a copy of the live file</td><td>2.81 days of history</td></tr>
+  <tr><td>Write volume</td><td>cgroup <code>io.stat wbytes</code> delta</td><td>60 s</td></tr>
+  <tr><td><code>git ls-remote</code> cost</td><td>10 sequential calls, child CPU from <code>/proc/&lt;pid&gt;/stat</code></td><td>4.5 s</td></tr>
+  <tr><td>Build peaks</td><td>Cold builds after <code>rm -rf .next</code> with 1 s process-tree RSS sampling, in both the 7-worker and 1-worker shapes</td><td>21–49 s each</td></tr>
+  <tr><td>Go build stage</td><td><code>CGO_ENABLED=0 go build -trimpath -ldflags=&quot;-s -w&quot;</code>, same flags as the Dockerfile, with RSS sampling</td><td>44 s</td></tr>
+  <tr><td>Build-mode equivalence</td><td>Route count, chunk count, total JS/CSS bytes, standalone size and a chunk-size fingerprint compared between both modes</td><td>identical</td></tr>
+  <tr><td>Type-check gate</td><td>Ill-typed probe file added to <code>src/</code>, built both ways, then removed</td><td>fails / passes as intended</td></tr>
+  <tr><td>Image rebuild</td><td><code>docker compose build frontend</code>, then a throwaway container serving <code>/login</code></td><td>31 s, HTTP 200</td></tr>
+  <tr><td>Images</td><td><code>docker system df -v</code> for shared/unique split; <code>docker history</code> per layer; <code>find</code> inside the image</td><td>—</td></tr>
+</table>
+
+<p>The production stack was left running throughout and finished with <strong>zero restarts and no OOM kills</strong>. The clean-room instance was removed afterwards; the only lasting change is a rebuilt <code>frontend/.next</code>, which is gitignored build output.</p>
+
+<footer>
+  Just Dashboard v0.6.7 · resource footprint report · generated 19 September 2026 · disposable, safe to delete
+</footer>
+
+</div>
+</body>
+</html>

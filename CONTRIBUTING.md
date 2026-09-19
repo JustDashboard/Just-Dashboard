@@ -52,6 +52,15 @@ carries no licensing question at all.
   Browser tests use the freshly built production frontend on loopback port 43117 and refuse to reuse
   an unrelated server. Run `bun run build` after source changes before running browser tests alone.
   `JD_BROWSER_BASE_URL` explicitly selects an externally managed test frontend when needed.
+- **`bun run build` here is the type-check gate, and it is the only one.** `frontend/Dockerfile`
+  sets `JD_IMAGE_BUILD=1`, which tells `next.config.ts` to skip the type-check pass and the
+  prerender source maps. That is deliberate: install and update are both
+  `docker compose up --build`, so the image build runs on the operator's own server, where
+  repeating a check that already passed here buys nothing and costs roughly a gigabyte — tsc runs
+  in a second Node process while the compiler still holds its graph, which is what made a 2 GB
+  machine fail the install intermittently. The emitted application is byte-for-byte identical
+  either way. So a type error you do not catch with `bun run build` will not be caught anywhere
+  later; it will ship.
 - `.github/workflows/verify.yml` runs the backend, deployment race, frontend and live Docker gates
   for every push, and for pull requests from forks, on a **self-hosted runner** on the release host
   (labels `self-hosted, linux, x64, just-dashboard`), because the suites need a real Docker daemon, host tools and a shell
