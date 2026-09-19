@@ -39,12 +39,15 @@ import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { FilterChip } from "@/components/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
+import { BlurFade } from "@/components/ui/blur-fade"
+import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
+import { MiniReleasePath } from "@/components/deploy/run-pipeline"
+import { ProjectMark } from "@/components/deploy/project-mark"
 import {
   ProjectStatus,
   RunStatus,
-  WorkloadMark,
   deploymentURL,
   formatDuration,
   hostOf,
@@ -310,11 +313,22 @@ function Fleet() {
           ) : layout === "grid" ? (
             <ul
               aria-label="Deployment projects"
-              className="grid animate-rise gap-4 md:grid-cols-2 2xl:grid-cols-3"
+              className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
             >
-              {filtered.map((deployment) => (
+              {filtered.map((deployment, index) => (
                 <li key={deployment.id} className="min-w-0">
-                  <ProjectCard deployment={deployment} />
+                  {/* Each card lands a beat after the one before it, capped
+                      so a fleet of forty does not take three seconds. */}
+                  <BlurFade delay={Math.min(index, 11) * 0.045} className="h-full">
+                    <ProjectCard
+                      deployment={deployment}
+                      currentStep={
+                        fleet.data?.activeWork.find(
+                          (item) => item.run.id === deployment.activeRun?.id,
+                        )?.currentStep
+                      }
+                    />
+                  </BlurFade>
                 </li>
               ))}
             </ul>
@@ -326,7 +340,7 @@ function Fleet() {
                   <Row
                     key={deployment.id}
                     href={`/deploy/${deployment.id}`}
-                    leading={<WorkloadMark profile={deployment.profile} size="sm" />}
+                    leading={<ProjectMark deployment={deployment} size="sm" />}
                     title={deployment.name}
                     subtitle={sourceLine(deployment).primary}
                     trailing={
@@ -404,9 +418,15 @@ function InProgressPanel({
                     {item.projectName}
                   </Link>
                 }
-                subtitle={`${item.environment} · ${
-                  item.currentStep ? humanize(item.currentStep) : "Waiting for next step"
-                }`}
+                subtitle={
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <MiniReleasePath currentStep={item.currentStep} />
+                    <span className="truncate">
+                      {item.environment} ·{" "}
+                      {item.currentStep ? humanize(item.currentStep) : "Waiting for next step"}
+                    </span>
+                  </span>
+                }
                 trailing={
                   <>
                     <span className="numeric text-hint text-muted-foreground">
@@ -447,7 +467,14 @@ function InProgressPanel({
  * A `Panel interactive` rather than `plain` — the one exception design system
  * §15 names by precedent: a card is what a project grid is made of.
  */
-function ProjectCard({ deployment }: { deployment: DeploymentSummary }) {
+function ProjectCard({
+  deployment,
+  currentStep,
+}: {
+  deployment: DeploymentSummary
+  /** Where the active run is, from the fleet's in-progress list. */
+  currentStep?: string
+}) {
   const { can } = useAuth()
   const router = useRouter()
   const [redeploying, setRedeploying] = useState(false)
@@ -537,10 +564,13 @@ function ProjectCard({ deployment }: { deployment: DeploymentSummary }) {
   }
 
   return (
-    <Panel interactive className="h-full">
+    <Panel interactive className="relative h-full">
+      {/* A light around the frame while a run is in progress: the card is
+          working, and the eye finds it in a grid without reading. */}
+      {deployment.activeRun && <BorderBeam />}
       <div className="flex h-full flex-col p-4">
         <div className="flex items-start gap-3">
-          <WorkloadMark profile={deployment.profile} size="sm" />
+          <ProjectMark deployment={deployment} size="sm" />
           <div className="min-w-0 flex-1">
             <Link
               href={base}
@@ -597,6 +627,7 @@ function ProjectCard({ deployment }: { deployment: DeploymentSummary }) {
           </span>
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ProjectStatus summary={deployment} />
+            {deployment.activeRun && <MiniReleasePath currentStep={currentStep} />}
             <Dot />
             <span className="text-muted-foreground">
               {relativeTime(deployment.lastRun?.requestedAt ?? deployment.updatedAt)}

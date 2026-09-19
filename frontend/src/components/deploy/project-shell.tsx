@@ -19,7 +19,6 @@ import {
   Trash,
 } from "@/components/icons"
 import { del, get } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentGitWatch } from "@/lib/types"
@@ -34,6 +33,7 @@ import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/nav"
 import { useNavScope } from "@/components/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
+import { ProjectMark } from "@/components/deploy/project-mark"
 import {
   ProjectStatus,
   deploymentURL,
@@ -327,90 +327,95 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow={
-          <Link
-            href="/deploy"
-            className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-          >
-            <ArrowLeft className="size-3" /> Deployments
-          </Link>
-        }
-        title={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-3">
-            <span className="truncate">{record.name}</span>
-            <ProjectStatus
-              summary={deployment}
-              runtime={runtime}
-              archived={project.archived}
-              live={Boolean(activeRun)}
-              className="shrink-0"
-            />
-          </span>
-        }
-        actions={
-          <>
-            {project.archived && <Tag>Archived</Tag>}
-            {url && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  <External className="size-3.5" /> Visit
-                </a>
-              </Button>
-            )}
-            {primary}
-            {verbs.length > 0 && <VerbMenu verbs={verbs} label="Deployment actions" />}
-          </>
-        }
-      />
+      {/* The header and the facts under it are one block: the facts are the
+          title's second line, not a section of their own. */}
+      <div className="space-y-3">
+        <PageHeader
+          eyebrow={
+            <Link
+              href="/deploy"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Deployments
+            </Link>
+          }
+          title={
+            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
+              <ProjectMark deployment={deployment} size="sm" />
+              <span className="truncate">{record.name}</span>
+              <ProjectStatus
+                summary={deployment}
+                runtime={runtime}
+                archived={project.archived}
+                live={Boolean(activeRun)}
+                className="shrink-0"
+              />
+            </span>
+          }
+          actions={
+            <>
+              {project.archived && <Tag>Archived</Tag>}
+              {url && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    <External className="size-3.5" /> Visit
+                  </a>
+                </Button>
+              )}
+              {primary}
+              {verbs.length > 0 && <VerbMenu verbs={verbs} label="Deployment actions" />}
+            </>
+          }
+        />
 
-      {/* What the project is: where it answers, what it was built from, what
+        {/* What the project is: where it answers, what it was built from, what
           is live, and whether it deploys itself. A row of facts under the
           title, not a fourth panel. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-        {url ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="truncate rounded-sm text-foreground focus-ring hover:underline"
-          >
-            {hostOf(url)}
-          </a>
-        ) : (
-          <span>{deployment.liveReleaseId ? "Private service" : "No public address yet"}</span>
-        )}
-        <Dot />
-        <span className="truncate">
-          {source.primary}
-          {source.secondary && (
-            <span className={cn("text-muted-foreground/80", source.mono && "font-mono text-xs")}>
-              {" · "}
-              {source.secondary}
-            </span>
-          )}
-        </span>
-        <Dot />
-        {project.liveRelease ? (
-          <span className="truncate">
-            <span className="numeric">Release #{project.liveRelease.number}</span>
-            {project.liveRun && <> · {liveReleaseLine(project.liveRun)}</>}
-          </span>
-        ) : (
-          <span>{deployment.liveReleaseId ? "Live release" : "Not deployed yet"}</span>
-        )}
-        {watch.data && watch.data.status !== "not_applicable" && (
-          <>
-            <Dot />
-            <Link
-              href={`${base}/settings/general`}
-              className="rounded-sm focus-ring"
-              aria-label="Automatic deployment settings"
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
+          {url ? (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="truncate rounded-sm text-foreground focus-ring hover:underline"
             >
-              <GitWatchStatus watch={watch.data} />
-            </Link>
-          </>
-        )}
+              {hostOf(url)}
+            </a>
+          ) : (
+            <span>{deployment.liveReleaseId ? "Private service" : "No public address yet"}</span>
+          )}
+          <Dot />
+          <span className="truncate">
+            {source.primary}
+            {source.secondary && (
+              <span className="text-muted-foreground/80">
+                {" · "}
+                {source.secondary}
+              </span>
+            )}
+          </span>
+          <Dot />
+          {project.liveRelease ? (
+            <span className="truncate">
+              <span className="numeric">Release #{project.liveRelease.number}</span>
+              {project.liveRun && <> · {liveReleaseLine(project.liveRun)}</>}
+            </span>
+          ) : (
+            <span>{deployment.liveReleaseId ? "Live release" : "Not deployed yet"}</span>
+          )}
+          {watch.data && watch.data.status !== "not_applicable" && (
+            <>
+              <Dot />
+              <Link
+                href={`${base}/settings/general`}
+                className="rounded-sm focus-ring"
+                aria-label="Automatic deployment settings"
+              >
+                <GitWatchStatus watch={watch.data} />
+              </Link>
+            </>
+          )}
+        </div>
       </div>
 
       {children}
