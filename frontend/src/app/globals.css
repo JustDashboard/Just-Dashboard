@@ -688,10 +688,13 @@
   background-color: var(--card);
 }
 
-/* An empty state nested in a panel would draw a second frame just inside the
- * first. The panel is already the container — the dashed border is for when
- * the empty state stands on its own. */
-[data-slot="panel"] [data-slot="empty-state"] {
+/* An empty state nested in a panel or a pane would draw a second frame just
+ * inside the first — and its rounded corners land against the container's
+ * own corners and header hairline, which reads as a mismatched inset frame.
+ * The container is already the frame; the dashed border is for when the
+ * empty state stands on its own. */
+[data-slot="panel"] [data-slot="empty-state"],
+[data-slot="pane"] [data-slot="empty-state"] {
   border: 0;
 }
 
