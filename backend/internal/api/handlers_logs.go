@@ -477,18 +477,24 @@ func dockerLine(l dockerx.LogLine) logsx.Line {
 			text = text[i+1:]
 		}
 	}
-	line.Text = text
 	parsed := logsx.ParseLine(text, l.Service)
-	line.Level = parsed.Level
+	// ParseLine strips the terminal control a build tool writes, so the text
+	// kept here is the text the level scan and the operator's search saw.
+	line.Text, line.Level = parsed.Text, parsed.Level
+	line.Message, line.Fields = parsed.Message, parsed.Fields
 	if line.Timestamp == nil {
 		line.Timestamp = parsed.Timestamp
 	}
-	// Docker's own stderr is a stronger signal than a keyword search over the
-	// text, but only where the text said nothing: a container logging "INFO
-	// listening" to stderr, which many do, must not be painted as an error.
-	if line.Level == "" && l.Stream == "stderr" {
-		line.Level = "error"
-	}
+	// stderr is deliberately *not* promoted to a level here.
+	//
+	// It used to be: a stderr line the word scan could not classify was filed
+	// as an error. That is true of a crash and false of almost everything else
+	// that reaches stderr — npm's notices, Prisma's "Update available" banner,
+	// every CLI that treats stderr as a second stdout. A freshly deployed,
+	// perfectly healthy Next.js project opened its Logs tab reading "13
+	// errors", all of them a version notice inside an ASCII box. A stream is a
+	// stream; the viewer already marks it, and a level the line does not claim
+	// is the page inventing a reading.
 	return line
 }
 
@@ -704,10 +710,9 @@ func (s *Server) followPM2(ctx context.Context, name string, n int, f *logsx.Fil
 		started++
 		stream := src.stream
 		go forwardLines(ctx, ch, out, func(l logsx.Line) logsx.Line {
+			// The stream is recorded, not promoted to a level — see dockerLine
+			// for why a process's stderr is a poor proxy for "this went wrong".
 			l.Stream = stream
-			if l.Level == "" && stream == "stderr" {
-				l.Level = "error"
-			}
 			return l
 		})
 	}

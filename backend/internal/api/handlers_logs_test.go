@@ -307,9 +307,43 @@ func TestDockerLineSplitsTheTimestampOut(t *testing.T) {
 	if info.Level != "info" {
 		t.Errorf("level = %q, want the level the line itself claims", info.Level)
 	}
-	// With nothing in the text to go on, stderr is the stronger signal.
+	// With nothing in the text to go on, the line claims no level and the page
+	// must not invent one. stderr is where npm writes its notices, where
+	// Prisma writes "Update available" and where half the CLI world writes
+	// anything that is not the program's output — a freshly deployed, healthy
+	// project opened its Logs tab reading "13 errors", every one of them a
+	// version banner. The stream is recorded on the line and rendered; that is
+	// the honest signal.
 	bare := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z something happened", "stderr"))
-	if bare.Level != "error" {
-		t.Errorf("level = %q, want error for an unclassified stderr line", bare.Level)
+	if bare.Level != "" {
+		t.Errorf("level = %q, want no level for a line that claims none", bare.Level)
+	}
+	if bare.Stream != "stderr" {
+		t.Errorf("stream = %q, want it kept so the viewer can mark it", bare.Stream)
+	}
+}
+
+// A build tool's progress spinner writes cursor moves and colour into the same
+// stream as its output. Leaving them in draws "B[2KB[1AB[2KB[G" on the page and
+// — worse — feeds the escape bytes to the level scan and the operator's search.
+func TestDockerLineStripsTerminalControl(t *testing.T) {
+	got := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z \x1b[2K\x1b[1A\x1b[32mGenerated Prisma Client\x1b[0m", "stdout"))
+	if got.Text != "Generated Prisma Client" {
+		t.Errorf("text = %q, want the escape sequences resolved away", got.Text)
+	}
+}
+
+// An application logging JSON is the common case for anything written this
+// decade, and the word scan finds either nothing or the wrong thing in one.
+func TestDockerLineReadsStructuredOutput(t *testing.T) {
+	got := dockerLine(dockerxLogLine(`2024-06-12T10:00:02Z {"level":"error","msg":"upstream timeout","requestId":"r-1"}`, "stdout"))
+	if got.Level != "error" {
+		t.Errorf("level = %q, want the level the JSON claims", got.Level)
+	}
+	if got.Message != "upstream timeout" {
+		t.Errorf("message = %q", got.Message)
+	}
+	if got.Fields["requestId"] != "r-1" {
+		t.Errorf("fields = %v, want the context that is the whole point of logging JSON", got.Fields)
 	}
 }

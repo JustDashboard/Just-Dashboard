@@ -164,9 +164,7 @@ func (c *Collector) scanFile(ctx context.Context, path, stream string) error {
 		}
 		line := ParseLine(text, name)
 		line.No, line.File, line.Stream = lineNo, name, stream
-		if line.Level == "" && stream == "stderr" {
-			line.Level = "error"
-		}
+
 		c.Feed(line)
 	}
 	return sc.Err()

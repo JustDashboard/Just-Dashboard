@@ -330,6 +330,13 @@ type Line struct {
 	// Match holds the byte ranges of the search term, computed here because
 	// the browser cannot faithfully re-run a Go regular expression.
 	Match [][2]int `json:"match,omitempty"`
+	// Message is the human sentence out of a structured line, and Fields the
+	// context around it. Both are empty for the plain text that is most of a
+	// host's logs; where they are set, the viewer can show the sentence and
+	// keep the request id, the trace id and the status code a keystroke away
+	// rather than making the reader parse JSON by eye.
+	Message string            `json:"message,omitempty"`
+	Fields  map[string]string `json:"fields,omitempty"`
 }
 
 // maxLine bounds one record. A binary blob written into a log file with no
@@ -432,8 +439,29 @@ func LevelFromPriority(p int) string {
 	}
 }
 
+// ParseLine turns one raw record into a Line. It strips terminal control
+// first, because every later step — the level scan, the timestamp scan, the
+// operator's search — reads the text, and none of them should be matching
+// against a cursor-movement sequence.
 func ParseLine(text, source string) Line {
-	l := Line{Text: text, Source: source, Level: detectLevel(text)}
+	text = StripANSI(text)
+	l := Line{Text: text, Source: source}
+	if level, message, at, fields, ok := parseStructured(text); ok {
+		l.Level, l.Message, l.Fields, l.Timestamp = level, message, fields, at
+		if l.Level == "" {
+			// A structured line with no level of its own still has a sentence
+			// worth scanning, and scanning the whole JSON would find the word
+			// "error" inside a field name.
+			l.Level = detectLevel(message)
+		}
+		if l.Timestamp == nil {
+			if ts, ok := parseTimestamp(text); ok {
+				l.Timestamp = &ts
+			}
+		}
+		return l
+	}
+	l.Level = detectLevel(text)
 	if ts, ok := parseTimestamp(text); ok {
 		l.Timestamp = &ts
 	}
