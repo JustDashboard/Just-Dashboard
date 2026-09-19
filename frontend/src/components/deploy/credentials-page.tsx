@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Key, Lightning, Pencil, Plus, Trash } from "@/components/icons"
+import { Lightning, Pencil, Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -10,15 +10,17 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentCredential, DeploymentCredentialKind } from "@/lib/types"
 import { Page, PageHeader } from "@/components/page"
-import { Panel } from "@/components/panel"
+import { Panel, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -28,15 +30,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { GitHubAppCard } from "@/components/deploy/github-app-card"
+import { GitHubAppPanel, useGitHubApp } from "@/components/deploy/github-app-card"
 
 /**
  * Fleet-level secrets: the tokens and keys the server uses on behalf of every
  * project, rather than one held per project. A project references one of
  * these by id instead of carrying its own copy, so rotating a token happens
  * once here rather than once per project that used it.
+ *
+ * The page is three readings, the GitHub App (one App standing in for a
+ * token and a webhook per repository) and the saved credentials as rows.
  */
 
 const KIND_OPTIONS: { kind: DeploymentCredentialKind; title: string; hint: string }[] = [
@@ -70,12 +76,10 @@ const KIND_LABEL: Record<DeploymentCredentialKind, string> = {
   github_app: "GitHub App",
 }
 
-const GIT_KINDS: DeploymentCredentialKind[] = ["git_bearer", "git_ssh"]
-
 const TARGET_HINT: Record<DeploymentCredentialKind, string> = {
-  git_bearer: "The host this token authenticates to, such as github.com.",
-  git_ssh: "The host this key authenticates to, such as github.com.",
-  registry: "The registry host, such as ghcr.io or docker.io.",
+  git_bearer: "The Git host this token signs in to.",
+  git_ssh: "The Git host this key signs in to.",
+  registry: "Required. The registry host, with its port if it has one.",
   provider_token: "The provider's API host, if this token is scoped to one.",
   github_app: "github.com",
 }
@@ -86,6 +90,22 @@ const TARGET_PLACEHOLDER: Record<DeploymentCredentialKind, string> = {
   registry: "ghcr.io",
   provider_token: "api.github.com",
   github_app: "github.com",
+}
+
+const SECRET_LABEL: Record<DeploymentCredentialKind, string> = {
+  git_bearer: "Token",
+  git_ssh: "Private key",
+  registry: "Password or token",
+  provider_token: "Token",
+  github_app: "Token",
+}
+
+const SECRET_HINT: Record<DeploymentCredentialKind, string> = {
+  git_bearer: "A personal access token that can read the repositories it will clone.",
+  git_ssh: "A private key in PEM form; the public half goes in the provider's deploy keys.",
+  registry: "The password, or an access token, that goes with the username.",
+  provider_token: "A token allowed to call the provider's API.",
+  github_app: "",
 }
 
 type Draft = {
@@ -99,6 +119,22 @@ type Draft = {
 
 function emptyDraft(kind: DeploymentCredentialKind): Draft {
   return { kind, name: "", target: "", username: "", secret: "" }
+}
+
+/**
+ * The server wants a bare host and refuses anything else, but what an
+ * operator has on the clipboard is usually a whole URL or an SSH remote.
+ * Cutting the scheme, the user and the path off here means a paste works
+ * rather than bouncing off "target must be a bare host".
+ */
+function bareHost(value: string) {
+  const host = value
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    .replace(/^[^@/]+@/, "")
+    .split("/")[0]
+  // `host:5000` is a registry with a port; `host:owner/repo` is an SSH remote.
+  return host.replace(/:(?!\d+$).*$/, "")
 }
 
 function usageLabel(usedBy: number) {
@@ -116,24 +152,37 @@ export function CredentialsPage() {
     (signal) => get<DeploymentCredential[]>("/deploy/credentials", undefined, signal),
     15000,
   )
+  const githubApp = useGitHubApp()
   const [draft, setDraft] = useState<Draft>()
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [formError, setFormError] = useState("")
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState<DeploymentCredential>()
   const { confirm, dialog } = useConfirm()
 
+  const closeDraft = () => {
+    setDraft(undefined)
+    setFieldErrors({})
+    setFormError("")
+  }
+
+  // What the server will refuse without reading the secret. The button waits
+  // for these rather than letting a press bounce off a 400.
+  const incomplete =
+    !draft ||
+    !draft.name.trim() ||
+    (!draft.id && !draft.secret.trim()) ||
+    (draft.kind === "registry" && (!bareHost(draft.target) || !draft.username.trim()))
+
   const save = async () => {
-    if (!draft) return
-    if (!draft.id && !draft.secret.trim()) {
-      setFieldErrors({ secret: "Enter the secret to seal." })
-      return
-    }
+    if (!draft || incomplete) return
     setSaving(true)
     setFieldErrors({})
+    setFormError("")
     const body = {
       name: draft.name.trim(),
       ...(draft.id ? {} : { kind: draft.kind }),
-      target: draft.target.trim() || undefined,
+      target: bareHost(draft.target) || undefined,
       username: draft.kind === "registry" ? draft.username.trim() || undefined : undefined,
       // An edit's blank secret means "keep the sealed one"; a create requires it.
       secret: draft.id ? draft.secret || undefined : draft.secret,
@@ -146,7 +195,7 @@ export function CredentialsPage() {
         await post("/deploy/credentials", body)
         notify.success("Credential added")
       }
-      setDraft(undefined)
+      closeDraft()
       credentials.refresh()
     } catch (caught) {
       if (caught instanceof ApiError && caught.field) {
@@ -157,6 +206,10 @@ export function CredentialsPage() {
         caught.code === "name_taken"
       ) {
         setFieldErrors({ name: "That name is already used." })
+      } else if (caught instanceof ApiError && caught.status === 400) {
+        // A shape refusal names what is wrong in its message, and belongs
+        // under the form rather than in a toast that closes over it.
+        setFormError(caught.message)
       } else {
         notify.error(draft.id ? "Could not save credential" : "Could not add credential", caught)
       }
@@ -167,6 +220,7 @@ export function CredentialsPage() {
 
   const edit = (credential: DeploymentCredential) => {
     setFieldErrors({})
+    setFormError("")
     setDraft({
       id: credential.id,
       kind: credential.kind,
@@ -203,6 +257,12 @@ export function CredentialsPage() {
     </Button>
   )
 
+  const list = credentials.data
+  const inUse = list?.filter((credential) => credential.usedBy > 0).length
+  const app = githubApp.data
+  const figure = (value: number | undefined) =>
+    value === undefined ? <Skeleton className="h-6 w-8" /> : value
+
   return (
     <Page>
       <PageHeader
@@ -215,28 +275,62 @@ export function CredentialsPage() {
         actions={addAction}
       />
 
-      <Notice title="Secrets are sealed">
-        Tokens and keys the server uses to read private repositories and registries. Secrets are
-        sealed and never shown again.
-      </Notice>
+      <StatGrid columns={3}>
+        <StatTile
+          key={list ? "credentials" : "credentials-loading"}
+          label="Credentials"
+          value={figure(list?.length)}
+          hint="tokens, keys and logins the server holds"
+          className={list && "animate-rise"}
+        />
+        <StatTile
+          key={list ? "in-use" : "in-use-loading"}
+          label="In use"
+          value={figure(inUse)}
+          hint="referenced by a project's current source"
+          className={list && "animate-rise"}
+        />
+        <StatTile
+          key={app || githubApp.error ? "app" : "app-loading"}
+          label="GitHub App"
+          value={
+            githubApp.error ? (
+              "Unavailable"
+            ) : app ? (
+              app.configured ? (
+                "Connected"
+              ) : (
+                "Not connected"
+              )
+            ) : (
+              <Skeleton className="h-6 w-24" />
+            )
+          }
+          hint={
+            app?.configured
+              ? `installed on ${plural(app.installations.length, "account")}`
+              : "one App in place of a token and a webhook per repository"
+          }
+          className={(app || githubApp.error) && "animate-rise"}
+        />
+      </StatGrid>
 
-      <GitHubAppCard admin={admin} />
+      <GitHubAppPanel admin={admin} status={githubApp} onChange={credentials.refresh} />
 
       <Panel plain>
+        <PanelHeader title="Saved credentials" />
         {credentials.error ? (
           <ErrorState error={credentials.error} onRetry={credentials.refresh} />
-        ) : credentials.loading && !credentials.data ? (
-          <LoadingPanel rows={3} />
-        ) : (credentials.data?.length ?? 0) === 0 ? (
-          <EmptyState
-            icon={Key}
-            title="No credentials"
-            description="Add a Git token, an SSH key or a registry login so the server can reach private sources."
-            action={addAction}
-          />
+        ) : credentials.loading && !list ? (
+          <LoadingRows rows={3} className="pt-4" />
+        ) : (list?.length ?? 0) === 0 ? (
+          <EmptyNote>
+            No credentials yet. Add a Git token, an SSH key or a registry login so the server can
+            reach private sources.
+          </EmptyNote>
         ) : (
           <RowList aria-label="Credentials" className="animate-rise">
-            {credentials.data?.map((credential) => {
+            {list?.map((credential) => {
               const verbs: Verb[] = []
               if (admin) {
                 verbs.push({
@@ -253,7 +347,7 @@ export function CredentialsPage() {
                   verbs.push({
                     key: "edit",
                     label: "Edit credential",
-                    detail: "Change its name, target or secret.",
+                    detail: "Change its name, host or secret.",
                     icon: Pencil,
                     run: () => edit(credential),
                   })
@@ -269,32 +363,29 @@ export function CredentialsPage() {
                   run: () => remove(credential),
                 })
               }
+              const where = [credential.target, credential.username].filter(Boolean).join(" · ")
               return (
                 <Row
                   key={credential.id}
-                  title={
-                    <span className="inline-flex min-w-0 items-center gap-2">
-                      <span className="truncate">{credential.name}</span>
-                      <Tag>{KIND_LABEL[credential.kind]}</Tag>
-                    </span>
-                  }
+                  title={credential.name}
                   subtitle={
-                    <span className="min-w-0 truncate">
-                      {(credential.target || credential.username) && (
+                    <>
+                      {where && (
                         <>
-                          <span className="font-mono">
-                            {[credential.target, credential.username].filter(Boolean).join(" · ")}
-                          </span>
+                          <span className="font-mono">{where}</span>
                           {" · "}
                         </>
                       )}
                       {usageLabel(credential.usedBy)} · {lastUsedLabel(credential.lastUsedAt)}
-                    </span>
+                    </>
                   }
                   trailing={
-                    verbs.length > 0 && (
-                      <VerbActions verbs={verbs} menuLabel={`Actions for ${credential.name}`} />
-                    )
+                    <>
+                      <Tag>{KIND_LABEL[credential.kind]}</Tag>
+                      {verbs.length > 0 && (
+                        <VerbActions verbs={verbs} menuLabel={`Actions for ${credential.name}`} />
+                      )}
+                    </>
                   }
                 />
               )
@@ -305,50 +396,62 @@ export function CredentialsPage() {
 
       <SidePanel
         open={Boolean(draft)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDraft(undefined)
-            setFieldErrors({})
-          }
-        }}
+        onOpenChange={(open) => !open && closeDraft()}
         title={draft?.id ? "Edit credential" : "Add credential"}
         description="A token or key the server uses to read a private repository or registry."
-        width="md"
+        width="sm"
         footer={
-          <Button pending={saving} disabled={!draft || !draft.name.trim()} onClick={save}>
+          <Button pending={saving} disabled={incomplete} onClick={save}>
             {draft?.id ? "Save credential" : "Add credential"}
           </Button>
         }
       >
         {draft && (
           <div className="space-y-5" aria-busy={saving}>
-            {!draft.id && (
-              <fieldset className="space-y-1.5">
-                <legend className="eyebrow mb-1">Kind</legend>
-                <OptionList role="group" aria-label="Credential kind">
+            {draft.id ? (
+              <FormFacts>
+                <FormFact label="Kind">{KIND_LABEL[draft.kind]}</FormFact>
+              </FormFacts>
+            ) : (
+              <fieldset className="space-y-2">
+                <legend className="eyebrow mb-2">Kind</legend>
+                <div className="grid gap-2 sm:grid-cols-2">
                   {KIND_OPTIONS.map((option) => (
-                    <OptionRow
+                    <ChoiceCard
                       key={option.kind}
-                      title={option.title}
-                      hint={option.hint}
-                      checked={draft.kind === option.kind}
-                      onCheckedChange={(checked) => checked && setDraft(emptyDraft(option.kind))}
-                    />
+                      selected={draft.kind === option.kind}
+                      onClick={() => {
+                        if (draft.kind === option.kind) return
+                        setFieldErrors({})
+                        setFormError("")
+                        setDraft({ ...emptyDraft(option.kind), name: draft.name })
+                      }}
+                    >
+                      <ChoiceCardTitle>{option.title}</ChoiceCardTitle>
+                      <ChoiceCardHint>{option.hint}</ChoiceCardHint>
+                    </ChoiceCard>
                   ))}
-                </OptionList>
+                </div>
               </fieldset>
             )}
 
-            <Field label="Name" htmlFor="credential-name" error={fieldErrors.name}>
+            <Field
+              label="Name"
+              htmlFor="credential-name"
+              hint="Letters, digits, dots, dashes and underscores."
+              error={fieldErrors.name}
+            >
               <Input
                 id="credential-name"
                 value={draft.name}
                 onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                placeholder={draft.kind === "registry" ? "ghcr-deploy" : "github-deploy"}
+                autoComplete="off"
               />
             </Field>
 
             <Field
-              label="Target"
+              label="Host"
               htmlFor="credential-target"
               hint={TARGET_HINT[draft.kind]}
               error={fieldErrors.target}
@@ -360,11 +463,17 @@ export function CredentialsPage() {
                 placeholder={TARGET_PLACEHOLDER[draft.kind]}
                 className="font-mono"
                 autoComplete="off"
+                spellCheck={false}
               />
             </Field>
 
             {draft.kind === "registry" && (
-              <Field label="Username" htmlFor="credential-username" error={fieldErrors.username}>
+              <Field
+                label="Username"
+                htmlFor="credential-username"
+                hint="Required. The account the registry knows this login by."
+                error={fieldErrors.username}
+              >
                 <Input
                   id="credential-username"
                   value={draft.username}
@@ -374,13 +483,17 @@ export function CredentialsPage() {
               </Field>
             )}
 
-            {draft.kind === "git_ssh" ? (
-              <Field
-                label="Secret"
-                htmlFor="credential-secret"
-                hint={`A private key in PEM form; the public half goes in the provider's deploy keys.${draft.id ? " Leave empty to keep the stored secret." : ""}`}
-                error={fieldErrors.secret}
-              >
+            <Field
+              label={SECRET_LABEL[draft.kind]}
+              htmlFor="credential-secret"
+              hint={
+                draft.id
+                  ? `${SECRET_HINT[draft.kind]} Leave empty to keep the stored secret.`
+                  : SECRET_HINT[draft.kind]
+              }
+              error={fieldErrors.secret}
+            >
+              {draft.kind === "git_ssh" ? (
                 <Textarea
                   id="credential-secret"
                   value={draft.secret}
@@ -394,14 +507,7 @@ export function CredentialsPage() {
                   autoComplete="off"
                   spellCheck={false}
                 />
-              </Field>
-            ) : (
-              <Field
-                label="Secret"
-                htmlFor="credential-secret"
-                hint={draft.id ? "Leave empty to keep the stored secret." : undefined}
-                error={fieldErrors.secret}
-              >
+              ) : (
                 <Input
                   id="credential-secret"
                   type="password"
@@ -409,20 +515,40 @@ export function CredentialsPage() {
                   onChange={(event) => setDraft({ ...draft, secret: event.target.value })}
                   autoComplete="new-password"
                 />
-              </Field>
-            )}
+              )}
+            </Field>
 
             <FormNote>Sealed with the server’s key. The dashboard never shows it again.</FormNote>
+
+            {formError && (
+              <FormNote tone="danger" role="alert">
+                {formError}
+              </FormNote>
+            )}
           </div>
         )}
       </SidePanel>
 
-      <TestCredentialDialog credential={testing} onClose={() => setTesting(undefined)} />
+      {/* A probe marks the credential used, so the row's "last used" is
+          stale the moment the dialog closes unless the list re-reads. */}
+      <TestCredentialDialog
+        credential={testing}
+        onClose={() => {
+          setTesting(undefined)
+          credentials.refresh()
+        }}
+      />
       {dialog}
     </Page>
   )
 }
 
+/**
+ * The live probe. Every kind needs something concrete to try — a repository
+ * to list, an image to resolve — because the server refuses a bare "does this
+ * token work" with nothing to point it at, and a dialog that let the field
+ * stay empty was a dialog whose Test button only ever produced an error.
+ */
 function TestCredentialDialog({
   credential,
   onClose,
@@ -430,8 +556,9 @@ function TestCredentialDialog({
   credential?: DeploymentCredential
   onClose: () => void
 }) {
-  const [repository, setRepository] = useState("")
+  const [subject, setSubject] = useState("")
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
   const [result, setResult] = useState<{ ok: boolean; message: string }>()
 
   // Reset on the way out rather than in an effect keyed on `credential`: the
@@ -440,25 +567,31 @@ function TestCredentialDialog({
   // it is open — closing is the one moment a fresh attempt is guaranteed.
   const close = () => {
     onClose()
-    setRepository("")
+    setSubject("")
+    setError("")
     setResult(undefined)
   }
 
+  const registry = credential?.kind === "registry"
+  const target = credential?.target
+
   const run = async () => {
-    if (!credential) return
+    if (!credential || !subject.trim()) return
     setBusy(true)
+    setError("")
+    setResult(undefined)
     try {
-      const body =
-        GIT_KINDS.includes(credential.kind) && repository.trim()
-          ? { repository: repository.trim() }
-          : {}
       const response = await post<{ ok: boolean; message: string }>(
         `/deploy/credentials/${credential.id}/test`,
-        body,
+        { repository: subject.trim() },
       )
       setResult(response)
     } catch (caught) {
-      notify.error("Could not run the test", caught)
+      if (caught instanceof ApiError && caught.status === 400) {
+        setError(caught.message)
+      } else {
+        notify.error("Could not run the test", caught)
+      }
     } finally {
       setBusy(false)
     }
@@ -476,7 +609,7 @@ function TestCredentialDialog({
           <Button variant="outline" onClick={close} disabled={busy}>
             Close
           </Button>
-          <Button onClick={() => void run()} pending={busy}>
+          <Button onClick={() => void run()} pending={busy} disabled={!subject.trim()}>
             Test
           </Button>
         </>
@@ -484,28 +617,28 @@ function TestCredentialDialog({
     >
       {credential && (
         <div className="space-y-4">
-          {GIT_KINDS.includes(credential.kind) ? (
-            <Field
-              label="Repository"
-              htmlFor="credential-test-repository"
-              hint="A full URL or owner/name. Leave empty to test against its target alone."
-            >
-              <Input
-                id="credential-test-repository"
-                value={repository}
-                onChange={(event) => setRepository(event.target.value)}
-                placeholder="owner/name"
-                className="font-mono"
-                autoComplete="off"
-              />
-            </Field>
-          ) : (
-            <FormNote>
-              {credential.kind === "registry"
-                ? "Resolves a manifest from the credential's target."
-                : "Calls the provider's API using this token."}
-            </FormNote>
-          )}
+          <Field
+            label={registry ? "Image" : "Repository"}
+            htmlFor="credential-test-subject"
+            hint={
+              registry
+                ? `An image on ${target} to resolve with this login.`
+                : target
+                  ? `owner/name on ${target}, or a full Git URL.`
+                  : "A full Git URL — this credential has no saved host."
+            }
+            error={error}
+          >
+            <Input
+              id="credential-test-subject"
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+              placeholder={registry ? `${target}/owner/app:latest` : "owner/name"}
+              className="font-mono"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
           {result && (
             <div role="status">
               <Status tone={result.ok ? "running" : "danger"} label={result.message} />
@@ -543,7 +676,9 @@ export function CredentialSelect({
     0,
   )
   const options = (credentials.data ?? []).filter((credential) =>
-    kind === "git" ? GIT_KINDS.includes(credential.kind) : credential.kind === "registry",
+    kind === "git"
+      ? credential.kind === "git_bearer" || credential.kind === "git_ssh"
+      : credential.kind === "registry",
   )
   return (
     <div className="space-y-1.5">

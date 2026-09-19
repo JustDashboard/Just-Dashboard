@@ -7,7 +7,7 @@ import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
 import type { GitHubAppManifestStart, GitHubAppStatus } from "@/lib/types"
-import { Field, FormFact, FormFacts } from "@/components/form"
+import { Field, FormFact, FormFacts, FormSection } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -64,12 +64,21 @@ function readCallbackOutcome(): CallbackOutcome | undefined {
   }
 }
 
-export function GitHubAppCard({ admin }: { admin: boolean }) {
-  const status = useGitHubApp()
+export function GitHubAppPanel({
+  admin,
+  status,
+  onChange,
+}: {
+  admin: boolean
+  /** The page polls the App once and shares the reading with its tiles. */
+  status: ReturnType<typeof useGitHubApp>
+  /** Disconnecting removes the App's own credentials; the list beside it re-reads. */
+  onChange?: () => void
+}) {
   const [organization, setOrganization] = useState("")
   const [starting, setStarting] = useState(false)
   // GitHub sends the browser back with the result in the query string: read
-  // once when the card first renders, then the address is cleaned so a
+  // once when the panel first renders, then the address is cleaned so a
   // reload does not repeat it.
   const [outcome] = useState(readCallbackOutcome)
   const { confirm, dialog } = useConfirm()
@@ -110,7 +119,10 @@ export function GitHubAppCard({ admin }: { admin: boolean }) {
       action: async () => {
         await del("/deploy/github-app/")
       },
-      onDone: () => status.refresh(),
+      onDone: () => {
+        status.refresh()
+        onChange?.()
+      },
     })
 
   const verbs: Verb[] = admin
@@ -149,30 +161,34 @@ export function GitHubAppCard({ admin }: { admin: boolean }) {
         {status.loading && !status.data && <LoadingRows rows={2} />}
         {status.data && !status.data.configured && (
           <>
-            <p className="text-sm text-muted-foreground">
-              One App, installed on your GitHub account or organisation, replaces a webhook secret
-              per repository, a personal token for private clones, and reading a run log to find a
-              preview address: the App delivers every push, clones with its own short-lived tokens,
-              and writes each preview&apos;s state on the pull request.
+            <p className="max-w-prose text-body leading-relaxed text-muted-foreground">
+              One App on your account or organisation delivers every push, clones private
+              repositories with its own short-lived tokens and writes each preview&apos;s state on
+              the pull request — no webhook secret or personal token per repository.
             </p>
             {admin ? (
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                <Field
-                  label="Organisation"
-                  htmlFor="github-app-organization"
-                  hint="Leave empty to create the App on your personal account."
-                >
+              <Field
+                label="Organisation"
+                htmlFor="github-app-organization"
+                hint="Leave empty to create the App on your personal account."
+              >
+                {/* The button sits on the input's own line, so the two read as
+                    one control: pressed against the field's hint instead, it
+                    hung a line lower than the box it belonged to. */}
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
                     id="github-app-organization"
                     value={organization}
                     onChange={(event) => setOrganization(event.target.value)}
                     placeholder="acme"
+                    autoComplete="off"
+                    className="sm:max-w-xs"
                   />
-                </Field>
-                <Button pending={starting} onClick={() => void create()}>
-                  Create GitHub App
-                </Button>
-              </div>
+                  <Button pending={starting} onClick={() => void create()} className="sm:shrink-0">
+                    Create GitHub App
+                  </Button>
+                </div>
+              </Field>
             ) : (
               <EmptyNote>An administrator connects the App from this page.</EmptyNote>
             )}
@@ -205,49 +221,50 @@ export function GitHubAppCard({ admin }: { admin: boolean }) {
                 </FormFact>
               )}
             </FormFacts>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="eyebrow">Installations</p>
-              {status.data.installUrl && (
-                <Button asChild size="xs" variant="outline">
-                  <a href={status.data.installUrl} target="_blank" rel="noreferrer">
-                    Install on another account
-                    <External className="size-3" aria-hidden />
-                  </a>
-                </Button>
+            <FormSection
+              title="Installations"
+              actions={
+                status.data.installUrl && (
+                  <Button asChild size="xs" variant="outline">
+                    <a href={status.data.installUrl} target="_blank" rel="noreferrer">
+                      Install on another account
+                      <External className="size-3" aria-hidden />
+                    </a>
+                  </Button>
+                )
+              }
+            >
+              {status.data.installations.length === 0 ? (
+                <EmptyNote>
+                  Not installed anywhere yet. Install it on the account whose repositories deploy
+                  here; the repositories then appear in the import list.
+                </EmptyNote>
+              ) : (
+                <RowList aria-label="GitHub App installations">
+                  {status.data.installations.map((installation) => (
+                    <Row
+                      key={installation.id}
+                      title={installation.account}
+                      subtitle={
+                        installation.repositorySelection === "all"
+                          ? "Every repository on the account"
+                          : "Selected repositories"
+                      }
+                      trailing={
+                        <>
+                          <Tag>{installation.accountType}</Tag>
+                          <Button asChild size="xs" variant="ghost">
+                            <a href={installation.htmlUrl} target="_blank" rel="noreferrer">
+                              Configure on GitHub
+                            </a>
+                          </Button>
+                        </>
+                      }
+                    />
+                  ))}
+                </RowList>
               )}
-            </div>
-            {status.data.installations.length === 0 ? (
-              <EmptyNote>
-                Not installed anywhere yet. Install it on the account whose repositories deploy
-                here; the repositories then appear in the import list.
-              </EmptyNote>
-            ) : (
-              <RowList aria-label="GitHub App installations">
-                {status.data.installations.map((installation) => (
-                  <Row
-                    key={installation.id}
-                    title={
-                      <span className="inline-flex min-w-0 items-center gap-2">
-                        <span className="truncate">{installation.account}</span>
-                        <Tag>{installation.accountType}</Tag>
-                      </span>
-                    }
-                    subtitle={
-                      installation.repositorySelection === "all"
-                        ? "Every repository on the account"
-                        : "Selected repositories"
-                    }
-                    trailing={
-                      <Button asChild size="xs" variant="ghost">
-                        <a href={installation.htmlUrl} target="_blank" rel="noreferrer">
-                          Configure on GitHub
-                        </a>
-                      </Button>
-                    }
-                  />
-                ))}
-              </RowList>
-            )}
+            </FormSection>
           </>
         )}
       </PanelBody>

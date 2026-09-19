@@ -32,9 +32,10 @@ each with the `credentialId` that clones it.
 - **Clones.** Every installation has one deploy credential of kind `github_app` named
   `GitHub-App-<account>` — a pointer to the installation, with no secret of its own. Opening it mints (or
   reuses, until two minutes before expiry) the installation's hour-long token and hands it to the same
-  bearer path an HTTPS token credential takes. The import picker lists the App's repositories first,
-  tagged App, and an import through it sets that credential. These credentials are created and removed
-  by the App service; the credential routes list and delete them and refuse to create or edit one.
+  HTTPS path a token credential takes (HTTP Basic, `x-access-token` and the token, scoped to the exact
+  remote). The import picker lists the App's repositories first, tagged App, and an import through it
+  sets that credential. These credentials are created and removed by the App service; the credential
+  routes list and delete them and refuse to create or edit one.
 - **Deliveries.** A GitHub trigger created with `config.delivery: "app"` (the form's default while an App
   is connected) has nothing configured on GitHub: `POST /api/v1/hooks/github-app` verifies every
   delivery with the App's webhook secret, and a `push` or `pull_request` reaches every enabled trigger on

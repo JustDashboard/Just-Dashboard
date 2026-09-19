@@ -598,7 +598,7 @@ test -z "${GIT_CONFIG_VALUE_0:-}"
 test -z "${JD_PLANNING_SECRET:-}"
 test -f "${GIT_CONFIG_GLOBAL:-missing}"
 test "$(stat -c '%a' "$GIT_CONFIG_GLOBAL")" = '600'
-grep -q 'fixture-bearer' "$GIT_CONFIG_GLOBAL"
+grep -q 'Authorization: Basic eC1hY2Nlc3MtdG9rZW46Zml4dHVyZS1iZWFyZXI=' "$GIT_CONFIG_GLOBAL"
 	case "$1" in
 	  ls-remote)
 	    printf '%s\trefs/heads/main\n' "${PLANNING_GIT_REMOTE_REVISION:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
@@ -1565,7 +1565,7 @@ func TestRegistryCredentialIsPassedOutOfBandAndNotReturned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(fake.registryAuth)
+	decoded, err := base64.URLEncoding.DecodeString(fake.registryAuth)
 	if err != nil || !strings.Contains(string(decoded), "registry-secret") {
 		t.Fatalf("registry auth was not passed to the Engine request: %q, %v", decoded, err)
 	}

@@ -598,10 +598,17 @@ only renderer/executor/validation authority for their feature.
   the same form" reasoning the invariants already give a saved DNS-provider credential, and is behind
   `s.destructive` without a typed phrase for the same reason. `POST .../test` runs `git ls-remote` (a full
   URL, or an `owner/name` shorthand combined with the credential's own saved target) for the Git kinds or an
-  authenticated manifest resolution for `registry`, through the exact adapter isolation detection uses, and
-  never returns the secret. `target`/`username`/`lastUsedAt` live in the row's existing `config_json`, so this
+  authenticated manifest resolution of the image named in `repository` for `registry` — every kind needs
+  something concrete to try, and the page's Test dialog asks for it — through the exact adapter isolation
+  detection uses, and never returns the secret. `target`/`username`/`lastUsedAt` live in the row's existing `config_json`, so this
   needed no schema change; `lastUsedAt` is set by `OpenCredential`'s own callers after a real use, best-effort.
-  `gitEnvironment` now branches on kind: the existing HTTPS bearer path is unchanged, and `git_ssh` writes the
+  `gitEnvironment` branches on kind: `git_bearer`/`provider_token` (and a minted App token) go out as an
+  `http.<remote>.extraHeader` of HTTP Basic with `x-access-token` (`x-token-auth` on bitbucket.org) and the
+  token as the password — the form a Git host's smart-HTTP endpoint actually accepts; `Authorization: Bearer`,
+  the REST convention it used to send, is answered by GitHub with a username prompt, so every token clone
+  failed while the API calls through the same token succeeded. `registryAuth` encodes `X-Registry-Auth` with
+  padded `base64.URLEncoding`, which is what the daemon decodes with; the unpadded form was dropped silently
+  whenever the JSON's length was not a multiple of three, and the registry saw an anonymous pull. `git_ssh` writes the
   sealed private key to a private 0600 file for the lifetime of one Git invocation and points
   `GIT_SSH_COMMAND` at it exclusively, with `-F /dev/null` and both known-hosts files pointed at `/dev/null`
   so the connection never reads or writes the operator's real `~/.ssh`; `SSH_AUTH_SOCK` was already stripped

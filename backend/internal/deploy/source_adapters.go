@@ -630,6 +630,21 @@ func (a *HostSourceAnalyzer) gitEnvironment(
 	}
 }
 
+// gitBasicAuthorization is the form a Git host expects a token in: HTTP Basic
+// with the token as the password, which is what the credential form promises
+// ("sent as the HTTPS password"). "Bearer" is the REST convention, and
+// GitHub's git endpoint answers it exactly as it answers no header at all —
+// a username prompt — so a token that read the API fine failed every clone.
+// The username is a placeholder every major host ignores, except Bitbucket
+// Cloud, which insists on its own.
+func gitBasicAuthorization(host, token string) string {
+	user := "x-access-token"
+	if strings.EqualFold(host, "bitbucket.org") {
+		user = "x-token-auth"
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+token))
+}
+
 // gitBearerEnvironment scopes an HTTPS bearer token to the exact remote being
 // fetched through a private, per-call git config file — never the operator's
 // own ~/.gitconfig — so the header cannot leak onto an unrelated host even if
@@ -651,7 +666,7 @@ func (a *HostSourceAnalyzer) gitBearerEnvironment(
 	path := file.Name()
 	cleanup := func() { _ = os.Remove(path) }
 	content := "[credential]\n\thelper =\n[http \"" + escapeGitConfigSection(remote) + "\"]\n" +
-		"\textraHeader = Authorization: Bearer " + credential.Secret + "\n"
+		"\textraHeader = Authorization: " + gitBasicAuthorization(parsedRemote.Hostname(), credential.Secret) + "\n"
 	if _, err := file.WriteString(content); err != nil {
 		_ = file.Close()
 		cleanup()
@@ -799,7 +814,11 @@ func (a *HostSourceAnalyzer) registryAuth(ctx context.Context, credentialID int6
 		payload["password"] = credential.Secret
 	}
 	encoded, _ := json.Marshal(payload)
-	return base64.RawURLEncoding.EncodeToString(encoded), nil
+	// Padded: the daemon decodes X-Registry-Auth with base64.URLEncoding, and an
+	// unpadded value fails that decode silently whenever the JSON's length is
+	// not a multiple of three — so the login was dropped for most usernames
+	// and passwords and the registry saw an anonymous request.
+	return base64.URLEncoding.EncodeToString(encoded), nil
 }
 
 // TestCredential exercises a saved credential the same way a real deployment

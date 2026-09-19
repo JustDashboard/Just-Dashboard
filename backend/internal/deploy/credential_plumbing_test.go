@@ -37,7 +37,7 @@ func TestGitBearerEnvironmentScopesTheHeaderToTheExactRemoteAndCleansUp(t *testi
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(content), `[http "https://example.test/owner/repo.git"]`) ||
-		!strings.Contains(string(content), "Authorization: Bearer tok-en-value") {
+		!strings.Contains(string(content), "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dG9rLWVuLXZhbHVl") {
 		t.Fatalf("credential file content = %q", content)
 	}
 	cleanup()
