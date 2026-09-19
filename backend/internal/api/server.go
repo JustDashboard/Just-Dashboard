@@ -141,6 +141,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.modules.deploySchedule.Start(ctx)
+	s.modules.trafficAlerts.Start(ctx)
 	if err := s.modules.deployEngine.Start(ctx); err != nil {
 		return err
 	}

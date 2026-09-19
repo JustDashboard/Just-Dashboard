@@ -84,3 +84,150 @@ func ObserveRequests(ctx context.Context, record RequestRecord, environmentID in
 	result.Entries, result.Slowest, result.Summary = window.Result.Entries, window.Result.Slowest, window.Result.Summary
 	return result
 }
+
+// TrafficReading is one window's worth of what the ingress served, small
+// enough to sit beside a release or on a card: how much, how much of it
+// failed, how slow the slow tenth was, and how many were page views.
+type TrafficReading struct {
+	Requests  int      `json:"requests"`
+	Pages     int      `json:"pages"`
+	PerMinute float64  `json:"perMinute"`
+	ErrorRate float64  `json:"errorRate"`
+	P95       *float64 `json:"p95,omitempty"`
+	From      string   `json:"from"`
+	Until     string   `json:"until"`
+}
+
+func trafficReading(window accesslog.Window, from, until time.Time) TrafficReading {
+	reading := TrafficReading{
+		Requests: window.Result.Summary.Total, Pages: window.Result.Summary.Pages,
+		ErrorRate: window.Result.Summary.ErrorRate,
+		From:      from.UTC().Format(time.RFC3339), Until: until.UTC().Format(time.RFC3339),
+	}
+	if minutes := until.Sub(from).Minutes(); minutes >= 1 {
+		reading.PerMinute = float64(reading.Requests) / minutes
+	}
+	if window.Result.Summary.Latency != nil {
+		p95 := window.Result.Summary.Latency.P95
+		reading.P95 = &p95
+	}
+	return reading
+}
+
+// RunTraffic is what a release did to the traffic: the same reading taken
+// over the half hour before its activation and the half hour after. The
+// container metrics beside it say whether the release costs more to run;
+// this says whether it serves worse — which is the sentence a deploy tool
+// exists to be able to say.
+type RunTraffic struct {
+	Status                string          `json:"status"`
+	Reason                string          `json:"reason,omitempty"`
+	ActivationCompletedAt *time.Time      `json:"activationCompletedAt,omitempty"`
+	WindowMinutes         int             `json:"windowMinutes"`
+	Before                *TrafficReading `json:"before,omitempty"`
+	After                 *TrafficReading `json:"after,omitempty"`
+	Latency               bool            `json:"latency"`
+}
+
+const runTrafficWindow = 30 * time.Minute
+
+// ObserveRunTraffic compares the traffic either side of a run's activation.
+// The window after is cut at now for a release that went live recently, and
+// the reading says so through its own bounds rather than pretending to a
+// full half hour.
+func ObserveRunTraffic(ctx context.Context, record RequestRecord, snapshot RunSnapshot, now time.Time) RunTraffic {
+	result := RunTraffic{Status: "unavailable", WindowMinutes: int(runTrafficWindow.Minutes())}
+	if record == nil {
+		result.Reason = "The proxy is unavailable, so this release's traffic cannot be read."
+		return result
+	}
+	releaseID := snapshot.Run.CandidateReleaseID
+	if releaseID == 0 {
+		releaseID = snapshot.Run.ReleaseID
+	}
+	if releaseID <= 0 {
+		result.Reason = "This run has no recorded release, so there is no activation to compare around."
+		return result
+	}
+	at := runActivationCompleted(snapshot, releaseID)
+	if at == nil {
+		result.Reason = "This run has no completed activation. Traffic is compared around the moment a release went live."
+		return result
+	}
+	result.ActivationCompletedAt = at
+	route := deploymentRouteName(snapshot.Run.EnvironmentID)
+	// A window's bounds are inclusive, so the instant of activation belongs
+	// to "after" alone — a request served at that exact moment was served by
+	// the new release.
+	before, err := record.Window(ctx, route, accesslog.Filter{Since: at.Add(-runTrafficWindow), Until: at.Add(-time.Nanosecond), Limit: 1})
+	if err != nil {
+		result.Reason = "This deployment's request record could not be read. Open Proxy to check the ingress is running."
+		return result
+	}
+	if !before.Coverage.Exists {
+		result.Reason = "No request has been recorded for this deployment yet."
+		return result
+	}
+	afterUntil := at.Add(runTrafficWindow)
+	if afterUntil.After(now) {
+		afterUntil = now
+	}
+	after, err := record.Window(ctx, route, accesslog.Filter{Since: *at, Until: afterUntil, Limit: 1})
+	if err != nil {
+		result.Reason = "This deployment's request record could not be read. Open Proxy to check the ingress is running."
+		return result
+	}
+	result.Status, result.Latency = "available", before.Facts.Latency
+	b, a := trafficReading(before, at.Add(-runTrafficWindow), *at), trafficReading(after, *at, afterUntil)
+	result.Before, result.After = &b, &a
+	return result
+}
+
+// TrafficPulse is a project's last hour on a card: enough to say whether the
+// site is alive and whether it is failing, and a line of one figure per
+// minute to draw it.
+type TrafficPulse struct {
+	Status    string  `json:"status"`
+	PerMinute float64 `json:"perMinute"`
+	ErrorRate float64 `json:"errorRate"`
+	Pages     int     `json:"pages"`
+	Points    []int   `json:"points"`
+}
+
+// CachedRecord is a record that can answer from what it already holds.
+type CachedRecord interface {
+	Cached(ctx context.Context, route string, filter accesslog.Filter, maxAge time.Duration) (accesslog.Window, error)
+}
+
+// ObserveTrafficPulse reads one project's last hour, content with a record a
+// minute old: a fleet of cards asks about every route at once, and a file
+// read per card per poll would be exactly the cost the store exists to avoid.
+func ObserveTrafficPulse(ctx context.Context, record CachedRecord, environmentID int64, now time.Time) TrafficPulse {
+	pulse := TrafficPulse{Status: "unavailable", Points: []int{}}
+	if record == nil || environmentID <= 0 {
+		return pulse
+	}
+	since := now.Add(-time.Hour)
+	window, err := record.Cached(ctx, deploymentRouteName(environmentID), accesslog.Filter{Since: since, Until: now, Limit: 1}, time.Minute)
+	if err != nil || !window.Coverage.Exists {
+		return pulse
+	}
+	pulse.Status = "available"
+	pulse.PerMinute = float64(window.Result.Summary.Total) / 60
+	pulse.ErrorRate = window.Result.Summary.ErrorRate
+	pulse.Pages = window.Result.Summary.Pages
+	// One point per minute of the hour, from the chart's own columns, so the
+	// card's line and the page's chart agree.
+	points := make([]int, 60)
+	for _, bucket := range window.Result.Summary.Buckets {
+		start, err := time.Parse(time.RFC3339, bucket.Start)
+		if err != nil {
+			continue
+		}
+		if i := int(start.Sub(since).Minutes()); i >= 0 && i < 60 {
+			points[i] += bucket.Total
+		}
+	}
+	pulse.Points = points
+	return pulse
+}

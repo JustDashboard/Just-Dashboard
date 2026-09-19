@@ -327,3 +327,125 @@ func TestSlowestSpansTheWholeWindowNotJustTheRows(t *testing.T) {
 		}
 	}
 }
+
+func TestIsPageSeparatesViewsFromWhatTheyDragIn(t *testing.T) {
+	page := func(method, path, query string) bool {
+		return IsPage(Entry{Method: method, Path: path, Query: query, Status: 200})
+	}
+	if !page("GET", "/ro/contact", "") || !page("POST", "/api/checkout", "") || !page("GET", "/", "") {
+		t.Fatal("a document and an API call are what a person means by a request")
+	}
+	for _, drag := range [][3]string{
+		{"GET", "/ro/contact", "_rsc=abc"},
+		{"GET", "/_next/static/chunks/main.js", ""},
+		{"GET", "/apple-icon.png", ""},
+		{"GET", "/manifest.webmanifest", ""},
+		{"GET", "/assets/app.css", ""},
+		{"HEAD", "/", ""},
+		{"OPTIONS", "/api/x", ""},
+	} {
+		if page(drag[0], drag[1], drag[2]) {
+			t.Fatalf("%v is what a page load drags in, not a page view", drag)
+		}
+	}
+	// A path with a dot in a directory name is still a page.
+	if !page("GET", "/v1.2/docs", "") {
+		t.Fatal("a dot in a directory is not an extension")
+	}
+}
+
+func TestIsProbeNamesScannersNotTypos(t *testing.T) {
+	probe := func(path string, status int) bool { return IsProbe(Entry{Path: path, Status: status}) }
+	for _, p := range []string{"/.env", "/wp-login.php", "/.git/config", "/phpmyadmin/index.php", "/vendor/phpunit/x", "/backup.sql", "/admin.php"} {
+		if !probe(p, 404) {
+			t.Fatalf("%s refused is a probe", p)
+		}
+	}
+	// The same paths served are the site's own business.
+	if probe("/wp-login.php", 200) {
+		t.Fatal("a WordPress site serving its own login is not being scanned")
+	}
+	// A refused ordinary page is a dead link, not a scanner.
+	if probe("/ro/old-page", 404) {
+		t.Fatal("a 404 on an ordinary path is a typo or a stale link")
+	}
+}
+
+func TestCollectorCountsPagesAndNamesScanners(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Limit: 10})
+	visitor := func(path, query string, status int) {
+		e := entry(base, "GET", path, status, 5)
+		e.Query, e.RemoteIP, e.Host = query, "198.51.100.7", "site.test"
+		e.Referer = "https://www.google.com/search?q=site"
+		c.Feed(e)
+	}
+	visitor("/ro/contact", "", 200)
+	visitor("/ro/contact", "_rsc=x", 200)
+	visitor("/_next/static/a.js", "", 200)
+	for _, p := range []string{"/.env", "/wp-login.php", "/xmlrpc.php", "/.git/HEAD"} {
+		e := entry(base, "GET", p, 404, 1)
+		e.RemoteIP, e.Host = "203.0.113.9", "site.test"
+		c.Feed(e)
+	}
+	result := c.Result()
+	// One document view: the prefetch and the script are what it dragged in,
+	// and the four refused probes are a scanner, not visits.
+	if result.Summary.Pages != 1 {
+		t.Fatalf("pages = %d, want the one document view", result.Summary.Pages)
+	}
+	if len(result.Summary.Scanners) != 1 || result.Summary.Scanners[0].Value != "203.0.113.9" || result.Summary.Scanners[0].Probes != 4 {
+		t.Fatalf("scanners = %+v", result.Summary.Scanners)
+	}
+	if len(result.Summary.Probes) != 4 {
+		t.Fatalf("probes = %+v", result.Summary.Probes)
+	}
+	// The visitor is not a scanner, however many things their page load asked for.
+	for _, client := range result.Summary.Clients {
+		if client.Value == "198.51.100.7" && client.Probes != 0 {
+			t.Fatalf("a visitor was counted as probing: %+v", client)
+		}
+	}
+	if len(result.Summary.Referers) != 1 || result.Summary.Referers[0].Value != "www.google.com" || result.Summary.Referers[0].Count != 3 {
+		t.Fatalf("referers = %+v", result.Summary.Referers)
+	}
+}
+
+func TestCollectorReferersDropTheSitesOwnLinks(t *testing.T) {
+	c := NewCollector(Filter{Limit: 10})
+	e := entry(time.Now(), "GET", "/b", 200, 1)
+	e.Host, e.Referer = "site.test", "https://site.test/a"
+	c.Feed(e)
+	if len(c.Result().Summary.Referers) != 0 {
+		t.Fatal("a link followed within the site is navigation, not a source")
+	}
+}
+
+func TestPathsCarryTheirOwnP95(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Limit: 10})
+	for i := 0; i < 20; i++ {
+		c.Feed(entry(base, "GET", "/fast", 200, 5))
+		c.Feed(entry(base, "GET", "/slow", 200, 900))
+	}
+	paths := c.Result().Summary.Paths
+	byValue := map[string]Facet{}
+	for _, f := range paths {
+		byValue[f.Value] = f
+	}
+	if byValue["/slow"].P95 == nil || *byValue["/slow"].P95 != 900 || byValue["/fast"].P95 == nil || *byValue["/fast"].P95 != 5 {
+		t.Fatalf("per-path p95 wrong: %+v", paths)
+	}
+}
+
+func TestPagesOnlyFilterKeepsTheReadingsHonest(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{PagesOnly: true, Limit: 10})
+	c.Feed(entry(base, "GET", "/ro", 200, 5))
+	asset := entry(base, "GET", "/_next/static/x.js", 200, 1)
+	c.Feed(asset)
+	result := c.Result()
+	if result.Summary.Total != 1 || result.Summary.Scanned != 2 || len(result.Entries) != 1 {
+		t.Fatalf("pages-only: total %d scanned %d rows %d", result.Summary.Total, result.Summary.Scanned, len(result.Entries))
+	}
+}

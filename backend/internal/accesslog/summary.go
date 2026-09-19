@@ -2,6 +2,7 @@ package accesslog
 
 import (
 	"math"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,10 +24,82 @@ type Filter struct {
 	Client  string
 	MinMs   float64
 	MaxMs   float64
+	// PagesOnly keeps the requests a person would call a page view and drops
+	// the ones a page load brings with it: framework prefetches, scripts,
+	// styles, icons, manifests. A modern front end asks for six things per
+	// click, and a log that shows all six is a log nobody can read for what
+	// people actually opened.
+	PagesOnly bool
 	// Limit bounds the rows returned, newest first. The readings above the
 	// table are still computed over everything in the window: a page showing
 	// the last 200 requests must not report a p95 of only those 200.
 	Limit int
+}
+
+// assetExtensions are what a page load fetches alongside the document.
+var assetExtensions = map[string]bool{
+	".js": true, ".mjs": true, ".css": true, ".map": true, ".json": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".ico": true,
+	".webp": true, ".avif": true, ".woff": true, ".woff2": true, ".ttf": true, ".otf": true,
+	".webmanifest": true, ".txt": true, ".xml": true, ".mp4": true, ".webm": true, ".pdf": true,
+}
+
+// IsPage reports whether a request is a page view rather than something a
+// page view dragged in. Next.js prefetches carry `_rsc=`; every framework's
+// build output lives under a handful of prefixes; the rest is decided by the
+// extension. HEAD and OPTIONS are never a person.
+func IsPage(e Entry) bool {
+	switch e.Method {
+	case "HEAD", "OPTIONS":
+		return false
+	}
+	if strings.Contains(e.Query, "_rsc=") || strings.Contains(e.Query, "__nextDataReq") {
+		return false
+	}
+	for _, prefix := range []string{"/_next/", "/_nuxt/", "/static/", "/assets/", "/_astro/", "/build/", "/__vite", "/.well-known/"} {
+		if strings.HasPrefix(e.Path, prefix) {
+			return false
+		}
+	}
+	if i := strings.LastIndexByte(e.Path, '.'); i >= 0 && i > strings.LastIndexByte(e.Path, '/') {
+		if assetExtensions[strings.ToLower(e.Path[i:])] {
+			return false
+		}
+	}
+	return true
+}
+
+// probePaths are what scanners ask every host for. A request for one of these
+// that the site refused is not a visitor with a typo; it is somebody trying
+// doors, and the client that tries several is worth naming.
+var probePaths = []string{
+	"/.env", "/.git", "/.aws", "/.ssh", "/.docker", "/.vscode",
+	"/wp-login.php", "/wp-admin", "/wp-content", "/wp-includes", "/xmlrpc.php", "/wp-config",
+	"/phpmyadmin", "/pma", "/adminer", "/mysql", "/phpinfo",
+	"/cgi-bin", "/vendor/phpunit", "/actuator", "/console", "/boaform", "/hnap1",
+	"/config.json", "/config.yml", "/config.php", "/backup", "/dump.sql", "/database.sql",
+	"/etc/passwd", "/server-status", "/telescope", "/_ignition", "/debug",
+}
+
+// IsProbe reports whether a refused request looks like a scanner's probe.
+func IsProbe(e Entry) bool {
+	if e.Status < 400 {
+		return false
+	}
+	lower := strings.ToLower(e.Path)
+	for _, probe := range probePaths {
+		if strings.HasPrefix(lower, probe) {
+			return true
+		}
+	}
+	// A refused request for a PHP or ASP page on a site that serves neither
+	// is the commonest probe of all.
+	for _, ext := range []string{".php", ".asp", ".aspx", ".jsp", ".cgi", ".sh", ".bak", ".sql"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // Match reports whether one request answers the question.
@@ -64,6 +137,12 @@ func (f Filter) Match(e Entry) bool {
 	if f.Client != "" && !strings.HasPrefix(e.RemoteIP, f.Client) {
 		return false
 	}
+	// "Pages" is what people opened: a document, and not a scanner's refused
+	// probe for one — a script asking for /wp-login.php on a site that has
+	// none is not a visit.
+	if f.PagesOnly && (!IsPage(e) || IsProbe(e)) {
+		return false
+	}
 	if f.MinMs > 0 || f.MaxMs > 0 {
 		if !e.timed {
 			return false
@@ -97,6 +176,11 @@ type Facet struct {
 	Errors int      `json:"errors"`
 	Bytes  int64    `json:"bytes,omitempty"`
 	P95    *float64 `json:"p95,omitempty"`
+	// Refused is how many were answered 4xx, and Probes how many of those
+	// looked like a scanner's. On a client both together are the difference
+	// between a visitor who followed a dead link and a script trying doors.
+	Refused int `json:"refused,omitempty"`
+	Probes  int `json:"probes,omitempty"`
 }
 
 // Bucket is one column of the request chart, counted by status family so a
@@ -137,12 +221,23 @@ type Summary struct {
 	// the figure means the same thing whichever range is chosen.
 	PerMinute float64 `json:"perMinute"`
 
+	// Pages is how many of the requests were page views rather than what a
+	// page view dragged in — the number a person means by "visits".
+	Pages int `json:"pages"`
+
 	Methods  []Facet `json:"methods"`
 	Statuses []Facet `json:"statuses"`
 	Paths    []Facet `json:"paths"`
 	Hosts    []Facet `json:"hosts"`
 	Clients  []Facet `json:"clients"`
 	Agents   []Facet `json:"agents"`
+	// Referers are the sites traffic arrived from, by host; a page's own
+	// links to itself are not a source.
+	Referers []Facet `json:"referers"`
+	// Probes are the refused paths that look like scanning, and Scanners the
+	// clients that asked for several of them.
+	Probes   []Facet `json:"probes"`
+	Scanners []Facet `json:"scanners"`
 
 	Buckets       []Bucket `json:"buckets"`
 	BucketSeconds int      `json:"bucketSeconds"`
@@ -194,6 +289,14 @@ type Collector struct {
 	hosts    map[string]*Facet
 	clients  map[string]*Facet
 	agents   map[string]*Facet
+	referers map[string]*Facet
+	probes   map[string]*Facet
+	// pathLatencies is a bounded sample per path, so the top-paths table can
+	// say which route is slow rather than only that one is. Bounded twice:
+	// per path, and in how many paths are sampled at all, because a path
+	// with an id in it is a new key per request.
+	pathLatencies map[string][]float64
+	pages         int
 
 	latencies []float64
 	sum       float64
@@ -224,7 +327,9 @@ func NewCollector(f Filter) *Collector {
 		methods: map[string]*Facet{}, statuses: map[int]*Facet{},
 		paths: map[string]*Facet{}, hosts: map[string]*Facet{},
 		clients: map[string]*Facet{}, agents: map[string]*Facet{},
-		byMinute: map[int64]*minuteBucket{},
+		referers: map[string]*Facet{}, probes: map[string]*Facet{},
+		pathLatencies: map[string][]float64{},
+		byMinute:      map[int64]*minuteBucket{},
 	}
 }
 
@@ -253,11 +358,27 @@ func (c *Collector) Feed(e Entry) {
 	}
 
 	failed := e.Status >= 500
-	c.bump(c.methods, e.Method, e, failed)
-	c.bump(c.paths, e.Path, e, failed)
-	c.bump(c.hosts, e.Host, e, failed)
-	c.bump(c.clients, e.RemoteIP, e, failed)
-	c.bump(c.agents, agentFamily(e.UserAgent), e, failed)
+	refused := e.Status >= 400 && e.Status < 500
+	probe := IsProbe(e)
+	if IsPage(e) && !probe {
+		c.pages++
+	}
+	c.bump(c.methods, e.Method, e, failed, refused, probe)
+	c.bump(c.paths, e.Path, e, failed, refused, probe)
+	c.bump(c.hosts, e.Host, e, failed, refused, probe)
+	c.bump(c.clients, e.RemoteIP, e, failed, refused, probe)
+	c.bump(c.agents, agentFamily(e.UserAgent), e, failed, refused, probe)
+	c.bump(c.referers, refererHost(e.Referer, e.Host), e, failed, refused, probe)
+	if probe {
+		c.bump(c.probes, e.Path, e, failed, refused, probe)
+	}
+	if e.timed {
+		if samples, ok := c.pathLatencies[e.Path]; ok || len(c.pathLatencies) < pathSampleKeys {
+			if len(samples) < pathSamplesEach {
+				c.pathLatencies[e.Path] = append(samples, e.duration)
+			}
+		}
+	}
 	if facet, ok := c.statuses[e.Status]; ok {
 		facet.Count++
 		if failed {
@@ -301,23 +422,53 @@ func (c *Collector) Feed(e Entry) {
 	}
 }
 
-func (c *Collector) bump(into map[string]*Facet, key string, e Entry, failed bool) {
+func (c *Collector) bump(into map[string]*Facet, key string, e Entry, failed, refused, probe bool) {
 	if key == "" {
 		return
 	}
-	if facet, ok := into[key]; ok {
-		facet.Count++
-		facet.Bytes += e.Size
-		if failed {
-			facet.Errors++
+	facet, ok := into[key]
+	if !ok {
+		if len(into) >= facetCap {
+			c.truncated = true
+			return
 		}
-		return
+		facet = &Facet{Value: key}
+		into[key] = facet
 	}
-	if len(into) >= facetCap {
-		c.truncated = true
-		return
+	facet.Count++
+	facet.Bytes += e.Size
+	facet.Errors += boolInt(failed)
+	facet.Refused += boolInt(refused)
+	facet.Probes += boolInt(probe)
+}
+
+const (
+	pathSampleKeys  = 2000
+	pathSamplesEach = 128
+)
+
+// refererHost reduces a referer to the site it names, and drops the site's
+// own — a link followed within the site is navigation, not a source.
+func refererHost(referer, own string) string {
+	if referer == "" || referer == "-" {
+		return ""
 	}
-	into[key] = &Facet{Value: key, Count: 1, Bytes: e.Size, Errors: boolInt(failed)}
+	parsed, err := url.Parse(referer)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if own != "" && strings.EqualFold(host, hostOnly(own)) {
+		return ""
+	}
+	return host
+}
+
+func hostOnly(host string) string {
+	if i := strings.LastIndexByte(host, ':'); i > 0 && !strings.Contains(host, "]") {
+		return host[:i]
+	}
+	return host
 }
 
 func boolInt(v bool) int {
@@ -399,11 +550,23 @@ func (c *Collector) Result() *Result {
 		}
 	}
 
+	out.Summary.Pages = c.pages
 	out.Summary.Methods = rank(c.methods, 8)
 	out.Summary.Paths = rank(c.paths, 12)
+	for i := range out.Summary.Paths {
+		if samples := c.pathLatencies[out.Summary.Paths[i].Value]; len(samples) > 0 {
+			sorted := append([]float64(nil), samples...)
+			sort.Float64s(sorted)
+			p95 := percentile(sorted, 0.95)
+			out.Summary.Paths[i].P95 = &p95
+		}
+	}
 	out.Summary.Hosts = rank(c.hosts, 8)
 	out.Summary.Clients = rank(c.clients, 10)
 	out.Summary.Agents = rank(c.agents, 8)
+	out.Summary.Referers = rank(c.referers, 10)
+	out.Summary.Probes = rank(c.probes, 10)
+	out.Summary.Scanners = rankScanners(c.clients)
 	out.Summary.Statuses = rankStatuses(c.statuses)
 	out.Summary.Buckets = c.histogram()
 	out.Slowest = c.slowest()
@@ -538,6 +701,27 @@ func rank(from map[string]*Facet, limit int) []Facet {
 	})
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out
+}
+
+// rankScanners names the clients that tried several doors. Three probes is
+// the bar: one is a typo and two a curious person; three is a list.
+func rankScanners(clients map[string]*Facet) []Facet {
+	out := make([]Facet, 0)
+	for _, facet := range clients {
+		if facet.Probes >= 3 {
+			out = append(out, *facet)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Probes != out[j].Probes {
+			return out[i].Probes > out[j].Probes
+		}
+		return out[i].Value < out[j].Value
+	})
+	if len(out) > 10 {
+		out = out[:10]
 	}
 	return out
 }

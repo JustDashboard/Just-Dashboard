@@ -31,6 +31,10 @@ const (
 	NotificationEventCancelled = "run.cancelled"
 	NotificationEventFinished  = "run.finished"
 	NotificationEventTest      = "test"
+	// The traffic events are not selected on a channel: an alert rule names
+	// the channels it reaches, and these are what it sends them.
+	NotificationEventTrafficFiring    = "traffic.firing"
+	NotificationEventTrafficRecovered = "traffic.recovered"
 )
 
 // NotificationEvents is the closed vocabulary a channel may select from.
@@ -297,6 +301,22 @@ type NotificationEnvelope struct {
 	TerminalReason  string `json:"terminalReason,omitempty"`
 	DurationSeconds int64  `json:"durationSeconds,omitempty"`
 	URL             string `json:"url,omitempty"`
+	// Alert carries a traffic alert's reading; it is set on the two traffic
+	// events and on nothing else.
+	Alert *TrafficAlertEnvelope `json:"alert,omitempty"`
+}
+
+// TrafficAlertEnvelope is what a traffic alert says about itself when it
+// fires or recovers: which rule, what it saw, against what limit, for how
+// long. A webhook gets it verbatim; the providers get it as a sentence.
+type TrafficAlertEnvelope struct {
+	ID            int64   `json:"id"`
+	Kind          string  `json:"kind"`
+	Threshold     float64 `json:"threshold"`
+	Observed      float64 `json:"observed"`
+	WindowMinutes int     `json:"windowMinutes"`
+	// Since is when the rule entered the state it is announcing.
+	Since time.Time `json:"since"`
 }
 
 // notificationMessage is the rendered, provider-neutral form.
@@ -327,6 +347,8 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	}
 	message := notificationMessage{URL: envelope.URL}
 	switch envelope.Event {
+	case NotificationEventTrafficFiring, NotificationEventTrafficRecovered:
+		return renderTrafficAlert(envelope, project, environment)
 	case NotificationEventTest:
 		message.Emoji, message.Color = "🔔", 0x5865f2
 		message.Title = "Test notification from Just Dashboard"
@@ -374,6 +396,56 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	}
 	message.Fields = fields
 	return message
+}
+
+// renderTrafficAlert is the sentence a traffic alert sends. The reading and
+// the limit are both in it, because "5xx rate is high" is a message somebody
+// has to open the dashboard to act on, and "5xx rate 4.2% over 5 min, limit
+// 1%" is one they can act on from their phone.
+func renderTrafficAlert(envelope NotificationEnvelope, project, environment string) notificationMessage {
+	message := notificationMessage{URL: envelope.URL}
+	alert := envelope.Alert
+	if alert == nil {
+		alert = &TrafficAlertEnvelope{}
+	}
+	window := fmt.Sprintf("%d min", alert.WindowMinutes)
+	var reading, limit, what string
+	switch alert.Kind {
+	case TrafficAlertLatency:
+		what = "slow"
+		reading = fmt.Sprintf("p95 %s over %s", humanMillis(alert.Observed), window)
+		limit = humanMillis(alert.Threshold)
+	case TrafficAlertSilence:
+		what = "silent"
+		reading = fmt.Sprintf("no requests for %s", window)
+		limit = "any traffic"
+	default:
+		what = "failing"
+		reading = fmt.Sprintf("5xx rate %.1f%% over %s", alert.Observed, window)
+		limit = fmt.Sprintf("%.1f%%", alert.Threshold)
+	}
+	if envelope.Event == NotificationEventTrafficFiring {
+		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Title = fmt.Sprintf("%s · %s is %s — %s", project, environment, what, reading)
+		message.Summary = fmt.Sprintf("The limit is %s. Open the project's Logs page to see which requests.", limit)
+	} else {
+		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Title = fmt.Sprintf("%s · %s recovered — %s", project, environment, reading)
+		message.Summary = fmt.Sprintf("Back within the limit of %s.", limit)
+	}
+	fields := [][2]string{{"Reading", reading}, {"Limit", limit}, {"Window", window}}
+	if !alert.Since.IsZero() {
+		fields = append(fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
+	}
+	message.Fields = fields
+	return message
+}
+
+func humanMillis(ms float64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%.0fms", ms)
+	}
+	return fmt.Sprintf("%.2fs", ms/1000)
 }
 
 func humanizeOperation(operation string) string {

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/csv"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -44,6 +46,7 @@ func requestFilterFrom(q url.Values) accesslog.Filter {
 	}
 	filter.MinMs, _ = strconv.ParseFloat(q.Get("minMs"), 64)
 	filter.MaxMs, _ = strconv.ParseFloat(q.Get("maxMs"), 64)
+	filter.PagesOnly = q.Get("pages") == "true"
 	if v := q.Get("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			filter.Since = t
@@ -154,6 +157,99 @@ func (s *Server) handleDeploymentRequestStream(w http.ResponseWriter, r *http.Re
 			conn.Send("requests", batch)
 		}
 	}
+}
+
+// handleDeploymentRequestExport streams the window as CSV. Streamed rather
+// than buffered because the whole point of a download is a window bigger than
+// the page shows, and the row limit is the store's export bound rather than
+// the table's.
+func (s *Server) handleDeploymentRequestExport(w http.ResponseWriter, r *http.Request) error {
+	environmentID, err := s.deploymentEnvironment(r)
+	if err != nil {
+		return err
+	}
+	if s.modules.requests == nil {
+		return httpx.BadRequest("the proxy is unavailable, so requests cannot be exported")
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	filter := requestFilterFrom(r.URL.Query())
+	name := deploy.RouteNameFor(environmentID)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
+		fmt.Sprintf("requests-%d-%s.csv", environmentID, time.Now().UTC().Format("20060102-150405"))))
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"time", "method", "path", "query", "status", "durationMs", "size", "client", "host", "proto", "tls", "userAgent", "referer"})
+	_, err = s.modules.requests.Export(ctx, name, filter, 0, func(e accesslog.Entry) {
+		duration := ""
+		if ms, ok := e.Duration(); ok {
+			duration = strconv.FormatFloat(ms, 'f', 3, 64)
+		}
+		_ = writer.Write([]string{
+			e.At().Format(time.RFC3339Nano), e.Method, e.Path, e.Query, strconv.Itoa(e.Status), duration,
+			strconv.FormatInt(e.Size, 10), e.RemoteIP, e.Host, e.Proto, strconv.FormatBool(e.TLS), e.UserAgent, e.Referer,
+		})
+	})
+	writer.Flush()
+	if err != nil {
+		// The headers are sent; the body says what happened where a status no
+		// longer can.
+		fmt.Fprintf(w, "# export stopped: the request record could not be read\n")
+	}
+	return nil
+}
+
+// handleDeploymentRunTraffic compares the traffic either side of a run's
+// activation, beside the container metrics the run page already shows.
+func (s *Server) handleDeploymentRunTraffic(w http.ResponseWriter, r *http.Request) error {
+	projectID, runID, err := deploymentRunIDs(r)
+	if err != nil {
+		return err
+	}
+	snapshot, err := s.modules.deployRuns.Snapshot(r.Context(), runID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	if snapshot.Run.ProjectID != projectID {
+		return mapDeployError(deploy.ErrRunNotFound)
+	}
+	ctx, cancel := timeoutCtx(r, 45*time.Second)
+	defer cancel()
+	var record deploy.RequestRecord
+	if s.modules.requests != nil {
+		record = s.modules.requests
+	}
+	httpx.JSON(w, http.StatusOK, deploy.ObserveRunTraffic(ctx, record, *snapshot, time.Now().UTC()))
+	return nil
+}
+
+// handleDeploymentTrafficPulse is every project's last hour at once, for the
+// fleet's cards. Cached to the minute per route: twenty cards polling every
+// ten seconds must not become twenty file reads every ten seconds.
+func (s *Server) handleDeploymentTrafficPulse(w http.ResponseWriter, r *http.Request) error {
+	fleet, err := s.modules.deployRuns.Fleet(r.Context(), deploy.QueueBudget{
+		Heavy: s.Cfg.DeployHeavySlots,
+		Light: s.Cfg.DeployLightSlots,
+	})
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	var record deploy.CachedRecord
+	if s.modules.requests != nil {
+		record = s.modules.requests
+	}
+	now := time.Now().UTC()
+	out := map[string]deploy.TrafficPulse{}
+	for _, project := range fleet.Deployments {
+		if ctx.Err() != nil {
+			break
+		}
+		out[strconv.FormatInt(project.ID, 10)] = deploy.ObserveTrafficPulse(ctx, record, project.EnvironmentID, now)
+	}
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
 }
 
 // deploymentLifecycle is what Docker did to this deployment's containers:

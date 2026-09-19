@@ -248,11 +248,15 @@ func (s *Store) Forget(route string) {
 // Window refreshes the route's record — at most once per refreshEvery — and
 // answers the filter over it.
 func (s *Store) Window(ctx context.Context, route string, filter Filter) (Window, error) {
+	return s.window(ctx, route, filter, refreshEvery)
+}
+
+func (s *Store) window(ctx context.Context, route string, filter Filter, minGap time.Duration) (Window, error) {
 	now := s.now()
 	rec := s.record(route, now)
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	if err := rec.refresh(ctx, s, now); err != nil && len(rec.entries) == 0 && !rec.seeded {
+	if err := rec.refresh(ctx, s, now, minGap); err != nil && len(rec.entries) == 0 && !rec.seeded {
 		return Window{}, err
 	}
 	s.enforceCap(route)
@@ -268,6 +272,39 @@ func (s *Store) Window(ctx context.Context, route string, filter Filter) (Window
 	return Window{Result: c.Result(), Coverage: rec.coverage(), Facts: rec.facts}, nil
 }
 
+// Export hands every request in the window that matches the filter to fn,
+// oldest first, up to limit. It is the whole answer rather than the newest
+// rows: a download is for taking the record somewhere else, not for reading
+// it here.
+func (s *Store) Export(ctx context.Context, route string, filter Filter, limit int, fn func(Entry)) (int, error) {
+	now := s.now()
+	rec := s.record(route, now)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if err := rec.refresh(ctx, s, now, refreshEvery); err != nil && len(rec.entries) == 0 && !rec.seeded {
+		return 0, err
+	}
+	if limit <= 0 {
+		limit = 50_000
+	}
+	n := 0
+	for i := rec.lowerBound(filter.Since); i < len(rec.entries) && n < limit; i++ {
+		if filter.Match(rec.entries[i]) {
+			fn(rec.entries[i])
+			n++
+		}
+	}
+	return n, nil
+}
+
+// Cached answers like Window but is content with a record refreshed within
+// maxAge. It is for the readers that ask about many routes at once — the
+// fleet's cards — where "fresh to the minute" is plenty and a read of every
+// record on every poll would be a read of every record on every poll.
+func (s *Store) Cached(ctx context.Context, route string, filter Filter, maxAge time.Duration) (Window, error) {
+	return s.window(ctx, route, filter, maxAge)
+}
+
 // After refreshes the record and returns, oldest first, the requests numbered
 // past `after` that match the filter, up to limit — and the cursor to continue
 // from. FromNow returns nothing and only positions the cursor; a cursor behind
@@ -278,7 +315,7 @@ func (s *Store) After(ctx context.Context, route string, after uint64, filter Fi
 	rec := s.record(route, now)
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	if err := rec.refresh(ctx, s, now); err != nil && len(rec.entries) == 0 && !rec.seeded {
+	if err := rec.refresh(ctx, s, now, refreshEvery); err != nil && len(rec.entries) == 0 && !rec.seeded {
 		return nil, 0, err
 	}
 	start := 0
@@ -341,8 +378,11 @@ func (r *record) lowerBound(since time.Time) int {
 
 // refresh brings the record up to date, once per refreshEvery. The caller
 // holds the record's lock, so two pollers arriving together do one read.
-func (r *record) refresh(ctx context.Context, s *Store, now time.Time) error {
-	if !r.refreshed.IsZero() && now.Sub(r.refreshed) < refreshEvery {
+func (r *record) refresh(ctx context.Context, s *Store, now time.Time, minGap time.Duration) error {
+	if minGap < refreshEvery {
+		minGap = refreshEvery
+	}
+	if !r.refreshed.IsZero() && now.Sub(r.refreshed) < minGap {
 		return nil
 	}
 	if r.reader == nil {

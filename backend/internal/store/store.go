@@ -779,6 +779,25 @@ CREATE TABLE IF NOT EXISTS deploy_notification_deliveries (
   UNIQUE(channel_id, run_id, event, attempt)
 );
 
+CREATE TABLE IF NOT EXISTS deploy_traffic_alerts (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id     INTEGER NOT NULL REFERENCES deploy_projects(id) ON DELETE CASCADE,
+  environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,
+  threshold      REAL NOT NULL DEFAULT 0,
+  window_minutes INTEGER NOT NULL DEFAULT 5,
+  channels       TEXT NOT NULL DEFAULT '[]',
+  enabled        INTEGER NOT NULL DEFAULT 1,
+  state          TEXT NOT NULL DEFAULT 'ok',
+  state_since    INTEGER NOT NULL DEFAULT 0,
+  observed       REAL NOT NULL DEFAULT 0,
+  checked_at     INTEGER NOT NULL DEFAULT 0,
+  fired_at       INTEGER NOT NULL DEFAULT 0,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deploy_traffic_alerts_project ON deploy_traffic_alerts(project_id);
+
 CREATE TABLE IF NOT EXISTS deploy_preview_refs (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   trigger_id     INTEGER NOT NULL REFERENCES deploy_triggers(id) ON DELETE CASCADE,

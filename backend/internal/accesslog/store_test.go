@@ -582,3 +582,53 @@ func TestConsumeLines(t *testing.T) {
 		t.Fatalf("partial line consumed %d bytes", n)
 	}
 }
+
+func TestStoreExportHandsTheWholeWindowOldestFirst(t *testing.T) {
+	reader, clock := newFake()
+	now := clock.Now()
+	for i := 0; i < 700; i++ {
+		reader.append(line(now.Add(time.Duration(i)*time.Second), fmt.Sprintf("/p%d", i), 200))
+	}
+	store := newTestStore(reader, clock)
+	var got []string
+	n, err := store.Export(context.Background(), "r", Filter{}, 0, func(e Entry) { got = append(got, e.Path) })
+	if err != nil || n != 700 || len(got) != 700 {
+		t.Fatalf("export n=%d len=%d err=%v", n, len(got), err)
+	}
+	if got[0] != "/p0" || got[699] != "/p699" {
+		t.Fatalf("export order wrong: first %s last %s", got[0], got[699])
+	}
+	// A filter and a limit both apply.
+	got = nil
+	n, _ = store.Export(context.Background(), "r", Filter{Path: "/p1"}, 3, func(e Entry) { got = append(got, e.Path) })
+	if n != 3 || len(got) != 3 {
+		t.Fatalf("limited export: %v", got)
+	}
+}
+
+func TestStoreCachedSkipsTheReadInsideMaxAge(t *testing.T) {
+	reader, clock := newFake()
+	reader.append(line(clock.Now(), "/a", 200))
+	store := newTestStore(reader, clock)
+	if _, err := store.Window(context.Background(), "r", Filter{Limit: 5}); err != nil {
+		t.Fatal(err)
+	}
+	reads := reader.reads
+	clock.Advance(20 * time.Second)
+	reader.append(line(clock.Now(), "/b", 200))
+	w, err := store.Cached(context.Background(), "r", Filter{Limit: 5}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader.reads != reads {
+		t.Fatal("a cached read inside its max age must not touch the file")
+	}
+	if w.Result.Summary.Total != 1 {
+		t.Fatalf("cached answer should be the held one: total %d", w.Result.Summary.Total)
+	}
+	clock.Advance(time.Minute)
+	w, _ = store.Cached(context.Background(), "r", Filter{Limit: 5}, time.Minute)
+	if w.Result.Summary.Total != 2 {
+		t.Fatalf("past its max age the cached read refreshes: total %d", w.Result.Summary.Total)
+	}
+}

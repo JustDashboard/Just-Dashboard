@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -65,10 +66,13 @@ type moduleSet struct {
 	// requests holds what every deployment's ingress served, read once and
 	// advanced by what was appended since; every poll and live tail on a
 	// project's Logs page is answered from it.
-	requests   *accesslog.Store
-	dbs        *dbx.Manager
-	linuxUsers *linuxusers.Service
-	netsec     *netsec.Service
+	requests *accesslog.Store
+	// trafficAlerts watches the request record for the rules operators set,
+	// and tells the notification channels when one crosses its line.
+	trafficAlerts *deploy.TrafficAlertEvaluator
+	dbs           *dbx.Manager
+	linuxUsers    *linuxusers.Service
+	netsec        *netsec.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -260,6 +264,14 @@ func (s *Server) initModules() {
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)
+	// Alerts reach the same channels a deployment's own outcome does, through
+	// the same delivery, with two more events those channels can carry.
+	s.modules.trafficAlerts = deploy.NewTrafficAlertEvaluator(
+		s.modules.deployAutomation, s.modules.requests,
+		func(ctx context.Context, channelID int64, envelope deploy.NotificationEnvelope) error {
+			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
+		},
+		s.trafficAlertNames, s.Log)
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 }
 
@@ -412,6 +424,22 @@ func (p githubStatusPoster) PostCommitStatus(ctx context.Context, nameWithOwner,
 // point at. It is the self-configuration report's endpoint — the one the
 // settings page shows — cached briefly because the report reads the stack's
 // env file and asks Docker where the stack lives.
+// trafficAlertNames supplies what an alert's message says about where it is
+// from: the project's name, the environment's, and the Logs page to open.
+func (s *Server) trafficAlertNames(ctx context.Context, projectID, environmentID int64) (string, string, string) {
+	project, environment := "", ""
+	if summary, err := s.modules.deployRuns.DeploymentSummary(ctx, projectID, deploy.QueueBudget{
+		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
+	}); err == nil {
+		project, environment = summary.Name, summary.EnvironmentName
+	}
+	url := ""
+	if base := strings.TrimRight(strings.TrimSpace(s.dashboardEndpoint()), "/"); base != "" {
+		url = fmt.Sprintf("%s/deploy/%d/logs", base, projectID)
+	}
+	return project, environment, url
+}
+
 func (s *Server) dashboardEndpoint() string {
 	s.endpointMu.Lock()
 	defer s.endpointMu.Unlock()

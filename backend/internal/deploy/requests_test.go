@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -140,5 +141,81 @@ func TestObserveRequestsCarriesTheNginxFacts(t *testing.T) {
 	}
 	if window.Summary.Latency != nil {
 		t.Fatal("combined carries no durations; a latency block would be zeros presented as measurements")
+	}
+}
+
+func TestObserveRunTrafficComparesEitherSideOfActivation(t *testing.T) {
+	at := time.Now().UTC().Add(-10 * time.Minute)
+	var data []byte
+	// Twenty fast, clean requests before; twenty slower ones with failures after.
+	for i := 0; i < 20; i++ {
+		data = append(data, caddyLine(at.Add(-time.Duration(20-i)*time.Minute), "GET", "/", 200, 0.02)...)
+	}
+	for i := 0; i < 20; i++ {
+		status := 200
+		if i%4 == 0 {
+			status = 500
+		}
+		data = append(data, caddyLine(at.Add(time.Duration(i)*20*time.Second), "GET", "/", status, 0.400)...)
+	}
+	record := &memoryRecord{data: data}
+	snapshot := RunSnapshot{Run: EngineRun{ID: 9, EnvironmentID: 7, CandidateReleaseID: 11},
+		Steps: []RunStep{{ID: 1, Key: StepActivate, Attempt: 1, State: StepPassed, EndedAt: &at,
+			Evidence: json.RawMessage(`{"releaseId":11}`)}}}
+	traffic := ObserveRunTraffic(context.Background(), storeOver(record, caddyFacts), snapshot, time.Now().UTC())
+	if traffic.Status != "available" || traffic.Before == nil || traffic.After == nil {
+		t.Fatalf("traffic = %+v", traffic)
+	}
+	if record.asked != "just-dashboard-env-7.conf" {
+		t.Fatalf("asked %q, want the run's environment route", record.asked)
+	}
+	if traffic.Before.Requests != 20 || traffic.After.Requests != 20 {
+		t.Fatalf("counts before %d after %d", traffic.Before.Requests, traffic.After.Requests)
+	}
+	if traffic.Before.ErrorRate != 0 || traffic.After.ErrorRate != 0.25 {
+		t.Fatalf("error rates before %v after %v", traffic.Before.ErrorRate, traffic.After.ErrorRate)
+	}
+	if traffic.Before.P95 == nil || traffic.After.P95 == nil || *traffic.After.P95 <= *traffic.Before.P95 {
+		t.Fatalf("p95 before %v after %v: the release made it slower and the reading must say so", traffic.Before.P95, traffic.After.P95)
+	}
+	// The window after is cut at now for a recent release.
+	if until, _ := time.Parse(time.RFC3339, traffic.After.Until); until.After(time.Now().Add(time.Second)) {
+		t.Fatalf("after-window runs into the future: %s", traffic.After.Until)
+	}
+}
+
+func TestObserveRunTrafficWithoutAnActivation(t *testing.T) {
+	snapshot := RunSnapshot{Run: EngineRun{ID: 9, EnvironmentID: 7, CandidateReleaseID: 11}}
+	traffic := ObserveRunTraffic(context.Background(), storeOver(&memoryRecord{}, caddyFacts), snapshot, time.Now())
+	if traffic.Status != "unavailable" || !strings.Contains(traffic.Reason, "activation") {
+		t.Fatalf("traffic = %+v", traffic)
+	}
+}
+
+func TestObserveTrafficPulseDrawsTheLastHour(t *testing.T) {
+	now := time.Now().UTC()
+	var data []byte
+	for i := 0; i < 30; i++ {
+		data = append(data, caddyLine(now.Add(-time.Duration(59-i)*time.Minute), "GET", "/ro", 200, 0.01)...)
+	}
+	record := &memoryRecord{data: data}
+	pulse := ObserveTrafficPulse(context.Background(), storeOver(record, caddyFacts), 3, now)
+	if pulse.Status != "available" || len(pulse.Points) != 60 || pulse.Pages != 30 {
+		t.Fatalf("pulse = %+v", pulse)
+	}
+	total := 0
+	for _, p := range pulse.Points {
+		total += p
+	}
+	if total != 30 {
+		t.Fatalf("the points must hold every request of the hour: %d", total)
+	}
+	if pulse.PerMinute != 0.5 {
+		t.Fatalf("perMinute = %v", pulse.PerMinute)
+	}
+	// Nothing recorded: unavailable, and still renderable.
+	empty := ObserveTrafficPulse(context.Background(), storeOver(&memoryRecord{}, caddyFacts), 4, now)
+	if empty.Status != "unavailable" || empty.Points == nil {
+		t.Fatalf("empty pulse = %+v", empty)
 	}
 }
