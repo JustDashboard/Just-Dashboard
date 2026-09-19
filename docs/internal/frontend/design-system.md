@@ -39,8 +39,8 @@ What separates a surface now:
 
 **And not every block is a surface.** The 0.6.7 pass found the other failure: a page on which every
 block *was* framed read as a page of containers, and the frames stopped separating anything because
-there was nothing unframed left to separate from. The ground went darker (`--background` 0.105,
-`--card` 0.128) so the one step still reads, and the default flipped: **a block on a page is plain
+there was nothing unframed left to separate from. The ground went darker (`--background` 0.145,
+`--card` 0.168) so the one step still reads, and the default flipped: **a block on a page is plain
 unless it can say why it needs an edge.** The host Overview ended 0.6.7 with no framed block at all
 above its Services row and none in it — see §15 for what that took. Three kinds of thing stopped
 taking a frame:
