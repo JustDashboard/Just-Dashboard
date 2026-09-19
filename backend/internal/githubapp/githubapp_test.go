@@ -365,7 +365,7 @@ func TestServiceManifestFlowStoresTheAppSealedAndKeepsCredentialsInStep(t *testi
 	}
 	if start.Action != "https://github.example.test/organizations/acme/settings/apps/new?state="+start.State ||
 		start.Manifest.HookAttributes["url"] != "https://dash.example.test/api/v1/hooks/github-app" ||
-		start.Manifest.RedirectURL != "https://dash.example.test/api/v1/deploy/github-app/callback" ||
+		start.Manifest.RedirectURL != "https://dash.example.test/deploy/credentials" ||
 		start.Manifest.DefaultPermissions["pull_requests"] != "write" || start.Manifest.DefaultPermissions["contents"] != "read" ||
 		!strings.HasPrefix(start.Manifest.Name, "Just Dashboard ") || start.Manifest.Public {
 		t.Fatalf("manifest start = %+v", start)

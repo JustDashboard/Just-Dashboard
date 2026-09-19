@@ -11,10 +11,12 @@ address.
 post it to (`/settings/apps/new`, or `/organizations/<org>/settings/apps/new` when an organisation was
 named) and a `state` good for fifteen minutes. The Credentials page posts that manifest from the
 operator's own browser, as GitHub requires; GitHub creates the App and redirects the browser to
-`GET /api/v1/deploy/github-app/callback?code=…&state=…`, which exchanges the one-time code for the
-App's id, slug, client id and secret, webhook secret and private key, stores them sealed under the
-master key in the `github_app` row, and redirects to `/deploy/credentials?github-app=connected` (or
-`…=failed&reason=…`). The manifest asks for `contents:read`, `metadata:read`, `pull_requests:write` and
+`/deploy/credentials?code=…&state=…`. The page strips both from the address and posts them to
+`POST /api/v1/deploy/github-app/callback` (`system.admin`), which exchanges the one-time code for the
+App's id, slug, client id and secret, webhook secret and private key and stores them sealed under the
+master key in the `github_app` row. The redirect lands on the page rather than on the API because it
+is a cross-site navigation from github.com: the browser withholds the SameSite=Strict session cookie
+on it, so an API callback could only ever answer 401. The manifest asks for `contents:read`, `metadata:read`, `pull_requests:write` and
 `statuses:write`, subscribes to `push` and `pull_request`, and points the App's webhook at
 `<dashboard endpoint>/api/v1/hooks/github-app`; the dashboard therefore refuses to start the flow until
 it knows its own public HTTPS address. `DELETE /api/v1/deploy/github-app` forgets the App (the App

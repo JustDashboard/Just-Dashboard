@@ -47,7 +47,12 @@ func NewManifest(name, dashboardURL string) Manifest {
 	return Manifest{
 		Name: name, URL: base,
 		HookAttributes: map[string]any{"url": base + "/api/v1/hooks/github-app", "active": true},
-		RedirectURL:    base + "/api/v1/deploy/github-app/callback",
+		// The page, not the API: GitHub sends the browser back with a
+		// cross-site navigation, on which the SameSite=Strict session cookie
+		// is not sent, so an API callback answered 401 to every real
+		// browser. The page reads code and state and finishes the exchange
+		// with its own session.
+		RedirectURL:    base + "/deploy/credentials",
 		SetupURL:       base + "/deploy/credentials",
 		SetupOnUpdate:  true,
 		Public:         false,

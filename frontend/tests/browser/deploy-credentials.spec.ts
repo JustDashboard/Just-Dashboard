@@ -299,6 +299,29 @@ test("Test shows a probe the server refused as a field error", async ({ page }) 
   await expect(dialog.getByRole("alert")).toContainText("owner/name path")
 })
 
+test("GitHub's redirect is finished from the page with the code and state it carried", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/credentials", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await json(route, [])
+  })
+  const exchanges: Record<string, unknown>[] = []
+  await page.route("**/api/v1/deploy/github-app/callback", async (route) => {
+    exchanges.push(route.request().postDataJSON() as Record<string, unknown>)
+    await json(route, { slug: "just-dashboard-ab12", owner: "acme" })
+  })
+
+  // GitHub lands the browser here without the session cookie (a cross-site
+  // navigation), so the page itself has to post the exchange.
+  await page.goto("/deploy/credentials?code=one-time-code&state=issued-state")
+  await expect(page.getByText("just-dashboard-ab12 is connected.")).toBeVisible()
+  expect(exchanges).toEqual([{ code: "one-time-code", state: "issued-state" }])
+  // Both came off the address, so a reload cannot replay the exchange.
+  expect(new URL(page.url()).search).toBe("")
+})
+
 test("removing a credential still in use shows the server's reason once", async ({ page }) => {
   await mockProject(page)
   await page.route("**/api/v1/deploy/credentials", async (route) => {

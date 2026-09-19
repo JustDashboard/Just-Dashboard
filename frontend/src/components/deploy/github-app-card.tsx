@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { External, Trash } from "@/components/icons"
-import { del, get, post } from "@/lib/api"
+import { del, errorMessage, get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
@@ -47,21 +47,24 @@ function submitManifest(start: GitHubAppManifestStart) {
 
 type CallbackOutcome = { tone: "success" | "warning"; text: string }
 
-function readCallbackOutcome(): CallbackOutcome | undefined {
+/**
+ * GitHub sends the browser back to this page with a one-time code and the
+ * state the dashboard issued. Both come off the address before anything
+ * else happens, so a reload or a shared link cannot replay them, and the
+ * exchange is finished under the page's own session — the redirect itself is
+ * a cross-site navigation, on which the browser withholds the session cookie.
+ */
+function takeCallback(): { code: string; state: string } | undefined {
   if (typeof window === "undefined") return undefined
   const query = new URLSearchParams(window.location.search)
-  const result = query.get("github-app")
-  if (!result) return undefined
-  if (result === "connected") {
-    return {
-      tone: "success",
-      text: "The GitHub App is connected. Install it on the accounts whose repositories deploy here.",
-    }
-  }
-  return {
-    tone: "warning",
-    text: `GitHub did not finish creating the App: ${query.get("reason") ?? "unknown reason"}`,
-  }
+  const code = query.get("code")
+  const state = query.get("state")
+  if (!code || !state) return undefined
+  query.delete("code")
+  query.delete("state")
+  const rest = query.toString()
+  window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""))
+  return { code, state }
 }
 
 export function GitHubAppPanel({
@@ -77,20 +80,31 @@ export function GitHubAppPanel({
 }) {
   const [organization, setOrganization] = useState("")
   const [starting, setStarting] = useState(false)
-  // GitHub sends the browser back with the result in the query string: read
-  // once when the panel first renders, then the address is cleaned so a
-  // reload does not repeat it.
-  const [outcome] = useState(readCallbackOutcome)
+  const [outcome, setOutcome] = useState<CallbackOutcome>()
   const { confirm, dialog } = useConfirm()
 
+  // Runs once per arrival: the first pass takes the code and state off the
+  // address, so a re-run (a poll re-render, StrictMode's second mount) finds
+  // nothing and does nothing.
   useEffect(() => {
-    if (!outcome || typeof window === "undefined") return
-    const query = new URLSearchParams(window.location.search)
-    query.delete("github-app")
-    query.delete("reason")
-    const rest = query.toString()
-    window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""))
-  }, [outcome])
+    const pending = takeCallback()
+    if (!pending) return
+    post<{ slug: string }>("/deploy/github-app/callback", pending)
+      .then((app) => {
+        setOutcome({
+          tone: "success",
+          text: `${app.slug} is connected. Install it on the accounts whose repositories deploy here.`,
+        })
+        status.refresh()
+        onChange?.()
+      })
+      .catch((error) => {
+        setOutcome({
+          tone: "warning",
+          text: `GitHub created the App, but the dashboard could not finish connecting it: ${errorMessage(error)}`,
+        })
+      })
+  }, [status, onChange])
 
   const create = async () => {
     setStarting(true)
