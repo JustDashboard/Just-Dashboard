@@ -753,10 +753,12 @@ verbs do; the menu hides them otherwise. Legacy `?tab=` links
 redirect to these routes. Operation failures are titled by the operation and re-read the project at
 once so the header and the Danger zone never disagree about a stopped service.
 
-Overview centres on the production block: the constrained site preview, domains with route and
-certificate status, health, source, the live release with who deployed it, automatic deployments,
-Build logs and Roll back. Findings from the operations diagnosis are a plain list under it; recent
-deployments and live usage follow. `GET /deploy/{id}/preview-frame` is an
+Overview centres on the production block: the site preview — the website laid out at desktop width
+and shrunk into one tile that is a link to it — beside the way a request reaches the project (source
+with automatic deployments, the live release with who deployed it, the runtime's containers and
+health, domains with certificate status), with Build logs and Roll back. Findings from the
+operations diagnosis are a plain list under it; the delivery insights, recent deployments and live
+usage with the last hour's shape follow. `GET /deploy/{id}/preview-frame` is an
 authenticated, non-cacheable static HTML wrapper with no scripts. Its CSP permits a child frame only
 from the recorded endpoint's origin and allows the wrapper itself to be framed only by this dashboard.
 This is a deliberate exception to the API's default frame denial; the dashboard document's CSP stays

@@ -50,7 +50,9 @@ test("a run deployed from a specific version names that version, not the branch"
   await expect(page.getByText(/v1\.4\.2 · a1b2c3d · by operator/)).toBeVisible()
 })
 
-test("website preview loads inside a constrained frame", async ({ page }) => {
+test("the website preview is a desktop-width page shrunk into one tile that opens the site", async ({
+  page,
+}) => {
   await mockProject(page)
   let requests = 0
   await page.route("**/api/v1/deploy/7/preview-frame", (route) => {
@@ -63,15 +65,21 @@ test("website preview loads inside a constrained frame", async ({ page }) => {
   await page.goto("/deploy/7")
   await expect.poll(() => requests).toBe(1)
 
+  const tile = page.getByRole("link", { name: "Open api.example.test in a new tab" })
+  await expect(tile).toHaveAttribute("href", "https://api.example.test/")
+  await expect(tile).toHaveAttribute("target", "_blank")
   const preview = page.locator('iframe[title="Website preview for api-production"]')
-  await expect(preview).toBeVisible()
-  await page.getByRole("button", { name: "Mobile width", exact: true }).click()
-  const width = await preview.evaluate((frame) => frame.getBoundingClientRect().width)
-  expect(width).toBeLessThanOrEqual(384)
-  await page.getByRole("button", { name: "Reload website preview" }).click()
-  await expect.poll(() => requests).toBe(2)
-  await page.getByRole("button", { name: "Close preview" }).click()
-  await expect(preview).toHaveCount(0)
+  await expect(preview).toBeAttached()
+  // Laid out at 1280 wide and scaled down: the frame's box on the page is no
+  // wider than the tile it sits in, and its own layout width stays desktop.
+  const [shown, tileWidth, laidOut] = await Promise.all([
+    preview.evaluate((frame) => frame.getBoundingClientRect().width),
+    tile.evaluate((element) => element.getBoundingClientRect().width),
+    preview.evaluate((frame) => (frame as HTMLIFrameElement).offsetWidth),
+  ])
+  expect(laidOut).toBe(1280)
+  expect(shown).toBeLessThanOrEqual(tileWidth)
+  expect(shown).toBeGreaterThan(tileWidth * 0.9)
   await expect(page).toHaveURL(/\/deploy\/7$/)
 })
 

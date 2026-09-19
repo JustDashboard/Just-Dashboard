@@ -9,6 +9,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { humanize } from "@/components/deploy/vocabulary"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import {
   Select,
   SelectContent,
@@ -81,13 +82,21 @@ export function Insights({ projectId }: { projectId: number }) {
             <StatGrid columns={5}>
               <StatTile
                 label="Success rate"
-                value={decided ? `${Math.round(data.successRate * 100)}%` : "—"}
+                value={
+                  decided ? (
+                    <>
+                      <NumberTicker value={Math.round(data.successRate * 100)} />%
+                    </>
+                  ) : (
+                    "—"
+                  )
+                }
                 hint={`${data.succeeded} of ${decided} decided release${decided === 1 ? "" : "s"}`}
                 tone={data.failureStreak > 0 ? "warning" : "default"}
               />
               <StatTile
                 label="Deploys per week"
-                value={data.deploysPerWeek.toFixed(1)}
+                value={<NumberTicker value={data.deploysPerWeek} decimalPlaces={1} />}
                 hint={`${data.succeeded} successful over ${data.windowDays} days`}
               />
               <StatTile
@@ -108,7 +117,7 @@ export function Insights({ projectId }: { projectId: number }) {
               />
               <StatTile
                 label="Failure streak"
-                value={String(data.failureStreak)}
+                value={<NumberTicker value={data.failureStreak} />}
                 hint={
                   data.lastFailureAt
                     ? `last failure ${relativeTime(data.lastFailureAt)}`

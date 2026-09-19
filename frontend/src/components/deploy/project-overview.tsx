@@ -1,17 +1,16 @@
 "use client"
 
-import { Tag } from "@/components/tag"
 import { useCallback, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowRight, External, GitBranch } from "@/components/icons"
+import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { cn } from "@/lib/utils"
 import type {
+  ContainerHistory,
   ContainerStats,
   DeploymentDiagnosis,
   DeploymentGitWatch,
@@ -22,23 +21,24 @@ import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, Notice } from "@/components/state"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status, StatusDot, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { useProject } from "@/components/deploy/project-context"
 import {
-  HealthStatus,
   RunStatus,
   deploymentURL,
-  formatDuration,
   hostOf,
-  runDurationSeconds,
+  projectState,
   runSubject,
   runTitle,
   sourceLine,
 } from "@/components/deploy/vocabulary"
 import { SitePreview } from "@/components/deploy/site-preview"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
-import { CertificateStatus } from "@/components/deploy/project-runtime"
+import { ProjectWiring } from "@/components/deploy/project-wiring"
+import { Insights } from "@/components/deploy/insights"
+import { Sparkline } from "@/components/metrics/sparkline"
+import { NumberTicker } from "@/components/ui/number-ticker"
 
 /**
  * The project's front page: a window onto the live site, the facts a visitor
@@ -140,116 +140,27 @@ export function ProjectOverview() {
         />
         <PanelBody
           flush
-          className="grid items-start gap-8 pt-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"
+          // The preview takes a measure rather than a share: past about 32rem a
+          // thumbnail stops telling the reader more and only grows a tall block
+          // of somebody else's website into the middle of the page.
+          className="grid items-start gap-8 pt-4 lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)]"
         >
           <SitePreview
             key={`${deployment.endpoint}:${deployment.liveReleaseId}`}
             deployment={deployment}
           />
-          <div className="min-w-0 space-y-5">
-            <div className="min-w-0">
-              <p className="eyebrow mb-1.5">Domains</p>
-              {opsDomains ? (
-                opsDomains.length === 0 ? (
-                  <p className="text-body text-muted-foreground">No public domain</p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {opsDomains.map((domain) => (
-                      <li key={domain.hostname} className="flex min-w-0 items-center gap-2">
-                        <a
-                          href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="min-w-0 truncate rounded-sm text-body font-medium focus-ring hover:underline"
-                        >
-                          {domain.hostname}
-                        </a>
-                        <CertificateStatus domain={domain} />
-                        {domain.protected && <Tag>Password</Tag>}
-                        <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-                      </li>
-                    ))}
-                  </ul>
-                )
-              ) : url ? (
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-body font-medium focus-ring hover:underline"
-                >
-                  {hostOf(url)}{" "}
-                  <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-                </a>
-              ) : (
-                <p className="text-body text-muted-foreground">
-                  {deployment.liveReleaseId
-                    ? "Private service"
-                    : "Appears after your first deployment"}
-                </p>
-              )}
-            </div>
-
-            <dl className="min-w-0 space-y-2.5">
-              <Fact label="Status">
-                <HealthStatus health={deployment.health} />
-              </Fact>
-              <Fact label="Source">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <GitBranch aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{source.primary}</span>
-                </span>
-                {source.secondary && (
-                  <span
-                    className={cn(
-                      "mt-0.5 block truncate text-hint text-muted-foreground",
-                      source.mono && "font-mono",
-                    )}
-                  >
-                    {source.secondary}
-                  </span>
-                )}
-              </Fact>
-              <Fact label="Live release">
-                {project.liveRelease ? (
-                  <span className="truncate">
-                    <span className="numeric">#{project.liveRelease.number}</span>
-                    {project.liveRun && (
-                      <>
-                        {" · "}
-                        {relativeTime(project.liveRun.endedAt ?? project.liveRun.requestedAt)}
-                        {project.liveRun.actor && ` · by ${project.liveRun.actor}`}
-                        {" · "}
-                        {formatDuration(runDurationSeconds(project.liveRun))}
-                      </>
-                    )}
-                  </span>
-                ) : (
-                  "Not deployed yet"
-                )}
-              </Fact>
-              {deployment.sourceKind === "git" && (
-                <Fact label="Auto-deploy">
-                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {watch.data ? <AutoDeploy watch={watch.data} /> : "—"}
-                    <Link
-                      href={`/deploy/${project.projectId}/settings/general`}
-                      className="inline-flex items-center gap-1 rounded-sm text-hint text-muted-foreground focus-ring hover:text-foreground"
-                    >
-                      Manage <ArrowRight className="size-3" />
-                    </Link>
-                  </span>
-                </Fact>
-              )}
-            </dl>
-
-            {project.liveRun?.operation === "rollback" && project.liveRelease && (
-              <Notice
-                tone="warning"
-                title={`Rolled back to release #${project.liveRelease.number}${project.liveRun.actor ? ` by ${project.liveRun.actor}` : ""} ${relativeTime(project.liveRun.endedAt ?? project.liveRun.requestedAt)}`}
-              />
-            )}
-          </div>
+          <ProjectWiring
+            projectId={project.projectId}
+            deployment={deployment}
+            state={projectState(deployment, runtime, project.archived)}
+            source={source}
+            liveRelease={project.liveRelease}
+            liveRun={project.liveRun}
+            runtime={runtime}
+            domains={opsDomains}
+            url={url}
+            watch={watch.data}
+          />
         </PanelBody>
       </Panel>
 
@@ -261,6 +172,11 @@ export function ProjectOverview() {
           </PanelBody>
         </Panel>
       )}
+
+      {/* The delivery figures belong on the front page as much as on
+          Deployments: how often this project ships and how often it
+          fails are the two facts a visitor asks after "is it up". */}
+      {project.normalized && <Insights projectId={project.projectId} />}
 
       <div className="grid min-w-0 gap-8 xl:grid-cols-2">
         <Panel plain>
@@ -388,34 +304,11 @@ export function ProjectOverview() {
   )
 }
 
-/** One labelled fact in the overview's column: a small name over its value. */
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-hint text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-body">{children}</dd>
-    </div>
-  )
-}
-
-function autoDeployReading(watch: DeploymentGitWatch): { tone: DotTone; label: string } {
-  const automatic = watch.policy?.automatic ?? watch.automatic
-  if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
-    return { tone: "warning", label: "Needs attention" }
-  }
-  if (!automatic) return { tone: "stopped", label: "Manual deployments" }
-  if (watch.status === "awaiting_first_deployment") {
-    return { tone: "stopped", label: "On after first deployment" }
-  }
-  return { tone: "running", label: `On · every ${watch.intervalSeconds}s` }
-}
-
-function AutoDeploy({ watch }: { watch: DeploymentGitWatch }) {
-  const reading = autoDeployReading(watch)
-  return <Status tone={reading.tone} label={reading.label} />
-}
-
-/** CPU and memory from the live stats socket — the same reading Runtime shows, at a glance. */
+/**
+ * CPU and memory from the live stats socket — the same reading Runtime
+ * shows, at a glance — with the last hour's shape beside each figure, from
+ * the recorded history, so "1.2%" also says whether it was 40% a moment ago.
+ */
 function UsageTiles({ containerId, name }: { containerId: string; name: string }) {
   const [stats, setStats] = useState<ContainerStats | null>(null)
   const onMessage = useCallback((message: Envelope) => {
@@ -423,17 +316,54 @@ function UsageTiles({ containerId, name }: { containerId: string; name: string }
   }, [])
   const socket = useSocket(`/docker/containers/${containerId}/stats/stream`, { onMessage })
   const live = socket.state === "open"
+  const history = usePoll(
+    (signal) =>
+      get<ContainerHistory>(
+        `/docker/containers/${encodeURIComponent(containerId)}/stats/history`,
+        { points: 60 },
+        signal,
+      ),
+    60000,
+    [containerId],
+  )
+  const points = history.data?.points ?? []
+  const trend = (values: number[], label: string, color: string) =>
+    values.length > 1 ? (
+      <Sparkline values={values} label={label} color={color} width={72} height={20} />
+    ) : null
   return (
     <StatGrid columns={2}>
+      {/* The figures spring from one reading to the next rather than jumping,
+          so a stats socket at one message a second reads as a gauge. */}
       <StatTile
         label="CPU"
-        value={stats ? `${stats.cpuPercent.toFixed(1)}%` : "—"}
+        value={stats ? <NumberTicker value={stats.cpuPercent} decimalPlaces={1} /> : "—"}
+        trailing={
+          <span className="inline-flex items-center gap-3">
+            {stats && "%"}
+            {trend(
+              points.map((point) => point.cpuPeak),
+              "CPU over the last hour",
+              "var(--chart-1)",
+            )}
+          </span>
+        }
         hint={name}
-        trailing={live && <StatusDot tone="running" live />}
       />
       <StatTile
         label="Memory"
-        value={stats ? `${(stats.memUsage / 1024 / 1024).toFixed(0)} MiB` : "—"}
+        value={stats ? <NumberTicker value={stats.memUsage / 1024 / 1024} /> : "—"}
+        trailing={
+          <span className="inline-flex items-center gap-3">
+            {stats && "MiB"}
+            {trend(
+              points.map((point) => point.memBytesPeak),
+              "Memory over the last hour",
+              "var(--chart-2)",
+            )}
+            {live && <StatusDot tone="running" live />}
+          </span>
+        }
         hint={name}
       />
     </StatGrid>
