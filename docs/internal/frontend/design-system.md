@@ -66,7 +66,20 @@ taking a frame:
   sites, certificates, streams and ports tables with their toolbars; the TLS report's readings,
   findings, protocol, certificate, chain and HTTP rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, the Overview's last-hour sparklines, and the
-  deployment pages' lists, overview facts, run summary and create flow are plain, and so are the
+  deployment pages' lists, overview facts, run summary and create flow are plain (the framed
+  blocks in the deployment section are its two *pictures*: the GitHub App on Credentials — the
+  accounts that installed it, the App and this server — and where an outcome goes on
+  Notifications — every deployment on the left, a mark per channel on the right, dashed rings
+  for the kinds not yet added; each draws its lines with `ui/animated-beam` from the marks' own
+  positions, and the line is the state: dotted before the thing exists, still while it is
+  paused or not installed, a brand-to-signal pulse travelling along it while it carries —
+  because a picture needs an edge to read as one thing. The same vocabulary
+  (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is
+  inside a block that already has its edge: the way a request reaches a project on the overview —
+  source, live release, runtime, domains — in the column beside the preview; each mark paints the
+  ground under its tint so the line never shows through it. The release path on a deployment page
+  is not a wiring picture but a timeline: one bar in seven segments, each as long as its stage
+  took, `components/deploy/run-pipeline.tsx`), and so are the
   databases section's connection facts and maintenance rows, its find, monitor and generate panels,
   and every block on the four Processes pages — the live table, the PM2 applications, the systemd
   units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
@@ -379,6 +392,30 @@ fresh its numbers are.
 Nothing here needs a `motion-reduce:` guard. The rule lives once at the root of `globals.css` and
 collapses every animation's *duration* rather than cancelling it, so a keyframe that would otherwise
 never reach its final frame still ends up there.
+
+### Motion that arrived with a library
+
+The deployment section brings in registry components — Magic UI's `ui/animated-beam`,
+`ui/border-beam`, `ui/blur-fade`, `ui/number-ticker`, `ui/bento-grid` and `ui/confetti`, and Motion
+Primitives' `ui/text-shimmer` — each rewritten onto the tokens and each saying one of the four things
+above:
+
+- *arrived* — `BlurFade` staggers the fleet's cards by a beat each; `NumberTicker` counts a figure up
+  to its value on the Credentials readings, the delivery insights and the overview's live usage;
+- *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around a project card while a run
+  is in progress, and `TextShimmer` lighting the name of the stage a release is at, are `breathe`
+  for a link, a frame and a word: a reading that is happening now;
+- *once* — `Confetti` fires only when a release goes live in front of the reader, never on arrival.
+
+Magic UI's `animated-circular-progress-bar` was tried beside the release path and removed: a ring
+saying "100%" next to a header saying "Ready" was the same fact twice, and the timeline now shows how
+far a run is by how much of the bar has coloured. Its `safari` device mock was evaluated for the
+website preview and not adopted — its chrome is drawn for a hero, and at tile size the address bar's
+text is too small to read — so the preview draws its own strip and shrinks a desktop-width frame.
+
+Every one of them honours `prefers-reduced-motion` in JavaScript, because the root CSS rule cannot
+reach a JavaScript-driven animation. `BentoGrid` is not motion: it is the "Start with something
+ready" catalogue on New project, cells of unequal size that are buttons.
 
 ## 12. A table is a layout, not a contract
 
