@@ -8,12 +8,16 @@ on:
 permissions:
   contents: read
 
-# One runner, one job at a time: a push to a branch with an open pull request
-# would otherwise queue the same commit twice. Keying on the branch name lets
-# the push run and the pull-request run cancel each other, so the newest wins.
 concurrency:
-  group: verify-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# Every push runs the gates on the self-hosted runner, which takes one job at
+# a time. A pull request from a branch in this repository is already covered by
+# the push that created it, and a second run for the same commit both queued
+# behind the first and, when the newer cancelled the older, showed on the pull
+# request as a failure. The pull-request event therefore only runs for forks,
+# whose pushes never reach this repository.
 
 env:
   JD_TEST_POSTGRES_DSN: postgres://jd_test:jd_test@127.0.0.1:1/jd_test?sslmode=disable
@@ -26,6 +30,7 @@ env:
 
 jobs:
   backend:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 25
     defaults:
@@ -62,6 +67,7 @@ jobs:
           retention-days: 30
 
   frontend:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 20
     defaults:
@@ -99,6 +105,7 @@ jobs:
           retention-days: 30
 
   deployment-live:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 45
     env:

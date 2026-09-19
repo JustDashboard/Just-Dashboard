@@ -53,8 +53,8 @@ carries no licensing question at all.
   an unrelated server. Run `bun run build` after source changes before running browser tests alone.
   `JD_BROWSER_BASE_URL` explicitly selects an externally managed test frontend when needed.
 - `.github/workflows/verify.yml` runs the backend, deployment race, frontend and live Docker gates
-  for pushes and pull requests on a **self-hosted runner** on the release host (labels `self-hosted,
-  linux, x64, just-dashboard`), because the suites need a real Docker daemon, host tools and a shell
+  for every push, and for pull requests from forks, on a **self-hosted runner** on the release host
+  (labels `self-hosted, linux, x64, just-dashboard`), because the suites need a real Docker daemon, host tools and a shell
   that GitHub's hosted runners do not provide. The runner is a systemd service under `~/actions-runner`
   on that machine, running as `ubuntu`; one job runs at a time. Go and Bun come from `go.mod` and
   `package.json`; dependencies use the frozen Bun lockfile; Playwright's Chromium is installed into the
