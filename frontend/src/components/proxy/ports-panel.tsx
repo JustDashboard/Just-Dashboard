@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { ListOrdered, Router, Shield } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -45,8 +46,8 @@ const REACH_LABEL: Record<Reach, string> = {
  */
 export function PortsPage() {
   const router = useRouter()
-  const [filter, setFilter] = useState("")
-  const [reach, setReach] = useState<Reach>("all")
+  const [filter, setFilter] = useSessionState("proxy.ports.query", "")
+  const [reach, setReach] = useSessionState<Reach>("proxy.ports.reach", "all")
   const { data, error, loading } = usePoll(
     (signal) => get<Listener[]>("/ports", undefined, signal),
     15_000,

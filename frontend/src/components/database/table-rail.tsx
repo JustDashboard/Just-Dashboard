@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import { bytes, plural } from "@/lib/format"
 import type { DbTable } from "@/lib/types"
@@ -43,8 +44,8 @@ export function TableRail({
   action?: React.ReactNode
   className?: string
 }) {
-  const [query, setQuery] = useState("")
-  const [schema, setSchema] = useState("all")
+  const [query, setQuery] = useSessionState("databases.tables.query", "")
+  const [schema, setSchema] = useSessionState("databases.tables.schema", "all")
 
   const schemaNames = useMemo(() => {
     const set = new Set<string>()

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { ArrowRight, Box, Terminal } from "@/components/icons"
@@ -40,8 +40,10 @@ function DockerConsole() {
   const services = runtime?.status === "available" ? runtime.services : []
   const running = services.filter((service) => service.state === "running")
   const preferred = running.find((service) => service.liveRelease) ?? running[0]
-  const [selected, setSelected] = useState<string | undefined>(
-    () => search.get("service") ?? undefined,
+  const [selected, setSelected] = useSessionState<string | undefined>(
+    `deploy.${project.projectId}.console.service`,
+    undefined,
+    search.get("service"),
   )
   const service = running.find((item) => item.containerId === selected) ?? preferred
 

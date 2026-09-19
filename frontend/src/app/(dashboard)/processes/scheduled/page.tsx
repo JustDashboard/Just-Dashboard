@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -8,7 +7,7 @@ import { describeCron } from "@/lib/cron"
 import type { Crontab } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -36,7 +35,7 @@ export default function ScheduledPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [user, setUser] = useViewState("processes.cron.user", "root")
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useSessionState("processes.cron.adding", false)
   const users = usePoll((signal) => get<string[]>("/cron/users", undefined, signal), 0)
   const system = usePoll((signal) => get<Crontab[]>("/cron/system", undefined, signal), 0)
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -24,6 +24,7 @@ import { relativeTime, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentActiveWork,
@@ -107,41 +108,17 @@ function matchesFilter(deployment: DeploymentSummary, filter: FilterKey) {
   }
 }
 
-const VIEW_KEY = "jd.deploy.fleet"
-
-type FleetView = { query: string; filter: FilterKey; layout: "grid" | "list" }
-
-/** The furniture, not the question: kept across a visit so a filtered fleet does not reset itself. */
-function loadFleetView(): Partial<FleetView> {
-  try {
-    const raw = sessionStorage.getItem(VIEW_KEY)
-    return raw ? (JSON.parse(raw) as Partial<FleetView>) : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveFleetView(view: FleetView) {
-  try {
-    sessionStorage.setItem(VIEW_KEY, JSON.stringify(view))
-  } catch {
-    // Private browsing or a full quota: the choice still applies this session.
-  }
-}
-
 function Fleet() {
   const { can } = useAuth()
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     5000,
   )
-  const [query, setQuery] = useState(() => loadFleetView().query ?? "")
-  const [filter, setFilter] = useState<FilterKey>(() => loadFleetView().filter ?? "all")
-  const [layout, setLayout] = useState<"grid" | "list">(() => loadFleetView().layout ?? "grid")
-
-  useEffect(() => {
-    saveFleetView({ query, filter, layout })
-  }, [query, filter, layout])
+  // The question is kept for the tab and the furniture for good, so a
+  // filtered fleet does not reset itself on the way back from a project.
+  const [query, setQuery] = useSessionState("deploy.fleet.query", "")
+  const [filter, setFilter] = useSessionState<FilterKey>("deploy.fleet.filter", "all")
+  const [layout, setLayout] = useViewState<"grid" | "list">("deploy.fleet.layout", "grid")
 
   const deployments = useMemo(() => fleet.data?.deployments ?? [], [fleet.data])
   const filtered = useMemo(() => {

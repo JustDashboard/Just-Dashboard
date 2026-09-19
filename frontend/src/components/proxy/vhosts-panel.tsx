@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Globe, Plus, ShieldCheck, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post, put } from "@/lib/api"
@@ -59,14 +60,17 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const { confirm, dialog } = useConfirm()
   const admin = can("system.admin")
   const [editing, setEditing] = useState<VHost | null>(null)
-  const [form, setForm] = useState<{
+  // The form's open state and its fields are kept for the tab: a site is a
+  // long form, and checking a port or a certificate half-way through it
+  // should not mean typing it again. Closing it is what forgets it.
+  const [form, setForm] = useSessionState<{
     open: boolean
     editing: string | null
     copyFrom: string | null
     session: number
-  }>({ open: false, editing: null, copyFrom: null, session: 0 })
-  const [filter, setFilter] = useState("")
-  const [chip, setChip] = useState<SiteFilter>("all")
+  }>("proxy.sites.form", { open: false, editing: null, copyFrom: null, session: 0 })
+  const [filter, setFilter] = useSessionState("proxy.sites.query", "")
+  const [chip, setChip] = useSessionState<SiteFilter>("proxy.sites.chip", "all")
   const [pending, setPending] = useState<Record<string, string>>({})
   // In the URL so a deployment finding can link straight at the site serving
   // its hostname, and so the browser's back button restores the selection.
@@ -91,7 +95,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
   const closeForm = (open: boolean) => {
     setForm((f) => ({ ...f, open }))
-    if (!open) setRequested(null)
+    if (!open) {
+      setRequested(null)
+      forgetSessionState("proxy.site.form.")
+    }
   }
   const closeRaw = (open: boolean) => {
     if (open) return

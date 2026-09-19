@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Archive, Trash } from "@/components/icons"
@@ -25,7 +26,7 @@ export function ArchivedProjects() {
   const router = useRouter()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useSessionState("deploy.archived.query", "")
   const [restoringId, setRestoringId] = useState<number>()
   const result = usePoll(
     (signal) => get<DeployProject[]>("/deploy/", { view: "archived" }, signal),

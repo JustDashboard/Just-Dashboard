@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useMemoryState } from "@/lib/view-state"
 import Link from "next/link"
 import { Lightning, Pencil, Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
@@ -154,7 +155,10 @@ export function CredentialsPage() {
     15000,
   )
   const githubApp = useGitHubApp()
-  const [draft, setDraft] = useState<Draft>()
+  // The open form is kept in memory for the tab — memory, because the secret
+  // is typed into it — so a look at the provider for the token does not
+  // mean starting the credential again.
+  const [draft, setDraft] = useMemoryState<Draft | undefined>("deploy.credentials.draft", undefined)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState("")
   const [saving, setSaving] = useState(false)

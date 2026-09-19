@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Logs, Pause, Play, Plus, Trash } from "@/components/icons"
 import { del, get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -57,15 +58,17 @@ export function Schedules({
     [projectId, environmentId],
   )
 
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState("Nightly deploy")
-  const [expression, setExpression] = useState("0 3 * * *")
-  const [timezone, setTimezone] = useState("UTC")
-  const [action, setAction] = useState<ScheduleAction>("deploy")
-  const [backupJobId, setBackupJobId] = useState("")
-  const [containerId, setContainerId] = useState("")
-  const [argv, setArgv] = useState("")
-  const [timeoutSeconds, setTimeoutSeconds] = useState("")
+  // The new-schedule form is kept for the tab until it is created.
+  const draft = `deploy.${projectId}.${environmentId}.schedules.new`
+  const [open, setOpen] = useSessionState(`${draft}.open`, false)
+  const [name, setName] = useSessionState(`${draft}.name`, "Nightly deploy")
+  const [expression, setExpression] = useSessionState(`${draft}.expression`, "0 3 * * *")
+  const [timezone, setTimezone] = useSessionState(`${draft}.timezone`, "UTC")
+  const [action, setAction] = useSessionState<ScheduleAction>(`${draft}.action`, "deploy")
+  const [backupJobId, setBackupJobId] = useSessionState(`${draft}.backupJob`, "")
+  const [containerId, setContainerId] = useSessionState(`${draft}.container`, "")
+  const [argv, setArgv] = useSessionState(`${draft}.argv`, "")
+  const [timeoutSeconds, setTimeoutSeconds] = useSessionState(`${draft}.timeout`, "")
   const [saving, setSaving] = useState(false)
   const [runsFor, setRunsFor] = useState<DeploymentSchedule>()
 

@@ -11,6 +11,25 @@
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
+- `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
+  thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
+  sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
+  doing** — the filter in the box, the chip narrowed to, the page of results, the row whose detail is
+  open, the SQL in the editor, a form half filled in — in sessionStorage, so it survives moving between
+  pages and a reload and is gone when the tab closes. `useMemoryState` is the same for a value that must
+  never be written down by the browser (a secret in an unsaved form: a credential, a database password,
+  a backup destination's keys, an environment value): it lives as long as the page's JavaScript does,
+  across navigation but not a reload. All three have `useState`'s shape; a dotted key names the page and
+  the thing, and a third argument to `useSessionState` is the value the address bar handed over, which
+  wins on arrival and is remembered from then on. A form draft is keyed under the revision or name it
+  was read from, so a save from anywhere starts it again from the server's copy; a dialog's fields are
+  forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
+  navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
+  keeps a detail panel's selection in the address bar and, per page and key, in the session store, so
+  arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
+  layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
+  filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
+  whole new-project flow are remembered; a search box is no longer the exception it used to be.
 - `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
   minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an

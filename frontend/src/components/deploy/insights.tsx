@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
@@ -40,7 +40,7 @@ function seconds(value: number) {
  * projects, which the engine never scored.
  */
 export function Insights({ projectId }: { projectId: number }) {
-  const [range, setRange] = useState<(typeof WINDOWS)[number][0]>("30")
+  const [range, setRange] = useViewState<(typeof WINDOWS)[number][0]>("deploy.insights.range", "30")
   const insights = usePoll(
     (signal) => get<DeploymentInsights>(`/deploy/${projectId}/insights`, { days: range }, signal),
     60000,

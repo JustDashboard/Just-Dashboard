@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
 import type { LogLine, PM2Process } from "@/lib/types"
 import { post } from "@/lib/api"
@@ -61,7 +62,14 @@ function PM2Sheet({
 }) {
   const { confirm, dialog } = useConfirm()
   const { pending, act } = usePM2Control(onChanged)
-  const [tab, setTab] = useState(initialTab ?? "overview")
+  // Which tab an application opens on, remembered the way a container's is;
+  // a caller asking for a specific tab ("open its logs") is answered first.
+  const [remembered, remember] = useViewState("processes.pm2.detail.tab", "overview")
+  const [tab, setTabState] = useState(initialTab ?? remembered)
+  const setTab = (next: string) => {
+    setTabState(next)
+    remember(next)
+  }
   const [scaling, setScaling] = useState(false)
   const busy = process ? pending[pm2Key(process)] : undefined
 

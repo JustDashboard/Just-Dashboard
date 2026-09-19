@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Check, Download, Information, MagnifyingGlass } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -52,7 +53,7 @@ export function InstallPanel({
   manager?: string
 }) {
   const { can } = useAuth()
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useSessionState("packages.install.query", "")
   const [results, setResults] = useState<PackageSearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState("")

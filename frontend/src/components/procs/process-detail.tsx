@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import type { Tone } from "@/components/tone"
 import Link from "next/link"
 import { Cpu, Minus, Plus } from "@/components/icons"
@@ -127,7 +128,8 @@ function ProcessDetail({
   onSelect: (pid: number) => void
   onChanged: () => void
 }) {
-  const [tab, setTab] = useState("overview")
+  // Which tab a process opens on, remembered the way a container's is.
+  const [tab, setTab] = useViewState("processes.detail.tab", "overview")
   // Read once when the sheet opens: uptime is a fact about the process, and
   // a clock that ticks during render is a render that never settles.
   const [openedAt] = useState(() => Date.now())

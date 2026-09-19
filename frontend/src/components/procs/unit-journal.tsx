@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
 import type { JournalEntry, LogLine, SystemdUnit, SystemdUnitDetail } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
@@ -58,7 +59,14 @@ function UnitSheet({
   onChanged?: () => void
 }) {
   const { confirm, dialog } = useConfirm()
-  const [tab, setTab] = useState(initialTab ?? "overview")
+  // Which tab a unit opens on, remembered the way a container's is; a caller
+  // asking for a specific tab ("open its journal") is answered first.
+  const [remembered, remember] = useViewState("processes.services.detail.tab", "overview")
+  const [tab, setTabState] = useState(initialTab ?? remembered)
+  const setTab = (next: string) => {
+    setTabState(next)
+    remember(next)
+  }
   const detail = usePoll(
     (signal) =>
       get<SystemdUnitDetail>(`/systemd/${encodeURIComponent(unit ?? "")}`, undefined, signal),

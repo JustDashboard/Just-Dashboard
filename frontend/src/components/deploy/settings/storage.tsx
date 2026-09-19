@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { Plus } from "@/components/icons"
 import { ApiError, refusedIndex } from "@/lib/api"
@@ -58,7 +59,11 @@ function StorageForm({
   const { can } = useAuth()
   const canAdmin = can("system.admin")
   const project = useProject()
-  const [mounts, setMounts] = useState<MountValue[]>(configuration.runtime.mounts ?? [])
+  // Kept for the tab under the revision it was read from (see build.tsx).
+  const [mounts, setMounts] = useSessionState<MountValue[]>(
+    `deploy.${project.projectId}.settings.storage@${configuration.revision}`,
+    configuration.runtime.mounts ?? [],
+  )
   const [saving, setSaving] = useState(false)
   const [mountError, setMountError] = useState<{ index: number; message: string }>()
   const storage = project.operations?.storage

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { forgetMemoryState, useMemoryState, useSessionState } from "@/lib/view-state"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Database, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -54,16 +55,39 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
     0,
   )
 
-  const [addOpen, setAddOpen] = useState(false)
+  const [addOpen, setAddOpen] = useMemoryState("databases.connect.open", false)
   const [newOpen, setNewOpen] = useState(false)
   const [credentialsFor, setCredentialsFor] = useState<DbCredentialServer | null>(null)
 
   const list = connections.data
   const connId = Number(params.get("conn")) || null
-  const conn = useMemo(
-    () => list?.find((c) => c.id === connId) ?? list?.[0] ?? null,
-    [list, connId],
+  // Where the reader was in this section, kept for the tab. The rail's own
+  // link is a bare `/databases`, and without this every visit opened on the
+  // first connection's first page rather than the table being worked on.
+  const [place, setPlace] = useSessionState<{ conn: number; schema: string; table: string } | null>(
+    "databases.place",
+    null,
   )
+  const conn = useMemo(
+    () => list?.find((c) => c.id === (connId ?? place?.conn)) ?? list?.[0] ?? null,
+    [list, connId, place?.conn],
+  )
+  useEffect(() => {
+    if (!connId) return
+    const next = {
+      conn: connId,
+      schema: params.get("schema") ?? "",
+      table: params.get("table") ?? "",
+    }
+    setPlace((current) =>
+      current &&
+      current.conn === next.conn &&
+      current.schema === next.schema &&
+      current.table === next.table
+        ? current
+        : next,
+    )
+  }, [connId, params, setPlace])
   const info = drivers.data?.find((d) => d.id === conn?.driver)
   const selection = { schema: params.get("schema") ?? "", table: params.get("table") ?? undefined }
 
@@ -124,8 +148,13 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
     q.set("conn", String(conn.id))
     q.delete("schema")
     q.delete("table")
+    // Arriving bare: the table this tab was on comes back with the connection.
+    if (!connId && place?.conn === conn.id) {
+      if (place.schema) q.set("schema", place.schema)
+      if (place.table) q.set("table", place.table)
+    }
     router.replace(`${pathname}?${q.toString()}`)
-  }, [list, conn, connId, params, pathname, router])
+  }, [list, conn, connId, params, pathname, router, place])
 
   // Databases running on this server connect themselves. Idempotent, skips by
   // address, silent when it adds nothing. Fires once per layout mount — the
@@ -207,7 +236,11 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       {addOpen && (
         <ConnectionDialog
           open
-          onOpenChange={(o) => !o && setAddOpen(false)}
+          onOpenChange={(o) => {
+            if (o) return
+            setAddOpen(false)
+            forgetMemoryState("databases.connect.")
+          }}
           onDone={connections.refresh}
         />
       )}

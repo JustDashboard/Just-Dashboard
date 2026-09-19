@@ -14,7 +14,7 @@ import { notify } from "@/lib/toast"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { InstalledPackage, Job, PackageInventory, UpdateReport } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -78,9 +78,9 @@ const VIEWS: { key: View; label: string }[] = [
 export default function PackagesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [filter, setFilter] = useState("")
-  // How the inventory is arranged, and which view you were on. The search box
-  // is not remembered: it is the question, not the furniture.
+  // The search box is kept for the tab; how the inventory is arranged, and
+  // which view you were on, for good.
+  const [filter, setFilter] = useSessionState("packages.query", "")
   const [view, setView] = useViewState<View>("packages.tab", "installed")
   const [scope, setScope] = useViewState<Scope>("packages.scope", "explicit")
   const [bySize, setBySize] = useViewState("packages.by-size", false)

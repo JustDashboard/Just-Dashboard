@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import { Copy, Database, Download } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
@@ -25,7 +26,7 @@ import { copyText } from "@/lib/clipboard"
  * file to match — which is exactly the second list that drifts.
  */
 export function OrmTab({ conn, schema }: { conn: DbConnection; schema: string }) {
-  const [target, setTarget] = useState<OrmTarget>("prisma")
+  const [target, setTarget] = useViewState<OrmTarget>("db.orm.target", "prisma")
   const [output, setOutput] = useState<{ schema: string; filename: string } | null>(null)
   const [busy, setBusy] = useState(false)
 

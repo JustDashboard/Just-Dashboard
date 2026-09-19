@@ -58,9 +58,17 @@ only renderer/executor/validation authority for their feature.
   preflight, commits, imports the environment text and enqueues the first run; Save only stops after
   the import. The saved draft revision is adopted before preflight, so a failed preflight never
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
-  draft (including one produced by `POST /deploy/{id}/duplicate`), `?mode=advanced` opens Advanced,
-  and existing workloads adopt through `/deploy/import/adopt` without a run. Saved credentials are
-  picked from `GET /deploy/credentials`. Environment text never enters the URL or browser storage.
+  draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
+  configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
+  is re-detected rather than refused. `?mode=advanced` opens Advanced, and existing workloads adopt
+  through `/deploy/import/adopt` without a run. Saved credentials are picked from
+  `GET /deploy/credentials`. The page is kept for the tab (`useSessionState`,
+  [`../frontend/data-theming.md`](../frontend/data-theming.md)): the source tab and its form, and the
+  configure screen's flow, findings and Advanced disclosure, survive a walk to another page and a
+  reload until the project is created or the source is changed, and a remembered flow whose draft has
+  expired is dropped with a notice on the way in. Environment text never enters the URL or browser
+  storage: Configure holds it in memory only (`useMemoryState`), where it survives navigation and is
+  the one part of a setup a reload does not keep.
   The environment section opens with the variables detection found the source reading — the template's
   example as the placeholder, the file it was read from beside the key — and a detected row left empty
   is skipped at submit rather than set to nothing; each database the source connects to is one button

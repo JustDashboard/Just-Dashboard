@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { CloudDownload, GitHubMark, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -59,8 +60,8 @@ const FILTER_LABEL: Record<Filter, string> = {
 export default function GitPage() {
   const { can } = useAuth()
   const [selected, select] = useQuerySelection("repo")
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<Filter>("all")
+  const [filter, setFilter] = useSessionState("git.query", "")
+  const [state, setState] = useSessionState<Filter>("git.state", "all")
   const [cloning, setCloning] = useState(false)
 
   const repos = usePoll(

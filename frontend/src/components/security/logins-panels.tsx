@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { ClockRewind, Logout, Users } from "@/components/icons"
 import { get, post, ApiError } from "@/lib/api"
@@ -366,8 +367,8 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
  */
 function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<LoginRecord[]>> }) {
   const { can } = useAuth()
-  const [failed, setFailed] = useState(false)
-  const [query, setQuery] = useState("")
+  const [failed, setFailed] = useSessionState("security.logins.failed", false)
+  const [query, setQuery] = useSessionState("security.logins.query", "")
   const admin = can("system.admin")
   const showFailed = failed && admin
 

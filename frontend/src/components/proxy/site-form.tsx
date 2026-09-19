@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { Code, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -115,19 +116,27 @@ function SiteFormBody({
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
-  const [spec, setSpec] = useState<SiteSpec>(BLANK)
-  const [domainText, setDomainText] = useState("")
+  const source = editing ?? copyFrom
+  // Kept for the tab while the form is open (the panel forgets it on close):
+  // a site is a long form, and a look at a port or a certificate half-way
+  // through it should not mean typing it again. An existing site is read
+  // back from the server on every open, as before.
+  const draft = `proxy.site.form.${source ?? "new"}`
+  const [spec, setSpec] = useSessionState<SiteSpec>(`${draft}.spec`, BLANK)
+  const [domainText, setDomainText] = useSessionState(`${draft}.domains`, "")
   const [preview, setPreview] = useState("")
   const [warnings, setWarnings] = useState<string[]>([])
   const [previewError, setPreviewError] = useState("")
-  const [managed, setManaged] = useState(true)
+  const [managed, setManaged] = useSessionState(`${draft}.managed`, true)
   const [busy, setBusy] = useState(false)
-  const source = editing ?? copyFrom
   const [loaded, setLoaded] = useState(source === null)
 
-  const set = useCallback(<K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => {
-    setSpec((s) => ({ ...s, [key]: value }))
-  }, [])
+  const set = useCallback(
+    <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => {
+      setSpec((s) => ({ ...s, [key]: value }))
+    },
+    [setSpec],
+  )
 
   // Load an existing site back into the form — as itself, or as the start of
   // a new one with the name, domains and certificate paths cleared, since
@@ -162,7 +171,7 @@ function SiteFormBody({
       })
       .catch((err) => !controller.signal.aborted && notify.error("Could not load the site", err))
     return () => controller.abort()
-  }, [open, source, copyFrom, editing])
+  }, [open, source, copyFrom, editing, setSpec, setDomainText, setManaged])
 
   // The live preview. Debounced, because it is a request per keystroke
   // otherwise and the answer only matters once typing stops.

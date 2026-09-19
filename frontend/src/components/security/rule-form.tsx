@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { ArrowUpDown, Check, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
@@ -53,23 +54,28 @@ export function AddRuleDialog({
   onDone: () => void
   hasProfiles?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useSessionState("security.firewall.adding", false)
+  // Forgotten on close — a second opening never has the previous rule still
+  // in the boxes, since an almost-right rule is worse than a blank one — and
+  // kept while open, so a look at the ports page comes back to the same rule.
+  const close = () => {
+    setOpen(false)
+    forgetSessionState("security.firewall.rule.")
+  }
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         <Plus className="size-4" />
         Add rule
       </Button>
-      {/* Keyed so a second visit never opens with the previous rule still in
-          the boxes — an almost-right rule is worse than a blank one. */}
       {open && (
         <RuleForm
           key="rule-form"
           open={open}
-          onOpenChange={setOpen}
+          onOpenChange={(next) => !next && close()}
           hasProfiles={hasProfiles}
           onDone={() => {
-            setOpen(false)
+            close()
             onDone()
           }}
         />
@@ -171,17 +177,22 @@ function RuleForm({
   edit?: FirewallRule
 }) {
   const initial = useMemo(() => fieldsOf(edit), [edit])
-  const [action, setAction] = useState(initial.action)
-  const [direction, setDirection] = useState(initial.direction)
-  const [position, setPosition] = useState("")
-  const [mode, setMode] = useState<"service" | "profile">(initial.mode)
-  const [preset, setPreset] = useState("")
-  const [profile, setProfile] = useState(initial.profile)
-  const [port, setPort] = useState(initial.port)
-  const [protocol, setProtocol] = useState(initial.protocol)
-  const [sourceKind, setSourceKind] = useState<string>(initial.sourceKind)
-  const [from, setFrom] = useState(initial.from)
-  const [comment, setComment] = useState(initial.comment)
+  // Kept for the tab while the dialog is open; whoever opened it forgets it on close.
+  const draft = `security.firewall.rule.${edit?.number ?? "new"}`
+  const [action, setAction] = useSessionState(`${draft}.action`, initial.action)
+  const [direction, setDirection] = useSessionState(`${draft}.direction`, initial.direction)
+  const [position, setPosition] = useSessionState(`${draft}.position`, "")
+  const [mode, setMode] = useSessionState<"service" | "profile">(`${draft}.mode`, initial.mode)
+  const [preset, setPreset] = useSessionState(`${draft}.preset`, "")
+  const [profile, setProfile] = useSessionState(`${draft}.profile`, initial.profile)
+  const [port, setPort] = useSessionState(`${draft}.port`, initial.port)
+  const [protocol, setProtocol] = useSessionState(`${draft}.protocol`, initial.protocol)
+  const [sourceKind, setSourceKind] = useSessionState<string>(
+    `${draft}.sourceKind`,
+    initial.sourceKind,
+  )
+  const [from, setFrom] = useSessionState(`${draft}.from`, initial.from)
+  const [comment, setComment] = useSessionState(`${draft}.comment`, initial.comment)
   const [busy, setBusy] = useState(false)
 
   const services = usePoll<ServicePreset[]>(

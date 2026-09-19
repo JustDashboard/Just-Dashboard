@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ClockRewind, Warning } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -44,7 +45,7 @@ export default function DashboardVersionPage() {
   const { can } = useAuth()
   const { report, error, restarting, check, checking, install } = useSelfUpdate()
   const { confirm, dialog } = useConfirm()
-  const [filter, setFilter] = useState("")
+  const [filter, setFilter] = useSessionState("dashboard.releases.query", "")
 
   // Everything this build knows about, newest first: the releases the check
   // turned up sit above the ones compiled in, and a version in both is shown

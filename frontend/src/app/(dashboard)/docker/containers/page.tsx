@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Box, Warning } from "@/components/icons"
@@ -97,8 +98,8 @@ export default function ContainersPage() {
   const [socketError, setSocketError] = useState<string>()
   const [selected, setSelected] = useQuerySelection("container")
   const [focusTab, setFocusTab] = useState<string>()
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<StateFilter>("all")
+  const [filter, setFilter] = useSessionState("docker.containers.query", "")
+  const [state, setState] = useSessionState<StateFilter>("docker.containers.state", "all")
 
   /**
    * An hour of shape per container, in one request. The live socket shows what

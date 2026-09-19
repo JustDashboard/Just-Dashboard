@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState, type RefObject } from "react"
+import { useMemoryState } from "@/lib/view-state"
 import Link from "next/link"
 import {
   ClockRewind,
@@ -131,7 +132,12 @@ export function NotificationsPage() {
     (signal) => get<NotificationChannel[]>("/deploy/notifications", undefined, signal),
     10000,
   )
-  const [draft, setDraft] = useState<Draft>()
+  // The open form is kept in memory for the tab — memory, because webhook
+  // URLs and bot tokens are typed into it — until it is saved or closed.
+  const [draft, setDraft] = useMemoryState<Draft | undefined>(
+    "deploy.notifications.draft",
+    undefined,
+  )
   // Discord/Slack's webhook field starts hidden behind "Replace delivery
   // settings" on Edit; email/telegram show theirs regardless (ALWAYS_OPEN).
   const [revealDelivery, setRevealDelivery] = useState(false)

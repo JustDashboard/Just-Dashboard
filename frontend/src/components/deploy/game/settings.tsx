@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Box, Warning } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -28,7 +29,10 @@ import type { BlueprintProperty, GameProperties } from "@/lib/types"
  */
 export function GameSettings({ projectId }: { projectId: number }) {
   const { can } = useAuth()
-  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [draft, setDraft] = useSessionState<Record<string, string>>(
+    `deploy.${projectId}.game.settings`,
+    {},
+  )
   const [saving, setSaving] = useState(false)
   const properties = usePoll(
     (signal) => get<GameProperties>(`/deploy/${projectId}/game/properties`, undefined, signal),

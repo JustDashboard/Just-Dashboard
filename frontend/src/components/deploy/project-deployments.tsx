@@ -1,6 +1,7 @@
 "use client"
 
 import { Fragment, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -121,8 +122,14 @@ export function ProjectDeployments() {
   const router = useRouter()
   const { can } = useAuth()
   const { deployment, project: record } = project.detail
-  const [filter, setFilter] = useState<StatusFilter>("all")
-  const [environmentId, setEnvironmentId] = useState<number>()
+  const [filter, setFilter] = useSessionState<StatusFilter>(
+    `deploy.${project.projectId}.deployments.filter`,
+    "all",
+  )
+  const [environmentId, setEnvironmentId] = useSessionState<number | undefined>(
+    `deploy.${project.projectId}.deployments.environment`,
+    undefined,
+  )
   const [rollback, setRollback] = useState<{ open: boolean; releaseId?: number }>({ open: false })
   const [compare, setCompare] = useState<{ open: boolean; releaseId?: number }>({ open: false })
   const [pinningReleaseId, setPinningReleaseId] = useState<number>()
@@ -150,7 +157,12 @@ export function ProjectDeployments() {
     return [...labels.entries()].map(([id, label]) => ({ id, label }))
   }, [project.environmentId, previews.data, project.runs])
 
-  const selectedEnv = environmentId ?? project.environmentId
+  // A remembered preview environment may have been closed since; production
+  // is the answer then, not an empty list under a name nobody can pick.
+  const selectedEnv =
+    environmentId !== undefined && environments.some((entry) => entry.id === environmentId)
+      ? environmentId
+      : project.environmentId
 
   // The context poll always hands back the newest page; "Load older"
   // appends pages of its own, keyed to the filters they were fetched under

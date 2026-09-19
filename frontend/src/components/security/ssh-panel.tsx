@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { ArrowRight, Key, TerminalWindow, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
@@ -64,7 +65,7 @@ export function SSHPanel({
     { enabled: admin },
   )
   const [pending, setPending] = useState<Record<string, string>>({})
-  const [only, setOnly] = useState<"all" | "attention">("all")
+  const [only, setOnly] = useSessionState<"all" | "attention">("security.ssh.only", "all")
   const [busy, setBusy] = useState(false)
   const console_ = useJobConsole()
 

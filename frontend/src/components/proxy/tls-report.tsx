@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CrossCircle, Inspect } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -41,13 +41,13 @@ export function TLSReportPage() {
   const { can } = useAuth()
   const params = useSearchParams()
   const initial = params.get("domain") ?? ""
-  const [domain, setDomain] = useState(initial)
+  const [domain, setDomain] = useSessionState("proxy.tls.domain", "", initial || undefined)
   // The domain being reported on. A ?domain= link from a site or a
   // certificate runs the report on arrival: the link is the question, and a
   // page that then waits for a second click to ask it is a page that forgot
   // why it was opened. The scan is a one-shot poll keyed on the target, so
   // arriving with one and pressing Scan are the same path.
-  const [target, setTarget] = useState(initial.trim())
+  const [target, setTarget] = useSessionState("proxy.tls.target", "", initial.trim() || undefined)
   const admin = can("system.admin")
   const report = usePoll(
     (signal) => get<TLSScan>("/certificates/scan", { domain: target }, signal),

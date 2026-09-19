@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
 import { FileText } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -38,10 +39,10 @@ export default function AuditPage() {
   // where they are now, and re-applying it on every keystroke would fight the
   // filter box.
   const initialAction = useSearchParams().get("action") ?? ""
-  const [username, setUsername] = useState("")
-  const [action, setAction] = useState(initialAction)
-  const [onlyFailed, setOnlyFailed] = useState(false)
-  const [offset, setOffset] = useState(0)
+  const [username, setUsername] = useSessionState("audit.username", "")
+  const [action, setAction] = useSessionState("audit.action", "", initialAction || undefined)
+  const [onlyFailed, setOnlyFailed] = useSessionState("audit.failed", false)
+  const [offset, setOffset] = useSessionState("audit.offset", 0)
 
   const { data, error, loading } = usePoll(
     (signal) =>

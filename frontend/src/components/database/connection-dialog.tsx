@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useMemo, useState } from "react"
+import { useMemoryState } from "@/lib/view-state"
 import { CheckCircle, CrossCircle, Router } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { errorMessage, get, post, put } from "@/lib/api"
@@ -59,19 +60,27 @@ export function ConnectionDialog({
     (signal) => get<DbDriverInfo[]>("/databases/drivers", undefined, signal),
     0,
   )
-  const [name, setName] = useState(existing?.name ?? "")
-  const [driver, setDriver] = useState<DbDriver>(existing?.driver ?? "postgres")
-  const [mode, setMode] = useState<"fields" | "string">(
+  // Kept in memory for the tab — memory, because a password is typed here —
+  // until the dialog is closed, so checking a port on the way does not mean
+  // filling the address in again.
+  const draft = `databases.connect.${existing?.id ?? "new"}`
+  const [name, setName] = useMemoryState(`${draft}.name`, existing?.name ?? "")
+  const [driver, setDriver] = useMemoryState<DbDriver>(
+    `${draft}.driver`,
+    existing?.driver ?? "postgres",
+  )
+  const [mode, setMode] = useMemoryState<"fields" | "string">(
+    `${draft}.mode`,
     existing?.driver === "sqlite" ? "string" : "fields",
   )
-  const [fields, setFields] = useState<DsnFields>({
+  const [fields, setFields] = useMemoryState<DsnFields>(`${draft}.fields`, {
     ...EMPTY_FIELDS,
     host: existing?.host || EMPTY_FIELDS.host,
     port: existing?.port ?? "",
     user: existing?.user ?? "",
     database: existing?.database ?? "",
   })
-  const [raw, setRaw] = useState("")
+  const [raw, setRaw] = useMemoryState(`${draft}.raw`, "")
   const [testResult, setTestResult] = useState<{
     ok: boolean
     version?: string

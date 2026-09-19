@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Crosshair, Information } from "@/components/icons"
@@ -40,8 +41,8 @@ export function ToolsPanel() {
     if (!tool || !TOOL_GROUPS.some((g) => g.tools.some((t) => t.key === tool))) return null
     return { tool, prefill: { target: target ?? undefined, record: params.get("record") ?? undefined } }
   }, [params])
-  const [query, setQuery] = useState("")
-  const [group, setGroup] = useState<string | null>(null)
+  const [query, setQuery] = useSessionState("security.tools.query", "")
+  const [group, setGroup] = useSessionState<string | null>("security.tools.group", null)
   // The arrival the reader has widened away from. Kept as the object rather
   // than a flag so a fresh arrival — a new query string, hence a new object —
   // narrows the page again without an effect to reset anything.

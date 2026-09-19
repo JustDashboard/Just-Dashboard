@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
+import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
 import { Archive, CloudUpload, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -48,9 +49,24 @@ export default function BackupsPage() {
   // with the path already in it, and the address is cleaned so a reload does
   // not open it again.
   const incoming = search.get("source")
-  const [form, setForm] = useState<{ job?: BackupJob; prefill?: JobPrefill } | null>(() =>
-    incoming ? { prefill: { sources: [incoming] } } : null,
+  // The open form, and its fields in `JobDialog`, are kept in memory for the
+  // tab — memory, because a destination's keys are typed into it — so a
+  // look at the volume it should cover does not mean filling it in again.
+  const [form, setForm] = useMemoryState<{ job?: BackupJob; prefill?: JobPrefill } | null>(
+    "backups.form",
+    null,
   )
+  // A form opened *for* something — a path sent here, a resource to protect —
+  // starts from that thing, not from whatever a form left open was holding.
+  const openFor = (prefill: JobPrefill) => {
+    forgetMemoryState("backups.job.new")
+    setForm({ prefill })
+  }
+  useEffect(() => {
+    if (!incoming) return
+    forgetMemoryState("backups.job.new")
+    setForm({ prefill: { sources: [incoming] } })
+  }, [incoming, setForm])
   const jobs = usePoll((signal) => get<BackupJob[]>("/backups/", undefined, signal), 15000)
   const coverage = usePoll(
     (signal) => get<BackupResourceReport>("/backups/resources", undefined, signal),
@@ -404,7 +420,7 @@ export default function BackupsPage() {
         report={coverage.data}
         loading={coverage.loading}
         canCreate={admin}
-        onProtect={(res) => setForm({ prefill: prefillFor(res) })}
+        onProtect={(res) => openFor(prefillFor(res))}
         onOpenJob={(id) => select(String(id))}
       />
 
@@ -419,7 +435,11 @@ export default function BackupsPage() {
           job={form.job}
           prefill={form.prefill}
           resources={coverage.data?.resources ?? []}
-          onOpenChange={(open) => !open && setForm(null)}
+          onOpenChange={(open) => {
+            if (open) return
+            setForm(null)
+            forgetMemoryState("backups.job.")
+          }}
           onDone={refresh}
         />
       )}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
 import {
   ArrowRight,
   Check,
@@ -62,7 +63,7 @@ export default function ConnectionPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const { conn, info, refreshConnections, goto, hrefFor } = useDatabase()
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useMemoryState("databases.connection.editing", false)
   // Read at the action rather than rendered: the confirm dialog takes its
   // description once, so the checkbox inside it is uncontrolled and the
   // ref is what the delete reads.
@@ -403,7 +404,11 @@ export default function ConnectionPage() {
         <ConnectionDialog
           key={conn.id}
           open
-          onOpenChange={(o) => !o && setEditing(false)}
+          onOpenChange={(o) => {
+            if (o) return
+            setEditing(false)
+            forgetMemoryState("databases.connect.")
+          }}
           onDone={refreshConnections}
           existing={conn}
         />

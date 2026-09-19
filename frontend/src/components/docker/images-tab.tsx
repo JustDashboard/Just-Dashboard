@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import {
   Box,
   CheckCircle,
@@ -83,8 +84,8 @@ export function ImagesTab({
   onBuildingChange?: (open: boolean) => void
 }) {
   const { can } = useAuth()
-  const [filter, setFilter] = useState("")
-  const [selected, setSelected] = useState<string | null>(null)
+  const [filter, setFilter] = useSessionState("docker.images.query", "")
+  const [selected, setSelected] = useSessionState<string | null>("docker.images.selected", null)
   // null is closed; a string (possibly empty) opens the dialog seeded with it.
   const [internalPulling, setInternalPulling] = useState<string | null>(null)
   const [internalBuilding, setInternalBuilding] = useState(false)

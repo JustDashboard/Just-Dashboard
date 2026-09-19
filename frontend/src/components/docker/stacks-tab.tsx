@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import {
   Code,
@@ -90,8 +91,8 @@ export function StacksTab({
   const [internalCreating, setInternalCreating] = useState(false)
   const creating = externalCreating ?? internalCreating
   const setCreating = onCreatingChange ?? setInternalCreating
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<StateFilter>("all")
+  const [filter, setFilter] = useSessionState("docker.stacks.query", "")
+  const [state, setState] = useSessionState<StateFilter>("docker.stacks.state", "all")
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),

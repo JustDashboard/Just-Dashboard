@@ -35,7 +35,7 @@ import { ApiError, del, get, post, put } from "@/lib/api"
 import { bytes, plural, truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileBookmark, FileEntry, FileListing, FilePlaces } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePanelSize } from "@/lib/panel-size"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -141,9 +141,12 @@ export default function FilesPage() {
   const places = usePoll<FilePlaces>((signal) => get("/files/places", undefined, signal), 0, [])
   // Derived rather than copied into state by an effect: until either the URL
   // or a navigation has said otherwise, the answer *is* whatever the server
-  // reports as home.
-  const [chosenPath, setChosenPath] = useState<string | null>(
-    initialPath ? cleanPath(initialPath) : null,
+  // reports as home. The chosen directory is kept for the tab, so the rail's
+  // bare link comes back to the folder being worked in rather than to home.
+  const [chosenPath, setChosenPath] = useSessionState<string | null>(
+    "files.path",
+    null,
+    initialPath ? cleanPath(initialPath) : undefined,
   )
   const path = chosenPath ?? places.data?.home ?? null
   const pathRef = useRef(path)
@@ -336,11 +339,14 @@ export default function FilesPage() {
     setActive({ dir: path ?? "/", entry })
   }
 
-  const navigate = useCallback((next: string) => {
-    setChosenPath(cleanPath(next))
-    setActive(null)
-    setViewing(null)
-  }, [])
+  const navigate = useCallback(
+    (next: string) => {
+      setChosenPath(cleanPath(next))
+      setActive(null)
+      setViewing(null)
+    },
+    [setChosenPath],
+  )
 
   const viewEntry = useCallback(
     (entry: FileEntry) => {

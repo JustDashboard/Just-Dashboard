@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useMemoryState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
 import { bytes, calendarDate, clock } from "@/lib/format"
@@ -70,36 +71,79 @@ export function JobDialog({
   onOpenChange: (open: boolean) => void
   onDone: () => void
 }) {
-  const [name, setName] = useState(job?.name ?? prefill?.name ?? "")
-  const [sources, setSources] = useState((job?.sources ?? prefill?.sources ?? []).join("\n"))
-  const [excludes, setExcludes] = useState((job?.excludes ?? prefill?.excludes ?? []).join("\n"))
-  const [targetKind, setTargetKind] = useState<BackupJob["targetKind"]>(job?.targetKind ?? "local")
-  const [path, setPath] = useState(job?.target.path ?? "/var/backups/just-dashboard")
-  const [bucket, setBucket] = useState(job?.target.bucket ?? "")
-  const [region, setRegion] = useState(job?.target.region ?? "")
-  const [endpoint, setEndpoint] = useState(job?.target.endpoint ?? "")
-  const [prefix, setPrefix] = useState(job?.target.prefix ?? "")
-  const [accessKey, setAccessKey] = useState("")
-  const [secretKey, setSecretKey] = useState("")
-  const [schedule, setSchedule] = useState(() => scheduleFields(job?.schedule ?? "0 3 * * *"))
-  const [retention, setRetention] = useState(String(job?.retention ?? 7))
-  const [retentionDays, setRetentionDays] = useState(String(job?.retentionDays ?? 0))
-  const [enabled, setEnabled] = useState(job?.enabled ?? true)
-  const [sqlitePaths, setSQLitePaths] = useState(
+  // Every field is kept in memory for the tab until the dialog is closed —
+  // memory rather than storage, because the destination's keys are typed
+  // here too — so checking a path or a volume does not mean starting over.
+  const draft = `backups.job.${job?.id ?? "new"}`
+  const [name, setName] = useMemoryState(`${draft}.name`, job?.name ?? prefill?.name ?? "")
+  const [sources, setSources] = useMemoryState(
+    `${draft}.sources`,
+    (job?.sources ?? prefill?.sources ?? []).join("\n"),
+  )
+  const [excludes, setExcludes] = useMemoryState(
+    `${draft}.excludes`,
+    (job?.excludes ?? prefill?.excludes ?? []).join("\n"),
+  )
+  const [targetKind, setTargetKind] = useMemoryState<BackupJob["targetKind"]>(
+    `${draft}.targetKind`,
+    job?.targetKind ?? "local",
+  )
+  const [path, setPath] = useMemoryState(
+    `${draft}.path`,
+    job?.target.path ?? "/var/backups/just-dashboard",
+  )
+  const [bucket, setBucket] = useMemoryState(`${draft}.bucket`, job?.target.bucket ?? "")
+  const [region, setRegion] = useMemoryState(`${draft}.region`, job?.target.region ?? "")
+  const [endpoint, setEndpoint] = useMemoryState(`${draft}.endpoint`, job?.target.endpoint ?? "")
+  const [prefix, setPrefix] = useMemoryState(`${draft}.prefix`, job?.target.prefix ?? "")
+  const [accessKey, setAccessKey] = useMemoryState(`${draft}.accessKey`, "")
+  const [secretKey, setSecretKey] = useMemoryState(`${draft}.secretKey`, "")
+  const [schedule, setSchedule] = useMemoryState(
+    `${draft}.schedule`,
+    scheduleFields(job?.schedule ?? "0 3 * * *"),
+  )
+  const [retention, setRetention] = useMemoryState(
+    `${draft}.retention`,
+    String(job?.retention ?? 7),
+  )
+  const [retentionDays, setRetentionDays] = useMemoryState(
+    `${draft}.retentionDays`,
+    String(job?.retentionDays ?? 0),
+  )
+  const [enabled, setEnabled] = useMemoryState(`${draft}.enabled`, job?.enabled ?? true)
+  const [sqlitePaths, setSQLitePaths] = useMemoryState(
+    `${draft}.sqlitePaths`,
     (job?.sqlitePaths ?? prefill?.sqlitePaths ?? []).join("\n"),
   )
-  const [databaseDumps, setDatabaseDumps] = useState<number[]>(
+  const [databaseDumps, setDatabaseDumps] = useMemoryState<number[]>(
+    `${draft}.databaseDumps`,
     job?.databaseDumps ?? prefill?.databaseDumps ?? [],
   )
-  const [pauseContainers, setPauseContainers] = useState<string[]>(
+  const [pauseContainers, setPauseContainers] = useMemoryState<string[]>(
+    `${draft}.pauseContainers`,
     job?.pauseContainers ?? prefill?.pauseContainers ?? [],
   )
-  const [recoveryEnabled, setRecoveryEnabled] = useState(Boolean(job?.recovery))
-  const [recoveryImage, setRecoveryImage] = useState(job?.recovery?.image ?? "")
-  const [recoveryCommand, setRecoveryCommand] = useState((job?.recovery?.command ?? []).join("\n"))
-  const [recoverySchema, setRecoverySchema] = useState(job?.recovery?.schemaVersion ?? "")
-  const [expectedOutput, setExpectedOutput] = useState("")
-  const [recoveryAutomatic, setRecoveryAutomatic] = useState(job?.recovery?.automatic ?? false)
+  const [recoveryEnabled, setRecoveryEnabled] = useMemoryState(
+    `${draft}.recoveryEnabled`,
+    Boolean(job?.recovery),
+  )
+  const [recoveryImage, setRecoveryImage] = useMemoryState(
+    `${draft}.recoveryImage`,
+    job?.recovery?.image ?? "",
+  )
+  const [recoveryCommand, setRecoveryCommand] = useMemoryState(
+    `${draft}.recoveryCommand`,
+    (job?.recovery?.command ?? []).join("\n"),
+  )
+  const [recoverySchema, setRecoverySchema] = useMemoryState(
+    `${draft}.recoverySchema`,
+    job?.recovery?.schemaVersion ?? "",
+  )
+  const [expectedOutput, setExpectedOutput] = useMemoryState(`${draft}.expectedOutput`, "")
+  const [recoveryAutomatic, setRecoveryAutomatic] = useMemoryState(
+    `${draft}.recoveryAutomatic`,
+    job?.recovery?.automatic ?? false,
+  )
   const [busy, setBusy] = useState(false)
 
   const connections = usePoll(

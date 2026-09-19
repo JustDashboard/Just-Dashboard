@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useMemo, useState } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { ChartActivity, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, duration, percent, relativeTime } from "@/lib/format"
@@ -62,11 +63,11 @@ export default function PM2Page() {
 function PM2Applications() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<StateFilter>("all")
+  const [filter, setFilter] = useSessionState("processes.pm2.query", "")
+  const [state, setState] = useSessionState<StateFilter>("processes.pm2.state", "all")
   const [selectedKey, selectKey] = useQuerySelection("app")
   const [focusTab, setFocusTab] = useState<string>()
-  const [starting, setStarting] = useState(false)
+  const [starting, setStarting] = useSessionState("processes.pm2.starting", false)
   const inventory = usePoll((signal) => get<PM2Inventory>("/pm2/", undefined, signal), 5000)
   const { pending, act } = usePM2Control(inventory.refresh)
 
@@ -327,7 +328,11 @@ function PM2Applications() {
       <PM2StartDialog
         open={starting}
         daemons={daemons}
-        onOpenChange={setStarting}
+        onOpenChange={(open) => {
+          setStarting(open)
+          // Closed by hand, whether cancelled or started: the next one starts blank.
+          if (!open) forgetSessionState("processes.pm2.start.")
+        }}
         onStarted={inventory.refresh}
       />
       {dialog}

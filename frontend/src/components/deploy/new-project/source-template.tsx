@@ -6,6 +6,7 @@ import { ArrowUpRight, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
+import { useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
   BlueprintInput,
@@ -59,10 +60,13 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
     (signal) => get<BlueprintSummary[]>("/deploy/blueprints/", undefined, signal),
     0,
   )
-  const [filter, setFilter] = useState("")
-  const [selectedId, setSelectedId] = useState("")
-  const [inputs, setInputs] = useState<Record<string, string>>({})
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
+  const [selectedId, setSelectedId] = useSessionState("deploy.new.template.selected", "")
+  const [inputs, setInputs] = useSessionState<Record<string, string>>(
+    "deploy.new.template.inputs",
+    {},
+  )
+  const [showAdvanced, setShowAdvanced] = useSessionState("deploy.new.template.advanced", false)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()
 
@@ -462,8 +466,8 @@ function GameVersionField({
  * file, and says what it concluded and why so the operator can correct it.
  */
 function ExistingServerImport({ onAdopt }: { onAdopt: (preview: GameImportPreview) => void }) {
-  const [open, setOpen] = useState(false)
-  const [path, setPath] = useState("")
+  const [open, setOpen] = useSessionState("deploy.new.template.import.open", false)
+  const [path, setPath] = useSessionState("deploy.new.template.import.path", "")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [preview, setPreview] = useState<GameImportPreview | null>(null)

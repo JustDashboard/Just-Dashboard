@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import {
   BranchPlus,
   ClockRewind,
@@ -71,7 +72,7 @@ export function HistoryPanel({
   active?: string
   onChanged: () => void
 }) {
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useSessionState("git.history.search", "")
   const [term, setTerm] = useState("")
   const [loadingMore, setLoadingMore] = useState(false)
   const [naming, setNaming] = useState<{ kind: "branch" | "tag"; commit: GitCommit } | null>(null)

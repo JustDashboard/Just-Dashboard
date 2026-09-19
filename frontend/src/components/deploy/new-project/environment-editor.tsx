@@ -17,7 +17,8 @@ import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
  * Key/value rows plus a pasted block, the way `quick-deploy.tsx` handed
  * environment text to the draft: never part of the plan, only ever imported
  * once the project exists (§1 rule 15 — secrets never enter the URL or
- * browser storage, so this stays in component state until submit).
+ * browser storage, so Configure holds this in memory, where it survives a
+ * walk to another page and nothing else, until submit).
  */
 export function EnvironmentEditor({
   rows,

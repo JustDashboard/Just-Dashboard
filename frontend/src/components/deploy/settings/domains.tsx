@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { CheckCircle, LockClosed, Plus, Trash, Warning } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
@@ -90,9 +91,16 @@ function DomainsForm({
   const { can } = useAuth()
   const canAdmin = can("system.admin")
   const project = useProject()
-  const [domains, setDomains] = useState<DomainValue[]>(configuration.domains)
+  // Kept for the tab under the revision it was read from (see build.tsx).
+  const [domains, setDomains] = useSessionState<DomainValue[]>(
+    `deploy.${project.projectId}.settings.domains@${configuration.revision}`,
+    configuration.domains,
+  )
   const [saving, setSaving] = useState(false)
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useSessionState(
+    `deploy.${project.projectId}.settings.domains.adding`,
+    false,
+  )
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
   const runtime = configuration.runtime
   const publicBind = runtime.bindAddress === "0.0.0.0" || runtime.bindAddress === "::"
@@ -382,8 +390,8 @@ function AddDomainPanel({
   onOpenChange: (open: boolean) => void
   onAdd: (domain: DomainValue) => Promise<void>
 }) {
-  const [hostname, setHostname] = useState("")
-  const [https, setHttps] = useState(true)
+  const [hostname, setHostname] = useSessionState("deploy.settings.domains.add.hostname", "")
+  const [https, setHttps] = useSessionState("deploy.settings.domains.add.https", true)
   const [checking, setChecking] = useState(false)
   const [saving, setSaving] = useState(false)
   const [suggestion, setSuggestion] = useState<HostnameSuggestion>()

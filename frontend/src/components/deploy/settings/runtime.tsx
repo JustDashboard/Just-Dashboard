@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import type { FormEvent } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ApiError, put, refusedIndex } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -118,12 +119,21 @@ function RuntimeForm({
 }) {
   const { can } = useAuth()
   const canEdit = can("system.admin")
-  const [runtime, setRuntime] = useState<RuntimePlan>(configuration.runtime)
-  const [command, setCommand] = useState((configuration.runtime.command ?? []).join("\n"))
-  const [capabilities, setCapabilities] = useState(
+  // Kept for the tab under the revision they were read from (see build.tsx).
+  const draft = `deploy.${projectId}.settings.runtime@${configuration.revision}`
+  const [runtime, setRuntime] = useSessionState<RuntimePlan>(`${draft}.plan`, configuration.runtime)
+  const [command, setCommand] = useSessionState(
+    `${draft}.command`,
+    (configuration.runtime.command ?? []).join("\n"),
+  )
+  const [capabilities, setCapabilities] = useSessionState(
+    `${draft}.capabilities`,
     (configuration.runtime.capabilities ?? []).join("\n"),
   )
-  const [devices, setDevices] = useState((configuration.runtime.devices ?? []).join("\n"))
+  const [devices, setDevices] = useSessionState(
+    `${draft}.devices`,
+    (configuration.runtime.devices ?? []).join("\n"),
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [fieldError, setFieldError] = useState<{ id: string; message: string }>()
@@ -450,7 +460,10 @@ function HealthChecksCard({
 }) {
   const { can } = useAuth()
   const canEdit = can("system.admin")
-  const [checks, setChecks] = useState<Check[]>(configuration.checks)
+  const [checks, setChecks] = useSessionState<Check[]>(
+    `deploy.${projectId}.settings.checks@${configuration.revision}`,
+    configuration.checks,
+  )
   const [busy, setBusy] = useState(false)
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
 

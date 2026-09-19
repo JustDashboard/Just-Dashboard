@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import type { FormEvent } from "react"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -109,15 +110,22 @@ function VariablesForm({
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
-  const [name, setName] = useState("")
-  const [value, setValue] = useState("")
+  // The add-variable form is kept for the tab — its value and a pasted .env
+  // in memory only, since those are the secrets — so a look at the source
+  // for the right key does not mean starting the row again.
+  const draft = `deploy.${projectId}.${environmentId}.variables`
+  const [name, setName] = useSessionState(`${draft}.name`, "")
+  const [value, setValue] = useMemoryState(`${draft}.value`, "")
   const [valueError, setValueError] = useState("")
-  const [reference, setReference] = useState(false)
-  const [sensitivity, setSensitivity] = useState<"plain" | "secret">("secret")
-  const [scopes, setScopes] = useState<Scope[]>(["runtime"])
-  const [showImport, setShowImport] = useState(false)
-  const [dotenv, setDotenv] = useState("")
-  const [query, setQuery] = useState("")
+  const [reference, setReference] = useSessionState(`${draft}.reference`, false)
+  const [sensitivity, setSensitivity] = useSessionState<"plain" | "secret">(
+    `${draft}.sensitivity`,
+    "secret",
+  )
+  const [scopes, setScopes] = useSessionState<Scope[]>(`${draft}.scopes`, ["runtime"])
+  const [showImport, setShowImport] = useSessionState(`${draft}.showImport`, false)
+  const [dotenv, setDotenv] = useMemoryState(`${draft}.dotenv`, "")
+  const [query, setQuery] = useSessionState(`${draft}.query`, "")
   const [busy, setBusy] = useState("")
   const [error, setError] = useState("")
   const [revealed, setRevealed] = useState<Record<string, string>>({})
@@ -125,7 +133,10 @@ function VariablesForm({
   // The row loaded into the form above, so the submit label, the "value was
   // never read back" hint and the client-side required check all agree on
   // whether this is an edit or a brand new variable.
-  const [editingName, setEditingName] = useState<string>()
+  const [editingName, setEditingName] = useSessionState<string | undefined>(
+    `${draft}.editing`,
+    undefined,
+  )
   const [revealingIntoForm, setRevealingIntoForm] = useState(false)
   // Reveal/rotate/remove all write with `configuration.revision`, which only
   // updates once the poll it came from refreshes; a row action's own error

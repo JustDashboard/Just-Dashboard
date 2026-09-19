@@ -1,4 +1,5 @@
 import { get, post, put } from "@/lib/api"
+import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
 import { defaultConfiguration } from "@/components/deploy/deployment-defaults"
 import type {
   DeploymentConfiguration,
@@ -167,6 +168,21 @@ export type ConfigureFlow = {
   importPreview?: ImportPreview
 }
 
+/** What Configure hands back: a whole flow, nothing (back to the chooser), or an update of the current one. */
+export type FlowUpdate =
+  ConfigureFlow | null | ((current: ConfigureFlow | null) => ConfigureFlow | null)
+
+/**
+ * The environment as typed on Configure, held in memory for one draft. Never
+ * Web Storage and never the URL: it is the one part of a setup that carries
+ * secrets, and a reload is the one thing it does not survive.
+ */
+export type EnvironmentDraft = {
+  draftId: string
+  rows: EnvironmentRow[]
+  dotenv: string
+}
+
 function effectiveConfiguration(
   fallbackProfile: WorkloadProfile,
   source: DeploymentDraftSource,
@@ -290,6 +306,93 @@ export async function inspectAndPrepare(
     hostname,
     ...extra,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Resuming and forgetting
+// ---------------------------------------------------------------------------
+
+/** A github.com clone URL as `owner/name`, which is what the branch list is asked for. */
+export function githubRepoOf(url: string | undefined) {
+  const match = (url ?? "")
+    .trim()
+    .match(
+      /^(?:https?:\/\/|ssh:\/\/(?:git@)?|git@)github\.com[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i,
+    )
+  return match ? `${match[1]}/${match[2]}` : undefined
+}
+
+/** What the source row calls a draft's source — a repository, an image, a blueprint. */
+export function sourceLabelFromDraft(source: DeploymentDraftSource) {
+  return (
+    source.repository ||
+    source.url ||
+    source.image ||
+    source.blueprintId ||
+    source.resourceId ||
+    source.localPath ||
+    "Source"
+  )
+}
+
+/**
+ * A saved draft, back on Configure.
+ *
+ * Only the source is something a draft has to carry: the configuration is
+ * saved at Deploy, so a draft abandoned by walking away from Configure has
+ * none, and the unfinished-setups list used to refuse exactly those with
+ * "has not reached configuration yet". The plan is derived from the saved
+ * detection here, the way the source tab derived it; a draft with neither —
+ * one that never reached detection — is detected first; and a duplicate,
+ * which arrives with a configuration and no detection, is taken as it is.
+ */
+export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow> {
+  const { intent, source } = draft.data
+  if (!intent || !source) {
+    throw new Error("This draft has no source yet. Choose one to start again.")
+  }
+  let current = draft
+  let detection = draft.data.detection
+  let configuration = draft.data.configuration
+  if (!detection && !configuration) {
+    const result = await detectAndResolve(draft, intent.profile, source)
+    current = result.draft
+    detection = result.detection
+    configuration = result.configuration
+  }
+  const candidate =
+    detection?.candidates.find((entry) => entry.id === detection?.selectedId) ??
+    detection?.candidates[0]
+  configuration ??= effectiveConfiguration(intent.profile, source, current, candidate, detection)
+  return {
+    name: intent.name,
+    profile: candidate?.profile ?? intent.profile,
+    source,
+    draft: current,
+    candidate,
+    detection,
+    configuration,
+    sourceLabel: sourceLabelFromDraft(source),
+    githubRepo: source.kind === "git" ? (source.repository ?? githubRepoOf(source.url)) : undefined,
+    hostname: await fetchHostnameSuggestion(intent.name),
+  }
+}
+
+/**
+ * What the new-project page remembers, and for how long. The source tab and
+ * its form live under `deploy.new.<tab>.`, Configure's flow, findings and
+ * disclosure under `deploy.new.configure.`, and the environment in memory
+ * under the same prefix. "Change source" forgets Configure; a created
+ * project forgets everything.
+ */
+export function forgetConfigure() {
+  forgetSessionState("deploy.new.configure.")
+  forgetMemoryState("deploy.new.configure.")
+}
+
+export function forgetNewProject() {
+  forgetSessionState("deploy.new.")
+  forgetMemoryState("deploy.new.")
 }
 
 // ---------------------------------------------------------------------------

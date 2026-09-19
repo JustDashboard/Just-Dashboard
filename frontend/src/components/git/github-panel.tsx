@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { BranchPlus, External, GitMerge, GitPullRequest, Plus } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -75,7 +76,7 @@ export function GitHubPanel({
 }) {
   const [creating, setCreating] = useState(false)
   const [merging, setMerging] = useState<PR | null>(null)
-  const [state, setState] = useState<PullState>("open")
+  const [state, setState] = useSessionState<PullState>("git.github.pulls", "open")
   const signedIn = Boolean(github?.available && github.account?.loggedIn)
 
   const repo = usePoll(

@@ -1,12 +1,12 @@
 "use client"
 
-import { useRef, useState } from "react"
-import type { Dispatch, SetStateAction } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, SettingsSliders } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   DeploymentBuildMethod,
   DeploymentDraft,
@@ -64,8 +64,11 @@ import {
   reinspect,
   saveConfiguration,
   selectCandidate,
+  forgetNewProject,
   type ConfigureFlow,
+  type EnvironmentDraft,
   type EnvironmentRow,
+  type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
 
 function asError(error: unknown) {
@@ -88,47 +91,109 @@ export function Configure({
   // Accepts the functional updater form too: the two calls in `submit` below
   // run after an `await`, and merging onto the closed-over `flow` there would
   // revert anything the operator typed while the request was in flight.
-  // `new-project.tsx` wires this straight to its `useState<ConfigureFlow>()`
-  // setter, which is why the state type carries `| undefined` here even
-  // though this component only ever runs once `flow` itself is set — every
-  // functional update below guards it back out.
-  onFlowChange: Dispatch<SetStateAction<ConfigureFlow | undefined>>
+  // `new-project.tsx` wires this straight to the remembered flow's setter,
+  // which is why the type carries `| null` here even though this component
+  // only ever runs once `flow` itself is set — every functional update below
+  // guards it back out.
+  onFlowChange: (next: FlowUpdate) => void
   onChangeSource: () => void
   initialAdvanced: boolean
 }) {
   const router = useRouter()
   const advancedRef = useRef<HTMLDivElement>(null)
   const [nameTouched, setNameTouched] = useState(false)
-  const [envRows, setEnvRows] = useState<EnvironmentRow[]>(() =>
-    discoveredEnvironmentRows(flow.candidate),
+  // The environment is remembered in memory only — never Web Storage, never
+  // the URL — and belongs to this draft: a different source starts from what
+  // its own detection found rather than from the last one's secrets.
+  const [environment, setEnvironment] = useMemoryState<EnvironmentDraft | null>(
+    "deploy.new.configure.environment",
+    null,
   )
+  const draftId = flow.draft.id
+  const own = environment?.draftId === draftId ? environment : null
+  const discovered = useMemo(() => discoveredEnvironmentRows(flow.candidate), [flow.candidate])
+  const envRows = own?.rows ?? discovered
+  const dotenv = own?.dotenv ?? ""
+  const setEnvRows = (next: EnvironmentRow[] | ((rows: EnvironmentRow[]) => EnvironmentRow[])) =>
+    setEnvironment((current) => {
+      const mine = current?.draftId === draftId ? current : null
+      const rows = typeof next === "function" ? next(mine?.rows ?? discovered) : next
+      return { draftId, rows, dotenv: mine?.dotenv ?? "" }
+    })
+  const setDotenv = (value: string) =>
+    setEnvironment((current) => {
+      const mine = current?.draftId === draftId ? current : null
+      return { draftId, rows: mine?.rows ?? discovered, dotenv: value }
+    })
+  // The detected rows are written down as soon as they exist, so a generated
+  // value (a Laravel key) is the same one on every visit rather than minted
+  // again each time the page mounts.
+  useEffect(() => {
+    if (own) return
+    setEnvironment({ draftId, rows: discovered, dotenv: "" })
+  }, [own, draftId, discovered, setEnvironment])
   // A branch change re-detects, and the new candidate may read variables the
   // old one did not; they join the rows without touching anything typed.
-  const [rowsCandidate, setRowsCandidate] = useState(flow.candidate)
-  if (rowsCandidate !== flow.candidate) {
-    setRowsCandidate(flow.candidate)
-    setEnvRows((current) => mergeDiscoveredRows(current, discoveredEnvironmentRows(flow.candidate)))
-  }
-  const [dotenv, setDotenv] = useState("")
+  const rowsCandidate = useRef(flow.candidate)
+  useEffect(() => {
+    const previous = rowsCandidate.current
+    if (previous === flow.candidate) return
+    rowsCandidate.current = flow.candidate
+    const found = discoveredEnvironmentRows(flow.candidate)
+    setEnvironment((current) => {
+      const mine = current?.draftId === draftId ? current : null
+      const rows = mine?.rows ?? discoveredEnvironmentRows(previous)
+      return { draftId, rows: mergeDiscoveredRows(rows, found), dotenv: mine?.dotenv ?? "" }
+    })
+  }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
-  const [preflight, setPreflight] = useState<DeploymentPreflight>()
-  const [acknowledged, setAcknowledged] = useState<string[]>([])
+  // Preflight's findings and which warnings were acknowledged belong to the
+  // draft they were computed for, so a fresh source never inherits them.
+  const [review, setReview] = useSessionState<{
+    draftId: string
+    preflight?: DeploymentPreflight
+    acknowledged: string[]
+  } | null>("deploy.new.configure.preflight", null)
+  const preflight = review?.draftId === draftId ? review.preflight : undefined
+  const acknowledged = review?.draftId === draftId ? review.acknowledged : []
+  const setPreflight = (next: DeploymentPreflight) =>
+    setReview((current) => ({
+      draftId,
+      preflight: next,
+      acknowledged: current?.draftId === draftId ? current.acknowledged : [],
+    }))
+  const setAcknowledged = (next: string[]) =>
+    setReview((current) => ({
+      draftId,
+      preflight: current?.draftId === draftId ? current.preflight : undefined,
+      acknowledged: next,
+    }))
   const [configErrors, setConfigErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
   // A blueprint's declarative variables (a generated password, a EULA
   // acceptance) are review material, not a power-user setting — open by
   // default the same way the old wizard opened them for a blueprint source.
-  const [advancedOpen, setAdvancedOpen] = useState(
-    initialAdvanced ||
-      (flow.source.mode === "blueprint" && flow.configuration.variables.length > 0),
+  const [advancedOpen, setAdvancedOpen] = useSessionState(
+    "deploy.new.configure.advanced",
+    flow.source.mode === "blueprint" && flow.configuration.variables.length > 0,
+    initialAdvanced ? true : undefined,
   )
   const [created, setCreated] = useState<{
     projectId: number
     environmentId: number
     ready: boolean
   }>()
+  // Once the project exists nothing about this setup is unfinished, and the
+  // next "New project" starts blank. Forgotten on the way out rather than at
+  // commit, so the "Deployment created" panel is not swapped for the source
+  // chooser in the frame before the project page opens.
+  const done = Boolean(created)
+  useEffect(() => {
+    if (!done) return
+    return () => forgetNewProject()
+  }, [done])
 
   const branches = usePoll(
     (signal) =>

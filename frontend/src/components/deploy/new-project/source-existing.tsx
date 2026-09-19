@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { useSessionState } from "@/lib/view-state"
 import type { DeploymentDraftSource } from "@/lib/types"
 import { deploymentName } from "@/components/deploy/vocabulary"
 import { validateSource, type WizardErrors } from "@/components/deploy/deployment-defaults"
@@ -41,15 +42,24 @@ function asError(error: unknown) {
  * same button proceeds, and adoption ends in a plan, never a run.
  */
 export function SourceExisting({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
-  const [mode, setMode] = useState<ExistingMode>("existing_container")
-  const [resourceId, setResourceId] = useState("")
-  const [localPath, setLocalPath] = useState("")
-  const [subdirectory, setSubdirectory] = useState("")
-  const [managedInPlace, setManagedInPlace] = useState(false)
-  const [includeSubmodules, setIncludeSubmodules] = useState(false)
-  const [includeLfs, setIncludeLfs] = useState(false)
-  const [preview, setPreview] = useState<ImportPreview>()
-  const [acknowledged, setAcknowledged] = useState(false)
+  const [mode, setMode] = useSessionState<ExistingMode>(
+    "deploy.new.existing.mode",
+    "existing_container",
+  )
+  const [resourceId, setResourceId] = useSessionState("deploy.new.existing.resource", "")
+  const [localPath, setLocalPath] = useSessionState("deploy.new.existing.path", "")
+  const [subdirectory, setSubdirectory] = useSessionState("deploy.new.existing.subdirectory", "")
+  const [managedInPlace, setManagedInPlace] = useSessionState("deploy.new.existing.managed", false)
+  const [includeSubmodules, setIncludeSubmodules] = useSessionState(
+    "deploy.new.existing.submodules",
+    false,
+  )
+  const [includeLfs, setIncludeLfs] = useSessionState("deploy.new.existing.lfs", false)
+  const [preview, setPreview] = useSessionState<ImportPreview | undefined>(
+    "deploy.new.existing.preview",
+    undefined,
+  )
+  const [acknowledged, setAcknowledged] = useSessionState("deploy.new.existing.acknowledged", false)
   const [errors, setErrors] = useState<WizardErrors>({})
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()

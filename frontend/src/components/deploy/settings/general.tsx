@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import type { FormEvent } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ApiError, get, put } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -190,7 +191,9 @@ function ProjectNameCard({
   legacy: boolean
   onSaved: () => void
 }) {
-  const [value, setValue] = useState(name)
+  // Kept for the tab under the name it started from: a rename, from here or
+  // anywhere else, starts the field again from the new name.
+  const [value, setValue] = useSessionState(`deploy.${projectId}.settings.name@${name}`, name)
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -312,10 +315,15 @@ function GitPolicyForm({
     watchExclude: [],
     revision: 0,
   }
-  const [automatic, setAutomatic] = useState(policy.automatic)
-  const [commitStatuses, setCommitStatuses] = useState(policy.commitStatuses ?? true)
-  const [include, setInclude] = useState(policy.watchInclude.join("\n"))
-  const [exclude, setExclude] = useState(policy.watchExclude.join("\n"))
+  // Kept for the tab under the revision it was read from (see build.tsx).
+  const draft = `deploy.${projectId}.settings.policy@${policy.revision}`
+  const [automatic, setAutomatic] = useSessionState(`${draft}.automatic`, policy.automatic)
+  const [commitStatuses, setCommitStatuses] = useSessionState(
+    `${draft}.commitStatuses`,
+    policy.commitStatuses ?? true,
+  )
+  const [include, setInclude] = useSessionState(`${draft}.include`, policy.watchInclude.join("\n"))
+  const [exclude, setExclude] = useSessionState(`${draft}.exclude`, policy.watchExclude.join("\n"))
   const [busy, setBusy] = useState(false)
 
   const unavailable = ["unavailable", "stale", "policy_conflict"].includes(watch.status)
@@ -493,14 +501,28 @@ function SourceSettingCard({
 }) {
   const isGit = sourceKind === "git"
   const prefillUrl = source?.url ?? connectedGithubUrl(source) ?? ""
-  const [url, setUrl] = useState(prefillUrl)
-  const [ref, setRef] = useState(source?.ref ?? sourceRef ?? "")
-  const [subdirectory, setSubdirectory] = useState(source?.subdirectory ?? "")
-  const [image, setImage] = useState(source?.image ?? (isGit ? "" : (sourceRef ?? "")))
-  const [platform, setPlatform] = useState(source?.platform ?? "")
-  const [credentialId, setCredentialId] = useState<number | undefined>(source?.credentialId)
-  const [includeSubmodules, setIncludeSubmodules] = useState(source?.includeSubmodules ?? false)
-  const [includeLfs, setIncludeLfs] = useState(source?.includeLfs ?? false)
+  // Kept for the tab under the revision it was read from (see build.tsx).
+  const draft = `deploy.${projectId}.settings.source@${revision}`
+  const [url, setUrl] = useSessionState(`${draft}.url`, prefillUrl)
+  const [ref, setRef] = useSessionState(`${draft}.ref`, source?.ref ?? sourceRef ?? "")
+  const [subdirectory, setSubdirectory] = useSessionState(
+    `${draft}.subdirectory`,
+    source?.subdirectory ?? "",
+  )
+  const [image, setImage] = useSessionState(
+    `${draft}.image`,
+    source?.image ?? (isGit ? "" : (sourceRef ?? "")),
+  )
+  const [platform, setPlatform] = useSessionState(`${draft}.platform`, source?.platform ?? "")
+  const [credentialId, setCredentialId] = useSessionState<number | undefined>(
+    `${draft}.credential`,
+    source?.credentialId,
+  )
+  const [includeSubmodules, setIncludeSubmodules] = useSessionState(
+    `${draft}.submodules`,
+    source?.includeSubmodules ?? false,
+  )
+  const [includeLfs, setIncludeLfs] = useSessionState(`${draft}.lfs`, source?.includeLfs ?? false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [cardError, setCardError] = useState<string>()
   const [busy, setBusy] = useState(false)

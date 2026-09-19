@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { CloudDownload, Database, Download, Eye, FolderOpen, ShieldCheck } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { downloadUrl, get, post } from "@/lib/api"
@@ -323,7 +324,7 @@ function RunDetail({
   canRestore: boolean
   onRestorePaths: (paths: string[]) => void
 }) {
-  const [showFiles, setShowFiles] = useState(browsing)
+  const [showFiles, setShowFiles] = useSessionState(`backups.run.${run.id}.files.open`, browsing)
   const verification = run.restoreVerification
   return (
     <div className="animate-rise space-y-4">
@@ -391,7 +392,7 @@ function ArchiveBrowser({
   canRestore: boolean
   onRestorePaths: (paths: string[]) => void
 }) {
-  const [filter, setFilter] = useState("")
+  const [filter, setFilter] = useSessionState(`backups.run.${run.id}.files.filter`, "")
   const [chosen, setChosen] = useState<string[]>([])
   const entries = usePoll(
     (signal) =>

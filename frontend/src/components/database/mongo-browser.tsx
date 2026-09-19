@@ -16,7 +16,7 @@ import { del, downloadUrl, get, patch, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import type { DbConnection, DbTable, MongoCollectionInfo, QueryResult } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
@@ -66,11 +66,17 @@ const PAGE = 100
 export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: ConfirmFn }) {
   const { can } = useAuth()
   const [tab, setTab] = useViewState("db.mongo.tab", "documents")
-  const [database, setDatabase] = useState(conn.database)
-  const [collection, setCollection] = useState<string>()
-  const [filter, setFilter] = useState("{}")
-  const [applied, setApplied] = useState("{}")
-  const [skip, setSkip] = useState(0)
+  const [database, setDatabase] = useSessionState(
+    `databases.${conn.id}.mongo.database`,
+    conn.database,
+  )
+  const [collection, setCollection] = useSessionState<string | undefined>(
+    `databases.${conn.id}.mongo.collection`,
+    undefined,
+  )
+  const [filter, setFilter] = useSessionState(`databases.${conn.id}.mongo.filter`, "{}")
+  const [applied, setApplied] = useSessionState(`databases.${conn.id}.mongo.applied`, "{}")
+  const [skip, setSkip] = useSessionState(`databases.${conn.id}.mongo.skip`, 0)
   const [editing, setEditing] = useState<{ doc: string; id: unknown } | null>(null)
   const [inserting, setInserting] = useState(false)
   const [importing, setImporting] = useState(false)

@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ClockRewind, Slash } from "@/components/icons"
 import { get, ApiError } from "@/lib/api"
 import { timestamp } from "@/lib/format"
@@ -151,8 +152,11 @@ export function IntrusionPanels() {
  * restart would be invented.
  */
 function BanHistoryPanel() {
-  const [query, setQuery] = useState("")
-  const [kind, setKind] = useState<"all" | "ban" | "unban">("all")
+  const [query, setQuery] = useSessionState("security.intrusion.history.query", "")
+  const [kind, setKind] = useSessionState<"all" | "ban" | "unban">(
+    "security.intrusion.history.kind",
+    "all",
+  )
   const { data, error, loading } = usePoll(
     (signal) => get<BanEvent[]>("/fail2ban/history", { limit: 100 }, signal),
     60000,

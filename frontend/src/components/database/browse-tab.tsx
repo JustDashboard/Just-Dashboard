@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Copy, Cross, Filter, Layout, Plus, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, downloadUrl, get, patch, post } from "@/lib/api"
@@ -76,6 +77,22 @@ const OP_LABELS: Record<string, string> = {
  * COUNT(*) is a full scan on most engines and paying for it on every page turn
  * would make deep paging progressively slower for a number nobody asked for.
  */
+/** Where the reader is in a table: the page, the order and the filters, tagged with the table. */
+type BrowsePlace = {
+  table: string
+  offset: number
+  sort: { column: string; desc: boolean } | null
+  filters: DbFilter[]
+  showFilters: boolean
+}
+
+const FRESH_PLACE: Omit<BrowsePlace, "table"> = {
+  offset: 0,
+  sort: null,
+  filters: [],
+  showFilters: false,
+}
+
 export function BrowseTab({
   conn,
   info,
@@ -93,18 +110,39 @@ export function BrowseTab({
   onSelect: (sel: TableSelection | null) => void
 }) {
   const { can } = useAuth()
+  const tableIdentity = JSON.stringify([conn.id, selection?.schema, selection?.table])
   const [count, setCount] = useState<number | null>(null)
-  const [offset, setOffset] = useState(0)
-  const [sort, setSort] = useState<{ column: string; desc: boolean } | null>(null)
-  const [filters, setFilters] = useState<DbFilter[]>([])
-  const [showFilters, setShowFilters] = useState(false)
+  // The place is kept for the tab and tagged with the table it belongs to:
+  // coming back finds the same page under the same filters, and a different
+  // table starts at the top — including the one a foreign key leads to,
+  // which is handed its filter under its own name below.
+  const [stored, setStored] = useSessionState<BrowsePlace | null>(
+    `databases.${conn.id}.browse.place`,
+    null,
+  )
+  const place: BrowsePlace =
+    stored?.table === tableIdentity ? stored : { ...FRESH_PLACE, table: tableIdentity }
+  const { offset, sort, filters, showFilters } = place
+  const movePlace = (changes: Partial<Omit<BrowsePlace, "table">>, table = tableIdentity) =>
+    setStored((current) => ({
+      ...(current?.table === table ? current : { ...FRESH_PLACE, table }),
+      ...changes,
+      table,
+    }))
+  const setOffset = (next: number | ((prev: number) => number)) =>
+    movePlace({ offset: typeof next === "function" ? next(offset) : next })
+  const setSort = (
+    next: BrowsePlace["sort"] | ((prev: BrowsePlace["sort"]) => BrowsePlace["sort"]),
+  ) => movePlace({ sort: typeof next === "function" ? next(sort) : next })
+  const setFilters = (next: DbFilter[] | ((prev: DbFilter[]) => DbFilter[])) =>
+    movePlace({ filters: typeof next === "function" ? next(filters) : next })
+  const setShowFilters = (next: boolean) => movePlace({ showFilters: next })
   const [counting, setCounting] = useState(false)
   const [rowSelection, setRowSelection] = useState<{
     query: string
     result?: QueryResult
     indices: Set<number>
   }>()
-  const tableIdentity = JSON.stringify([conn.id, selection?.schema, selection?.table])
   const [editor, setEditor] = useState<{
     tableIdentity: string
     mode: "insert" | "edit"
@@ -192,13 +230,18 @@ export function BrowseTab({
   // row. It is the same navigation the rail does, plus a filter — which is why
   // it reuses onSelect rather than inventing a second way to be somewhere.
   const followForeignKey = (fk: DbForeignKey, value: unknown) => {
-    setOffset(0)
-    setSort(null)
+    const target = { schema: fk.refSchema || schema, table: fk.refTable }
     setSelected(new Set())
-    setFilters([{ column: fk.refColumns[0], op: "eq", value: String(value) }])
-    setShowFilters(true)
+    movePlace(
+      {
+        ...FRESH_PLACE,
+        filters: [{ column: fk.refColumns[0], op: "eq", value: String(value) }],
+        showFilters: true,
+      },
+      JSON.stringify([conn.id, target.schema, target.table]),
+    )
     setCount(null)
-    onSelect({ schema: fk.refSchema || schema, table: fk.refTable })
+    onSelect(target)
   }
 
   const pk = detail.data?.primaryKey ?? []

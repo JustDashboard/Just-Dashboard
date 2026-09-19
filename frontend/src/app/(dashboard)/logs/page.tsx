@@ -10,7 +10,7 @@ import { EMPTY_FILTER, readLogWindow } from "@/lib/log-filter"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { usePanelSize } from "@/lib/panel-size"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -46,31 +46,50 @@ export default function LogsPage() {
   // before searching would lose the offset during a repeated daylight-saving hour.
   const [initialWindow] = useState(() => readLogWindow(params))
   const [windowError, setWindowError] = useState(initialWindow.error)
-  const [picked, setPicked] = useState<string | null>(() => params.get("source"))
-  const [mode, setMode] = useState<LogMode>(() =>
-    params.get("mode") === "search" || initialWindow.since || initialWindow.until
-      ? "search"
-      : "live",
+  // A link into the page is a complete question and sets the whole window;
+  // arriving bare — the rail's own link — reopens the window this tab had,
+  // which the effect below then writes back into the address bar.
+  const linked = ["source", "mode", "q", "unit", "since", "until"].some((key) => params.has(key))
+  const arrival = <T,>(value: T) => (linked ? value : undefined)
+  const [picked, setPicked] = useSessionState(
+    "logs.source",
+    "",
+    arrival(params.get("source") ?? ""),
   )
-  const [filter, setFilter] = useState<LogFilterState>(() => ({
-    ...EMPTY_FILTER,
-    q: params.get("q") ?? "",
-  }))
-  const [unit, setUnit] = useState(
-    () =>
+  const [mode, setMode] = useSessionState<LogMode>(
+    "logs.mode",
+    "live",
+    arrival(
+      params.get("mode") === "search" || initialWindow.since || initialWindow.until
+        ? "search"
+        : "live",
+    ),
+  )
+  const [filter, setFilter] = useSessionState<LogFilterState>(
+    "logs.filter",
+    EMPTY_FILTER,
+    arrival({ ...EMPTY_FILTER, q: params.get("q") ?? "" }),
+  )
+  const [unit, setUnit] = useSessionState(
+    "logs.unit",
+    "",
+    arrival(
       params.get("unit") ??
-      (params.get("source")?.startsWith("journal:")
-        ? params.get("source")!.slice("journal:".length)
-        : ""),
+        (params.get("source")?.startsWith("journal:")
+          ? params.get("source")!.slice("journal:".length)
+          : ""),
+    ),
   )
-  const [range, setRange] = useState<LogTimeRange>(
-    initialWindow.since || initialWindow.until ? "custom" : "24h",
+  const [range, setRange] = useSessionState<LogTimeRange>(
+    "logs.range",
+    "24h",
+    arrival(initialWindow.since || initialWindow.until ? "custom" : "24h"),
   )
-  const [since, setSince] = useState(initialWindow.since)
-  const [until, setUntil] = useState(initialWindow.until)
-  const [context, setContext] = useState(0)
-  const [archives, setArchives] = useState(false)
-  const [boot, setBoot] = useState(false)
+  const [since, setSince] = useSessionState("logs.since", "", arrival(initialWindow.since))
+  const [until, setUntil] = useSessionState("logs.until", "", arrival(initialWindow.until))
+  const [context, setContext] = useSessionState("logs.context", 0)
+  const [archives, setArchives] = useSessionState("logs.archives", false)
+  const [boot, setBoot] = useSessionState("logs.boot", false)
   const [showRail, setShowRail] = useViewState("logs.rail", true)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("logs.rail", RAIL.base)
   const railPx = Math.max(RAIL.min, Math.min(RAIL.max, railWidth))

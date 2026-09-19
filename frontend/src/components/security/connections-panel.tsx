@@ -6,7 +6,7 @@ import { NetworkDevice } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
 import type { Connections } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { PageHeader, SearchInput } from "@/components/page"
@@ -44,7 +44,7 @@ export function ConnectionsPanel() {
   const { posture, applyFix } = useSecurity()
   const router = useRouter()
   const [scope, setScope] = useViewState<"all" | "public">("security.connections.scope", "all")
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useSessionState("security.connections.query", "")
   const [blocking, setBlocking] = useState<string | null>(null)
   const { data, error, loading, refresh } = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),

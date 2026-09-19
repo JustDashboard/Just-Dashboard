@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Linked, NetworkDevice, Slash, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
@@ -59,12 +60,15 @@ export function NetworksTab({
   onCreatingChange?: (open: boolean) => void
 }) {
   const { can } = useAuth()
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useSessionState<string | null>("docker.networks.selected", null)
   const [internalCreating, setInternalCreating] = useState(false)
   const creating = externalCreating ?? internalCreating
   const setCreating = onCreatingChange ?? setInternalCreating
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<"all" | "custom" | "system">("all")
+  const [filter, setFilter] = useSessionState("docker.networks.query", "")
+  const [state, setState] = useSessionState<"all" | "custom" | "system">(
+    "docker.networks.state",
+    "all",
+  )
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<DockerNetwork[]>("/docker/networks/", undefined, signal),

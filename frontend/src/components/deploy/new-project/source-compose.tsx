@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { useSessionState } from "@/lib/view-state"
 import type { DeploymentComposeDocument, DeploymentDraftSource } from "@/lib/types"
 import { deploymentName } from "@/components/deploy/vocabulary"
 import { validateSource, type WizardErrors } from "@/components/deploy/deployment-defaults"
@@ -37,16 +38,17 @@ function asError(error: unknown) {
  * on Configure's source row once inspected, the same as a framework tag.
  */
 export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
-  const [mode, setMode] = useState<FilesMode>("compose_paste")
-  const [documents, setDocuments] = useState<DeploymentComposeDocument[]>([
-    { path: "compose.yml", content: "", order: 0 },
-  ])
-  const [selectors, setSelectors] = useState<string[]>([])
-  const [gitUrl, setGitUrl] = useState("")
-  const [gitRef, setGitRef] = useState("main")
-  const [credentialId, setCredentialId] = useState(0)
-  const [localPath, setLocalPath] = useState("")
-  const [subdirectory, setSubdirectory] = useState("")
+  const [mode, setMode] = useSessionState<FilesMode>("deploy.new.compose.mode", "compose_paste")
+  const [documents, setDocuments] = useSessionState<DeploymentComposeDocument[]>(
+    "deploy.new.compose.documents",
+    [{ path: "compose.yml", content: "", order: 0 }],
+  )
+  const [selectors, setSelectors] = useSessionState<string[]>("deploy.new.compose.selectors", [])
+  const [gitUrl, setGitUrl] = useSessionState("deploy.new.compose.url", "")
+  const [gitRef, setGitRef] = useSessionState("deploy.new.compose.ref", "main")
+  const [credentialId, setCredentialId] = useSessionState("deploy.new.compose.credential", 0)
+  const [localPath, setLocalPath] = useSessionState("deploy.new.compose.path", "")
+  const [subdirectory, setSubdirectory] = useSessionState("deploy.new.compose.subdirectory", "")
   const [errors, setErrors] = useState<WizardErrors>({})
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()

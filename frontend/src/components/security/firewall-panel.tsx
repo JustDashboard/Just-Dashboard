@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   LockClosed,
   Pencil,
@@ -74,8 +75,11 @@ export function FirewallPanel({
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [editing, setEditing] = useState<FirewallRule | null>(null)
-  const [query, setQuery] = useState("")
+  const [editing, setEditing] = useSessionState<FirewallRule | null>(
+    "security.firewall.editing",
+    null,
+  )
+  const [query, setQuery] = useSessionState("security.firewall.query", "")
   const admin = can("system.admin")
 
   // ufw prints every rule twice on a dual-stack host and distinguishes the
@@ -531,7 +535,11 @@ export function FirewallPanel({
         <EditRuleDialog
           rule={editing}
           open
-          onOpenChange={(o) => !o && setEditing(null)}
+          onOpenChange={(o) => {
+            if (o) return
+            setEditing(null)
+            forgetSessionState("security.firewall.rule.")
+          }}
           onDone={refresh}
           hasProfiles={caps.profiles}
         />

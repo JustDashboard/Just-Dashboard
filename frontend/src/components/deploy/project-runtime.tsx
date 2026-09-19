@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Box, External, Layers, Logs, Terminal } from "@/components/icons"
@@ -109,7 +110,10 @@ export function ProjectRuntime() {
   const { runtime } = project.detail
   const services = runtime?.status === "available" ? runtime.services : []
   const running = services.filter((service) => service.state === "running")
-  const [picked, setPicked] = useState<string>()
+  const [picked, setPicked] = useSessionState<string | undefined>(
+    `deploy.${project.projectId}.runtime.service`,
+    undefined,
+  )
   const selected =
     (picked && services.find((service) => service.containerId === picked)) ||
     running.find((service) => service.liveRelease) ||

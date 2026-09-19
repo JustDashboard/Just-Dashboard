@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import type { FormEvent } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ApiError, put, refusedIndex } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -143,7 +144,13 @@ function BuildForm({
 }) {
   const { can } = useAuth()
   const canEdit = can("system.admin")
-  const [build, setBuild] = useState<BuildPlan>(configuration.build)
+  // Kept for the tab under the revision it was read from: a save, or a
+  // change from anywhere else, bumps the revision and starts the form again
+  // from what the server now holds; walking away and back does not.
+  const [build, setBuild] = useSessionState<BuildPlan>(
+    `deploy.${projectId}.settings.build@${configuration.revision}`,
+    configuration.build,
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [fieldError, setFieldError] = useState<{ id: string; message: string }>()

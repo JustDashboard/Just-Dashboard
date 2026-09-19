@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
+import { useSessionState } from "@/lib/view-state"
 import { bytes } from "@/lib/format"
 import type { DockerImage } from "@/lib/types"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
@@ -31,9 +32,12 @@ function asError(error: unknown) {
  */
 export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
   const images = usePoll((signal) => get<DockerImage[]>("/docker/images", undefined, signal), 0)
-  const [filter, setFilter] = useState("")
-  const [reference, setReference] = useState("")
-  const [credentialId, setCredentialId] = useState<number>()
+  const [filter, setFilter] = useSessionState("deploy.new.image.filter", "")
+  const [reference, setReference] = useSessionState("deploy.new.image.reference", "")
+  const [credentialId, setCredentialId] = useSessionState<number | undefined>(
+    "deploy.new.image.credential",
+    undefined,
+  )
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()
 

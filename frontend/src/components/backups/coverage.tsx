@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Box, CloudUpload, Database, GitBranch, Globe, Layers, SettingsGear } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import type { BackupResource, BackupResourceKind, BackupResourceReport } from "@/lib/types"
@@ -52,8 +53,11 @@ export function CoveragePanel({
 }) {
   const resources = useMemo(() => report?.resources ?? [], [report])
   const unprotected = resources.filter((r) => !r.protected)
-  const [filter, setFilter] = useState<Filter>("unprotected")
-  const [kind, setKind] = useState<BackupResourceKind | "all">("all")
+  const [filter, setFilter] = useSessionState<Filter>("backups.coverage.filter", "unprotected")
+  const [kind, setKind] = useSessionState<BackupResourceKind | "all">(
+    "backups.coverage.kind",
+    "all",
+  )
   const kinds = useMemo(
     () => [...new Set(resources.map((r) => r.kind))].sort(),
     [resources],

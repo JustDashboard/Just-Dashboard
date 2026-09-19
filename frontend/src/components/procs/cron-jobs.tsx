@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Clock, Copy, Pause, Pencil, Play, Trash } from "@/components/icons"
 import { get, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -82,7 +83,7 @@ export function CronJobsPanel({
   const [draftFor, setDraftFor] = useState<{ user: string; text: string } | null>(null)
   const draft = draftFor?.user === user ? draftFor.text : null
   const setDraft = (text: string | null) => setDraftFor(text === null ? null : { user, text })
-  const [editing, setEditing] = useState<CronJob | null>(null)
+  const [editing, setEditing] = useSessionState<CronJob | null>("processes.cron.editing", null)
   const [saving, setSaving] = useState(false)
 
   const save = async (content: string, done: string, confirmText?: string) => {
@@ -247,6 +248,7 @@ export function CronJobsPanel({
           onClose={() => {
             onAddingChange(false)
             setEditing(null)
+            forgetSessionState("processes.cron.job.")
           }}
           onSave={async (edit) => {
             const next = editing ? replaceJob(raw, editing, edit) : appendJob(raw, edit)
@@ -403,16 +405,19 @@ function CronJobDialog({
   onClose: () => void
   onSave: (edit: JobEdit) => Promise<void>
 }) {
-  // Mounted only while open, so every field starts from the job being edited.
+  // Every field starts from the job being edited and is kept for the tab
+  // until the dialog is closed, so a walk to the Files page for the exact
+  // path of a script comes back to the half-written job.
   const [initial] = useState(() => fieldsOf(job))
-  const [preset, setPreset] = useState<CronPreset>(initial.preset)
-  const [time, setTime] = useState(initial.time)
-  const [weekday, setWeekday] = useState(initial.weekday)
-  const [monthDay, setMonthDay] = useState(initial.monthDay)
-  const [custom, setCustom] = useState(job?.schedule ?? "")
-  const [command, setCommand] = useState(job?.command ?? "")
-  const [comment, setComment] = useState(job?.comment ?? "")
-  const [enabled, setEnabled] = useState(job ? !job.disabled : true)
+  const draft = `processes.cron.job.${job ? job.line : "new"}`
+  const [preset, setPreset] = useSessionState<CronPreset>(`${draft}.preset`, initial.preset)
+  const [time, setTime] = useSessionState(`${draft}.time`, initial.time)
+  const [weekday, setWeekday] = useSessionState(`${draft}.weekday`, initial.weekday)
+  const [monthDay, setMonthDay] = useSessionState(`${draft}.monthDay`, initial.monthDay)
+  const [custom, setCustom] = useSessionState(`${draft}.custom`, job?.schedule ?? "")
+  const [command, setCommand] = useSessionState(`${draft}.command`, job?.command ?? "")
+  const [comment, setComment] = useSessionState(`${draft}.comment`, job?.comment ?? "")
+  const [enabled, setEnabled] = useSessionState(`${draft}.enabled`, job ? !job.disabled : true)
   const [busy, setBusy] = useState(false)
 
   const [hh, mm] = time.split(":").map((v) => Number(v))

@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ChevronDown, Warning } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -65,7 +66,13 @@ export default function DashboardConfigurationPage() {
     refresh,
   } = useSelfConfig()
   const { confirm, dialog } = useConfirm()
-  const [local, setLocal] = useState<DashboardSettings | null>(null)
+  // The unsaved changes are kept for the tab: the page lists them as a diff
+  // with Apply beside it, so what was typed before a walk to another page is
+  // in plain sight rather than silently gone or silently pending.
+  const [local, setLocal] = useSessionState<DashboardSettings | null>(
+    "dashboard.configuration.draft",
+    null,
+  )
 
   const saved = report?.settings
   // The form follows the server until the operator types into it, and does so

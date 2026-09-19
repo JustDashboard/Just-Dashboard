@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import {
@@ -87,7 +88,7 @@ export function RunPage() {
   const [selectedStepId, setSelectedStepId] = useState<number>()
   const [working, setWorking] = useState<"cancel" | "retry" | "redeploy">()
   const [streamComplete, setStreamComplete] = useState(false)
-  const [view, setView] = useState<View>("build")
+  const [view, setView] = useSessionState<View>(`deploy.run.${projectId}.${runId}.view`, "build")
   const lastSeq = useRef(0)
   const streamedRunState = useRef<DeploymentEngineRun["state"] | undefined>(undefined)
   const snapshot = liveSnapshot ?? initial.data

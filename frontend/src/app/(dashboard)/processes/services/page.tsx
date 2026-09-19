@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ListOrdered, RefreshClockwise } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -72,9 +73,9 @@ export default function ServicesPage() {
 function Services() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<StateFilter>("all")
-  const [startup, setStartup] = useState("all")
+  const [filter, setFilter] = useSessionState("processes.services.query", "")
+  const [state, setState] = useSessionState<StateFilter>("processes.services.state", "all")
+  const [startup, setStartup] = useSessionState("processes.services.startup", "all")
   const [selected, select] = useQuerySelection("unit")
   const [focusTab, setFocusTab] = useState<string>()
   const [reloading, setReloading] = useState(false)

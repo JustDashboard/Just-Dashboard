@@ -7,7 +7,7 @@ import { del, get, patch, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import type { SSHKey, SystemUser } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
@@ -53,7 +53,7 @@ function accountState(user: SystemUser): { tone: DotTone; label: string } {
 export default function SystemUsersPage() {
   const { confirm, dialog } = useConfirm()
   const [showSystem, setShowSystem] = useViewState("system-users.show-system", false)
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useSessionState("system-users.query", "")
   const [keysFor, setKeysFor] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending>({})
   const { data, error, loading, refresh } = usePoll(

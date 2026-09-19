@@ -14,6 +14,7 @@ import {
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useGitHubAccount } from "@/hooks/use-github"
+import { useSessionState } from "@/lib/view-state"
 import { GitHubAccountControl } from "@/components/git/github-account"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
@@ -131,15 +132,35 @@ export function SourceGit({
     0,
   )
   const appConfigured = (appRepos.data?.length ?? 0) > 0
-  const [filter, setFilter] = useState("")
-  const [owner, setOwner] = useState("all")
-  const [manualUrl, setManualUrl] = useState(() => cloneURL(initialUrl))
-  const [manualRef, setManualRef] = useState(() => initialRef?.trim() || "main")
-  const [credentialId, setCredentialId] = useState<number>()
+  // Every field is remembered for the tab, so a look at another page — the
+  // credential this repository needs, say — never means finding it again.
+  const [filter, setFilter] = useSessionState("deploy.new.git.filter", "")
+  const [owner, setOwner] = useSessionState("deploy.new.git.owner", "all")
+  // A deploy link sets the field, and a link that is not a clone URL clears
+  // it: what arrives in the address bar is the whole answer, never a mix of
+  // the link and what was typed last time.
+  const linked = initialUrl !== undefined
+  const [manualUrl, setManualUrl] = useSessionState(
+    "deploy.new.git.url",
+    "",
+    linked ? cloneURL(initialUrl) : undefined,
+  )
+  const [manualRef, setManualRef] = useSessionState(
+    "deploy.new.git.ref",
+    "main",
+    linked ? initialRef?.trim() || "main" : undefined,
+  )
+  const [credentialId, setCredentialId] = useSessionState<number | undefined>(
+    "deploy.new.git.credential",
+    undefined,
+  )
   // Apply to whichever import fires — the picked-repo rows and the pasted
   // URL both become the same `DeploymentDraftSource` the fields already are.
-  const [includeSubmodules, setIncludeSubmodules] = useState(false)
-  const [includeLfs, setIncludeLfs] = useState(false)
+  const [includeSubmodules, setIncludeSubmodules] = useSessionState(
+    "deploy.new.git.submodules",
+    false,
+  )
+  const [includeLfs, setIncludeLfs] = useSessionState("deploy.new.git.lfs", false)
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
 

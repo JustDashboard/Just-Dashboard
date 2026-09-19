@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Connection, Pencil, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
@@ -46,8 +47,8 @@ import {
 export function StreamsPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [editing, setEditing] = useState<StreamSpec | null>(null)
-  const [form, setForm] = useState({ open: false, session: 0 })
+  const [editing, setEditing] = useSessionState<StreamSpec | null>("proxy.streams.editing", null)
+  const [form, setForm] = useSessionState("proxy.streams.form", { open: false, session: 0 })
   const { data, error, loading, refresh } = usePoll<StreamStatus>(
     (signal) => get("/proxy/streams/", undefined, signal),
     60_000,
@@ -267,7 +268,10 @@ export function StreamsPage() {
         spec={editing}
         included={data.included}
         snippet={data.snippet}
-        onOpenChange={(open) => setForm((f) => ({ ...f, open }))}
+        onOpenChange={(open) => {
+          setForm((f) => ({ ...f, open }))
+          if (!open) forgetSessionState("proxy.stream.form.")
+        }}
         onSaved={refresh}
       />
       {dialog}
@@ -301,8 +305,14 @@ function StreamForm({
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
-  const [spec, setSpec] = useState<StreamSpec>(initial ?? BLANK)
-  const [allow, setAllow] = useState((initial?.allowFrom ?? []).join(", "))
+  const [spec, setSpec] = useSessionState<StreamSpec>(
+    `proxy.stream.form.${initial?.name ?? "new"}.spec`,
+    initial ?? BLANK,
+  )
+  const [allow, setAllow] = useSessionState(
+    `proxy.stream.form.${initial?.name ?? "new"}.allow`,
+    (initial?.allowFrom ?? []).join(", "),
+  )
   const [preview, setPreview] = useState("")
   const [previewError, setPreviewError] = useState("")
   const [busy, setBusy] = useState(false)

@@ -45,7 +45,7 @@ import { get } from "@/lib/api"
 import { bytes, duration, percent, plural, relativeTime } from "@/lib/format"
 import type { ProcessList, ProcessRow, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { ProcessDetailSheet } from "@/components/procs/process-detail"
 import {
   useProcessControl,
@@ -101,10 +101,10 @@ function automaticFocus(snapshot: Snapshot | undefined): {
  */
 export function LiveProcesses() {
   const { confirm, dialog } = useConfirm()
-  const [query, setQuery] = useState("")
-  const [user, setUser] = useState("")
-  const [state, setState] = useState("")
-  const [manager, setManager] = useState("")
+  const [query, setQuery] = useSessionState("processes.live.query", "")
+  const [user, setUser] = useSessionState("processes.live.user", "")
+  const [state, setState] = useSessionState("processes.live.state", "")
+  const [manager, setManager] = useSessionState("processes.live.manager", "")
   const [selectedPid, selectPid] = useQuerySelection("pid")
   const [sort, setSort] = useViewState<ProcessSort>("processes.table.sort.v2", "auto")
   const [limit, setLimit] = useViewState("processes.table.limit", 200)

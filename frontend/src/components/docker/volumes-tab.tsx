@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { FolderOpen, Servers, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -60,8 +61,11 @@ export function VolumesTab({
   const [internalCreating, setInternalCreating] = useState(false)
   const creating = externalCreating ?? internalCreating
   const setCreating = onCreatingChange ?? setInternalCreating
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<"all" | "used" | "unused">("all")
+  const [filter, setFilter] = useSessionState("docker.volumes.query", "")
+  const [state, setState] = useSessionState<"all" | "used" | "unused">(
+    "docker.volumes.state",
+    "all",
+  )
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<VolumeDetail[]>("/docker/volumes/", undefined, signal),
