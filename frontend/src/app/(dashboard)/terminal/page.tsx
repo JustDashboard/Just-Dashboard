@@ -20,6 +20,7 @@ import {
   type ShortcutAction,
 } from "@/lib/terminal-keymap"
 import { usePanelSize } from "@/lib/panel-size"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -44,6 +45,8 @@ type TerminalList = {
 const RAIL = { min: 208, max: 480, base: 288 }
 const TOOLS = { min: 256, max: 640, base: 336 }
 const TERMINAL_MIN = 360
+// Tailwind's `lg`, below which the columns stop fitting beside each other.
+const STACKED = "(max-width: 1023px)"
 
 export default function TerminalPage() {
   const { confirm, dialog } = useConfirm()
@@ -70,6 +73,11 @@ export default function TerminalPage() {
   const [visitedWindows, setVisitedWindows] = useState<{ id: string; sessionId: string }[]>([])
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
   const [showTools, setShowTools] = useViewState("terminal.tools", true)
+  // Below `lg` the rail and the tools column cover the emulator instead of
+  // sitting beside it. Stacked under and over it, they left a phone's terminal
+  // one line tall — the two side panels are each "the whole screen" there, so
+  // only one is up at a time and picking a session puts the rail away.
+  const overlay = useMediaQuery(STACKED)
   const [immersive, setImmersive] = useState(false)
   const workspaceRef = useRef<HTMLDivElement>(null)
   const focusPaneRef = useRef<(() => void) | null>(null)
@@ -230,8 +238,18 @@ export default function TerminalPage() {
     [refresh, windows],
   )
 
+  const toggleRail = () => {
+    if (!showRail && overlay) setShowTools(false)
+    setShowRail(!showRail)
+  }
+  const toggleTools = () => {
+    if (!showTools && overlay) setShowRail(false)
+    setShowTools(!showTools)
+  }
+
   const select = (session: TerminalWorkspace) => {
     setRemembered(session.id)
+    if (overlay) setShowRail(false)
     focusPaneRef.current?.()
   }
   const showWindow = (id: string) => {
@@ -369,8 +387,8 @@ export default function TerminalPage() {
       if (previous) showWindow(previous.id)
     },
     "window.close": () => activeWindow && closeWindow(activeWindow.id),
-    "workspace.rail": () => setShowRail((value) => !value),
-    "workspace.tools": () => setShowTools((value) => !value),
+    "workspace.rail": toggleRail,
+    "workspace.tools": toggleTools,
   }
   for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
     navigation[`session.${n}`] = () => sessions[n - 1] && select(sessions[n - 1])
@@ -431,7 +449,7 @@ export default function TerminalPage() {
     <>
       <WorkspaceToggle
         active={showRail}
-        onClick={() => setShowRail((value) => !value)}
+        onClick={toggleRail}
         label={showRail ? "Hide the sessions rail" : "Show the sessions rail"}
         action="workspace.rail"
         icon={SidebarLeft}
@@ -458,7 +476,7 @@ export default function TerminalPage() {
       )}
       <WorkspaceToggle
         active={showTools}
-        onClick={() => setShowTools((value) => !value)}
+        onClick={toggleTools}
         label={showTools ? "Hide files & git" : "Show files & git"}
         action="workspace.tools"
         icon={SidebarRight}
@@ -483,12 +501,12 @@ export default function TerminalPage() {
         ref={workspaceRef}
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card lg:flex-row",
+          "relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card",
           immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background",
         )}
       >
         {showRail && (
-          <div className="relative flex min-h-[16rem] shrink-0 border-b border-hairline lg:min-h-0 lg:w-(--jd-rail) lg:border-r lg:border-b-0">
+          <div className="absolute inset-0 z-20 flex bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-rail) lg:shrink-0 lg:border-r lg:border-hairline">
             <SessionRail
               sessions={sessions}
               folders={data.folders}
@@ -510,6 +528,7 @@ export default function TerminalPage() {
                 )
               }
               onDeleteFolder={deleteFolder}
+              onHide={overlay ? () => setShowRail(false) : undefined}
             />
             <ResizeHandle
               side="left"
@@ -573,7 +592,7 @@ export default function TerminalPage() {
         </div>
 
         {showTools && (
-          <div className="relative flex min-h-[16rem] shrink-0 flex-col border-t border-hairline lg:min-h-0 lg:w-(--jd-tools) lg:border-t-0 lg:border-l">
+          <div className="absolute inset-0 z-20 flex flex-col bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-tools) lg:shrink-0 lg:border-l lg:border-hairline">
             <ResizeHandle
               side="right"
               label="Files and git panel width"

@@ -64,8 +64,9 @@ export function GitHubAccountControl({
    * the only thing asking.
    */
   status?: ReturnType<typeof useGitHubAccount>
-  /** For a crowded strip: the avatar, the login, and nothing else. */
-  compact?: boolean
+  /** For a crowded strip: the avatar, the login, and nothing else — or, for
+   *  a strip too narrow for a login, the avatar alone. */
+  compact?: boolean | "avatar"
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -170,9 +171,11 @@ export function GitHubAccountControl({
                 {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}
                 <AvatarFallback className="text-micro">{initials}</AvatarFallback>
               </Avatar>
-              <span className={compact ? "max-w-[7rem] truncate" : "max-w-[10rem] truncate"}>
-                {account.login}
-              </span>
+              {compact !== "avatar" && (
+                <span className={compact ? "max-w-[7rem] truncate" : "max-w-[10rem] truncate"}>
+                  {account.login}
+                </span>
+              )}
               {!account.gitConfigured && <span className="size-1.5 rounded-full bg-warning" />}
             </Button>
           </DropdownMenuTrigger>

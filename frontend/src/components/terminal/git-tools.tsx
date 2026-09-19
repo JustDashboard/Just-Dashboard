@@ -264,6 +264,38 @@ function RepoStrip({
   const q = { path: repo.path }
   const stashes = status.data?.stashes ?? 0
   const clean = Boolean(status.data?.clean)
+  // The strip is one row whatever the column's width, and the branch is the
+  // reading that must survive on it. Below 400px the account's login goes
+  // (the avatar stays, and the login is one press away in its menu) rather
+  // than the branch being squeezed to nothing; dragged to the column's
+  // narrowest, or on a phone, pull and push join the menu as well, instead
+  // of being pushed off the edge.
+  const stripRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(Infinity)
+  useEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  const narrow = width < 320
+  const avatarOnly = width < 400
+
+  const pull = () =>
+    void run("Pulled", () => post<GitResult>("/git/pull", undefined, { query: q })).catch(
+      () => undefined,
+    )
+  const push = () =>
+    void run("Pushed", () => post<GitResult>("/git/push", undefined, { query: q })).catch(
+      () => undefined,
+    )
+
+  const menuBusy =
+    busy === "Fetched" ||
+    busy === "Stashed" ||
+    busy === "Stash popped" ||
+    (narrow && (busy === "Pulled" || busy === "Pushed"))
 
   const more: {
     key: string
@@ -284,6 +316,24 @@ function RepoStrip({
         ).catch(() => undefined),
     },
   ]
+  if (canControl && narrow) {
+    more.unshift(
+      {
+        key: "pull",
+        label: "Pull",
+        detail: "Fast-forward the branch to its upstream.",
+        icon: ChevronDoubleDown,
+        run: pull,
+      },
+      {
+        key: "push",
+        label: "Push",
+        detail: "Send the branch's commits to its upstream.",
+        icon: ChevronDoubleUp,
+        run: push,
+      },
+    )
+  }
   if (canControl) {
     more.push({
       key: "stash",
@@ -313,10 +363,13 @@ function RepoStrip({
   }
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-hairline pr-1.5 pl-3">
+    <div
+      ref={stripRef}
+      className="flex h-9 shrink-0 items-center gap-1.5 border-b border-hairline pr-1.5 pl-3"
+    >
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium">
+          <span className="min-w-12 flex-1 truncate font-mono text-xs font-medium">
             {repo.branch}
           </span>
         </TooltipTrigger>
@@ -328,18 +381,14 @@ function RepoStrip({
       <AheadBehind ahead={repo.ahead} behind={repo.behind} />
       {/* Whose push this would be. Compact — the avatar and the login — because
           the rest of this strip is one reading and three buttons. */}
-      <GitHubAccountControl repoPath={repo.path} compact />
-      {canControl && (
+      <GitHubAccountControl repoPath={repo.path} compact={avatarOnly ? "avatar" : true} />
+      {canControl && !narrow && (
         <>
           <GitButton
             label="Pull (fast-forward only)"
             busy={busy === "Pulled"}
             disabled={!!busy}
-            onClick={() =>
-              void run("Pulled", () => post<GitResult>("/git/pull", undefined, { query: q })).catch(
-                () => undefined,
-              )
-            }
+            onClick={pull}
           >
             <ChevronDoubleDown className="size-3.5" />
           </GitButton>
@@ -347,11 +396,7 @@ function RepoStrip({
             label="Push the current branch"
             busy={busy === "Pushed"}
             disabled={!!busy}
-            onClick={() =>
-              void run("Pushed", () => post<GitResult>("/git/push", undefined, { query: q })).catch(
-                () => undefined,
-              )
-            }
+            onClick={push}
           >
             <ChevronDoubleUp className="size-3.5" />
           </GitButton>
@@ -369,7 +414,7 @@ function RepoStrip({
                 disabled={!!busy}
                 className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
               >
-                {busy === "Fetched" || busy === "Stashed" || busy === "Stash popped" ? (
+                {menuBusy ? (
                   <Spinner className="size-3.5" />
                 ) : (
                   <MoreHorizontal className="size-3.5" />
@@ -377,7 +422,7 @@ function RepoStrip({
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent>Fetch, stash</TooltipContent>
+          <TooltipContent>{narrow ? "Pull, push, fetch, stash" : "Fetch, stash"}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-68">
           {more.map((verb) => (
@@ -651,7 +696,10 @@ function ChangesView({
             rows={2}
             className="w-full resize-none rounded-md border border-input bg-transparent px-2 py-1.5 font-mono text-xs focus-ring"
           />
-          <div className="flex items-center gap-2">
+          {/* The buttons wrap under the checkbox once the column is too
+              narrow for the row: at its narrowest width the two of them,
+              side by side with "Amend", ran past the panel's edge. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             <label className="flex cursor-pointer items-center gap-1.5 text-hint text-muted-foreground">
               <Checkbox
                 checked={amend}
@@ -661,30 +709,31 @@ function ChangesView({
               />
               Amend
             </label>
-            <span className="flex-1" />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={!canCommit}
-                  onClick={() => void commit(true)}
-                >
-                  <ChevronDoubleUp className="size-3.5" />
-                  Commit &amp; push
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Commit the staged changes, then push the branch</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="xs" disabled={!canCommit} onClick={() => void commit(false)}>
-                  <GitCommitIcon className="size-3.5" />
-                  Commit
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Commit the staged changes (Ctrl+Enter)</TooltipContent>
-            </Tooltip>
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={!canCommit}
+                    onClick={() => void commit(true)}
+                  >
+                    <ChevronDoubleUp className="size-3.5" />
+                    Commit &amp; push
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Commit the staged changes, then push the branch</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="xs" disabled={!canCommit} onClick={() => void commit(false)}>
+                    <GitCommitIcon className="size-3.5" />
+                    Commit
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Commit the staged changes (Ctrl+Enter)</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
           {staged.length === 0 && (message.trim() || amend) && (
             <p className="text-hint text-muted-foreground">Stage something first.</p>

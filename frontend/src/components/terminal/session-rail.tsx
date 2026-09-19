@@ -10,6 +10,7 @@ import {
   Pencil,
   Pin,
   Plus,
+  SidebarLeft,
   Trash,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -60,6 +61,7 @@ export function SessionRail({
   onCreateFolder,
   onUpdateFolder,
   onDeleteFolder,
+  onHide,
   className,
 }: {
   sessions: TerminalWorkspace[]
@@ -75,6 +77,9 @@ export function SessionRail({
   onCreateFolder: (name: string) => void
   onUpdateFolder: (name: string, next: { name?: string }) => void
   onDeleteFolder: (folder: TerminalFolder) => void
+  /** Given when the rail covers the emulator rather than sitting beside it,
+   *  so the only way back to the shell is not a session pick. */
+  onHide?: () => void
   className?: string
 }) {
   const [collapsed, setCollapsed] = useViewState<Record<string, boolean>>(
@@ -131,6 +136,11 @@ export function SessionRail({
         <IconAction label="New session" className="size-7" onClick={() => onNew()}>
           <Plus />
         </IconAction>
+        {onHide && (
+          <IconAction label="Hide this panel" className="size-7" onClick={onHide}>
+            <SidebarLeft />
+          </IconAction>
+        )}
       </PaneHeader>
       {/* A filter over one session is a box with nothing to do. It appears
           once the list is long enough that scanning it stops being faster

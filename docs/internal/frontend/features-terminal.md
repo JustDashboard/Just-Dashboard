@@ -185,9 +185,12 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 
 - The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
   inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
-  edge and the tools column's left edge; they turn into top and bottom rules when the columns stack
-  below `lg`). Three framed panes with a gutter between them read as three boxes floating on the page;
-  the screen is one working surface. Immersive mode drops the wrapper's frame along with the page.
+  edge and the tools column's left edge). Three framed panes with a gutter between them read as three
+  boxes floating on the page; the screen is one working surface. Immersive mode drops the wrapper's
+  frame along with the page. Below `lg` the rail and the tools column **cover the emulator** inside the
+  frame instead of sitting beside it — stacked over and under it they left a phone's terminal one line
+  tall — so only one of the two is up at a time (`useMediaQuery` in `page.tsx` decides), picking a
+  session puts the rail away, and each carries its own hide button while it is an overlay.
 - `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. A row
   is one line — the session's label and, at the end, the activity mark (below). Rows carry no terminal
   glyph (every row is a terminal) and no directory line under the title (the label carries the
@@ -249,7 +252,11 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   drops it (`chrome={false}`) and draws its own place switcher above the same tree, which there also
   reveals the folder being browsed, reloads its open folders on `refreshTick`, and takes drops. The Git half (`git-tools.tsx`) is two strips before content: the repository's
   reading (branch, `detached` tag, ahead/behind, the GitHub account) with **pull** and **push** inline
-  and fetch / stash / pop behind one menu where each verb carries a sentence (§13); then a `FilterChip`
+  and fetch / stash / pop behind one menu where each verb carries a sentence (§13). That strip stays
+  one row at every width and the branch is what it keeps: under 400px the account shows its avatar
+  alone, and under 320px (the column's minimum, or a phone) pull and push join the menu rather than
+  being pushed off the edge. The commit row under the changes wraps its two buttons under "Amend"
+  when the column is too narrow for all three. Then a `FilterChip`
   row switching Changes / History / Branches, with a `+` for a new branch on the Branches view that
   opens an inline create row rather than a permanent form. Changed-file rows colour only the status
   letter; the list is all changes, so a tinted band on every row said nothing. A file staged and then
