@@ -170,3 +170,38 @@ archive/candidate-release/remove-managed fixes listed in the audit ledger
   real provider, Discord/Slack/Telegram/e-mail delivery, public TLS issuance, and credentials
   against a real remote host (SSH and bearer plumbing were verified against a local bare
   repository and a refused loopback connection).
+
+## Pictures — 2026-09-19
+
+Four screens gained a drawing of the thing they are about, and the library components that draw
+it were brought in through the shadcn registry (Magic UI, rewritten onto the design system's
+tokens; see `docs/internal/frontend/design-system.md` §11):
+
+- **Credentials:** the GitHub App as the accounts that installed it, the App and this server,
+  with the traffic between them as lines (`github-app-card.tsx`, `wire.tsx`).
+- **Deployment page:** the release path as a timeline — one bar in seven segments, each as long as
+  the stage took, the working stage's name lit by `ui/text-shimmer` — and a burst of paper when a
+  release goes live in front of the reader (`run-pipeline.tsx`). Details rows open to the step's
+  evidence and timings and lead to the build console only where the step wrote to it
+  (`run-steps.tsx`); a stage with no output says so in the console. Metrics draws the before and
+  after windows on one scale with sparklines and reads the change (`run-metrics.tsx`); Runtime
+  logs says what the stream is and where the two views look (`run-logs.tsx`).
+- **Project overview:** the preview is one tile that is the website laid out at desktop width and
+  shrunk, and one link that opens it (`site-preview.tsx`); the column beside it is the way a
+  request reaches the project — source, live release, runtime, domains — drawn on an opaque ground
+  so the line never shows through a mark (`project-wiring.tsx`, `wire.tsx`); the delivery insights
+  sit under it, and the usage tiles carry the last hour's shape beside the live figure.
+- **Projects and the project header:** a card, a row and the title carry the website's own icon,
+  read through `GET /deploy/{id}/favicon` — the dashboard's image policy allows its own origin
+  only — bound to the recorded website address, one host, one megabyte, remembered for an hour
+  (`project-mark.tsx`, `handlers_deploy_favicon.go`).
+- **Notifications:** every deployment on the left and a mark per channel on the right, with dashed
+  rings an administrator presses to add a kind not yet set up; the rows under it are the list.
+- **Projects:** cards land one after another, a card whose run is in progress carries a light
+  around its frame and a seven-dot release path beside its state; the in-progress rows carry the
+  same dots. **New project:** "Start with something ready" is a bento of the five other ways in.
+  **Deployments:** the delivery figures count up.
+
+The deployment, project, projects, credentials and design-system browser specs pass against these
+surfaces; the details and preview scenarios were rewritten for the rows that open and the tile that
+is a link.
