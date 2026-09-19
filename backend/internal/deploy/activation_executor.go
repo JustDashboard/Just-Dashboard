@@ -664,6 +664,10 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 		Name: deploymentRouteName(environmentID), Domains: names,
 		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
 		TLS:      tls, ForceHTTPS: tls, BasicAuth: users,
+		// The request record is what the project's Logs page reads. nginx has
+		// always written one for these routes; asking Caddy for it too is what
+		// makes the two drivers answer the same question.
+		AccessLog: true,
 	}
 }
 

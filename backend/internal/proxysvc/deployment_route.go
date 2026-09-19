@@ -27,6 +27,10 @@ type DeploymentRoute struct {
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
+	// AccessLog asks the ingress to record what this route served. nginx has
+	// always done it; the Docker Caddy driver did not, which is why a
+	// deployment behind Caddy could not answer "is anyone using it" at all.
+	AccessLog bool `json:"accessLog,omitempty"`
 }
 
 type BasicAuthUser struct {
@@ -204,6 +208,10 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 			defer cancel()
 			return errors.Join(err, edge.restore(recovery, snapshot))
 		}
+		// The request record goes with the route. It holds client addresses,
+		// so leaving it behind after the deployment it described is gone would
+		// keep personal data on the host with nothing left to read it.
+		edge.removeAccessLog(ctx, name)
 		return nil
 	}
 	s.mu.Lock()

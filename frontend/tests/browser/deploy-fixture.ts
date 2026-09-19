@@ -693,6 +693,39 @@ export async function mockProject(
           { code: "build_failed", count: 1 },
         ],
       }
+    } else if (path === "/deploy/7/requests") {
+      body = deploymentRequests(url)
+    } else if (path === "/deploy/7/lifecycle") {
+      body = {
+        status: "available",
+        watching: true,
+        since: new Date(Date.now() - 6 * 3_600_000).toISOString(),
+        events: [
+          {
+            time: new Date(Date.now() - 12 * 60_000).toISOString(),
+            type: "container",
+            action: "die",
+            name: "api-production-r20",
+            id: "c0ffee",
+            exitCode: "137",
+            message: "api-production-r20 exited with status 137",
+            level: "error",
+            source: "daemon",
+            owner: { "environment-id": "12", "release-id": "20" },
+          },
+          {
+            time: new Date(Date.now() - 11 * 60_000).toISOString(),
+            type: "container",
+            action: "start",
+            name: "api-production-r20",
+            id: "c0ffee",
+            message: "api-production-r20 started",
+            level: "info",
+            source: "docker",
+            owner: { "environment-id": "12", "release-id": "20" },
+          },
+        ],
+      }
     } else if (path === "/deploy/7/runs/84" && method === "GET") {
       body = { run: liveRun(), steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
@@ -1221,4 +1254,129 @@ export async function mockNewProject(page: Page) {
     return json(route, { id: 84, state: "queued" })
   })
   return { ...journey, imported: () => imported, runs: () => runs }
+}
+
+/**
+ * A deployment's request record, as the ingress would have written it.
+ *
+ * Two families and one slow route, because the page's job is to make a 5xx and
+ * a tail latency findable — a fixture of two hundred identical 200s would pass
+ * every assertion while proving none of that.
+ */
+function deploymentRequests(url: URL) {
+  const limit = Number(url.searchParams.get("limit") ?? "500")
+  const base = Date.parse("2026-09-03T11:40:00Z")
+  const entries = [
+    {
+      seq: 9917,
+      time: "2026-09-03T11:59:31Z",
+      method: "POST",
+      path: "/api/checkout",
+      status: 500,
+      size: 412,
+      remoteIp: "198.51.100.23",
+      host: "api.example.com",
+      proto: "HTTP/2.0",
+      userAgent: "Mozilla/5.0 Chrome/140.0",
+      durationMs: 2840,
+      tls: true,
+    },
+    {
+      seq: 9916,
+      time: "2026-09-03T11:59:12Z",
+      method: "GET",
+      path: "/api/items",
+      query: "page=2",
+      status: 200,
+      size: 18400,
+      remoteIp: "198.51.100.7",
+      host: "api.example.com",
+      proto: "HTTP/2.0",
+      userAgent: "curl/8.5.0",
+      durationMs: 24,
+      tls: true,
+    },
+    {
+      seq: 9915,
+      time: "2026-09-03T11:58:40Z",
+      method: "GET",
+      path: "/healthz",
+      status: 200,
+      size: 2,
+      remoteIp: "127.0.0.1",
+      host: "api.example.com",
+      proto: "HTTP/1.1",
+      durationMs: 1,
+    },
+    {
+      seq: 9914,
+      time: "2026-09-03T11:57:02Z",
+      method: "GET",
+      path: "/admin",
+      status: 404,
+      size: 120,
+      remoteIp: "203.0.113.55",
+      host: "api.example.com",
+      proto: "HTTP/1.1",
+      userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1)",
+      durationMs: 6,
+    },
+  ]
+  return {
+    status: "available",
+    driver: "docker-caddy",
+    format: "caddy-json",
+    latency: true,
+    complete: true,
+    observedAt: now,
+    entries: entries.slice(0, Math.max(limit, 1)),
+    slowest: [entries[0]],
+    coverage: {
+      exists: true,
+      from: "2026-09-01T00:00:00Z",
+      to: "2026-09-03T11:59:31Z",
+      held: 9917,
+      complete: true,
+      cursor: 9917,
+      refreshedAt: now,
+    },
+    summary: {
+      total: 1284,
+      scanned: 1310,
+      classes: { "2xx": 1201, "3xx": 14, "4xx": 56, "5xx": 13 },
+      errorRate: 13 / 1284,
+      clientErrorRate: 56 / 1284,
+      bytes: 41_284_112,
+      perMinute: 21.4,
+      latency: { p50: 24, p75: 61, p90: 190, p95: 412, p99: 2840, max: 3120, mean: 78 },
+      methods: [
+        { value: "GET", count: 1180, errors: 4 },
+        { value: "POST", count: 92, errors: 9 },
+        { value: "HEAD", count: 12, errors: 0 },
+      ],
+      statuses: [
+        { value: "200", count: 1201, errors: 0 },
+        { value: "404", count: 56, errors: 0 },
+        { value: "500", count: 13, errors: 13 },
+      ],
+      paths: [
+        { value: "/healthz", count: 720, errors: 0 },
+        { value: "/api/items", count: 402, errors: 0 },
+        { value: "/api/checkout", count: 92, errors: 13 },
+      ],
+      hosts: [{ value: "api.example.com", count: 1284, errors: 13 }],
+      clients: [{ value: "127.0.0.1", count: 720, errors: 0 }],
+      agents: [{ value: "Chrome", count: 402, errors: 9 }],
+      buckets: Array.from({ length: 20 }, (_, index) => ({
+        start: new Date(base + index * 60_000).toISOString(),
+        total: 60 + index,
+        counts: { "2xx": 56 + index, "4xx": 3, "5xx": index === 19 ? 1 : 0 },
+        p95: 40 + index * 12,
+      })),
+      bucketSeconds: 60,
+      first: "2026-09-03T11:40:00Z",
+      last: "2026-09-03T11:59:31Z",
+      truncated: false,
+    },
+  }
 }

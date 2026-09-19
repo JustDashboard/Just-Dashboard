@@ -479,3 +479,8 @@ func vhostServes(vhost proxysvc.VHost, hostname string) bool {
 func deploymentRouteName(environmentID int64) string {
 	return fmt.Sprintf("just-dashboard-env-%d.conf", environmentID)
 }
+
+// RouteNameFor is the same spelling for callers outside this package. The API
+// layer needs it to follow the route's request record, and a second literal
+// there would be a second answer to "which file is this deployment's".
+func RouteNameFor(environmentID int64) string { return deploymentRouteName(environmentID) }

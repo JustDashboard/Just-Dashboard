@@ -35,6 +35,19 @@ publications are unchanged. The new public ingress serves deployment hostnames o
   that storage identity matches. Apply, verification and removal failures restore and reload the old
   route; recovery verifies the restored bytes.
 
+## Access logging
+
+A managed route asks Caddy to record what it served, into `/config/just-dashboard/access/<route>.log`
+inside the ingress's own persistent `/config` volume, `format json`, rolled by Caddy itself
+(`roll_size 16MiB`, `roll_keep 4`, `roll_keep_for 336h`, `roll_uncompressed` so a rolled generation
+can be read from an offset). The file is inside the container rather than on the host because the
+ingress may be one the operator already owned, and adding a bind mount would mean recreating their
+running web server to turn on a log. Reads go through one `docker exec` each, the same mechanism
+route files use, addressing a generation by inode so a roll under the reader loses nothing. The record is removed with its route — it holds
+client addresses. Host nginx routes have always written `/var/log/nginx/<route>.access.log`; only
+this driver was silent. See
+[`request-observability.md`](request-observability.md).
+
 ## Certificates and application networking
 
 Caddy owns issuance and renewal on its existing public listener. A deterministic, temporary site

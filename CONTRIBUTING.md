@@ -128,6 +128,12 @@ carries no licensing question at all.
   replaces databases at a different IP, reconnects the same clients using their original URLs,
   verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
   integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+- Changes to the ingress request record — the rendered `log` block, `accesslog.Store`, or either
+  reader in `proxysvc/deployment_access_log.go` — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCaddyAccessLogReader -count=1 -v`, which
+  drives the container-side script against `caddy:2-alpine`: a roll under the reader, the rolled
+  generation found by inode with its tail recovered, the new live file, a vanished inode reading as
+  absent. It starts one idle container and removes it.
 - Changes to deployment routes, activation cutover or runtime ownership also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
   and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeLossKeepsExactlyOneReleaseLive -count=1 -v`.

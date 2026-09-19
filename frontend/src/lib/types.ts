@@ -810,6 +810,13 @@ export type DockerEvent = {
   image?: string
   stack?: string
   exitCode?: string
+  /**
+   * The dashboard's own labels off the object this happened to, with the
+   * `io.just-dashboard.` prefix stripped — `environment-id` and `release-id`
+   * for a deployment's container. It is what lets a project page show its own
+   * restarts without inspecting a container that is by then already gone.
+   */
+  owner?: Record<string, string>
   message: string
   level: "info" | "notice" | "error"
   /**
@@ -1401,6 +1408,15 @@ export type LogLine = {
   file?: string
   /** Byte ranges of the search term, computed server-side where the browser cannot re-run a Go regexp. */
   match?: [number, number][]
+  /**
+   * The human sentence out of a structured line, and the context around it.
+   * Both are absent for the plain text that is most of a host's logs; where
+   * they are set, the line was JSON and the viewer shows the sentence with the
+   * request id and the rest a keystroke away rather than making the reader
+   * parse JSON by eye.
+   */
+  message?: string
+  fields?: Record<string, string>
 }
 
 /** One column of the search histogram, counted by level. */
@@ -4825,4 +4841,134 @@ export type JobLine = {
   stream: string
   text: string
   at: string
+}
+
+/**
+ * What a deployment served, as the ingress recorded it.
+ *
+ * The container's own output answers "what did the application print", which
+ * for a modern framework is a startup banner and then nothing at all. This is
+ * the other half of the Logs page: every request that reached the deployment,
+ * whether or not the application chose to say anything about it.
+ */
+export type RequestEntry = {
+  /**
+   * Where this request sits in the server's record of its route: a number
+   * that only rises. A live tail continues from it exactly, where "newer than
+   * the last timestamp" drops the second of two requests in one second — which
+   * is every request, in nginx's format.
+   */
+  seq?: number
+  time: string
+  method: string
+  path: string
+  query?: string
+  host?: string
+  proto?: string
+  status: number
+  size: number
+  remoteIp?: string
+  userAgent?: string
+  referer?: string
+  /** Absent where the format carries no duration — nginx's stock `combined` does not. */
+  durationMs?: number
+  tls?: boolean
+}
+
+export type RequestFacet = {
+  value: string
+  count: number
+  /** How many of those were 5xx, so the busiest and the failing are one table. */
+  errors: number
+  bytes?: number
+  p95?: number
+}
+
+/** One column of the request chart, counted by status family. */
+export type RequestBucket = {
+  start: string
+  total: number
+  counts: Record<string, number>
+  p95?: number
+}
+
+/** The distribution, not an average: a p50 of 30ms hides a p99 of nine seconds. */
+export type RequestLatency = {
+  p50: number
+  p75: number
+  p90: number
+  p95: number
+  p99: number
+  max: number
+  mean: number
+}
+
+export type RequestSummary = {
+  total: number
+  scanned: number
+  classes: Record<string, number>
+  /** Shares of the window, 0–1. Two readings because they are two people's problem. */
+  errorRate: number
+  clientErrorRate: number
+  bytes: number
+  latency?: RequestLatency
+  /** Arrival rate, so the figure means the same thing whichever range is chosen. */
+  perMinute: number
+  methods: RequestFacet[]
+  statuses: RequestFacet[]
+  paths: RequestFacet[]
+  hosts: RequestFacet[]
+  clients: RequestFacet[]
+  agents: RequestFacet[]
+  buckets: RequestBucket[]
+  bucketSeconds: number
+  first?: string
+  last?: string
+  /** The scan hit its own bound, so every figure above is a floor. */
+  truncated: boolean
+}
+
+/**
+ * What the server holds of a route's record, so an empty window can explain
+ * itself: whether a record exists at all, how far back what is held reaches,
+ * whether that is the whole retained record or a tail of it, and how fresh.
+ */
+export type RequestCoverage = {
+  exists: boolean
+  from?: string
+  to?: string
+  held: number
+  complete: boolean
+  /** The newest request's sequence — what a live tail continues from. */
+  cursor: number
+  refreshedAt: string
+  /** The last read failed; these figures are from the previous successful one. */
+  stale?: boolean
+}
+
+export type DeploymentRequests = {
+  status: "available" | "unavailable"
+  reason?: string
+  /** Which server wrote the record: the two drivers do not record the same things. */
+  driver?: string
+  format?: string
+  /** Whether this format carries a request duration at all. */
+  latency: boolean
+  /** What is held reaches the start of the retained record; false means every figure is a floor. */
+  complete: boolean
+  observedAt: string
+  entries: RequestEntry[]
+  slowest?: RequestEntry[]
+  summary: RequestSummary
+  coverage: RequestCoverage
+}
+
+/** What Docker did to this deployment's containers, as opposed to what they printed. */
+export type DeploymentLifecycle = {
+  status: "available" | "unavailable"
+  reason?: string
+  /** Whether the event stream is connected, so an empty feed can explain itself. */
+  watching: boolean
+  since?: string
+  events: DockerEvent[]
 }

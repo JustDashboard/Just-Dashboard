@@ -1,0 +1,329 @@
+package accesslog
+
+import (
+	"encoding/json"
+	"math"
+	"strings"
+	"testing"
+	"time"
+)
+
+const caddyLineJSON = `{"level":"info","ts":1758276477.5,"logger":"http.log.access.log0","msg":"handled request","request":{"remote_ip":"203.0.113.9","remote_port":"54321","client_ip":"198.51.100.4","proto":"HTTP/2.0","method":"GET","host":"app.example.com","uri":"/api/items?page=2","headers":{"User-Agent":["Mozilla/5.0 Chrome/140.0"],"Referer":["https://app.example.com/"]},"tls":{"version":772}},"bytes_read":0,"duration":0.0125,"size":2048,"status":200}`
+
+func TestParseCaddyJSON(t *testing.T) {
+	entry, ok := Parse(caddyLineJSON)
+	if !ok {
+		t.Fatal("a Caddy access entry was not recognised")
+	}
+	if entry.Method != "GET" || entry.Status != 200 || entry.Host != "app.example.com" {
+		t.Fatalf("request read wrong: %+v", entry)
+	}
+	// client_ip wins over remote_ip: behind another proxy the remote address
+	// is the proxy, and a table of one repeated address is useless.
+	if entry.RemoteIP != "198.51.100.4" {
+		t.Fatalf("client address = %q, want the client_ip", entry.RemoteIP)
+	}
+	if entry.Path != "/api/items" || entry.Query != "page=2" {
+		t.Fatalf("path/query split wrong: %q %q", entry.Path, entry.Query)
+	}
+	if ms, ok := entry.Duration(); !ok || math.Abs(ms-12.5) > 0.001 {
+		t.Fatalf("duration = %v %v, want 12.5ms", ms, ok)
+	}
+	if !entry.TLS {
+		t.Fatal("a request with a tls block is an HTTPS request")
+	}
+	if entry.UserAgent == "" || entry.Referer == "" {
+		t.Fatalf("headers were dropped: %+v", entry)
+	}
+	if got := entry.At().UTC().Format(time.RFC3339); got != "2025-09-19T10:07:57Z" {
+		t.Fatalf("timestamp = %s", got)
+	}
+}
+
+func TestParseCaddyRFC3339Timestamp(t *testing.T) {
+	line := `{"ts":"2026-09-19T05:47:57.123Z","msg":"handled request","request":{"method":"POST","host":"h","uri":"/x"},"status":201,"size":3,"duration":0.5}`
+	entry, ok := Parse(line)
+	if !ok {
+		t.Fatal("an operator who set time_format rfc3339 still has an access log")
+	}
+	if entry.At().Year() != 2026 || entry.Status != 201 {
+		t.Fatalf("entry read wrong: %+v", entry)
+	}
+}
+
+func TestParseCaddyIgnoresNonRequestLines(t *testing.T) {
+	// Caddy's own startup notices share the file's shape but describe no
+	// request; counting one as a hit reports a status of zero.
+	for _, line := range []string{
+		`{"level":"info","ts":1758276477.5,"msg":"serving initial configuration"}`,
+		`{"level":"error","ts":1758276477.5,"logger":"tls","msg":"job failed"}`,
+		``,
+		`not json at all`,
+	} {
+		if _, ok := Parse(line); ok {
+			t.Fatalf("%q was read as a served request", line)
+		}
+	}
+}
+
+func TestParseCombined(t *testing.T) {
+	line := `198.51.100.4 - - [19/Sep/2026:05:47:57 +0000] "GET /a%20b?x=1 HTTP/1.1" 404 512 "https://ref/" "curl/8.5.0"`
+	entry, ok := Parse(line)
+	if !ok {
+		t.Fatal("nginx's stock combined line was not recognised")
+	}
+	if entry.Method != "GET" || entry.Status != 404 || entry.Size != 512 {
+		t.Fatalf("entry read wrong: %+v", entry)
+	}
+	if entry.Path != "/a b" {
+		t.Fatalf("path = %q, want it percent-decoded so one route is one row", entry.Path)
+	}
+	if entry.Query != "x=1" || entry.Proto != "HTTP/1.1" {
+		t.Fatalf("query/proto wrong: %+v", entry)
+	}
+	if entry.Referer != "https://ref/" || entry.UserAgent != "curl/8.5.0" {
+		t.Fatalf("quoted fields wrong: %+v", entry)
+	}
+	// combined carries no duration, and inventing a zero would put a
+	// measurement on the page that was never measured.
+	if ms, ok := entry.Duration(); ok {
+		t.Fatalf("duration = %v, want absent for combined", ms)
+	}
+}
+
+func TestParseCombinedEscapedQuoteInAgent(t *testing.T) {
+	line := `1.2.3.4 - - [19/Sep/2026:05:47:57 +0000] "GET / HTTP/1.1" 200 - "-" "Mozilla \"weird\" 1.0"`
+	entry, ok := Parse(line)
+	if !ok {
+		t.Fatal("a client sending a quote in its agent still made a request")
+	}
+	if entry.UserAgent != `Mozilla "weird" 1.0` {
+		t.Fatalf("agent = %q", entry.UserAgent)
+	}
+	if entry.Referer != "" {
+		t.Fatalf("referer = %q, want empty for the - placeholder", entry.Referer)
+	}
+	if entry.Size != 0 {
+		t.Fatalf("size = %d, want 0 for the - placeholder", entry.Size)
+	}
+}
+
+func TestParseCombinedRejectsJunk(t *testing.T) {
+	for _, line := range []string{
+		"",
+		"just some text",
+		`1.2.3.4 - - [not a date] "GET / HTTP/1.1" 200 1`,
+		`1.2.3.4 - - [19/Sep/2026:05:47:57 +0000] "GET / HTTP/1.1" notastatus 1`,
+	} {
+		if _, ok := Parse(line); ok {
+			t.Fatalf("%q was read as a request", line)
+		}
+	}
+}
+
+func entry(at time.Time, method, path string, status int, ms float64) Entry {
+	return Entry{
+		Method: method, Path: path, Status: status, Size: 100, RemoteIP: "1.2.3.4",
+		at: at.UnixNano(), duration: ms, timed: true,
+	}
+}
+
+func TestEntryWireShape(t *testing.T) {
+	at := time.Date(2026, 9, 19, 12, 0, 0, 500_000_000, time.UTC)
+	raw, err := json.Marshal(entry(at, "GET", "/x", 200, 12.5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["time"] != "2026-09-19T12:00:00.5Z" {
+		t.Fatalf("time = %v", wire["time"])
+	}
+	if wire["durationMs"] != 12.5 {
+		t.Fatalf("durationMs = %v", wire["durationMs"])
+	}
+	// The compact fields never reach the wire under their own names.
+	for _, key := range []string{"at", "duration", "timed"} {
+		if _, present := wire[key]; present {
+			t.Fatalf("%q leaked onto the wire", key)
+		}
+	}
+	untimed, _ := json.Marshal(Entry{Method: "GET", Path: "/", Status: 200, at: at.UnixNano()})
+	if strings.Contains(string(untimed), "durationMs") {
+		t.Fatalf("an unmeasured duration must be absent, not zero: %s", untimed)
+	}
+}
+
+func TestCollectorReadings(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Limit: 10})
+	for i := 0; i < 100; i++ {
+		status := 200
+		if i%10 == 0 {
+			status = 500
+		}
+		c.Feed(entry(base.Add(time.Duration(i)*time.Second), "GET", "/api", status, float64(i)))
+	}
+	result := c.Result()
+	if result.Summary.Total != 100 {
+		t.Fatalf("total = %d", result.Summary.Total)
+	}
+	if result.Summary.Classes["5xx"] != 10 || result.Summary.Classes["2xx"] != 90 {
+		t.Fatalf("classes = %v", result.Summary.Classes)
+	}
+	if math.Abs(result.Summary.ErrorRate-0.10) > 1e-9 {
+		t.Fatalf("error rate = %v, want 0.10", result.Summary.ErrorRate)
+	}
+	// Nearest rank: the p95 must be a duration a request actually took, so an
+	// operator reading it can go and find that request in the rows.
+	if result.Summary.Latency == nil || result.Summary.Latency.P95 != 94 {
+		t.Fatalf("p95 = %+v, want the 95th sample", result.Summary.Latency)
+	}
+	if len(result.Entries) != 10 {
+		t.Fatalf("returned %d rows, want the limit", len(result.Entries))
+	}
+	// Newest first, and the newest of a hundred rather than the oldest ten.
+	if result.Entries[0].At() != base.Add(99*time.Second) {
+		t.Fatalf("first row is %v, want the newest request", result.Entries[0].At())
+	}
+}
+
+func TestCollectorLimitDoesNotCapTheReadings(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Limit: 5})
+	for i := 0; i < 500; i++ {
+		c.Feed(entry(base.Add(time.Duration(i)*time.Second), "GET", "/", 200, 1))
+	}
+	result := c.Result()
+	if result.Summary.Total != 500 {
+		t.Fatalf("total = %d: a table showing the last five requests must not report a p95 of only those five", result.Summary.Total)
+	}
+	if len(result.Entries) != 5 {
+		t.Fatalf("rows = %d", len(result.Entries))
+	}
+}
+
+func TestFilterNarrows(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Classes: []string{"5xx"}, Limit: 10})
+	c.Feed(entry(base, "GET", "/ok", 200, 5))
+	c.Feed(entry(base.Add(time.Second), "POST", "/broken", 503, 900))
+	result := c.Result()
+	if result.Summary.Total != 1 || result.Entries[0].Path != "/broken" {
+		t.Fatalf("filter kept the wrong rows: %+v", result.Entries)
+	}
+	if result.Summary.Scanned != 2 {
+		t.Fatalf("scanned = %d, want both lines counted", result.Summary.Scanned)
+	}
+}
+
+func TestFilterOnLatencyDropsUntimedEntries(t *testing.T) {
+	// A combined-format log has no durations at all. Narrowing by latency must
+	// not quietly return everything.
+	c := NewCollector(Filter{MinMs: 100, Limit: 10})
+	e := Entry{Method: "GET", Path: "/", Status: 200, at: time.Now().UnixNano()}
+	c.Feed(e)
+	if c.Result().Summary.Total != 0 {
+		t.Fatal("a request with no measured duration cannot satisfy a latency filter")
+	}
+}
+
+func TestFacetsCarryTheirErrors(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Limit: 10})
+	for i := 0; i < 5; i++ {
+		c.Feed(entry(base.Add(time.Duration(i)*time.Second), "GET", "/healthy", 200, 1))
+	}
+	for i := 0; i < 3; i++ {
+		c.Feed(entry(base.Add(time.Duration(i)*time.Second), "GET", "/failing", 500, 1))
+	}
+	paths := c.Result().Summary.Paths
+	if len(paths) != 2 || paths[0].Value != "/healthy" || paths[0].Count != 5 {
+		t.Fatalf("paths ranked wrong: %+v", paths)
+	}
+	if paths[1].Value != "/failing" || paths[1].Errors != 3 {
+		t.Fatalf("the failing path must carry its own error count: %+v", paths[1])
+	}
+}
+
+func TestHistogramCoversTheRequestedWindow(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Since: base, Until: base.Add(time.Hour), Limit: 10})
+	for i := 0; i < 60; i++ {
+		c.Feed(entry(base.Add(time.Duration(i)*time.Minute), "GET", "/", 200, 1))
+	}
+	result := c.Result()
+	if len(result.Summary.Buckets) == 0 {
+		t.Fatal("a window with requests in it has columns")
+	}
+	total := 0
+	for _, b := range result.Summary.Buckets {
+		total += b.Total
+	}
+	if total != 60 {
+		t.Fatalf("columns hold %d of 60 requests — a request fell outside every column", total)
+	}
+	if result.Summary.Buckets[0].Start[:16] != "2026-09-19T12:00" {
+		t.Fatalf("the first column starts at %s, not at the window's own start", result.Summary.Buckets[0].Start)
+	}
+}
+
+func TestHistogramSurvivesASingleRequest(t *testing.T) {
+	at := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	c := NewCollector(Filter{Limit: 10})
+	c.Feed(entry(at, "GET", "/", 200, 1))
+	result := c.Result()
+	if len(result.Summary.Buckets) == 0 {
+		t.Fatal("one request is still a chart with one column, not a crash")
+	}
+}
+
+func TestAgentFamilyGroups(t *testing.T) {
+	cases := map[string]string{
+		"Mozilla/5.0 (X11) Chrome/140.0.0.0 Safari/537.36":       "Chrome",
+		"Mozilla/5.0 (Windows) Chrome/140 Safari/537.36 Edg/140": "Edge",
+		"curl/8.5.0": "curl",
+		"Mozilla/5.0 (compatible; Googlebot/2.1)": "Googlebot",
+		"": "",
+	}
+	for agent, want := range cases {
+		if got := agentFamily(agent); got != want {
+			t.Errorf("agentFamily(%q) = %q, want %q", agent, got, want)
+		}
+	}
+}
+
+func TestClassBoundaries(t *testing.T) {
+	cases := map[int]string{100: "1xx", 200: "2xx", 301: "3xx", 404: "4xx", 500: "5xx", 0: "other"}
+	for status, want := range cases {
+		if got := (Entry{Status: status}).Class(); got != want {
+			t.Errorf("status %d is %q, want %q", status, got, want)
+		}
+	}
+}
+
+func TestSlowestSpansTheWholeWindowNotJustTheRows(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	// The row buffer holds the newest few; the slowest request of the day is
+	// almost never among them, which is exactly when it is worth reporting.
+	c := NewCollector(Filter{Limit: 3})
+	c.Feed(entry(base, "GET", "/very-slow", 200, 9000))
+	for i := 1; i < 200; i++ {
+		c.Feed(entry(base.Add(time.Duration(i)*time.Second), "GET", "/fast", 200, 5))
+	}
+	result := c.Result()
+	if len(result.Slowest) == 0 || result.Slowest[0].Path != "/very-slow" {
+		t.Fatalf("slowest = %+v, want the 9s request from the start of the window", result.Slowest)
+	}
+	if len(result.Slowest) > 5 {
+		t.Fatalf("kept %d slow rows, want at most 5", len(result.Slowest))
+	}
+	// Ordered slowest first, so the list reads as a ranking.
+	for i := 1; i < len(result.Slowest); i++ {
+		if result.Slowest[i-1].duration < result.Slowest[i].duration {
+			t.Fatalf("slowest list is not ordered: %+v", result.Slowest)
+		}
+	}
+}

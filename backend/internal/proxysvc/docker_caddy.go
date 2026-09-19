@@ -23,6 +23,13 @@ import (
 const dockerCaddyRoot = "/config/just-dashboard"
 const dockerCaddyImport = "import /config/just-dashboard/routes/*.caddy"
 
+// dockerCaddyAccessRoot is where a route keeps the record of what it
+// served. It sits inside the ingress's own persistent /config volume
+// rather than on the host: the container may be one the operator already
+// owned, and adding a bind mount to it would mean recreating their
+// running web server to turn on a log.
+const dockerCaddyAccessRoot = dockerCaddyRoot + "/access"
+
 type dockerCaddy struct{ ID, Name, Source, Identity string }
 type ingressContainer struct {
 	ID     string
@@ -259,6 +266,18 @@ func dockerCaddyRoutePath(name string) (string, error) {
 	return dockerCaddyRoot + "/routes/" + name + ".caddy", nil
 }
 
+// dockerCaddyAccessLogPath is where one route's request record lives. It takes
+// the same name through the same check as the route file, because a name that
+// cannot be trusted to build a config path cannot be trusted to build a log
+// path either — and this one is handed to Caddy, which will create whatever it
+// is pointed at.
+func dockerCaddyAccessLogPath(name string) (string, error) {
+	if _, err := dockerCaddyRoutePath(name); err != nil {
+		return "", err
+	}
+	return dockerCaddyAccessRoot + "/" + strings.TrimSuffix(name, ".conf") + ".log", nil
+}
+
 func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, error) {
 	if len(route.Domains) == 0 {
 		return "", errors.New("a public route needs a domain")
@@ -295,6 +314,30 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		// if any, is where it asks.
 		tlsDirective = acmeDirectory().caddyIssuer()
 	}
+	logDirective := ""
+	if route.AccessLog {
+		path, err := dockerCaddyAccessLogPath(route.Name)
+		if err != nil {
+			return "", err
+		}
+		// JSON rather than the console format: the console spelling drops the
+		// request duration into a human sentence, and the page's whole point is
+		// a latency reading. Rotation is Caddy's own — the ingress volume is
+		// not on a logrotate schedule this dashboard controls, and an access
+		// log is the fastest-growing file a deployment produces. Rolled
+		// generations stay uncompressed so the reader can pick one up from an
+		// offset: the tail of the file that rolled between two reads is
+		// recovered from wherever the roller put it, and a gzip has no offsets.
+		logDirective = "  log {\n" +
+			"    output file " + strconv.Quote(path) + " {\n" +
+			"      roll_size 16MiB\n" +
+			"      roll_keep 4\n" +
+			"      roll_keep_for 336h\n" +
+			"      roll_uncompressed\n" +
+			"    }\n" +
+			"    format json\n" +
+			"  }\n"
+	}
 	authDirective := ""
 	if len(route.BasicAuth) > 0 {
 		lines := make([]string, 0, len(route.BasicAuth))
@@ -306,7 +349,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		}
 		authDirective = "  basic_auth {\n" + strings.Join(lines, "\n") + "\n  }\n"
 	}
-	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + authDirective + "  " + directive + "\n}\n", nil
+	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + authDirective + "  " + directive + "\n}\n", nil
 }
 
 func (c *dockerCaddy) snapshot(ctx context.Context, name string) (DeploymentRouteSnapshot, error) {
@@ -492,6 +535,11 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	}
 	if err = c.attach(ctx); err != nil {
 		return result, err
+	}
+	if route.AccessLog {
+		if err := c.ensureAccessLogDir(ctx); err != nil {
+			return result, err
+		}
 	}
 	if route.TLS && route.CertPath != "" && !strings.HasPrefix(filepath.Base(filepath.Dir(route.CertPath)), "caddy-") {
 		cert, err := os.ReadFile(route.CertPath)

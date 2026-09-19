@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -61,9 +62,13 @@ type moduleSet struct {
 	selfConfig    *selfcfg.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
-	dbs           *dbx.Manager
-	linuxUsers    *linuxusers.Service
-	netsec        *netsec.Service
+	// requests holds what every deployment's ingress served, read once and
+	// advanced by what was appended since; every poll and live tail on a
+	// project's Logs page is answered from it.
+	requests   *accesslog.Store
+	dbs        *dbx.Manager
+	linuxUsers *linuxusers.Service
+	netsec     *netsec.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -158,6 +163,7 @@ func (s *Server) initModules() {
 	s.modules.certKeeper = selfcfg.NewCertKeeper(
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
+	s.modules.requests = accesslog.NewStore(s.modules.proxy.AccessLogReader)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()

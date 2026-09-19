@@ -69,7 +69,19 @@ type Event struct {
 	// on an unexplained restart: something in this dashboard did it, or
 	// something outside it did.
 	Trigger *EventTrigger `json:"trigger,omitempty"`
+
+	// Owner carries the dashboard's own labels off the object this happened
+	// to — for a deployment's container, which environment and release it
+	// belonged to. Docker puts every label in the actor's attributes, and
+	// keeping this one namespace is what lets a project page show its own
+	// restarts and OOM kills without inspecting a container that is by then
+	// already gone. Only the dashboard's prefix is kept: an arbitrary image's
+	// label set is unbounded and none of it is ours to render.
+	Owner map[string]string `json:"owner,omitempty"`
 }
+
+// ownerLabelPrefix is the namespace the dashboard stamps on what it creates.
+const ownerLabelPrefix = "io.just-dashboard."
 
 // EventTrigger links a Docker event to the dashboard action that caused it.
 type EventTrigger struct {
@@ -315,6 +327,15 @@ func convertEvent(msg events.Message) Event {
 		Image:    attrs["image"],
 		Stack:    attrs[labelProject],
 		ExitCode: attrs["exitCode"],
+	}
+	for key, value := range attrs {
+		if !strings.HasPrefix(key, ownerLabelPrefix) {
+			continue
+		}
+		if ev.Owner == nil {
+			ev.Owner = map[string]string{}
+		}
+		ev.Owner[strings.TrimPrefix(key, ownerLabelPrefix)] = value
 	}
 	if msg.TimeNano > 0 {
 		ev.Time = time.Unix(0, msg.TimeNano).UTC()
