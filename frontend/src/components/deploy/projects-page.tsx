@@ -20,7 +20,7 @@ import {
   StopCircle,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { relativeTime, plural } from "@/lib/format"
+import { percent, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -31,6 +31,7 @@ import type {
   DeploymentEngineRun,
   DeploymentFleet,
   DeploymentSummary,
+  TrafficPulse,
 } from "@/lib/types"
 import { Page, PageHeader, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -41,6 +42,8 @@ import { Tag } from "@/components/tag"
 import { FilterChip } from "@/components/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { BlurFade } from "@/components/ui/blur-fade"
+import { perMinute } from "@/lib/requests"
+import { Sparkline } from "@/components/metrics/sparkline"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
@@ -113,6 +116,12 @@ function Fleet() {
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     5000,
+  )
+  // Every project's last hour in one answer, cached to the minute per route
+  // on the server, so a fleet of forty is one read rather than forty.
+  const pulse = usePoll(
+    (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
+    30000,
   )
   // The question is kept for the tab and the furniture for good, so a
   // filtered fleet does not reset itself on the way back from a project.
@@ -299,6 +308,7 @@ function Fleet() {
                   <BlurFade delay={Math.min(index, 11) * 0.045} className="h-full">
                     <ProjectCard
                       deployment={deployment}
+                      pulse={pulse.data?.[String(deployment.id)]}
                       currentStep={
                         fleet.data?.activeWork.find(
                           (item) => item.run.id === deployment.activeRun?.id,
@@ -447,10 +457,13 @@ function InProgressPanel({
 function ProjectCard({
   deployment,
   currentStep,
+  pulse,
 }: {
   deployment: DeploymentSummary
   /** Where the active run is, from the fleet's in-progress list. */
   currentStep?: string
+  /** The last hour at the ingress, from the fleet-wide pulse. */
+  pulse?: TrafficPulse
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -609,6 +622,20 @@ function ProjectCard({
             <span className="text-muted-foreground">
               {relativeTime(deployment.lastRun?.requestedAt ?? deployment.updatedAt)}
             </span>
+            {/* Alive, and how much: the last hour at the ingress, so the fleet
+                shows which sites are being reached without opening each. */}
+            {pulse?.status === "available" && (
+              <>
+                <Dot />
+                <span className="flex items-center gap-1.5 text-muted-foreground" title="Requests per minute over the last hour">
+                  <Sparkline values={pulse.points} width={48} height={14} label="Requests per minute, last hour" />
+                  <span className="numeric">{perMinute(pulse.perMinute)}/min</span>
+                  {pulse.errorRate > 0.01 && (
+                    <span className="text-destructive">{percent(pulse.errorRate * 100, 1)} failing</span>
+                  )}
+                </span>
+              </>
+            )}
             {deployment.environmentKind !== "production" && (
               <>
                 <Dot />

@@ -195,3 +195,36 @@ export function resolveRequestRange(range: RequestRange): string {
   const preset = REQUEST_RANGES.find((r) => r.id === range) ?? REQUEST_RANGES[1]
   return new Date(Date.now() - preset.minutes * 60_000).toISOString()
 }
+
+/**
+ * What a traffic alert watches, in words. The vocabulary is the server's
+ * (`TrafficAlertKinds`); the sentences are the form's, so a rule reads as a
+ * sentence in the list rather than as three fields.
+ */
+export const ALERT_KINDS = {
+  error_rate: {
+    label: "Failing requests",
+    unit: "%",
+    hint: "The share of requests answered 5xx over the window.",
+    describe: (threshold: number, minutes: number) =>
+      `more than ${threshold}% of requests fail over ${minutes} min`,
+    read: (observed: number) => `${observed.toFixed(1)}% failing`,
+  },
+  latency: {
+    label: "Slow responses",
+    unit: "ms",
+    hint: "The p95 response time over the window.",
+    describe: (threshold: number, minutes: number) =>
+      `p95 above ${latency(threshold)} over ${minutes} min`,
+    read: (observed: number) => `p95 ${latency(observed)}`,
+  },
+  silence: {
+    label: "No traffic",
+    unit: "",
+    hint: "A site that was busy and receives nothing for the window.",
+    describe: (_threshold: number, minutes: number) => `no requests for ${minutes} min`,
+    read: (observed: number) => `${observed} requests`,
+  },
+} as const
+
+export type AlertKind = keyof typeof ALERT_KINDS

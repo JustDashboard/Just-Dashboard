@@ -35,10 +35,28 @@ function widthLabel(seconds: number) {
  * It is a row of the workspace, not a box in it: the hairline under it is the
  * only edge, and the columns sit on the same ground as the rows they count.
  */
+/**
+ * A moment worth a mark on the chart: a release going live, a container
+ * exiting, being restarted or killed. A spike of red with a deploy mark at
+ * its foot is a different afternoon from the same spike with none.
+ */
+export type ChartMarker = {
+  at: string
+  kind: "deploy" | "restart" | "failure"
+  label: string
+}
+
+const MARKER: Record<ChartMarker["kind"], { line: string; word: string }> = {
+  deploy: { line: "bg-brand", word: "deploy" },
+  restart: { line: "bg-warning", word: "restart" },
+  failure: { line: "bg-destructive", word: "exit" },
+}
+
 export function RequestChart({
   buckets,
   bucketSeconds,
   latencyKnown,
+  markers = [],
   onZoom,
   className,
 }: {
@@ -46,6 +64,7 @@ export function RequestChart({
   bucketSeconds: number
   /** nginx's stock format carries no duration, so there is no line to draw. */
   latencyKnown: boolean
+  markers?: ChartMarker[]
   onZoom: (since: Date, until: Date) => void
   className?: string
 }) {
@@ -63,6 +82,13 @@ export function RequestChart({
   const last = new Date(buckets[buckets.length - 1].start)
   const sameDay = first.toDateString() === last.toDateString()
   const edge = (iso: string) => (sameDay ? clock(iso) : timestamp(iso))
+  // Where a marker sits, as a share of the chart's own span — the columns are
+  // equal widths over equal time, so time maps to width directly.
+  const spanStart = first.getTime()
+  const spanEnd = last.getTime() + bucketSeconds * 1000
+  const placed = markers
+    .map((m) => ({ ...m, x: (Date.parse(m.at) - spanStart) / (spanEnd - spanStart) }))
+    .filter((m) => Number.isFinite(m.x) && m.x >= 0 && m.x <= 1)
 
   return (
     <div className={cn("shrink-0 border-b border-hairline px-3 pt-2 pb-1.5", className)}>
@@ -115,6 +141,21 @@ export function RequestChart({
           </button>
         ))}
 
+        {placed.map((m, i) => (
+          <span
+            key={`${m.at}:${i}`}
+            title={`${m.label} · ${timestamp(m.at)}`}
+            aria-label={`${m.label} at ${timestamp(m.at)}`}
+            className={cn("pointer-events-auto absolute inset-y-0 w-px", MARKER[m.kind].line)}
+            style={{ left: `${m.x * 100}%` }}
+          >
+            <span
+              aria-hidden
+              className={cn("absolute -top-0.5 -left-[3px] size-[7px] rounded-full", MARKER[m.kind].line)}
+            />
+          </span>
+        ))}
+
         {/*
           The latency line rides over the columns rather than beside them, as a
           row of marks rather than a path: an SVG polyline through sixty points
@@ -154,6 +195,14 @@ export function RequestChart({
               p95 to {latency(slowest)}
             </span>
           )}
+          {(["deploy", "restart", "failure"] as const)
+            .filter((kind) => placed.some((m) => m.kind === kind))
+            .map((kind) => (
+              <span key={kind} className="flex items-center gap-1">
+                <span className={cn("size-1.5 rounded-full", MARKER[kind].line)} />
+                {MARKER[kind].word}
+              </span>
+            ))}
         </span>
         <span className="numeric">{edge(buckets[buckets.length - 1].start)}</span>
       </div>

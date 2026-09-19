@@ -22,7 +22,16 @@ import { Tag } from "@/components/tag"
  * none: `docker events` shows you what happens from the moment you run it, so
  * the answer to "why did this restart at 04:00" is otherwise a shrug.
  */
-export function LifecycleFeed({ projectId }: { projectId: number }) {
+export function LifecycleFeed({
+  projectId,
+  moment,
+  onClearMoment,
+}: {
+  projectId: number
+  /** An instant to look around — a failing request's — scoping the list to ±2 minutes. */
+  moment?: string
+  onClearMoment?: () => void
+}) {
   const feed = usePoll<DeploymentLifecycle>(
     (signal) => get<DeploymentLifecycle>(`/deploy/${projectId}/lifecycle`, undefined, signal),
     10000,
@@ -52,25 +61,49 @@ export function LifecycleFeed({ projectId }: { projectId: number }) {
     )
   }
 
+  const at = moment ? Date.parse(moment) : NaN
+  const around = Number.isFinite(at)
+    ? data.events.filter((e) => Math.abs(Date.parse(e.time) - at) <= 2 * 60_000)
+    : data.events
+
   return (
     <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
+      {moment && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+          <span>
+            Around <span className="numeric text-foreground">{timestamp(moment)}</span> — two minutes
+            either side.
+          </span>
+          {onClearMoment && (
+            <button
+              type="button"
+              onClick={onClearMoment}
+              className="rounded-sm font-medium focus-ring hover:text-foreground"
+            >
+              Show everything
+            </button>
+          )}
+        </div>
+      )}
       {!data.watching && (
         <Notice tone="warning" title="The Docker event stream is not connected" className="mb-3">
           This list is whatever was recorded before the connection dropped, and it stops here.
         </Notice>
       )}
-      {data.events.length === 0 ? (
+      {around.length === 0 ? (
         <EmptyState
-          title="Nothing has happened to these containers"
+          title={moment ? "Nothing happened to the container then" : "Nothing has happened to these containers"}
           description={
-            data.since
-              ? `Watching since ${timestamp(data.since)}. No start, stop, restart, exit or health change has been recorded for this deployment since then — which for a running deployment is the reading you want.`
-              : "No start, stop, restart, exit or health change has been recorded for this deployment."
+            moment
+              ? "No exit, restart, OOM kill or health change within two minutes of that request. Whatever failed, it was not the container's life."
+              : data.since
+                ? `Watching since ${timestamp(data.since)}. No start, stop, restart, exit or health change has been recorded for this deployment since then — which for a running deployment is the reading you want.`
+                : "No start, stop, restart, exit or health change has been recorded for this deployment."
           }
         />
       ) : (
         <RowList>
-          {data.events.map((event, i) => (
+          {around.map((event, i) => (
             <LifecycleRow key={`${event.time}:${event.id ?? ""}:${i}`} event={event} />
           ))}
         </RowList>

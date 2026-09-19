@@ -35,6 +35,8 @@ every path segment except the last) and the sealed configuration holds the real 
 update responses never include a credential. Editing a channel with a blank credential field keeps
 the stored value; a channel's kind cannot change after creation.
 
+Two more events reach a channel without being selected on it: `traffic.firing` and `traffic.recovered`, sent by a traffic alert rule to the channels the rule names (see [`request-observability.md`](request-observability.md)); a webhook receives the envelope with an `alert` block, the providers a rendered sentence with the reading and the limit.
+
 Events are a closed vocabulary: `run.started`, `run.succeeded`, `run.failed` (includes
 `failed_activation` and `rolled_back`), `run.cancelled` (includes `superseded`). An empty list
 selects everything. The historical `run.finished` value remains valid as "every terminal outcome",

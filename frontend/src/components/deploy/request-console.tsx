@@ -54,6 +54,8 @@ export function RequestConsole({
   onPausedChange,
   held = 0,
   onFilterPath,
+  outputHref,
+  onEventsAround,
 }: {
   entries: RequestEntry[]
   summary: RequestSummary
@@ -69,6 +71,10 @@ export function RequestConsole({
   held?: number
   /** Narrowing to the path under the pointer, from the row itself. */
   onFilterPath?: (path: string) => void
+  /** The host Logs page opened on the container's lines around this request's minute. */
+  outputHref?: (entry: RequestEntry) => string | undefined
+  /** The Events view scoped to this request's minute. */
+  onEventsAround?: (entry: RequestEntry) => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
@@ -225,7 +231,12 @@ export function RequestConsole({
                   </div>
 
                   {open === key && (
-                    <RequestDetail entry={entry} onFilterPath={onFilterPath} />
+                    <RequestDetail
+                      entry={entry}
+                      onFilterPath={onFilterPath}
+                      outputHref={outputHref?.(entry)}
+                      onEventsAround={onEventsAround}
+                    />
                   )}
                 </div>
               )
@@ -272,9 +283,13 @@ export function RequestConsole({
 function RequestDetail({
   entry,
   onFilterPath,
+  outputHref,
+  onEventsAround,
 }: {
   entry: RequestEntry
   onFilterPath?: (path: string) => void
+  outputHref?: string
+  onEventsAround?: (entry: RequestEntry) => void
 }) {
   const facts: [string, React.ReactNode][] = [
     ["When", timestamp(entry.time)],
@@ -301,6 +316,23 @@ function RequestDetail({
         ))}
       </dl>
       <div className="mt-2.5 flex flex-wrap gap-2">
+        {/* The two questions a failing request raises, each one press: what
+            did the container print then, and what happened to it then. */}
+        {outputHref && (
+          <Button size="sm" variant="secondary" className="h-7 font-sans text-xs" asChild>
+            <a href={outputHref}>Container output around this moment</a>
+          </Button>
+        )}
+        {onEventsAround && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 font-sans text-xs"
+            onClick={() => onEventsAround(entry)}
+          >
+            Container events around this moment
+          </Button>
+        )}
         {onFilterPath && (
           <Button
             size="sm"

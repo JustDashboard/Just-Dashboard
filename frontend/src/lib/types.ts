@@ -4882,6 +4882,9 @@ export type RequestFacet = {
   errors: number
   bytes?: number
   p95?: number
+  /** How many were answered 4xx, and how many of those looked like a scanner's probe. */
+  refused?: number
+  probes?: number
 }
 
 /** One column of the request chart, counted by status family. */
@@ -4914,12 +4917,19 @@ export type RequestSummary = {
   latency?: RequestLatency
   /** Arrival rate, so the figure means the same thing whichever range is chosen. */
   perMinute: number
+  /** Page views: documents a person opened, not what a page load dragged in or a scanner's probes. */
+  pages: number
   methods: RequestFacet[]
   statuses: RequestFacet[]
   paths: RequestFacet[]
   hosts: RequestFacet[]
   clients: RequestFacet[]
   agents: RequestFacet[]
+  /** The sites traffic arrived from, by host; the site's own links are not a source. */
+  referers: RequestFacet[]
+  /** Refused paths that look like scanning, and the clients that asked for several. */
+  probes: RequestFacet[]
+  scanners: RequestFacet[]
   buckets: RequestBucket[]
   bucketSeconds: number
   first?: string
@@ -4961,6 +4971,68 @@ export type DeploymentRequests = {
   slowest?: RequestEntry[]
   summary: RequestSummary
   coverage: RequestCoverage
+}
+
+/** One window's worth of traffic, small enough to sit beside a release or on a card. */
+export type TrafficReading = {
+  requests: number
+  pages: number
+  perMinute: number
+  errorRate: number
+  p95?: number
+  from: string
+  until: string
+}
+
+/** What a release did to the traffic: the same reading either side of its activation. */
+export type RunTraffic = {
+  status: "available" | "unavailable"
+  reason?: string
+  activationCompletedAt?: string
+  windowMinutes: number
+  before?: TrafficReading
+  after?: TrafficReading
+  latency: boolean
+}
+
+/** A project's last hour on a card: alive, failing, and a line to draw. */
+export type TrafficPulse = {
+  status: "available" | "unavailable"
+  perMinute: number
+  errorRate: number
+  pages: number
+  points: number[]
+}
+
+export type TrafficAlertKind = "error_rate" | "latency" | "silence"
+
+/**
+ * A rule over a deployment's request record, told to the notification
+ * channels once when it crosses its line and once when it comes back.
+ */
+export type TrafficAlert = {
+  id: number
+  projectId: number
+  environmentId: number
+  kind: TrafficAlertKind
+  /** A percentage for error_rate, milliseconds for latency, unused for silence. */
+  threshold: number
+  windowMinutes: number
+  /** Channel ids; empty means every enabled channel. */
+  channels: number[]
+  enabled: boolean
+  state: "ok" | "firing"
+  stateSince?: string
+  observed: number
+  checkedAt?: string
+  firedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TrafficAlertList = {
+  alerts: TrafficAlert[]
+  kinds: TrafficAlertKind[]
 }
 
 /** What Docker did to this deployment's containers, as opposed to what they printed. */

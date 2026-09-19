@@ -12,6 +12,7 @@ import {
 import { Previews } from "@/components/deploy/settings/automation/previews"
 import { Schedules } from "@/components/deploy/settings/automation/schedules"
 import { Webhooks } from "@/components/deploy/settings/automation/webhooks"
+import { TrafficAlerts } from "@/components/deploy/settings/traffic-alerts"
 import { useProject } from "@/components/deploy/project-context"
 
 /**
@@ -42,6 +43,7 @@ export function AutomationSettings({
           ) : (
             <LegacyHook />
           )}
+          <TrafficAlerts projectId={projectId} />
           <RowList aria-label="Automation links">
             <Row href="/deploy/notifications" title="Notification channels" />
           </RowList>

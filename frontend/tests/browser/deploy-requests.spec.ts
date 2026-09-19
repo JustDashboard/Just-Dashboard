@@ -80,7 +80,50 @@ test.describe("a deployment's traffic", () => {
       .toBe(true)
   })
 
-  test("output is still there, and the container's own lines are one press away", async ({
+  test("insights say which page is failing, which client is scanning, and where visitors came from", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button", { name: "Insights", exact: true }).click()
+
+    // The failing path carries its own 5xx count and its own p95, so "p95 is
+    // 412ms" becomes "p95 is 412ms because of /api/checkout".
+    await expect(page.getByText("13 × 5xx · p95 2.84s")).toBeVisible()
+    // A client that tried a dozen doors is named as a scanner, not as a visitor.
+    await expect(page.getByText("scanner · 12 probes")).toBeVisible()
+    await expect(page.getByText("Scanners", { exact: true })).toBeVisible()
+    await expect(page.getByText("www.google.com")).toBeVisible()
+    // Bots are a share, not a guess.
+    await expect(page.getByText("12% bots")).toBeVisible()
+    // An admin can block the scanner from the row.
+    await expect(page.getByRole("button", { name: "Block" }).first()).toBeVisible()
+
+    // Clicking a page narrows the rows to it.
+    await page.getByRole("button", { name: "Show every request to /api/checkout" }).click()
+    await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api/checkout")
+  })
+
+  test("pages only hides what a page load drags in, and the export carries the same window", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const asked: URL[] = []
+    await page.route("**/api/v1/deploy/7/requests*", async (route) => {
+      asked.push(new URL(route.request().url()))
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button", { name: "Pages only", exact: true }).click()
+    await expect.poll(() => asked.some((url) => url.searchParams.get("pages") === "true")).toBe(true)
+    // The export link is the window's own query, so a download is what the
+    // page shows and not the whole record.
+    const href = await page.getByRole("link", { name: "Export" }).getAttribute("href")
+    expect(href).toContain("/api/v1/deploy/7/requests/export?")
+    expect(href).toContain("pages=true")
+  })
+
+  test("a failing request opens onto the container's output and events around that minute", async ({
     page,
   }) => {
     await mockProject(page, {
@@ -100,19 +143,49 @@ test.describe("a deployment's traffic", () => {
         ],
       },
     })
-    await page.route("**/api/v1/logs/**", async (route) => {
-      const url = new URL(route.request().url())
-      if (url.pathname.endsWith("/sources"))
-        return json(route, { sources: [], units: [], roots: ["/var/log"], missing: {} })
-      return json(route, { lines: [], scanned: 0, matched: 0, histogram: [], files: [] })
-    })
     await page.goto("/deploy/7/logs")
+    await page.getByText("/api/checkout").first().click()
 
-    await page.getByRole("button", { name: "Output", exact: true }).click()
-    // The service picker and the workspace's own Live/History strip — the
-    // original pane, kept whole rather than replaced.
-    await expect(page.getByRole("combobox", { name: "Runtime log source" })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Live", exact: true })).toBeVisible()
+    // The container's lines are one press away, on the host Logs page, for the
+    // minute either side — the one time anybody wants them.
+    const output = page.getByRole("link", { name: "Container output around this moment" })
+    await expect(output).toBeVisible()
+    const href = await output.getAttribute("href")
+    expect(href).toContain("/logs?source=docker%3Aabc123")
+    expect(href).toContain("mode=search")
+    expect(href).toContain("since=2026-09-03T11%3A58%3A31")
+
+    await page.getByRole("button", { name: "Container events around this moment" }).click()
+    await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await expect(page.getByText("two minutes either side")).toBeVisible()
+    await page.getByRole("button", { name: "Show everything" }).click()
+    await expect(page.getByText("api-production-r20 exited with status 137")).toBeVisible()
+  })
+
+  test("the readings say whether anybody will be told, and the chart marks the release", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+    // A rule is firing: the line says so with its reading and how long.
+    await expect(page.getByText("1 firing")).toBeVisible()
+    await expect(page.getByText(/4\.2% failing · began/)).toBeVisible()
+    await expect(page.getByRole("link", { name: "Alerts" })).toHaveAttribute(
+      "href",
+      "/deploy/7/settings/automation#alerts",
+    )
+    // Page views ride on the requests tile, and served bytes have their own.
+    await expect(page.getByText("402 page views in the last hour")).toBeVisible()
+    await expect(page.getByText("Served", { exact: true })).toBeVisible()
+    // The live release went live inside the chart's window: a deploy mark.
+    await expect(page.getByLabel(/Release #2 went live at/)).toBeVisible()
+  })
+
+  test("the output tab is gone", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible()
   })
 
   test("events name the exit code, and say whether the dashboard or Docker did it", async ({
@@ -187,6 +260,18 @@ test.describe("a deployment's traffic", () => {
         path: testInfo.outputPath(`deploy-requests-${width}.png`),
         fullPage: true,
       })
+      await page.getByRole("button", { name: "Insights", exact: true }).click()
+      await expect(page.getByText("Pages", { exact: true })).toBeVisible()
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true)
+      await page.screenshot({
+        path: testInfo.outputPath(`deploy-insights-${width}.png`),
+        fullPage: true,
+      })
     }
+    await page.goto("/deploy/7/settings/automation")
+    await expect(page.getByText("Traffic alerts")).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath("deploy-alerts-1280.png"), fullPage: true })
   })
 })

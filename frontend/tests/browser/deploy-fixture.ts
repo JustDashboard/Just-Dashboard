@@ -515,6 +515,25 @@ export async function mockProject(
   }
   let automationSchedules: Record<string, unknown>[] = []
   let notificationChannels: Record<string, unknown>[] = []
+  let trafficAlerts: Record<string, unknown>[] = [
+    {
+      id: 91,
+      projectId: 7,
+      environmentId: 12,
+      kind: "error_rate",
+      threshold: 1,
+      windowMinutes: 5,
+      channels: [],
+      enabled: true,
+      state: "firing",
+      stateSince: new Date(Date.now() - 12 * 60_000).toISOString(),
+      observed: 4.2,
+      checkedAt: now,
+      firedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]
   let notificationTests = 0
   let scopedVariables = [
     {
@@ -695,6 +714,56 @@ export async function mockProject(
       }
     } else if (path === "/deploy/7/requests") {
       body = deploymentRequests(url)
+    } else if (path === "/deploy/7/alerts" && method === "GET") {
+      body = { alerts: trafficAlerts, kinds: ["error_rate", "latency", "silence"] }
+    } else if (path === "/deploy/7/alerts" && method === "POST") {
+      const request = route.request().postDataJSON() as Record<string, unknown>
+      trafficAlerts.push({
+        id: 100 + trafficAlerts.length,
+        projectId: 7,
+        environmentId: 12,
+        kind: request.kind as string,
+        threshold: Number(request.threshold ?? 0),
+        windowMinutes: Number(request.windowMinutes ?? 5),
+        channels: (request.channels as number[]) ?? [],
+        enabled: true,
+        state: "ok",
+        observed: 0,
+        createdAt: now,
+        updatedAt: now,
+      })
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify(trafficAlerts[trafficAlerts.length - 1]),
+      })
+      return
+    } else if (path.startsWith("/deploy/7/alerts/") && path.endsWith("/test")) {
+      body = { delivered: 1, failed: 0, channels: 1 }
+    } else if (path.startsWith("/deploy/7/alerts/") && method === "DELETE") {
+      const id = Number(path.split("/").pop())
+      trafficAlerts = trafficAlerts.filter((alert) => alert.id !== id)
+      await route.fulfill({ status: 204 })
+      return
+    } else if (path === "/deploy/traffic") {
+      body = {
+        "7": {
+          status: "available",
+          perMinute: 21.4,
+          errorRate: 13 / 1284,
+          pages: 402,
+          points: Array.from({ length: 60 }, (_, i) => 15 + (i % 7)),
+        },
+      }
+    } else if (path === "/deploy/7/runs/84/traffic") {
+      body = {
+        status: "available",
+        activationCompletedAt: "2026-09-03T11:30:00Z",
+        windowMinutes: 30,
+        latency: true,
+        before: { requests: 600, pages: 200, perMinute: 20, errorRate: 0.002, p95: 55, from: "2026-09-03T11:00:00Z", until: "2026-09-03T11:30:00Z" },
+        after: { requests: 640, pages: 210, perMinute: 21.3, errorRate: 0.02, p95: 240, from: "2026-09-03T11:30:00Z", until: "2026-09-03T12:00:00Z" },
+      }
     } else if (path === "/deploy/7/lifecycle") {
       body = {
         status: "available",
@@ -1348,6 +1417,7 @@ function deploymentRequests(url: URL) {
       clientErrorRate: 56 / 1284,
       bytes: 41_284_112,
       perMinute: 21.4,
+      pages: 402,
       latency: { p50: 24, p75: 61, p90: 190, p95: 412, p99: 2840, max: 3120, mean: 78 },
       methods: [
         { value: "GET", count: 1180, errors: 4 },
@@ -1360,13 +1430,27 @@ function deploymentRequests(url: URL) {
         { value: "500", count: 13, errors: 13 },
       ],
       paths: [
-        { value: "/healthz", count: 720, errors: 0 },
-        { value: "/api/items", count: 402, errors: 0 },
-        { value: "/api/checkout", count: 92, errors: 13 },
+        { value: "/healthz", count: 720, errors: 0, p95: 1 },
+        { value: "/api/items", count: 402, errors: 0, p95: 61 },
+        { value: "/api/checkout", count: 92, errors: 13, p95: 2840 },
       ],
       hosts: [{ value: "api.example.com", count: 1284, errors: 13 }],
-      clients: [{ value: "127.0.0.1", count: 720, errors: 0 }],
-      agents: [{ value: "Chrome", count: 402, errors: 9 }],
+      clients: [
+        { value: "127.0.0.1", count: 720, errors: 0 },
+        { value: "198.51.100.7", count: 402, errors: 9 },
+        { value: "203.0.113.55", count: 40, errors: 0, refused: 40, probes: 12 },
+      ],
+      agents: [
+        { value: "Chrome", count: 402, errors: 9 },
+        { value: "Googlebot", count: 56, errors: 0 },
+      ],
+      referers: [{ value: "www.google.com", count: 88, errors: 0 }],
+      probes: [
+        { value: "/.env", count: 5, errors: 0, refused: 5, probes: 5 },
+        { value: "/wp-login.php", count: 4, errors: 0, refused: 4, probes: 4 },
+        { value: "/xmlrpc.php", count: 3, errors: 0, refused: 3, probes: 3 },
+      ],
+      scanners: [{ value: "203.0.113.55", count: 40, errors: 0, refused: 40, probes: 12 }],
       buckets: Array.from({ length: 20 }, (_, index) => ({
         start: new Date(base + index * 60_000).toISOString(),
         total: 60 + index,

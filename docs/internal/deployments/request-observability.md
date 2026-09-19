@@ -33,8 +33,14 @@ timeline:
 | View | Question | Source |
 | --- | --- | --- |
 | **Requests** | Is it serving traffic, and how well? | The ingress's access log |
-| **Output** | What did the application print? | The container's stdout/stderr, as before |
+| **Insights** | What does the window add up to — which page fails, who is scanning, where visitors come from? | The same record, faceted |
 | **Events** | What happened to the container? | Docker's own event stream |
+
+The container's own output is no longer a view of this page. For a modern framework it is a startup
+banner and then silence, and a tab that never moves teaches the reader to ignore the page. The lines
+stay one press away from a failing request — "Container output around this moment" opens the host
+Logs page on the live container for the minute either side (the same handoff a run's own logs use) —
+which is the only time anybody wanted them. The run page keeps its runtime-logs view.
 
 The ingress is the right layer for the first because it is the one place every request passes
 through regardless of what the application chose to write about itself — and it works for every
@@ -144,6 +150,20 @@ new live file, a vanished inode reading as absent.
 
 `accesslog.Collector` folds the window into one `Result` in a single pass:
 
+- **Page views** (`Summary.Pages`, `Filter.PagesOnly`) are documents a person opened: `IsPage` drops
+  framework prefetches (`_rsc=`, `__nextDataReq`), build-output prefixes (`/_next/`, `/_nuxt/`,
+  `/assets/`, …), asset extensions, `HEAD` and `OPTIONS`; a refused scanner probe is not a visit
+  either. The "Pages only" chip filters on it; the readings tile says "N page views" beside the rate.
+- **Probes and scanners** (`IsProbe`, `Summary.Probes`, `Summary.Scanners`): a refused request for
+  one of the paths every scanner tries — `/.env`, `/wp-login.php`, `/xmlrpc.php`, `/.git`,
+  `/phpmyadmin`, … — or for a `.php`/`.asp`/`.sql` file the site does not serve. A client with three
+  or more is named a scanner. Every client facet carries `Refused` and `Probes`, so a visitor who
+  followed a dead link and a script trying doors are told apart on the row.
+- **Referers** are grouped by host, the site's own host excluded: a link followed within the site is
+  navigation, not a source.
+- **Per-path p95**: a bounded sample per path (128 samples, 2,000 paths) so the top-paths table says
+  which route the slow tenth belongs to.
+
 - **Rows** are the newest `Limit`, and the readings are computed over the *whole* window — a table
   showing the last 500 requests must not report a p95 of only those 500.
 - **Latency** is a distribution (`p50/p75/p90/p95/p99/max/mean`), nearest-rank rather than
@@ -172,6 +192,10 @@ addresses, so the reason shown is the operator's next move.
 | `GET /deploy/{id}/requests` | The window: rows, readings, facets, chart columns |
 | `GET /deploy/{id}/requests/stream?after=<cursor>` | WebSocket: every 400ms, what the store holds past the cursor, batched — a deployment under load writes thousands of lines a second and one frame each would spend the budget on envelopes |
 | `GET /deploy/{id}/lifecycle` | Docker events for this environment's containers |
+| `GET /deploy/{id}/requests/export?…` | The window as CSV, every matching request oldest first (up to 50k) — the page's own query, not the whole record |
+| `GET /deploy/{id}/runs/{run}/traffic` | Requests/min, 5xx share, p95 and page views over the half hour before and after the run's activation; the after-window is cut at now |
+| `GET /deploy/traffic` | Every project's last hour — rate, 5xx share, page views and one point per minute — read from the held record when it is under a minute old, so a fleet of forty cards is one answer rather than forty file reads |
+| `GET/POST /deploy/{id}/alerts`, `PUT/DELETE …/{alert}`, `POST …/{alert}/test` | Traffic alert rules (below); writes need `system.admin` |
 
 An unbounded read walks the whole retained record to answer a question about "now", so a missing
 window defaults to the last 24 hours and is reported back — an empty answer is never read as "nothing
@@ -186,6 +210,40 @@ the log, however many pages are open on it.
 These sit on the same authenticated group as every other deployment read, with no extra capability.
 That matches the existing boundary rather than widening it: `/logs` already serves
 `/var/log/nginx/access.log`, which is the same data for the same host.
+
+## Traffic alerts
+
+A rule watches one environment's record: `error_rate` (share of requests answered 5xx, as a
+percentage), `latency` (the window's p95, milliseconds) or `silence` (a record that has held traffic
+holds none for the window — at least five minutes, or a quiet minute is an outage). Rows live in
+`deploy_traffic_alerts` (additive, `CREATE TABLE IF NOT EXISTS`); `AutomationStore` owns them
+(`ListTrafficAlerts`, `CreateTrafficAlert`, `UpdateTrafficAlert`, `DeleteTrafficAlert`,
+`EnabledTrafficAlerts`), and a rule naming a channel that does not exist is refused at the form.
+
+`TrafficAlertEvaluator` takes every enabled rule's reading once a minute from the held record
+(`Window` with `Since: now − window`), decides `ok` or `firing`, and announces only the transition:
+`traffic.firing` on the way over, `traffic.recovered` on the way back — a rule that stays crossed for
+an hour is one message, not sixty. A route with no record is new, not silent, and is skipped; a
+latency rule over nginx's duration-less record has nothing to say and is skipped; an unreadable record
+changes nothing. The state, the reading and when it entered the state are written back so the page
+can say "firing since 03:12, 4.2%" without waiting a minute.
+
+Delivery is the notification channels' own: the two events are rendered by `renderTrafficAlert` into
+the same provider payloads a run's outcome takes (Discord, Slack, Telegram, e-mail; a webhook gets the
+envelope with an `alert` block verbatim). The rule's channels, or every enabled channel when it names
+none. "Send test" delivers the rule as if it had just fired, at twice its limit, with `[test]` in the
+title so nobody wakes up for it.
+
+The Logs page carries one line under its readings — no alerts, all quiet with the rules as sentences,
+or what is firing and since when — with the Automation settings card a press away. The card lists
+rules as sentences with their state, and its form speaks the rule back before it is saved.
+
+## Security intel and blocking
+
+The Insights view's Clients list names scanners and, for `system.admin`, offers **Block** on each
+address — `POST /firewall/rules` with a source-only deny, exactly what the Security pages' address
+verbs do, so a scanner seen here is stopped at the firewall without changing pages. Loopback and
+private addresses never get the verb.
 
 ## Lifecycle
 
@@ -221,7 +279,16 @@ of a host's logs.
 
 ## Frontend
 
-`ProjectLogs` is a `StatGrid` of four readings over a `Pane` with the three views. The readings are
+`ProjectLogs` is a `StatGrid` of five readings (requests/min with page views, failing share, p95,
+bytes served, container events — the figures count up on arrival through `NumberTicker`) and the
+alerts line over a `Pane` with the three views. The chart carries markers: a release going live
+(`releases[].activatedAt`, brand), a container exit or OOM kill (danger), a restart (warning) — a
+spike of red with a deploy mark at its foot is a different afternoon from the same spike with none.
+A failing request's detail opens onto the container's output around that minute (host Logs page) and
+onto Events scoped to two minutes either side. The Overview carries a Traffic panel (rate, failing
+share, a sparkline of the hour) and each fleet card a sparkline with the rate, both from
+`/deploy/traffic`; the run page's Metrics view leads with `RunTrafficPanel` — requests/min, failing
+share and p95 before → after activation. The readings are
 the page's own, over a fixed last hour, so they hold still while the reader narrows the rows beneath
 them — which is what lets the error rate be the thing that sent them to Output in the first place.
 Each is a rate or a share rather than a count: a figure whose meaning depends on a control somewhere
@@ -235,6 +302,12 @@ location mark and a chart of served requests is neither.
 
 The socket opens with the window's cursor (`after=`), and rows are keyed by sequence, so a live
 prepend neither remounts the list nor shows a request twice.
+
+`TrafficFacets` (Insights) draws each reading as a `BarList` — Tremor's BarList pattern rewritten
+onto the tokens as a house primitive in `components/bar-list.tsx`: the meter's own track behind a
+name, the figure at the right in `.numeric`, and a signal segment inside the bar for the failing or
+refused share, so "the busiest" and "the failing" are one row read two ways. A path row narrows the
+rows to it; a client row narrows to the client and, for an admin, blocks it.
 
 `RequestConsole` draws rows in the log console's own anatomy rather than a `<table>`: a request record
 is read the way a log is read, and a nine-column table at this density spends its width on cell

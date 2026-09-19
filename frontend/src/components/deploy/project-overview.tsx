@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { percent, relativeTime } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type {
+  TrafficPulse,
   ContainerHistory,
   ContainerStats,
   DeploymentDiagnosis,
@@ -38,6 +39,7 @@ import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
 import { Sparkline } from "@/components/metrics/sparkline"
+import { perMinute } from "@/lib/requests"
 import { NumberTicker } from "@/components/ui/number-ticker"
 
 /**
@@ -222,6 +224,23 @@ export function ProjectOverview() {
                 Start your first deployment to see its build and release here.
               </EmptyNote>
             )}
+          </PanelBody>
+        </Panel>
+
+        <Panel plain>
+          <PanelHeader
+            title="Traffic"
+            actions={
+              <Link
+                href={`/deploy/${project.projectId}/logs`}
+                className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+              >
+                Requests <ArrowRight className="size-3" />
+              </Link>
+            }
+          />
+          <PanelBody>
+            <TrafficTiles projectId={project.projectId} />
           </PanelBody>
         </Panel>
 
@@ -419,4 +438,48 @@ function useFindings(
     }
     return findings
   }, [diagnosis, router])
+}
+
+/**
+ * The last hour at the ingress: how much, how much failing, and the line of
+ * it. Read from the record the server holds, content with a reading a minute
+ * old — this is a glance, and the Logs page is where the rows are.
+ */
+function TrafficTiles({ projectId }: { projectId: number }) {
+  const pulse = usePoll<Record<string, TrafficPulse>>(
+    (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
+    30000,
+    [],
+  )
+  const mine = pulse.data?.[String(projectId)]
+  if (!mine || mine.status !== "available") {
+    return (
+      <EmptyNote className="px-0 py-5 text-left">
+        {pulse.data ? "No requests recorded yet. They appear here once the site is reached." : "Reading the request record…"}
+      </EmptyNote>
+    )
+  }
+  return (
+    <StatGrid columns={2}>
+      <StatTile
+        key={`rpm:${mine.perMinute}`}
+        label="Requests"
+        value={<NumberTicker value={Number(perMinute(mine.perMinute))} decimalPlaces={mine.perMinute < 10 ? 2 : mine.perMinute < 100 ? 1 : 0} />}
+        trailing="per minute"
+        hint={
+          <span className="flex items-center gap-2">
+            <Sparkline values={mine.points} label="Requests per minute, last hour" width={72} height={20} />
+            {mine.pages.toLocaleString()} page views
+          </span>
+        }
+      />
+      <StatTile
+        key={`err:${mine.errorRate}`}
+        label="Failing"
+        value={percent(mine.errorRate * 100, 1)}
+        tone={mine.errorRate > 0.01 ? "danger" : "default"}
+        hint="answered 5xx in the last hour"
+      />
+    </StatGrid>
+  )
 }

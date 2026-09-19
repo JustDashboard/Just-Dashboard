@@ -8,6 +8,7 @@ import { Sparkline } from "@/components/metrics/sparkline"
 import { bytes, percent } from "@/lib/format"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
+import { RunTrafficPanel } from "@/components/deploy/run-traffic"
 
 type MetricPoint = {
   ts?: string
@@ -81,6 +82,8 @@ export function RunMetrics({ projectId, runId }: { projectId: number; runId: num
   const after = data && summarize(seriesOf(data.after)[0]?.points ?? [])
 
   return (
+    <div className="space-y-6">
+    <RunTrafficPanel projectId={projectId} runId={runId} />
     <Panel plain>
       <PanelHeader title="Metrics around activation" />
       <PanelBody flush className="space-y-4 pt-3">
@@ -124,6 +127,7 @@ export function RunMetrics({ projectId, runId }: { projectId: number; runId: num
         )}
       </PanelBody>
     </Panel>
+    </div>
   )
 }
 
