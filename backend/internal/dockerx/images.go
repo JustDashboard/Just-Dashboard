@@ -218,7 +218,7 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 	for _, v := range res.Volumes {
 		vol := Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
-			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: v.Labels, RefCount: -1,
+			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
 		}
 		if vol.Labels == nil {
 			vol.Labels = map[string]string{}

@@ -58,8 +58,17 @@ func (c *Client) CreateVolume(ctx context.Context, spec VolumeSpec) (*Volume, er
 	c.invalidateDiskUsage()
 	return &Volume{
 		Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
-		CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: v.Labels, RefCount: 0,
+		CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: 0,
 	}, nil
+}
+
+// labelsOrEmpty keeps a volume without labels an empty object on the wire. A
+// nil map marshals to null, and the client reads labels as an object.
+func labelsOrEmpty(labels map[string]string) map[string]string {
+	if labels == nil {
+		return map[string]string{}
+	}
+	return labels
 }
 
 // VolumeDetail is a volume plus the only two things anybody opens it to find
@@ -97,7 +106,7 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 	d := &VolumeDetail{
 		Volume: Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
-			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: v.Labels, RefCount: -1,
+			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
 		},
 		UsedBy:  []VolumeUser{},
 		Options: v.Options,

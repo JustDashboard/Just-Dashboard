@@ -175,7 +175,7 @@ func (s *Session) setTitle(title string) {
 // browser if it changed. Cheap enough for the listing poll: one ioctl and a
 // handful of small /proc reads per window.
 func (s *Session) Activity() Activity {
-	fg, busy, process, title := s.inspect()
+	fg, busy, process, title, transition := s.inspect()
 	var ticks int64
 	sampled := false
 	if busy {
@@ -206,8 +206,9 @@ func (s *Session) Activity() Activity {
 	working := busy && (output || cpu)
 
 	next := Activity{Title: title, Busy: busy, Process: process, Working: working}
-	if busy && now.Sub(s.job.since) < holdOff {
-		// A job younger than the hold-off is not news yet. What was published
+	if transition || (busy && now.Sub(s.job.since) < holdOff) {
+		// A job younger than the hold-off is not news yet, and a terminal
+		// between a job and its shell is not news either. What was published
 		// stands until it either lasts or ends.
 		next = s.activity
 	} else {
@@ -226,7 +227,7 @@ func (s *Session) Activity() Activity {
 	// Keep looking while there is something to notice that no output will
 	// announce: a job waiting out its hold-off, a silent job's CPU, a run of
 	// output that is about to count as quiet.
-	if busy || (!s.lastOutput.IsZero() && now.Sub(s.lastOutput) <= quietAfter) {
+	if busy || transition || (!s.lastOutput.IsZero() && now.Sub(s.lastOutput) <= quietAfter) {
 		s.armTickLocked(tickEvery)
 	}
 	var targets []chan Activity
@@ -308,20 +309,23 @@ func (s *Session) WindowNamed() bool {
 
 // inspect reads the raw facts: which group holds the terminal, whether that is
 // a job rather than the prompt, what the job is called, and the title if the
-// group that set it is the one holding the terminal.
-func (s *Session) inspect() (fg int, busy bool, process, title string) {
+// group that set it is the one holding the terminal. A group that still holds
+// the terminal but has no live process in it is a job that has just ended and
+// a shell that has not yet taken the terminal back; that instant is reported
+// as a transition rather than as an idle prompt with no title.
+func (s *Session) inspect() (fg int, busy bool, process, title string, transition bool) {
 	fg = s.foregroundGroup()
 	s.mu.Lock()
 	stored, owner, root := s.title, s.titleOwner, s.PID
 	s.mu.Unlock()
 	if fg <= 0 {
-		return 0, false, "", ""
+		return 0, false, "", "", false
 	}
-	busy, process = foregroundJob(fg, root)
+	busy, process, transition = foregroundJob(fg, root)
 	if owner == fg {
 		title = stored
 	}
-	return fg, busy, process, title
+	return fg, busy, process, title, transition
 }
 
 // foregroundGroup asks the kernel which process group holds the terminal.
@@ -358,13 +362,13 @@ func (s *Session) foregroundGroup() int {
 // has already gone: in `cat big.log | less` the leader is `cat`, which finishes
 // long before `less` does, yet the terminal stays the pipeline's until the
 // shell takes it back. Whatever the shell still has in that group is the job.
-func foregroundJob(group, root int) (busy bool, process string) {
+func foregroundJob(group, root int) (busy bool, process string, gone bool) {
 	argv := cmdline(group)
 	if argv == nil {
 		argv = groupMember(group, root)
 	}
 	if argv == nil {
-		return false, ""
+		return false, "", true
 	}
 	probe := argv
 	if wrappers[programName(argv[0])] {
@@ -377,9 +381,9 @@ func foregroundJob(group, root int) (busy bool, process string) {
 		}
 	}
 	if atPrompt(probe) {
-		return false, ""
+		return false, "", false
 	}
-	return true, commandName(argv)
+	return true, commandName(argv), false
 }
 
 // groupMember finds a live process in the shell's part of the tree that

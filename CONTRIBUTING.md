@@ -53,11 +53,18 @@ carries no licensing question at all.
   an unrelated server. Run `bun run build` after source changes before running browser tests alone.
   `JD_BROWSER_BASE_URL` explicitly selects an externally managed test frontend when needed.
 - `.github/workflows/verify.yml` runs the backend, deployment race, frontend and live Docker gates
-  on fresh Ubuntu 24.04 runners for pushes and pull requests. Go and Bun come from `go.mod` and
-  `package.json`; dependencies use the frozen Bun lockfile. Race packages run serially on a dedicated
-  job so frontend builds do not compete with the fleet latency check. Required live fixtures fail CI
-  if skipped or absent. Logs and browser failure traces are retained for 30 days, including failed runs.
-  CI does not replace public TLS, clean-host installation, remote-host, architecture or soak acceptance.
+  for every push, and for pull requests from forks, on a **self-hosted runner** on the release host
+  (labels `self-hosted, linux, x64, just-dashboard`), because the suites need a real Docker daemon, host tools and a shell
+  that GitHub's hosted runners do not provide. The runner is a systemd service under `~/actions-runner`
+  on that machine, running as `ubuntu`; one job runs at a time. Go and Bun come from `go.mod` and
+  `package.json`; dependencies use the frozen Bun lockfile; Playwright's Chromium is installed into the
+  runner user's cache. Race packages run serially on a dedicated job so frontend builds do not compete
+  with the fleet latency check. Required live fixtures fail CI if skipped or absent. Logs and browser
+  failure traces are retained for 30 days, including failed runs. The live job ends by pruning the
+  BuildKit cache its fixtures fill back to two gigabytes, because the runner shares the host's Docker
+  daemon and a few unpruned runs fill the disk. Workflows from outside contributors wait for approval
+  before they touch the runner. CI does not replace public TLS, clean-host
+  installation, remote-host, architecture or soak acceptance.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run

@@ -428,8 +428,18 @@ func startCutoverTraffic(t *testing.T, endpoint string) (*cutoverTraffic, func()
 				select {
 				case <-stop:
 					return
-				default:
+				case <-time.After(20 * time.Millisecond):
 				}
+				// The pause is the difference between a continuity test and a
+				// throughput test. nginx opens a new upstream connection per
+				// proxied request (the rendered route carries no upstream
+				// keepalive), and the proxy's side of each closed one sits in
+				// TIME_WAIT for a minute. Four unthrottled clients on a fast
+				// host open more of those per second than the container's
+				// ephemeral port range can turn over, and from then on every
+				// proxied request fails with a 502 that says nothing about
+				// cutovers. Fifty requests a second per client is still far
+				// more than a reload can hide a dropped request behind.
 				request, _ := http.NewRequest("GET", endpoint+"/", nil)
 				request.Host = cutoverDomain
 				response, err := client.Do(request)

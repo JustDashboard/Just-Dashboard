@@ -12,6 +12,13 @@ concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every push runs the gates on the self-hosted runner, which takes one job at
+# a time. A pull request from a branch in this repository is already covered by
+# the push that created it, and a second run for the same commit both queued
+# behind the first and, when the newer cancelled the older, showed on the pull
+# request as a failure. The pull-request event therefore only runs for forks,
+# whose pushes never reach this repository.
+
 env:
   JD_TEST_POSTGRES_DSN: postgres://jd_test:jd_test@127.0.0.1:1/jd_test?sslmode=disable
   JD_TEST_MYSQL_DSN: jd_test:jd_test@tcp(127.0.0.1:1)/jd_test
@@ -23,7 +30,8 @@ env:
 
 jobs:
   backend:
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 25
     defaults:
       run:
@@ -36,7 +44,10 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+          # The runner's home persists between jobs, so the module and build
+          # caches are already on disk; restoring a cache archive over them
+          # fails on files that exist, and saving one afterwards fails the job.
+          cache: false
       - name: Build, vet and test
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
@@ -56,7 +67,8 @@ jobs:
           retention-days: 30
 
   frontend:
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 20
     defaults:
       run:
@@ -72,7 +84,7 @@ jobs:
       - name: Install locked dependencies and Chromium
         run: |
           bun install --frozen-lockfile
-          bun run test:browser:install --with-deps
+          bun run test:browser:install
       - name: Lint, unit tests, production build and browser gate
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
@@ -93,7 +105,8 @@ jobs:
           retention-days: 30
 
   deployment-live:
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 45
     env:
       JD_DEPLOY_LIVE: "1"
@@ -108,8 +121,11 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: Verify disposable runner infrastructure
+          # The runner's home persists between jobs, so the module and build
+          # caches are already on disk; restoring a cache archive over them
+          # fails on files that exist, and saving one afterwards fails the job.
+          cache: false
+      - name: Verify runner tooling
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           docker version | tee "$RUNNER_TEMP/jd-ci/docker-version.txt"
@@ -141,3 +157,13 @@ jobs:
           name: deployment-live-evidence
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
+      - name: Return the build cache the fixtures filled
+        # The runner shares the release host's Docker daemon. One pass of the
+        # live fixtures leaves around ten gigabytes of BuildKit cache behind,
+        # which filled the disk after three runs; the host's own deployments
+        # rebuild their layers, they do not depend on them being kept.
+        if: always()
+        run: |
+          docker builder prune --all --force --keep-storage 2GB
+          docker image prune --force
+          df -h / | tail -1
