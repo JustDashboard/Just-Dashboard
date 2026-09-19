@@ -78,15 +78,13 @@ export const CLASS_TEXT: Record<StatusClass, string> = {
 export const CLASS_DOT: Record<StatusClass, string> = {
   "5xx": "bg-destructive",
   "4xx": "bg-warning",
-  "3xx": "bg-foreground/30",
-  // Deliberately faint. On a working deployment 2xx is ninety-five per cent of
-  // every column, and at a mid ink the chart was a wall of grey with the
-  // thirteen-request red sliver — the only thing anyone is looking for —
-  // invisible on top of it. The column's *height* is the volume reading; its
-  // colour is reserved for what went wrong.
-  "2xx": "bg-foreground/18",
-  "1xx": "bg-muted-foreground/25",
-  other: "bg-muted-foreground/20",
+  "3xx": "bg-muted-foreground",
+  // The chart's own first colour, as every primary series on the Metrics
+  // page takes: the ok share is the chart's ground, and a chip whose dot is
+  // the series' colour is a legend, not a decoration.
+  "2xx": "bg-chart-1",
+  "1xx": "bg-muted-foreground/60",
+  other: "bg-muted-foreground/40",
 }
 
 /** The rule down the left of a row. Only what needs finding draws one. */

@@ -179,11 +179,11 @@ export function RequestsWorkspace({
 
       {data.summary.buckets.length > 0 && (
         <RequestChart
-          key={`${params.since}:${data.observedAt}`}
-          className="animate-rise"
+          key={`chart:${params.since}`}
           buckets={data.summary.buckets}
           bucketSeconds={data.summary.bucketSeconds}
           latencyKnown={data.latency}
+          showLatency={view === "insights"}
           markers={markers}
           onZoom={(from, to) =>
             onQueryChange({
@@ -197,7 +197,7 @@ export function RequestsWorkspace({
       )}
 
       {view === "insights" ? (
-        <div key={`${params.since}:${data.observedAt}`} className="min-h-0 flex-1 animate-rise overflow-auto">
+        <div key={`insights:${params.since}`} className="min-h-0 flex-1 animate-rise overflow-auto">
           <TrafficFacets
             summary={data.summary}
             slowest={data.slowest}

@@ -281,8 +281,8 @@ of a host's logs.
 
 `ProjectLogs` is a `StatGrid` of five readings (requests/min with page views, failing share, p95,
 bytes served, container events — the figures count up on arrival through `NumberTicker`) and the
-alerts line over a `Pane` with the three views. The chart carries markers: a release going live
-(`releases[].activatedAt`, brand), a container exit or OOM kill (danger), a restart (warning) — a
+alerts line over a `Pane` with the three views. The chart carries marks through the house chart's `events`: a release going live
+(`releases[].activatedAt`, the Metrics page's deploy colour), a container exit or OOM kill (danger), a restart (warning) — a
 spike of red with a deploy mark at its foot is a different afternoon from the same spike with none.
 A failing request's detail opens onto the container's output around that minute (host Logs page) and
 onto Events scoped to two minutes either side. The Overview carries a Traffic panel (rate, failing
@@ -316,10 +316,15 @@ pausing holds what arrives rather than dropping it, both carried over from the l
 `content-visibility` rather than a virtualiser, for the same three reasons: an honest scrollbar, real
 row heights, and the browser's own find.
 
-`RequestChart` stacks the families and rides the p95 over them as a row of marks. The two readings are
-one chart deliberately: a wall of red with a flat p95 is a deployment refusing requests, and the same
-red with the p95 climbing is one falling over. Those are different afternoons, and two charts side by
-side make the reader correlate them by eye.
+`RequestChart` goes through `components/metrics/` like every chart (§10): a `ChartPanel` of request
+volume as the chart's ramped area with 4xx and 5xx as lines that sit on the floor until they don't,
+and a second, shorter `ChartPanel` of the p95 on the same time axis — a wall of red with a flat p95 is
+a deployment refusing requests, the same red with the p95 climbing is one falling over. Numeric time
+axis, synced crosshair readout, drag-to-narrow and `events` for the marks come with the house chart;
+the legend is a one-line one, because here the chart is a row of a workspace, not the page. A first
+version hand-drew stacked columns to mirror the log histogram and stacked the families solid; on a
+working deployment the ok share is ninety-five per cent of every column, and a pale slab that size
+swallowed the red sliver that is the only thing anyone looks for.
 
 ### On component libraries
 

@@ -99,8 +99,9 @@ test.describe("a deployment's traffic", () => {
     // An admin can block the scanner from the row.
     await expect(page.getByRole("button", { name: "Block" }).first()).toBeVisible()
 
-    // Clicking a page narrows the rows to it.
-    await page.getByRole("button", { name: "Show every request to /api/checkout" }).click()
+    // Clicking a page narrows the rows to it. Two rows name this path — the
+    // Pages list and the Slowest list — and either does.
+    await page.getByRole("button", { name: "Show every request to /api/checkout" }).first().click()
     await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api/checkout")
   })
 
@@ -166,6 +167,27 @@ test.describe("a deployment's traffic", () => {
     page,
   }) => {
     await mockProject(page)
+    // A container exit inside the chart's window, so there is a mark to draw;
+    // the fixture's own events sit at "now", outside a window fixed in the past.
+    await page.route("**/api/v1/deploy/7/lifecycle*", (route) =>
+      json(route, {
+        status: "available",
+        watching: true,
+        events: [
+          {
+            time: "2026-09-03T11:52:00Z",
+            type: "container",
+            action: "die",
+            name: "api-production-r20",
+            exitCode: "137",
+            message: "api-production-r20 exited with status 137",
+            level: "error",
+            source: "daemon",
+            owner: { "environment-id": "12" },
+          },
+        ],
+      }),
+    )
     await page.goto("/deploy/7/logs")
     // A rule is firing: the line says so with its reading and how long.
     await expect(page.getByText("1 firing")).toBeVisible()
@@ -177,8 +199,15 @@ test.describe("a deployment's traffic", () => {
     // Page views ride on the requests tile, and served bytes have their own.
     await expect(page.getByText("402 page views in the last hour")).toBeVisible()
     await expect(page.getByText("Served", { exact: true })).toBeVisible()
-    // The live release went live inside the chart's window: a deploy mark.
-    await expect(page.getByLabel(/Release #2 went live at/)).toBeVisible()
+    // The chart is the house one — stacked by status family, with the live
+    // release's activation drawn as a mark inside the window.
+    await expect(page.getByText("Requests", { exact: true }).first()).toBeVisible()
+    await expect(page.getByText("5xx server error").first()).toBeVisible()
+    // The p95 chart lives on Insights, where the readings are, not over the rows.
+    await expect(page.getByText("Slowest tenth", { exact: true })).toHaveCount(1)
+    await page.getByRole("button", { name: "Insights", exact: true }).click()
+    await expect(page.getByText("Slowest tenth", { exact: true })).toHaveCount(2)
+    await expect.poll(() => page.locator(".recharts-reference-line").count()).toBeGreaterThan(0)
   })
 
   test("the output tab is gone", async ({ page }) => {
