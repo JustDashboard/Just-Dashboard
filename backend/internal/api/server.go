@@ -48,6 +48,9 @@ type Server struct {
 	endpointCache    string
 	endpointCachedAt time.Time
 
+	// The icons deployed websites declare, read once an hour per project.
+	favicons faviconCache
+
 	modules moduleSet
 }
 

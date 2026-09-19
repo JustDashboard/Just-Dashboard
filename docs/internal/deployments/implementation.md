@@ -761,10 +761,22 @@ authenticated, non-cacheable static HTML wrapper with no scripts. Its CSP permit
 from the recorded endpoint's origin and allows the wrapper itself to be framed only by this dashboard.
 This is a deliberate exception to the API's default frame denial; the dashboard document's CSP stays
 unchanged. The embedded website is sandboxed without top navigation, popups, or downloads. No website
-request is made by the backend and dashboard request headers are never forwarded to it. The browser
+request is made by the backend for the preview and dashboard request headers are never forwarded to
+it. The browser
 applies its normal cookie and mixed-content policies. Sites that disallow embedding, require login,
 or use an insecure URL under an HTTPS dashboard may require the direct website link. A preview is
 not a deployment health check and does not bypass the site's own framing policy.
+
+`GET /deploy/{id}/favicon` is the one request the backend makes to a deployed website, so a project
+card and the project header can carry the site's own icon (the dashboard's image policy allows only
+its own origin). It reads the recorded endpoint's page for `<link rel="icon">` (then
+`apple-touch-icon`), falling back to `/favicon.ico`, `/favicon.png` and `/apple-touch-icon.png`.
+Every request stays on the recorded scheme and host, port included: a declared icon or a redirect
+anywhere else is refused, not followed. It reads at most 512 KB of page and 1 MB of icon within five
+seconds, accepts only a response that is an image, and remembers each project's answer for an hour
+(an absence for ten minutes). The icon is served with `nosniff`, a sandboxing CSP and private
+caching, so an SVG opened directly is a picture and not a document; `404 favicon_unavailable` means
+the card keeps its workload glyph.
 
 Deployments carries the delivery insights, filter chips and the run rows — status, duration, title,
 commit subject, then branch (or the requested tag or commit) · sha · trigger · time. A row's menu

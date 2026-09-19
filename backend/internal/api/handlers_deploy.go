@@ -37,6 +37,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
 		r.Method(http.MethodGet, "/{id}/preview-frame", s.handle(s.handleDeploymentPreviewFrame))
+		r.Method(http.MethodGet, "/{id}/favicon", s.handle(s.handleDeploymentFavicon))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
 		r.Method(http.MethodGet, "/{id}/runs/{run}", s.handle(s.handleDeploymentRunGet))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
