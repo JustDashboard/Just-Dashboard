@@ -1,7 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowRight, LockClosed, RefreshClockwise, Warning } from "@/components/icons"
+import {
+  Box,
+  Database,
+  Layers,
+  LockClosed,
+  Puzzle,
+  RefreshClockwise,
+  Servers,
+  Warning,
+} from "@/components/icons"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useGitHubAccount } from "@/hooks/use-github"
@@ -15,6 +24,7 @@ import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
+import { BentoCard, BentoGrid } from "@/components/ui/bento-grid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -26,6 +36,7 @@ import {
 } from "@/components/ui/select"
 import Link from "next/link"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { cn } from "@/lib/utils"
 import {
   inspectAndPrepare,
   repositoryName,
@@ -33,15 +44,36 @@ import {
   type SourceTabKey,
 } from "@/components/deploy/new-project/draft"
 
-const SHORTCUTS: { tab: SourceTabKey; title: string; hint: string }[] = [
-  { tab: "template", title: "Template", hint: "Reviewed apps with ready-to-use defaults" },
-  { tab: "database", title: "Database", hint: "Postgres, MySQL, Redis, MongoDB & more" },
-  { tab: "image", title: "Docker image", hint: "Run an image from any registry" },
-  { tab: "compose", title: "Compose stack", hint: "An application and its services, together" },
+const SHORTCUTS: {
+  tab: SourceTabKey
+  title: string
+  hint: string
+  icon: React.ComponentType<{ className?: string }>
+}[] = [
+  {
+    tab: "template",
+    title: "Template",
+    hint: "Reviewed apps with ready-to-use defaults",
+    icon: Puzzle,
+  },
+  {
+    tab: "database",
+    title: "Database",
+    hint: "Postgres, MySQL, Redis, MongoDB & more",
+    icon: Database,
+  },
+  { tab: "image", title: "Docker image", hint: "Run an image from any registry", icon: Box },
+  {
+    tab: "compose",
+    title: "Compose stack",
+    hint: "An application and its services, together",
+    icon: Layers,
+  },
   {
     tab: "existing",
     title: "Existing workload",
     hint: "Bring a running service into your projects",
+    icon: Servers,
   },
 ]
 
@@ -391,18 +423,22 @@ export function SourceGit({
       </div>
       <Panel plain>
         <PanelHeader title="Start with something ready" />
-        <PanelBody flush>
-          <RowList aria-label="Other ways to start">
-            {SHORTCUTS.map((shortcut) => (
-              <Row
+        <PanelBody flush className="pt-4">
+          {/* The five other ways in, as a bento: the first is the widest
+              because a reviewed template is the shortest path to something
+              running. Each cell is a button that switches the strip above. */}
+          <BentoGrid className="grid-cols-2" aria-label="Other ways to start">
+            {SHORTCUTS.map((shortcut, index) => (
+              <BentoCard
                 key={shortcut.tab}
+                name={shortcut.title}
+                description={shortcut.hint}
+                icon={shortcut.icon}
                 onClick={() => onSwitchTab(shortcut.tab)}
-                title={shortcut.title}
-                subtitle={shortcut.hint}
-                trailing={<ArrowRight className="size-3.5 text-muted-foreground" />}
+                className={cn(index === 0 && "col-span-2")}
               />
             ))}
-          </RowList>
+          </BentoGrid>
         </PanelBody>
       </Panel>
       <FormNote className="lg:col-span-2">
