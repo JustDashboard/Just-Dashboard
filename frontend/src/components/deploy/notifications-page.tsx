@@ -1,10 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState, type RefObject } from "react"
 import Link from "next/link"
-import { Bell, ClockRewind, Lightning, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
+import {
+  ClockRewind,
+  CloudUpload,
+  Lightning,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Trash,
+} from "@/components/icons"
 import { del, errorMessage, get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -16,9 +26,9 @@ import type {
   NotificationEvent,
 } from "@/lib/types"
 import { Page, PageHeader } from "@/components/page"
-import { Panel, Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
@@ -35,6 +45,8 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 
 /**
  * Where a deployment outcome is announced.
@@ -252,10 +264,6 @@ export function NotificationsPage() {
         }
       />
 
-      <Notice title="Channels are shared across every project">
-        Channels announce every deployment outcome across all projects and link back to the run.
-      </Notice>
-
       {secret && (
         <Well className="space-y-2">
           <p className="text-body font-medium">Signing secret — shown once</p>
@@ -270,99 +278,112 @@ export function NotificationsPage() {
         </Well>
       )}
 
-      <Panel plain>
-        {channels.error ? (
-          <ErrorState error={channels.error} onRetry={channels.refresh} />
-        ) : channels.loading && !channels.data ? (
-          <LoadingPanel rows={3} />
-        ) : (channels.data?.length ?? 0) === 0 ? (
-          <EmptyState
-            icon={Bell}
-            title="No notification channels"
-            description="Add Discord, Slack, Telegram, e-mail or a signed webhook to hear about deployments as they finish."
+      {channels.error ? (
+        <ErrorState error={channels.error} onRetry={channels.refresh} />
+      ) : channels.loading && !channels.data ? (
+        <LoadingRows rows={3} />
+      ) : (
+        // Framed, like the GitHub App's picture on Credentials: a drawing of
+        // one thing and the places it goes needs an edge to read as one.
+        <div className="animate-rise overflow-hidden rounded-xl border bg-card px-6 py-7 lg:px-8 lg:py-9">
+          <Fanout
+            channels={channels.data ?? []}
+            onAdd={admin ? (kind) => setDraft(emptyDraft(kind)) : undefined}
           />
-        ) : (
-          <RowList aria-label="Notification channels" className="animate-rise">
-            {channels.data?.map((channel) => {
-              const verbs: Verb[] = []
-              if (admin) {
+        </div>
+      )}
+
+      <Panel plain>
+        <PanelHeader title="Channels" />
+        <PanelBody flush>
+          {channels.error || (channels.loading && !channels.data) ? null : (channels.data?.length ??
+              0) === 0 ? (
+            // The picture above already offers the five kinds; the list only
+            // has to say it is empty.
+            <EmptyNote>No notification channels</EmptyNote>
+          ) : (
+            <RowList aria-label="Notification channels" className="animate-rise">
+              {channels.data?.map((channel) => {
+                const verbs: Verb[] = []
+                if (admin) {
+                  verbs.push({
+                    key: "test",
+                    label: "Send test",
+                    detail: "Deliver a sample message to this channel right now.",
+                    icon: Lightning,
+                    inline: true,
+                    disabled: testingId === channel.id,
+                    run: () => void test(channel),
+                  })
+                }
+                if (admin) {
+                  verbs.push({
+                    key: "edit",
+                    label: "Edit channel",
+                    detail: "Change its name, credentials or events.",
+                    icon: Pencil,
+                    run: () => edit(channel),
+                  })
+                  verbs.push({
+                    key: "toggle",
+                    label: channel.enabled ? "Pause channel" : "Resume channel",
+                    detail: channel.enabled
+                      ? "Stop delivering messages without losing its history."
+                      : "Start delivering messages again.",
+                    icon: channel.enabled ? Pause : Play,
+                    run: () => void toggle(channel, !channel.enabled),
+                  })
+                }
                 verbs.push({
-                  key: "test",
-                  label: "Send test",
-                  detail: "Deliver a sample message to this channel right now.",
-                  icon: Lightning,
-                  inline: true,
-                  disabled: testingId === channel.id,
-                  run: () => void test(channel),
+                  key: "history",
+                  label: "Delivery history",
+                  detail: "The last fifty attempts to reach this channel.",
+                  icon: ClockRewind,
+                  run: () => setHistory(channel),
                 })
-              }
-              if (admin) {
-                verbs.push({
-                  key: "edit",
-                  label: "Edit channel",
-                  detail: "Change its name, credentials or events.",
-                  icon: Pencil,
-                  run: () => edit(channel),
-                })
-                verbs.push({
-                  key: "toggle",
-                  label: channel.enabled ? "Pause channel" : "Resume channel",
-                  detail: channel.enabled
-                    ? "Stop delivering messages without losing its history."
-                    : "Start delivering messages again.",
-                  icon: channel.enabled ? Pause : Play,
-                  run: () => void toggle(channel, !channel.enabled),
-                })
-              }
-              verbs.push({
-                key: "history",
-                label: "Delivery history",
-                detail: "The last fifty attempts to reach this channel.",
-                icon: ClockRewind,
-                run: () => setHistory(channel),
-              })
-              if (admin) {
-                verbs.push({
-                  key: "remove",
-                  label: "Remove channel",
-                  detail: "Deployment events stop reaching it immediately.",
-                  icon: Trash,
-                  danger: true,
-                  run: () => remove(channel),
-                })
-              }
-              return (
-                <Row
-                  key={channel.id}
-                  title={
-                    <span className="inline-flex min-w-0 items-center gap-2">
-                      <span className="truncate">{channel.name}</span>
-                      <Tag>
-                        {KINDS.find((item) => item.kind === channel.kind)?.title ?? channel.kind}
-                      </Tag>
-                    </span>
-                  }
-                  subtitle={
-                    <span className="min-w-0 truncate">
-                      <span className="font-mono">{channel.target || channel.url}</span>
-                      {" · "}
-                      {eventLabel(channel.events)}
-                    </span>
-                  }
-                  trailing={
-                    <>
-                      <Status
-                        tone={channel.enabled ? "running" : "stopped"}
-                        label={channel.enabled ? "Enabled" : "Paused"}
-                      />
-                      <VerbActions verbs={verbs} menuLabel={`Actions for ${channel.name}`} />
-                    </>
-                  }
-                />
-              )
-            })}
-          </RowList>
-        )}
+                if (admin) {
+                  verbs.push({
+                    key: "remove",
+                    label: "Remove channel",
+                    detail: "Deployment events stop reaching it immediately.",
+                    icon: Trash,
+                    danger: true,
+                    run: () => remove(channel),
+                  })
+                }
+                return (
+                  <Row
+                    key={channel.id}
+                    title={
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        <span className="truncate">{channel.name}</span>
+                        <Tag>
+                          {KINDS.find((item) => item.kind === channel.kind)?.title ?? channel.kind}
+                        </Tag>
+                      </span>
+                    }
+                    subtitle={
+                      <span className="min-w-0 truncate">
+                        <span className="font-mono">{channel.target || channel.url}</span>
+                        {" · "}
+                        {eventLabel(channel.events)}
+                      </span>
+                    }
+                    trailing={
+                      <>
+                        <Status
+                          tone={channel.enabled ? "running" : "stopped"}
+                          label={channel.enabled ? "Enabled" : "Paused"}
+                        />
+                        <VerbActions verbs={verbs} menuLabel={`Actions for ${channel.name}`} />
+                      </>
+                    }
+                  />
+                )
+              })}
+            </RowList>
+          )}
+        </PanelBody>
       </Panel>
 
       <SidePanel
@@ -485,6 +506,136 @@ export function NotificationsPage() {
       <DeliveryHistory channel={history} onClose={() => setHistory(undefined)} />
       {dialog}
     </Page>
+  )
+}
+
+/**
+ * Where an outcome goes: one mark for every deployment on the left, and on
+ * the right a mark for each channel it reaches. The line to a channel pulses
+ * while the channel is enabled and stands still while it is paused; the kinds
+ * not yet set up are dashed rings an administrator can press to add one, so
+ * the empty page is the same picture with nothing wired yet.
+ */
+function Fanout({
+  channels,
+  onAdd,
+}: {
+  channels: NotificationChannel[]
+  onAdd?: (kind: NotificationChannelKind) => void
+}) {
+  const container = useRef<HTMLDivElement>(null)
+  const source = useRef<HTMLDivElement>(null)
+  const missing = KINDS.filter((item) => !channels.some((channel) => channel.kind === item.kind))
+  const targets = [
+    ...channels.map((channel) => ({ key: `channel-${channel.id}`, channel })),
+    ...(onAdd ? missing.map((item) => ({ key: `add-${item.kind}`, kind: item.kind })) : []),
+  ]
+  const live = channels.filter((channel) => channel.enabled).length
+  return (
+    <div ref={container} className="relative">
+      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(4rem,0.6fr)_minmax(0,1.4fr)] lg:items-center lg:gap-0">
+        <WireNode
+          nodeRef={source}
+          align="end"
+          mark={
+            <WireMark tone="brand" shape="square">
+              <CloudUpload />
+            </WireMark>
+          }
+          eyebrow="Every deployment"
+          title="All projects"
+          hint={
+            live > 0
+              ? `started, succeeded, failed, cancelled · reaching ${live} ${live === 1 ? "channel" : "channels"}`
+              : "started, succeeded, failed, cancelled · reaching nobody yet"
+          }
+        />
+        <div aria-hidden className="hidden lg:block" />
+        {/* Not a list: the rows below are the channels' list, and these are
+            a picture of the same channels. */}
+        <div className="flex flex-col gap-4" aria-label="Where deployment events go">
+          {targets.map((target) => (
+            <FanoutTarget
+              key={target.key}
+              containerRef={container}
+              sourceRef={source}
+              channel={"channel" in target ? target.channel : undefined}
+              kind={"kind" in target ? target.kind : undefined}
+              onAdd={onAdd}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** One channel, or the ring where a kind of channel would go, and its line from the source. */
+function FanoutTarget({
+  containerRef,
+  sourceRef,
+  channel,
+  kind,
+  onAdd,
+}: {
+  containerRef: RefObject<HTMLDivElement | null>
+  sourceRef: RefObject<HTMLDivElement | null>
+  channel?: NotificationChannel
+  kind?: NotificationChannelKind
+  onAdd?: (kind: NotificationChannelKind) => void
+}) {
+  const mark = useRef<HTMLDivElement>(null)
+  const meta = KINDS.find((item) => item.kind === (channel?.kind ?? kind))
+  const title = meta?.title ?? channel?.kind ?? kind ?? ""
+  // A monogram, because the product draws no third-party logos: the first
+  // letter of the kind is enough to tell five channels apart in a column.
+  const monogram = title.slice(0, 1).toUpperCase()
+  return (
+    <div className="min-w-0">
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={sourceRef}
+        toRef={mark}
+        still={!channel?.enabled}
+        dashed={!channel}
+        duration={2.2}
+        delay={channel ? (channel.id % 5) * 0.3 : 0}
+      />
+      {channel ? (
+        <WireNode
+          nodeRef={mark}
+          mark={
+            <WireMark size="md" tone={channel.enabled ? "neutral" : "neutral"}>
+              <span
+                className={cn("text-sm font-semibold", !channel.enabled && "text-muted-foreground")}
+              >
+                {monogram}
+              </span>
+            </WireMark>
+          }
+          // The kind is the title and the name rides in the hint as one
+          // string: the rows below are where a channel is found by name.
+          title={title}
+          hint={`${channel.name} · ${channel.enabled ? eventLabel(channel.events).toLowerCase() : "paused"}`}
+        />
+      ) : (
+        <WireNode
+          nodeRef={mark}
+          mark={
+            <WireLink
+              label={`Add ${title}`}
+              onClick={kind && onAdd ? () => onAdd(kind) : undefined}
+            >
+              <WirePlaceholder size="md">
+                <Plus />
+              </WirePlaceholder>
+            </WireLink>
+          }
+          title={<span className="text-muted-foreground">{title}</span>}
+          hint={meta?.hint}
+        />
+      )}
+    </div>
   )
 }
 
