@@ -93,7 +93,10 @@ taking a frame:
   which is the same three classes `Row` applies to itself;
 - a panel's header — it is no longer a tinted strip. The title sits on the panel's own ground with a
   hairline under it. `--surface-header` survives at a fainter mix for the two places a strip is still
-  chrome: a `Pane`'s header and footer.
+  chrome: a `Pane`'s header and footer. On a plain panel that hairline keeps a step under it even when
+  the body is `flush` (12px above, 8px below): it is the only thing marking where the section begins,
+  and with nothing below it the first surface the body draws — a row's hover wash, a table header —
+  butted into it and the rule read as an edge of that surface rather than as the line under the title.
 
 A panel that is also a destination takes `interactive`: its border steps up to `--border-strong`
 under the pointer, and nothing else moves.
@@ -294,7 +297,10 @@ this product has.
 
 A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to
-name.
+name. It is opaque, so rows scroll *under* a sticky header rather than through it, and the ground it
+is opaque with is `--panel-ground` — declared by the panel (`--card` framed, `--background` plain),
+never assumed by the table. Reading `--card` there put a faint unexplained band across every table on
+a plain panel, overhanging the header hairline by the table's own `-mx-4` bleed.
 
 `.eyebrow` is the small-caps label that opens a section, a panel header or a stat tile. `.numeric` is
 any figure meant to be compared with the one above it — tabular digits stop a polling table from

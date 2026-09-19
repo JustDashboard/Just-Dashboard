@@ -681,11 +681,25 @@
   mask-image: radial-gradient(72% 60% at 50% 40%, black, transparent 100%);
 }
 
-/* A table header is chrome, not data. The tint separates it from the rows
- * without a heavier rule, and being opaque rather than a translucent utility
- * it also holds up as a sticky header with rows scrolling under it. */
+/* A table header is chrome, not data: it is opaque rather than a translucent
+ * utility so that rows scroll *under* a sticky header rather than through it.
+ *
+ * What it is opaque *with* has to be the ground the panel it sits in actually
+ * has. It was `--card` unconditionally, and a plain panel has no card — so
+ * every table on a plain panel (the process table, the audit log, the ports
+ * list) carried a faint unexplained band one step off the page, overhanging
+ * the header hairline above it by the table's own `-mx-4` bleed. Declaring
+ * the ground on the panel rather than reading it at the table means the
+ * nearest panel wins, so a framed block nested in a plain section is still
+ * opaque with its own card. */
+[data-slot="panel"] {
+  --panel-ground: var(--card);
+}
+[data-slot="panel"][data-plain] {
+  --panel-ground: var(--background);
+}
 [data-slot="panel"] [data-slot="table-container"] thead {
-  background-color: var(--card);
+  background-color: var(--panel-ground);
 }
 
 /* An empty state nested in a panel or a pane would draw a second frame just
