@@ -116,16 +116,36 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 				found = true
 			}
 		}
-		if !found || (connected && next == target) {
+		// A route written before request recording existed serves its site
+		// unrecorded until something rewrites it, and nothing would until the
+		// next deploy. This pass is the something: the block is added here,
+		// through the same write, reload and restore a repair takes, so an
+		// upgrade turns recording on for every managed route within a tick.
+		unrecorded := !hasAccessLog(snapshot.Content)
+		if !found || (connected && next == target && !unrecorded) {
 			continue
 		}
 		if err := c.configurationSynced(ctx); err != nil {
 			return err
 		}
-		_, repairErr := c.connectTarget(ctx, next)
+		var repairErr error
+		if !connected || next != target {
+			_, repairErr = c.connectTarget(ctx, next)
+		}
+		content, rewrite := snapshot.Content, false
 		if repairErr == nil && next != target {
-			content := strings.Replace(snapshot.Content, "reverse_proxy "+strconv.Quote(target.upstream()), "reverse_proxy "+strconv.Quote(next.upstream()), 1)
+			content = strings.Replace(content, "reverse_proxy "+strconv.Quote(target.upstream()), "reverse_proxy "+strconv.Quote(next.upstream()), 1)
 			content = strings.Replace(content, target.metadata(), next.metadata(), 1)
+			rewrite = true
+		}
+		if repairErr == nil && unrecorded {
+			upgraded, changed, err := withAccessLog(name, content)
+			if err == nil && changed {
+				content, rewrite = upgraded, true
+				repairErr = c.ensureAccessLogDir(ctx)
+			}
+		}
+		if repairErr == nil && rewrite {
 			repairErr = c.write(ctx, path, content)
 			if repairErr == nil {
 				repairErr = c.reload(ctx)
@@ -144,4 +164,34 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		}
 	}
 	return nil
+}
+
+// hasAccessLog reports whether a managed route already records its requests.
+func hasAccessLog(content string) bool {
+	return strings.Contains(content, "\n  log {\n")
+}
+
+// withAccessLog adds the `log` block to a managed route that has none, placed
+// where activation renders it — directly inside the site's opening line, ahead
+// of everything else the block holds. The rest of the file is untouched: the
+// target metadata the next pass parses, the certificate and credentials the
+// route was activated with. It answers false for a route that already records,
+// and refuses anything not written by this dashboard.
+func withAccessLog(name, content string) (string, bool, error) {
+	if !strings.HasPrefix(content, "# Managed by Just Dashboard\n") {
+		return content, false, errors.New("not a managed Caddy route")
+	}
+	if hasAccessLog(content) {
+		return content, false, nil
+	}
+	directive, err := renderAccessLogDirective(name)
+	if err != nil {
+		return content, false, err
+	}
+	open := strings.Index(content, " {\n")
+	if open < 0 {
+		return content, false, errors.New("managed Caddy route has no site block")
+	}
+	at := open + len(" {\n")
+	return content[:at] + directive + content[at:], true, nil
 }

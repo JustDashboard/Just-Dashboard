@@ -67,6 +67,12 @@ log {
 }
 ```
 
+A route written before this existed carries no block, and nothing would rewrite it until its next
+deploy — so the ingress lifecycle worker's 30-second pass (`reconcileRoutes`) adds it in place through
+the same write, validate, reload and restore-on-failure a network repair takes, recorded as a
+reconcile. `renderAccessLogDirective` is the one spelling of the block, so an upgraded route and a
+freshly activated one are byte-identical and the next pass reads the upgraded one as recording.
+
 Rotation is Caddy's own: the ingress volume is on no logrotate schedule this dashboard controls, and
 an access log is the fastest-growing file a deployment produces. Rolled generations stay uncompressed
 so the reader can pick one up from an offset — the tail of a file that rolled between two reads is
@@ -285,7 +291,9 @@ half-written line waits for its newline, a roll with and without the old generat
 truncation in place, the seed budget and its ordering of generations, eviction past the cap without
 renumbering, `After` from a cursor, `FromNow` and a stale cursor, out-of-order instants inside a
 window, the idle sweep, an absent record that later appears, stale-on-failure, and a removed route
-emptying. `internal/proxysvc` covers the rendered log block, its rotation and `roll_uncompressed`,
+emptying. `internal/proxysvc` covers the rendered log block, its rotation and `roll_uncompressed`, the
+in-place upgrade of a pre-recording route (byte-identical to activation, credentials and TLS kept,
+idempotent, foreign content refused),
 the framing of the container script's two reports, the host-file reader across appends, a rename and
 a truncation, and — live — the script against `caddy:2-alpine`. `internal/logsx` covers ANSI, carriage-return frames, structured levels on
 both numeric scales, and that a brace alone is not JSON. `internal/proxysvc` covers the rendered log

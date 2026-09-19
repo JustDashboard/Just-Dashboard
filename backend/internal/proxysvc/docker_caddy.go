@@ -316,27 +316,10 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	}
 	logDirective := ""
 	if route.AccessLog {
-		path, err := dockerCaddyAccessLogPath(route.Name)
-		if err != nil {
+		var err error
+		if logDirective, err = renderAccessLogDirective(route.Name); err != nil {
 			return "", err
 		}
-		// JSON rather than the console format: the console spelling drops the
-		// request duration into a human sentence, and the page's whole point is
-		// a latency reading. Rotation is Caddy's own — the ingress volume is
-		// not on a logrotate schedule this dashboard controls, and an access
-		// log is the fastest-growing file a deployment produces. Rolled
-		// generations stay uncompressed so the reader can pick one up from an
-		// offset: the tail of the file that rolled between two reads is
-		// recovered from wherever the roller put it, and a gzip has no offsets.
-		logDirective = "  log {\n" +
-			"    output file " + strconv.Quote(path) + " {\n" +
-			"      roll_size 16MiB\n" +
-			"      roll_keep 4\n" +
-			"      roll_keep_for 336h\n" +
-			"      roll_uncompressed\n" +
-			"    }\n" +
-			"    format json\n" +
-			"  }\n"
 	}
 	authDirective := ""
 	if len(route.BasicAuth) > 0 {
@@ -350,6 +333,36 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		authDirective = "  basic_auth {\n" + strings.Join(lines, "\n") + "\n  }\n"
 	}
 	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + authDirective + "  " + directive + "\n}\n", nil
+}
+
+// renderAccessLogDirective is the `log` block a managed route carries. One
+// spelling, because two routes write it: activation renders it into a new
+// route, and the lifecycle worker adds it to a route written before request
+// recording existed — and the two must come out byte-identical, or an upgraded
+// route reads as hand-edited to the next pass.
+//
+// JSON rather than the console format: the console spelling drops the
+// request duration into a human sentence, and the page's whole point is a
+// latency reading. Rotation is Caddy's own — the ingress volume is not on a
+// logrotate schedule this dashboard controls, and an access log is the
+// fastest-growing file a deployment produces. Rolled generations stay
+// uncompressed so the reader can pick one up from an offset: the tail of the
+// file that rolled between two reads is recovered from wherever the roller
+// put it, and a gzip has no offsets.
+func renderAccessLogDirective(name string) (string, error) {
+	path, err := dockerCaddyAccessLogPath(name)
+	if err != nil {
+		return "", err
+	}
+	return "  log {\n" +
+		"    output file " + strconv.Quote(path) + " {\n" +
+		"      roll_size 16MiB\n" +
+		"      roll_keep 4\n" +
+		"      roll_keep_for 336h\n" +
+		"      roll_uncompressed\n" +
+		"    }\n" +
+		"    format json\n" +
+		"  }\n", nil
 }
 
 func (c *dockerCaddy) snapshot(ctx context.Context, name string) (DeploymentRouteSnapshot, error) {

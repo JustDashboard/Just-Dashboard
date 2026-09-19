@@ -66,7 +66,9 @@ remain usable. Wildcards require DNS-01 credentials for a domain the operator co
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments
 persist the exact candidate container ID, network, internal port and address. The lifecycle worker checks
-every 30 seconds and repairs a lost Caddy network attachment or changed candidate address. It never
+every 30 seconds and repairs a lost Caddy network attachment or changed candidate address; the same pass
+adds the access-log block to a managed route written before request recording existed, so an upgrade
+turns recording on for every existing deployment within a tick rather than at its next deploy. It never
 follows a host port to a replacement container. Repairs are audited as `proxy.ingress.reconcile` with
 route name and success only. Read-only verification does not reconnect networks. Recovery can have up
 to one polling interval of interruption after container recreation; missing/replaced candidates require
@@ -83,7 +85,9 @@ changing an application port cannot bypass those requirements.
 `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddy -count=1 -v` provisions isolated
 containers on loopback test ports. It checks fresh provisioning, persisted restart, original-site
 preservation, hostname collision refusal, private imported certificates, API-only configuration
-protection, Caddy recreation/network repair, storage-identity fencing and snapshot restoration. It does
+protection, Caddy recreation/network repair, storage-identity fencing and snapshot restoration, and — since the reconcile pass upgrades a route written before request recording
+existed — that the first pass after recreation both repairs the network and adds the access-log block
+as one recorded repair, and that the next pass leaves the route alone. It does
 not order a public production certificate. The deployment C5 live gate and deployment/API/Proxy race
 tests remain required. The browser regression covers automatic Caddy HTTPS without a Certbot warning.
 

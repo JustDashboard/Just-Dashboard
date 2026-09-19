@@ -312,3 +312,80 @@ func TestLiveCaddyAccessLogReader(t *testing.T) {
 		t.Fatalf("stat-only read: %+v %d", stat, n)
 	}
 }
+
+// A route written before request recording existed gets the block from the
+// lifecycle worker, and comes out exactly as activation would have written it.
+func TestWithAccessLogUpgradesARouteWrittenBeforeRecording(t *testing.T) {
+	route := DeploymentRoute{Name: "just-dashboard-env-6.conf", Domains: []string{"lampino.example.test"}, TLS: true}
+	before, err := renderDockerCaddyRoute(route, "http://10.0.5.2:3000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before += dockerCaddyTarget{ContainerID: strings.Repeat("b", 64), Network: "jd-net", Port: "3000", Address: "10.0.5.2"}.metadata()
+	if hasAccessLog(before) {
+		t.Fatal("the fixture must be a route without recording")
+	}
+
+	upgraded, changed, err := withAccessLog(route.Name, before)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	route.AccessLog = true
+	want, _ := renderDockerCaddyRoute(route, "http://10.0.5.2:3000")
+	want += dockerCaddyTarget{ContainerID: strings.Repeat("b", 64), Network: "jd-net", Port: "3000", Address: "10.0.5.2"}.metadata()
+	if upgraded != want {
+		t.Fatalf("an upgraded route must be byte-identical to a freshly activated one:\n--- upgraded\n%s\n--- want\n%s", upgraded, want)
+	}
+	// The next pass still reads the target out of it, and sees it recorded.
+	if _, ok := parseDockerCaddyTarget(upgraded); !ok {
+		t.Fatal("the target metadata must survive the upgrade")
+	}
+	if !hasAccessLog(upgraded) {
+		t.Fatal("the upgraded route must read as recording")
+	}
+	again, changed, _ := withAccessLog(route.Name, upgraded)
+	if changed || again != upgraded {
+		t.Fatal("upgrading twice must change nothing")
+	}
+}
+
+func TestWithAccessLogKeepsCredentialsAndCertificates(t *testing.T) {
+	route := DeploymentRoute{
+		Name: "just-dashboard-env-9.conf", Domains: []string{"a.example.test"}, TLS: true,
+		BasicAuth: []BasicAuthUser{{Username: "ops", Hash: "$2a$10$" + strings.Repeat("a", 53)}},
+	}
+	before, err := renderDockerCaddyRoute(route, "http://10.0.0.4:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded, changed, err := withAccessLog(route.Name, before)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	for _, keep := range []string{"  basic_auth {", "    ops $2a$10$", `reverse_proxy "http://10.0.0.4:8080"`} {
+		if !strings.Contains(upgraded, keep) {
+			t.Fatalf("%q was lost in the upgrade:\n%s", keep, upgraded)
+		}
+	}
+	route.AccessLog = true
+	want, _ := renderDockerCaddyRoute(route, "http://10.0.0.4:8080")
+	if upgraded != want {
+		t.Fatalf("upgrade differs from activation:\n%s\n---\n%s", upgraded, want)
+	}
+}
+
+func TestWithAccessLogRefusesWhatItDidNotWrite(t *testing.T) {
+	for _, content := range []string{
+		"example.test {\n  reverse_proxy localhost:3000\n}\n",
+		"",
+		"# Managed by Just Dashboard\nno site block here\n",
+	} {
+		if _, changed, err := withAccessLog("just-dashboard-env-1.conf", content); err == nil || changed {
+			t.Fatalf("%q was upgraded: changed=%v err=%v", content, changed, err)
+		}
+	}
+	// An unsafe name never becomes a path Caddy is pointed at, even here.
+	if _, _, err := withAccessLog("../../x.conf", "# Managed by Just Dashboard\nh {\n}\n"); err == nil {
+		t.Fatal("an unsafe route name must be refused")
+	}
+}
