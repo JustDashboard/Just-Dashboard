@@ -1334,6 +1334,7 @@ type planningDockerFake struct {
 	validatedProject   string
 	validatedVariables []string
 	image              *dockerx.DistributionImage
+	imageDetail        *dockerx.ImageDetail
 	container          *dockerx.ContainerSpec
 	stacks             []dockerx.ComposeStack
 	registryAuth       string
@@ -1349,6 +1350,14 @@ func (f *planningDockerFake) ResolveDistributionImage(_ context.Context, _ strin
 		return nil, errors.New("image missing")
 	}
 	copy := *f.image
+	return &copy, nil
+}
+
+func (f *planningDockerFake) InspectImage(context.Context, string) (*dockerx.ImageDetail, error) {
+	if f.imageDetail == nil {
+		return nil, errors.New("image is not present on this host")
+	}
+	copy := *f.imageDetail
 	return &copy, nil
 }
 

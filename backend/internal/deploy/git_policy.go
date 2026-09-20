@@ -180,6 +180,39 @@ func (s *OrchestrationStore) SetGitDeploymentPolicy(ctx context.Context, project
 	return p, tx.Commit()
 }
 
+// commitGitPolicy records the automatic-deployment decision taken while a
+// project was being created. No decision writes no row, which leaves the
+// defaults in `gitDeploymentPolicy` exactly as they were for every caller that
+// does not ask; a decision is stored at revision 1, so the Automation page
+// edits it from there like any other saved policy.
+func commitGitPolicy(
+	ctx context.Context,
+	tx *sql.Tx,
+	environmentID int64,
+	policy *GitDeploymentPolicy,
+	now int64,
+) error {
+	if policy == nil {
+		return nil
+	}
+	include, err := canonicalWatchPatterns(policy.WatchInclude)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
+	exclude, err := canonicalWatchPatterns(policy.WatchExclude)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
+	stored := GitDeploymentPolicy{
+		Automatic:      policy.Automatic,
+		WatchInclude:   include,
+		WatchExclude:   exclude,
+		CommitStatuses: policy.CommitStatuses,
+		Revision:       1,
+	}
+	return writeGitPolicyTx(ctx, tx, environmentID, stored, now)
+}
+
 func writeGitPolicyTx(ctx context.Context, tx *sql.Tx, environmentID int64, p GitDeploymentPolicy, now int64) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO deploy_git_policies(environment_id,automatic,include_json,exclude_json,commit_statuses,revision,updated_at) VALUES(?,?,?,?,?,?,?)
 		ON CONFLICT(environment_id) DO UPDATE SET automatic=excluded.automatic,include_json=excluded.include_json,exclude_json=excluded.exclude_json,commit_statuses=excluded.commit_statuses,revision=excluded.revision,updated_at=excluded.updated_at`,

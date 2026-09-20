@@ -34,6 +34,12 @@ type DraftSaveRequest struct {
 type DraftCommitRequest struct {
 	Revision             int      `json:"revision"`
 	AcknowledgedWarnings []string `json:"acknowledgedWarnings"`
+	// GitPolicy is the automatic-deployment decision, taken while the project
+	// is being created rather than after. A Git deployment polls its branch
+	// from the moment it exists and the default is to deploy every push, so
+	// "manual only" used to be a setting you could reach only once an
+	// unintended release had already gone out.
+	GitPolicy *GitDeploymentPolicy `json:"gitPolicy,omitempty"`
 }
 
 type DraftCommitResult struct {
@@ -510,6 +516,31 @@ func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 	return draft, nil
 }
 
+// Discard removes an unfinished setup the caller owns.
+//
+// Every press of Import creates a draft, and abandoning one at the source or
+// configure step left it in the unfinished-setups list for its whole 30-day
+// life with no way to clear it: three attempts at the same repository read as
+// three pieces of unfinished work. A committed draft is never discarded — it
+// is the record that a project came from this plan.
+func (s *PlanningStore) Discard(ctx context.Context, id string, userID int64, admin bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	draft, err := s.getUnlocked(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := AuthorizeDraft(draft, userID, admin); err != nil {
+		return err
+	}
+	if draft.CommittedProjectID != 0 {
+		return fmt.Errorf("%w: this setup already created a project", ErrDraftCommitted)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`DELETE FROM deploy_drafts WHERE id = ? AND committed_project_id = 0`, id)
+	return err
+}
+
 // ListDrafts returns the caller's own uncommitted, unexpired drafts, newest
 // first, so the new-project page can offer to resume one instead of starting
 // the wizard over. A committed or expired draft has nothing left to resume.
@@ -908,6 +939,9 @@ func (s *PlanningStore) Commit(
 	}
 	environmentID, err := result.LastInsertId()
 	if err != nil {
+		return nil, err
+	}
+	if err := commitGitPolicy(ctx, tx, environmentID, request.GitPolicy, now.Unix()); err != nil {
 		return nil, err
 	}
 	sourceJSON, _ := json.Marshal(draft.Data.Source)

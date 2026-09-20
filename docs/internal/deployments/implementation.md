@@ -36,6 +36,13 @@ only renderer/executor/validation authority for their feature.
   own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
   starting a new setup over; a committed or expired draft has nothing left to resume and is excluded.
+  `DELETE /deploy/drafts/{draft}` (session, audited `deploy.draft.discard`) throws one away: every
+  press of Import creates a draft, so an abandoned attempt would otherwise sit in that list for its
+  whole thirty-day life and three tries at one repository would read as three pieces of unfinished
+  work. Only the owner's own uncommitted setup can go — a committed draft is the record a project was
+  planned from and answers `409 draft_committed`. The page also discards for itself: inspecting a
+  second source, or pressing "Change source", throws away the setup being walked away from, because
+  that is a different project rather than a revision of the first.
   Remote Git inspection resolves an exact ref into a
   private dashboard-owned bare mirror and detached temporary worktree; it never clones into or resets an
   operator checkout. Inspection's mirror is shallow and blob-filtered so planning stays bounded, so a
@@ -51,17 +58,38 @@ only renderer/executor/validation authority for their feature.
   stack (paste, upload, Git, local) and an existing workload (container, stack, checkout). Choosing a
   source creates a draft, saves the intent and source, and runs detection in one action; when
   detection is ambiguous the candidates are offered as a choice that re-runs detection with
-  `selectedId`. The configure form then holds the name, the type, the detected build and output
+  `selectedId`. The configure screen draws the plan beside the form — source → build → runtime →
+  address, in the same `wire.tsx` vocabulary the project overview uses for a deployment that already
+  exists, with a dashed ring for a step not yet decided and nothing pulsing, because a pulse means
+  live traffic and a plan has none. Every step is pressable and opens the fields that decide it,
+  which is what puts the release strategy and the memory limit on screen without opening Advanced to
+  find them; an unbounded container reads as "No memory or CPU limit" there rather than as silence.
+  The form itself holds the name, the type, the detected build and output
   settings, environment variables, an optional database, the public address (with the hostname
-  suggestion and certificate readiness) and an Advanced disclosure carrying the runtime, health check,
-  storage, release task, build secret and container fields. Deploy saves the configuration, runs
+  suggestion and certificate readiness), automatic deployment for a Git source, and an Advanced
+  disclosure carrying the runtime, health check,
+  storage, release task, build secret and container fields. The type is offered for an image source
+  as well as a Git one: the profile is plan-time intent that only preflight reads, and offering it
+  only for Git is why an HTTP application shipped as a container could not be told it was one —
+  it deployed stop-first, with no health gate and no finding to say so. Choosing a gated type seeds
+  the readiness check and candidate-first activation that preflight requires for it. A name a live
+  project already holds is reported by `GET /deploy/hostname?name=` as `nameTaken` and flagged beside
+  the field while it is typed, rather than refused by the schema's UNIQUE constraint at commit after
+  the whole setup has been filled in. What detection could not settle for itself (`needsDecision`)
+  is shown on the source row. Deploy saves the configuration, runs
   preflight, commits, imports the environment text and enqueues the first run; Save only stops after
   the import. The saved draft revision is adopted before preflight, so a failed preflight never
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
   is re-detected rather than refused. `?mode=advanced` opens Advanced, and existing workloads adopt
-  through `/deploy/import/adopt` without a run. Saved credentials are picked from
+  through `/deploy/import/adopt` without a run. For a Git source the commit carries a `gitPolicy`
+  (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
+  `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so
+  every caller that does not ask keeps the defaults in `gitDeploymentPolicy` exactly as they were.
+  A Git deployment polls its branch from the moment it exists and the default is to deploy every
+  push, so until this travelled with the commit "manual only" was a setting reachable only after a
+  production service had already released a commit nobody meant to ship. Saved credentials are picked from
   `GET /deploy/credentials`. The page is kept for the tab (`useSessionState`,
   [`../frontend/data-theming.md`](../frontend/data-theming.md)): the source tab and its form, and the
   configure screen's flow, findings and Advanced disclosure, survive a walk to another page and a

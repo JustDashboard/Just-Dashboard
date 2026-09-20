@@ -9,9 +9,7 @@ import { blueprintCatalogue, json, mockNewProject, now } from "./deploy-fixture"
  * only the endpoints its own source needs.
  */
 
-test("the source strip and the Git tab's shortcuts both switch the active source", async ({
-  page,
-}) => {
+test("the source strip switches the active source and is the only way in", async ({ page }) => {
   await mockNewProject(page)
   await page.goto("/deploy/new")
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
@@ -20,8 +18,11 @@ test("the source strip and the Git tab's shortcuts both switch the active source
     "true",
   )
 
-  // A shortcut on the Git tab switches the strip to the matching source.
-  await page.getByRole("button", { name: /ready-to-use defaults/ }).click()
+  // The Git tab used to repeat all five other sources as a grid of cards
+  // directly under the strip that already listed them. One navigation.
+  await expect(page.getByRole("button", { name: /ready-to-use defaults/ })).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Template", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Application templates" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Template", exact: true })).toHaveAttribute(
     "aria-pressed",

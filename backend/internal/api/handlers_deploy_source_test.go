@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -167,6 +168,9 @@ func (f *fakePlanningDocker) Ping(context.Context) dockerx.Availability {
 func (f *fakePlanningDocker) ResolveDistributionImage(context.Context, string, string) (*dockerx.DistributionImage, error) {
 	copy := *f.image
 	return &copy, nil
+}
+func (f *fakePlanningDocker) InspectImage(context.Context, string) (*dockerx.ImageDetail, error) {
+	return nil, errors.New("image is not present on this host")
 }
 func (f *fakePlanningDocker) SpecOf(context.Context, string) (*dockerx.ContainerSpec, error) {
 	return nil, nil

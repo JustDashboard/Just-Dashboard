@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft } from "@/components/icons"
+import { ArrowLeft, Trash } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -11,12 +11,15 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { ROW_BLEED, RowList } from "@/components/row-list"
+import { IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { tabClasses } from "@/components/tabs"
 import { humanize } from "@/components/deploy/vocabulary"
 import {
+  discardAbandoned,
+  discardDraft,
   forgetConfigure,
   loadDraft,
   resumeFlow,
@@ -116,9 +119,19 @@ export function NewProject({
   // a new setup: it opens the chooser over a remembered flow, which stays
   // remembered until something is inspected in its place.
   const [linkArrived, setLinkArrived] = useState(Boolean(source || profile || repo))
+  // Inspecting a second source is a different project, not a revision of the
+  // first: the setup being walked away from is thrown away rather than left
+  // to expire, which is what turned three attempts at one repository into
+  // three rows of unfinished work.
   const inspected = (next: ConfigureFlow) => {
+    if (flow && flow.draft.id !== next.draft.id) void discardAbandoned(flow.draft.id)
     setLinkArrived(false)
     setFlow(next)
+  }
+  const changeSource = () => {
+    void discardAbandoned(flow?.draft.id)
+    forgetConfigure()
+    setFlow(null)
   }
 
   // Never blocks the chooser and never reports a failure of its own: a
@@ -129,6 +142,19 @@ export function NewProject({
     0,
     [],
   )
+
+  const discard = async (id: string) => {
+    try {
+      await discardDraft(id)
+      if (flow?.draft.id === id) {
+        forgetConfigure()
+        setFlow(null)
+      }
+      drafts.refresh()
+    } catch (error) {
+      notify.error("Could not discard this setup", asError(error))
+    }
+  }
 
   useEffect(() => {
     if (!draftId) return
@@ -198,20 +224,39 @@ export function NewProject({
               <PanelBody flush>
                 <RowList aria-label="Unfinished setups">
                   {drafts.data!.map((entry) => (
-                    <Row
-                      key={entry.id}
-                      href={`/deploy/new?draft=${entry.id}`}
-                      title={entry.name || "Untitled"}
-                      subtitle={entry.source ?? "No source chosen yet"}
-                      trailing={
-                        <>
+                    // Laid out by hand rather than as one `Row`: the whole row
+                    // resumes the setup, and Discard is a second action, which
+                    // cannot be a button nested inside that link.
+                    <li key={entry.id} className="group/row relative min-w-0">
+                      <Link
+                        href={`/deploy/new?draft=${entry.id}`}
+                        className={`flex min-w-0 items-center gap-3 py-3 pr-12 pl-5 text-left ${ROW_BLEED} focus-ring-inset transition-colors hover:bg-row-hover`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-body font-medium">
+                            {entry.name || "Untitled"}
+                          </span>
+                          <span className="block truncate text-hint text-muted-foreground">
+                            {entry.source ?? "No source chosen yet"}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
                           <Tag>{humanize(entry.currentStep)}</Tag>
                           <span className="numeric text-hint text-muted-foreground">
                             {relativeTime(entry.updatedAt)}
                           </span>
-                        </>
-                      }
-                    />
+                        </span>
+                      </Link>
+                      <IconAction
+                        label={`Discard ${entry.name || "this setup"}`}
+                        reveal
+                        revealGroup="row"
+                        className="absolute top-1/2 right-2 -translate-y-1/2"
+                        onClick={() => void discard(entry.id)}
+                      >
+                        <Trash />
+                      </IconAction>
+                    </li>
                   ))}
                 </RowList>
               </PanelBody>
@@ -235,13 +280,7 @@ export function NewProject({
             ))}
           </div>
           {tab === "git" && (
-            <SourceGit
-              key="git"
-              onInspected={inspected}
-              onSwitchTab={setTab}
-              initialUrl={repo}
-              initialRef={repoRef}
-            />
+            <SourceGit key="git" onInspected={inspected} initialUrl={repo} initialRef={repoRef} />
           )}
           {tab === "image" && <SourceImage key="image" onInspected={inspected} />}
           {tab === "template" && <SourceTemplate key="template" onInspected={inspected} />}
@@ -253,7 +292,7 @@ export function NewProject({
         <Configure
           flow={flow}
           onFlowChange={setFlow}
-          onChangeSource={forgetConfigure}
+          onChangeSource={changeSource}
           initialAdvanced={mode === "advanced"}
         />
       )}
