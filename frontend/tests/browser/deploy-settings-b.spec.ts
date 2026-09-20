@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test"
-import { deployment, json, mockProject, now, project, run, steps } from "./deploy-fixture"
+import {
+  backupJob,
+  deployment,
+  json,
+  mockProject,
+  now,
+  project,
+  run,
+  steps,
+} from "./deploy-fixture"
 
 /**
  * Settings part B — Domains, Storage, Databases & backups, Automation, and
@@ -234,6 +243,8 @@ test.describe("Databases & backups", () => {
       {
         connectionId: 9,
         name: "orders-db",
+        driver: "postgres",
+        database: "orders",
         network: "jd-e12-db-abc",
         hostname: "db-9.jd.internal",
         status: "connected",
@@ -267,9 +278,17 @@ test.describe("Databases & backups", () => {
     await expect(orders).toHaveAttribute("href", "/databases?conn=9")
     await expect(page.getByText("db-9.jd.internal", { exact: true })).toBeVisible()
     await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("list", { name: "Linked databases" }).getByText("postgres", { exact: true }),
+    ).toBeVisible()
 
-    await page.getByRole("button", { name: "Remove database", exact: true }).click()
-    await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "orders-db actions" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
+    // The fixture's configuration echoes no `reference` for the variable that
+    // was just written, so the page sees a bound database it cannot name a
+    // carrier for and asks before removing the link alone.
+    await expect(page.getByText("This page finds no variable referencing orders-db")).toBeVisible()
+    await page.getByRole("button", { name: "Remove the link", exact: true }).click()
     await expect.poll(() => configPuts.length).toBe(2)
     expect(configPuts[1].dependencies).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "backup" })]),
@@ -285,8 +304,8 @@ test.describe("Databases & backups", () => {
     await mockProject(page)
     await page.route("**/api/v1/backups/", (route) =>
       json(route, [
-        { id: 4, name: "Nightly snapshot" },
-        { id: 5, name: "Weekly full" },
+        backupJob({ id: 4, name: "Nightly snapshot", lastSuccessAt: now, nextRun: now }),
+        backupJob({ id: 5, name: "Weekly full" }),
       ]),
     )
     await page.route("**/api/v1/deploy/7/runs/84", async (route) => {
@@ -343,15 +362,17 @@ test.describe("Databases & backups", () => {
     ])
 
     await expect(page.getByRole("heading", { name: "Latest backup gate evidence" })).toBeVisible()
-    await expect(page.getByText("#4", { exact: true })).toBeVisible()
+    // The gate names the job rather than its number now that the page holds
+    // the job list it is gating on.
+    await expect(page.getByText("Nightly snapshot").first()).toBeVisible()
     await expect(page.getByText("#201", { exact: true })).toBeVisible()
 
-    await expect(page.getByRole("heading", { name: "Backups", exact: true })).toBeVisible()
-    const backupEvidence = page.getByRole("list", { name: "Backup evidence" })
-    await expect(backupEvidence.getByText("Backup job 4", { exact: true })).toBeVisible()
-    await expect(backupEvidence.getByRole("link", { name: "Open the backup job" })).toHaveAttribute(
+    // The job's own facts are on its row, and the live release's observation
+    // of it folds onto the same row rather than into a second panel below.
+    await expect(page.getByText("Observed · last run success")).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open the backup job" })).toHaveAttribute(
       "href",
-      "/backups",
+      "/backups?job=4",
     )
   })
 
@@ -442,10 +463,248 @@ test.describe("Databases & backups", () => {
     await page.getByRole("button", { name: "Add backup", exact: true }).click()
     await expect(page.getByRole("combobox", { name: "Backup job" })).toBeVisible()
 
-    await page.getByRole("button", { name: "Remove database", exact: true }).click()
+    await page.getByRole("button", { name: "Database 9 actions" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
     await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].dependencies).toEqual([])
+  })
+})
+
+/**
+ * The configuration a linked project is in: one database dependency, one
+ * variable carrying it as a typed reference, and the binding observed.
+ */
+async function mockLinkedDatabase(
+  page: import("@playwright/test").Page,
+  options: {
+    status?: string
+    detail?: string
+    variables?: Record<string, unknown>[]
+    dependencies?: Record<string, unknown>[]
+  } = {},
+) {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/environments/12/database-links", (route) =>
+    json(route, [
+      {
+        connectionId: 9,
+        name: "orders-db",
+        driver: "postgres",
+        database: "orders",
+        network: "jd-e12-db-abc",
+        hostname: "db-9.jd.internal",
+        status: options.status ?? "connected",
+        detail: options.detail,
+        checkedAt: now,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await json(route, {
+      revision: 3,
+      build: { method: "recipe" },
+      runtime: {
+        internalPort: 3000,
+        hostPort: 0,
+        bindAddress: "127.0.0.1",
+        strategy: "blue_green",
+        mounts: [],
+      },
+      variables: options.variables ?? [
+        {
+          name: "DATABASE_URL",
+          revision: 1,
+          sensitivity: "secret",
+          scopes: ["runtime"],
+          masked: "••••••••",
+          valueDigest: `sha256:${"1".repeat(64)}`,
+          reference: { kind: "database", target: "9" },
+          pending: false,
+          createdBy: "operator",
+          createdAt: now,
+          environmentId: 12,
+          desiredRevision: 3,
+        },
+      ],
+      dependencies: options.dependencies ?? [
+        {
+          kind: "database",
+          ownership: "linked",
+          resourceKind: "database_connection",
+          resourceId: "9",
+          config: {},
+        },
+      ],
+      checks: [],
+      domains: [],
+      pending: { pending: false, desiredRevision: 3, changes: [] },
+    })
+  })
+}
+
+test.describe("Databases & backups evidence", () => {
+  test("the readings report the link, the policy and the dump coverage", async ({ page }) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("Linked databases").first()).toBeVisible()
+    await expect(page.getByText("All connected", { exact: true })).toBeVisible()
+    // A linked database with no backup policy at all is the reading that
+    // earns its space; the gate would refuse nothing, and nothing is kept.
+    await expect(page.getByText("None", { exact: true })).toBeVisible()
+    await expect(page.getByText("A linked database with no backup policy")).toBeVisible()
+    await expect(page.getByText("0 of 1", { exact: true })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Back up orders-db" })).toHaveAttribute(
+      "href",
+      "/backups?database=9",
+    )
+  })
+
+  test("the variable that carries a database is named, and removal takes it with the link", async ({
+    page,
+  }) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.route("**/api/v1/deploy/7/environments/12/variables/**", async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback()
+      await json(route, { desiredRevision: 4 })
+    })
+    const configPuts: Record<string, unknown>[] = []
+    const variableDeletes: string[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        configPuts.push(request.postDataJSON())
+      }
+      if (request.method() === "DELETE" && request.url().includes("/variables/")) {
+        variableDeletes.push(request.url())
+      }
+    })
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("Carried by DATABASE_URL.")).toBeVisible()
+
+    await page.getByRole("button", { name: "orders-db actions" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
+
+    // Runtime activation attaches a database by reading the variable, so a
+    // removal that left the variable behind reattached it on the next deploy.
+    await expect(page.getByText("DATABASE_URL carries this database")).toBeVisible()
+    await page.getByRole("button", { name: "Remove the link and its variables" }).click()
+
+    await expect.poll(() => variableDeletes.length).toBe(1)
+    expect(variableDeletes[0]).toContain("/variables/DATABASE_URL")
+    await expect.poll(() => configPuts.length).toBe(1)
+    expect(configPuts[0].dependencies).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "database" })]),
+    )
+    // The delete advanced the environment's desired revision, so the write
+    // after it has to send the one the delete handed back or be refused.
+    expect(configPuts[0].revision).toBe(4)
+  })
+
+  test("a job that takes no dump of a linked database says so, and can be given one", async ({
+    page,
+  }) => {
+    await mockLinkedDatabase(page, {
+      dependencies: [
+        {
+          kind: "database",
+          ownership: "linked",
+          resourceKind: "database_connection",
+          resourceId: "9",
+          config: {},
+        },
+        {
+          kind: "backup",
+          ownership: "linked",
+          resourceKind: "backup_job",
+          resourceId: "4",
+          config: { requiredBeforeDeploy: true, maxAgeSeconds: 86400 },
+        },
+      ],
+    })
+    let dumps: number[] = []
+    await page.route("**/api/v1/backups/", (route) =>
+      json(route, [backupJob({ id: 4, name: "Nightly snapshot", databaseDumps: dumps })]),
+    )
+    const jobPuts: Record<string, unknown>[] = []
+    await page.route("**/api/v1/backups/4", async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback()
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      jobPuts.push(body)
+      dumps = body.databaseDumps as number[]
+      await json(route, backupJob({ id: 4, name: "Nightly snapshot", databaseDumps: dumps }))
+    })
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toBeVisible()
+    await expect(page.getByText("0 of 1", { exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Add the dump to Nightly snapshot" }).click()
+    await expect(page.getByText("Nightly snapshot now dumps this database")).toBeVisible()
+    await expect.poll(() => jobPuts.length).toBe(1)
+    expect(jobPuts[0].databaseDumps).toEqual([9])
+    // The destination's keys are preserved precisely by not being sent.
+    expect(jobPuts[0]).not.toHaveProperty("secrets")
+    expect(jobPuts[0]).toMatchObject({ name: "Nightly snapshot", schedule: "0 3 * * *" })
+
+    await expect(page.getByText("1 of 1", { exact: true })).toBeVisible()
+    await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toHaveCount(
+      0,
+    )
+  })
+
+  test("a binding that could not be repaired reports the reason reconciliation recorded", async ({
+    page,
+  }) => {
+    await mockLinkedDatabase(page, {
+      status: "unavailable",
+      detail: "the saved database port belongs to a different container; reconnect it explicitly",
+    })
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("orders-db needs reconnection")).toBeVisible()
+    await expect(
+      page.getByText("the saved database port belongs to a different container"),
+    ).toBeVisible()
+    await expect(page.getByText("1 needs attention", { exact: true })).toBeVisible()
+  })
+
+  test("a linked database with no variable carrying it is called out", async ({ page }) => {
+    await mockLinkedDatabase(page, { variables: [] })
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    // No observed binding either: nothing is holding this database's address.
+    await page.route("**/api/v1/deploy/7/environments/12/database-links", (route) =>
+      json(route, []),
+    )
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("No variable carries this database")).toBeVisible()
+    await expect(page.getByText("No variable carries a linked database.")).toBeVisible()
+  })
+
+  test("a database bound by a literal address is not reported as uncarried", async ({ page }) => {
+    // An install from before typed references stores the URL itself, so the
+    // reference this page reads is absent while the database is plainly bound.
+    // Calling that "no variable carries it" would be a false alarm — and the
+    // page must not overclaim either: a binding outlives the variable that
+    // made it, so it reports what it observed, not a variable it cannot see.
+    await mockLinkedDatabase(page, { variables: [] })
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("No variable carries this database")).toHaveCount(0)
+    await expect(
+      page.getByText("Bound on the managed network; no variable names one by reference."),
+    ).toBeVisible()
+
+    await page.getByRole("button", { name: "orders-db actions" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
+    await expect(page.getByText("This page finds no variable referencing orders-db")).toBeVisible()
   })
 })
 
@@ -453,7 +712,7 @@ test.describe("Databases & backups field errors", () => {
   test("a dependency refusal is shown on its own row, not just as a toast", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/backups/", (route) =>
-      json(route, [{ id: 4, name: "Nightly snapshot" }]),
+      json(route, [backupJob({ id: 4, name: "Nightly snapshot" })]),
     )
     await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
       if (route.request().method() !== "PUT") return route.fallback()
@@ -555,7 +814,7 @@ test.describe("Automation", () => {
   }) => {
     await mockProject(page)
     await page.route("**/api/v1/backups/", (route) =>
-      json(route, [{ id: 4, name: "Nightly snapshot" }]),
+      json(route, [backupJob({ id: 4, name: "Nightly snapshot" })]),
     )
     let schedules: Record<string, unknown>[] = []
     await page.route("**/api/v1/deploy/7/environments/12/schedules**", async (route) => {
@@ -1064,7 +1323,7 @@ test.describe("Screenshots", () => {
     test(`${screen.name} at 1280 and 390`, async ({ page }, testInfo) => {
       await mockProject(page)
       await page.route("**/api/v1/backups/", (route) =>
-        json(route, [{ id: 4, name: "Nightly snapshot" }]),
+        json(route, [backupJob({ id: 4, name: "Nightly snapshot" })]),
       )
       await page.route("**/api/v1/docker/volumes/", (route) => json(route, []))
       // The shell scrolls an inner div (`h-svh overflow-hidden` on the

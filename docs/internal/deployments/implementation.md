@@ -810,7 +810,15 @@ variables is an inline form over a list with reveal, rotate and remove, and edit
 variable asks for its value again (an administrator can reveal the current one into the form) so a
 scope change can never blank a secret; Domains checks a new hostname through `GET /deploy/hostname`;
 Databases & backups links databases through the same sheet the creation flow uses and never commits
-a half-filled sibling row when a database is connected or removed; Automation holds webhooks (with
+a half-filled sibling row when a database is connected or removed. It opens on four readings — linked
+count, connection, backup policy and native-dump coverage — and draws each link as a row carrying its
+engine, database, managed hostname, observed status and the reason reconciliation recorded when it
+could not repair one. Because runtime activation attaches a database by reading the variable that
+holds its address rather than the dependency row, removing a link offers to delete the variables that
+reference it, and says so plainly when it is bound by a value it cannot name. A declared backup job
+shows its schedule, last success, next run and stored size with the live release's observation folded
+onto the same row, runs on demand, and warns when it takes no native dump of a linked database —
+which the gate would otherwise refuse mid-deployment — with one press to add the dump; Automation holds webhooks (with
 their delivery log and secret rotation, the hook URL shown absolute), schedules (with their run
 history) and previews (approve, reject, variables, deploy); Danger zone holds Stop or Start, Archive,
 managed-resource removal and permanent deletion.

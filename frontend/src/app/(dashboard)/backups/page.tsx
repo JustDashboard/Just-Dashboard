@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
 import { Archive, CloudUpload, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
@@ -49,6 +49,10 @@ export default function BackupsPage() {
   // with the path already in it, and the address is cleaned so a reload does
   // not open it again.
   const incoming = search.get("source")
+  // A deployment's Databases settings sends a linked connection here when no
+  // job dumps it: the form opens on the coverage entry for that database,
+  // which already carries the native dump as its suggestion.
+  const incomingDatabase = search.get("database")
   // The open form, and its fields in `JobDialog`, are kept in memory for the
   // tab — memory, because a destination's keys are typed into it — so a
   // look at the volume it should cover does not mean filling it in again.
@@ -76,12 +80,29 @@ export default function BackupsPage() {
   const list = useMemo(() => jobs.data ?? [], [jobs.data])
   const selected = list.find((j) => String(j.id) === selectedId) ?? null
 
+  // The coverage report is what knows how to back a database up — its paths,
+  // its native dump, the containers to freeze — so the form waits for it
+  // rather than being filled from the id alone. Opened once: the report keeps
+  // polling, and a second arrival must not reopen a form being typed into.
+  const openedForDatabase = useRef(false)
   useEffect(() => {
-    if (!incoming) return
+    if (!incomingDatabase || openedForDatabase.current) return
+    const resource = coverage.data?.resources?.find(
+      (item) => item.kind === "database" && String(item.connectionId) === incomingDatabase,
+    )
+    if (!resource) return
+    openedForDatabase.current = true
+    forgetMemoryState("backups.job.new")
+    setForm({ prefill: prefillFor(resource) })
+  }, [incomingDatabase, coverage.data, setForm])
+
+  useEffect(() => {
+    if (!incoming && !incomingDatabase) return
     const url = new URL(window.location.href)
     url.searchParams.delete("source")
+    url.searchParams.delete("database")
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
-  }, [incoming])
+  }, [incoming, incomingDatabase])
 
   const refresh = () => {
     jobs.refresh()

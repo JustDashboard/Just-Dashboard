@@ -118,6 +118,9 @@ Redis on pure-Go drivers, so the image still needs no CGO.
 ### Database provisioning for deployments
 
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
+A project's Databases settings reuses the same two reads for a linked connection: `/ping` behind its
+Test connection verb, and `?target=container` behind Copy application URL, which stays admin-only and
+audited there as everywhere else.
 Quick setup provisions with `exposure: local`, so those ports are published to host loopback only;
 the Databases page's own dialog defaults to every interface (above). The data volume is named
 `<container>-data`, and provisioning refuses with `409 volume_exists` when that volume already exists:
