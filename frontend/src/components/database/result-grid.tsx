@@ -311,6 +311,11 @@ export function ResultGrid({
                       <button
                         type="button"
                         onClick={() => setDetail({ column: result.columns[j], value: cell })}
+                        // An empty string is a value, and it renders as nothing —
+                        // which leaves a focusable control a screen reader has no
+                        // name for. It is the one cell that has to say what it is
+                        // rather than show it.
+                        aria-label={cell === "" ? `${result.columns[j]}: empty` : undefined}
                         className="min-w-0 flex-1 truncate px-4 py-3 text-left focus-ring-inset hover:bg-menu-hover"
                       >
                         <CellValue value={cell} />

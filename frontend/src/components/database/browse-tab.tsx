@@ -121,7 +121,17 @@ export function BrowseTab({
 }) {
   const { can } = useAuth()
   const tableIdentity = JSON.stringify([conn.id, selection?.schema, selection?.table])
-  const [count, setCount] = useState<number | null>(null)
+  /**
+   * An exact COUNT(*), tagged with the conditions it was taken under.
+   *
+   * It has to be self-invalidating rather than cleared by hand at each of the
+   * places that change the view: the figure drives the page count, the Last
+   * button and what the export menu promises, and a count taken under a filter
+   * that has since been removed clamps paging to a page that no longer exists.
+   * The order is deliberately not part of the tag — sorting a table does not
+   * change how many rows are in it.
+   */
+  const [counted, setCounted] = useState<{ filters?: string; value: number } | null>(null)
   // The place is kept for the tab and tagged with the table it belongs to:
   // coming back finds the same page under the same filters, and a different
   // table starts at the top — including the one a foreign key leads to,
@@ -148,6 +158,16 @@ export function BrowseTab({
     movePlace({ filters: typeof next === "function" ? next(filters) : next })
   const setShowFilters = (next: boolean) => movePlace({ showFilters: next })
   const [counting, setCounting] = useState(false)
+  /**
+   * What the grid held when a re-read was asked for.
+   *
+   * usePoll reports `loading` only until its first result, so re-reading a
+   * table that already has rows is invisible and the button answers a press by
+   * sitting still — which is the reason anybody presses refresh twice. The read
+   * is finished the moment either the result or the error is a different one,
+   * which is a fact about the data rather than a flag to remember to clear.
+   */
+  const [readBefore, setReadBefore] = useState<{ data?: QueryResult; error?: Error } | null>(null)
   const [rowSelection, setRowSelection] = useState<{
     query: string
     result?: QueryResult
@@ -250,7 +270,7 @@ export function BrowseTab({
     setOffset(0)
     setSort(null)
     setFilters([])
-    setCount(null)
+    setCounted(null)
     setSelected(new Set())
     onSelect({ schema: t.schema, table: t.name })
   }
@@ -269,7 +289,7 @@ export function BrowseTab({
       },
       JSON.stringify([conn.id, target.schema, target.table]),
     )
-    setCount(null)
+    setCounted(null)
     onSelect(target)
   }
 
@@ -296,30 +316,42 @@ export function BrowseTab({
   const current = tables.data?.find((t) => t.name === table && t.schema === schema)
 
   /**
-   * The tables whose rows point at the one being browsed. Composite keys are
-   * left out for the same reason the outgoing links are: following one means
-   * matching several columns at once, and a filter on the first of them would
-   * open a list that is wrong rather than merely incomplete.
+   * The tables whose rows point at the one being browsed.
+   *
+   * Three things are deliberately excluded. A composite key, for the same
+   * reason the outgoing links exclude one: following it means matching several
+   * columns at once, and a filter on the first of them opens a list that is
+   * wrong rather than merely incomplete. A key naming a parent in another
+   * schema, because the relations map is keyed by bare table name and two
+   * schemas may each hold a `users` — pointing at the wrong one is worse than
+   * not offering the link. And a key whose column names came back empty, which
+   * SQLite produces for a reference written without an explicit parent column:
+   * the filter it would build has nothing to match on.
    */
   const references: TableReference[] = useMemo(() => {
     if (!table || !relations.data) return []
     const out: TableReference[] = []
     for (const [child, fks] of Object.entries(relations.data)) {
-      if (child === table) continue
+      // A table that points at itself is kept: `employees.manager_id -> id` is
+      // the commonest shape this verb exists for, and "the rows that report to
+      // this one" is exactly the question it answers.
       for (const fk of fks) {
-        if (fk.refTable === table && fk.columns.length === 1 && fk.refColumns.length === 1) {
-          out.push({ table: child, fk })
-        }
+        if (fk.refTable !== table) continue
+        if (fk.refSchema && schema && fk.refSchema !== schema) continue
+        if (fk.columns.length !== 1 || fk.refColumns.length !== 1) continue
+        if (!fk.columns[0] || !fk.refColumns[0]) continue
+        out.push({ table: child, fk })
       }
     }
     return out.sort((a, b) => a.table.localeCompare(b.table))
-  }, [relations.data, table])
+  }, [relations.data, table, schema])
 
   const reload = () => {
+    setReadBefore({ data: rows.data, error: rows.error })
     rows.refresh()
     tables.refresh()
     detail.refresh()
-    setCount(null)
+    setCounted(null)
     setSelected(new Set())
   }
 
@@ -428,7 +460,7 @@ export function BrowseTab({
         table,
         filters: filterParam,
       })
-      setCount(res.count)
+      setCounted({ filters: filterParam, value: res.count })
     } catch (err) {
       notify.error("Could not count rows", err)
     } finally {
@@ -505,7 +537,7 @@ export function BrowseTab({
       action: async (c) => {
         await del(`/databases/${conn.id}/ddl/table`, { body: { schema, table }, confirm: c })
         notify.success(`Dropped ${table}`)
-        setCount(null)
+        setCounted(null)
         // Deselected before the list is refreshed: the table is gone, and
         // leaving it selected left the grid showing its last rows under a live
         // Insert button while the list beside it had already dropped the name.
@@ -531,6 +563,11 @@ export function BrowseTab({
       },
     })
 
+  const refreshing =
+    readBefore !== null && readBefore.data === rows.data && readBefore.error === rows.error
+
+  // A count taken under different conditions is not this view's count.
+  const count = counted && counted.filters === filterParam ? counted.value : null
   const first = offset + 1
   const last = offset + (rows.data?.rowCount ?? 0)
   const page = Math.floor(offset / PAGE) + 1
@@ -792,7 +829,7 @@ export function BrowseTab({
                     editor should not shuffle under the pointer. So re-reading
                     it has to be a verb, and before this it was only a side
                     effect of picking the table again. */}
-                <Button size="xs" variant="ghost" onClick={reload} pending={rows.loading}>
+                <Button size="xs" variant="ghost" onClick={reload} pending={refreshing}>
                   Refresh
                 </Button>
               </div>
@@ -856,7 +893,7 @@ export function BrowseTab({
           kind="table"
           current={table}
           onDone={(to) => {
-            setCount(null)
+            setCounted(null)
             // Follow the rename rather than holding the old name, which the
             // next poll would ask the server for and be told does not exist.
             onSelect({ schema, table: to })

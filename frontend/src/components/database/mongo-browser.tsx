@@ -57,6 +57,12 @@ import {
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 const PAGE = 100
+/**
+ * How many documents an export writes before it stops. The server caps it too;
+ * this is the number the menu promises, sent as the request's own limit so the
+ * sentence and the file cannot drift apart.
+ */
+const EXPORT_CAP = 100_000
 
 /** The three readings of one collection, in the order the strip draws them. */
 const VIEWS = [
@@ -161,6 +167,7 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
       table: collection,
       filter: applied,
       format,
+      limit: EXPORT_CAP,
     })
     a.click()
   }
@@ -464,7 +471,7 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
           )}
 
           {tab === "aggregate" && (
-            <div className={cn("min-h-0 flex-1 overflow-y-auto p-4", ringSafeScroll)}>
+            <div className={cn("min-h-0 flex-1 overflow-y-auto", ringSafeScroll, "p-4")}>
               <AggregateTab
                 conn={conn}
                 database={dbName}
@@ -533,7 +540,7 @@ function CollectionMenu({
   onImport: () => void
   onDrop: () => void
 }) {
-  const hint = filtered ? "What this filter matches." : "Every document in the collection."
+  const hint = `${filtered ? "What this filter matches" : "The whole collection"}, up to ${EXPORT_CAP.toLocaleString()} documents.`
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

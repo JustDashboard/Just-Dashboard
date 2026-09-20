@@ -68,7 +68,10 @@ func (clickhouseDialect) Tables(ctx context.Context, db *sql.DB, schema string) 
 	rows, err := db.QueryContext(ctx, `
 	  SELECT database, name,
 	         if(engine LIKE '%View', 'view', 'table'),
-	         toInt64(ifNull(total_rows, -1)),
+	         -- The cast comes first: total_rows is Nullable(UInt64), and asking
+	         -- ClickHouse 24.8/25.8 for a supertype of that and a signed -1
+	         -- literal is NO_COMMON_TYPE, which fails the whole catalogue.
+	         ifNull(toInt64(total_rows), -1),
 	         toInt64(ifNull(total_bytes, 0)),
 	         ifNull(comment, '')
 	  FROM system.tables

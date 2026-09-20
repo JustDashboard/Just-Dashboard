@@ -399,6 +399,43 @@ test("the grid pages by typing a page number and by First and Last", async ({ pa
 })
 
 /**
+ * An exact count belongs to the conditions it was taken under. When it did not,
+ * counting a filtered view and then clearing the filter left the page count
+ * clamped to the filtered total — Next was enabled and did nothing, and the
+ * button that would have corrected the figure was hidden because a figure existed.
+ */
+test("counting a filtered view does not clamp paging once the filter is gone", async ({ page }) => {
+  const browses: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], browses })
+  await page.goto("/databases?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await expect(page.getByText("ada@example.com")).toBeVisible()
+  await page.getByLabel("Close toast").click()
+
+  // Count under a filter…
+  await page.getByRole("button", { name: "Filter rows" }).click()
+  await page.getByRole("button", { name: "Add condition" }).click()
+  await page.getByRole("textbox", { name: "Value" }).fill("ada@example.com")
+  await page.getByRole("button", { name: "Count all rows" }).click()
+  await expect(page.getByRole("button", { name: "Last" })).toBeVisible()
+
+  // …then drop it. The count no longer describes this view, so the page total
+  // and the Last it implied go with it, and paging is free again.
+  await page.getByRole("button", { name: "Remove this condition" }).click()
+  await expect(page.getByRole("button", { name: "Last" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Count all rows" })).toBeVisible()
+
+  // The clamp is what broke: under the stale count the page field could not
+  // leave page 1, because ceil(1 / 100) said there was only one page.
+  browses.length = 0
+  await page.getByRole("textbox", { name: "Page" }).fill("3")
+  await page.getByRole("textbox", { name: "Page" }).press("Enter")
+  await expect.poll(() => browses.some((q) => q.includes("offset=200"))).toBe(true)
+  await expect(page.getByRole("textbox", { name: "Page" })).toHaveValue("3")
+})
+
+/**
  * The value viewer is the one way to read a JSON blob the column has truncated,
  * and it hung off a click handler on the `<td>` — which a keyboard cannot reach.
  */

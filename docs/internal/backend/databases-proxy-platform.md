@@ -65,7 +65,11 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   `>= 0` only where the engine actually answered. It used to be floored to zero in three dialects and
   leaked a raw `reltuples` of `-1` in a fourth, so a catalogue that could not say how many rows a table
   held was indistinguishable from one saying the table was empty, and every table in a fresh database
-  was drawn as having no rows. `Count` on request is the number that is true.
+  was drawn as having no rows. `Count` on request is the number that is true. The ClickHouse query casts
+  before it substitutes (`ifNull(toInt64(total_rows), -1)`): `total_rows` is `Nullable(UInt64)`, and asking
+  24.8 or 25.8 for a supertype of that and a signed literal is `NO_COMMON_TYPE`, which fails the whole
+  catalogue — 26.x accepts either form, so the version a contributor happens to run decides whether the
+  mistake is visible.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
