@@ -235,6 +235,24 @@
    * sunken well and inside a table row. */
   --meter-track: color-mix(in oklab, var(--foreground) 14%, transparent);
 
+  /* ---- The flow register -------------------------------------------------
+   *
+   * Three values spent only where the reader is *deciding* something — the
+   * deploy flow's chooser and its Configure screen. The reading register has
+   * no use for them and must not grow one: see §16.
+   *
+   * `--flow-surface` is the ground of the one surface per screen that is
+   * allowed depth. It is a step above `--card` rather than a new colour,
+   * because what makes it read as foreground is being the only one.
+   *
+   * `--flow-lit` is the brand at the strength a *border* needs to be seen
+   * under the pointer without becoming a glow — it is spent on a one-pixel
+   * edge and nowhere else. `--flow-lit-soft` is the same edge at rest on a
+   * card that is already chosen. */
+  --flow-surface: color-mix(in oklab, var(--card) 93%, var(--foreground) 7%);
+  --flow-lit: color-mix(in oklab, var(--brand) 76%, transparent);
+  --flow-lit-soft: color-mix(in oklab, var(--brand) 24%, transparent);
+
   --rule-brand: color-mix(in oklab, var(--brand) 38%, transparent);
   --rule-primary: color-mix(in oklab, var(--primary) 30%, transparent);
   --rule-success: color-mix(in oklab, var(--success) 32%, transparent);
@@ -321,6 +339,10 @@
   --color-surface-sunken: var(--surface-sunken);
   --color-hairline: var(--hairline);
   --color-border-strong: var(--border-strong);
+
+  --color-flow-surface: var(--flow-surface);
+  --color-flow-lit: var(--flow-lit);
+  --color-flow-lit-soft: var(--flow-lit-soft);
   /* Registered so `bg-row-hover` is a real utility. It was written both as
      `bg-row-hover` and as `bg-[var(--row-hover)]` across the app, and only the
      second one did anything — which is why the terminal rail's rows and the
@@ -605,6 +627,23 @@
   &:focus-visible {
     outline-color: var(--ring);
   }
+}
+
+/* The rule under a flow screen's question (§16).
+ *
+ * A hairline that starts at the brand and fades out across the measure. It is
+ * the one gradient the product draws, and it is one pixel tall: what it says
+ * is "this is the head of a sequence", which a flat hairline cannot say on a
+ * page whose every other block is also separated by one. On a reading page the
+ * blocks are peers and the flat rule is correct — which is why this is a
+ * register-B utility and not a change to `--hairline`. */
+@utility flow-rule {
+  background-image: linear-gradient(
+    to right,
+    var(--rule-brand),
+    var(--hairline) 28%,
+    transparent 92%
+  );
 }
 
 @layer components {

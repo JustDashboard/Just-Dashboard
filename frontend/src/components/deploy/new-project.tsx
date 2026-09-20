@@ -19,6 +19,7 @@ import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageHeader, PageState } from "@/components/page"
+import { FlowHeader, FlowSteps } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ROW_BLEED, RowList } from "@/components/row-list"
 import { IconAction } from "@/components/icon-action"
@@ -101,6 +102,21 @@ const Eyebrow = (
     <ArrowLeft className="size-3" /> Deployments
   </Link>
 )
+
+/**
+ * The three steps of making a project, as the reader experiences them: pick
+ * what it is built from, settle how it runs, and let it go. They are the
+ * draft's own `source` → `configuration` → commit sequence (`draft.ts`) rather
+ * than a decorative count, so the spine cannot drift from the state machine
+ * underneath it. What happens after the commit — building, releasing, live —
+ * is the run page's own timeline, which picks the sequence up where this
+ * leaves it.
+ */
+const FLOW_STEPS = [
+  { key: "source", label: "Source" },
+  { key: "configure", label: "Configure" },
+  { key: "deploy", label: "Deploy" },
+]
 
 /**
  * One page, two states: choose a source, then configure it. The old
@@ -240,10 +256,17 @@ export function NewProject({
     )
 
   return (
-    <Page className="animate-rise">
-      <PageHeader eyebrow={Eyebrow} title="New project" />
+    <Page register="flow" className="animate-rise">
       {!flow || linkArrived ? (
         <>
+          {/* The screen asks something, and the question is the page's own
+              rank — not a sentence under a title, which is the caption §5
+              removed from every page in the product. */}
+          <FlowHeader
+            eyebrow={Eyebrow}
+            question="What are you deploying?"
+            steps={<FlowSteps steps={FLOW_STEPS} current={0} />}
+          />
           {(drafts.data?.length ?? 0) > 0 && (
             <Panel plain className="animate-rise">
               <PanelHeader
@@ -345,12 +368,22 @@ export function NewProject({
           {tab === "existing" && <SourceExisting key="existing" onInspected={inspected} />}
         </>
       ) : (
-        <Configure
-          flow={flow}
-          onFlowChange={setFlow}
-          onChangeSource={changeSource}
-          initialAdvanced={mode === "advanced"}
-        />
+        <>
+          {/* The second step asks the second question. The spine is the only
+              thing on either screen that says they are one sequence, which is
+              why it is drawn here rather than inside each screen. */}
+          <FlowHeader
+            eyebrow={Eyebrow}
+            question="How should it run?"
+            steps={<FlowSteps steps={FLOW_STEPS} current={1} />}
+          />
+          <Configure
+            flow={flow}
+            onFlowChange={setFlow}
+            onChangeSource={changeSource}
+            initialAdvanced={mode === "advanced"}
+          />
+        </>
       )}
     </Page>
   )

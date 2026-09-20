@@ -11,8 +11,15 @@ import { useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
+import {
+  ChoiceList,
+  ChoiceRow,
+  FlowPanel,
+  FlowPanelBody,
+  FlowPanelHeader,
+} from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ROW_BLEED, Row, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -357,9 +364,13 @@ export function SourceGit({
         </PanelBody>
       </Panel>
 
-      <div className="grid min-w-0 items-start gap-x-10 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <Panel plain className="min-w-0">
-          <PanelHeader
+      <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        {/* The one surface on this screen that carries depth (§16): choosing a
+            repository is what the reader came here to do, and the paste field
+            beside it is the fallback for when this list has not got it. Two
+            surfaces with depth would be two foregrounds, which is none. */}
+        <FlowPanel className="min-w-0">
+          <FlowPanelHeader
             title="Import Git repository"
             actions={
               canBrowse && (
@@ -371,7 +382,7 @@ export function SourceGit({
               )
             }
           />
-          <PanelBody className="space-y-4">
+          <FlowPanelBody className="space-y-4">
             {status.error && <ErrorState error={status.error} />}
             {repos.error && <ErrorState error={repos.error} />}
             {canBrowse && (
@@ -442,9 +453,9 @@ export function SourceGit({
                   key={listing ? "loading" : "listed"}
                 >
                   {groups.map((group) => (
-                    <div key={group.key} className="animate-rise space-y-1 pt-2 first:pt-0">
+                    <div key={group.key} className="animate-rise space-y-2 pt-3 first:pt-0">
                       {groups.length > 1 && <p className="eyebrow">{group.label}</p>}
-                      <RowList aria-label={group.label}>
+                      <ChoiceList aria-label={group.label}>
                         {group.repos.map((repo) => (
                           <RepoRow
                             key={repo.nameWithOwner}
@@ -453,7 +464,7 @@ export function SourceGit({
                             onImport={() => importRepo(repo)}
                           />
                         ))}
-                      </RowList>
+                      </ChoiceList>
                     </div>
                   ))}
                 </div>
@@ -485,8 +496,8 @@ export function SourceGit({
                 />
               </OptionList>
             </details>
-          </PanelBody>
-        </Panel>
+          </FlowPanelBody>
+        </FlowPanel>
 
         {/* Beside the rows at this width, under them at every other — which is
           what spec §5.4 asks for. It is the fallback for a repository neither
@@ -583,38 +594,21 @@ function RepoRow({
   onImport: () => void
 }) {
   return (
-    <li data-slot="row" className="min-w-0">
-      <div
-        onClick={onImport}
-        className={`group flex min-w-0 cursor-pointer items-center gap-3 px-5 py-3 text-left ${ROW_BLEED} transition-colors hover:bg-row-hover`}
-      >
-        {repo.private && (
+    <ChoiceRow
+      verb={`Import ${repo.nameWithOwner}`}
+      onSelect={onImport}
+      title={repo.nameWithOwner}
+      description={repo.description}
+      leading={
+        repo.private && (
           <LockClosed
             className="size-3.5 shrink-0 text-muted-foreground"
             aria-label="Private repository"
           />
-        )}
-        <span className="min-w-0 flex-1">
-          <button
-            type="button"
-            aria-label={`Import ${repo.nameWithOwner}`}
-            // The row's own handler already fires on the pointer; this one is
-            // for the keyboard, and must not run the import twice.
-            onClick={(event) => {
-              event.stopPropagation()
-              onImport()
-            }}
-            className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
-          >
-            {repo.nameWithOwner}
-          </button>
-          {repo.description && (
-            <span className="block truncate text-hint text-muted-foreground">
-              {repo.description}
-            </span>
-          )}
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
+        )
+      }
+      trailing={
+        <>
           {repo.archived && <Tag>archived</Tag>}
           {repo.fork && <Tag>fork</Tag>}
           {repo.language && <Tag>{repo.language}</Tag>}
@@ -634,8 +628,8 @@ function RepoRow({
               {pending ? "Importing…" : relativeTime(repo.pushedAt)}
             </span>
           )}
-        </span>
-      </div>
-    </li>
+        </>
+      }
+    />
   )
 }

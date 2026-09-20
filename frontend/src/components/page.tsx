@@ -31,13 +31,32 @@ import { ErrorState, LoadingPanel } from "@/components/state"
 export function Page({
   className,
   fill,
+  register = "reading",
   ...props
-}: React.ComponentProps<"div"> & { fill?: boolean }) {
+}: React.ComponentProps<"div"> & {
+  fill?: boolean
+  /**
+   * Which register this page is drawn in (§16).
+   *
+   * `reading` is the product: a page that reports state, drawn flat, where
+   * the figures are the loud thing. `flow` is a page where the reader is
+   * deciding something in sequence — it composes `components/flow.tsx`
+   * instead of bare panels and rows, and it is the only place the depth,
+   * the lit border and the mandatory command face are allowed.
+   *
+   * It is stamped on the page element rather than inferred, so which register
+   * a page is in is one grep, a page cannot be half in each by accident, and
+   * a browser test can assert that only the flow pages carry the flow
+   * affordances.
+   */
+  register?: "reading" | "flow"
+}) {
   return (
     <div
       data-slot="page"
+      data-register={register}
       className={cn(
-        "mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
+        "group/page mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
         fill && "h-full min-h-0 overflow-hidden",
         className,
       )}
