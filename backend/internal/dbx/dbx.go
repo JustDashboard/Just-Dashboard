@@ -230,9 +230,13 @@ func ListDatabases(ctx context.Context, db *sql.DB, driver Driver) ([]Database, 
 }
 
 type Table struct {
-	Schema  string `json:"schema"`
-	Name    string `json:"name"`
-	Type    string `json:"type"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	// The planner's estimate, and -1 where the engine has none: a table the
+	// planner has never analysed, a view, an engine that does not count. It
+	// used to be floored to 0, and a catalogue that cannot say how many rows a
+	// table has was indistinguishable from one saying the table is empty.
 	Rows    int64  `json:"estimatedRows"`
 	Size    int64  `json:"size,omitempty"`
 	Comment string `json:"comment,omitempty"`

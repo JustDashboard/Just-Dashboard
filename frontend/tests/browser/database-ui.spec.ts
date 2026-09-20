@@ -46,6 +46,18 @@ const connection = {
   createdAt: now,
 }
 
+/** A second connection, so switching between them can be asserted. */
+const otherConnection = {
+  id: 2,
+  name: "cache",
+  driver: "postgres",
+  host: "127.0.0.1",
+  port: "5433",
+  user: "app",
+  database: "cache",
+  createdAt: now,
+}
+
 const drivers = [
   {
     id: "postgres",
@@ -135,7 +147,16 @@ async function json(route: Route, body: unknown, status = 200) {
  */
 async function mockDatabases(
   page: Page,
-  state: { layout: unknown; puts: unknown[]; access?: unknown; deletes?: unknown[] },
+  state: {
+    layout: unknown
+    puts: unknown[]
+    access?: unknown
+    deletes?: unknown[]
+    /** Every /export request's query string, so the download can be asserted. */
+    exports?: string[]
+    /** Every /browse request's query string, for the paging assertions. */
+    browses?: string[]
+  },
 ) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
@@ -160,7 +181,7 @@ async function mockDatabases(
     }
     if (path === "/updates/self" || path === "/dashboard/update")
       return json(route, { current: "0.6.7", latest: "0.6.7" })
-    if (path === "/databases/") return json(route, [connection])
+    if (path === "/databases/") return json(route, [connection, otherConnection])
     if (path === "/databases/drivers") return json(route, drivers)
     if (path === "/databases/sync")
       return json(route, {
@@ -178,7 +199,8 @@ async function mockDatabases(
           },
         ],
       })
-    if (path === "/databases/1/ping") return json(route, { ok: true })
+    if (path === "/databases/1/ping" || path === "/databases/2/ping")
+      return json(route, { ok: true })
     if (path === "/databases/1/tables") return json(route, tables)
     if (path === "/databases/1/table") {
       const table = url.searchParams.get("table") ?? "users"
@@ -203,7 +225,26 @@ async function mockDatabases(
         createSql: `CREATE TABLE ${table} ()`,
       })
     }
-    if (path === "/databases/1/browse")
+    if (path === "/databases/1/relations")
+      return json(route, {
+        orders: [
+          {
+            name: "orders_customer_id_fkey",
+            columns: ["customer_id"],
+            refTable: "users",
+            refColumns: ["id"],
+            onDelete: "CASCADE",
+          },
+        ],
+      })
+    if (path === "/databases/1/count") return json(route, { count: 1200 })
+    if (path === "/databases/1/export") {
+      state.exports?.push(url.search)
+      // A download still has to be fulfilled, or the navigation never settles.
+      return route.fulfill({ status: 200, contentType: "text/csv", body: "id,email\n" })
+    }
+    if (path === "/databases/1/browse") {
+      state.browses?.push(url.search)
       return json(route, {
         columns: ["id", "email"],
         types: ["int4", "text"],
@@ -214,6 +255,7 @@ async function mockDatabases(
         truncated: false,
         statement: "",
       })
+    }
     if (path === "/databases/1/graph") return json(route, graph)
     if (path === "/databases/1/diagram") {
       if (method === "GET")
@@ -271,6 +313,119 @@ test("the connection is the section's title and the tables are on the rail", asy
   await page.getByRole("button", { name: /^users/ }).click()
   await expect(page.getByText("ada@example.com")).toBeVisible()
   await expect(page.getByRole("button", { name: "Insert" })).toBeVisible()
+})
+
+/**
+ * The export is the view. Narrowing the grid and pressing Export as CSV used to
+ * download the whole table, which looks exactly like a correct export until
+ * somebody opens the file.
+ */
+test("exporting carries the conditions and the order the grid is under", async ({ page }) => {
+  const exports: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], exports })
+  await page.goto("/databases?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await expect(page.getByText("ada@example.com")).toBeVisible()
+
+  // Order by a column, then narrow to one value.
+  await page.getByRole("button", { name: "email", exact: true }).click()
+  await page.getByRole("button", { name: "Filter rows" }).click()
+  await page.getByRole("button", { name: "Add condition" }).click()
+  await page.getByRole("textbox", { name: "Value" }).fill("ada@example.com")
+
+  await page.getByRole("button", { name: "More table actions" }).click()
+  const csv = page.getByRole("menuitem", { name: /Export as CSV/ })
+  await expect(csv).toContainText("condition applied")
+  await expect(csv).toContainText("ordered by email")
+  await csv.click()
+
+  await expect.poll(() => exports.length).toBeGreaterThan(0)
+  const query = exports[exports.length - 1]
+  expect(query).toContain("orderBy=email")
+  expect(query).toContain("ada%40example.com")
+  expect(query).toContain("limit=100000")
+})
+
+/**
+ * A grid can always say what a row points at. Saying what points *at* it needs
+ * the rest of the schema — the route for which existed from the start and was
+ * called by nothing.
+ */
+test("a row says which tables reference it, and following one lands filtered", async ({ page }) => {
+  const browses: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], browses })
+  await page.goto("/databases?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await page.getByRole("button", { name: "More row actions" }).first().click()
+  const reference = page.getByRole("menuitem", { name: /orders/ })
+  await expect(reference).toContainText("where customer_id is this row")
+  await reference.click()
+
+  // It is the same navigation the rail does, plus a filter: the orders table,
+  // narrowed to the row that was open.
+  await expect.poll(() => browses.some((q) => q.includes("table=orders"))).toBe(true)
+  const landed = browses.filter((q) => q.includes("table=orders")).pop() ?? ""
+  expect(decodeURIComponent(landed)).toContain('"column":"customer_id"')
+  await expect(page.getByRole("button", { name: "Remove this condition" })).toBeVisible()
+})
+
+/** Paging past the first few hundred rows, without pressing Next four hundred times. */
+test("the grid pages by typing a page number and by First and Last", async ({ page }) => {
+  const browses: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], browses })
+  await page.goto("/databases?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await expect(page.getByText("ada@example.com")).toBeVisible()
+  // The sync notice about a server that needs credentials never expires by
+  // design, and it sits over the footer's controls at this height.
+  await page.getByLabel("Close toast").click()
+
+  await page.getByRole("textbox", { name: "Page" }).fill("7")
+  await page.getByRole("textbox", { name: "Page" }).press("Enter")
+  await expect.poll(() => browses.some((q) => q.includes("offset=600"))).toBe(true)
+
+  // Last needs a count, so it appears once the table has been counted.
+  await expect(page.getByRole("button", { name: "Last" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Count all rows" }).click()
+  await expect(page.getByRole("button", { name: "Last" })).toBeVisible()
+  await page.getByRole("button", { name: "Last" }).click()
+  await expect.poll(() => browses.some((q) => q.includes("offset=1100"))).toBe(true)
+
+  await page.getByRole("button", { name: "First" }).click()
+  await expect(page.getByRole("textbox", { name: "Page" })).toHaveValue("1")
+})
+
+/**
+ * The value viewer is the one way to read a JSON blob the column has truncated,
+ * and it hung off a click handler on the `<td>` — which a keyboard cannot reach.
+ */
+test("a cell opens its value from the keyboard", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  const cell = page.getByRole("button", { name: "ada@example.com", exact: true })
+  await cell.focus()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog")).toContainText("ada@example.com")
+})
+
+/**
+ * The rail's filter and schema belong to the connection being read. Under one
+ * shared key, a schema chosen on one engine emptied the rail on the next.
+ */
+test("the table filter belongs to the connection, not to the rail", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases?conn=1")
+
+  await page.getByRole("textbox", { name: "Filter tables" }).fill("orders")
+  await expect(page.getByRole("button", { name: /^users/ })).toHaveCount(0)
+
+  await page.goto("/databases?conn=2")
+  await expect(page.getByRole("textbox", { name: "Filter tables" })).toHaveValue("")
 })
 
 test("the create table form shows the statement it will run", async ({ page }) => {

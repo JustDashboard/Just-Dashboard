@@ -320,7 +320,12 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
           <div className="mx-auto w-full max-w-[1440px] px-5 md:px-8">
             <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3 pt-6 pb-3 md:pt-8">
               <div className="min-w-0 space-y-1.5">
-                <p className="eyebrow">Access</p>
+                {/* The eyebrow names the nav group, the way every other page
+                    header in the product does — and the way this file's own
+                    loading, error and empty states already did. "Access" said
+                    nothing the sidebar had not, and said it in a word that
+                    appears nowhere else. */}
+                <p className="eyebrow">Apps</p>
                 {conn && (
                   <ConnectionSwitcher
                     connections={list ?? []}

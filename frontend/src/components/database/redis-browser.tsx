@@ -13,7 +13,7 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { cn, ringSafeScroll } from "@/lib/utils"
 import type { DbConnection, RedisPage, RedisValue } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
 import { EmptyNote, EmptyState, LoadingRows, Spinner } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
@@ -160,134 +160,145 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
       },
     })
 
+  // One workbench sized to the window — a key rail beside a value editor with a
+  // hairline between them — rather than two framed cards on a scrolling page.
+  // It is the shape the SQL browser has had since the section was written, and
+  // the one the section's documentation already described.
   return (
-    <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)] [&>*]:min-w-0">
-      <Panel>
-        <PanelHeader
-          title="Keys"
-          actions={
-            <>
+    <Pane className="min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,15rem)_minmax(0,1fr)] lg:grid-cols-[22rem_minmax(0,1fr)] lg:grid-rows-1">
+        <div className="flex min-h-0 min-w-0 flex-col border-b border-hairline lg:border-r lg:border-b-0">
+          <div className="shrink-0 space-y-2 border-b border-hairline p-2.5">
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={pattern}
+                onChange={(e) => setPattern(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && search()}
+                className="h-7 min-w-0 flex-1 font-mono text-xs sm:h-7"
+                placeholder="user:*"
+                aria-label="Key pattern"
+              />
+              <Button
+                size="icon-sm"
+                variant="outline"
+                className="size-7"
+                aria-label="Scan for this pattern"
+                onClick={search}
+              >
+                <MagnifyingGlass className="size-3.5" />
+              </Button>
               {canWrite && (
-                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  className="size-7"
+                  aria-label="New key"
+                  title="New key"
+                  onClick={() => setCreating(true)}
+                >
                   <Plus className="size-3.5" />
-                  New key
                 </Button>
               )}
-              {databases.data && databases.data.length > 1 ? (
-                <Select
-                  value={db}
-                  onValueChange={(v) => {
-                    setDb(v)
-                    setCursor("0")
-                    setHistory([])
-                    setSelected(null)
-                  }}
-                >
-                  {/* Wide enough for "db15 · 12345": at w-24 the count was
-                    clipped mid-digit, which reads as a rendering fault rather
-                    than as a number that did not fit. */}
-                  <SelectTrigger size="sm" className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {databases.data.map((d) => (
-                      <SelectItem key={d.name} value={d.name}>
-                        db{d.name}
-                        {d.size > 0 && ` · ${d.size}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-            </>
-          }
-        />
-        <PanelBody className="space-y-3">
-          <div className="flex items-center gap-1.5">
-            <Input
-              value={pattern}
-              onChange={(e) => setPattern(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && search()}
-              className="h-8 font-mono text-xs"
-              placeholder="user:*"
-            />
-            <Button size="sm" variant="outline" onClick={search}>
-              <MagnifyingGlass className="size-3.5" />
-            </Button>
+            </div>
+            {databases.data && databases.data.length > 1 ? (
+              <Select
+                value={db}
+                onValueChange={(v) => {
+                  setDb(v)
+                  setCursor("0")
+                  setHistory([])
+                  setSelected(null)
+                }}
+              >
+                <SelectTrigger size="sm" className="h-7 w-full text-xs sm:h-7" aria-label="Database">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {databases.data.map((d) => (
+                    <SelectItem key={d.name} value={d.name}>
+                      db{d.name}
+                      {d.size > 0 && ` · ${d.size}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            <p className="text-hint text-muted-foreground">
+              A glob pattern, matched by the server with SCAN — not a filter over this page.
+            </p>
           </div>
-          <p className="text-hint text-muted-foreground">
-            A glob pattern, matched by the server with SCAN — not a filter over this page.
-          </p>
 
-          <div
-            className={cn("max-h-[calc(100svh-30rem)] space-y-0.5 overflow-y-auto", ringSafeScroll)}
-          >
+          <div className={cn("min-h-0 flex-1 space-y-px overflow-y-auto p-1", ringSafeScroll)}>
             {page.loading && <LoadingRows rows={5} />}
             {page.data?.keys.length === 0 && <EmptyNote>No keys match this pattern.</EmptyNote>}
             {page.data?.keys.map((k) => (
               <button
                 key={k.key}
+                type="button"
+                aria-pressed={selected === k.key}
                 onClick={() => setSelected(k.key)}
                 className={cn(
-                  "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
+                  "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
                   selected === k.key
                     ? "bg-accent font-medium text-foreground"
                     : "hover:bg-row-hover",
                 )}
               >
                 <span className="truncate font-mono text-xs">{k.key}</span>
-                <span className="truncate text-micro text-muted-foreground">
-                  {k.type} · {k.size.toLocaleString()}
+                <span className="truncate text-hint text-muted-foreground">
+                  {k.type} · {keySize(k.type, k.size)}
                   {k.ttl >= 0 && ` · ttl ${k.ttl}s`}
                 </span>
               </button>
             ))}
           </div>
-        </PanelBody>
-        <PanelFooter>
-          <Button size="sm" variant="outline" disabled={history.length === 0} onClick={prev}>
-            Previous
-          </Button>
-          <Button size="sm" variant="outline" disabled={page.data?.done} onClick={next}>
-            Next
-          </Button>
-          {page.data?.done && <span className="text-hint text-muted-foreground">End of scan</span>}
-        </PanelFooter>
-      </Panel>
 
-      <Panel>
-        <PanelHeader
-          title={selected ?? "Pick a key"}
-          actions={
-            selected &&
-            canWrite && (
-              <>
-                <Button size="sm" variant="ghost" onClick={() => setRenaming(selected)}>
+          <PaneFooter>
+            <Button size="xs" variant="outline" disabled={history.length === 0} onClick={prev}>
+              Previous
+            </Button>
+            <Button size="xs" variant="outline" disabled={page.data?.done} onClick={next}>
+              Next
+            </Button>
+            {page.data?.done && (
+              <span className="text-hint text-muted-foreground">End of scan</span>
+            )}
+          </PaneFooter>
+        </div>
+
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <PaneHeader className="gap-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-body font-medium">
+              {selected ?? <span className="font-sans text-muted-foreground">Pick a key</span>}
+            </span>
+            {selected && canWrite && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button size="xs" variant="outline" onClick={() => setRenaming(selected)}>
                   <Pencil className="size-3.5" />
                   Rename
                 </Button>
                 <Button
-                  size="sm"
-                  variant="ghost"
+                  size="xs"
+                  variant="outline"
                   className="text-destructive"
                   onClick={() => deleteKey(selected)}
                 >
                   <Trash className="size-3.5" />
                   Delete
                 </Button>
-              </>
-            )
-          }
-        />
-        <PanelBody flush>
-          {!selected && <EmptyState icon={Key} title="Select a key to see its value" />}
-          {selected && value.loading && (
-            <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-              <Spinner /> Reading…
-            </div>
-          )}
-          {value.data && (
-            <RedisValueView
+              </div>
+            )}
+          </PaneHeader>
+
+          <div className={cn("min-h-0 flex-1 overflow-y-auto", ringSafeScroll)}>
+            {!selected && <EmptyState icon={Key} title="Select a key to see its value" />}
+            {selected && value.loading && (
+              <div className="flex items-center gap-2 p-6 text-body text-muted-foreground">
+                <Spinner /> Reading…
+              </div>
+            )}
+            {value.data && (
+              <RedisValueView
               // Remounting on the key is what resets the editor's draft. Syncing
               // it in an effect instead left a window where the previous key's
               // text was on screen under the new key's name — and one Save away
@@ -298,11 +309,12 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
               value={value.data}
               canWrite={canWrite}
               confirm={confirm}
-              onChanged={reload}
-            />
-          )}
-        </PanelBody>
-      </Panel>
+                onChanged={reload}
+              />
+            )}
+          </div>
+        </div>
+      </div>
 
       {creating && <NewKeyDialog onClose={() => setCreating(false)} onCreate={createKey} />}
       {renaming && (
@@ -312,8 +324,35 @@ export function RedisBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
           onRename={(to) => renameKey(renaming, to)}
         />
       )}
-    </div>
+    </Pane>
   )
+}
+
+/**
+ * What a key's size *is*, which depends on its type.
+ *
+ * The server sends one number per key and it is STRLEN for a string and a
+ * cardinality for everything else — LLEN, SCARD, ZCARD, HLEN, XLEN. Only the
+ * first of those is a count of bytes, so only the first may be formatted as
+ * one: a list of eighteen thousand entries rendered through `bytes` reads as
+ * "18.0 KB", which is a quantity the server never measured.
+ */
+function keySize(type: string, size: number): string {
+  switch (type) {
+    case "string":
+      return bytes(size)
+    case "list":
+      return plural(size, "item")
+    case "hash":
+      return plural(size, "field")
+    case "set":
+    case "zset":
+      return plural(size, "member")
+    case "stream":
+      return plural(size, "entry", "entries")
+    default:
+      return size.toLocaleString()
+  }
 }
 
 /**
@@ -581,7 +620,8 @@ function RedisValueView({
   const copy = (text: string) => void copyText(text, "Copied")
 
   return (
-    <div className="space-y-3 p-4">
+    // Already remounted per key by the caller, so the rise runs once per value.
+    <div className="animate-rise space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Tag>{value.type}</Tag>
         <div className="flex items-center gap-1.5">

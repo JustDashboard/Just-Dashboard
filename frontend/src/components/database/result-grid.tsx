@@ -15,8 +15,10 @@ import {
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DbForeignKey, QueryResult } from "@/lib/types"
+import type { TableReference } from "@/components/database/browse-tab"
 import { Modal } from "@/components/modal"
-import { IconAction, RowActions } from "@/components/icon-action"
+import { Well } from "@/components/panel"
+import { DimActions, IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -32,6 +34,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -55,6 +58,8 @@ export function ResultGrid({
   onSort,
   foreignKeys,
   onFollow,
+  references,
+  onFollowReference,
   selection,
   onSelectionChange,
   className,
@@ -79,6 +84,15 @@ export function ResultGrid({
   /** Outgoing foreign keys, so a referencing value becomes a link. */
   foreignKeys?: DbForeignKey[]
   onFollow?: (fk: DbForeignKey, value: unknown) => void
+  /**
+   * The tables whose rows point at this one. A grid can always say what a row
+   * points at, because the key is in the row; saying what points *at* it needs
+   * the rest of the schema, and that is the question an operator actually
+   * arrives with — "this customer is about to be deleted, what is attached to
+   * them". One menu item per referencing table.
+   */
+  references?: TableReference[]
+  onFollowReference?: (ref: TableReference, row: Record<string, unknown>) => void
   /** Row indices selected for a bulk action, when the caller supports one. */
   selection?: Set<number>
   onSelectionChange?: (next: Set<number>) => void
@@ -204,7 +218,11 @@ export function ResultGrid({
               )}
               {hasActions && (
                 <TableCell className="w-[5.5rem]">
-                  <RowActions>
+                  {/* The verbs have a column of their own here, so they are
+                      always drawn and merely quiet (§6). Revealed on hover,
+                      the reserved column was a hundred pixels of nothing down
+                      every row until one of them sprouted buttons. */}
+                  <DimActions>
                     {onEdit && (
                       <IconAction label="Edit row" onClick={() => onEdit(rowRecord(row))}>
                         <Pencil />
@@ -241,6 +259,28 @@ export function ResultGrid({
                             Duplicate row…
                           </DropdownMenuItem>
                         )}
+                        {onFollowReference && references && references.length > 0 && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel className="text-hint font-medium text-muted-foreground">
+                              Referenced by
+                            </DropdownMenuLabel>
+                            {references.map((ref) => (
+                              <DropdownMenuItem
+                                key={`${ref.table}.${ref.fk.name}`}
+                                onClick={() => onFollowReference(ref, rowRecord(row))}
+                              >
+                                <External className="size-3.5" />
+                                <span className="flex min-w-0 flex-col">
+                                  <span className="truncate">{ref.table}</span>
+                                  <span className="truncate text-hint text-muted-foreground">
+                                    where {ref.fk.columns[0]} is this row
+                                  </span>
+                                </span>
+                              </DropdownMenuItem>
+                            ))}
+                          </>
+                        )}
                         {onDelete && (
                           <>
                             <DropdownMenuSeparator />
@@ -255,32 +295,33 @@ export function ResultGrid({
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </RowActions>
+                  </DimActions>
                 </TableCell>
               )}
               {row.map((cell, j) => {
                 const fk = fkByColumn.get(result.columns[j])
                 const followable = fk && onFollow && cell !== null && cell !== undefined
                 return (
-                  <TableCell
-                    key={j}
-                    onClick={() => setDetail({ column: result.columns[j], value: cell })}
-                    className="max-w-xs cursor-pointer truncate font-mono text-xs hover:bg-menu-hover"
-                    title="Click to view full value"
-                  >
-                    <span className="inline-flex min-w-0 items-center gap-1">
-                      <CellValue value={cell} />
+                  <TableCell key={j} className="max-w-xs p-0 font-mono text-xs">
+                    <span className="flex min-w-0 items-center gap-1 pr-2">
+                      {/* The value is a real button, not a `<td>` with an
+                          onClick. A cell handler is reachable by pointer only,
+                          and the viewer behind it is the one way to read a JSON
+                          blob or a paragraph that the column has truncated. */}
+                      <button
+                        type="button"
+                        onClick={() => setDetail({ column: result.columns[j], value: cell })}
+                        className="min-w-0 flex-1 truncate px-4 py-3 text-left focus-ring-inset hover:bg-menu-hover"
+                      >
+                        <CellValue value={cell} />
+                      </button>
                       {followable && (
                         <button
-                          onClick={(e) => {
-                            // The cell itself opens the value viewer; following
-                            // the reference is a different intent and must not
-                            // trigger both.
-                            e.stopPropagation()
-                            onFollow(fk, cell)
-                          }}
+                          type="button"
+                          onClick={() => onFollow(fk, cell)}
+                          aria-label={`Open ${fk.refTable} where ${fk.refColumns[0]} = ${String(cell)}`}
                           title={`Open ${fk.refTable} where ${fk.refColumns[0]} = ${String(cell)}`}
-                          className="shrink-0 text-muted-foreground/60 hover:text-primary"
+                          className="shrink-0 rounded-sm p-1 text-muted-foreground/60 focus-ring hover:text-primary"
                         >
                           <External className="size-3" />
                         </button>
@@ -336,13 +377,13 @@ function CellDetail({ value }: { value: unknown }) {
   const isNull = value === null || value === undefined
   return (
     <div className="space-y-2">
-      <div className="max-h-[60vh] overflow-auto rounded-md border border-hairline bg-muted/40 p-3">
+      <Well className="max-h-[60vh]">
         {isNull ? (
-          <span className="text-sm text-muted-foreground italic">null</span>
+          <span className="text-body text-muted-foreground italic">null</span>
         ) : (
-          <pre className="font-mono text-xs break-words whitespace-pre-wrap">{text}</pre>
+          <pre className="break-words whitespace-pre-wrap">{text}</pre>
         )}
-      </div>
+      </Well>
       {!isNull && (
         <Button size="sm" variant="outline" onClick={() => void copyText(text, "Copied")}>
           <Copy className="size-3.5" />

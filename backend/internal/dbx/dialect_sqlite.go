@@ -73,9 +73,12 @@ func (sqliteDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, err
 // would be a COUNT(*) per table on every listing — so they are left at zero
 // rather than making the table list quadratic.
 func (sqliteDialect) Tables(ctx context.Context, db *sql.DB, _ string) ([]Table, error) {
+	// SQLite keeps no row estimate and no per-table size: -1 is "unknown",
+	// which the catalogue says nothing about, rather than 0, which claims the
+	// table is empty.
 	rows, err := db.QueryContext(ctx, `SELECT 'main', name,
 	                CASE type WHEN 'table' THEN 'table' ELSE type END,
-	                0, 0, ''
+	                -1, 0, ''
 	         FROM sqlite_master
 	         WHERE type IN ('table','view')
 	           AND name NOT LIKE 'sqlite_%'

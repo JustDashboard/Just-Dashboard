@@ -68,7 +68,7 @@ func (clickhouseDialect) Tables(ctx context.Context, db *sql.DB, schema string) 
 	rows, err := db.QueryContext(ctx, `
 	  SELECT database, name,
 	         if(engine LIKE '%View', 'view', 'table'),
-	         toInt64(ifNull(total_rows, 0)),
+	         toInt64(ifNull(total_rows, -1)),
 	         toInt64(ifNull(total_bytes, 0)),
 	         ifNull(comment, '')
 	  FROM system.tables

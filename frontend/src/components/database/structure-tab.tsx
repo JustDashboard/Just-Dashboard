@@ -161,6 +161,7 @@ export function StructureTab({
     <Pane className="min-h-0 flex-1">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,14rem)_minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)] lg:grid-rows-1">
         <TableRail
+          connId={conn.id}
           tables={tables.data}
           loading={tables.loading}
           selected={selection}

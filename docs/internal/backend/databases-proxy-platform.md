@@ -52,6 +52,20 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   fires and nobody knows which table grew (row counts are the engine's estimate — counting forty tables
   exactly is a full scan to answer a question about *relative* size). `search.go` finds which table holds
   a value, bounded three ways at once; those bounds are what make it safe to point at production.
+- **The export is the view, not the table.** `/databases/{id}/export` takes the grid's `filters`,
+  `orderBy` and `dir` and assembles the statement through the same `browseSelect` the page fetch uses,
+  so a download taken from a narrowed grid is that grid. It was an unconditional `SELECT * FROM`, which
+  made the panel's own promise — "applied on the server, across the whole table" — the reason the file
+  looked right. The filters are parsed **before** any response header is written: once the body has
+  started, a rejected filter can only arrive as JSON inside a file named `.csv`. `ExportTable` remains
+  as the unfiltered form. The row cap is still 100 000 and still reported only to the audit trail, so
+  the page states the cap in the menu item that spends it and sends it as the request's own `limit`.
+- **An unknown row count says so.** `Table.Rows` (`estimatedRows`) is `-1` where the catalogue has no
+  estimate — a table PostgreSQL has never analysed, a view, SQLite, which keeps no count at all — and
+  `>= 0` only where the engine actually answered. It used to be floored to zero in three dialects and
+  leaked a raw `reltuples` of `-1` in a fourth, so a catalogue that could not say how many rows a table
+  held was indistinguishable from one saying the table was empty, and every table in a fresh database
+  was drawn as having no rows. `Count` on request is the number that is true.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the

@@ -946,6 +946,14 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 	if !format.Valid() {
 		format = dbx.ExportCSV
 	}
+	// The grid's conditions travel with the export, so a download taken from a
+	// narrowed view is that view rather than the whole table. They are parsed
+	// before a single response header is written: once the body has started, a
+	// rejected filter can only arrive as JSON inside a file called .csv.
+	filters, err := parseFilters(q.Get("filters"))
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
 		return err
@@ -984,8 +992,11 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 		if perr != nil {
 			return perr
 		}
-		count, truncated, err = dbx.ExportTable(ctx, pool, conn.Driver, q.Get("schema"), table, format, w,
-			atoiDefault(q.Get("limit"), 0))
+		count, truncated, err = dbx.ExportBrowse(ctx, pool, conn.Driver, dbx.BrowseOptions{
+			Schema: q.Get("schema"), Table: table,
+			OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
+			Filters: filters,
+		}, format, w, atoiDefault(q.Get("limit"), 0))
 	}
 	if err != nil {
 		// Headers are already sent, so the error cannot become a JSON body; it is
@@ -995,8 +1006,10 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 			map[string]any{"table": table, "error": err.Error()})
 		return nil
 	}
-	httpx.SetAudit(r, "database.export", conn.Name,
-		map[string]any{"table": table, "format": string(format), "rows": count, "truncated": truncated})
+	httpx.SetAudit(r, "database.export", conn.Name, map[string]any{
+		"table": table, "format": string(format), "rows": count, "truncated": truncated,
+		"filtered": q.Get("filters") != "",
+	})
 	return nil
 }
 

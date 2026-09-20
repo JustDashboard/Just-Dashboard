@@ -11,6 +11,7 @@ import type {
   DbDriverInfo,
   DbFilter,
   DbForeignKey,
+  DbRelations,
   DbTable,
   DbTableDetail,
   QueryResult,
@@ -47,6 +48,12 @@ import { copyText } from "@/lib/clipboard"
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 export type { TableSelection }
 const PAGE = 100
+/**
+ * How many rows an export writes before it stops. The server caps it too — this
+ * is the number the menu promises, sent as the request's own limit so the
+ * promise and the file cannot drift apart.
+ */
+const EXPORT_CAP = 100_000
 
 const OP_LABELS: Record<string, string> = {
   eq: "=",
@@ -77,6 +84,9 @@ const OP_LABELS: Record<string, string> = {
  * COUNT(*) is a full scan on most engines and paying for it on every page turn
  * would make deep paging progressively slower for a number nobody asked for.
  */
+/** A table that points at the one being browsed, and the key that does it. */
+export type TableReference = { table: string; fk: DbForeignKey }
+
 /** Where the reader is in a table: the page, the order and the filters, tagged with the table. */
 type BrowsePlace = {
   table: string
@@ -170,6 +180,25 @@ export function BrowseTab({
     [conn.id, selection?.schema, selection?.table],
   )
 
+  /**
+   * Every foreign key in the schema, so the grid can answer the other half of
+   * the question it already answers one way: not only "what does this row point
+   * at" but "what points at this row". The route has existed since the section
+   * was written and nothing called it.
+   *
+   * It is one request per connection — it walks the catalogue, so it is not
+   * cheap on a large schema — and it is only asked for once a table is open.
+   * It settles on its own; the grid never waits for it.
+   */
+  const relations = usePoll(
+    (signal) =>
+      selection
+        ? get<DbRelations>(`/databases/${conn.id}/relations`, undefined, signal)
+        : Promise.resolve({} as DbRelations),
+    0,
+    [conn.id, Boolean(selection)],
+  )
+
   // Only filters with a value (or one of the two null tests) are sent, so a
   // half-typed filter row does not blank the grid while it is being written.
   const activeFilters = useMemo(
@@ -226,22 +255,36 @@ export function BrowseTab({
     onSelect({ schema: t.schema, table: t.name })
   }
 
-  // Following a foreign key opens the parent table filtered to the referenced
-  // row. It is the same navigation the rail does, plus a filter — which is why
-  // it reuses onSelect rather than inventing a second way to be somewhere.
-  const followForeignKey = (fk: DbForeignKey, value: unknown) => {
-    const target = { schema: fk.refSchema || schema, table: fk.refTable }
+  // Opening another table narrowed to one value. It is the same navigation the
+  // rail does, plus a filter — which is why it reuses onSelect rather than
+  // inventing a second way to be somewhere. Both directions of a foreign key
+  // come through here.
+  const openFiltered = (target: TableSelection, column: string, value: unknown) => {
     setSelected(new Set())
     movePlace(
       {
         ...FRESH_PLACE,
-        filters: [{ column: fk.refColumns[0], op: "eq", value: String(value) }],
+        filters: [{ column, op: "eq", value: String(value) }],
         showFilters: true,
       },
       JSON.stringify([conn.id, target.schema, target.table]),
     )
     setCount(null)
     onSelect(target)
+  }
+
+  /** Outwards: this row's value, in the table it points at. */
+  const followForeignKey = (fk: DbForeignKey, value: unknown) =>
+    openFiltered({ schema: fk.refSchema || schema, table: fk.refTable }, fk.refColumns[0], value)
+
+  /** Inwards: the rows of another table that point at this one. */
+  const followReference = (ref: TableReference, row: Record<string, unknown>) => {
+    const value = row[ref.fk.refColumns[0]]
+    if (value === null || value === undefined) return
+    // Relations are keyed by table name alone, so the child's schema is
+    // recovered from the catalogue rather than assumed to be this one's.
+    const child = tables.data?.find((t) => t.name === ref.table)
+    openFiltered({ schema: child?.schema ?? schema, table: ref.table }, ref.fk.columns[0], value)
   }
 
   const pk = detail.data?.primaryKey ?? []
@@ -251,6 +294,26 @@ export function BrowseTab({
   const table = selection?.table
   const schema = selection?.schema ?? ""
   const current = tables.data?.find((t) => t.name === table && t.schema === schema)
+
+  /**
+   * The tables whose rows point at the one being browsed. Composite keys are
+   * left out for the same reason the outgoing links are: following one means
+   * matching several columns at once, and a filter on the first of them would
+   * open a list that is wrong rather than merely incomplete.
+   */
+  const references: TableReference[] = useMemo(() => {
+    if (!table || !relations.data) return []
+    const out: TableReference[] = []
+    for (const [child, fks] of Object.entries(relations.data)) {
+      if (child === table) continue
+      for (const fk of fks) {
+        if (fk.refTable === table && fk.columns.length === 1 && fk.refColumns.length === 1) {
+          out.push({ table: child, fk })
+        }
+      }
+    }
+    return out.sort((a, b) => a.table.localeCompare(b.table))
+  }, [relations.data, table])
 
   const reload = () => {
     rows.refresh()
@@ -406,10 +469,26 @@ export function BrowseTab({
     })
   }
 
+  /**
+   * The export is the view, not the table. It carries the conditions and the
+   * order the grid is under, because the alternative is the failure this page
+   * used to have: narrow a million rows to eleven, press Export as CSV, and
+   * receive a million-row file that looks exactly like a correct export until
+   * somebody opens it. The row cap travels too, so the sentence in the menu
+   * and the request are the same number.
+   */
   const exportTable = (format: "csv" | "json") => {
     if (!selection) return
     const a = document.createElement("a")
-    a.href = downloadUrl(`/databases/${conn.id}/export`, { schema, table, format })
+    a.href = downloadUrl(`/databases/${conn.id}/export`, {
+      schema,
+      table,
+      format,
+      limit: EXPORT_CAP,
+      orderBy: sort?.column,
+      dir: sort?.desc ? "desc" : undefined,
+      filters: filterParam,
+    })
     a.click()
   }
 
@@ -454,11 +533,34 @@ export function BrowseTab({
 
   const first = offset + 1
   const last = offset + (rows.data?.rowCount ?? 0)
+  const page = Math.floor(offset / PAGE) + 1
+  // Only a counted table knows how many pages it has; until then the field
+  // still jumps, it just cannot say what the end is.
+  const pages = count === null ? null : Math.max(1, Math.ceil(count / PAGE))
+  const goPage = (next: number) => {
+    const clamped = Math.max(1, pages === null ? next : Math.min(next, pages))
+    // Selection is by row index within the page, so it cannot survive a page
+    // turn — carrying it would delete whatever now sits at those positions.
+    setSelected(new Set())
+    setOffset((clamped - 1) * PAGE)
+  }
+  const exportHint = [
+    activeFilters.length > 0
+      ? `${plural(activeFilters.length, "condition")} applied`
+      : "The whole table",
+    sort ? `ordered by ${sort.column}` : null,
+    count !== null && count > EXPORT_CAP
+      ? `first ${EXPORT_CAP.toLocaleString()} of ${count.toLocaleString()} rows`
+      : `up to ${EXPORT_CAP.toLocaleString()} rows`,
+  ]
+    .filter(Boolean)
+    .join(", ")
 
   return (
     <Pane className="min-h-0 flex-1">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,14rem)_minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)] lg:grid-rows-1">
         <TableRail
+          connId={conn.id}
           tables={tables.data}
           loading={tables.loading}
           selected={selection}
@@ -532,6 +634,7 @@ export function BrowseTab({
                   counting={counting}
                   onCount={fetchCount}
                   onExport={exportTable}
+                  exportHint={exportHint}
                   onImport={() => setDialog("import")}
                   onAddColumn={() => setDialog("addColumn")}
                   onCreateIndex={() => setDialog("createIndex")}
@@ -590,13 +693,23 @@ export function BrowseTab({
             {table && !rows.error && !rows.data && <LoadingRows rows={8} className="p-4" />}
             {table && rows.data && (
               <ResultGrid
+                // Keyed on the request, so a new page, a new order or a new
+                // set of conditions arrives rather than swapping in place.
+                key={selectionQuery}
+                className="animate-rise"
                 result={rows.data}
                 sort={sort}
                 onSort={toggleSort}
                 foreignKeys={detail.data?.foreignKeys}
                 onFollow={followForeignKey}
-                selection={canEditRows ? selected : undefined}
-                onSelectionChange={canEditRows ? setSelected : undefined}
+                references={references}
+                onFollowReference={followReference}
+                // Selecting is a read: it is how rows are copied out as JSON
+                // or as INSERTs, which a table with no primary key and a
+                // reader with no write capability can both do. Only Delete
+                // needs a key and the capability, and it is guarded on its own.
+                selection={selected}
+                onSelectionChange={setSelected}
                 onEdit={
                   canEditRows
                     ? (row) => setEditor({ mode: "edit", initial: row, tableIdentity })
@@ -622,32 +735,42 @@ export function BrowseTab({
 
           {table && (
             <PaneFooter className="justify-between">
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Button
                   size="xs"
                   variant="outline"
                   disabled={offset === 0}
-                  onClick={() => {
-                    // Selection is by row index within the page, so it cannot
-                    // survive a page turn — carrying it would delete whatever
-                    // now sits at those positions.
-                    setSelected(new Set())
-                    setOffset((o) => Math.max(0, o - PAGE))
-                  }}
+                  onClick={() => goPage(1)}
                 >
-                  Previous
+                  First
                 </Button>
                 <Button
                   size="xs"
                   variant="outline"
+                  disabled={offset === 0}
+                  onClick={() => goPage(page - 1)}
+                >
+                  Previous
+                </Button>
+                <PageJump page={page} pages={pages} onGo={goPage} />
+                <Button
+                  size="xs"
+                  variant="outline"
                   disabled={rows.data ? rows.data.rowCount < PAGE : true}
-                  onClick={() => {
-                    setSelected(new Set())
-                    setOffset((o) => o + PAGE)
-                  }}
+                  onClick={() => goPage(page + 1)}
                 >
                   Next
                 </Button>
+                {pages !== null && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={page >= pages}
+                    onClick={() => goPage(pages)}
+                  >
+                    Last
+                  </Button>
+                )}
                 {rows.data && rows.data.rowCount > 0 && (
                   <span className="numeric ml-1.5 text-hint text-muted-foreground">
                     Rows {first.toLocaleString()}–{last.toLocaleString()}
@@ -665,6 +788,13 @@ export function BrowseTab({
                     Count all rows
                   </Button>
                 )}
+                {/* The grid does not poll: a table being read under an open
+                    editor should not shuffle under the pointer. So re-reading
+                    it has to be a verb, and before this it was only a side
+                    effect of picking the table again. */}
+                <Button size="xs" variant="ghost" onClick={reload} pending={rows.loading}>
+                  Refresh
+                </Button>
               </div>
             </PaneFooter>
           )}
@@ -747,6 +877,49 @@ export function BrowseTab({
         />
       )}
     </Pane>
+  )
+}
+
+/**
+ * Which page of the table you are on, as a field you can type into.
+ *
+ * Previous and Next alone are paging only for the first few hundred rows: an
+ * audit table opened at its newest entries is four hundred presses from the
+ * thousandth page, and the offset was in session state where nothing could
+ * reach it. The field holds its own draft while it is being typed so a
+ * half-entered number never re-fetches, and commits on Enter or on blur.
+ */
+function PageJump({
+  page,
+  pages,
+  onGo,
+}: {
+  page: number
+  pages: number | null
+  onGo: (page: number) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = () => {
+    const next = Number(draft)
+    if (draft !== null && draft !== "" && Number.isFinite(next)) onGo(Math.floor(next))
+    setDraft(null)
+  }
+  return (
+    <span className="ml-1 flex items-center gap-1.5 text-hint text-muted-foreground">
+      <Input
+        value={draft ?? String(page)}
+        onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit()
+          if (e.key === "Escape") setDraft(null)
+        }}
+        inputMode="numeric"
+        aria-label="Page"
+        className="numeric h-6 w-14 px-1.5 text-center text-xs sm:h-6"
+      />
+      {pages !== null && <span className="numeric">of {pages.toLocaleString()}</span>}
+    </span>
   )
 }
 

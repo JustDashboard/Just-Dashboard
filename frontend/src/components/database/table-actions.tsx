@@ -34,6 +34,7 @@ export function TableMenu({
   counting,
   onCount,
   onExport,
+  exportHint,
   onImport,
   onAddColumn,
   onCreateIndex,
@@ -46,6 +47,12 @@ export function TableMenu({
   counting?: boolean
   onCount?: () => void
   onExport?: (f: "csv" | "json") => void
+  /**
+   * What the export will contain — how many rows it is capped at, and whether
+   * the conditions on screen narrow it. A download has no progress and no
+   * result, so the only place it can say what it is about to do is here.
+   */
+  exportHint?: string
   onImport?: () => void
   onAddColumn: () => void
   onCreateIndex: () => void
@@ -72,11 +79,11 @@ export function TableMenu({
           <>
             <DropdownMenuItem onClick={() => onExport("csv")}>
               <Download />
-              Export as CSV
+              {exportHint ? <Words title="Export as CSV" hint={exportHint} /> : "Export as CSV"}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onExport("json")}>
               <AcronymJson />
-              Export as JSON
+              {exportHint ? <Words title="Export as JSON" hint={exportHint} /> : "Export as JSON"}
             </DropdownMenuItem>
           </>
         )}

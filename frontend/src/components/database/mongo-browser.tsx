@@ -7,6 +7,7 @@ import {
   CodeBracket,
   Download,
   Layout,
+  MoreHorizontal,
   Play,
   Plus,
   Trash,
@@ -23,9 +24,9 @@ import type { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Pane, PaneFooter, PaneHeader, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { tabClasses } from "@/components/tabs"
 import {
   Select,
   SelectContent,
@@ -46,9 +47,23 @@ import { ImportDialog } from "@/components/database/import-dialog"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { FormNote } from "@/components/form"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 type ConfirmFn = ReturnType<typeof useConfirm>["confirm"]
 const PAGE = 100
+
+/** The three readings of one collection, in the order the strip draws them. */
+const VIEWS = [
+  { key: "documents", label: "Documents" },
+  { key: "indexes", label: "Indexes" },
+  { key: "aggregate", label: "Aggregate" },
+] as const
 
 /**
  * MongoDB, in its own vocabulary.
@@ -218,38 +233,42 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
     })
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] [&>*]:min-w-0">
-      <Panel>
-        <PanelHeader title="Collections" />
-        <PanelBody className="space-y-3">
+    // One workbench sized to the window, the shape the SQL browser has: a
+    // collection rail, a hairline, and the documents beside it. It was two
+    // framed cards and a filled tab list on a page that scrolled.
+    <Pane className="min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,13rem)_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)] lg:grid-rows-1">
+        <div className="flex min-h-0 min-w-0 flex-col border-b border-hairline lg:border-r lg:border-b-0">
           {databases.data && databases.data.length > 1 && (
-            <Select
-              value={dbName}
-              onValueChange={(v) => {
-                setDatabase(v)
-                setCollection(undefined)
-                setSkip(0)
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {databases.data.map((d) => (
-                  <SelectItem key={d.name} value={d.name}>
-                    {d.name} {d.size > 0 && `(${bytes(d.size)})`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="shrink-0 border-b border-hairline p-2.5">
+              <Select
+                value={dbName}
+                onValueChange={(v) => {
+                  setDatabase(v)
+                  setCollection(undefined)
+                  setSkip(0)
+                }}
+              >
+                <SelectTrigger size="sm" className="h-7 w-full text-xs sm:h-7" aria-label="Database">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {databases.data.map((d) => (
+                    <SelectItem key={d.name} value={d.name}>
+                      {d.name} {d.size > 0 && `(${bytes(d.size)})`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
-          <div
-            className={cn("max-h-[calc(100svh-28rem)] space-y-0.5 overflow-y-auto", ringSafeScroll)}
-          >
+          <div className={cn("min-h-0 flex-1 space-y-px overflow-y-auto p-1", ringSafeScroll)}>
             {collections.loading && <LoadingRows rows={4} />}
             {collections.data?.map((c) => (
               <button
                 key={c.name}
+                type="button"
+                aria-pressed={collection === c.name}
                 onClick={() => {
                   setCollection(c.name)
                   setSkip(0)
@@ -257,7 +276,7 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                   setApplied("{}")
                 }}
                 className={cn(
-                  "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left transition-colors",
+                  "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
                   collection === c.name
                     ? "bg-accent font-medium text-foreground"
                     : "hover:bg-row-hover",
@@ -265,128 +284,143 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
               >
                 <span className="truncate text-body">{c.name}</span>
                 <span className="truncate text-hint text-muted-foreground">
-                  {c.estimatedRows.toLocaleString()} docs
+                  {plural(c.estimatedRows, "document")}
                   {c.size ? ` · ${bytes(c.size)}` : ""}
                 </span>
               </button>
             ))}
             {collections.data?.length === 0 && <EmptyNote>No collections.</EmptyNote>}
           </div>
-        </PanelBody>
-      </Panel>
+          {collections.data && collections.data.length > 0 && (
+            <div className="numeric shrink-0 border-t border-hairline px-3 py-1.5 text-hint text-muted-foreground">
+              {plural(collections.data.length, "collection")}
+            </div>
+          )}
+        </div>
 
-      <div className="flex min-w-0 flex-col gap-4">
-        <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
-          <TabsList>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
-            <TabsTrigger value="indexes">Indexes</TabsTrigger>
-            <TabsTrigger value="aggregate">Aggregate</TabsTrigger>
-          </TabsList>
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <PaneHeader className="gap-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-body font-medium">
+              {collection ?? (
+                <span className="font-sans text-muted-foreground">Pick a collection</span>
+              )}
+            </span>
+            {collection && (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                {canWrite && (
+                  <Button size="xs" variant="outline" onClick={() => setInserting(true)}>
+                    <Plus className="size-3.5" />
+                    Insert
+                  </Button>
+                )}
+                {/* One verb inline, the rest behind one menu where each of
+                    them gets a sentence (§13). Five buttons across a pane
+                    header spelled "CSV" and "JSON" at each other and never
+                    said what either would contain. */}
+                <CollectionMenu
+                  canWrite={canWrite}
+                  filtered={applied.trim() !== "" && applied.trim() !== "{}"}
+                  onExport={exportDocs}
+                  onImport={() => setImporting(true)}
+                  onDrop={dropCollection}
+                />
+              </div>
+            )}
+          </PaneHeader>
 
-          <TabsContent value="documents" className="min-w-0">
-            <Panel>
-              <PanelHeader
-                title={collection ?? "Pick a collection"}
-                actions={
-                  collection && (
-                    <>
-                      {canWrite && (
-                        <Button size="sm" variant="outline" onClick={() => setInserting(true)}>
-                          <Plus className="size-3.5" />
-                          Insert
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title="Export the current filter as CSV"
-                        onClick={() => exportDocs("csv")}
-                      >
-                        <Download className="size-3.5" />
-                        CSV
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title="Export the current filter as JSON"
-                        onClick={() => exportDocs("json")}
-                      >
-                        <AcronymJson className="size-3.5" />
-                        JSON
-                      </Button>
-                      {canWrite && (
-                        <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
-                          <CloudUpload className="size-3.5" />
-                          Import
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={skip === 0}
-                        onClick={() => setSkip((s) => Math.max(0, s - PAGE))}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={docs.data ? docs.data.rowCount < PAGE : true}
-                        onClick={() => setSkip((s) => s + PAGE)}
-                      >
-                        Next
-                      </Button>
-                      {canWrite && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive"
-                          onClick={dropCollection}
-                        >
-                          <Trash className="size-3.5" />
-                        </Button>
-                      )}
-                    </>
-                  )
-                }
-              />
+          {/* The same underlined strip every switcher in the product wears.
+              The pill-shaped tab list it replaces was a control with a face,
+              sitting on top of a workbench that has no other faces on it. */}
+          <nav
+            aria-label="Collection views"
+            className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline px-2.5"
+          >
+            {VIEWS.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                aria-pressed={tab === entry.key}
+                onClick={() => setTab(entry.key)}
+                className={tabClasses(tab === entry.key, "h-9")}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </nav>
+
+          {tab === "documents" && (
+            <>
               {collection && (
-                <PanelToolbar>
+                <div className="flex shrink-0 items-center gap-1.5 border-b border-hairline px-2.5 py-2">
                   <Input
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && runFilter()}
-                    className="h-8 font-mono text-xs"
+                    className="h-7 min-w-0 flex-1 font-mono text-xs sm:h-7"
                     placeholder='{"status": "active"}'
+                    aria-label="Filter document"
                   />
-                  <Button size="sm" variant="outline" onClick={runFilter}>
+                  <Button size="xs" variant="outline" onClick={runFilter}>
                     <Play className="size-3.5" />
                     Find
                   </Button>
-                </PanelToolbar>
+                </div>
               )}
-              <PanelBody flush>
+              <div className="relative min-h-0 min-w-0 flex-1">
                 {docs.error && <ErrorState error={docs.error} className="m-4" />}
                 {!collection && <EmptyState icon={Layout} title="Select a collection" />}
                 {docs.data && (
                   <ResultGrid
+                    key={`${collection}:${applied}:${skip}`}
+                    className="animate-rise"
                     result={docs.data}
                     onEdit={canWrite ? editDoc : undefined}
                     onDelete={canWrite ? deleteDoc : undefined}
+                    maxHeightClass="h-full"
                     emptyTitle="No documents"
                     emptyDescription="Either the collection is empty or the filter above matched nothing in it."
                   />
                 )}
-              </PanelBody>
-            </Panel>
-          </TabsContent>
+              </div>
+              {collection && (
+                <PaneFooter className="justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={skip === 0}
+                      onClick={() => setSkip((s) => Math.max(0, s - PAGE))}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={docs.data ? docs.data.rowCount < PAGE : true}
+                      onClick={() => setSkip((s) => s + PAGE)}
+                    >
+                      Next
+                    </Button>
+                    {docs.data && docs.data.rowCount > 0 && (
+                      <span className="numeric ml-1.5 text-hint text-muted-foreground">
+                        Documents {(skip + 1).toLocaleString()}–
+                        {(skip + docs.data.rowCount).toLocaleString()}
+                        {docs.data.duration && ` · ${docs.data.duration}`}
+                      </span>
+                    )}
+                  </div>
+                  <Button size="xs" variant="ghost" onClick={reload} pending={docs.loading}>
+                    Refresh
+                  </Button>
+                </PaneFooter>
+              )}
+            </>
+          )}
 
-          <TabsContent value="indexes" className="min-w-0">
-            <Panel>
-              <PanelHeader title="Indexes" />
-              <PanelBody flush>
-                {!collection && <EmptyState icon={CodeBracket} title="Select a collection" />}
-                {info.data && (
+          {tab === "indexes" && (
+            <div className={cn("min-h-0 flex-1 overflow-y-auto", ringSafeScroll)}>
+              {!collection && <EmptyState icon={CodeBracket} title="Select a collection" />}
+              {info.data && (
                   <>
                     <Table>
                       <TableHeader>
@@ -426,20 +460,21 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                     )}
                   </>
                 )}
-              </PanelBody>
-            </Panel>
-          </TabsContent>
+            </div>
+          )}
 
-          <TabsContent value="aggregate" className="min-w-0">
-            <AggregateTab
-              conn={conn}
-              database={dbName}
-              collection={collection}
-              confirm={confirm}
-              onWrote={collections.refresh}
-            />
-          </TabsContent>
-        </Tabs>
+          {tab === "aggregate" && (
+            <div className={cn("min-h-0 flex-1 overflow-y-auto p-4", ringSafeScroll)}>
+              <AggregateTab
+                conn={conn}
+                database={dbName}
+                collection={collection}
+                confirm={confirm}
+                onWrote={collections.refresh}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {editing && (
@@ -474,7 +509,71 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
           onSave={insertDoc}
         />
       )}
-    </div>
+    </Pane>
+  )
+}
+
+/**
+ * Everything that can be done to a collection but insert, behind one menu.
+ *
+ * The same shape the table workbench uses (`table-actions.tsx`), so the two
+ * browse surfaces in this section do not disagree about where a verb lives.
+ */
+function CollectionMenu({
+  canWrite,
+  filtered,
+  onExport,
+  onImport,
+  onDrop,
+}: {
+  canWrite: boolean
+  /** Whether a filter is applied — the export carries it, and says so. */
+  filtered: boolean
+  onExport: (format: "csv" | "json") => void
+  onImport: () => void
+  onDrop: () => void
+}) {
+  const hint = filtered ? "What this filter matches." : "Every document in the collection."
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon-sm" variant="ghost" aria-label="More collection actions">
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuItem onClick={() => onExport("csv")}>
+          <Download />
+          <Words title="Export as CSV" hint={hint} />
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onExport("json")}>
+          <AcronymJson />
+          <Words title="Export as JSON" hint={hint} />
+        </DropdownMenuItem>
+        {canWrite && (
+          <>
+            <DropdownMenuItem onClick={onImport}>
+              <CloudUpload />
+              <Words title="Import documents…" hint="CSV or JSON, in one transaction." />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onDrop}>
+              <Trash />
+              <Words title="Drop collection…" hint="Deletes it and every document in it." />
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function Words({ title, hint }: { title: string; hint: string }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span>{title}</span>
+      <span className="text-hint text-muted-foreground">{hint}</span>
+    </span>
   )
 }
 
@@ -620,7 +719,7 @@ function AggregateTab({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <Panel>
+      <Panel plain>
         <PanelHeader title="Aggregation pipeline" />
         <PanelBody flush>
           <CodeEditor className="h-56" language="json" value={pipeline} onChange={setPipeline} />
@@ -634,7 +733,7 @@ function AggregateTab({
         </PanelFooter>
       </Panel>
       {result && (
-        <Panel>
+        <Panel plain>
           <PanelHeader title="Result" />
           <PanelBody flush>
             <ResultGrid

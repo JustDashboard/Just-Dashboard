@@ -29,6 +29,7 @@ export type TableSelection = { schema: string; table: string }
  * command.
  */
 export function TableRail({
+  connId,
   tables,
   loading,
   selected,
@@ -36,6 +37,14 @@ export function TableRail({
   action,
   className,
 }: {
+  /**
+   * Which connection's catalogue this is. The filter and the schema are kept
+   * per connection, not per rail: under one shared key, choosing the `public`
+   * schema on Postgres and then switching to MySQL left every table filtered
+   * out by a schema that engine has never heard of, under a search box that
+   * was visibly empty.
+   */
+  connId: number
   tables: DbTable[] | undefined
   loading: boolean
   selected: TableSelection | null
@@ -44,8 +53,8 @@ export function TableRail({
   action?: React.ReactNode
   className?: string
 }) {
-  const [query, setQuery] = useSessionState("databases.tables.query", "")
-  const [schema, setSchema] = useSessionState("databases.tables.schema", "all")
+  const [query, setQuery] = useSessionState(`databases.${connId}.tables.query`, "")
+  const [schema, setSchema] = useSessionState(`databases.${connId}.tables.schema`, "all")
 
   const schemaNames = useMemo(() => {
     const set = new Set<string>()
@@ -92,7 +101,14 @@ export function TableRail({
         )}
       </div>
 
-      <div className={cn("min-h-0 flex-1 space-y-px overflow-y-auto", ringSafeScroll)}>
+      <div
+        key={tables ? "catalogue" : "waiting"}
+        className={cn(
+          "min-h-0 flex-1 space-y-px overflow-y-auto",
+          tables && "animate-rise",
+          ringSafeScroll,
+        )}
+      >
         {loading && !tables && <LoadingRows rows={6} className="p-1" />}
         {visible.map((t) => {
           const active = selected?.table === t.name && selected.schema === t.schema
@@ -110,9 +126,23 @@ export function TableRail({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-body font-medium">{t.name}</span>
                 <span className="block truncate text-hint text-muted-foreground">
-                  {schemaNames.length > 1 ? `${t.schema} · ` : ""}
-                  {t.estimatedRows > 0 ? plural(t.estimatedRows, "row") : "no rows"}
-                  {t.size ? ` · ${bytes(t.size)}` : ""}
+                  {[
+                    schemaNames.length > 1 ? t.schema : null,
+                    // A negative estimate is the catalogue saying it has none —
+                    // a view, a table the planner has never analysed, SQLite,
+                    // which keeps no count at all. It used to be floored to
+                    // zero and drawn as "no rows", so half the tables in a
+                    // fresh database claimed to be empty. Say nothing instead;
+                    // Count rows in the menu is the answer that is true.
+                    t.estimatedRows > 0
+                      ? `~${plural(t.estimatedRows, "row")}`
+                      : t.estimatedRows === 0
+                        ? "no rows"
+                        : null,
+                    t.size ? bytes(t.size) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
               </span>
               {t.type && t.type.toLowerCase() !== "table" && (

@@ -14,11 +14,13 @@ export default function BrowsePage() {
 
   const sel = selection.table ? { schema: selection.schema, table: selection.table } : null
 
-  // The SQL browser is a workbench sized to the window; the key and document
-  // browsers are pages of panels that scroll.
+  // Every engine's browser is a workbench sized to the window. The key and
+  // document browsers were pages of framed panels that scrolled, which put two
+  // of the three browse surfaces in this section on a different footing from
+  // the third for no reason the reader could see.
   if (conn.driver === "redis" || conn.driver === "mongodb") {
     return (
-      <Page>
+      <Page fill>
         {conn.driver === "redis" ? (
           <RedisBrowser conn={conn} confirm={confirm} />
         ) : (

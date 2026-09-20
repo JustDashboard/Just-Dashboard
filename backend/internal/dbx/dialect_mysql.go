@@ -54,7 +54,7 @@ func (mysqlDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, erro
 func (mysqlDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([]Table, error) {
 	rows, err := db.QueryContext(ctx, `SELECT TABLE_SCHEMA, TABLE_NAME,
 	                CASE TABLE_TYPE WHEN 'BASE TABLE' THEN 'table' ELSE LOWER(TABLE_TYPE) END,
-	                COALESCE(TABLE_ROWS, 0),
+	                COALESCE(TABLE_ROWS, -1),
 	                COALESCE(DATA_LENGTH + INDEX_LENGTH, 0),
 	                COALESCE(TABLE_COMMENT, '')
 	         FROM information_schema.TABLES
