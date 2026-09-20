@@ -3046,6 +3046,12 @@ export type DeploymentHostnameSuggestion = {
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
   address?: string
+  /**
+   * Whether a live project already answers to the `name` this was asked with.
+   * Absent when the question was about a hostname, which carries no claim
+   * about project names at all.
+   */
+  nameTaken?: boolean
 }
 
 export type DeploymentDraftSource = {

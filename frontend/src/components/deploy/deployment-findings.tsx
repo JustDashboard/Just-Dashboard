@@ -55,14 +55,21 @@ export function FindingRow({
   finding,
   index,
   onOpenRemedy,
+  canOpenRemedy = true,
 }: {
   finding: DeploymentPreflightFinding
   index?: number
   /** Jumps to the control this finding is about, where one exists (§3). */
   onOpenRemedy?: (finding: DeploymentPreflightFinding) => void
+  /**
+   * Whether this screen actually owns a control for this finding's field. The
+   * link used to be drawn for every finding and answered for one of them, so
+   * a blocked plan offered to open a remedy and then did nothing.
+   */
+  canOpenRemedy?: boolean
 }) {
   const remedy = findingRemedy(finding)
-  const remedyOpensControl = Boolean(onOpenRemedy) && !finding.deepLink
+  const remedyOpensControl = Boolean(onOpenRemedy) && canOpenRemedy && !finding.deepLink
   return (
     <div
       id={

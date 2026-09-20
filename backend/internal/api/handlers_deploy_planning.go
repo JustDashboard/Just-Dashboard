@@ -43,6 +43,22 @@ func (s *Server) handleDeploymentDraftList(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
+// handleDeploymentDraftDiscard throws away one of the caller's unfinished
+// setups, so the resume list on the new-project page stays the work that is
+// actually still wanted.
+func (s *Server) handleDeploymentDraftDiscard(w http.ResponseWriter, r *http.Request) error {
+	principal := httpx.MustPrincipal(r)
+	id := chi.URLParam(r, "draft")
+	if err := s.modules.deployPlanning.Discard(
+		r.Context(), id, principal.UserID(), principal.Can(auth.CapSystemAdmin),
+	); err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	httpx.SetAudit(r, "deploy.draft.discard", id, nil)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (s *Server) handleDeploymentDraftGet(w http.ResponseWriter, r *http.Request) error {
 	draft, err := s.deploymentDraftForPrincipal(r)
 	if err != nil {

@@ -127,12 +127,15 @@ export function FieldRow({
  * a page uses to open a section, at the size a dialog has room for.
  */
 export function FormSection({
+  id,
   title,
   hint,
   actions,
   className,
   children,
 }: {
+  /** A scroll target, for a page that sends a reader to one of its sections. */
+  id?: string
   title: React.ReactNode
   hint?: React.ReactNode
   actions?: React.ReactNode
@@ -140,7 +143,7 @@ export function FormSection({
   children: React.ReactNode
 }) {
   return (
-    <section className={cn("min-w-0 space-y-3", className)}>
+    <section id={id} className={cn("min-w-0 space-y-3", className)}>
       <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-hairline pb-2">
         <div className="min-w-0">
           <p className="eyebrow">{title}</p>

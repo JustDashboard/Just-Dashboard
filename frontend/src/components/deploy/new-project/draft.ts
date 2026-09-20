@@ -1,4 +1,4 @@
-import { get, post, put } from "@/lib/api"
+import { del, get, post, put } from "@/lib/api"
 import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
 import { defaultConfiguration } from "@/components/deploy/deployment-defaults"
 import type {
@@ -93,11 +93,61 @@ export async function preflightDraft(draft: DeploymentDraft) {
   )
 }
 
-export async function commitDraft(draft: DeploymentDraft, acknowledgedWarnings: string[]) {
+export async function commitDraft(
+  draft: DeploymentDraft,
+  acknowledgedWarnings: string[],
+  gitPolicy?: DraftGitPolicy,
+) {
   return post<DraftCommitResult>(`/deploy/drafts/${draft.id}/commit`, {
     revision: draft.revision,
     acknowledgedWarnings,
+    gitPolicy,
   })
+}
+
+/**
+ * The automatic-deployment decision, taken while the project is being created.
+ *
+ * A Git deployment polls its branch from the moment it exists and the default
+ * is to deploy every push, so until this travelled with the commit "manual
+ * only" was a setting reachable only after the first unintended release.
+ */
+export type DraftGitPolicy = {
+  automatic: boolean
+  watchInclude: string[]
+  watchExclude: string[]
+  commitStatuses: boolean
+}
+
+/**
+ * Throws away an unfinished setup.
+ *
+ * Every press of Import creates a draft on the server, so without this an
+ * abandoned attempt sat in the resume list for its whole thirty-day life and
+ * three tries at the same repository read as three pieces of unfinished work.
+ * Best-effort at the call sites that clean up after themselves: failing to
+ * tidy is not a reason to fail the thing the operator actually asked for.
+ */
+export async function discardDraft(id: string) {
+  return del<void>(`/deploy/drafts/${id}`)
+}
+
+/**
+ * Throws away a setup that has just been walked away from — a second source
+ * inspected, or "Change source" pressed. Inspecting a different source is a
+ * different project, not a revision of the first one.
+ *
+ * Deliberately silent: the draft may already be gone, expired, or committed in
+ * another tab, and none of those is worth interrupting what the operator
+ * actually asked for.
+ */
+export async function discardAbandoned(id: string | undefined) {
+  if (!id) return
+  try {
+    await discardDraft(id)
+  } catch {
+    // Tidying is best-effort; the unfinished-setups list has its own Discard.
+  }
 }
 
 export async function previewImport(source: DeploymentDraftSource) {

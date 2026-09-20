@@ -1,16 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import {
-  Box,
-  Database,
-  Layers,
-  LockClosed,
-  Puzzle,
-  RefreshClockwise,
-  Servers,
-  Warning,
-} from "@/components/icons"
+import { LockClosed, RefreshClockwise, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useGitHubAccount } from "@/hooks/use-github"
@@ -25,7 +16,6 @@ import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
-import { BentoCard, BentoGrid } from "@/components/ui/bento-grid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -37,46 +27,11 @@ import {
 } from "@/components/ui/select"
 import Link from "next/link"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { cn } from "@/lib/utils"
 import {
   inspectAndPrepare,
   repositoryName,
   type ConfigureFlow,
-  type SourceTabKey,
 } from "@/components/deploy/new-project/draft"
-
-const SHORTCUTS: {
-  tab: SourceTabKey
-  title: string
-  hint: string
-  icon: React.ComponentType<{ className?: string }>
-}[] = [
-  {
-    tab: "template",
-    title: "Template",
-    hint: "Reviewed apps with ready-to-use defaults",
-    icon: Puzzle,
-  },
-  {
-    tab: "database",
-    title: "Database",
-    hint: "Postgres, MySQL, Redis, MongoDB & more",
-    icon: Database,
-  },
-  { tab: "image", title: "Docker image", hint: "Run an image from any registry", icon: Box },
-  {
-    tab: "compose",
-    title: "Compose stack",
-    hint: "An application and its services, together",
-    icon: Layers,
-  },
-  {
-    tab: "existing",
-    title: "Existing workload",
-    hint: "Bring a running service into your projects",
-    icon: Servers,
-  },
-]
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
@@ -108,12 +63,10 @@ type PickableRepo = {
 
 export function SourceGit({
   onInspected,
-  onSwitchTab,
   initialUrl,
   initialRef,
 }: {
   onInspected: (flow: ConfigureFlow) => void
-  onSwitchTab: (tab: SourceTabKey) => void
   initialUrl?: string
   initialRef?: string
 }) {
@@ -223,7 +176,7 @@ export function SourceGit({
   const listing = (signedIn && repos.loading) || (appRepos.loading && !appRepos.data)
 
   return (
-    <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+    <div className="min-w-0 space-y-4">
       <div className="min-w-0 space-y-4">
         {failure && <ErrorState error={failure} />}
         <Panel plain>
@@ -360,6 +313,32 @@ export function SourceGit({
               </>
             )}
 
+            {/* Above the paste fallback and below the list, because these
+                apply to whichever import fires — a row's button as much as
+                the pasted URL. They used to live inside "Branch &
+                authentication", which reads as being about the field beside
+                it, so a repository that needed its submodules failed its
+                build with no hint that the switch existed. */}
+            <details className="border-t border-hairline pt-4">
+              <summary className="cursor-pointer rounded-sm py-1 text-xs text-muted-foreground focus-ring">
+                Clone options · apply to every import here
+              </summary>
+              <OptionList className="pt-2">
+                <OptionRow
+                  title="Include submodules"
+                  hint="Fetch the repositories declared in .gitmodules along with this one."
+                  checked={includeSubmodules}
+                  onCheckedChange={setIncludeSubmodules}
+                />
+                <OptionRow
+                  title="Include Git LFS files"
+                  hint="Download Git LFS objects instead of leaving their pointer files."
+                  checked={includeLfs}
+                  onCheckedChange={setIncludeLfs}
+                />
+              </OptionList>
+            </details>
+
             {/* Below the repository rows (spec §5.4), not above them: this is
                 the fallback for a repository the signed-in account cannot
                 list, not the primary way in. */}
@@ -423,47 +402,14 @@ export function SourceGit({
                     />
                   </Field>
                 </div>
-                <OptionList className="pt-1">
-                  <OptionRow
-                    title="Include submodules"
-                    hint="Fetch the repositories declared in .gitmodules along with this one."
-                    checked={includeSubmodules}
-                    onCheckedChange={setIncludeSubmodules}
-                  />
-                  <OptionRow
-                    title="Include Git LFS files"
-                    hint="Download Git LFS objects instead of leaving their pointer files."
-                    checked={includeLfs}
-                    onCheckedChange={setIncludeLfs}
-                  />
-                </OptionList>
               </details>
             </div>
           </PanelBody>
         </Panel>
       </div>
-      <Panel plain>
-        <PanelHeader title="Start with something ready" />
-        <PanelBody flush className="pt-4">
-          {/* The five other ways in, as a bento: the first is the widest
-              because a reviewed template is the shortest path to something
-              running. Each cell is a button that switches the strip above. */}
-          <BentoGrid className="grid-cols-2" aria-label="Other ways to start">
-            {SHORTCUTS.map((shortcut, index) => (
-              <BentoCard
-                key={shortcut.tab}
-                name={shortcut.title}
-                description={shortcut.hint}
-                icon={shortcut.icon}
-                onClick={() => onSwitchTab(shortcut.tab)}
-                className={cn(index === 0 && "col-span-2")}
-              />
-            ))}
-          </BentoGrid>
-        </PanelBody>
-      </Panel>
-      <FormNote className="lg:col-span-2">
-        New commits to the selected branch deploy automatically after your first deployment.
+      <FormNote>
+        New commits to the selected branch deploy automatically after your first deployment, unless
+        you turn that off on the next screen.
       </FormNote>
     </div>
   )

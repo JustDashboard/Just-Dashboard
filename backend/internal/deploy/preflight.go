@@ -922,10 +922,14 @@ func preflightFindings(
 		}
 	}
 	if persistentStorage > 0 && !hasBackupDependency(configuration.Dependencies) {
-		findings = append(findings, finding("backup_policy_missing", PreflightWarning,
+		item := finding("backup_policy_missing", PreflightWarning,
 			"Persistent storage has no linked backup policy", fmt.Sprintf("%d mount(s)", persistentStorage),
 			"A stop-first update can preserve storage but cannot prove it is recoverable.",
-			"Link a backup job or explicitly accept this risk.", "backups", "runtime.mounts"))
+			"Link a backup job or explicitly accept this risk.", "backups", "runtime.mounts")
+		// The remedy lives in another feature, so the finding carries the way
+		// there rather than naming a field this screen does not own.
+		item.DeepLink = "/backups"
+		findings = append(findings, item)
 	}
 	dependencyEvidence := make(map[string]DependencyObservation, len(observation.Dependencies))
 	for _, observed := range observation.Dependencies {

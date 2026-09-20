@@ -323,7 +323,10 @@ export function defaultConfiguration(
  * its own merits: traffic should not move to a candidate that has not answered
  * once, and both the port and the path are already known here.
  */
-function defaultChecks(profile: WorkloadProfile, port: number): DeploymentConfiguration["checks"] {
+export function defaultChecks(
+  profile: WorkloadProfile,
+  port: number,
+): DeploymentConfiguration["checks"] {
   if (profile === "game")
     return [
       {

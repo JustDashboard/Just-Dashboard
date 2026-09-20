@@ -2,9 +2,10 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { CheckCircle, LockClosed, RefreshClockwise, Warning } from "@/components/icons"
+import { CheckCircle, LockClosed, Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { Field, FormSection, OptionRow } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,23 +27,42 @@ type Domain = DeploymentConfiguration["domains"][number]
  * said here, before the deploy, rather than explained afterwards.
  */
 export function PublicAddress({
-  domain,
+  id,
+  domains,
   onChange,
   suggestion,
 }: {
-  domain?: Domain
-  onChange: (domain: Domain | undefined) => void
+  id?: string
+  /**
+   * Every name this deployment will answer to. The first is the primary one,
+   * with the suggestion and the certificate reading; the rest are a plain
+   * list. It used to be exactly one, so apex-plus-www — the commonest thing
+   * anyone wants on day one — meant creating the project and then going to
+   * its Domains settings to add the second name.
+   */
+  domains: Domain[]
+  onChange: (domains: Domain[]) => void
   suggestion?: DeploymentHostnameSuggestion
 }) {
   const [checked, setChecked] = useState<DeploymentHostnameSuggestion | undefined>(suggestion)
   const [checking, setChecking] = useState(false)
 
+  // Annotated rather than inferred: indexing an array answers `Domain` under
+  // this compiler's settings, and "is there a primary domain at all" is the
+  // question the whole section turns on.
+  const domain: Domain | undefined = domains[0]
+  const extra = domains.slice(1)
+  const setPrimary = (next: Domain | undefined) =>
+    onChange(next ? [next, ...extra] : extra.length > 0 ? extra : [])
   const publish = domain !== undefined
   const hostname = domain?.hostname ?? suggestion?.hostname ?? ""
   const https = domain?.https ?? true
   const protection = domain?.protection
-  const update = (patch: Partial<Domain>) =>
-    onChange({ hostname, https, ownership: "managed", ...(domain ?? {}), ...patch })
+  // The primary domain as it stands, or the one the suggestion would create.
+  // Spelled out rather than spread over defaults: the keys were written twice
+  // in one literal, which reads as a merge and is really a dead branch.
+  const base: Domain = domain ?? { hostname, https, ownership: "managed" }
+  const update = (patch: Partial<Domain>) => setPrimary({ ...base, ...patch })
   const current = checked ?? suggestion
   const matches = current?.hostname.toLowerCase() === hostname.toLowerCase()
 
@@ -65,12 +85,12 @@ export function PublicAddress({
   }
 
   return (
-    <FormSection title="Public address">
+    <FormSection id={id} title="Public address">
       <OptionRow
         title="Publish on a public hostname"
         checked={publish}
         onCheckedChange={(next) =>
-          onChange(
+          setPrimary(
             next ? { hostname: hostname.toLowerCase(), https, ownership: "managed" } : undefined,
           )
         }
@@ -90,7 +110,7 @@ export function PublicAddress({
                 id="public-hostname"
                 value={hostname}
                 onChange={(event) =>
-                  onChange({ hostname: event.target.value, https, ownership: "managed" })
+                  setPrimary({ hostname: event.target.value, https, ownership: "managed" })
                 }
                 onBlur={(event) => void recheck(event.target.value)}
                 placeholder="app.example.com"
@@ -102,7 +122,7 @@ export function PublicAddress({
                 <Switch
                   checked={https}
                   onCheckedChange={(nextHttps) =>
-                    onChange({ hostname, https: nextHttps, ownership: "managed" })
+                    setPrimary({ hostname, https: nextHttps, ownership: "managed" })
                   }
                 />
                 HTTPS
@@ -205,6 +225,71 @@ export function PublicAddress({
               )}
             </Notice>
           )}
+
+          {/* The other names, as a plain list: the certificate reading above
+              belongs to the primary one, and repeating it per row would say
+              the same thing four times. */}
+          {extra.length > 0 && (
+            <ul className="space-y-2" aria-label="Additional hostnames">
+              {extra.map((entry, index) => (
+                <li key={index} className="flex min-w-0 items-end gap-2">
+                  <Field
+                    label={`Also answers to ${index + 2}`}
+                    htmlFor={`extra-hostname-${index}`}
+                    className="min-w-0 flex-1"
+                  >
+                    <Input
+                      id={`extra-hostname-${index}`}
+                      value={entry.hostname}
+                      placeholder="www.example.com"
+                      className="font-mono"
+                      onChange={(event) =>
+                        onChange(
+                          domains.map((item, position) =>
+                            position === index + 1
+                              ? { ...item, hostname: event.target.value }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                  </Field>
+                  <Label className="flex min-h-9 items-center gap-2 pb-1 text-xs">
+                    <Switch
+                      checked={entry.https}
+                      onCheckedChange={(nextHttps) =>
+                        onChange(
+                          domains.map((item, position) =>
+                            position === index + 1 ? { ...item, https: nextHttps } : item,
+                          ),
+                        )
+                      }
+                    />
+                    HTTPS
+                  </Label>
+                  <IconAction
+                    label={`Remove ${entry.hostname || `hostname ${index + 2}`}`}
+                    className="mb-1"
+                    onClick={() =>
+                      onChange(domains.filter((_, position) => position !== index + 1))
+                    }
+                  >
+                    <Trash />
+                  </IconAction>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onChange([...domains, { hostname: "", https, ownership: "managed" as const }])
+            }
+          >
+            <Plus className="size-3.5" /> Add another hostname
+          </Button>
         </div>
       </OptionRow>
       {current?.method === "none" && (

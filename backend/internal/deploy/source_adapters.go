@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type CredentialReader interface {
 type PlanningDocker interface {
 	Ping(context.Context) dockerx.Availability
 	ResolveDistributionImage(context.Context, string, string) (*dockerx.DistributionImage, error)
+	InspectImage(context.Context, string) (*dockerx.ImageDetail, error)
 	SpecOf(context.Context, string) (*dockerx.ContainerSpec, error)
 	ListStacks(context.Context, []string) ([]dockerx.ComposeStack, error)
 	ComposeAvailable(context.Context) bool
@@ -389,12 +391,57 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 			identity.Architecture = parts[1]
 		}
 	}
+	// The registry manifest names platforms and nothing else, so the port the
+	// image serves on has to come from the image's own configuration — which
+	// only exists locally, for an image this host has already pulled. When it
+	// is there the plan starts with the right port instead of zero; when it is
+	// not, the decision below still says so and the form asks.
+	evidence := []DetectionEvidence{{Path: reference, Reason: "registry digest " + resolved.Digest}}
+	port, portReason := a.imageExposedPort(ctx, reference)
+	decisions := []string{"confirm runtime command, ports, storage, and readiness"}
+	if port > 0 {
+		evidence = append(evidence, DetectionEvidence{Path: reference, Reason: portReason})
+		decisions = []string{"confirm runtime command, storage, and readiness"}
+	}
 	candidate := newDetectedCandidate("", BuildImage, DetectedCandidate{
 		Name: reference, Profile: ProfileImage, Confidence: ConfidenceHigh,
-		Evidence:      []DetectionEvidence{{Path: reference, Reason: "registry digest " + resolved.Digest}},
-		NeedsDecision: []string{"confirm runtime command, ports, storage, and readiness"},
+		Port: port, Evidence: evidence, NeedsDecision: decisions,
 	})
 	return DetectionResult{Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID}, nil
+}
+
+// imageExposedPort is the lowest TCP port a locally present image declares.
+//
+// Lowest rather than first so the same image always proposes the same port,
+// and TCP only because a UDP listener is not something a readiness check or a
+// proxy route can be built on. An image this host has never pulled, or a
+// daemon that cannot answer, is no evidence rather than an error: detection
+// has already succeeded on the registry manifest by this point.
+func (a *HostSourceAnalyzer) imageExposedPort(ctx context.Context, reference string) (int, string) {
+	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	detail, err := a.docker.InspectImage(inspectCtx, reference)
+	if err != nil || detail == nil {
+		return 0, ""
+	}
+	best := 0
+	for _, exposed := range detail.ExposedPorts {
+		value, protocol, _ := strings.Cut(exposed, "/")
+		if protocol != "" && !strings.EqualFold(protocol, "tcp") {
+			continue
+		}
+		number, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || number < 1 || number > 65535 {
+			continue
+		}
+		if best == 0 || number < best {
+			best = number
+		}
+	}
+	if best == 0 {
+		return 0, ""
+	}
+	return best, fmt.Sprintf("image exposes %d/tcp", best)
 }
 
 func (a *HostSourceAnalyzer) analyzeLocalCompose(ctx context.Context, source DraftSourceConfig) (DetectionResult, error) {

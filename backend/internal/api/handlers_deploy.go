@@ -30,6 +30,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/drafts", s.handle(s.handleDeploymentDraftList))
 			r.Method(http.MethodGet, "/drafts/{draft}", s.handle(s.handleDeploymentDraftGet))
 			r.Method(http.MethodPut, "/drafts/{draft}", s.handle(s.handleDeploymentDraftSave))
+			r.Method(http.MethodDelete, "/drafts/{draft}", s.handle(s.handleDeploymentDraftDiscard))
 			r.Method(http.MethodPost, "/drafts/{draft}/detect", s.handle(s.handleDeploymentDraftDetect))
 			r.Method(http.MethodPost, "/drafts/{draft}/preflight", s.handle(s.handleDeploymentDraftPreflight))
 		})

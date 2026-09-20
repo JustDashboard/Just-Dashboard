@@ -1139,6 +1139,8 @@ export async function mockDraftJourney(page: Page) {
   let currentStep = "intent"
   let data: Record<string, unknown> = {}
   let commits = 0
+  let commitBody: Record<string, unknown> | undefined
+  const discarded: string[] = []
   const currentDraft = () => ({
     id: "journey-draft",
     ownerUsername: "operator",
@@ -1172,6 +1174,10 @@ export async function mockDraftJourney(page: Page) {
       })
     }
     if (path === "/deploy/drafts" && method === "POST") return json(route, currentDraft())
+    if (path.startsWith("/deploy/drafts/") && method === "DELETE") {
+      discarded.push(path.slice("/deploy/drafts/".length))
+      return route.fulfill({ status: 204, body: "" })
+    }
     if (path === "/deploy/drafts/journey-draft" && method === "GET") {
       return json(route, currentDraft())
     }
@@ -1230,6 +1236,42 @@ export async function mockDraftJourney(page: Page) {
               ref: "postgresql@1.0.0",
               revision: `sha256:${"d".repeat(64)}`,
               digest: `sha256:${"c".repeat(64)}`,
+              platforms: ["linux/amd64"],
+            },
+            candidates: [candidate],
+            selectedId: candidate.id,
+            scannedFiles: 0,
+            scannedBytes: 0,
+            truncated: false,
+            gitRequirements: { submodules: false, lfs: false },
+          },
+        }
+        return json(route, currentDraft())
+      }
+      if (source.kind === "image" && intent.profile !== "game") {
+        revision += 1
+        currentStep = "detection"
+        const candidate = {
+          id: "image-candidate",
+          name: source.image,
+          root: "",
+          profile: "image",
+          buildMethod: "image",
+          confidence: "high",
+          port: 8080,
+          evidence: [
+            { path: source.image, reason: `registry digest sha256:${"a".repeat(64)}` },
+            { path: source.image, reason: "image exposes 8080/tcp" },
+          ],
+          needsDecision: ["confirm runtime command, storage, and readiness"],
+        }
+        data = {
+          ...data,
+          detection: {
+            source: {
+              kind: "image",
+              repository: source.image,
+              digest: `sha256:${"a".repeat(64)}`,
               platforms: ["linux/amd64"],
             },
             candidates: [candidate],
@@ -1318,6 +1360,7 @@ export async function mockDraftJourney(page: Page) {
     }
     if (path === "/deploy/drafts/journey-draft/commit" && method === "POST") {
       commits += 1
+      commitBody = request.postDataJSON() as Record<string, unknown>
       return json(route, {
         projectId: 77,
         environmentId: 78,
@@ -1333,6 +1376,8 @@ export async function mockDraftJourney(page: Page) {
   })
   return {
     commits: () => commits,
+    commitBody: () => commitBody,
+    discarded: () => discarded,
     configuration: () => data.configuration as Record<string, unknown> | undefined,
   }
 }

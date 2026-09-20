@@ -205,3 +205,57 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
 The deployment, project, projects, credentials and design-system browser specs pass against these
 surfaces; the details and preview scenarios were rewritten for the rows that open and the tile that
 is a link.
+
+## New project — 2026-09-20
+
+`/deploy/new` was the one screen in the rebuild that still read as a form with a picture stuck
+beside it, and four of the decisions it exists to make could only be made after the project was
+already running. Both were fixed in the same pass.
+
+- **The plan is the picture** (`new-project/plan-wiring.tsx`). The configure screen draws what the
+  setup will create as the four things a request passes through — source → build → runtime →
+  address — in the `wire.tsx` vocabulary the project overview already uses for a deployment that
+  exists, so the screen where a project is planned and the screen where it is read agree about what
+  a project is. Nothing pulses: a pulse means live traffic and a plan has none. A step not yet
+  decided is a dashed line to a dashed ring, exactly as an undeployed project's release is. Every
+  step is pressable and opens the fields that decide it, which makes the drawing the form's table of
+  contents — the release strategy and the memory limit are readable without opening Advanced to
+  find them, and an unbounded container reads as "No memory or CPU limit" rather than as silence,
+  because on one server that is the thing that takes the dashboard down with it. The screen splits
+  at `xl` (drawing left, a sticky summary right); below it the plan is read first and the form
+  follows.
+- **The Git tab's bento is gone.** The "Pictures" pass above put a grid of the five other sources on
+  the Git tab; the source strip above it already did that job, so the same six ways in were drawn
+  twice, one of them wired to a tab the other did not know about. The space now carries the clone
+  options — submodules and LFS — as a disclosure that says it governs every import made on the tab.
+- **Four decisions moved to creation**, each one previously reachable only from settings after a
+  production service had already done the wrong thing once: whether pushes deploy themselves and
+  which paths count (`new-project/automatic-deployment.tsx`, committed as the environment's
+  `deploy_git_policies` row inside the commit transaction — no decision writes no row, so every
+  other caller keeps `gitDeploymentPolicy`'s defaults); a second and third hostname; what an image
+  is (project type is offered for an image source, not only a Git one, so an HTTP application
+  shipped as a container can be told it is one and earn the readiness gate and candidate-first
+  activation preflight requires for it); and whether an unfinished setup is still wanted —
+  `DELETE /deploy/drafts/{draft}`, audited, owner-only, refused once committed, and called by the
+  page itself when a second source is inspected in place of the first.
+- **What the screen knew but did not say.** An image's exposed port is read from its own
+  configuration (`imageExposedPort`, lowest TCP port, absence tolerated) instead of arriving as
+  zero; a project name a live project already holds is reported by `GET /deploy/hostname?name=` as
+  `nameTaken` — a pointer, so "not asked" stays distinguishable from "free" — and flagged while it
+  is typed rather than refused by the schema's UNIQUE constraint at commit; what detection could not
+  settle (`needsDecision`) is shown on the source row; all eight build recipes are offered rather
+  than the four that fit on the old control; and an acknowledged warning now carries its remedy and
+  its owning page's link, which is how `backup_policy_missing`'s deep link was found to be drawn
+  nowhere.
+
+Deliberately not done: no `runtime_unbounded` finding (a warning that fires on every plan and has to
+be acknowledged on every deploy teaches operators to acknowledge without reading — the plan drawing
+says it instead), no `readiness_missing` for image profiles (it is blocking severity and would refuse
+existing image deployments), and no second server, second environment or promotion — those are an
+architectural change (R12), not a change to this page.
+
+Verified: `go build ./... && go vet ./... && go test ./...`, the deployment race packages, the
+frontend lint, type-check, unit and complete browser suites against a clean production build, and
+`scripts/e2e-deployments.py` against a real backend and Docker. Screenshots at 1280, 1720 and 390
+were reviewed; nothing scrolls sideways. Not verified live: a real GitHub push through the new
+`gitPolicy`, and public TLS for a second hostname.
