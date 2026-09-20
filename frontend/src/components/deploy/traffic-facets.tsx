@@ -130,7 +130,7 @@ export function TrafficFacets({
                   title: `Show every request from ${c.value}`,
                   onClick: () => onFilterClient(c.value),
                   trailing:
-                    onBlock && !isLoopback(c.value) ? (
+                    onBlock && !isPrivate(c.value) ? (
                       <Button
                         size="sm"
                         variant={scanner ? "destructive" : "ghost"}
@@ -252,10 +252,33 @@ function isBot(agent: string) {
   return /bot|spider|crawl|curl|wget|python|go-http|java\//i.test(agent)
 }
 
-function isLoopback(ip: string) {
-  return (
-    ip === "127.0.0.1" || ip === "::1" || ip.startsWith("10.") || ip.startsWith("172.") || ip.startsWith("192.168.")
-  )
+/**
+ * An address there is no point offering to block: this server talking to
+ * itself, or something already inside the network the firewall stands at the
+ * edge of.
+ *
+ * `172.` is the trap, and this read it as private for the whole /8. RFC 1918
+ * reserves 172.16 through 172.31 and nothing either side, so a prefix test
+ * hides the verb for 172.217.x.x — which is Google, and precisely the kind of
+ * address somebody looking at this list wants to act on.
+ */
+function isPrivate(ip: string) {
+  // An IPv4-mapped address is an IPv4 address wearing a hat.
+  const address = ip.toLowerCase().replace(/^::ffff:/, "")
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(address)
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])]
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    )
+  }
+  // ::1 is loopback, fc00::/7 unique-local, fe80::/10 link-local.
+  return address === "::1" || /^f[cd]/.test(address) || /^fe[89ab]/.test(address)
 }
 
 function statusWord(code: number) {

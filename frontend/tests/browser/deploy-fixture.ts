@@ -44,6 +44,17 @@ export const user = {
   },
 }
 
+/**
+ * The dashboard's own labels, as they arrive on a container event. `run-id` is
+ * what lets a row link to the run that put the release on the server.
+ */
+export const releaseOwner = {
+  "environment-id": "12",
+  "release-id": "20",
+  "release-number": "20",
+  "run-id": "84",
+}
+
 export const run = {
   id: 84,
   runNumber: 1,
@@ -780,7 +791,7 @@ export async function mockProject(
             message: "api-production-r20 exited with status 137",
             level: "error",
             source: "daemon",
-            owner: { "environment-id": "12", "release-id": "20" },
+            owner: releaseOwner,
           },
           {
             time: new Date(Date.now() - 11 * 60_000).toISOString(),
@@ -791,7 +802,36 @@ export async function mockProject(
             message: "api-production-r20 started",
             level: "info",
             source: "docker",
-            owner: { "environment-id": "12", "release-id": "20" },
+            owner: releaseOwner,
+          },
+          // Correlated against the audit log: the one distinction an operator
+          // wants on an unexplained restart is whether this dashboard did it.
+          {
+            time: new Date(Date.now() - 13 * 60_000).toISOString(),
+            type: "container",
+            action: "create",
+            name: "api-production-r20",
+            id: "c0ffee",
+            message: "api-production-r20 was created",
+            level: "info",
+            source: "dashboard",
+            owner: releaseOwner,
+            trigger: {
+              auditId: 918,
+              action: "deploy.run",
+              actor: "wayy",
+              confidence: "likely",
+            },
+          },
+          {
+            time: new Date(Date.now() - 40 * 60_000).toISOString(),
+            type: "network",
+            action: "destroy",
+            name: "jd-db-e12",
+            message: "deleted network jd-db-e12",
+            level: "notice",
+            source: "docker",
+            owner: { "environment-id": "12" },
           },
         ],
       }
@@ -1439,6 +1479,10 @@ function deploymentRequests(url: URL) {
         { value: "127.0.0.1", count: 720, errors: 0 },
         { value: "198.51.100.7", count: 402, errors: 9 },
         { value: "203.0.113.55", count: 40, errors: 0, refused: 40, probes: 12 },
+        // 172.217 is Google and 172.16 is RFC 1918. They differ by one octet
+        // and only one of them is worth offering a firewall rule for.
+        { value: "172.217.0.1", count: 31, errors: 0 },
+        { value: "172.16.4.9", count: 12, errors: 0 },
       ],
       agents: [
         { value: "Chrome", count: 402, errors: 9 },

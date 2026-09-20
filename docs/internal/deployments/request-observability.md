@@ -191,7 +191,8 @@ addresses, so the reason shown is the operator's next move.
 | --- | --- |
 | `GET /deploy/{id}/requests` | The window: rows, readings, facets, chart columns |
 | `GET /deploy/{id}/requests/stream?after=<cursor>` | WebSocket: every 400ms, what the store holds past the cursor, batched — a deployment under load writes thousands of lines a second and one frame each would spend the budget on envelopes |
-| `GET /deploy/{id}/lifecycle` | Docker events for this environment's containers |
+| `GET /deploy/{id}/lifecycle` | Docker events for this environment's containers and networks, filtered by `kinds`, `search`, `since` and `limit`, each correlated against the audit log |
+| `GET /deploy/{id}/lifecycle/stream` | WebSocket: this environment's buffered past, then every arriving event that carries its label |
 | `GET /deploy/{id}/requests/export?…` | The window as CSV, every matching request oldest first (up to 50k) — the page's own query, not the whole record |
 | `GET /deploy/{id}/runs/{run}/traffic` | Requests/min, 5xx share, p95 and page views over the half hour before and after the run's activation; the after-window is cut at now |
 | `GET /deploy/traffic` | Every project's last hour — rate, 5xx share, page views and one point per minute — read from the held record when it is under a minute old, so a fleet of forty cards is one answer rather than forty file reads |
@@ -243,7 +244,14 @@ rules as sentences with their state, and its form speaks the rule back before it
 The Insights view's Clients list names scanners and, for `system.admin`, offers **Block** on each
 address — `POST /firewall/rules` with a source-only deny, exactly what the Security pages' address
 verbs do, so a scanner seen here is stopped at the firewall without changing pages. Loopback and
-private addresses never get the verb.
+private addresses never get the verb: a deny rule against something already inside the network the
+firewall stands at the edge of does nothing.
+
+"Private" is read from the actual reservations rather than from a prefix. The first version tested
+`172.` and so hid the verb for the whole of `172.32`–`172.255`, which is public space — 172.217 is
+Google — while RFC 1918 reserves only `172.16`–`172.31`. `isPrivate` in `traffic-facets.tsx` covers
+`0/8`, `10/8`, `127/8`, `172.16/12`, `192.168/16`, `169.254/16`, `::1`, `fc00::/7` and `fe80::/10`,
+and unwraps an IPv4-mapped address first.
 
 ## Lifecycle
 
@@ -254,10 +262,45 @@ by then already gone. Only the dashboard's prefix is kept — an arbitrary image
 unbounded and none of it is ours to render.
 
 The buffer is host-wide and bounded (2000), so `handleDeploymentLifecycle` asks for a wide slice and
-narrows by `Owner["environment-id"]`: asking for only `limit` events would return a hundred belonging
-to other containers and none belonging to this one. The `since` bound is served here rather than
-computed in the browser — a reading like "restarts in the last hour" worked out during render reads
-the clock on every re-render, so the figure would depend on when React happened to paint.
+narrows by `Owner["environment-id"]` in `ownedByEnvironment`: asking for only `limit` events would
+return a hundred belonging to other containers and none belonging to this one. The `since` bound is
+served here rather than computed in the browser — a reading like "restarts in the last hour" worked
+out during render reads the clock on every re-render, so the figure would depend on when React
+happened to paint. `kinds` defaults to **containers and networks** rather than containers alone: a
+database network carries the same environment label (`deployment_database_network.go`), and one
+disappearing under a running release is exactly what this feed is for.
+
+`handleDeploymentLifecycleStream` follows the same slice live. Without it the feed learned about a
+restart up to ten seconds after the chart beside it had drawn the 502s, which is not one timeline.
+The socket sends the buffered past on connect and then every arriving event carrying this
+environment's label, and correlates none of them: a single event would cost its own audit query, and
+the poll beside it re-reads the same event with its trigger a moment later — which is why the client
+dedupes with the polled copy first, so a row stops saying "docker itself" once the poll knows better
+rather than flickering back to it.
+
+### Who did it
+
+`correlateEvents` on the host feed matches an audit entry naming the same container, image or compose
+stack within a minute either side. Run against a deployment it finds nothing, because a release is
+audited against the **project** (`deploy.run` with target `lampino`) and never against the container
+it goes on to create — so `handleDeploymentLifecycle` did not call it at all, and every row said
+"docker itself" or nothing however the container had been started. The tag the frontend drew for a
+correlated event was unreachable code.
+
+`correlateDeploymentEvents` runs both passes over one batch. The container-level match goes first and
+is kept, because an entry naming this exact container is a better answer than one naming the project
+it belongs to. The deployment pass then matches the project's name across a window that is
+**directional**: the entry must precede the event by no more than `deployCorrelationWindow` (15
+minutes, because a release's containers appear after the build rather than with the button) and never
+follow it — a symmetric window would let a deploy at 10:05 explain a container that died at 10:01,
+which reads as "the deploy broke it" when the truth is the reverse.
+
+Two actions are never a release's doing however well they line up. `oom` and `health_status:*` are
+the kernel's reaper and a health check reporting something that happened *to* a container, and filing
+those under "this dashboard" sends an operator to the audit log for an answer that is not there.
+
+`correlateEventsWith` is the shared walk both passes use, and it skips an event that already carries a
+trigger, which is what makes "first match wins" true rather than "last one seen wins".
 
 ## The three output fixes
 
@@ -285,7 +328,21 @@ alerts line over a `Pane` with the three views. The chart carries marks through 
 (`releases[].activatedAt`, the Metrics page's deploy colour), a container exit or OOM kill (danger), a restart (warning) — a
 spike of red with a deploy mark at its foot is a different afternoon from the same spike with none.
 A failing request's detail opens onto the container's output around that minute (host Logs page) and
-onto Events scoped to two minutes either side. The Overview carries a Traffic panel (rate, failing
+onto Events scoped to two minutes either side. The view and that instant are written back to the URL
+(`?view=events&moment=…`, through `history.replaceState` as the host Logs page does): they were read
+on arrival and never written, so pressing the tab changed nothing in the address bar and a reload
+landed back on Requests with the scoping gone — and a link to the minute a deployment broke is
+exactly the thing somebody pastes into a chat.
+
+`LifecycleFeed` carries the toolbar the other two views have — a search box, kind chips with counts,
+and a Live chip over the socket — because it was the only one of the three that could be neither
+searched nor followed. Filtering is applied in the browser rather than on the wire, for the reason
+the host feed gives: re-subscribing on every keystroke would drop the connection four times a word.
+Its empty state names the boundary instead of asserting steadiness. "Watching since 07:28" is the
+backend's own start, so a few minutes after a restart the old copy — "which for a running deployment
+is the reading you want" — was a claim the page could not make; under an hour it now says the record
+begins with the dashboard and nothing from before was kept. A row's release links to the run that put
+it there and a correlated trigger links to `/audit?action=…`, the same hand-off the host feed makes. The Overview carries a Traffic panel (rate, failing
 share, a sparkline of the hour) and each fleet card a sparkline with the rate, both from
 `/deploy/traffic`; the run page's Metrics view leads with `RunTrafficPanel` — requests/min, failing
 share and p95 before → after activation. The readings are
@@ -351,7 +408,10 @@ the verbs that change something step forward in weight.
   and sequences start again; a page holding an older cursor gets everything held rather than nothing,
   and dedups by sequence.
 - The Docker event buffer is memory-resident and bounded; it is an hour of a busy host, not an audit
-  trail. What the dashboard itself did is in `audit_log`.
+  trail. What the dashboard itself did is in `audit_log`. A restart of the backend — a self-update
+  included — empties it, and the Events view, the Container reading and the chart's failure marks all
+  forget together. The empty state and the feed's own footer say so rather than leaving a reader to
+  infer steadiness from a record that starts three minutes ago.
 - Access logs hold client addresses. They are removed with the route, and they sit behind the same
   authentication as every other host log this dashboard serves.
 
@@ -376,6 +436,15 @@ the framing of the container script's two reports, the host-file reader across a
 a truncation, and — live — the script against `caddy:2-alpine`. `internal/logsx` covers ANSI, carriage-return frames, structured levels on
 both numeric scales, and that a brace alone is not JSON. `internal/proxysvc` covers the rendered log
 block, its rotation, and that the reader and `sites_render` agree about nginx's path.
-`internal/deploy` covers the observer against a fake ingress. `tests/browser/deploy-requests.spec.ts`
-covers the three views, the readings, chip narrowing, the opened row, the absent-record sentence, and
-that the page fits at 390 and 1280.
+`internal/deploy` covers the observer against a fake ingress. `internal/api` covers the lifecycle feed
+itself: that it shows one environment's events and not the host's, that the window and the limit are
+the caller's, that an environment with no events reads as an empty list rather than a null, that the
+default kinds are containers and networks and a junk `since` is ignored, and — for the correlation —
+that a release names itself as the cause of its own containers, that it never explains what happened
+before it or outside its window, that an OOM kill and a health flip are never the dashboard's doing,
+that another project's release and a refused action explain nothing, and that an entry naming the
+container itself wins over the one naming its project. `tests/browser/deploy-requests.spec.ts`
+covers the three views, the readings, chip narrowing, the opened row, the absent-record sentence,
+the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
+on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which
+addresses are offered a Block, and that the page fits at 390 and 1280.

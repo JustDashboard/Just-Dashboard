@@ -812,9 +812,10 @@ export type DockerEvent = {
   exitCode?: string
   /**
    * The dashboard's own labels off the object this happened to, with the
-   * `io.just-dashboard.` prefix stripped — `environment-id` and `release-id`
-   * for a deployment's container. It is what lets a project page show its own
-   * restarts without inspecting a container that is by then already gone.
+   * `io.just-dashboard.` prefix stripped — `environment-id`, `release-id`,
+   * `release-number` and `run-id` for a deployment's container. It is what
+   * lets a project page show its own restarts without inspecting a container
+   * that is by then already gone, and link a row to the run that made it.
    */
   owner?: Record<string, string>
   message: string

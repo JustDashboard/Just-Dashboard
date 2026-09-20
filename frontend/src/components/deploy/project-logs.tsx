@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { get } from "@/lib/api"
@@ -63,7 +63,24 @@ export function ProjectLogs() {
     return asked === "insights" || asked === "events" ? asked : "requests"
   })
   const [query, setQuery] = useState<RequestQuery>(EMPTY_REQUEST_QUERY)
-  const [moment, setMoment] = useState<string | undefined>()
+  const [moment, setMoment] = useState<string | undefined>(() => {
+    const asked = search.get("moment")
+    return asked && Number.isFinite(Date.parse(asked)) ? asked : undefined
+  })
+
+  // The view and the instant it is scoped to are written back to the URL. A
+  // link to Events at the minute a deployment broke is the thing somebody
+  // pastes into a chat, and it was only ever readable on arrival: pressing the
+  // tab changed nothing in the address bar, so a reload landed back on
+  // Requests and the ±2 minutes around the failing request were gone.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (view === "requests") url.searchParams.delete("view")
+    else url.searchParams.set("view", view)
+    if (moment) url.searchParams.set("moment", moment)
+    else url.searchParams.delete("moment")
+    window.history.replaceState(null, "", url)
+  }, [view, moment])
 
   // The readings are the page's own, not a view's: they hold still while the
   // reader moves between views, which is what lets the error rate be the

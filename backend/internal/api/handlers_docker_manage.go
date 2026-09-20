@@ -1126,13 +1126,38 @@ func (s *Server) handleDockerEvents(w http.ResponseWriter, r *http.Request) erro
 // reported as "likely" and the audit entry is offered for the operator to
 // check rather than asserted as the reason.
 func (s *Server) correlateEvents(r *http.Request, events []dockerx.Event) {
+	s.correlateEventsWith(r, events, "docker.", eventCorrelationWindow,
+		func(entry *audit.Entry, ev *dockerx.Event) bool {
+			gap := ev.Time.Sub(entry.TS)
+			if gap < 0 {
+				gap = -gap
+			}
+			return gap <= eventCorrelationWindow && auditNames(entry, ev)
+		})
+}
+
+// correlateEventsWith is the walk both feeds share: read the audit entries that
+// could plausibly explain this batch, and hand each candidate pair to a matcher.
+//
+// `lead` is how far *before* an event an entry may sit. The host feed's window
+// is symmetric — a container action and its audit entry are seconds apart in
+// either order, because the entry is written when the request finishes and the
+// event when the daemon acts. A deployment's is not (see
+// correlateDeploymentEvents), which is the whole reason this is a parameter.
+func (s *Server) correlateEventsWith(
+	r *http.Request,
+	events []dockerx.Event,
+	action string,
+	lead time.Duration,
+	match func(*audit.Entry, *dockerx.Event) bool,
+) {
 	if len(events) == 0 || s.Audit == nil {
 		return
 	}
 	oldest := events[len(events)-1].Time
 	entries, _, err := s.Audit.List(r.Context(), audit.Filter{
-		Action: "docker.",
-		Since:  oldest.Add(-eventCorrelationWindow),
+		Action: action,
+		Since:  oldest.Add(-lead),
 		Limit:  500,
 	})
 	if err != nil {
@@ -1140,16 +1165,12 @@ func (s *Server) correlateEvents(r *http.Request, events []dockerx.Event) {
 	}
 	for i := range events {
 		ev := &events[i]
+		if ev.Trigger != nil {
+			continue
+		}
 		for j := range entries {
 			entry := &entries[j]
-			if !entry.Success {
-				continue
-			}
-			gap := ev.Time.Sub(entry.TS)
-			if gap < 0 {
-				gap = -gap
-			}
-			if gap > eventCorrelationWindow || !auditNames(entry, ev) {
+			if !entry.Success || !match(entry, ev) {
 				continue
 			}
 			ev.Source = "dashboard"

@@ -230,7 +230,117 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByText("exit 137")).toBeVisible()
     // Docker records what happened and never who asked, so "the daemon did
     // this on its own" is the distinction worth drawing.
-    await expect(page.getByText("docker itself")).toBeVisible()
+    await expect(page.getByText("docker itself").first()).toBeVisible()
+
+    // And the other half of that distinction, which the server can only make
+    // by laying the event against the audit log. It was unreachable for as
+    // long as the deployment feed did not correlate: every row said "docker
+    // itself" or nothing, whoever had pressed the button.
+    const trigger = page.getByRole("link", { name: "this dashboard" })
+    await expect(trigger).toBeVisible()
+    await expect(trigger).toHaveAttribute("href", "/audit?action=deploy.run")
+
+    // The release is the reader's next move, so it is a link to the run that
+    // put it there rather than a piece of text.
+    await expect(page.getByRole("link", { name: "· release 20" }).first()).toHaveAttribute(
+      "href",
+      "/deploy/7/runs/84",
+    )
+  })
+
+  test("the events feed can be searched, narrowed to a kind, and followed", async ({ page }) => {
+    await mockProject(page)
+    const sockets: string[] = []
+    page.on("websocket", (socket) => sockets.push(socket.url()))
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+
+    // A deployment owns more than its containers: a database network vanishing
+    // under a running release is exactly this feed's business.
+    await expect(page.getByText("deleted network jd-db-e12")).toBeVisible()
+    await page.getByRole("button", { name: /^Containers/ }).click()
+    await expect(page.getByText("deleted network jd-db-e12")).toHaveCount(0)
+    await expect(page.getByText("api-production-r20 exited with status 137")).toBeVisible()
+    await page.getByRole("button", { name: /^All/ }).click()
+
+    await page.getByLabel("Filter container events").fill("exited")
+    await expect(page.getByText("api-production-r20 exited with status 137")).toBeVisible()
+    await expect(page.getByText("api-production-r20 started")).toHaveCount(0)
+
+    await page.getByLabel("Filter container events").fill("nothing here")
+    await expect(page.getByText("Nothing matches that filter")).toBeVisible()
+    await page.getByLabel("Filter container events").fill("")
+
+    // Followed rather than polled: a feed that learns about the restart ten
+    // seconds after the chart beside it has drawn the 502s is not on the same
+    // timeline as the chart.
+    await expect
+      .poll(() => sockets.some((url) => url.includes("/deploy/7/lifecycle/stream")))
+      .toBe(true)
+  })
+
+  test("an empty feed says the record began when the dashboard did", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/lifecycle*", (route) =>
+      json(route, {
+        status: "available",
+        watching: true,
+        // The buffer lives in the backend's memory, so this is a restart three
+        // minutes ago rather than a deployment that has been steady all week.
+        since: new Date(Date.now() - 3 * 60_000).toISOString(),
+        events: [],
+      }),
+    )
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+
+    await expect(page.getByText("Nothing has happened since the dashboard started")).toBeVisible()
+    await expect(page.getByText(/not yet evidence that the deployment has been steady/)).toBeVisible()
+  })
+
+  test("the view and the moment it is scoped to survive a reload", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("events")
+
+    await page.getByRole("button", { name: "Requests", exact: true }).click()
+    await page.getByText("/api/checkout").first().click()
+    await page.getByRole("button", { name: "Container events around this moment" }).click()
+    const scoped = new URL(page.url())
+    expect(scoped.searchParams.get("view")).toBe("events")
+    expect(scoped.searchParams.get("moment")).toBeTruthy()
+
+    // The point of putting it there: the link somebody pastes into a chat
+    // lands on the same two minutes it was taken from.
+    await page.goto(scoped.toString())
+    await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect(page.getByText("two minutes either side")).toBeVisible()
+  })
+
+  test("only an address worth blocking is offered the verb", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button", { name: "Insights", exact: true }).click()
+
+    const row = (ip: string) =>
+      page
+        .locator("li")
+        .filter({ has: page.getByRole("button", { name: `Show every request from ${ip}` }) })
+
+    // A scanner is the reason the verb exists.
+    await expect(row("203.0.113.55").getByRole("button", { name: "Block" })).toBeVisible()
+    // 172.217 is Google. It differs from RFC 1918 space by one octet, and a
+    // prefix test on "172." hid the verb for the whole of the public half.
+    await expect(row("172.217.0.1").getByRole("button", { name: "Block" })).toBeVisible()
+    // These two are inside the network the firewall stands at the edge of, so
+    // a deny rule against them is a rule that does nothing.
+    await expect(row("172.16.4.9").getByRole("button", { name: "Block" })).toHaveCount(0)
+    await expect(row("127.0.0.1").getByRole("button", { name: "Block" })).toHaveCount(0)
   })
 
   test("a deployment with no request record explains which nothing this is", async ({ page }) => {
