@@ -259,3 +259,66 @@ frontend lint, type-check, unit and complete browser suites against a clean prod
 `scripts/e2e-deployments.py` against a real backend and Docker. Screenshots at 1280, 1720 and 390
 were reviewed; nothing scrolls sideways. Not verified live: a real GitHub push through the new
 `gitPolicy`, and public TLS for a second hostname.
+
+## The chooser — 2026-09-20 (second pass)
+
+The 2026-09-20 entry above rebuilt Configure and left the half of `/deploy/new` the reader arrives on
+untouched. Opened side by side with the host Overview it failed §15's passes 3, 7 and 9 outright, and
+the operator's complaint named all three without using their numbers: the page had no life, it never
+said which of the two GitHub identities was connected, and the tabs other than Git were dry.
+
+- **One measure.** Five of the six sources rendered into `mx-auto w-full max-w-2xl` while Git rendered
+  full width, so pressing a tab collapsed the page from its own width to a 672px centred column under
+  a title and a strip that stayed full width. Every source now starts on the page's own left edge
+  (§15 pass 9). Git, Docker image and Template are two columns at `xl` — the list and the thing you do
+  when the list has not got it (paste a URL, pull from a registry, fill in the chosen template);
+  Compose, Database and Existing workload are a left-aligned form, because a form does not want 1440px.
+  The Template tab's second column exists only once a template is chosen: a reserved empty column
+  reads as a layout bug.
+- **Both GitHub identities, said once.** The App was inferred from `(appRepos.data?.length ?? 0) > 0`,
+  so an App installed on an account that had granted it nothing reported as no App at all and the page
+  offered to connect one that was already connected. The Git tab now reads `GET /deploy/github-app/`
+  through `hooks/use-github.ts` (lifted out of `github-app-card.tsx`, which had owned the hook since
+  Credentials was the only caller) and opens with two rows — the App and the CLI — each carrying a
+  `Status`, what it grants, how many repositories it is responsible for, and the repair for whichever
+  is missing. `installUrl` was in the type and drawn nowhere; it is now the block's action *and* the
+  remedy inside the empty result of a filter, which is where "my repository is not here" is actually
+  felt. A GitHub-side failure degrades to one muted line: the page used to paint `ErrorState` across
+  the top of the import path whenever an optional integration was unreachable, which every run of
+  `deploy-fixture.ts` reproduced as a red "Not mocked" banner because both App routes were unmocked.
+- **Provenance is a heading, not a tag on every row.** `<Tag>App</Tag>` at a row's right edge was three
+  characters at 10px with nothing on the page defining them. The rows are grouped under the identity
+  that clones them, and only when there is more than one.
+- **The rows are the target.** Ten outline `Import` buttons down the right edge became §12's shape —
+  the name is the control and carries the verb in its accessible name, the row around it answers the
+  pointer — on the repository, image and template lists alike. A template that cannot be deployed has
+  no control at all, so nothing announces one. A press that takes a second says `Importing…` (§13).
+- **Recency.** The list arrived in whatever order the API answered in. `pushedAt` was on
+  `GitHubRepoSummary` and discarded by the picker's own projection; it did not exist at all on
+  `GitHubAppRepository`, which serves nearly every row on a dashboard with an App, so
+  `internal/githubapp` now carries `pushedAt`, `fork` and `archived` through the installation listing.
+  Newest push first, anything that never reported one last.
+- **Both scroll containers grew a sideways scrollbar** — §15 pass 3 names this defect verbatim, and it
+  was visible in the screenshots the complaint arrived with. A container over bleeding rows pays the
+  bleed (`-mx-3 px-3`), and the caps went from `32rem`/`20rem` to `min(60vh,42rem)`.
+- **Unfinished setups stopped opening the page.** Four rows, two lines each, above the thing the reader
+  came to do. One line each now, with a count in the header and `expiresAt` — on the wire since the
+  type was written, drawn nowhere — said only within three days of lapsing, because every draft expires
+  and "29 days from now" on all four is a column of the same word.
+- **The strip carries a mark per source.** Six words in a line are six words to read; the glyphs are
+  wayfinding in §14's sense (the reader is choosing between kinds of thing, not being told what page
+  they are on) and every one is `aria-hidden`, so each button's accessible name is still exactly its
+  label.
+- **Nothing was installed.** The 2026 registry landscape was surveyed — Magic UI, Aceternity, Motion
+  Primitives, Kibo, cult-ui, Origin/coss, Base UI, Ark UI, React Aria, Tremor, shadcn's own `Item`
+  and `InputGroup` — and every candidate either duplicates a primitive in `components/` or sells the
+  gradient, glow, shadow and hover-transform §15 bans in one sentence. `ui/bento-grid.tsx` went the
+  other way: dead since the 2026-09-20 pass removed the Git tab's bento, it is deleted, and the §11
+  sentence still describing it as shipped is corrected.
+
+Verified: `bun run lint`, `bun run build`, `bun test src` (80), the complete browser suite against the
+production build (336 passed, 16 conditional skips), `go build ./... && go vet ./...`, and
+`go test ./internal/githubapp ./internal/api`. Screenshots of all six sources at 390, 1280 and 1720
+were reviewed, and no tab scrolls sideways at any of those widths or at 768. Not verified live: a real
+GitHub App installation listing (the new `pushedAt`/`fork`/`archived` fields are exercised against the
+package's fake GitHub only), and a real `gh` sign-in.

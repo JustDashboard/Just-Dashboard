@@ -1,19 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { LockClosed, RefreshClockwise, Warning } from "@/components/icons"
+import { External, GitHubMark, LockClosed, RefreshClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
+import { plural, relativeTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { useGitHubAccount } from "@/hooks/use-github"
+import { githubAppStage, useGitHubAccount, useGitHubApp } from "@/hooks/use-github"
 import { useSessionState } from "@/lib/view-state"
-import { GitHubAccountControl } from "@/components/git/github-account"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { ROW_BLEED, Row, RowList } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -38,9 +40,10 @@ function asError(error: unknown) {
 }
 
 /**
- * Import a repository the signed-in GitHub credential can reach, or paste any
- * Git URL. Importing inspects immediately with the default branch — the
- * branch itself is changed on Configure, once a plan exists to re-detect.
+ * Import a repository one of this dashboard's two GitHub identities can
+ * reach, or paste any Git URL. Importing inspects immediately with the default
+ * branch — the branch itself is changed on Configure, once a plan exists to
+ * re-detect.
  */
 /** Only a clone URL is prefilled from a link: anything else stays out of the field. */
 function cloneURL(value?: string) {
@@ -52,13 +55,30 @@ function cloneURL(value?: string) {
 type PickableRepo = {
   nameWithOwner: string
   name: string
+  owner: string
   description?: string
   language?: string
   private: boolean
+  fork?: boolean
+  archived?: boolean
+  pushedAt?: string
+  htmlUrl?: string
   cloneUrl: string
   defaultBranch: string
   credentialId?: number
   viaApp: boolean
+}
+
+/**
+ * Newest push first, and anything that never reported one last. The repository
+ * somebody wants to deploy is almost always the one they touched this week,
+ * and the list arrived in the order the API happened to answer in.
+ */
+function byRecency(a: PickableRepo, b: PickableRepo) {
+  if (a.pushedAt && b.pushedAt) return b.pushedAt.localeCompare(a.pushedAt)
+  if (a.pushedAt) return -1
+  if (b.pushedAt) return 1
+  return a.nameWithOwner.localeCompare(b.nameWithOwner)
 }
 
 export function SourceGit({
@@ -84,7 +104,16 @@ export function SourceGit({
     (signal) => get<GitHubAppRepository[]>("/deploy/github-app/repositories", undefined, signal),
     0,
   )
-  const appConfigured = (appRepos.data?.length ?? 0) > 0
+  // The App is *asked about*, not inferred from how many repositories came
+  // back. An App installed on an account that has granted it nothing is
+  // configured and correct, and counting rows reported it as absent — which
+  // is how the page came to tell an operator to connect an App they had
+  // already connected.
+  const app = useGitHubApp()
+  const stage = githubAppStage(app.data)
+  // Every read is guarded: an unmocked path answers `[]` in the design-system
+  // browser run, so `app.data` is sometimes an array with no fields at all.
+  const installations = app.data?.installations ?? []
   // Every field is remembered for the tab, so a look at another page — the
   // credential this repository needs, say — never means finding it again.
   const [filter, setFilter] = useSessionState("deploy.new.git.filter", "")
@@ -135,97 +164,221 @@ export function SourceGit({
     }
   }
 
+  const importRepo = (repo: PickableRepo) =>
+    void doImport(
+      {
+        kind: "git",
+        mode: "git_url",
+        url: repo.cloneUrl,
+        ref: repo.defaultBranch || "main",
+        credentialId: repo.credentialId,
+        includeSubmodules,
+        includeLfs,
+      },
+      deploymentName(repo.name),
+      repo.nameWithOwner,
+      repo.nameWithOwner,
+      repo.nameWithOwner,
+    )
+
   const needle = filter.trim().toLowerCase()
   // One list: what the App grants first, then what the signed-in account can
   // reach and the App cannot. A repository both can reach imports through the
   // App, whose token never expires under the operator's feet.
   const appNames = new Set((appRepos.data ?? []).map((repo) => repo.nameWithOwner))
-  const pickable: PickableRepo[] = [
-    ...(appRepos.data ?? []).map((repo) => ({
+  const fromApp: PickableRepo[] = (appRepos.data ?? []).map((repo) => ({
+    nameWithOwner: repo.nameWithOwner,
+    name: repo.name,
+    owner: repo.account || repo.nameWithOwner.split("/")[0],
+    description: repo.description,
+    language: repo.language,
+    private: repo.private,
+    fork: repo.fork,
+    archived: repo.archived,
+    pushedAt: repo.pushedAt,
+    htmlUrl: repo.htmlUrl,
+    cloneUrl: repo.cloneUrl,
+    defaultBranch: repo.defaultBranch,
+    credentialId: repo.credentialId,
+    viaApp: true,
+  }))
+  const fromCli: PickableRepo[] = (repos.data ?? [])
+    .filter((repo) => !appNames.has(repo.nameWithOwner))
+    .map((repo) => ({
       nameWithOwner: repo.nameWithOwner,
       name: repo.name,
+      owner: repo.owner || repo.nameWithOwner.split("/")[0],
       description: repo.description,
       language: repo.language,
       private: repo.private,
+      fork: repo.fork,
+      archived: repo.archived,
+      pushedAt: repo.pushedAt,
+      htmlUrl: repo.url,
       cloneUrl: repo.cloneUrl,
-      defaultBranch: repo.defaultBranch,
-      credentialId: repo.credentialId,
-      viaApp: true,
-    })),
-    ...(repos.data ?? [])
-      .filter((repo) => !appNames.has(repo.nameWithOwner))
-      .map((repo) => ({
-        nameWithOwner: repo.nameWithOwner,
-        name: repo.name,
-        description: repo.description,
-        language: repo.language,
-        private: repo.private,
-        cloneUrl: repo.cloneUrl,
-        defaultBranch: repo.defaultBranch || "main",
-        viaApp: false,
-      })),
-  ]
-  const owners = [...new Set(pickable.map((repo) => repo.nameWithOwner.split("/")[0]))]
-  const visible = pickable.filter(
-    (repo) =>
-      (owner === "all" || repo.nameWithOwner.split("/")[0] === owner) &&
-      (!needle ||
-        repo.nameWithOwner.toLowerCase().includes(needle) ||
-        (repo.description ?? "").toLowerCase().includes(needle)),
-  )
+      defaultBranch: repo.defaultBranch || "main",
+      viaApp: false,
+    }))
+  const pickable = [...fromApp, ...fromCli]
+  const owners = [...new Set(pickable.map((repo) => repo.owner))].sort((a, b) => a.localeCompare(b))
+  const matches = (repo: PickableRepo) =>
+    (owner === "all" || repo.owner === owner) &&
+    (!needle ||
+      repo.nameWithOwner.toLowerCase().includes(needle) ||
+      (repo.description ?? "").toLowerCase().includes(needle))
+
+  // Which identity clones a row used to be a bare `App` tag at its right
+  // edge, three characters at 10px beside the language and nothing on the
+  // page defining them. Provenance is a property of the whole run of rows, so
+  // it is a heading over the run — and only when there is more than one, since
+  // a single group is a heading over everything.
+  const groups = [
+    { key: "app", label: "From the GitHub App", repos: fromApp.filter(matches).sort(byRecency) },
+    { key: "cli", label: "From the GitHub CLI", repos: fromCli.filter(matches).sort(byRecency) },
+  ].filter((group) => group.repos.length > 0)
+  const visibleCount = groups.reduce((total, group) => total + group.repos.length, 0)
   const listing = (signedIn && repos.loading) || (appRepos.loading && !appRepos.data)
+  const canBrowse = signedIn || stage === "import" || pickable.length > 0
 
   return (
-    <div className="min-w-0 space-y-4">
-      <div className="min-w-0 space-y-4">
-        {failure && <ErrorState error={failure} />}
-        <Panel plain>
+    <div className="min-w-0 space-y-6">
+      {failure && <ErrorState error={failure} />}
+
+      {/* Said once, in one place. Two identities reach GitHub from this
+          server and the screen used to represent them with a 20px avatar and
+          a three-letter tag, so "why are these the repositories I can see"
+          had no answer anywhere on the page. */}
+      <Panel plain className="animate-rise">
+        <PanelHeader
+          title="Where these repositories come from"
+          actions={
+            app.data?.installUrl && (
+              <Button variant="outline" size="xs" asChild>
+                <a href={app.data.installUrl} target="_blank" rel="noreferrer noopener">
+                  <External className="size-3" />
+                  Adjust repository access
+                </a>
+              </Button>
+            )
+          }
+        />
+        <PanelBody flush>
+          <RowList aria-label="GitHub connections">
+            <Row
+              leading={<GitHubMark className="size-4 text-muted-foreground" />}
+              title={app.data?.app?.name ? `GitHub App · ${app.data.app.name}` : "GitHub App"}
+              subtitle={
+                stage === "import"
+                  ? `Installed on ${installations.map((one) => one.account).join(", ")} · clones with an installation token, so nothing expires under you`
+                  : stage === "install"
+                    ? "Created on GitHub, waiting for an account to install it"
+                    : stage === "create"
+                      ? "One App in place of a token and a webhook for every repository"
+                      : "Reading the App…"
+              }
+              trailing={
+                <>
+                  {stage === "import" && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {plural(fromApp.length, "repository", "repositories")}
+                    </span>
+                  )}
+                  <Status
+                    tone={
+                      stage === "import" ? "running" : stage === "install" ? "warning" : "unknown"
+                    }
+                    label={
+                      stage === "import"
+                        ? "Installed"
+                        : stage === "install"
+                          ? "Uninstalled"
+                          : "Disconnected"
+                    }
+                  />
+                  {stage === "create" && (
+                    <Link
+                      href="/deploy/credentials"
+                      className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                    >
+                      Connect
+                    </Link>
+                  )}
+                </>
+              }
+            />
+            <Row
+              leading={<Terminal className="size-4 text-muted-foreground" />}
+              title={signedIn ? `GitHub CLI · ${status.data?.account?.login}` : "GitHub CLI"}
+              subtitle={
+                signedIn
+                  ? "Clones and pushes as this account, with the token gh stores on this host"
+                  : status.data?.available === false
+                    ? "gh is not installed on this host, so signing in is not available here"
+                    : "Installed on this host, nobody signed in"
+              }
+              trailing={
+                <>
+                  {signedIn && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {plural(fromCli.length, "repository", "repositories")}
+                    </span>
+                  )}
+                  <Status
+                    tone={signedIn ? "running" : "unknown"}
+                    label={
+                      signedIn
+                        ? "Signed in"
+                        : status.data?.available === false
+                          ? "Unavailable"
+                          : "Signed out"
+                    }
+                  />
+                  {!signedIn && status.data?.available !== false && (
+                    <Link
+                      href="/git"
+                      className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                    >
+                      Sign in
+                    </Link>
+                  )}
+                </>
+              }
+            />
+          </RowList>
+          {/* An optional integration that cannot be read is information, not a
+              failure: the page used to paint a red error block across the
+              primary import path whenever GitHub was unreachable. */}
+          {app.error && (
+            <p className="px-5 pt-3 text-hint text-muted-foreground">
+              The GitHub App could not be read just now. Anything it grants is missing from the list
+              below.
+            </p>
+          )}
+        </PanelBody>
+      </Panel>
+
+      <div className="grid min-w-0 items-start gap-x-10 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <Panel plain className="min-w-0">
           <PanelHeader
             title="Import Git repository"
-            actions={<GitHubAccountControl status={status} compact />}
+            actions={
+              canBrowse && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {needle || owner !== "all"
+                    ? `${visibleCount} of ${pickable.length}`
+                    : plural(pickable.length, "repository", "repositories")}
+                </span>
+              )
+            }
           />
           <PanelBody className="space-y-4">
             {status.error && <ErrorState error={status.error} />}
             {repos.error && <ErrorState error={repos.error} />}
-            {appRepos.error && <ErrorState error={appRepos.error} />}
-            {!signedIn && !appConfigured && status.data && (
-              <Notice
-                tone="warning"
-                icon={Warning}
-                title={
-                  status.data.available
-                    ? "Not signed in to GitHub on this server"
-                    : "The GitHub CLI is not installed on this host"
-                }
-              >
-                {status.data.available ? (
-                  <>
-                    Sign in once on the{" "}
-                    <Link href="/git" className="underline underline-offset-2">
-                      Git page
-                    </Link>{" "}
-                    and every private repository becomes selectable here, or connect the{" "}
-                    <Link href="/deploy/credentials" className="underline underline-offset-2">
-                      GitHub App
-                    </Link>{" "}
-                    and every repository it is installed on appears without signing in.
-                  </>
-                ) : (
-                  <>
-                    Connect the{" "}
-                    <Link href="/deploy/credentials" className="underline underline-offset-2">
-                      GitHub App
-                    </Link>{" "}
-                    to browse repositories here. A public clone URL works without it.
-                  </>
-                )}
-              </Notice>
-            )}
-            {(signedIn || appConfigured) && (
+            {canBrowse && (
               <>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select value={owner} onValueChange={setOwner}>
-                    <SelectTrigger aria-label="Repository owner" className="w-40">
+                    <SelectTrigger aria-label="Repository owner" className="w-44">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -237,88 +390,82 @@ export function SourceGit({
                       ))}
                     </SelectContent>
                   </Select>
+                  <SearchInput
+                    value={filter}
+                    onChange={(event) => setFilter(event.target.value)}
+                    placeholder="Filter repositories"
+                    aria-label="Filter repositories"
+                    containerClassName="min-w-0 flex-1 sm:w-auto"
+                  />
                   <IconAction
                     label="Refresh repositories"
                     onClick={() => {
                       repos.refresh()
                       appRepos.refresh()
+                      app.refresh()
                     }}
                   >
                     <RefreshClockwise />
                   </IconAction>
                 </div>
-                <SearchInput
-                  value={filter}
-                  onChange={(event) => setFilter(event.target.value)}
-                  placeholder="Filter repositories"
-                  aria-label="Filter repositories"
-                  containerClassName="sm:w-full"
-                />
-                {listing && <LoadingRows rows={5} />}
-                {!listing && visible.length === 0 && (
+                {listing && <LoadingRows rows={6} />}
+                {!listing && visibleCount === 0 && (
+                  // The repair for "my repository is not here" belongs where the
+                  // absence is felt, not on a settings page two navigations
+                  // away — which is where every platform that got this right
+                  // ended up putting it.
                   <EmptyNote>
                     {pickable.length === 0
-                      ? "This account has no repositories the credential can list."
-                      : "No repository matches that filter."}
+                      ? "Neither identity above lists a repository yet."
+                      : "No repository matches that filter."}{" "}
+                    {app.data?.installUrl && (
+                      <>
+                        If the one you want is missing, the App has probably not been granted it —{" "}
+                        <a
+                          href={app.data.installUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="rounded-sm underline underline-offset-2 focus-ring"
+                        >
+                          adjust repository access
+                        </a>
+                        . A public clone URL below works without either identity.
+                      </>
+                    )}
                   </EmptyNote>
                 )}
-                <RowList aria-label="Repositories" className="max-h-[32rem] overflow-y-auto">
-                  {visible.map((repo) => (
-                    <Row
-                      key={repo.nameWithOwner}
-                      leading={
-                        repo.private ? (
-                          <LockClosed
-                            className="size-3.5 text-muted-foreground"
-                            aria-label="Private repository"
-                          />
-                        ) : undefined
-                      }
-                      title={repo.nameWithOwner}
-                      subtitle={repo.description}
-                      trailing={
-                        <>
-                          {repo.viaApp && <Tag>App</Tag>}
-                          {repo.language && <Tag>{repo.language}</Tag>}
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            aria-label={`Import ${repo.nameWithOwner}`}
+                {/* Padded by the rows' own bleed. A scroll container over rows
+                  that bleed grows a sideways scrollbar otherwise, which is
+                  what it had. */}
+                <div
+                  className="-mx-3 max-h-[min(60vh,42rem)] overflow-y-auto px-3"
+                  key={listing ? "loading" : "listed"}
+                >
+                  {groups.map((group) => (
+                    <div key={group.key} className="animate-rise space-y-1 pt-2 first:pt-0">
+                      {groups.length > 1 && <p className="eyebrow">{group.label}</p>}
+                      <RowList aria-label={group.label}>
+                        {group.repos.map((repo) => (
+                          <RepoRow
+                            key={repo.nameWithOwner}
+                            repo={repo}
                             pending={busy === repo.nameWithOwner}
-                            onClick={() =>
-                              void doImport(
-                                {
-                                  kind: "git",
-                                  mode: "git_url",
-                                  url: repo.cloneUrl,
-                                  ref: repo.defaultBranch || "main",
-                                  credentialId: repo.credentialId,
-                                  includeSubmodules,
-                                  includeLfs,
-                                },
-                                deploymentName(repo.name),
-                                repo.nameWithOwner,
-                                repo.nameWithOwner,
-                                repo.nameWithOwner,
-                              )
-                            }
-                          >
-                            Import
-                          </Button>
-                        </>
-                      }
-                    />
+                            onImport={() => importRepo(repo)}
+                          />
+                        ))}
+                      </RowList>
+                    </div>
                   ))}
-                </RowList>
+                </div>
               </>
             )}
 
-            {/* Above the paste fallback and below the list, because these
-                apply to whichever import fires — a row's button as much as
-                the pasted URL. They used to live inside "Branch &
-                authentication", which reads as being about the field beside
-                it, so a repository that needed its submodules failed its
-                build with no hint that the switch existed. */}
+            {/* Under the rows they govern, not inside the paste panel: these
+                apply to whichever import fires — a row's press as much as the
+                pasted URL. They lived inside "Branch & authentication" once,
+                which reads as being about the field beside it, and a
+                repository that needed its submodules failed its build with no
+                hint that the switch existed. */}
             <details className="border-t border-hairline pt-4">
               <summary className="cursor-pointer rounded-sm py-1 text-xs text-muted-foreground focus-ring">
                 Clone options · apply to every import here
@@ -338,79 +485,157 @@ export function SourceGit({
                 />
               </OptionList>
             </details>
+          </PanelBody>
+        </Panel>
 
-            {/* Below the repository rows (spec §5.4), not above them: this is
-                the fallback for a repository the signed-in account cannot
-                list, not the primary way in. */}
-            <div className="space-y-3 border-t border-hairline pt-5">
-              <p className="eyebrow">Or paste a Git URL</p>
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <Field label="Clone URL" htmlFor="manual-url">
+        {/* Beside the rows at this width, under them at every other — which is
+          what spec §5.4 asks for. It is the fallback for a repository neither
+          identity lists, never the primary way in, and it is second in the
+          DOM so a phone reaches the rows first. */}
+        <Panel plain className="min-w-0 xl:sticky xl:top-6">
+          <PanelHeader title="Or paste a Git URL" />
+          <PanelBody className="space-y-3">
+            <Field label="Clone URL" htmlFor="manual-url">
+              <Input
+                id="manual-url"
+                value={manualUrl}
+                onChange={(event) => setManualUrl(event.target.value)}
+                placeholder="https://github.com/owner/repository.git"
+                className="font-mono"
+              />
+            </Field>
+            <details>
+              <summary className="cursor-pointer rounded-sm py-2 text-xs text-muted-foreground focus-ring">
+                Branch & authentication
+              </summary>
+              <div className="grid gap-3 pt-2">
+                <Field label="Branch or tag" htmlFor="manual-ref">
                   <Input
-                    id="manual-url"
-                    value={manualUrl}
-                    onChange={(event) => setManualUrl(event.target.value)}
-                    placeholder="https://github.com/owner/repository.git"
-                    className="font-mono"
+                    id="manual-ref"
+                    value={manualRef}
+                    onChange={(event) => setManualRef(event.target.value)}
                   />
                 </Field>
-                <div className="flex items-end">
-                  <Button
-                    variant="outline"
-                    pending={busy === "manual"}
-                    disabled={!manualUrl.trim()}
-                    onClick={() =>
-                      void doImport(
-                        {
-                          kind: "git",
-                          mode: "git_url",
-                          url: manualUrl.trim(),
-                          ref: manualRef.trim() || "main",
-                          credentialId,
-                          includeSubmodules,
-                          includeLfs,
-                        },
-                        deploymentName(repositoryName(manualUrl)),
-                        manualUrl.trim(),
-                        undefined,
-                        "manual",
-                      )
-                    }
-                  >
-                    Import
-                  </Button>
-                </div>
+                <Field label="Credential" htmlFor="manual-credential">
+                  <CredentialSelect
+                    id="manual-credential"
+                    kind="git"
+                    value={credentialId}
+                    onChange={setCredentialId}
+                  />
+                </Field>
               </div>
-              <details>
-                <summary className="cursor-pointer rounded-sm py-2 text-xs text-muted-foreground focus-ring">
-                  Branch & authentication
-                </summary>
-                <div className="grid gap-3 pt-2 sm:grid-cols-2">
-                  <Field label="Branch or tag" htmlFor="manual-ref">
-                    <Input
-                      id="manual-ref"
-                      value={manualRef}
-                      onChange={(event) => setManualRef(event.target.value)}
-                    />
-                  </Field>
-                  <Field label="Credential" htmlFor="manual-credential">
-                    <CredentialSelect
-                      id="manual-credential"
-                      kind="git"
-                      value={credentialId}
-                      onChange={setCredentialId}
-                    />
-                  </Field>
-                </div>
-              </details>
-            </div>
+            </details>
+            <Button
+              className="h-11 w-full sm:h-9"
+              variant="outline"
+              pending={busy === "manual"}
+              disabled={!manualUrl.trim()}
+              onClick={() =>
+                void doImport(
+                  {
+                    kind: "git",
+                    mode: "git_url",
+                    url: manualUrl.trim(),
+                    ref: manualRef.trim() || "main",
+                    credentialId,
+                    includeSubmodules,
+                    includeLfs,
+                  },
+                  deploymentName(repositoryName(manualUrl)),
+                  manualUrl.trim(),
+                  undefined,
+                  "manual",
+                )
+              }
+            >
+              Import
+            </Button>
           </PanelBody>
         </Panel>
       </div>
+
       <FormNote>
         New commits to the selected branch deploy automatically after your first deployment, unless
         you turn that off on the next screen.
       </FormNote>
     </div>
+  )
+}
+
+/**
+ * One repository, as a target rather than a row with a button bolted to it.
+ *
+ * The shape is §12's: the title is a real `<button>` carrying the verb in its
+ * accessible name, and the press on the surrounding row is a convenience for
+ * the pointer. A single button wrapping the whole row would have been simpler
+ * and wrong — an ARIA button takes its name from its contents, so the
+ * description, the language and the last push would be read out as part of the
+ * control's name, or silenced by an `aria-label` that overrides them.
+ */
+function RepoRow({
+  repo,
+  pending,
+  onImport,
+}: {
+  repo: PickableRepo
+  pending: boolean
+  onImport: () => void
+}) {
+  return (
+    <li data-slot="row" className="min-w-0">
+      <div
+        onClick={onImport}
+        className={`group flex min-w-0 cursor-pointer items-center gap-3 px-5 py-3 text-left ${ROW_BLEED} transition-colors hover:bg-row-hover`}
+      >
+        {repo.private && (
+          <LockClosed
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Private repository"
+          />
+        )}
+        <span className="min-w-0 flex-1">
+          <button
+            type="button"
+            aria-label={`Import ${repo.nameWithOwner}`}
+            // The row's own handler already fires on the pointer; this one is
+            // for the keyboard, and must not run the import twice.
+            onClick={(event) => {
+              event.stopPropagation()
+              onImport()
+            }}
+            className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+          >
+            {repo.nameWithOwner}
+          </button>
+          {repo.description && (
+            <span className="block truncate text-hint text-muted-foreground">
+              {repo.description}
+            </span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {repo.archived && <Tag>archived</Tag>}
+          {repo.fork && <Tag>fork</Tag>}
+          {repo.language && <Tag>{repo.language}</Tag>}
+          {/* The last push is the reading that decides which of forty
+              repositories is the one, and it was on the wire and drawn
+              nowhere. While an import is in flight the same slot carries the
+              present participle (§13), so a press that takes a second says so
+              rather than sitting still — and nothing has to reserve a column
+              that is empty on every other row. */}
+          {(repo.pushedAt || pending) && (
+            <span
+              className={cn(
+                "numeric hidden w-20 shrink-0 text-right text-hint sm:inline",
+                pending ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {pending ? "Importing…" : relativeTime(repo.pushedAt)}
+            </span>
+          )}
+        </span>
+      </div>
+    </li>
   )
 }

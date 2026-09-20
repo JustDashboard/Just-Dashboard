@@ -109,7 +109,14 @@ type Repository struct {
 	DefaultBranch  string `json:"defaultBranch"`
 	CloneURL       string `json:"cloneUrl"`
 	HTMLURL        string `json:"htmlUrl"`
-	CredentialID   int64  `json:"credentialId,omitempty"`
+	// PushedAt, Fork and Archived are what the import picker sorts and marks
+	// by. GitHub returns them on the same listing; without them a repository
+	// the App grants could not be told apart from one abandoned two years ago,
+	// while the CLI's own listing had carried all three since it existed.
+	PushedAt     string `json:"pushedAt,omitempty"`
+	Fork         bool   `json:"fork,omitempty"`
+	Archived     bool   `json:"archived,omitempty"`
+	CredentialID int64  `json:"credentialId,omitempty"`
 }
 
 // CommitStatus is one state posted against a commit.
@@ -300,6 +307,9 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation Inst
 				DefaultBranch string `json:"default_branch"`
 				CloneURL      string `json:"clone_url"`
 				HTMLURL       string `json:"html_url"`
+				PushedAt      string `json:"pushed_at"`
+				Fork          bool   `json:"fork"`
+				Archived      bool   `json:"archived"`
 			} `json:"repositories"`
 		}
 		if err := json.Unmarshal(page, &raw); err != nil {
@@ -310,6 +320,7 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation Inst
 				InstallationID: installation.ID, Account: installation.Account, CredentialID: installation.CredentialID,
 				NameWithOwner: item.FullName, Name: item.Name, Description: item.Description, Language: item.Language,
 				Private: item.Private, DefaultBranch: item.DefaultBranch, CloneURL: item.CloneURL, HTMLURL: item.HTMLURL,
+				PushedAt: item.PushedAt, Fork: item.Fork, Archived: item.Archived,
 			})
 		}
 		return nil

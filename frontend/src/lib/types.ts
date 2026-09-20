@@ -2960,6 +2960,10 @@ export type GitHubAppRepository = {
   defaultBranch: string
   cloneUrl: string
   htmlUrl: string
+  /** What the picker sorts by, and the two marks it reads. */
+  pushedAt?: string
+  fork?: boolean
+  archived?: boolean
   credentialId?: number
 }
 

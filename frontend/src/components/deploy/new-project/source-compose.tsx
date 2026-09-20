@@ -112,7 +112,7 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4">
+    <div className="w-full max-w-3xl min-w-0 space-y-4">
       {failure && <ErrorState error={failure} />}
       <Panel plain>
         <PanelHeader title="Compose stack" />

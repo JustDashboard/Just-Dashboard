@@ -99,7 +99,7 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 		_, _ = fmt.Sscan(id, &installation)
 		items := []map[string]any{}
 		for _, name := range f.repositories[installation] {
-			items = append(items, map[string]any{"full_name": name, "name": strings.Split(name, "/")[1], "private": true, "default_branch": "main", "clone_url": "https://github.com/" + name + ".git", "html_url": "https://github.com/" + name, "language": "Go"})
+			items = append(items, map[string]any{"full_name": name, "name": strings.Split(name, "/")[1], "private": true, "default_branch": "main", "clone_url": "https://github.com/" + name + ".git", "html_url": "https://github.com/" + name, "language": "Go", "pushed_at": "2026-09-18T11:00:00Z", "fork": name == "acme/api", "archived": false})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(items), "repositories": items})
 	})
@@ -255,6 +255,11 @@ func TestInstallationTokensAreMintedOncePerHourAndListingsFollowPages(t *testing
 	repositories, err := client.InstallationRepositories(ctx, installations[1])
 	if err != nil || len(repositories) != 2 || repositories[0].NameWithOwner != "acme/shop" || !repositories[0].Private || repositories[0].CloneURL != "https://github.com/acme/shop.git" || repositories[0].InstallationID != 2 {
 		t.Fatalf("repositories = %+v, %v", repositories, err)
+	}
+	// The import picker sorts by the last push and marks a fork, so both
+	// travel with the listing rather than being dropped on the way through.
+	if repositories[0].PushedAt != "2026-09-18T11:00:00Z" || repositories[0].Fork || !repositories[1].Fork || repositories[0].Archived {
+		t.Fatalf("recency and fork were not carried: %+v", repositories)
 	}
 	// Listing installations authenticates as the App; listing what one grants
 	// authenticates as the installation.

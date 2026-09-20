@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
 import { Check, Copy, External, GitHubMark, Plus, Trash } from "@/components/icons"
-import { del, errorMessage, get, post } from "@/lib/api"
+import { del, errorMessage, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { usePoll } from "@/hooks/use-poll"
+import { githubAppStage, useGitHubApp, type GitHubAppStage } from "@/hooks/use-github"
 import type { GitHubAppInstallation, GitHubAppManifestStart, GitHubAppStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Field } from "@/components/form"
@@ -34,10 +34,6 @@ import { WireLabel, WireLink, WireMark, WireNode, WirePlaceholder } from "@/comp
  * repository, no personal token for private clones and statuses, and the
  * preview address arrives on the pull request itself.
  */
-export function useGitHubApp() {
-  return usePoll((signal) => get<GitHubAppStatus>("/deploy/github-app/", undefined, signal), 30000)
-}
-
 /** Posts the manifest to GitHub the way GitHub requires: a form, from the browser. */
 function submitManifest(start: GitHubAppManifestStart) {
   const form = document.createElement("form")
@@ -72,20 +68,6 @@ function takeCallback(): { code: string; state: string } | undefined {
   const rest = query.toString()
   window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""))
   return { code, state }
-}
-
-/**
- * Where the App is on its way from nothing to deploying: not created, created
- * but installed nowhere, or installed and ready to import from. The whole
- * block is drawn from this one reading, so the tile above it, the lines in
- * the picture and the step that is lit can never disagree.
- */
-export type GitHubAppStage = "create" | "install" | "import"
-
-export function githubAppStage(status: GitHubAppStatus | undefined): GitHubAppStage | undefined {
-  if (!status) return undefined
-  if (!status.configured) return "create"
-  return status.installations.length === 0 ? "install" : "import"
 }
 
 /** GitHub serves every account's picture at a fixed address; no API call needed. */

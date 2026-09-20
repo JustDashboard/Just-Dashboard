@@ -397,7 +397,7 @@ never reach its final frame still ends up there.
 ### Motion that arrived with a library
 
 The deployment section brings in registry components — Magic UI's `ui/animated-beam`,
-`ui/border-beam`, `ui/blur-fade`, `ui/number-ticker`, `ui/bento-grid` and `ui/confetti`, and Motion
+`ui/border-beam`, `ui/blur-fade`, `ui/number-ticker` and `ui/confetti`, and Motion
 Primitives' `ui/text-shimmer` — each rewritten onto the tokens and each saying one of the four things
 above:
 
@@ -415,8 +415,14 @@ website preview and not adopted — its chrome is drawn for a hero, and at tile 
 text is too small to read — so the preview draws its own strip and shrinks a desktop-width frame.
 
 Every one of them honours `prefers-reduced-motion` in JavaScript, because the root CSS rule cannot
-reach a JavaScript-driven animation. `BentoGrid` is not motion: it is the "Start with something
-ready" catalogue on New project, cells of unequal size that are buttons.
+reach a JavaScript-driven animation.
+
+`ui/bento-grid` was a seventh, and is gone. It drew "Start with something ready" on New project's Git
+tab as cells of unequal size that were buttons; the 2026-09-20 pass removed that grid because the
+source strip above it already listed the same six ways in, and the file then sat unimported for a
+release while this paragraph went on describing it as shipped. A registry component with no caller is
+not a component the product has — the next reader takes a sentence like that as permission to rebuild
+what was deliberately deleted.
 
 ## 12. A table is a layout, not a contract
 

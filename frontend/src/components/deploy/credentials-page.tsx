@@ -35,7 +35,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { GitHubAppPanel, githubAppStage, useGitHubApp } from "@/components/deploy/github-app-card"
+import { GitHubAppPanel } from "@/components/deploy/github-app-card"
+import { githubAppStage, useGitHubApp } from "@/hooks/use-github"
 
 /**
  * Fleet-level secrets: the tokens and keys the server uses on behalf of every

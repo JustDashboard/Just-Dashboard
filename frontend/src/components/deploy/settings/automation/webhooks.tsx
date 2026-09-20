@@ -29,7 +29,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { SettingCard } from "@/components/deploy/settings/setting-card"
 import { humanize } from "@/components/deploy/vocabulary"
-import { useGitHubApp } from "@/components/deploy/github-app-card"
+import { useGitHubApp } from "@/hooks/use-github"
 
 const PROVIDERS = ["github", "gitlab", "bitbucket", "gitea", "generic_hook"] as const
 

@@ -10,7 +10,7 @@ import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
  */
 export function SourceDatabase() {
   return (
-    <div className="mx-auto w-full max-w-2xl">
+    <div className="w-full max-w-3xl min-w-0">
       <DatabaseQuickDeploy />
     </div>
   )

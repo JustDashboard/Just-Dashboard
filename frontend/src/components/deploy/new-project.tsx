@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, Trash } from "@/components/icons"
+import {
+  ArrowLeft,
+  Box,
+  Database,
+  GitHubMark,
+  Inspect,
+  Layers,
+  Sparkles,
+  Trash,
+} from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -34,13 +43,23 @@ import { SourceCompose } from "@/components/deploy/new-project/source-compose"
 import { SourceExisting } from "@/components/deploy/new-project/source-existing"
 import { Configure } from "@/components/deploy/new-project/configure"
 
-const TABS: { key: SourceTabKey; label: string }[] = [
-  { key: "git", label: "Git repository" },
-  { key: "image", label: "Docker image" },
-  { key: "template", label: "Template" },
-  { key: "database", label: "Database" },
-  { key: "compose", label: "Compose" },
-  { key: "existing", label: "Existing workload" },
+// The mark is wayfinding, not decoration: six words set in one line are six
+// words to read, and the reader is choosing between six *kinds* of thing.
+// §14 bans a glyph in front of a heading because you are already there; a
+// chooser is the opposite case, and the same rule keeps the sidebar's and the
+// overview tiles' marks. Every one is `aria-hidden`, so the button's
+// accessible name stays exactly its label.
+const TABS: {
+  key: SourceTabKey
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}[] = [
+  { key: "git", label: "Git repository", icon: GitHubMark },
+  { key: "image", label: "Docker image", icon: Box },
+  { key: "template", label: "Template", icon: Sparkles },
+  { key: "database", label: "Database", icon: Database },
+  { key: "compose", label: "Compose", icon: Layers },
+  { key: "existing", label: "Existing workload", icon: Inspect },
 ]
 
 // A profile from a link written before this page existed — the source tab
@@ -65,6 +84,13 @@ function arrivalTab(source?: string, profile?: string): SourceTabKey | undefined
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
+}
+
+/** Within three days of lapsing — the point at which the date is worth saying. */
+function expiringSoon(iso: string | undefined) {
+  if (!iso) return false
+  const at = new Date(iso).getTime()
+  return !Number.isNaN(at) && at - Date.now() < 3 * 24 * 60 * 60 * 1000
 }
 
 const Eyebrow = (
@@ -219,10 +245,25 @@ export function NewProject({
       {!flow || linkArrived ? (
         <>
           {(drafts.data?.length ?? 0) > 0 && (
-            <Panel plain>
-              <PanelHeader title="Unfinished setups" />
+            <Panel plain className="animate-rise">
+              <PanelHeader
+                title="Unfinished setups"
+                // A count, not a caption (§4): how many there are is the one
+                // thing the title cannot say, and it is what decides whether
+                // this block is worth reading at all.
+                actions={
+                  <span className="numeric text-hint text-muted-foreground">
+                    {drafts.data!.length}
+                  </span>
+                }
+              />
               <PanelBody flush>
-                <RowList aria-label="Unfinished setups">
+                {/* Padded by the rows' own bleed, so a long list scrolls
+                    without the wash overflowing sideways. */}
+                <RowList
+                  aria-label="Unfinished setups"
+                  className="-mx-3 max-h-64 overflow-y-auto px-3"
+                >
                   {drafts.data!.map((entry) => (
                     // Laid out by hand rather than as one `Row`: the whole row
                     // resumes the setup, and Discard is a second action, which
@@ -230,17 +271,26 @@ export function NewProject({
                     <li key={entry.id} className="group/row relative min-w-0">
                       <Link
                         href={`/deploy/new?draft=${entry.id}`}
-                        className={`flex min-w-0 items-center gap-3 py-3 pr-12 pl-5 text-left ${ROW_BLEED} focus-ring-inset transition-colors hover:bg-row-hover`}
+                        className={`flex min-w-0 items-center gap-3 py-2.5 pr-12 pl-5 text-left ${ROW_BLEED} focus-ring-inset transition-colors hover:bg-row-hover`}
                       >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-body font-medium">
+                        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
+                          <span className="truncate text-body font-medium">
                             {entry.name || "Untitled"}
                           </span>
-                          <span className="block truncate text-hint text-muted-foreground">
+                          <span className="min-w-0 flex-1 truncate text-hint text-muted-foreground">
                             {entry.source ?? "No source chosen yet"}
                           </span>
                         </span>
-                        <span className="flex shrink-0 items-center gap-2">
+                        <span className="flex shrink-0 items-center gap-3">
+                          {/* Only once it is nearly gone. Every draft expires,
+                              so "29 days from now" on all four is a column of
+                              the same word; the one about to lapse is the only
+                              one that changes what you do next. */}
+                          {expiringSoon(entry.expiresAt) && (
+                            <span className="numeric text-hint text-warning">
+                              expires {relativeTime(entry.expiresAt)}
+                            </span>
+                          )}
                           <Tag>{humanize(entry.currentStep)}</Tag>
                           <span className="numeric text-hint text-muted-foreground">
                             {relativeTime(entry.updatedAt)}
@@ -265,7 +315,7 @@ export function NewProject({
           <div
             role="tablist"
             aria-label="Project source"
-            className="-mt-2 flex gap-1 overflow-x-auto border-b border-hairline"
+            className="flex gap-1 overflow-x-auto border-b border-hairline"
           >
             {TABS.map((option) => (
               <button
@@ -273,8 +323,14 @@ export function NewProject({
                 type="button"
                 aria-pressed={tab === option.key}
                 onClick={() => setTab(option.key)}
-                className={tabClasses(tab === option.key, "h-10")}
+                className={tabClasses(tab === option.key, "h-11")}
               >
+                <option.icon
+                  aria-hidden
+                  className={
+                    tab === option.key ? "size-3.5 text-brand" : "size-3.5 text-muted-foreground"
+                  }
+                />
                 {option.label}
               </button>
             ))}

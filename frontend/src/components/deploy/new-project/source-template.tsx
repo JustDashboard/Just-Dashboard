@@ -4,8 +4,9 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { ArrowUpRight, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
+import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
@@ -18,7 +19,7 @@ import type {
 } from "@/lib/types"
 import { Field } from "@/components/form"
 import { Group, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { ROW_BLEED, RowList } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -129,11 +130,35 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
     }
   }
 
+  const listed = (catalogue.data ?? []).length
+
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4">
-      {failure && <ErrorState error={failure} />}
-      <Panel plain>
-        <PanelHeader title="Application templates" />
+    // The catalogue and the chosen template's own inputs, side by side. They
+    // used to be stacked, so choosing one scrolled the catalogue off the
+    // screen and comparing two meant scrolling back up to find the first.
+    //
+    // The second column only exists once there is something to put in it: a
+    // reserved empty column reads as a layout bug rather than as a promise,
+    // which is the same reason a row's actions are revealed and not merely
+    // made transparent.
+    <div
+      className={cn(
+        "grid min-w-0 items-start gap-x-10 gap-y-6",
+        definition ? "xl:grid-cols-[minmax(0,1fr)_26rem]" : "max-w-4xl",
+      )}
+    >
+      {failure && <ErrorState error={failure} className="xl:col-span-2" />}
+      <Panel plain className="min-w-0">
+        <PanelHeader
+          title="Application templates"
+          actions={
+            catalogue.data && (
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(listed, "template")}
+              </span>
+            )
+          }
+        />
         <PanelBody className="space-y-4">
           {catalogue.error && <ErrorState error={catalogue.error} />}
           <SearchInput
@@ -148,41 +173,63 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
             <EmptyNote>No template matches that search.</EmptyNote>
           )}
           {grouped.map(([category, entries]) => (
-            <div key={category} className="space-y-1">
+            <div key={category} className="animate-rise space-y-1">
               <p className="eyebrow">{CATEGORY_LABEL[category] ?? humanize(category)}</p>
               <RowList aria-label={CATEGORY_LABEL[category] ?? humanize(category)}>
-                {entries.map((entry) => (
-                  <Row
-                    key={entry.id}
-                    title={entry.name}
-                    subtitle={
-                      entry.deploymentSupported === false
-                        ? entry.unavailableReason ||
-                          "This blueprint cannot be deployed by this dashboard version."
-                        : entry.description
-                    }
-                    trailing={
-                      <>
-                        {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
-                        {entry.privileged && <Tag tone="danger">privileged</Tag>}
-                        <Tag mono>{entry.image}</Tag>
-                        {entry.deploymentSupported === false ? (
-                          <Tag tone="warning">Preview only</Tag>
-                        ) : (
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            aria-label={`Use ${entry.name}`}
-                            aria-pressed={selectedId === entry.id}
-                            onClick={() => select(entry)}
-                          >
-                            Use
-                          </Button>
+                {entries.map((entry) => {
+                  const usable = entry.deploymentSupported !== false
+                  return (
+                    // §12's shape again: the name carries the verb and is the
+                    // control; the row around it answers the pointer. A
+                    // template that cannot be deployed has no control at all,
+                    // so there is nothing to press and nothing announcing one.
+                    <li key={entry.id} data-slot="row" className="min-w-0">
+                      <div
+                        onClick={usable ? () => select(entry) : undefined}
+                        data-selected={selectedId === entry.id || undefined}
+                        className={cn(
+                          "flex min-w-0 items-center gap-3 px-5 py-3 text-left",
+                          ROW_BLEED,
+                          usable && "cursor-pointer transition-colors hover:bg-row-hover",
+                          selectedId === entry.id && "bg-accent hover:bg-accent",
                         )}
-                      </>
-                    }
-                  />
-                ))}
+                      >
+                        <span className="min-w-0 flex-1">
+                          {usable ? (
+                            <button
+                              type="button"
+                              aria-label={`Use ${entry.name}`}
+                              aria-pressed={selectedId === entry.id}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                select(entry)
+                              }}
+                              className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+                            >
+                              {entry.name}
+                            </button>
+                          ) : (
+                            <span className="block truncate text-body font-medium">
+                              {entry.name}
+                            </span>
+                          )}
+                          <span className="block truncate text-hint text-muted-foreground">
+                            {usable
+                              ? entry.description
+                              : entry.unavailableReason ||
+                                "This blueprint cannot be deployed by this dashboard version."}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
+                          {entry.privileged && <Tag tone="danger">privileged</Tag>}
+                          <Tag mono>{entry.image}</Tag>
+                          {!usable && <Tag tone="warning">Preview only</Tag>}
+                        </span>
+                      </div>
+                    </li>
+                  )
+                })}
               </RowList>
             </div>
           ))}
@@ -190,7 +237,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
       </Panel>
 
       {selectedId && definition && (
-        <Panel plain>
+        <Panel plain className="min-w-0 xl:sticky xl:top-6">
           <PanelHeader title={definition.name} actions={<Tag mono>v{definition.version}</Tag>} />
           <PanelBody className="space-y-4">
             <Group className="space-y-1.5 text-xs text-muted-foreground">

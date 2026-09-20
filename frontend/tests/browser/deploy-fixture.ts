@@ -1160,6 +1160,12 @@ export async function mockDraftJourney(page: Page) {
     const method = request.method()
     if (path === "/auth/session") return json(route, user)
     if (path === "/dashboard/update") return json(route, { current: "0.6.7", latest: "0.6.7" })
+    // The import picker asks both GitHub identities who they can reach. Left
+    // unmocked these fell through to the 503 below, so every run of this
+    // fixture drew "Not mocked" across the top of the repository list — the
+    // page's own report of an optional integration being unreachable.
+    if (path === "/deploy/github-app/") return json(route, { configured: false, installations: [] })
+    if (path === "/deploy/github-app/repositories") return json(route, [])
     if (path === "/deploy/blueprints/") return json(route, blueprintCatalogue)
     if (path === "/deploy/blueprints/minecraft-java") return json(route, minecraftBlueprint)
     if (path === "/deploy/blueprints/minecraft-java/versions") return json(route, minecraftVersions)
