@@ -8,8 +8,8 @@ import { bytes, plural, relativeTime } from "@/lib/format"
 import type { DockerImage } from "@/lib/types"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { Field } from "@/components/form"
+import { ChoiceList, ChoiceRow, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ROW_BLEED, RowList } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -89,8 +89,12 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
     // moved the page's left edge and left a field of nothing on either side.
     <div className="grid min-w-0 gap-x-10 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       {failure && <ErrorState error={failure} className="xl:col-span-2" />}
-      <Panel plain className="min-w-0">
-        <PanelHeader
+      {/* The one surface on this screen that carries depth (§16): which image
+          runs is what the reader opened this tab to decide, and the registry
+          field beside it is the fallback for a tag this host has not pulled.
+          Two surfaces with depth would be two foregrounds, which is none. */}
+      <FlowPanel className="min-w-0">
+        <FlowPanelHeader
           title="Choose an image"
           actions={
             images.data && (
@@ -100,7 +104,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
             )
           }
         />
-        <PanelBody className="space-y-4">
+        <FlowPanelBody className="space-y-4">
           {images.error && <ErrorState error={images.error} />}
           <SearchInput
             value={filter}
@@ -117,35 +121,25 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
                 : "No image on this server matches that filter."}
             </EmptyNote>
           )}
-          {/* Padded by the rows' own bleed, or the negative margins overflow
-              and the list grows a sideways scrollbar. */}
+          {/* Every row carries its own lit edge now, and an edge flush with the
+              side of a scroll container runs under the scrollbar. The container
+              pads for the edges and pulls the padding back out, so the rows
+              still start where the filter field above them does. */}
           <div
             className="-mx-3 max-h-[min(60vh,40rem)] overflow-y-auto px-3"
             key={images.loading ? "loading" : "listed"}
           >
-            <RowList aria-label="Images on this server" className="animate-rise">
+            <ChoiceList aria-label="Images on this server" className="animate-rise">
               {tags.map(({ tag, size, created }) => (
-                // §12's shape: the name is the control and carries the verb,
-                // the row around it is a convenience for the pointer. A single
-                // button wrapping the row would read its size and age out as
-                // part of the control's name.
-                <li key={tag} data-slot="row" className="min-w-0">
-                  <div
-                    onClick={() => void doInspect(tag)}
-                    className={`group flex min-w-0 cursor-pointer items-center gap-3 px-5 py-3 text-left ${ROW_BLEED} transition-colors hover:bg-row-hover`}
-                  >
-                    <button
-                      type="button"
-                      aria-label={`Use ${tag}`}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void doInspect(tag)
-                      }}
-                      className="min-w-0 flex-1 truncate rounded-sm text-left font-mono text-body focus-ring"
-                    >
-                      {tag}
-                    </button>
-                    <span className="flex shrink-0 items-center gap-3">
+                <ChoiceRow
+                  key={tag}
+                  verb={`Use ${tag}`}
+                  onSelect={() => void doInspect(tag)}
+                  // Mono because a tag is read character by character: which of
+                  // `app:1.0.9` and `app:1.09` this is decides what runs.
+                  title={<span className="font-mono">{tag}</span>}
+                  trailing={
+                    <>
                       {created && (
                         <span className="numeric hidden text-hint text-muted-foreground sm:inline">
                           {relativeTime(created)}
@@ -154,14 +148,14 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
                       <span className="numeric w-16 text-right text-hint text-muted-foreground">
                         {bytes(size)}
                       </span>
-                    </span>
-                  </div>
-                </li>
+                    </>
+                  }
+                />
               ))}
-            </RowList>
+            </ChoiceList>
           </div>
-        </PanelBody>
-      </Panel>
+        </FlowPanelBody>
+      </FlowPanel>
 
       {/* The registry field is a task of its own, not a footnote under the
           list: an image that is not on this server yet is the other half of
@@ -190,8 +184,16 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
               onChange={setCredentialId}
             />
           </Field>
+          {/* The brand marks whatever advances the screen (§16), and which
+              thing that is depends on whether the list beside this one has
+              anything in it. With images to choose from, the rows are the
+              advance and their lit edges say so; this is the fallback, and a
+              brand face here would be the only blue on the screen pointing at
+              the secondary path. With no images pulled, there is nothing to
+              choose and the registry field *is* the way forward. */}
           <Button
             className="h-11 w-full sm:h-9"
+            variant={tags.length > 0 ? "outline" : "default"}
             pending={busy}
             disabled={!reference.trim()}
             onClick={() => void doInspect(reference, true)}

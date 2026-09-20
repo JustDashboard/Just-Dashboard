@@ -13,9 +13,13 @@ import { cn } from "@/lib/utils"
  * only where a figure is. It is right for the Overview and wrong for a screen
  * that is asking the reader a question, because the compensations it hands
  * back for removing decoration — a 24px figure, a tone on a reading, a Status
- * dot — all require the page to have numbers on it. A chooser has none, so
- * §15 applied to one strips it and gives nothing back. That is the whole
- * reason this file exists.
+ * dot — all require the page to have numbers on it. A chooser has few, and
+ * spends them at the wrong rung: /deploy/new rendered four counts at 11px
+ * inside panel headers and fired the 24px step exactly once, on its own
+ * two-word title. That is the whole reason this file exists.
+ *
+ * Being in this register is not an exemption from §15 pass 2. A flow screen
+ * with a genuine set of headline figures still tiles them.
  *
  * What a flow screen has that a reading page does not:
  *
@@ -75,7 +79,7 @@ export function FlowHeader({
           A spine is already that mark, and more explicitly — drawing both put
           three rules in a hundred pixels, each saying the same thing more
           faintly than the one above it. */}
-      {!steps && <div aria-hidden className="flow-rule h-px w-full" />}
+      {!steps && <div aria-hidden className="h-px w-full flow-rule" />}
     </div>
   )
 }
@@ -99,7 +103,7 @@ export function FlowSteps({
   current,
   className,
 }: {
-  steps: { key: string; label: string; href?: string }[]
+  steps: { key: string; label: string }[]
   /** Index of the step being worked on. Everything before it is done. */
   current: number
   className?: string
@@ -113,6 +117,12 @@ export function FlowSteps({
       {steps.map((step, index) => {
         const done = index < current
         const here = index === current
+        // A reading, not navigation. A completed step is not a link back:
+        // going back to the source on this flow throws the draft away — that
+        // is what Configure's own "Change source" is for, and it says so —
+        // and a progress mark that silently discards minutes of work the
+        // moment it is mistaken for a breadcrumb is the worst kind of
+        // affordance. The spine says where you are and nothing else.
         const label = (
           <>
             <span
@@ -143,16 +153,7 @@ export function FlowSteps({
             className={cn("min-w-0 space-y-1.5", here ? "flex-[2]" : "flex-1")}
             aria-current={here ? "step" : undefined}
           >
-            {done && step.href ? (
-              <Link
-                href={step.href}
-                className="block min-w-0 space-y-1.5 rounded-sm focus-ring hover:[&_span]:text-foreground"
-              >
-                {label}
-              </Link>
-            ) : (
-              label
-            )}
+            {label}
           </li>
         )
       })}
@@ -172,11 +173,7 @@ export function FlowSteps({
  *
  * **One per screen.** A second one is two foregrounds, which is none.
  */
-export function FlowPanel({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<"section">) {
+export function FlowPanel({ className, children, ...props }: React.ComponentProps<"section">) {
   return (
     <section
       data-slot="flow-panel"
@@ -265,13 +262,20 @@ export function FlowActions({
     <div
       data-slot="flow-actions"
       className={cn(
-        "flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 border-t border-hairline px-4 py-3",
+        "flex min-w-0 flex-wrap items-center justify-end gap-x-6 gap-y-3 border-t border-hairline px-4 py-3",
         className,
       )}
     >
-      {note && <p className="mr-auto min-w-0 text-hint text-muted-foreground">{note}</p>}
-      {secondary}
-      {children}
+      {/* The note yields the row, not the command. It was `mr-auto` on a bare
+          paragraph in a wrapping row, so a sentence long enough to crowd three
+          buttons pushed the *last* of them — the command — onto a line of its
+          own, under the two ways out. The note shrinks and wraps; the buttons
+          are one group that never breaks up. */}
+      {note && <p className="min-w-0 flex-1 basis-48 text-hint text-muted-foreground">{note}</p>}
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
+        {secondary}
+        {children}
+      </div>
     </div>
   )
 }
@@ -316,10 +320,21 @@ export function ChoiceGrid({
  * A chosen card keeps a brand edge and a check; it does not get a fill,
  * because a filled card among unfilled ones is the selected *state* doing the
  * job of the command face.
+ *
+ * **The whole card is not the button**, for the reason §12 gives about rows:
+ * a control takes its accessible name from its contents, so a card that is one
+ * `<button>` announces its title, its sentence and every one of its tags as the
+ * name of the control. The first version of this component did exactly that,
+ * and it was caught by a spec that had to be loosened from
+ * `{ name: "Use PostgreSQL", exact: true }` to a prefix match to keep passing —
+ * a test being relaxed to fit the markup is the markup being wrong. The title
+ * is a real `<button>` carrying the verb, and the press on the card around it
+ * is a convenience for the pointer, exactly as `ChoiceRow` and `TableRow` do it.
  */
 export function ChoiceCard({
   mark,
   title,
+  verb,
   description,
   trailing,
   selected,
@@ -331,6 +346,8 @@ export function ChoiceCard({
 }: {
   mark?: React.ComponentType<{ className?: string }>
   title: React.ReactNode
+  /** The accessible name of the title control — "Use PostgreSQL". */
+  verb: string
   description?: React.ReactNode
   /** A reading about this option — how many there are, what it costs. */
   trailing?: React.ReactNode
@@ -343,56 +360,75 @@ export function ChoiceCard({
   className?: string
 }) {
   const Mark = mark
-  const inner = (
-    <>
-      <span className="flex min-w-0 items-center gap-2">
-        {Mark && (
-          <Mark
-            aria-hidden
-            className={cn("size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")}
-          />
-        )}
-        <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
-        {selected ? (
-          <Check aria-hidden className="size-4 shrink-0 text-brand" />
-        ) : (
-          <ArrowRight
-            aria-hidden
-            className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-          />
-        )}
-      </span>
-      {description && (
-        <span className="block text-hint text-muted-foreground">{description}</span>
-      )}
-      {trailing && <span className="block text-hint text-muted-foreground">{trailing}</span>}
-    </>
-  )
-
-  const shape = cn(
-    "group/choice flex min-w-0 flex-col gap-1.5 rounded-xl p-3 text-left focus-ring",
-    disabled && "pointer-events-none opacity-50",
-    className,
-  )
-
+  const choose = () => {
+    if (!disabled) onClick?.()
+  }
   return (
-    <BlurFade delay={index * 0.03}>
+    <BlurFade delay={index * 0.03} className="h-full">
       <SpotlightBorder resting={selected ? "lit" : "border"} className="h-full">
-        {href && !disabled ? (
-          <Link href={href} className={cn(shape, "h-full")} aria-current={selected}>
-            {inner}
-          </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={onClick}
-            disabled={disabled}
-            aria-pressed={selected}
-            className={cn(shape, "h-full w-full")}
-          >
-            {inner}
-          </button>
-        )}
+        <div
+          onClick={href ? undefined : choose}
+          aria-current={selected ? true : undefined}
+          className={cn(
+            "group/choice flex h-full min-w-0 flex-col gap-1.5 rounded-xl p-3 text-left",
+            disabled ? "opacity-50" : "cursor-pointer",
+            className,
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {Mark && (
+              <Mark
+                aria-hidden
+                className={cn("size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")}
+              />
+            )}
+            {/* An option that cannot be taken carries no control at all — not a
+                disabled one. A disabled `<button>` is still a button: it
+                answers `getByRole("button")`, a screen reader still announces
+                it as the way to use this thing, and the card then has to say
+                "no" twice. The card stays drawn and dimmed and keeps its
+                sentence, because the reader still needs to know the template
+                exists and why they cannot have it. */}
+            {disabled ? (
+              <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
+            ) : href ? (
+              <Link
+                href={href}
+                aria-label={verb}
+                className="min-w-0 flex-1 truncate rounded-sm text-body font-medium focus-ring"
+              >
+                {title}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                aria-label={verb}
+                aria-pressed={selected}
+                // The card's own handler already fires on the pointer; this one
+                // is for the keyboard and must not choose twice.
+                onClick={(event) => {
+                  event.stopPropagation()
+                  choose()
+                }}
+                className="min-w-0 flex-1 truncate rounded-sm text-left text-body font-medium focus-ring"
+              >
+                {title}
+              </button>
+            )}
+            {selected ? (
+              <Check aria-hidden className="size-4 shrink-0 text-brand" />
+            ) : (
+              <ArrowRight
+                aria-hidden
+                className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
+              />
+            )}
+          </span>
+          {description && (
+            <span className="block text-hint text-muted-foreground">{description}</span>
+          )}
+          {trailing && <span className="block text-hint text-muted-foreground">{trailing}</span>}
+        </div>
       </SpotlightBorder>
     </BlurFade>
   )

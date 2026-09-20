@@ -3,7 +3,8 @@
 import { useState } from "react"
 import { ArrowDown, ArrowUp, Plus, Trash } from "@/components/icons"
 import { Field } from "@/components/form"
-import { Group, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { Group } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
@@ -114,9 +115,14 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
   return (
     <div className="w-full max-w-3xl min-w-0 space-y-4">
       {failure && <ErrorState error={failure} />}
-      <Panel plain>
-        <PanelHeader title="Compose stack" />
-        <PanelBody className="space-y-4">
+      {/* The one surface with depth on this tab (§16): which files the stack is
+          made of, and where they live, is the whole decision here. The tab drew
+          it as a `Panel plain` whose foot looked like every other panel foot in
+          the product, so nothing said which thing on the screen was being
+          decided. */}
+      <FlowPanel>
+        <FlowPanelHeader title="Compose stack" />
+        <FlowPanelBody className="space-y-4">
           <Field label="Where are the files" htmlFor="compose-mode">
             <Select value={mode} onValueChange={(value) => setMode(value as FilesMode)}>
               <SelectTrigger id="compose-mode" className="w-full">
@@ -220,13 +226,17 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
               error={errors.compose}
             />
           )}
-        </PanelBody>
-        <PanelFooter className="justify-end">
+        </FlowPanelBody>
+        {/* Inspect is what advances the tab, so it is the command in the foot of
+            the focused surface rather than one more button in a panel footer.
+            The two "Add file" buttons stay `outline`: one brand face per screen,
+            and neither of them leaves this step. */}
+        <FlowActions>
           <Button className="h-11 sm:h-9" pending={busy} onClick={() => void inspect()}>
             Inspect
           </Button>
-        </PanelFooter>
-      </Panel>
+        </FlowActions>
+      </FlowPanel>
     </div>
   )
 }

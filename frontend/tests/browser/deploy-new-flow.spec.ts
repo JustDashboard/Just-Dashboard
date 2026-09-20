@@ -140,7 +140,7 @@ test.describe("A stage that fails /preflight", () => {
     )
 
     await page.goto("/deploy/new?draft=fail-preflight-draft")
-    await expect(page.getByRole("heading", { name: "New project" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "How should it run?" })).toBeVisible()
     const deploy = page.getByRole("button", { name: "Deploy", exact: true })
 
     // First press: the save succeeds (revision 5 -> 6) but preflight 500s.
@@ -222,7 +222,7 @@ test.describe("An ambiguous detection", () => {
     })
 
     await page.goto("/deploy/new?draft=candidate-draft")
-    await expect(page.getByRole("heading", { name: "New project" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "How should it run?" })).toBeVisible()
     const picker = page.getByRole("group", { name: "Detected candidates" })
     await expect(picker.getByText("Next.js web application")).toBeVisible()
     await expect(picker.getByText("Background worker")).toBeVisible()

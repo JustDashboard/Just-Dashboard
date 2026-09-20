@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Warning } from "@/components/icons"
 import { Field } from "@/components/form"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -109,9 +109,13 @@ export function SourceExisting({ onInspected }: { onInspected: (flow: ConfigureF
   return (
     <div className="w-full max-w-3xl min-w-0 space-y-4">
       {failure && <ErrorState error={failure} />}
-      <Panel plain>
-        <PanelHeader title="Existing workload" />
-        <PanelBody className="space-y-4">
+      {/* The one surface with depth on this tab (§16): naming the workload to
+          adopt is the decision, and the acknowledgement the preview raises is
+          part of the same one, which is why it stays inside this panel instead
+          of becoming a second surface under it. */}
+      <FlowPanel>
+        <FlowPanelHeader title="Existing workload" />
+        <FlowPanelBody className="space-y-4">
           <Field label="What kind of resource" htmlFor="existing-mode">
             <Select
               value={mode}
@@ -217,13 +221,16 @@ export function SourceExisting({ onInspected }: { onInspected: (flow: ConfigureF
               </Label>
             </Notice>
           )}
-        </PanelBody>
-        <PanelFooter className="justify-end">
+        </FlowPanelBody>
+        {/* One press does both halves of this step — preview, then proceed once
+            the unadoptable settings are acknowledged — so it is the tab's single
+            command and belongs in the foot of the focused surface. */}
+        <FlowActions>
           <Button className="h-11 sm:h-9" pending={busy} onClick={() => void inspect()}>
             Inspect
           </Button>
-        </PanelFooter>
-      </Panel>
+        </FlowActions>
+      </FlowPanel>
     </div>
   )
 }

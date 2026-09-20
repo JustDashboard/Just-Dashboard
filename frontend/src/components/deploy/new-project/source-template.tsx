@@ -18,8 +18,15 @@ import type {
   WorkloadProfile,
 } from "@/lib/types"
 import { Field } from "@/components/form"
-import { Group, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { ROW_BLEED, RowList } from "@/components/row-list"
+import {
+  ChoiceCard,
+  ChoiceGrid,
+  FlowActions,
+  FlowPanel,
+  FlowPanelBody,
+  FlowPanelHeader,
+} from "@/components/flow"
+import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -172,75 +179,81 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
           {catalogue.data && grouped.length === 0 && (
             <EmptyNote>No template matches that search.</EmptyNote>
           )}
-          {grouped.map(([category, entries]) => (
-            <div key={category} className="animate-rise space-y-1">
-              <p className="eyebrow">{CATEGORY_LABEL[category] ?? humanize(category)}</p>
-              <RowList aria-label={CATEGORY_LABEL[category] ?? humanize(category)}>
-                {entries.map((entry) => {
-                  const usable = entry.deploymentSupported !== false
-                  return (
-                    // §12's shape again: the name carries the verb and is the
-                    // control; the row around it answers the pointer. A
-                    // template that cannot be deployed has no control at all,
-                    // so there is nothing to press and nothing announcing one.
-                    <li key={entry.id} data-slot="row" className="min-w-0">
-                      <div
-                        onClick={usable ? () => select(entry) : undefined}
-                        data-selected={selectedId === entry.id || undefined}
-                        className={cn(
-                          "flex min-w-0 items-center gap-3 px-5 py-3 text-left",
-                          ROW_BLEED,
-                          usable && "cursor-pointer transition-colors hover:bg-row-hover",
-                          selectedId === entry.id && "bg-accent hover:bg-accent",
-                        )}
-                      >
-                        <span className="min-w-0 flex-1">
-                          {usable ? (
-                            <button
-                              type="button"
-                              aria-label={`Use ${entry.name}`}
-                              aria-pressed={selectedId === entry.id}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                select(entry)
-                              }}
-                              className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
-                            >
-                              {entry.name}
-                            </button>
-                          ) : (
-                            <span className="block truncate text-body font-medium">
-                              {entry.name}
-                            </span>
-                          )}
-                          <span className="block truncate text-hint text-muted-foreground">
-                            {usable
-                              ? entry.description
-                              : entry.unavailableReason ||
-                                "This blueprint cannot be deployed by this dashboard version."}
+          {grouped.map(([category, entries]) => {
+            const label = CATEGORY_LABEL[category] ?? humanize(category)
+            return (
+              // The cards arrive staggered by their own index, so the group
+              // does not also rise: that is one block animating twice.
+              <div key={category} className="space-y-2">
+                <p className="eyebrow">{label}</p>
+                {/* Kinds, so cards (§16): a template is a different sort of
+                    thing from the one beside it, and what tells them apart is
+                    the sentence a row truncates to nothing. Two columns and
+                    not three, because at three that sentence wraps to four
+                    lines in the width the catalogue keeps once a chosen
+                    template's panel is beside it. The category is the grid's
+                    `role="group"` name — a bare `aria-label` on a div names
+                    nothing, so the eyebrow would reach a reader and no one
+                    else. */}
+                <ChoiceGrid columns={2} role="group" aria-label={label}>
+                  {entries.map((entry, index) => {
+                    const usable = entry.deploymentSupported !== false
+                    return (
+                      <ChoiceCard
+                        key={entry.id}
+                        index={index}
+                        title={entry.name}
+                        // The control's name is the verb and the template, not
+                        // the card's whole contents — see ChoiceCard (§12).
+                        verb={`Use ${entry.name}`}
+                        description={
+                          usable
+                            ? entry.description
+                            : entry.unavailableReason ||
+                              "This blueprint cannot be deployed by this dashboard version."
+                        }
+                        trailing={
+                          <span className="flex min-w-0 flex-wrap items-center gap-2">
+                            {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
+                            {entry.privileged && <Tag tone="danger">privileged</Tag>}
+                            <Tag mono>{entry.image}</Tag>
+                            {!usable && <Tag tone="warning">Preview only</Tag>}
                           </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
-                          {entry.privileged && <Tag tone="danger">privileged</Tag>}
-                          <Tag mono>{entry.image}</Tag>
-                          {!usable && <Tag tone="warning">Preview only</Tag>}
-                        </span>
-                      </div>
-                    </li>
-                  )
-                })}
-              </RowList>
-            </div>
-          ))}
+                        }
+                        selected={selectedId === entry.id}
+                        // A template this dashboard cannot deploy is still
+                        // drawn and still says why, and is dimmed and
+                        // unpressable rather than silently inert: when the
+                        // card is the control, a card with the control taken
+                        // out of it looks exactly like one that works.
+                        disabled={!usable}
+                        onClick={() => select(entry)}
+                      />
+                    )
+                  })}
+                </ChoiceGrid>
+              </div>
+            )
+          })}
         </PanelBody>
       </Panel>
 
       {selectedId && definition && (
-        <Panel plain className="min-w-0 xl:sticky xl:top-6">
-          <PanelHeader title={definition.name} actions={<Tag mono>v{definition.version}</Tag>} />
-          <PanelBody className="space-y-4">
-            <Group className="space-y-1.5 text-xs text-muted-foreground">
+        // The one surface with depth on this screen (§16). Until a template is
+        // chosen there is no foreground at all and the advance is the cards'
+        // own lit edges; once one is chosen, what is being decided is its
+        // inputs and the command that leaves the screen, so that is what takes
+        // the depth. The catalogue stays plain: a second framed surface is two
+        // foregrounds, which is none.
+        <FlowPanel className="min-w-0 xl:sticky xl:top-6">
+          <FlowPanelHeader
+            title={definition.name}
+            actions={<Tag mono>v{definition.version}</Tag>}
+          />
+          <FlowPanelBody className="space-y-4">
+            {/* Facts, not a fenced block: inside the one framed surface a
+                hairline box is a frame drawn inside a frame. */}
+            <div className="min-w-0 space-y-1.5 text-xs text-muted-foreground">
               <p className="flex flex-wrap items-center gap-2">
                 <Tag>{definition.provenance.license}</Tag>
               </p>
@@ -267,7 +280,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                   Upstream project <ArrowUpRight className="size-3" />
                 </Link>
               </p>
-            </Group>
+            </div>
 
             {blocked && (
               <Notice tone="warning" icon={Warning} title="Blueprint deployment unavailable">
@@ -344,8 +357,10 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                 </ul>
               </Notice>
             )}
-          </PanelBody>
-          <PanelFooter className="justify-end">
+          </FlowPanelBody>
+          {/* The one brand-faced command on the screen, at the foot of the
+              surface it acts on. */}
+          <FlowActions>
             <Button
               className="h-11 sm:h-9"
               pending={busy}
@@ -354,8 +369,8 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
             >
               Use this template
             </Button>
-          </PanelFooter>
-        </Panel>
+          </FlowActions>
+        </FlowPanel>
       )}
     </div>
   )

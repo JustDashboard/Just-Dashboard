@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef } from "react"
+import { useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 
@@ -44,6 +45,12 @@ export function SpotlightBorder({
   resting?: "border" | "lit"
 }) {
   const host = useRef<HTMLDivElement>(null)
+  // A light that follows the pointer is motion, even though no keyframe runs:
+  // the root `prefers-reduced-motion` rule in globals.css collapses animation
+  // durations and cannot reach a value being written from JavaScript, which is
+  // why every vendored component in this directory checks for itself. Reduced
+  // motion gets the resting edge and no listeners at all.
+  const reduced = useReducedMotion()
 
   // Park the light outside the card, so a card that has never been pointed at
   // draws its resting edge rather than a gradient centred on its top-left
@@ -63,6 +70,7 @@ export function SpotlightBorder({
   }, [])
 
   useEffect(() => {
+    if (reduced) return
     park()
     // A pointer that leaves the window entirely fires no `pointerleave` on the
     // card it was last over, so the light stays stuck where it was until the
@@ -82,19 +90,24 @@ export function SpotlightBorder({
       window.removeEventListener("blur", park)
       document.removeEventListener("visibilitychange", hidden)
     }
-  }, [park])
+  }, [park, reduced])
+
+  const edge = resting === "lit" ? "var(--flow-lit-soft)" : "var(--border)"
 
   return (
     <div
       ref={host}
-      onPointerMove={follow}
-      onPointerLeave={park}
+      onPointerMove={reduced ? undefined : follow}
+      onPointerLeave={reduced ? undefined : park}
       className={cn("relative isolate rounded-xl border border-transparent", className)}
       style={{
-        background: `linear-gradient(var(--flow-surface) 0 0) padding-box,
-          radial-gradient(${radius}px circle at var(--spot-x, -9999px) var(--spot-y, -9999px),
-            var(--flow-lit),
-            ${resting === "lit" ? "var(--flow-lit-soft)" : "var(--border)"} 100%) border-box`,
+        background: reduced
+          ? `linear-gradient(var(--flow-surface) 0 0) padding-box,
+             linear-gradient(${edge} 0 0) border-box`
+          : `linear-gradient(var(--flow-surface) 0 0) padding-box,
+             radial-gradient(${radius}px circle at var(--spot-x, -9999px) var(--spot-y, -9999px),
+               var(--flow-lit),
+               ${edge} 100%) border-box`,
       }}
     >
       {children}

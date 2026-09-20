@@ -26,7 +26,7 @@ import { IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { tabClasses } from "@/components/tabs"
-import { humanize } from "@/components/deploy/vocabulary"
+import { CREATION_STEPS, humanize } from "@/components/deploy/vocabulary"
 import {
   discardAbandoned,
   discardDraft,
@@ -102,21 +102,6 @@ const Eyebrow = (
     <ArrowLeft className="size-3" /> Deployments
   </Link>
 )
-
-/**
- * The three steps of making a project, as the reader experiences them: pick
- * what it is built from, settle how it runs, and let it go. They are the
- * draft's own `source` → `configuration` → commit sequence (`draft.ts`) rather
- * than a decorative count, so the spine cannot drift from the state machine
- * underneath it. What happens after the commit — building, releasing, live —
- * is the run page's own timeline, which picks the sequence up where this
- * leaves it.
- */
-const FLOW_STEPS = [
-  { key: "source", label: "Source" },
-  { key: "configure", label: "Configure" },
-  { key: "deploy", label: "Deploy" },
-]
 
 /**
  * One page, two states: choose a source, then configure it. The old
@@ -265,7 +250,7 @@ export function NewProject({
           <FlowHeader
             eyebrow={Eyebrow}
             question="What are you deploying?"
-            steps={<FlowSteps steps={FLOW_STEPS} current={0} />}
+            steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
           />
           {(drafts.data?.length ?? 0) > 0 && (
             <Panel plain className="animate-rise">
@@ -375,7 +360,7 @@ export function NewProject({
           <FlowHeader
             eyebrow={Eyebrow}
             question="How should it run?"
-            steps={<FlowSteps steps={FLOW_STEPS} current={1} />}
+            steps={<FlowSteps steps={CREATION_STEPS} current={1} />}
           />
           <Configure
             flow={flow}

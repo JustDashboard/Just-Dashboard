@@ -28,6 +28,7 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
+import { FlowSteps } from "@/components/flow"
 import { Page, PageHeader, Metric, MetricStrip } from "@/components/page"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
@@ -40,6 +41,7 @@ import {
   humanize,
   isActiveRun,
   isCancellable,
+  CREATION_STEPS,
   operationLabel,
   runDurationSeconds,
   isRetryable,
@@ -201,6 +203,10 @@ export function RunPage() {
 
   const run = snapshot.run
   const active = isActiveRun(run.state)
+  // A project carried over from the old engine has a run #1 that predates the
+  // draft flow entirely, and its one `legacy_pipeline` step is how that run is
+  // told apart from a release this engine planned.
+  const legacy = attempts.some((step) => step.key === "legacy_pipeline")
   const deployment = project.data?.deployment
   const url = deploymentURL(deployment?.endpoint)
   const isLiveRelease = Boolean(run.releaseId) && deployment?.liveReleaseId === run.releaseId
@@ -267,56 +273,75 @@ export function RunPage() {
   return (
     <Page>
       <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
-      <PageHeader
-        eyebrow={
-          <Link
-            href={`/deploy/${projectId}`}
-            className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-          >
-            <ArrowLeft className="size-3" /> {deployment?.name || "Deployment"}
-          </Link>
-        }
-        title={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-3">
-            <span className="truncate">Deployment #{run.runNumber}</span>
-            <RunStatus state={run.state} live className="shrink-0" />
-          </span>
-        }
-        actions={
-          <>
-            {canRun && isCancellable(run.state) && !run.cancelRequested && (
-              <Button variant="outline" size="sm" pending={working === "cancel"} onClick={cancel}>
-                <StopCircle className="size-3.5" />
-                {working === "cancel" ? "Cancelling…" : "Cancel"}
-              </Button>
-            )}
-            {canRun && isRetryable(run.state) && (
-              <Button size="sm" pending={working === "retry"} onClick={retry}>
-                <RefreshClockwise className="size-3.5" />
-                {working === "retry" ? "Starting…" : "Retry"}
-              </Button>
-            )}
-            {canRun && run.state === "succeeded" && isLiveRelease && (
-              <Button
-                variant="outline"
-                size="sm"
-                pending={working === "redeploy"}
-                onClick={redeploy}
-              >
-                <RotateCounterClockwise className="size-3.5" />
-                {working === "redeploy" ? "Redeploying…" : "Redeploy"}
-              </Button>
-            )}
-            {run.state === "succeeded" && isLiveRelease && url && (
-              <Button size="sm" asChild>
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  <External className="size-3.5" /> Visit
-                </a>
-              </Button>
-            )}
-          </>
-        }
-      />
+      <div className="flex min-w-0 flex-col gap-4">
+        <PageHeader
+          eyebrow={
+            <Link
+              href={`/deploy/${projectId}`}
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> {deployment?.name || "Deployment"}
+            </Link>
+          }
+          title={
+            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
+              <span className="truncate">Deployment #{run.runNumber}</span>
+              <RunStatus state={run.state} live className="shrink-0" />
+            </span>
+          }
+          actions={
+            <>
+              {canRun && isCancellable(run.state) && !run.cancelRequested && (
+                <Button variant="outline" size="sm" pending={working === "cancel"} onClick={cancel}>
+                  <StopCircle className="size-3.5" />
+                  {working === "cancel" ? "Cancelling…" : "Cancel"}
+                </Button>
+              )}
+              {canRun && isRetryable(run.state) && (
+                <Button size="sm" pending={working === "retry"} onClick={retry}>
+                  <RefreshClockwise className="size-3.5" />
+                  {working === "retry" ? "Starting…" : "Retry"}
+                </Button>
+              )}
+              {canRun && run.state === "succeeded" && isLiveRelease && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  pending={working === "redeploy"}
+                  onClick={redeploy}
+                >
+                  <RotateCounterClockwise className="size-3.5" />
+                  {working === "redeploy" ? "Redeploying…" : "Redeploy"}
+                </Button>
+              )}
+              {run.state === "succeeded" && isLiveRelease && url && (
+                <Button size="sm" asChild>
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    <External className="size-3.5" /> Visit
+                  </a>
+                </Button>
+              )}
+            </>
+          }
+        />
+        {/* The sequence's third step, happening. §16 keeps this page in the
+            reading register — you are watching, not deciding — and carries the
+            spine's last step across, so a reader who has just pressed Deploy
+            watches the sequence continue instead of landing on a page with no
+            trace of the two screens behind it.
+
+            Only the run the flow's own Deploy button enqueued, which is what
+            these three clauses together are: the project's first, deployed
+            rather than adopted — Configure starts a run only for `deploy`
+            (`new-project/draft.ts`), so an import's run #1 is an `import_adopt`
+            begun from the project page — and planned by this engine rather
+            than carried over from the old one. Anywhere else there is no flow
+            behind the run, and the spine would claim a Source and a Configure
+            step this reader never walked. */}
+        {run.runNumber === 1 && run.operation === "deploy" && !legacy && (
+          <FlowSteps steps={CREATION_STEPS} current={2} />
+        )}
+      </div>
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Deployment state: {humanize(run.state)}
@@ -348,7 +373,7 @@ export function RunPage() {
         />
       </MetricStrip>
 
-      {attempts.some((step) => step.key === "legacy_pipeline") ? (
+      {legacy ? (
         <p className="text-body text-muted-foreground">Compatibility pipeline</p>
       ) : (
         <div className="flex flex-col gap-3">

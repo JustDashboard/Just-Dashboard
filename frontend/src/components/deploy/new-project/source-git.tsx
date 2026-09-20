@@ -11,13 +11,7 @@ import { useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
-import {
-  ChoiceList,
-  ChoiceRow,
-  FlowPanel,
-  FlowPanelBody,
-  FlowPanelHeader,
-} from "@/components/flow"
+import { ChoiceList, ChoiceRow, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
@@ -537,9 +531,13 @@ export function SourceGit({
                 </Field>
               </div>
             </details>
+            {/* Outline while there are repositories to pick, because then the
+                rows are the advance (§16). With neither identity listing one,
+                there is nothing to choose and this field is the way forward,
+                so it takes the command face. */}
             <Button
               className="h-11 w-full sm:h-9"
-              variant="outline"
+              variant={pickable.length > 0 ? "outline" : "default"}
               pending={busy === "manual"}
               disabled={!manualUrl.trim()}
               onClick={() =>

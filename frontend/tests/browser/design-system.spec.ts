@@ -316,3 +316,50 @@ test("reduced motion is honoured globally", async ({ page }) => {
   })
   expect(moving, "animations still running under prefers-reduced-motion").toEqual([])
 })
+
+/**
+ * §16: a page is in exactly one register, and register B's affordances belong
+ * only to the pages that declared it.
+ *
+ * The section promises this check by name, so it exists rather than being a
+ * sentence — an unenforced rule in this document is the drift the whole file
+ * was written to stop. Three properties, each of which is a way the register
+ * could rot back into the thing it replaced:
+ *
+ *   a page declares a register, and it is one of the two;
+ *   at most one surface per screen carries depth, because a second foreground
+ *   is no foreground (§16) — the rule the rollout was most likely to break;
+ *   no reading page grows a `FlowPanel`, which is how "just this once" becomes
+ *   forty-nine raised surfaces again.
+ */
+test("every page declares one register, and only a flow page has a foreground", async ({
+  page,
+}) => {
+  await mockShell(page)
+
+  for (const path of SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+
+    const seen = await page.evaluate(() => {
+      const pages = [...document.querySelectorAll<HTMLElement>("[data-slot='page']")]
+      return {
+        registers: pages.map((el) => el.dataset.register ?? "(unset)"),
+        panels: document.querySelectorAll("[data-slot='flow-panel']").length,
+      }
+    })
+
+    expect(seen.registers.length, `no page element rendered on ${path}`).toBeGreaterThan(0)
+    for (const register of seen.registers) {
+      expect(["reading", "flow"], `${path} declares an unknown register`).toContain(register)
+    }
+
+    const isFlow = seen.registers.includes("flow")
+    // One is the contract; zero is fine, because a flow screen may be a
+    // question with a grid of choices under it and no focused surface at all.
+    expect(seen.panels, `more than one foreground on ${path}`).toBeLessThanOrEqual(1)
+    if (!isFlow) {
+      expect(seen.panels, `a reading page drew a flow panel on ${path}`).toBe(0)
+    }
+  }
+})

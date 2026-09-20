@@ -42,12 +42,20 @@ test("renders the header, facts and release path for an active run", async ({ pa
   )
 
   await expect(page.getByText("Production", { exact: true })).toBeVisible()
-  await expect(page.getByText("Deploy", { exact: true })).toBeVisible()
+  // The fixture is run #1, so the page also carries the creation flow's spine
+  // and its last step is called "Deploy" too: the operation is read off its own
+  // metric rather than as the only "Deploy" on the page.
+  await expect(
+    page.getByText("Operation", { exact: true }).locator("..").getByText("Deploy", { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText("by operator", { exact: true })).toBeVisible()
   await expect(page.getByText(/Sep 0?3, 2026/)).toBeVisible()
   await expect(page.getByText("main", { exact: true })).toBeVisible()
 
   await expect(page.getByRole("list", { name: "Release path" })).toBeVisible()
+  // A first run is the third step of the sequence that started on /deploy/new;
+  // a later one has no flow behind it and gets no spine.
+  await expect(page.getByRole("list", { name: "Progress" })).toBeVisible()
   await expect(page.getByRole("status")).toHaveText("Verify Readiness…")
 })
 

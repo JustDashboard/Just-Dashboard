@@ -757,3 +757,21 @@ export function latestAttempts(steps: DeploymentStep[]) {
   return [...byKey.values()].sort((a, b) => a.ordinal - b.ordinal)
 }
 
+/**
+ * The three steps of making a project, as the reader walks them.
+ *
+ * They are the draft's own `source` → `configuration` → commit sequence
+ * (`new-project/draft.ts`) rather than a decorative count, so the spine cannot
+ * drift from the state machine underneath it.
+ *
+ * It lives here because two screens draw it from opposite ends: `/deploy/new`
+ * while the reader is in it, and the first run's page once the commit has
+ * happened. It was written out twice, with a comment on each copy saying it
+ * had to agree with the other word for word — which is the shape of a label
+ * that is about to disagree.
+ */
+export const CREATION_STEPS = [
+  { key: "source", label: "Source" },
+  { key: "configure", label: "Configure" },
+  { key: "deploy", label: "Deploy" },
+]
