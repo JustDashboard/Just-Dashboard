@@ -12,9 +12,12 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
   deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
   The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
-- A request to *redesign a page with the design system* means running the ordered passes in
-  [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md) §15 against
-  that page, with the host Overview as the reference. Read §15 before touching any UI for that request.
+- A request to *redesign a page with the design system* means running that page's register's ordered
+  passes in [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md).
+  **Decide the register first** — §16 has the table and the test, which is what the reader came to do
+  rather than what the page contains. A page that *reports* takes §15's passes with the host Overview
+  as the reference; a page where the reader is *deciding* a sequence takes §17's, with `/deploy/new`
+  as the reference. Read §16 and the relevant passes before touching any UI for that request.
 - Do not add or change CI: no GitHub Actions workflows, no `.github/` automation, no hosted checks of
   any kind, unless the operator asks for them by name. Verification happens locally with the commands
   below; a red check on GitHub that nobody asked for is confusion, not safety.

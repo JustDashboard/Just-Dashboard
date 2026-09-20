@@ -584,3 +584,136 @@ header with an eyebrow, a 24px title and a `MetricStrip` of figures on the right
 it; a five-tile `StatGrid` of readings; a plain `Health` list; a plain sparkline block beside a plain
 activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module. No
 frame anywhere on the page. Everything that arrived, rose.
+
+## 16. Two registers
+
+Everything above §15 describes a page that **reports**. The Overview, the metrics page, the Docker
+lists, Security, the proxy tables, Processes, the audit log: the reader arrives to find out what is
+true, and the system is tuned for exactly that. It removes decoration and hands back three loud
+things in exchange — a 24px figure, a tone on a reading, a `Status` dot — and every one of them
+requires the page to have numbers on it.
+
+A page where the reader is **deciding** has almost none, and spends what it has at the wrong rung.
+The 2026-09-20 pass on `/deploy/new` applied §15 and produced a screen on which the 24px step fired
+exactly once — the two-word title — against fourteen times on the Overview; both buttons were
+`variant="outline"`, so the only brand ink on the page was a 14px icon on the active tab; and
+twenty-two repository rows were hand-laid without the arrow `Row` draws through `rowReveal`, so a
+page of click targets looked like a read-only listing. The complaint that arrived — "no life,
+doesn't look good" — was right.
+
+**But not because the page had no readings.** It had four: the draft count, the App's repositories,
+the identity count, and "N of M repositories". Every one was rendered at `text-hint` inside a
+`PanelHeader`'s actions. §15 pass 2 names counts explicitly, and `deploy/credentials-page.tsx` — the
+same section, also a page you configure rather than read — runs its `PageHeader` straight into a
+`StatGrid` of `StatTile`s. So the first half of the failure was §15 pass 2 skipped, not §15 being
+inapplicable; the HEAD commit that ran the pass audited itself against passes 3, 7 and 9 and never
+mentioned 2.
+
+What the second half needed is what this register adds. A flow page keeps §15 pass 2 wherever it has
+a genuine set of headline figures — being in register B is not an exemption from readings — and adds
+the things a sequence needs that no amount of correctly-applied §15 would have produced: a question,
+a spine, a foreground, and a command.
+
+So there are two registers, and a page declares which it is in.
+
+```tsx
+<Page register="flow">   // the reader is deciding
+<Page>                   // the reader is reading — the default, and most of the product
+```
+
+It is stamped on the page element as `data-register` rather than inferred, so which register a page
+is in is one grep, a page cannot be half in each by accident, and a browser test can assert that only
+the flow pages carry the flow affordances.
+
+### Which register a page is in
+
+The test is what the reader came to do, not what the page contains. A page with a form on it is not a
+flow page; Settings is a reading of a project's configuration that happens to be editable. A flow
+page is one where there is a **sequence with an outcome at the end**, and the screen's job is to get
+the reader through it.
+
+| Page | Register | Why |
+| --- | --- | --- |
+| Host Overview, metrics, Docker, Security, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
+| Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
+| `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
+| `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
+| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. It carries the spine's last step so the sequence still reads as one, and nothing else changes. |
+| Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
+| Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
+
+A section does not pick a register — a *page* does. The deployment section has pages in both, which
+is correct: making a project is a flow and reading one is not.
+
+### What register B adds
+
+Each of these is bought against a specific failure, and each is the smallest thing that answers it.
+
+- **The question is the `h1`.** A flow screen asks something — "What are you deploying?", "How should
+  it run?" — and the ask is at the page's own rank. It is *not* a sentence under the page's name:
+  that is the caption §5 removed from every page in the product, and putting one back at a rank
+  invented for it is how the ladder grew thirteen sizes the first time. The step count lives in the
+  eyebrow or in the spine, never in a new size between 24 and 15.
+- **A spine.** `FlowSteps` says which step this is, what is behind it and what is left, as segments of
+  a rule with their names under them — the way `deploy/run-pipeline.tsx` draws the seven stages of a
+  release, so the screen where a project is planned and the screen where it is built agree about how
+  "where we are" is drawn. **Never numbered circles**: a filled circle under 32px with a character in
+  it is the pill §4 deleted, and `tests/browser/design-system.spec.ts` fails any page that renders
+  one. Where a spine is drawn it *is* the head rule, and `--flow-rule` yields to it.
+- **Exactly one surface with depth.** §2 says nothing lifts, and the reason is that forty-nine
+  surfaces all claiming the foreground is a page with no foreground. One does not have that problem.
+  `FlowPanel` is the thing being decided right now: a step of ground above the card, `border-strong`,
+  and `shadow-sm` — the smallest step, and the only place outside a popover, a dropdown and a dialog
+  that takes any. **One per screen.** A second is two foregrounds, which is none.
+- **One unmistakable advancing gesture.** Either a brand-faced command — `Button` with no variant,
+  drawn in `FlowActions` at the foot of the focused surface — or, on a screen where *the choice is
+  the advance*, the choices themselves, whose edges light under the pointer. What a flow screen may
+  never have is what the Git tab shipped with: a primary action wearing `variant="outline"` while
+  nothing else on the page carries the brand either.
+- **A choice is something you pick.** `ChoiceCard` in a `ChoiceGrid` for the *kinds* of thing — the
+  six sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
+  kind — twenty-two repositories, a page of image tags. The split is load-bearing: a three-column
+  grid of twenty-two 13px names is a wall, and a flat row is the listing this register exists to stop
+  a decision from looking like. Both keep §12's shape — the title is a real `<button>` carrying the
+  verb in its accessible name, the surrounding press is a convenience for the pointer — and add the
+  two things a reading row does not have: an arrow that is always drawn, and an edge that answers the
+  pointer.
+- **The lit edge.** `ui/spotlight-border.tsx` paints a card's one-pixel border with a radial gradient
+  centred on the pointer, brand at the centre and the card's own `--border` a couple of hundred pixels
+  out. It is Magic UI's `magic-card` with the glow taken out of it. Depth and response; no decoration.
+
+### What register B does not get
+
+The bans are not relaxed here. No glass, no glow, no gradient ground, no hover-transform, no shadow
+on anything that is not the one focused surface, no pill, no badge, no icon plate, no off-ladder type
+or radius, no colour that is not a token. §2 §4 §8 §9 §13 §14 hold in both registers without
+exception. What §16 buys is depth on one surface, a mandatory command face, and an edge that responds
+— and nothing else. A flow page that also wants a gradient behind its hero has misread this section.
+
+`--flow-surface`, `--flow-lit`, `--flow-lit-soft` and the `flow-rule` utility are register B's whole
+palette, and a reading page must not grow a use for them.
+
+## 17. Redesigning a flow page
+
+§15 is the reading register's ordered passes. This is the other one. The reference is `/deploy/new`.
+
+1. **Declare it.** `<Page register="flow">`. If you cannot name the sequence and its outcome in one
+   sentence, the page is a reading page and §15 is what you want.
+2. **Ask the question.** The `h1` becomes what the screen is asking. The page's name moves to the
+   eyebrow beside the back link. No sentence under it — §5 holds.
+3. **Draw the spine.** `FlowSteps`, with the steps taken from the state machine underneath rather
+   than invented: `/deploy/new`'s three are the draft's own `source` → `configuration` → commit, so
+   the spine cannot drift from what the server thinks is happening.
+4. **Pick the one focused surface.** The thing being decided on this screen becomes a `FlowPanel`.
+   Everything else on the page stays a `Panel plain` — supporting facts do not get depth, and a
+   second `FlowPanel` is the pass failing.
+5. **Find the command.** One brand-faced button in `FlowActions`, or choices whose edges light. If
+   the screen has neither, the reader cannot tell what advances it.
+6. **Choices become choices.** Kinds → `ChoiceGrid` of `ChoiceCard`. Instances → `ChoiceList` of
+   `ChoiceRow`. A list of things you can pick is never a `RowList`.
+7. **Motion on the state change, not only on arrival.** §11's four still apply and no fifth is added:
+   the spine's current segment, a `BorderBeam` on a card while its work is in flight, a
+   `NumberTicker` on a figure that settled, `Confetti` once when the outcome lands in front of the
+   reader.
+8. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser`, then screenshots at 1280 and
+   1720 — and look at them. The failure this register exists to catch is one no assertion sees.
