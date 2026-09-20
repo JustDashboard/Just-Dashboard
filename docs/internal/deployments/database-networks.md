@@ -38,9 +38,18 @@ old database with the alias or an unrelated alias owner blocks repair. Attach/de
 are audited without connection strings. Cancellation stops reconciliation with the server.
 
 `GET /deploy/{project}/environments/{environment}/database-links` reports the connection identity,
-hostname, network and last observation, scoped to that environment. Configuration → Dependencies
-shows these observations. Connected means the network binding was observed; it does not prove database
-schema or application health. Observations older than 30 seconds are marked stale.
+its engine and database, hostname, network and last observation, scoped to that environment.
+Configuration → Dependencies shows these observations. Connected means the network binding was
+observed; it does not prove database schema or application health. Observations older than 30 seconds
+are marked stale. The database name is read from the sealed DSN the way every other database route
+reads it; a connection whose DSN no longer resolves keeps its row without that name.
+
+A binding that reconciliation could not repair carries `detail`, the reason of the pass that failed —
+a replaced container that no longer matches the saved identity, an alias another container holds, a
+namespace that cannot join a bridge. It is bounded to 300 characters, holds no connection string, and
+is the same sentence the routes performing these operations already return. A connected or stale
+binding reports no reason: staleness is the age of the last pass, not a failure. The additive
+`deploy_database_bindings.detail` column defaults to empty for existing installs.
 
 ## Removal and existing installs
 
@@ -67,7 +76,8 @@ database interruption; this feature does not preserve an existing TCP connection
 ## Verification
 
 - Component/API tests cover reference parsing, replacement identity, scoped status, stale observations,
-  safe removal plans, linked-database deletion, early preview credential refusal and generated-file containment.
+  the reported engine and recorded reconciliation reason with its bound, safe removal plans,
+  linked-database deletion, early preview credential refusal and generated-file containment.
 - `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
   provisions PostgreSQL, MySQL, MariaDB, Redis and MongoDB, authenticates from a separate client container,
   refuses a preview's production credential/network reference before allocation,

@@ -657,6 +657,7 @@ CREATE TABLE IF NOT EXISTS deploy_database_bindings (
   container_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   checked_at INTEGER NOT NULL DEFAULT 0,
+  detail TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(environment_id, connection_id)
 );
 
@@ -1036,6 +1037,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// Reconciliation knew why a binding could not be repaired and threw the
+	// reason away, so the settings page could only say "check that the
+	// container is running". The reason is kept on the binding it belongs to.
+	{"deploy_database_bindings", "detail", "TEXT NOT NULL DEFAULT ''"},
 	// Notification channels grew provider kinds beside the signed webhook.
 	// Existing rows are webhooks whose URL is also their display target.
 	{"deploy_notification_channels", "kind", "TEXT NOT NULL DEFAULT 'webhook'"},

@@ -55,6 +55,30 @@ export const releaseOwner = {
   "run-id": "84",
 }
 
+/**
+ * A complete backup job. The Databases settings page reads a job's schedule,
+ * its runs and what it has stored, so a partial literal in a test is a crash
+ * rather than a thinner assertion.
+ */
+export function backupJob(fields: { id: number; name: string } & Record<string, unknown>) {
+  return {
+    sources: ["/srv/app"],
+    excludes: [],
+    targetKind: "local",
+    target: { path: "/var/backups" },
+    schedule: "0 3 * * *",
+    retention: 7,
+    retentionDays: 0,
+    enabled: true,
+    createdAt: now,
+    hasCredentials: false,
+    overdue: false,
+    stored: { runs: 3, bytes: 1024 },
+    databaseDumps: [],
+    ...fields,
+  }
+}
+
 export const run = {
   id: 84,
   runNumber: 1,

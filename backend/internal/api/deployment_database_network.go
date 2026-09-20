@@ -171,10 +171,10 @@ func (o *deploymentDatabaseNetworks) bind(ctx context.Context, network deploymen
 		return errors.New("the saved database port belongs to a different container; reconnect the database explicitly")
 	}
 	if err := o.attachDatabase(ctx, network, binding, detail); err != nil {
-		_, _ = s.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET status='unavailable',checked_at=? WHERE environment_id=? AND connection_id=?`, time.Now().UTC().Unix(), network.EnvironmentID, connectionID)
+		o.markUnavailable(ctx, network.EnvironmentID, connectionID, err)
 		return err
 	}
-	_, err = s.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET container_id=?,container_name=?,status='connected',checked_at=? WHERE environment_id=? AND connection_id=?`, detail.ID, strings.TrimPrefix(detail.Name, "/"), time.Now().UTC().Unix(), network.EnvironmentID, connectionID)
+	_, err = s.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET container_id=?,container_name=?,status='connected',detail='',checked_at=? WHERE environment_id=? AND connection_id=?`, detail.ID, strings.TrimPrefix(detail.Name, "/"), time.Now().UTC().Unix(), network.EnvironmentID, connectionID)
 	return err
 }
 
@@ -275,6 +275,33 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 	return o.server.databaseApplicationURL(ctx, conn, dsn)
 }
 
+// markUnavailable records why a binding could not be repaired, beside the
+// status the settings page already reads.
+//
+// The reason was previously computed on every reconciliation pass and dropped,
+// which left one sentence for every cause: check that the container is
+// running. These are the adapter's own refusals — a replaced container that no
+// longer matches the saved identity, an alias another container has taken, a
+// network namespace that cannot join a bridge — and an operator who cannot see
+// which one applies cannot act on any of them.
+//
+// Bounded, because a Docker error is not written to a length this column
+// should hold, and it is a refusal rather than a credential: the same sentence
+// the API already returns from the routes that perform these operations.
+func (o *deploymentDatabaseNetworks) markUnavailable(ctx context.Context, environmentID, connectionID int64, cause error) {
+	detail := ""
+	if cause != nil {
+		detail = cause.Error()
+		// On a rune boundary: a byte slice through a multi-byte character
+		// would store text no reader can decode.
+		if len(detail) > 300 {
+			detail = strings.ToValidUTF8(detail[:300], "")
+		}
+	}
+	_, _ = o.server.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET status='unavailable',detail=?,checked_at=? WHERE environment_id=? AND connection_id=?`,
+		detail, time.Now().UTC().Unix(), environmentID, connectionID)
+}
+
 func (o *deploymentDatabaseNetworks) record(ctx context.Context, action string, environmentID, connectionID int64, containerID string, err error) {
 	raw, _ := json.Marshal(map[string]any{"environmentId": environmentID, "connectionId": connectionID, "containerId": containerID})
 	o.server.Audit.Record(ctx, audit.Entry{Actor: "system", Action: action, Target: strconv.FormatInt(environmentID, 10), Success: err == nil, Detail: string(raw)})
@@ -318,7 +345,7 @@ func (o *deploymentDatabaseNetworks) Reconcile(ctx context.Context) error {
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("environment %d database %d needs reconnection", v.environmentID, v.connectionID))
-			_, _ = o.server.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET status='unavailable',checked_at=? WHERE environment_id=? AND connection_id=?`, time.Now().UTC().Unix(), v.environmentID, v.connectionID)
+			o.markUnavailable(ctx, v.environmentID, v.connectionID, err)
 		}
 	}
 	return errors.Join(errs...)

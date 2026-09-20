@@ -267,8 +267,17 @@ return a hundred belonging to other containers and none belonging to this one. T
 served here rather than computed in the browser — a reading like "restarts in the last hour" worked
 out during render reads the clock on every re-render, so the figure would depend on when React
 happened to paint. `kinds` defaults to **containers and networks** rather than containers alone: a
-database network carries the same environment label (`deployment_database_network.go`), and one
-disappearing under a running release is exactly what this feed is for.
+network disappearing under a running release is exactly what this feed is for.
+
+A network is not recognised the way a container is. Docker puts an object's labels in the event's
+actor attributes for a container, which is what the owner filter reads; for a network it sends `name`
+and `type` and nothing else, whatever the network was created with — so the label test silently drops
+every network event and adding the kind would achieve nothing. `ownsEvent` falls back to the name for
+that one kind, which this dashboard chose and which carries the environment in it: `jd-e7-db-…` for a
+database network (`deployment_database_network.go`), `jd-preview-e7` and `jd-preview-e7-…` for a
+preview's. The trailing separator is what stops environment 7 claiming environment 70's. This was
+found by the live test rather than by reading the API reference, which is the argument for having
+one.
 
 `handleDeploymentLifecycleStream` follows the same slice live. Without it the feed learned about a
 restart up to ten seconds after the chart beside it had drawn the 502s, which is not one timeline.
@@ -295,9 +304,14 @@ minutes, because a release's containers appear after the build rather than with 
 follow it — a symmetric window would let a deploy at 10:05 explain a container that died at 10:01,
 which reads as "the deploy broke it" when the truth is the reverse.
 
-Two actions are never a release's doing however well they line up. `oom` and `health_status:*` are
-the kernel's reaper and a health check reporting something that happened *to* a container, and filing
-those under "this dashboard" sends an operator to the audit log for an answer that is not there.
+Three actions are never a release's doing however well they line up. `die`, `oom` and
+`health_status:*` are the daemon and the kernel reporting something that happened *to* a container,
+and filing those under "this dashboard" sends an operator to the audit log for an answer that is not
+there. `die` is on the list even though a release genuinely causes one when it recreates a container:
+the host feed is right to attribute that, because it has an audit entry naming the container seconds
+away, while this pass has a project's name and a fifteen-minute window — which a container that
+crashed of its own accord a minute after an unrelated deploy fits perfectly well. An exit is what the
+reader came to the page to explain, so a confident wrong answer about it is the expensive one.
 
 `correlateEventsWith` is the shared walk both passes use, and it skips an event that already carries a
 trigger, which is what makes "first match wins" true rather than "last one seen wins".
@@ -443,7 +457,11 @@ default kinds are containers and networks and a junk `since` is ignored, and —
 that a release names itself as the cause of its own containers, that it never explains what happened
 before it or outside its window, that an OOM kill and a health flip are never the dashboard's doing,
 that another project's release and a refused action explain nothing, and that an entry naming the
-container itself wins over the one naming its project. `tests/browser/deploy-requests.spec.ts`
+container itself wins over the one naming its project. `TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause`
+drives the whole path against a real daemon — a labelled container exiting 137 and a named network
+destroyed, read back through the real routes and the real socket — because the one thing the unit
+tests cannot hold is whether Docker still carries an object's labels on its events.
+`tests/browser/deploy-requests.spec.ts`
 covers the three views, the readings, chip narrowing, the opened row, the absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
 on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which

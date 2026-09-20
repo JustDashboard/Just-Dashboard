@@ -134,6 +134,14 @@ carries no licensing question at all.
   drives the container-side script against `caddy:2-alpine`: a roll under the reader, the rolled
   generation found by inode with its tail recovered, the new live file, a vanished inode reading as
   absent. It starts one idle container and removes it.
+- Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds, or
+  either endpoint in `handlers_deploy_requests.go` — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause -count=1 -v`.
+  It labels a real container and a real network the way the runtime owner labels what it creates,
+  lets the container exit 137, and reads both back through the real routes and the real socket. The
+  feed rests on Docker putting an object's labels in an event's actor attributes, and nothing in this
+  code would notice if that stopped being true — it is already false for networks, which is what the
+  fixture exists to pin. It creates two containers and one network and removes them.
 - Changes to deployment routes, activation cutover or runtime ownership also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
   and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeLossKeepsExactlyOneReleaseLive -count=1 -v`.

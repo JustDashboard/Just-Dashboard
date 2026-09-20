@@ -29,17 +29,50 @@ func TestLifecycleFeedShowsOnlyThisEnvironmentsEvents(t *testing.T) {
 	buffer := []dockerx.Event{
 		event(now, "container", "die", "jd-e6-r1", owner("6")),
 		event(now.Add(-time.Minute), "container", "start", "jd-e21-r1", owner("21")),
-		event(now.Add(-2*time.Minute), "network", "destroy", "jd-db-e6", owner("6")),
+		// Docker sends a network's `name` and `type` and nothing else — no
+		// labels, ever — so this is how a real one arrives and the name is the
+		// only thing left to recognise it by.
+		event(now.Add(-2*time.Minute), "network", "destroy", "jd-e6-db-9f2c1a4b7e05", nil),
+		// Environment 60's, which a prefix test without the separator would
+		// hand to environment 6.
+		event(now.Add(-3*time.Minute), "network", "destroy", "jd-e60-db-0011aabbccdd", nil),
 		// A container nobody here owns: an operator's own compose stack.
-		event(now.Add(-3*time.Minute), "container", "die", "postgres", nil),
+		event(now.Add(-4*time.Minute), "container", "die", "postgres", nil),
 	}
 
 	got := ownedByEnvironment(buffer, 6, time.Time{}, 100)
 	if len(got) != 2 {
 		t.Fatalf("want this environment's two events, got %d: %+v", len(got), got)
 	}
-	if got[0].Name != "jd-e6-r1" || got[1].Name != "jd-db-e6" {
+	if got[0].Name != "jd-e6-r1" || got[1].Name != "jd-e6-db-9f2c1a4b7e05" {
 		t.Errorf("newest-first order not preserved: %s, %s", got[0].Name, got[1].Name)
+	}
+}
+
+// A preview's network is named for the environment it belongs to as well, and
+// both of its spellings have to be recognised without swallowing a longer id.
+func TestAPreviewNetworkIsRecognisedByItsName(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		owned bool
+	}{
+		{"jd-preview-e7", true},
+		{"jd-preview-e7-1f4c9a0b2d3e4f50", true},
+		{"jd-e7-db-9f2c1a4b7e05", true},
+		{"jd-preview-e70", false},
+		{"jd-preview-e70-1f4c9a0b2d3e4f50", false},
+		{"jd-e70-db-9f2c1a4b7e05", false},
+		{"bridge", false},
+	} {
+		got := ownsEvent(dockerx.Event{Type: "network", Name: c.name}, 7)
+		if got != c.owned {
+			t.Errorf("%s: owned by environment 7 = %v, want %v", c.name, got, c.owned)
+		}
+	}
+	// The name is a fallback for networks alone. A container always carries
+	// the labels, so reading its name instead would be guessing.
+	if ownsEvent(dockerx.Event{Type: "container", Name: "jd-e7-r1"}, 7) {
+		t.Error("a container is identified by its labels, not by what it is called")
 	}
 }
 
@@ -67,9 +100,8 @@ func TestLifecycleFeedHonoursTheWindowAndTheLimit(t *testing.T) {
 	}
 }
 
-// A database network carries this dashboard's environment label too, and a
-// network disappearing under a running deployment is exactly the kind of thing
-// the feed exists for — so the default is not containers alone.
+// A network disappearing under a running deployment is exactly the kind of
+// thing the feed exists for, so the default is not containers alone.
 func TestLifecycleQueryDefaultsToContainersAndNetworks(t *testing.T) {
 	base := lifecycleQueryFrom(url.Values{})
 	if len(base.kinds) != 2 || base.kinds[0] != "container" || base.kinds[1] != "network" {
@@ -147,8 +179,11 @@ func TestAReleaseNeverExplainsWhatHappenedBeforeIt(t *testing.T) {
 		TS: now, Action: "deploy.run", Target: "lampino", Username: "wayy", Success: true,
 	})
 
+	// A start rather than an exit, so this holds the direction alone: an exit
+	// is refused for a different reason and would pass this whatever the
+	// window did.
 	events := correlated(t, s, "lampino", []dockerx.Event{
-		event(now.Add(-2*time.Minute), "container", "die", "jd-e6-r1", owner("6")),
+		event(now.Add(-2*time.Minute), "container", "start", "jd-e6-r1", owner("6")),
 	})
 	if events[0].Trigger != nil {
 		t.Fatalf("an entry written after the event cannot have caused it: %+v", events[0].Trigger)
@@ -171,10 +206,12 @@ func TestAReleaseStopsExplainingThingsOnceItIsOldEnough(t *testing.T) {
 	}
 }
 
-// The kernel's reaper and a health check are the daemon reporting something
-// that happened *to* a container. Filing those under "this dashboard" sends an
-// operator to the audit log for an answer that is not there.
-func TestTheDashboardIsNeverBlamedForAnOOMKillOrAHealthFlip(t *testing.T) {
+// An exit, the kernel's reaper and a health check are the daemon reporting
+// something that happened *to* a container. Filing those under "this
+// dashboard" sends an operator to the audit log for an answer that is not
+// there — and an exit is the one the reader came to the page to explain, so a
+// wrong answer about it is the expensive one.
+func TestTheDashboardIsNeverBlamedForAnExitOOMKillOrHealthFlip(t *testing.T) {
 	s := testServer(t)
 	now := time.Now().UTC()
 	s.Audit.Record(t.Context(), audit.Entry{
@@ -182,7 +219,7 @@ func TestTheDashboardIsNeverBlamedForAnOOMKillOrAHealthFlip(t *testing.T) {
 		Username: "wayy", Success: true,
 	})
 
-	for _, action := range []string{"oom", "health_status: unhealthy"} {
+	for _, action := range []string{"die", "oom", "health_status: unhealthy"} {
 		events := correlated(t, s, "lampino", []dockerx.Event{
 			event(now, "container", action, "jd-e6-r1", owner("6")),
 		})

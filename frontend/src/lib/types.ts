@@ -3352,6 +3352,23 @@ export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "
   identity?: SourceIdentity
 }
 
+/**
+ * One database bound to an environment's managed network, as reconciliation
+ * last observed it. `detail` is why the last pass could not repair a binding;
+ * it is empty while the database is connected.
+ */
+export type DeploymentDatabaseLink = {
+  connectionId: number
+  name: string
+  driver: DbDriver
+  database: string
+  network: string
+  hostname: string
+  status: "pending" | "connected" | "stale" | "unavailable"
+  detail?: string
+  checkedAt?: string
+}
+
 export type DeploymentRemovalTarget = {
   id: string
   kind: string
