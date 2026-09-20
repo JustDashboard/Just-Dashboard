@@ -272,11 +272,35 @@ type deploymentLifecycle struct {
 }
 
 // deploymentEventKinds is what a deployment owns that the daemon emits events
-// about. Containers are the reading the page exists for; a database network
-// carries this dashboard's environment label too
-// (`deployment_database_network.go`), and a network disappearing under a
-// running deployment is exactly the kind of thing the feed is for.
+// about. Containers are the reading the page exists for; a network vanishing
+// under a running deployment is the other thing worth hearing, and `ownsEvent`
+// below is what makes recognising one possible at all.
 var deploymentEventKinds = []string{"container", "network"}
+
+// ownsEvent reports whether an event happened to something this environment owns.
+//
+// A container says so itself: Docker puts an object's labels in the event's
+// actor attributes, so the dashboard's own namespace rides along on every
+// container event and the answer is a map lookup.
+//
+// A network does not. The daemon sends `name` and `type` for one and nothing
+// else — no labels, however they were created — so the same test silently drops
+// every network event, which is the whole of what including the kind would
+// otherwise achieve. What is left is the name, and that this dashboard chose:
+// `jd-e7-db-…` for a database network and `jd-preview-e7…` for a preview's both
+// carry the environment in them. The trailing separator is what keeps
+// environment 7 from claiming environment 70's.
+func ownsEvent(event dockerx.Event, environmentID int64) bool {
+	if event.Owner["environment-id"] == strconv.FormatInt(environmentID, 10) {
+		return true
+	}
+	if event.Type != "network" {
+		return false
+	}
+	preview := fmt.Sprintf("jd-preview-e%d", environmentID)
+	return strings.HasPrefix(event.Name, fmt.Sprintf("jd-e%d-", environmentID)) ||
+		event.Name == preview || strings.HasPrefix(event.Name, preview+"-")
+}
 
 // lifecycleQuery is the question the Events view asks, in the two halves it is
 // answered in: `kinds` and `search` the buffer can apply while it walks itself,
@@ -311,10 +335,9 @@ func lifecycleQueryFrom(q url.Values) lifecycleQuery {
 // host's, and asking the buffer for only `limit` of them would return a hundred
 // events belonging to other containers and none belonging to this one.
 func ownedByEnvironment(events []dockerx.Event, environmentID int64, since time.Time, limit int) []dockerx.Event {
-	want := strconv.FormatInt(environmentID, 10)
 	out := []dockerx.Event{}
 	for _, event := range events {
-		if event.Owner["environment-id"] != want {
+		if !ownsEvent(event, environmentID) {
 			continue
 		}
 		if !since.IsZero() && event.Time.Before(since) {
@@ -397,7 +420,6 @@ func (s *Server) handleDeploymentLifecycleStream(w http.ResponseWriter, r *http.
 			return nil
 		}
 	}
-	want := strconv.FormatInt(environmentID, 10)
 	events, unsubscribe := s.modules.dockerEvents.Subscribe()
 	defer unsubscribe()
 	for {
@@ -408,7 +430,7 @@ func (s *Server) handleDeploymentLifecycleStream(w http.ResponseWriter, r *http.
 			if !ok {
 				return nil
 			}
-			if ev.Owner["environment-id"] != want {
+			if !ownsEvent(ev, environmentID) {
 				continue
 			}
 			if err := conn.Send("events", []dockerx.Event{ev}); err != nil {
@@ -458,10 +480,19 @@ func (s *Server) correlateDeploymentEvents(r *http.Request, events []dockerx.Eve
 		})
 }
 
-// daemonOwnedAction reports the events nobody asks for: the kernel stopping a
-// container, and a health check changing its verdict.
+// daemonOwnedAction reports the events nobody asks for: a container exiting,
+// the kernel stopping one, and a health check changing its verdict. `dockerx`
+// draws the same line when it decides an event's source.
+//
+// An exit is on the list because this match is coarse. A release does cause
+// one when it recreates a container, and the host feed is right to attribute
+// that — it has an audit entry naming the container, seconds away. This pass
+// has a project's name and a fifteen-minute window, which a container that
+// crashed of its own accord a minute after an unrelated deploy fits perfectly
+// well. Labelling a crash "this dashboard did it" is the one error worth
+// engineering against: an exit is what the reader came here to explain.
 func daemonOwnedAction(action string) bool {
-	return action == "oom" || strings.HasPrefix(action, "health_status")
+	return action == "die" || action == "oom" || strings.HasPrefix(action, "health_status")
 }
 
 // deploymentEnvironment resolves the project in the URL to the environment its
