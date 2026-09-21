@@ -334,7 +334,7 @@ export function FirewallPanel({
         </Panel>
       )}
 
-      <Panel plain>
+      <Panel>
         <PanelHeader
           title="Rules"
           actions={
@@ -400,7 +400,7 @@ export function FirewallPanel({
               Nothing in these {rules.length} rules contains &ldquo;{query.trim()}&rdquo;.
             </EmptyNote>
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
               <Table containerClassName="max-h-[calc(100svh-26rem)]">
                 <TableHeader className={stickyTableHeader}>
                   <TableRow>

@@ -62,9 +62,10 @@ taking a frame:
   images; the attention and storage blocks inside a container's detail panel), the
   whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
   every area page the readings, the findings under them, the tables and the twenty probe blocks on
-  Tools), every block on the proxy pages (the overview's engine facts, attention list and sites; the
-  sites, certificates, streams and ports tables with their toolbars; the TLS report's readings,
-  findings, protocol, certificate, chain and HTTP rows; the password files and DNS provider lists),
+  Tools), every block on the proxy pages (the overview's engine facts, attention list, sites and
+  certificate expiry; the sites, certificates, streams and ports tables with their toolbars; the
+  TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
+  and DNS provider lists),
   health findings, the runtime-health bar, the Overview's last-hour sparklines, and the
   deployment pages' lists, overview facts, run summary and create flow are plain (the framed
   blocks in the deployment section are its two *pictures*: the GitHub App on Credentials — the
@@ -110,6 +111,34 @@ taking a frame:
   the body is `flush` (12px above, 8px below): it is the only thing marking where the section begins,
   and with nothing below it the first surface the body draws — a row's hover wash, a table header —
   butted into it and the rule read as an edge of that surface rather than as the line under the title.
+
+**And one kind of block came back to the frame: a table.** The 2026-09-21 pass found what sweeping
+tables into the second bullet had cost. A table's container is `overflow-auto`, so at any width where
+its columns stop fitting the grid is *already* clipped — and with nothing drawn at the boundary, a row
+whose actions sit past the edge reads as a row that has no actions. The proxy Sites table shipped
+exactly that: the last site's verbs were beyond an edge nothing marked, on a page that looked
+finished. §7 frames a `Pane` for this very property, and the only thing separating the two is that a
+`Pane` is a region of a workspace while this one sits in a page's flow.
+
+So **a panel whose body is a table is framed, and every other block on the page stays plain.** That
+is not a retreat from this section's argument — it is the argument: the frame separates *because* the
+readings, findings and lists around it have none. Security's Logins is the shape to check a page
+against — three framed grids read against one unframed `StatGrid`, and the page reads as three tables
+rather than as a stack of containers. A page on which the table is the only block is the easy case;
+a page on which everything is a table has a different problem than this rule.
+
+The flip is one word at the call site plus one on the bleed. A table inside a *plain* panel is bled
+out so its cells' own padding lines the first column up with the title; measured from a framed
+panel's origin that same bleed put the grid fifteen pixels through its own border, which is what
+framing one of these looked like at first. The bleed is written three ways across the product —
+`-mx-4` on a wrapper, `-mx-5` on the body, and nothing at all — so rather than compensate for it
+centrally, each one now carries the `group-data-[plain]/panel:` variant and simply does not apply
+once the panel has an edge; the outer-column padding rule that was written for the plain case is
+what then lands the column on the panel's gutter. The same pass
+fixed the neighbouring defect: `.scroll-affordance` painted its cover gradient in `--card`
+unconditionally, so every table on a plain panel wore a faint lighter smear down both edges — the
+same mistake §8 records for the sticky header, missed here because the gradient *named* the colour
+instead of inheriting `--panel-ground`.
 
 A panel that is also a destination takes `interactive`: its border steps up to `--border-strong`
 under the pointer, and nothing else moves.
@@ -715,7 +744,8 @@ no shadows, no icon plates, no badges, no rounded cards floating over the ground
 The passes, in order. Each one is a diff you can review on its own.
 
 1. **Remove the frames.** Every `Panel` becomes `Panel plain` unless it is one of the exceptions in §7:
-   a `Pane` (a working region with its own scrolling), a `Well` (output you read), a `Group` (a fence
+   a `Pane` (a working region with its own scrolling), a **table** (a region with its own scrolling
+   that happens to sit in the page's flow — §2), a `Well` (output you read), a `Group` (a fence
    inside a body), or something that genuinely floats (popover, dropdown, dialog). "It is a card" is
    not a reason. A block that is the whole of a section is a title and a hairline. Two blocks side by
    side are both plain; the gap between them is the separation. A framed block that survives this pass
@@ -726,9 +756,35 @@ The passes, in order. Each one is a diff you can review on its own.
    `className="h-full transition-colors group-hover:bg-row-hover"`; the arrow is the link's, not yours.
    The figure is 24px (`text-2xl`): `text-xl` is not on the ladder. A state colours the figure through
    `tone`, never through a badge beside it.
-3. **Lists are rows.** `RowList`/`Row` for things with a title and a second line, `FindingList` for
-   verdicts, a table for columns. Never a grid of framed cards standing in for rows. A scroll container
-   that holds plain rows pads by the rows' bleed (`-mx-3 px-3`), or it grows a sideways scrollbar.
+
+   **A page you *configure* is not exempt.** §16 makes this argument about `/deploy/new` and it
+   generalises to every settings tab in the product: the deployment Runtime tab ran ten fields, four
+   selects and two switches with not one figure among them, so none of the three loud things this
+   system trades decoration for could fire, and the screen had nothing on it a reader could find
+   without reading. It opens on four readings now — where it listens, what it may use, how it is
+   replaced, and what it can reach — and each is a fact the form beneath it sets, drawn from the
+   draft rather than the saved revision, because what you are setting is what the page is about.
+   A reading is `warning` where the *absence* of an answer is the answer: an uncapped container and
+   a port open on every interface are the two facts an operator wants off that page without opening
+   a fold.
+3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
+   a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
+   cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
+   (`-mx-3 px-3`), or it grows a sideways scrollbar.
+
+   **Then ask of every list on the page whether its rows are destinations.** A row that carries an
+   `href` — a project to enter, a site to open, a stack to look inside — is a choice, and the last
+   subsection of §16 gives it a `ChoiceList` of `ChoiceRow`s and the lit edge. A row that is a
+   *reading* keeps its hairlines and its wash, and a table of readings is never touched.
+
+   This is the pass that was missed everywhere, and the 2026-09-21 revamp exists because of it. The
+   lit edge shipped with `/deploy/new` and stayed there: `ChoiceRow` appeared in three files, all of
+   them under `new-project/`, so the git import panel was the only surface in the product that
+   answered the pointer with an edge — and the complaint that arrived, that one screen had depth and
+   the rest were flat, was a correct reading of exactly that. The proxy overview's sites, the Docker
+   overview's compose projects and its idle containers were all `Row`s with an `href` on them. It is
+   a numbered pass here rather than a sentence in §16 because a sentence in §16 is read by somebody
+   redesigning a **flow** page, which is precisely the reader who does not need it.
 4. **No decorative glyphs.** Headers, sections, tiles and modals carry no icon (§14). The glyphs that
    stay are wayfinding — the sidebar entry and a module tile's mark, drawn as a 12px `text-brand`
    glyph inline before the tile's eyebrow — and the ones that *are* the message: a `Status`, a

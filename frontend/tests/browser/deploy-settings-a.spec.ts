@@ -234,7 +234,7 @@ test.describe("Runtime settings", () => {
       .locator("form")
       .filter({ has: page.getByRole("heading", { name: "Runtime", exact: true }) })
 
-    await runtimeCard.getByLabel("Memory limit (MiB)").fill("512")
+    await runtimeCard.getByLabel("Memory limit").fill("512")
     await runtimeCard.getByLabel("CPU limit").fill("1.5")
     await runtimeCard.getByLabel("Process limit").fill("256")
     await runtimeCard.getByLabel("Restart policy").click()

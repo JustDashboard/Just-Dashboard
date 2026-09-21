@@ -279,6 +279,25 @@ const PAGES = [
   "/security/tools",
 ] as const
 
+/**
+ * §2: the only block on a page that may draw a frame is a table. A grid owns a
+ * scroll region, and an edge is what says where it ends — a row whose actions
+ * sit past the boundary otherwise reads as a row with no actions. Everything
+ * else in the page's flow stays plain, which is what the frame is read against.
+ *
+ * Asserted structurally rather than as a count, so the rule keeps holding as
+ * pages gain and lose tables.
+ */
+async function framedNonTables(page: Page) {
+  return page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
+    )
+      .filter((el) => !el.querySelector("[data-slot=table-container]"))
+      .map((el) => el.outerHTML.slice(0, 120)),
+  )
+}
+
 test("the overview reads as readings, findings and how the panel is reached", async ({ page }) => {
   await mockSecurity(page)
   await page.goto("/security")
@@ -316,11 +335,9 @@ for (const path of PAGES) {
     await mockSecurity(page)
     await page.goto(path)
     await page.waitForLoadState("networkidle")
-    // A dialog or sheet may frame itself; a block in the page's flow may not.
-    const framed = await page
-      .locator("[data-slot=page] section[data-slot=panel]:not([data-plain])")
-      .count()
-    expect(framed, `framed panels on ${path}`).toBe(0)
+    // A dialog or sheet may frame itself, and so may a table (§2); any other
+    // block in the page's flow may not.
+    expect(await framedNonTables(page), `framed non-table blocks on ${path}`).toEqual([])
   })
 
   test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {

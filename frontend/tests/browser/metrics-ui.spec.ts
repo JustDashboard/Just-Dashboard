@@ -4,9 +4,10 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * The metrics page after its design-system pass, against a mocked host.
  *
  * What is checked is the shape the redesign settled on and the features it
- * added, not the chart library: every block on the page is plain, the ten
- * headline readings are tiles, the moments list can zoom the charts, a zoom
- * is a link, the window exports as a file, and the live feed can be paused.
+ * added, not the chart library: every block on the page is plain but the one
+ * holding a table, the ten headline readings are tiles, the moments list can
+ * zoom the charts, a zoom is a link, the window exports as a file, and the
+ * live feed can be paused.
  * The screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
 
@@ -365,6 +366,25 @@ test.beforeEach(async ({ page }) => {
   await mockHost(page)
 })
 
+/**
+ * §2: the only block on a page that may draw a frame is a table. A grid owns a
+ * scroll region, and an edge is what says where it ends — a row whose actions
+ * sit past the boundary otherwise reads as a row with no actions. Everything
+ * else in the page's flow stays plain, which is what the frame is read against.
+ *
+ * Asserted structurally rather than as a count, so the rule keeps holding as
+ * pages gain and lose tables.
+ */
+async function framedNonTables(page: Page) {
+  return page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
+    )
+      .filter((el) => !el.querySelector("[data-slot=table-container]"))
+      .map((el) => el.outerHTML.slice(0, 120)),
+  )
+}
+
 test("the metrics page is readings on the page, not boxes", async ({ page }) => {
   await page.goto("/metrics")
   await expect(page.getByRole("heading", { name: "Metrics" })).toBeVisible()
@@ -377,8 +397,9 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
     "62°C",
   )
 
-  // Nothing on the page draws a frame: every panel is plain (design system §15).
-  await expect(page.locator("[data-slot=panel]:not([data-plain])")).toHaveCount(0)
+  // Nothing draws a frame but the Interfaces table (§2): the readings, the
+  // charts and the findings are all on the page's own ground.
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 
   // What the machine is made of, as a row of facts under the title.
   await expect(page.getByText("AMD EPYC 7B13")).toBeVisible()

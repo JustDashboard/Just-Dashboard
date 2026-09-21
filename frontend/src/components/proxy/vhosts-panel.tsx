@@ -272,7 +272,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         />
       </StatGrid>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Sites" />
         <PanelToolbar>
           <SearchInput
@@ -314,7 +314,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             <EmptyState icon={Globe} title="No sites match" className="mt-4" />
           ) : (
             <>
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

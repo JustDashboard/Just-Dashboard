@@ -196,7 +196,7 @@ export function StreamsPage() {
         </Notice>
       )}
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Port forwarding" />
         <PanelBody flush>
           {data.streams.length === 0 ? (
@@ -207,7 +207,7 @@ export function StreamsPage() {
               className="mt-2"
             />
           ) : (
-            <div className="-mx-4 min-w-0 animate-rise">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0 animate-rise">
               <Table>
                 <TableHeader>
                   <TableRow>

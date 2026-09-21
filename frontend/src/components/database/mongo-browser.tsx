@@ -740,7 +740,7 @@ function AggregateTab({
         </PanelFooter>
       </Panel>
       {result && (
-        <Panel plain>
+        <Panel>
           <PanelHeader title="Result" />
           <PanelBody flush>
             <ResultGrid

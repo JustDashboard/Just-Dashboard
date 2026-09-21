@@ -137,7 +137,7 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
 
   return (
     <>
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Interactive logins" />
         <PanelBody flush>
           {loading && !data ? (
@@ -152,7 +152,7 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
               className="mt-3"
             />
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -255,7 +255,7 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
   }
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title="Attackers"
         actions={
@@ -291,7 +291,7 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
             className="mt-3"
           />
         ) : (
-          <div className="-mx-4 min-w-0">
+          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
@@ -389,7 +389,7 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
   }, [data, query])
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title={showFailed ? "Failed login attempts" : "Recent logins"}
         actions={
@@ -460,7 +460,7 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
             />
           )
         ) : (
-          <div className="-mx-4 min-w-0">
+          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>

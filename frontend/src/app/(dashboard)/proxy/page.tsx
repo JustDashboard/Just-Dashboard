@@ -10,7 +10,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { BarList, type BarListItem } from "@/components/bar-list"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { StatusDot, Status } from "@/components/status-dot"
 import { FindingList } from "@/components/finding-list"
@@ -62,6 +63,37 @@ export default function ProxyOverviewPage() {
     () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error),
     [certs.data],
   )
+  // The certificates as a reading rather than a count. `share` is life left
+  // against the longest term on this host, floored at the ninety days certbot
+  // issues for, so a host whose certificates are all nearly due reads as a run
+  // of short bars instead of one full-length bar the rest are measured against.
+  const certExpiry = useMemo<BarListItem[]>(() => {
+    const all = certs.data ?? []
+    const horizon = Math.max(...all.map((c) => c.daysLeft), 90)
+    return [...all]
+      .sort((a, b) => a.daysLeft - b.daysLeft)
+      .slice(0, 8)
+      .map((cert) => {
+        const wrong = Boolean(cert.error) || cert.expired
+        return {
+          key: cert.path,
+          label: cert.name,
+          // The figure column is a fixed width and does not truncate, so the
+          // reading is a word rather than the sentence the finding carries.
+          value: cert.error ? "error" : cert.expired ? "expired" : `${cert.daysLeft}d`,
+          share: cert.daysLeft / horizon,
+          signal: wrong || cert.expiring ? 1 : 0,
+          tone: wrong ? "danger" : "warning",
+          // Where it came from, because certbot renews itself and an imported
+          // file does not — which is what the days left mean differently.
+          hint: cert.selfSigned
+            ? "self-signed"
+            : cert.source.startsWith("nginx:")
+              ? "site"
+              : cert.source,
+        }
+      })
+  }, [certs.data])
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
     certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
@@ -228,64 +260,113 @@ export default function ProxyOverviewPage() {
         </PanelBody>
       </Panel>
 
-      <Panel plain>
-        <PanelHeader
-          title="Sites"
-          actions={
-            hosts.length > 0 && (
-              <Link
-                href="/proxy/sites"
-                className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-              >
-                All sites <ArrowRight className="size-3" />
-              </Link>
-            )
-          }
-        />
-        <PanelBody flush>
-          {vhosts.loading ? (
-            <div className="space-y-3 py-1">
-              <Skeleton className="h-4 w-64" />
-              <Skeleton className="h-4 w-48" />
-            </div>
-          ) : hosts.length === 0 ? (
-            <EmptyState
-              icon={Globe}
-              title="Nothing configured yet"
-              description={
-                status.nginx
-                  ? "Add a site to put a domain in front of something on this machine, or issue a certificate from the Certificates tab."
-                  : "No nginx sites, Caddyfile or shared Caddy ingress was found on this host."
-              }
-              className="mt-2"
-            />
-          ) : (
-            <RowList className="animate-rise">
-              {hosts.slice(0, 8).map((vhost) => (
-                <Row
-                  key={`${vhost.kind}:${vhost.name}`}
-                  href={`/proxy/sites?site=${encodeURIComponent(vhost.name)}`}
-                  leading={<StatusDot state={vhost.enabled ? "running" : "stopped"} />}
-                  title={vhost.name}
-                  subtitle={
-                    [vhost.serverNames.join(", "), vhost.upstreams[0]]
-                      .filter(Boolean)
-                      .join(" → ") || vhost.path
-                  }
-                  mono
-                  trailing={
-                    vhost.tls ? (
-                      <Status state="active" label="TLS" icon={ShieldCheck} />
-                    ) : (
-                      <span className="text-xs text-muted-foreground">plain HTTP</span>
-                    )
-                  }
-                />
-              ))}
-            </RowList>
-          )}
-        </PanelBody>
-      </Panel>
+      {/* The list a reader leaves this page through, beside a reading that
+          stands still — the shape the host overview ends on. */}
+      <div className="grid items-start gap-6 lg:grid-cols-3 [&>*]:min-w-0">
+        <Panel plain className="lg:col-span-2">
+          <PanelHeader
+            title="Sites"
+            actions={
+              hosts.length > 0 && (
+                <Link
+                  href="/proxy/sites"
+                  className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                >
+                  All sites <ArrowRight className="size-3" />
+                </Link>
+              )
+            }
+          />
+          <PanelBody flush>
+            {vhosts.loading ? (
+              <div className="space-y-3 py-1">
+                <Skeleton className="h-4 w-64" />
+                <Skeleton className="h-4 w-48" />
+              </div>
+            ) : hosts.length === 0 ? (
+              <EmptyState
+                icon={Globe}
+                title="Nothing configured yet"
+                description={
+                  status.nginx
+                    ? "Add a site to put a domain in front of something on this machine, or issue a certificate from the Certificates tab."
+                    : "No nginx sites, Caddyfile or shared Caddy ingress was found on this host."
+                }
+                className="mt-2"
+              />
+            ) : (
+              // Every row here is a site to open, which is the case §16 names:
+              // a list of destinations becomes a `ChoiceList` and gets the edge,
+              // on a reading page as much as on a flow one. It read as a listing
+              // while it was the same row the tables below it use for values.
+              <ChoiceList aria-label="Sites" className="animate-rise">
+                {hosts.slice(0, 8).map((vhost) => (
+                  <ChoiceRow
+                    key={`${vhost.kind}:${vhost.name}`}
+                    href={`/proxy/sites?site=${encodeURIComponent(vhost.name)}`}
+                    verb={`Open ${vhost.name}`}
+                    leading={<StatusDot state={vhost.enabled ? "running" : "stopped"} />}
+                    title={vhost.name}
+                    description={
+                      <span className="font-mono">
+                        {[vhost.serverNames.join(", "), vhost.upstreams[0]]
+                          .filter(Boolean)
+                          .join(" → ") || vhost.path}
+                      </span>
+                    }
+                    trailing={
+                      vhost.tls ? (
+                        <Status state="active" label="TLS" icon={ShieldCheck} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">plain HTTP</span>
+                      )
+                    }
+                  />
+                ))}
+              </ChoiceList>
+            )}
+          </PanelBody>
+        </Panel>
+
+        {/* The four figures above count the certificates; none of them says
+            which one runs out first, and that is the reading somebody opens a
+            certificate list for. §7: the meter's track behind each name, the
+            figure at the right, and a signal segment for the share that is
+            wrong. */}
+        <Panel plain>
+          <PanelHeader
+            title="Certificate expiry"
+            actions={
+              certExpiry.length > 0 && (
+                <Link
+                  href="/proxy/certificates"
+                  className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                >
+                  All certificates <ArrowRight className="size-3" />
+                </Link>
+              )
+            }
+          />
+          <PanelBody flush>
+            {certs.loading ? (
+              <div className="space-y-3 py-1">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-4 w-56" />
+              </div>
+            ) : (
+              <BarList
+                className="animate-rise"
+                items={certExpiry}
+                emptyLabel={
+                  status.certbot
+                    ? "Nothing issued yet — issue a certificate from the Certificates tab."
+                    : "No certificates were found on this host."
+                }
+              />
+            )}
+          </PanelBody>
+        </Panel>
+      </div>
     </Page>
   )
 }

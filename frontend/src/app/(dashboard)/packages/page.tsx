@@ -456,7 +456,7 @@ export default function PackagesPage() {
           </nav>
 
           {view === "installed" && (
-            <Panel plain>
+            <Panel>
               <PanelToolbar>
                 <SearchInput
                   value={filter}
@@ -512,7 +512,7 @@ export default function PackagesPage() {
                     }
                   />
                 ) : (
-                  <div className="-mx-4 min-w-0">
+                  <div className="group-data-[plain]/panel:-mx-4 min-w-0">
                     <PackageTable packages={visible.slice(0, MAX_ROWS)} onInspect={setInspect} />
                   </div>
                 )}
@@ -532,7 +532,7 @@ export default function PackagesPage() {
           )}
 
           {view === "updates" && (
-            <Panel plain>
+            <Panel>
               <PanelToolbar className="min-h-12">
                 <p className="text-body text-muted-foreground">
                   {!report
@@ -571,7 +571,7 @@ export default function PackagesPage() {
                     }
                   />
                 ) : (
-                  <div className="-mx-4 min-w-0">
+                  <div className="group-data-[plain]/panel:-mx-4 min-w-0">
                     <Table containerClassName="max-h-[calc(100svh-30rem)]">
                       <TableHeader className={stickyTableHeader}>
                         <TableRow>

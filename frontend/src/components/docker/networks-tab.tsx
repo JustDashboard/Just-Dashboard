@@ -107,7 +107,7 @@ export function NetworksTab({
   return (
     <div className="space-y-4">
       {/* Plain: the list is the page. */}
-      <Panel plain className="animate-rise">
+      <Panel className="animate-rise">
         <PanelHeader
           title="Networks"
           actions={
@@ -212,7 +212,7 @@ export function NetworksTab({
                 ))}
               </ul>
 
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <Table>
                   <TableHeader>
                     <TableRow>

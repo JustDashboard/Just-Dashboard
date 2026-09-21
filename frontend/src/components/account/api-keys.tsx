@@ -90,7 +90,7 @@ export function ApiKeysTable({ keys }: { keys: ReturnType<typeof useApiKeys> }) 
 
   return (
     <>
-      <Panel plain>
+      <Panel>
         <PanelBody flush>
           <Table>
             <TableHeader>

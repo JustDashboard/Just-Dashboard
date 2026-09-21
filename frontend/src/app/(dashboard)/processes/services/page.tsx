@@ -194,7 +194,7 @@ function Services() {
         />
       </StatGrid>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Units" advanced />
         <PanelToolbar>
           <SearchInput
@@ -228,7 +228,7 @@ function Services() {
             <EmptyState icon={ListOrdered} title="No units match" className="mt-4" />
           ) : (
             <>
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

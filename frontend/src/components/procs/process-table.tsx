@@ -195,9 +195,9 @@ export function LiveProcesses() {
         </StatGrid>
       )}
 
-      {/* The table is the whole of the page below the figures: a title and a
-          hairline, no box. */}
-      <Panel plain>
+      {/* Framed, because it is a table: the grid owns a scroll region and the
+          edge is what says so (§2). The figures above it stay plain. */}
+      <Panel>
         <PanelHeader
           title="Process table"
           actions={
@@ -262,9 +262,10 @@ export function LiveProcesses() {
           {processList.error && !data && <ErrorState error={processList.error} />}
           {data && (
             <>
-              {/* Bled by the cells' own padding, so the first column starts
-                  where the title does. */}
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              {/* The outer columns take the gutter from their own cell padding,
+                  so the first column starts in the title's column; the `-mx`
+                  bleed that does the same on a plain panel is gated to it (§2). */}
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <ProcessTableWide
                   rows={data.processes}
                   ratesReady={data.ratesReady}

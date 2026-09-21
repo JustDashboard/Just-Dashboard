@@ -65,7 +65,7 @@ export default function ScheduledPage() {
 
       <TimersPanel confirm={confirm} />
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="System cron files" advanced />
         <PanelBody className="space-y-6">
           {system.data?.map((file) => (
@@ -81,7 +81,7 @@ export default function ScheduledPage() {
               {file.jobs.length === 0 ? (
                 <EmptyNote className="py-2 text-left">No jobs.</EmptyNote>
               ) : (
-                <Table containerClassName="-mx-4 w-auto">
+                <Table containerClassName="group-data-[plain]/panel:-mx-4 w-auto">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-52">Schedule</TableHead>

@@ -215,12 +215,12 @@ export function JobSheet({
               )}
             </DetailList>
 
-            <Panel plain>
+            <Panel>
               <PanelHeader
                 title="Runs"
                 actions={runs.data?.running && <Status state="running" label="running now" />}
               />
-              <PanelBody flush className="-mx-4">
+              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
                 {runs.loading && !runs.data ? (
                   <LoadingRows rows={3} className="px-4" />
                 ) : runs.data?.runs.length === 0 ? (

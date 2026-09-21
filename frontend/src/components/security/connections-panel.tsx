@@ -144,7 +144,7 @@ export function ConnectionsPanel() {
           opens to ask what is reachable. */}
       <AreaFindings posture={posture} area="ports" onFix={applyFix} />
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Live connections" />
         {/* One strip, not two. The filter and the search that change which
             rows are shown belong on the same line as each other. */}
@@ -186,7 +186,7 @@ export function ConnectionsPanel() {
               />
             )
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
               <Table containerClassName="max-h-[calc(100svh-28rem)]">
                 <TableHeader className={stickyTableHeader}>
                   <TableRow>

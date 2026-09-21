@@ -65,7 +65,7 @@ export function SessionsTable({ sessions }: { sessions: ReturnType<typeof useSes
   if (error) return <ErrorState error={error} />
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelBody flush>
         <Table>
           <TableHeader>

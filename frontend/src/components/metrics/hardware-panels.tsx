@@ -267,7 +267,7 @@ export function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
 
 export function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title="Interfaces"
         actions={
@@ -276,9 +276,10 @@ export function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
           </span>
         }
       />
-      {/* The table bleeds by its own cell padding so the first column starts
-          where the title does, as a plain list's rows do. */}
-      <PanelBody flush className="-mx-4">
+      {/* The bleed is plain-only: inside this panel's frame the outer columns
+          take the gutter from their own cell padding instead, which lands them
+          in the title's column either way (§2). */}
+      <PanelBody flush className="group-data-[plain]/panel:-mx-4">
         <Table>
           <TableHeader>
             <TableRow>

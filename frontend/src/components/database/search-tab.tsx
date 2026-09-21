@@ -63,7 +63,7 @@ export function SearchTab({
   }
 
   return (
-    <Panel plain className="animate-rise">
+    <Panel className="animate-rise">
       <PanelHeader title="Find a value" />
       <PanelToolbar>
         <SearchInput
@@ -113,7 +113,7 @@ export function SearchTab({
                 description={`Searched ${plural(result.tablesScanned, "table")}.`}
               />
             ) : (
-              <div className="-mx-4 min-w-0 overflow-x-auto">
+              <div className="group-data-[plain]/panel:-mx-4 min-w-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>

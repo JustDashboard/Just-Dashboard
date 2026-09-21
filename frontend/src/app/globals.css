@@ -852,10 +852,17 @@
  * looked for — and it is now the same gesture as every other depth in the
  * product, where a surface separates by its ground rather than by a glow. */
 .scroll-affordance {
+  /* The cover gradient has to be the ground the table actually sits on, which
+     is what `--panel-ground` already resolves (card framed, background plain).
+     It read `--card` unconditionally, so every table on a plain panel wore a
+     faint lighter smear down both edges — the same defect the sticky header
+     above was fixed for, missed here because the gradient names the colour
+     rather than inheriting it. The shade stays `--background`: it is a shadow
+     cast onto the page, not a fill of the surface. */
   --scroll-edge-shade: color-mix(in oklab, var(--background) 88%, transparent);
   background-image:
-    linear-gradient(to right, var(--card) 30%, transparent),
-    linear-gradient(to left, var(--card) 30%, transparent),
+    linear-gradient(to right, var(--panel-ground, var(--card)) 30%, transparent),
+    linear-gradient(to left, var(--panel-ground, var(--card)) 30%, transparent),
     linear-gradient(to right, var(--scroll-edge-shade), transparent),
     linear-gradient(to left, var(--scroll-edge-shade), transparent);
   background-position:
@@ -872,7 +879,28 @@
   background-attachment: local, local, scroll, scroll;
 }
 
-/* A table that runs to the panel's edge still lines its outer columns up with
+/* A table is a region, and a region takes an edge.
+ *
+ * §2 says a block on a page is plain unless it can say why it needs one. A
+ * table can say why, and the reason is its own scrolling: the container is
+ * `overflow-auto`, so at any width where the columns stop fitting the grid is
+ * already clipped — and with no boundary drawn, a row whose actions are cut
+ * off reads as a row that has no actions rather than as a region you can
+ * scroll. The proxy Sites table shipped exactly that. §7 gives a `Pane` a
+ * frame for this same property; the only thing separating the two is that a
+ * `Pane` is a region of a workspace and this one sits in a page's flow.
+ *
+ * So a table's panel is framed rather than plain. The bleed that lines a
+ * *plain* panel's first column up with its title is measured from the page's
+ * own edge; inside a frame that origin is wrong, and it put the grid fifteen
+ * pixels through its own border. Rather than compensate for it here — the
+ * bleed is written three ways across the call sites, `-mx-4` on a wrapper,
+ * `-mx-5` on the body, and nothing at all — each one now carries the
+ * `group-data-[plain]/panel:` variant, so the bleed simply does not apply when
+ * the panel has an edge — and the rule below, which was written for the plain
+ * case, is what lands the column on the panel's gutter in the framed one.
+ *
+ * A table that runs to the panel's edge still lines its outer columns up with
  * the panel's own padding, so the first column reads as a continuation of the
  * title above it rather than a grid that merely shares the frame.
  *

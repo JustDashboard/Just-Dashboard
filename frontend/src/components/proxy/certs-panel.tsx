@@ -267,7 +267,7 @@ export function CertificatesPage() {
         <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
       )}
 
-      <Panel plain>
+      <Panel>
         <PanelHeader
           title="certbot"
           actions={
@@ -311,7 +311,7 @@ export function CertificatesPage() {
         </PanelBody>
       </Panel>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Installed certificates" />
         <PanelBody flush>
           {certs.loading ? (
@@ -319,7 +319,7 @@ export function CertificatesPage() {
           ) : certs.error ? (
             <ErrorState error={certs.error} />
           ) : certs.data && certs.data.length > 0 ? (
-            <div className="-mx-4 min-w-0 animate-rise">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0 animate-rise">
               <CertTable
                 certs={certs.data}
                 onScan={(d) => router.push(`/proxy/tls?domain=${encodeURIComponent(d)}`)}
@@ -337,7 +337,7 @@ export function CertificatesPage() {
         </PanelBody>
       </Panel>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader
           title="Watched domains"
           actions={
@@ -376,7 +376,7 @@ export function CertificatesPage() {
               minutes, which is what catches a certificate renewed on disk and never reloaded.
             </p>
           ) : (
-            <div className="-mx-4 min-w-0 animate-rise">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0 animate-rise">
               <Table>
                 <TableHeader>
                   <TableRow>

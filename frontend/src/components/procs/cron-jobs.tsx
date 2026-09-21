@@ -106,7 +106,7 @@ export function CronJobsPanel({
 
   return (
     <>
-      <Panel plain>
+      <Panel>
         <PanelHeader
           title="Cron jobs"
           actions={
@@ -146,7 +146,7 @@ export function CronJobsPanel({
                   {admin && " Add one, or paste a crontab with Edit as text."}
                 </EmptyNote>
               ) : (
-                <Table containerClassName="-mx-4 max-h-[calc(100svh-22rem)] w-auto">
+                <Table containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
                       <TableHead className="w-56">Schedule</TableHead>

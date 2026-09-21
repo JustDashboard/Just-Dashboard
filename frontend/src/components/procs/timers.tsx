@@ -44,7 +44,7 @@ export function TimersPanel({ confirm }: { confirm: ConfirmFn }) {
   const list = useMemo(() => timers.data?.timers ?? [], [timers.data])
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title="systemd timers"
         advanced
@@ -62,7 +62,7 @@ export function TimersPanel({ confirm }: { confirm: ConfirmFn }) {
         )}
         {timers.data?.available && list.length === 0 && <EmptyNote>No timers.</EmptyNote>}
         {list.length > 0 && (
-          <Table containerClassName="-mx-4 max-h-[calc(100svh-22rem)] w-auto">
+          <Table containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
                 <TableHead className="w-full">Timer</TableHead>

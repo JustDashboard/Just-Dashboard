@@ -84,7 +84,7 @@ export function JailsPanel({
 
   return (
     <>
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Jails" />
         <PanelBody flush>
           {jails.length === 0 ? (
@@ -95,7 +95,7 @@ export function JailsPanel({
               className="mt-3"
             />
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
               <Table>
                 <TableHeader>
                   <TableRow>

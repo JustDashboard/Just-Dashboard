@@ -79,13 +79,20 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a header
   on its own ground and a hairline under it, so a toolbar or full-bleed table sits flush beneath
   without a second edge. `Panel plain` is the same anatomy with no frame, for a list that is the
-  whole of a section; `interactive` is the hover a panel-as-link takes. A **pane** is the same frame,
+  whole of a section — but **not for a table**, whose panel keeps its frame because the grid owns a
+  scroll region and a boundary you cannot see is one that lies about where the data ends (§2);
+  `interactive` is the hover a panel-as-link takes. A **pane** is the same frame,
   for a working region of the page rather than a block of content on it — a session rail, a file
   tree, a log console — and its strips keep a faint tint. Neither lifts; the distinction is semantic
   and shows in how the two are composed and in their header heights.
-- `components/row-list.tsx` — `RowList` and `Row`: the one list-of-rows. A leading mark, a title, an
-  optional second line and whatever sits at the right edge; a row with `href` is a link with a
-  revealed arrow, with `onClick` a button, with neither inert.
+- `components/row-list.tsx` — `RowList` and `Row`: the list-of-rows you *read*. A leading mark, a
+  title, an optional second line and whatever sits at the right edge; a row with `href` is a link
+  with a revealed arrow, with `onClick` a button, with neither inert.
+  Its counterpart is `ChoiceList`/`ChoiceRow` in `components/flow.tsx`, for a row you *take* — a
+  project to enter, a site to open, a stack to look inside. Same anatomy, plus an arrow that is
+  always drawn and a border that lights under the pointer. Which one a list gets is decided by
+  whether its rows are destinations, not by which register the page is in: see §15 pass 3 and the
+  last subsection of §16 in `design-system.md`.
 - `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
   input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
   `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only

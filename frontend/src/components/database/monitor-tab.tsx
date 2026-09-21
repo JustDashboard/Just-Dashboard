@@ -110,7 +110,7 @@ function ActivityPanel({
   const slowest = sessions.reduce((m, s) => Math.max(m, s.seconds), 0)
 
   return (
-    <Panel plain className="animate-rise">
+    <Panel className="animate-rise">
       <PanelHeader
         title="Running now"
         actions={
@@ -132,7 +132,7 @@ function ActivityPanel({
             description="The server reports no active sessions."
           />
         ) : (
-          <div className="-mx-4 min-w-0 overflow-x-auto">
+          <div className="group-data-[plain]/panel:-mx-4 min-w-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -475,7 +475,7 @@ function StoragePanel({
   const pool = o.pool
 
   return (
-    <Panel plain className="animate-rise">
+    <Panel className="animate-rise">
       <PanelHeader
         title="Storage"
         actions={
@@ -499,7 +499,7 @@ function StoragePanel({
         {o.tables.length === 0 ? (
           <EmptyState icon={Database} title="No tables in this schema" />
         ) : (
-          <div className="-mx-4 min-w-0 overflow-x-auto">
+          <div className="group-data-[plain]/panel:-mx-4 min-w-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

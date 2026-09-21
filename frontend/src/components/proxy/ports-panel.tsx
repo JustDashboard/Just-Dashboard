@@ -160,7 +160,7 @@ export function PortsPage() {
         />
       </StatGrid>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Sockets" />
         <PanelToolbar>
           <SearchInput
@@ -182,7 +182,7 @@ export function PortsPage() {
             <EmptyState icon={Router} title="No sockets match" className="mt-4" />
           ) : (
             <>
-              <div className="-mx-4 hidden min-w-0 md:block">
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 md:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

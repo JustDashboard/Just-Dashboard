@@ -63,7 +63,7 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
   }
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader title="Repeat offenders" />
       {data && data.offenders.length > 0 && (
         <PanelToolbar className="gap-x-6">
@@ -104,7 +104,7 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
         ) : !data?.offenders.length ? (
           <EmptyState icon={Crosshair} title="Nothing has been banned yet" className="mt-3" />
         ) : (
-          <div className="-mx-4 min-w-0">
+          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
             <Table>
               <TableHeader>
                 <TableRow>

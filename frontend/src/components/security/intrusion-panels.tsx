@@ -174,7 +174,7 @@ function BanHistoryPanel() {
   }, [data, kind, query])
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title="Ban activity"
         actions={
@@ -233,7 +233,7 @@ function BanHistoryPanel() {
             className="mt-3"
           />
         ) : (
-          <div className="-mx-4 min-w-0">
+          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
             <Table containerClassName="max-h-[24rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>

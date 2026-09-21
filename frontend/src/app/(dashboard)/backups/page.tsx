@@ -328,7 +328,7 @@ export default function BackupsPage() {
       )}
 
       {list.length > 0 && (
-        <Panel plain>
+        <Panel>
           <PanelHeader
             title="Jobs"
             actions={
@@ -370,7 +370,7 @@ export default function BackupsPage() {
               ))}
             </ul>
             <div className="hidden 2xl:block">
-              <Table containerClassName="-mx-4 w-auto">
+              <Table containerClassName="group-data-[plain]/panel:-mx-4 w-auto">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-full">Job</TableHead>

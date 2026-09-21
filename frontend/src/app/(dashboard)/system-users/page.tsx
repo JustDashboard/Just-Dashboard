@@ -171,9 +171,11 @@ export default function SystemUsersPage() {
         </StatGrid>
       )}
 
-      {/* The list is the whole of the page below the figures: a title and a
-          hairline, no box. */}
-      <Panel plain>
+      {/* The accounts are a table, so the block keeps its frame: the grid owns
+          a scroll region, and a boundary nobody can see is one that lies about
+          where the data ends (§2). The readings above it stay plain, which is
+          what the frame is read against. */}
+      <Panel>
         <PanelHeader title="Accounts" />
         <PanelToolbar>
           <SearchInput
@@ -191,9 +193,10 @@ export default function SystemUsersPage() {
           {error && !data && <ErrorState error={error} />}
           {data && (
             <div key="rows" className="animate-rise">
-              {/* Bled by the cells' own padding, so the first column starts
-                  where the title does. */}
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              {/* The outer columns take the gutter from their own cell padding,
+                  so the first column starts in the title's column; the `-mx`
+                  bleed that does the same on a plain panel is gated to it (§2). */}
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

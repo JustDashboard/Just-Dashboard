@@ -437,6 +437,25 @@ async function menuLabels(page: Page, rowName: string): Promise<string[]> {
   return items
 }
 
+/**
+ * §2: the only block on a page that may draw a frame is a table. A grid owns a
+ * scroll region, and an edge is what says where it ends — a row whose actions
+ * sit past the boundary otherwise reads as a row with no actions. Everything
+ * else in the page's flow stays plain, which is what the frame is read against.
+ *
+ * Asserted structurally rather than as a count, so the rule keeps holding as
+ * pages gain and lose tables.
+ */
+async function framedNonTables(page: Page) {
+  return page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
+    )
+      .filter((el) => !el.querySelector("[data-slot=table-container]"))
+      .map((el) => el.outerHTML.slice(0, 120)),
+  )
+}
+
 test("the live table reads the host and every process verb is a word", async ({ page }) => {
   await mockHost(page)
   await page.goto("/processes")
@@ -447,9 +466,9 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(page.getByText("exited, but the parent has not reaped them")).toBeVisible()
   await expect(page.getByText("waiting on a disk or a lock")).toBeVisible()
 
-  // No framed block: the table is a title and a hairline.
-  const framed = await page.locator("[data-slot='panel']:not([data-plain])").count()
-  expect(framed, "a framed panel on the live page").toBe(0)
+  // The process table frames itself because it is a table (§2); nothing else
+  // on the page may.
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 
   const labels = await menuLabels(page, "4021")
   expect(labels).toEqual(

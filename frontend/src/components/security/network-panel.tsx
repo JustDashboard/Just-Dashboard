@@ -131,7 +131,7 @@ export function NetworkPanel() {
         />
       </StatGrid>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Interfaces" />
         <PanelToolbar>
           <ToggleGroup
@@ -154,7 +154,7 @@ export function NetworkPanel() {
           {interfaces.length === 0 ? (
             <EmptyNote>No devices match.</EmptyNote>
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -200,10 +200,10 @@ export function NetworkPanel() {
 
       {/* Two plain blocks side by side; the gap between them is the separation. */}
       <div className="grid items-start gap-x-8 gap-y-6 lg:grid-cols-[2fr_1fr] [&>*]:min-w-0">
-        <Panel plain>
+        <Panel>
           <PanelHeader title="Routes" />
           <PanelBody flush>
-            <div className="-mx-4 min-w-0">
+            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
               <Table containerClassName="max-h-[22rem]">
                 <TableHeader>
                   <TableRow>

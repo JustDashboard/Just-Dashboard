@@ -230,7 +230,7 @@ function PM2Applications() {
         />
       </StatGrid>
 
-      <Panel plain>
+      <Panel>
         <PanelHeader title="Applications" />
         <PanelToolbar>
           <SearchInput
@@ -270,7 +270,7 @@ function PM2Applications() {
             <EmptyState icon={ChartActivity} title="No applications match" className="mt-4" />
           ) : (
             <>
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

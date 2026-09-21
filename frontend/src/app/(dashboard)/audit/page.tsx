@@ -86,10 +86,12 @@ export default function AuditPage() {
         }
       />
 
-      {/* The table is the whole of the page: a title, a hairline, no box. The
-          toolbar stays mounted across a filter change so the box being typed
-          into never loses its caret to a skeleton. */}
-      <Panel plain>
+      {/* The table is the whole of the page, and it is framed: a grid that owns
+          its own scrolling takes an edge, or a row whose actions sit past the
+          right of it reads as a row with no actions (§2). The toolbar stays
+          mounted across a filter change so the box being typed into never
+          loses its caret to a skeleton. */}
+      <Panel>
         <PanelHeader title="Recorded requests" />
         <PanelToolbar>
           <SearchInput
@@ -126,9 +128,10 @@ export default function AuditPage() {
           {error && !data && <ErrorState error={error} />}
           {data && (
             <div key="rows" className="animate-rise">
-              {/* Bled by the cells' own padding, so the first column starts
-                  where the title does. */}
-              <div className="-mx-4 hidden min-w-0 lg:block">
+              {/* The outer columns take the gutter from their own cell padding,
+                  so the first column starts in the title's column; the `-mx`
+                  bleed that does the same on a plain panel is gated to it (§2). */}
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-22rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

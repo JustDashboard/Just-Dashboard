@@ -231,6 +231,25 @@ async function mockHost(page: Page) {
   })
 }
 
+/**
+ * §2: the only block on a page that may draw a frame is a table. A grid owns a
+ * scroll region, and an edge is what says where it ends — a row whose actions
+ * sit past the boundary otherwise reads as a row with no actions. Everything
+ * else in the page's flow stays plain, which is what the frame is read against.
+ *
+ * Asserted structurally rather than as a count, so the rule keeps holding as
+ * pages gain and lose tables.
+ */
+async function framedNonTables(page: Page) {
+  return page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
+    )
+      .filter((el) => !el.querySelector("[data-slot=table-container]"))
+      .map((el) => el.outerHTML.slice(0, 120)),
+  )
+}
+
 test("the page reads the host as facts and figures, with nothing framed", async ({ page }) => {
   await mockHost(page)
   await page.goto("/packages")
@@ -253,9 +272,9 @@ test("the page reads the host as facts and figures, with nothing framed", async 
   // The decision, above the fold, with its own button.
   await expect(page.getByRole("button", { name: "Install security updates" })).toBeVisible()
 
-  // No framed block: the three views are each a toolbar, a hairline and rows.
-  const framed = await page.locator("[data-slot='panel']:not([data-plain])").count()
-  expect(framed, "a framed panel on the packages page").toBe(0)
+  // Each view is a toolbar, a hairline and a framed table (§2) — and nothing
+  // else on the page carries an edge.
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
   // The pill-shaped tab list is gone; the strip is the product's underlined one.
   expect(await page.locator("[data-slot='tabs-list']").count()).toBe(0)
 })

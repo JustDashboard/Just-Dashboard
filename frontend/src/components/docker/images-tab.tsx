@@ -167,7 +167,7 @@ export function ImagesTab({
 
       {/* Plain: the image list is the whole of the page under the disk
           readings, and a title with a hairline marks it. */}
-      <Panel plain className="animate-rise">
+      <Panel className="animate-rise">
         <PanelHeader
           title="Images"
           actions={
@@ -247,9 +247,10 @@ export function ImagesTab({
                 })}
               </ul>
 
-              {/* Bled by the cells' own padding, so the first column starts
-                  where the title does. */}
-              <div className="-mx-4 hidden min-w-0 xl:block">
+              {/* The outer columns take the gutter from their own cell padding,
+                  so the first column starts in the title's column; the `-mx`
+                  bleed that does the same on a plain panel is gated to it (§2). */}
+              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 xl:block">
                 <Table>
                   <TableHeader>
                     <TableRow>

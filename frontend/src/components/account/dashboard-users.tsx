@@ -105,7 +105,7 @@ export function DashboardUsersTable({
 
   return (
     <>
-      <Panel plain>
+      <Panel>
         <PanelBody flush>
           <Table>
             <TableHeader>
