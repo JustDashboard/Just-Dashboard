@@ -191,6 +191,19 @@ session.
   is to slow the whole flow. `LoginWithToken` is three steps that are one operation (store, `gh auth
   setup-git`, write a committer identity if missing) — any two without the third is a state nobody can
   see: a token with no helper pushes anonymously, a helper with no identity fails at the commit.
+- **An account's picture is read here, not by the browser.** `GET /git/github/avatar?account=` reads
+  a GitHub account's picture on the page's behalf, for the same reason `/deploy/{id}/favicon` reads a
+  deployed site's icon: the dashboard document's policy is `img-src 'self' data: blob:`, so
+  every GitHub avatar the product drew — the Git tab's two identity rows, the App card's
+  installations, the git tools' account button — was blocked before it was fetched and fell back to
+  initials. Widening the policy would instead have the operator's browser announce each view of those
+  pages to GitHub. The address is fixed (`github.com/<login>.png`, which needs no token) and the login
+  is matched against GitHub's own rule for one before it is built, so nothing the browser sends
+  chooses a host; redirects are followed only within github.com and githubusercontent.com over HTTPS,
+  three at most. It reads at most 512 KB within five seconds, accepts only an image, and remembers
+  each account for an hour (an absence for ten minutes) in a map bounded at 32 entries. The picture is
+  served with `nosniff`, a sandboxing CSP and private caching; `404 avatar_unavailable` means the page
+  keeps the initials. A host with no route to GitHub loses the pictures and nothing else.
 - **`gh auth status` is parsed, because it has no `--json` and never will.** It is written for a person,
   so the wording is the contract; `parseAuthStatus` matches both wordings gh has shipped and `ghx_test.go`
   pins them. Every field is optional, so a rewording costs a scope list rather than the page.

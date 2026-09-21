@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test"
-import { blueprintCatalogue, json, mockNewProject, now } from "./deploy-fixture"
+import { blueprintCatalogue, gotoStep, json, mockNewProject, now } from "./deploy-fixture"
 
 /**
- * `/deploy/new` — the source strip and the one configure screen every source
+ * `/deploy/new` — the source strip and the four configure screens every source
  * lands on. `mockNewProject` wires the draft lifecycle, the GitHub repository
  * list, the blueprint catalogue and the hostname suggestion the way the old
  * `deploy-ui.spec.ts` did for quick deploy and the wizard; each test adds
@@ -37,9 +37,6 @@ test("the source strip switches the active source and is the only way in", async
 
   await page.getByRole("button", { name: "Compose", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Compose stack" })).toBeVisible()
-
-  await page.getByRole("button", { name: "Existing workload", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Existing workload" })).toBeVisible()
 
   await page.getByRole("button", { name: "Git repository", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
@@ -108,14 +105,19 @@ test("a GitHub repository reaches a running release with a 44px Deploy target an
   })
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
 
-  // Importing inspected immediately with the default branch; the branch
-  // itself is changed here, fed by the repository's own branch list.
-  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main")
+  // Detection answered every question this repository asks, so the sequence
+  // opens on its last screen with the plan read back and Deploy under it: the
+  // two-press import survives being split into four steps.
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
 
-  // Detection filled the build in, and the public hostname is already chosen.
-  await page.locator("summary").filter({ hasText: "Build & output settings" }).click()
+  // A node of the plan drawing is how the reader goes back to one answer —
+  // it opens the step that owns it, and the fold inside it.
+  await page.getByRole("button", { name: "Change the build settings" }).click()
+  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main")
   await expect(page.getByRole("textbox", { name: "Build command" })).toHaveValue("bun run build")
   await expect(page.getByRole("textbox", { name: "Start command" })).toHaveValue("bun start")
+
+  await page.getByRole("button", { name: "Change the public address" }).click()
   await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("3000")
   await expect(page.getByRole("textbox", { name: "Hostname" })).toHaveValue(
     "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
@@ -125,10 +127,12 @@ test("a GitHub repository reaches a running release with a 44px Deploy target an
   await expect(page.getByText("A certificate will be issued during the deploy")).toBeVisible()
   await expect(page.getByRole("button", { name: /certificate/i })).toHaveCount(0)
 
+  await gotoStep(page, "variables")
   await page.getByText("Paste .env", { exact: true }).click()
   await page
     .getByRole("textbox", { name: "Environment variables" })
     .fill("NEXT_PUBLIC_SITE_URL=https://example.test")
+  await gotoStep(page, "review")
 
   const deployButton = page.getByRole("button", { name: "Deploy", exact: true })
   expect((await deployButton.boundingBox())?.height).toBeGreaterThanOrEqual(44)
@@ -167,6 +171,7 @@ test("an invalid project name is flagged beside the field and clears once fixed"
   await mockNewProject(page)
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "project")
   const name = page.getByRole("textbox", { name: "Project name" })
   await name.fill("invalid name")
   await name.blur()
@@ -174,6 +179,15 @@ test("an invalid project name is flagged beside the field and clears once fixed"
   await expect(page.getByText("Start with a letter or number.", { exact: false })).toBeVisible()
   await name.fill("valid-name")
   await expect(name).toHaveAttribute("aria-invalid", "false")
+
+  // And it is refused where it was typed rather than four screens later under
+  // the button: Continue does not leave a screen whose answer cannot be saved.
+  await name.fill("invalid name")
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What are you building?" }),
+  ).toBeVisible()
+  await expect(page.getByText("Use 1–64 letters", { exact: false })).toBeVisible()
 })
 
 test("editing the name and pasting environment text keeps the text out of the URL and browser storage", async ({
@@ -182,18 +196,21 @@ test("editing the name and pasting environment text keeps the text out of the UR
   const quick = await mockNewProject(page)
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "project")
   await page.getByRole("textbox", { name: "Project name" }).fill("edited-site")
+  await gotoStep(page, "variables")
   await page.getByText("Paste .env", { exact: true }).click()
   await page
     .getByRole("textbox", { name: "Environment variables", exact: true })
     .fill("API_TOKEN=handoff-secret")
-  const advanced = page.getByRole("button", { name: /Advanced/ })
-  await advanced.click()
-  await expect(advanced).toHaveAttribute("aria-expanded", "true")
+  const references = page.getByRole("button", { name: /Variable references & scopes/ })
+  await references.click()
+  await expect(references).toHaveAttribute("aria-expanded", "true")
   expect(page.url()).not.toContain("handoff-secret")
   expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
     "handoff-secret",
   )
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
   expect(quick.imported()).toMatchObject({
@@ -218,10 +235,12 @@ for (const stage of ["variables/import", "runs"]) {
     )
     await page.goto("/deploy/new")
     await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+    await gotoStep(page, "variables")
     await page.getByText("Paste .env", { exact: true }).click()
     await page
       .getByRole("textbox", { name: "Environment variables", exact: true })
       .fill("API_TOKEN=keep-this-value")
+    await gotoStep(page, "review")
     await page.getByRole("button", { name: "Deploy", exact: true }).click()
     await expect(page.getByRole("heading", { name: "Deployment created" })).toBeVisible()
     await expect(page.getByText("Setup service unavailable", { exact: true })).toBeVisible()
@@ -278,17 +297,25 @@ test("a pasted Git URL with expert settings reaches a reviewed plan", async ({ p
   await page.getByRole("combobox", { name: "Credential" }).click()
   await page.getByRole("option", { name: "Deploy token" }).click()
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
 
-  const advanced = page.getByRole("button", { name: /Advanced/ })
-  await advanced.click()
-  await expect(advanced).toHaveAttribute("aria-expanded", "true")
-  await page.getByRole("textbox", { name: "Target platform" }).fill("linux/amd64")
-
+  // The variable the plan declares comes first: a build secret and a release
+  // task may only name one that already carries the matching scope, and the
+  // step that refuses them is the step they are typed on.
+  await gotoStep(page, "variables")
+  const references = page.getByRole("button", { name: /Variable references & scopes/ })
+  await references.click()
+  await expect(references).toHaveAttribute("aria-expanded", "true")
   await page.getByRole("button", { name: "Add variable reference" }).click()
   await page.getByRole("textbox", { name: "Variable 1 name" }).fill("NPM_TOKEN")
   await page.getByRole("checkbox", { name: "Build", exact: true }).check()
   await page.getByRole("checkbox", { name: "Release Task", exact: true }).check()
+
+  await gotoStep(page, "project")
+  const extras = page.getByRole("button", { name: /Build secrets & release tasks/ })
+  await extras.click()
+  await expect(extras).toHaveAttribute("aria-expanded", "true")
+  await page.getByRole("textbox", { name: "Target platform" }).fill("linux/amd64")
 
   await page.getByRole("button", { name: "Add build secret" }).click()
   await page.getByRole("combobox", { name: "Build secret 1 variable" }).fill("NPM_TOKEN")
@@ -299,6 +326,7 @@ test("a pasted Git URL with expert settings reaches a reviewed plan", async ({ p
   await page.getByRole("textbox", { name: "Release task 1 command" }).fill("./bin/migrate")
   await page.getByRole("checkbox", { name: "NPM_TOKEN", exact: true }).check()
 
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Save only", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77$/)
   expect(selectedSource).toMatchObject({
@@ -442,18 +470,21 @@ test("resuming a duplicated draft shows its copied variable needing a value, and
   })
 
   await page.goto("/deploy/new?draft=duplicate-draft-1")
+  await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toHaveValue("api-copy")
 
   // The copied variable — a name and a scope, no value — is a row in the
-  // same "Variable references & scopes" editor a blueprint's declared
-  // variables use, reachable the same way: open Advanced.
-  const advanced = page.getByRole("button", { name: /Advanced/ })
-  await advanced.click()
-  await expect(advanced).toHaveAttribute("aria-expanded", "true")
+  // "Variable references & scopes" fold a blueprint's declared variables use,
+  // on the screen that asks what the project needs to run.
+  await gotoStep(page, "variables")
+  const references = page.getByRole("button", { name: /Variable references & scopes/ })
+  await references.click()
+  await expect(references).toHaveAttribute("aria-expanded", "true")
   const reference = page.getByRole("textbox", { name: "Variable DATABASE_URL reference" })
   await expect(reference).toHaveValue("")
   await reference.fill("${{credential.db}}")
 
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Save only", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77$/)
   expect(committed).toBe(1)
@@ -495,6 +526,7 @@ test("Add database from Configure creates a database, retries after a failed con
   })
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "variables")
   await page.locator("#env-key-0").fill("API_KEY")
   await page.locator("#env-value-0").fill("another-secret")
 
@@ -517,6 +549,7 @@ test("Add database from Configure creates a database, retries after a failed con
   expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
     "172.17.0.4",
   )
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
   expect(quick.configuration()).toMatchObject({
@@ -544,10 +577,12 @@ test("a supported blueprint reaches a reviewed plan with the server's rendered c
   await page.getByRole("textbox", { name: "Database name" }).fill("shop")
   await page.getByRole("button", { name: "Use this template", exact: true }).click()
 
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
-  // The plan the operator reviews is the render, not a browser default —
-  // Advanced opens on its own because a blueprint's variables are review
-  // material, not a power-user setting.
+  // A blueprint opens on the screen its declared variables are on, and the
+  // fold holding them is open: a generated password and a rendered database
+  // name are review material, not a power-user setting.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What does it need to run?" }),
+  ).toBeVisible()
   await expect(page.getByRole("textbox", { name: "Variable POSTGRES_DB value" })).toHaveValue(
     "shop",
   )
@@ -555,6 +590,7 @@ test("a supported blueprint reaches a reviewed plan with the server's rendered c
     "Generated on save (40 characters)",
   )
 
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Save only", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77$/)
   expect(journey.commits()).toBe(1)
@@ -676,11 +712,17 @@ test("a Minecraft blueprint accepts the EULA in the open, offers versions, and p
   await expect(page.getByRole("spinbutton", { name: "Maximum players" })).toHaveValue("40")
 
   await page.getByRole("button", { name: "Use this template", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
-  // Advanced is already open — the same rule that opened it for Postgres —
-  // and the game default port is what the operator reviews, unedited.
-  await expect(page.getByRole("spinbutton", { name: "Application port" })).toHaveValue("25565")
+  // The same rule that opened Postgres's variables opens these; the game
+  // default port is what the operator reviews, unedited, one screen back.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What does it need to run?" }),
+  ).toBeVisible()
+  await gotoStep(page, "runtime")
+  await expect(page.getByRole("spinbutton", { name: "Port the app listens on" })).toHaveValue(
+    "25565",
+  )
 
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Save only", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77$/)
   expect(journey.commits()).toBe(1)
@@ -755,57 +797,18 @@ test("pasting a Compose file surfaces its services, unsupported items and the ef
   await page.getByLabel("compose.yml content").fill("services:\n  web:\n    image: nginx:alpine\n")
   await page.getByRole("button", { name: "Inspect", exact: true }).click()
 
+  await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
   await expect(page.getByText("web", { exact: true })).toBeVisible()
   await expect(page.getByText("worker", { exact: true })).toBeVisible()
   await expect(page.getByText("network mode host is not supported")).toBeVisible()
-  await page.getByText("Show effective Compose plan", { exact: true }).click()
+  await page.getByText("Effective Compose plan", { exact: true }).click()
   await expect(page.getByText("build: .")).toBeVisible()
   // The variable the Compose file references becomes a required runtime
-  // variable — reviewable in Advanced without retyping it.
-  await page.getByRole("button", { name: /Advanced/ }).click()
+  // variable — reviewable where the project's variables are, without retyping.
+  await gotoStep(page, "variables")
+  await page.getByRole("button", { name: /Variable references & scopes/ }).click()
   await expect(page.getByRole("textbox", { name: "Variable API_KEY reference" })).toBeVisible()
-})
-
-test("adopting an existing container requires acknowledging what will not carry over", async ({
-  page,
-}) => {
-  const journey = await mockNewProject(page)
-  const preview = {
-    name: "legacy-api",
-    unsupported: ["command contains credential-shaped arguments and was dropped"],
-    warnings: ["Import is observation-only until adoption is confirmed."],
-    wouldChange: [],
-  }
-  let acknowledgedSent: string[] | undefined
-  await page.route("**/api/v1/deploy/import/preview", (route) => json(route, preview))
-  await page.route("**/api/v1/deploy/import/adopt", async (route) => {
-    acknowledgedSent = (route.request().postDataJSON() as { acknowledgedUnsupported: string[] })
-      .acknowledgedUnsupported
-    return json(route, { projectId: 77, environmentId: 78, planRevision: 1, created: true })
-  })
-  await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Existing workload", exact: true }).click()
-  await page.getByRole("textbox", { name: "Container name or id" }).fill("legacy-api")
-  await page.getByRole("button", { name: "Inspect", exact: true }).click()
-
-  await expect(page.getByText("Review legacy-api")).toBeVisible()
-  await expect(page.getByText(preview.unsupported[0])).toBeVisible()
-  // Nothing proceeds until the acknowledgement is checked.
-  await expect(page.getByRole("textbox", { name: "Project name" })).toHaveCount(0)
-
-  await page.getByRole("checkbox", { name: /I understand which settings/ }).check()
-  await page.getByRole("button", { name: "Inspect", exact: true }).click()
-
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Adopt workload", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Save only", exact: true })).toHaveCount(0)
-
-  await page.getByRole("button", { name: "Adopt workload", exact: true }).click()
-  await expect(page).toHaveURL(/\/deploy\/77$/)
-  expect(acknowledgedSent).toEqual(preview.unsupported)
-  expect(journey.runs()).toBe(0)
 })
 
 test("quick deploy shows the actual HTTPS blocker instead of assuming Certbot is missing", async ({
@@ -824,6 +827,7 @@ test("quick deploy shows the actual HTTPS blocker instead of assuming Certbot is
   )
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "runtime")
   await expect(page.getByText("Automatic HTTPS needs attention")).toBeVisible()
   await expect(page.getByText(reason, { exact: false }).last()).toBeVisible()
   await expect(page.getByText("Install certbot", { exact: false })).toHaveCount(0)
@@ -845,6 +849,7 @@ test("quick deploy keeps HTTPS automatic when Docker Caddy owns the public ports
   )
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "runtime")
   await expect(
     page.getByText("Caddy handles renewal automatically.", { exact: false }),
   ).toBeVisible()
@@ -931,16 +936,25 @@ test("a detected site opens with its variables, its database and its single-page
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
 
+  // Three detected variables with nothing in them is a question only the
+  // operator can answer, so that is the screen the sequence opens on.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What does it need to run?" }),
+  ).toBeVisible()
+
   // The framework is named the way its documentation spells it, and the
   // build settings carry the catalogue's serving defaults.
+  await gotoStep(page, "project")
   await expect(page.getByText("Vite", { exact: true })).toBeVisible()
   await page.locator("summary").filter({ hasText: "Build & output settings" }).click()
   await expect(page.getByRole("textbox", { name: "Output directory" })).toHaveValue("dist")
-  await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("80")
   await expect(page.getByRole("switch", { name: "Single-page application" })).toBeChecked()
+  await gotoStep(page, "runtime")
+  await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("80")
 
   // Every variable the source reads is a row already, with the example as
   // its placeholder and where it was read beside the key.
+  await gotoStep(page, "variables")
   await expect(page.locator("#env-key-0")).toHaveValue("DATABASE_URL")
   await expect(page.locator("#env-key-1")).toHaveValue("SESSION_SECRET")
   await expect(page.locator("#env-key-2")).toHaveValue("RESEND_API_KEY")
@@ -973,6 +987,7 @@ test("a detected site opens with its variables, its database and its single-page
   await expect(
     page.getByText("2 detected variables have no value yet and will not be set."),
   ).toBeVisible()
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await page.waitForURL(/\/deploy\/77\/runs\/84$/)
   expect(quick.imported()?.dotenv).toBe('SESSION_SECRET="s3cret"')
@@ -995,6 +1010,7 @@ test("a deploy link arrives on the Git tab with its clone URL and branch filled 
   // Importing from the prefilled field inspects that URL at that branch.
   await page.getByRole("button", { name: "Import", exact: true }).click()
   await expect(page.getByText("https://github.com/Wayy01/other.git", { exact: true })).toBeVisible()
+  await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Branch" })).toHaveValue("release")
 
   // Anything that is not a clone URL is left out of the field.
@@ -1059,7 +1075,9 @@ test("a Laravel import arrives with its application key minted and mints other s
   )
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "project")
   await expect(page.getByText("Laravel", { exact: true })).toBeVisible()
+  await gotoStep(page, "variables")
 
   // APP_KEY is what `php artisan key:generate` would have written; APP_URL
   // is a plain setting and stays empty.
@@ -1069,11 +1087,11 @@ test("a Laravel import arrives with its application key minted and mints other s
   await expect(page.locator("#env-value-1")).toHaveValue("")
 
   // A self-issued secret offers to be minted; a provider's key does not.
-  const generate = page.getByRole("button", { name: "Generate" })
+  const generate = page.getByRole("button", { name: "Generate", exact: true })
   await expect(generate).toHaveCount(1)
   await generate.click()
   await expect(page.locator("#env-value-2")).toHaveValue(/^[0-9a-f]{64}$/)
-  await expect(page.getByRole("button", { name: "Generate" })).toHaveCount(0)
+  await expect(generate).toHaveCount(0)
   // APP_URL (a plain setting with an example) and STRIPE_KEY (a provider's
   // key nothing here can mint) are still empty, and the note says so.
   await expect(
@@ -1087,12 +1105,14 @@ test("the public address can ask visitors for a password before the first deploy
   const quick = await mockNewProject(page)
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "runtime")
   await expect(page.getByRole("textbox", { name: "Hostname" })).toHaveValue(
     "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
   )
   await page.getByRole("switch", { name: "Ask visitors for a password" }).click()
   await page.getByRole("textbox", { name: "User name" }).fill("client")
   await page.locator("#public-protection-password").fill("show and tell")
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await page.waitForURL(/\/deploy\/77\/runs\/84$/)
   const saved = quick.configuration() as { domains: Record<string, unknown>[] }

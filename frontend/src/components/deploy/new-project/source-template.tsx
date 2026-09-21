@@ -18,14 +18,8 @@ import type {
   WorkloadProfile,
 } from "@/lib/types"
 import { Field } from "@/components/form"
-import {
-  ChoiceCard,
-  ChoiceGrid,
-  FlowActions,
-  FlowPanel,
-  FlowPanelBody,
-  FlowPanelHeader,
-} from "@/components/flow"
+import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"

@@ -1,6 +1,6 @@
 "use client"
 
-import { get } from "@/lib/api"
+import { downloadUrl, get } from "@/lib/api"
 import type { GitHubAppStatus, GitHubStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 
@@ -51,4 +51,17 @@ export function githubAppStage(status: GitHubAppStatus | undefined): GitHubAppSt
   if (!status) return undefined
   if (!status.configured) return "create"
   return status.installations.length === 0 ? "install" : "import"
+}
+
+/**
+ * An account's picture, through this server.
+ *
+ * Not `github.com/<account>.png` directly: the page's own policy allows images
+ * from this origin only (`proxy.ts`), so every avatar drawn from GitHub was
+ * blocked before it was fetched and every identity in the product fell back to
+ * its initials. The server reads it once an hour per account instead, which is
+ * also the reason the operator's browser never announces a visit to GitHub.
+ */
+export function githubAvatarUrl(account: string) {
+  return downloadUrl("/git/github/avatar", { account })
 }

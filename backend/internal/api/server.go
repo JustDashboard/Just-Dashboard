@@ -51,6 +51,9 @@ type Server struct {
 	// The icons deployed websites declare, read once an hour per project.
 	favicons faviconCache
 
+	// The GitHub accounts' own pictures, read once an hour per account.
+	avatars avatarCache
+
 	modules moduleSet
 }
 

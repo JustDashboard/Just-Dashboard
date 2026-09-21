@@ -48,11 +48,6 @@ export function AutomaticDeployment({
     <FormSection title="Automatic deployment">
       <OptionRow
         title="Deploy new commits automatically"
-        hint={
-          branch
-            ? `Every push to ${branch} starts a release once the first deployment succeeds.`
-            : "Every push to the selected branch starts a release once the first deployment succeeds."
-        }
         checked={policy.automatic}
         onCheckedChange={(automatic) => onChange({ ...policy, automatic })}
       >
@@ -75,13 +70,17 @@ export function AutomaticDeployment({
         </Field>
       </OptionRow>
       <OptionRow
-        title="Report each release on the commit"
-        hint="Posts a pending, success or failure status to GitHub through the dashboard's own credential."
+        title="Report each release as a GitHub commit status"
         checked={policy.commitStatuses}
         onCheckedChange={(commitStatuses) => onChange({ ...policy, commitStatuses })}
       />
+      {/* What the two switches cannot say in their own words, said once for
+          the section rather than twice under them: which branch is watched,
+          and that nothing fires until there is something to release from. */}
       <FormNote>
-        Both can be changed later under Settings → Automation. Manual deployments always work.
+        Releases start from {branch ? <b className="font-medium">{branch}</b> : "the chosen branch"}{" "}
+        once the first deployment succeeds. Both can be changed later under Settings → Automation,
+        and manual deployments always work.
       </FormNote>
     </FormSection>
   )

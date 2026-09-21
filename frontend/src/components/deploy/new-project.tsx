@@ -7,9 +7,8 @@ import {
   Box,
   Database,
   GitHubMark,
-  Inspect,
+  GridMasonry,
   Layers,
-  Sparkles,
   Trash,
 } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
@@ -19,21 +18,23 @@ import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageHeader, PageState } from "@/components/page"
-import { FlowHeader, FlowSteps } from "@/components/flow"
+import { ChoiceList, ChoiceRow, FlowHeader, FlowSteps } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ROW_BLEED, RowList } from "@/components/row-list"
-import { IconAction } from "@/components/icon-action"
+import { DimActions, IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { tabClasses } from "@/components/tabs"
 import { CREATION_STEPS, humanize } from "@/components/deploy/vocabulary"
 import {
+  creationStepIndex,
   discardAbandoned,
   discardDraft,
   forgetConfigure,
+  landingStep,
   loadDraft,
   resumeFlow,
   type ConfigureFlow,
+  type ConfigureStepKey,
   type SourceTabKey,
 } from "@/components/deploy/new-project/draft"
 import { SourceGit } from "@/components/deploy/new-project/source-git"
@@ -41,11 +42,10 @@ import { SourceImage } from "@/components/deploy/new-project/source-image"
 import { SourceTemplate } from "@/components/deploy/new-project/source-template"
 import { SourceDatabase } from "@/components/deploy/new-project/source-database"
 import { SourceCompose } from "@/components/deploy/new-project/source-compose"
-import { SourceExisting } from "@/components/deploy/new-project/source-existing"
 import { Configure } from "@/components/deploy/new-project/configure"
 
-// The mark is wayfinding, not decoration: six words set in one line are six
-// words to read, and the reader is choosing between six *kinds* of thing.
+// The mark is wayfinding, not decoration: five words set in one line are five
+// words to read, and the reader is choosing between five *kinds* of thing.
 // §14 bans a glyph in front of a heading because you are already there; a
 // chooser is the opposite case, and the same rule keeps the sidebar's and the
 // overview tiles' marks. Every one is `aria-hidden`, so the button's
@@ -57,10 +57,9 @@ const TABS: {
 }[] = [
   { key: "git", label: "Git repository", icon: GitHubMark },
   { key: "image", label: "Docker image", icon: Box },
-  { key: "template", label: "Template", icon: Sparkles },
+  { key: "template", label: "Template", icon: GridMasonry },
   { key: "database", label: "Database", icon: Database },
   { key: "compose", label: "Compose", icon: Layers },
-  { key: "existing", label: "Existing workload", icon: Inspect },
 ]
 
 // A profile from a link written before this page existed — the source tab
@@ -69,7 +68,6 @@ const LEGACY_PROFILE_TAB: Record<string, SourceTabKey> = {
   service: "template",
   game: "template",
   compose: "compose",
-  imported: "existing",
   image: "image",
   static: "git",
   worker: "git",
@@ -81,6 +79,24 @@ function arrivalTab(source?: string, profile?: string): SourceTabKey | undefined
   if (source && TABS.some((tab) => tab.key === source)) return source as SourceTabKey
   if (profile && LEGACY_PROFILE_TAB[profile]) return LEGACY_PROFILE_TAB[profile]
   return undefined
+}
+
+/**
+ * What each screen of the sequence asks, at the page's own rank (§16).
+ *
+ * Configure used to ask one question — "How should it run?" — over a screen
+ * that also settled what it was called, what it was built from, what it
+ * needed, and whether it was right. Four screens, four questions, and the
+ * spine under them saying which is which.
+ */
+const QUESTIONS: Record<ConfigureStepKey, string> = {
+  project: "What are you building?",
+  runtime: "How should it run?",
+  variables: "What does it need to run?",
+  review: "Ready to deploy?",
+  // A statement, because the sequence is over: the outcome is not a question,
+  // and this is the `h1` the surface under it no longer repeats.
+  done: "Deployment created",
 }
 
 function asError(error: unknown) {
@@ -134,12 +150,19 @@ export function NewProject({
   repo?: string
   repoRef?: string
 }) {
-  const [tab, setTab] = useSessionState<SourceTabKey>(
+  const [lastTab, setTab] = useSessionState<SourceTabKey>(
     "deploy.new.tab",
     "git",
     arrivalTab(source, profile),
   )
+  // The store outlives the strip: a tab open when Existing workload was still
+  // a source comes back naming it, and a key no button carries is a page with
+  // nothing under the strip at all.
+  const tab = TABS.some((option) => option.key === lastTab) ? lastTab : "git"
   const [flow, setFlow] = useSessionState<ConfigureFlow | null>("deploy.new.configure.flow", null)
+  // Which of the four configure screens is open. Under the `configure.` prefix
+  // so that changing the source forgets it with everything else the setup knew.
+  const [step, setStep] = useSessionState<ConfigureStepKey>("deploy.new.configure.step", "project")
   const [resuming, setResuming] = useState(Boolean(draftId))
   const [resumeError, setResumeError] = useState<Error>()
   // A link into the chooser — a README's deploy link, a `?source=` — asks for
@@ -154,11 +177,17 @@ export function NewProject({
     if (flow && flow.draft.id !== next.draft.id) void discardAbandoned(flow.draft.id)
     setLinkArrived(false)
     setFlow(next)
+    // Everything detection answered is a screen the reader does not have to
+    // visit: a repository it read completely opens on Review with the plan
+    // read back and Deploy under it, which is the two-press import the page
+    // had before it had steps at all.
+    setStep(landingStep(next, mode === "advanced"))
   }
   const changeSource = () => {
     void discardAbandoned(flow?.draft.id)
     forgetConfigure()
     setFlow(null)
+    setStep("project")
   }
 
   // Never blocks the chooser and never reports a failure of its own: a
@@ -194,6 +223,7 @@ export function NewProject({
         // environment included: the two are different setups.
         forgetConfigure()
         setFlow(resumed)
+        setStep(landingStep(resumed))
         setLinkArrived(false)
       })
       .catch((error) => {
@@ -205,7 +235,7 @@ export function NewProject({
     return () => {
       cancelled = true
     }
-  }, [draftId, setFlow])
+  }, [draftId, setFlow, setStep])
 
   // A remembered flow names a draft on the server, and the server may have
   // let it go: drafts expire, and another tab can finish one. Asked once per
@@ -265,31 +295,23 @@ export function NewProject({
                   </span>
                 }
               />
-              <PanelBody flush>
-                {/* Padded by the rows' own bleed, so a long list scrolls
-                    without the wash overflowing sideways. */}
-                <RowList
+              <PanelBody flush className="pt-3">
+                <ChoiceList
                   aria-label="Unfinished setups"
-                  className="-mx-3 max-h-64 overflow-y-auto px-3"
+                  className="max-h-72 overflow-y-auto pr-1"
                 >
                   {drafts.data!.map((entry) => (
-                    // Laid out by hand rather than as one `Row`: the whole row
-                    // resumes the setup, and Discard is a second action, which
-                    // cannot be a button nested inside that link.
-                    <li key={entry.id} className="group/row relative min-w-0">
-                      <Link
-                        href={`/deploy/new?draft=${entry.id}`}
-                        className={`flex min-w-0 items-center gap-3 py-2.5 pr-12 pl-5 text-left ${ROW_BLEED} focus-ring-inset transition-colors hover:bg-row-hover`}
-                      >
-                        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
-                          <span className="truncate text-body font-medium">
-                            {entry.name || "Untitled"}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-hint text-muted-foreground">
-                            {entry.source ?? "No source chosen yet"}
-                          </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-3">
+                    <ChoiceRow
+                      key={entry.id}
+                      href={`/deploy/new?draft=${entry.id}`}
+                      // The same fallback the title uses: a control whose name
+                      // is "this setup" while the row reads "Untitled" is two
+                      // names for one row.
+                      verb={`Resume ${entry.name || "Untitled"}`}
+                      title={entry.name || "Untitled"}
+                      description={entry.source ?? "No source chosen yet"}
+                      trailing={
+                        <>
                           {/* Only once it is nearly gone. Every draft expires,
                               so "29 days from now" on all four is a column of
                               the same word; the one about to lapse is the only
@@ -300,23 +322,24 @@ export function NewProject({
                             </span>
                           )}
                           <Tag>{humanize(entry.currentStep)}</Tag>
-                          <span className="numeric text-hint text-muted-foreground">
+                          <span className="numeric hidden text-hint text-muted-foreground sm:inline">
                             {relativeTime(entry.updatedAt)}
                           </span>
-                        </span>
-                      </Link>
-                      <IconAction
-                        label={`Discard ${entry.name || "this setup"}`}
-                        reveal
-                        revealGroup="row"
-                        className="absolute top-1/2 right-2 -translate-y-1/2"
-                        onClick={() => void discard(entry.id)}
-                      >
-                        <Trash />
-                      </IconAction>
-                    </li>
+                        </>
+                      }
+                      actions={
+                        <DimActions>
+                          <IconAction
+                            label={`Discard ${entry.name || "this setup"}`}
+                            onClick={() => void discard(entry.id)}
+                          >
+                            <Trash />
+                          </IconAction>
+                        </DimActions>
+                      }
+                    />
                   ))}
-                </RowList>
+                </ChoiceList>
               </PanelBody>
             </Panel>
           )}
@@ -350,23 +373,26 @@ export function NewProject({
           {tab === "template" && <SourceTemplate key="template" onInspected={inspected} />}
           {tab === "database" && <SourceDatabase key="database" />}
           {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
-          {tab === "existing" && <SourceExisting key="existing" onInspected={inspected} />}
         </>
       ) : (
         <>
-          {/* The second step asks the second question. The spine is the only
-              thing on either screen that says they are one sequence, which is
-              why it is drawn here rather than inside each screen. */}
+          {/* Every screen past the chooser asks its own question. The spine is
+              the only thing on any of them that says the five are one
+              sequence, which is why it is drawn here rather than inside each
+              screen — and why splitting Configure into four changed the spine
+              rather than adding a second one inside it. */}
           <FlowHeader
             eyebrow={Eyebrow}
-            question="How should it run?"
-            steps={<FlowSteps steps={CREATION_STEPS} current={1} />}
+            question={QUESTIONS[step]}
+            steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
           />
           <Configure
             flow={flow}
             onFlowChange={setFlow}
             onChangeSource={changeSource}
             initialAdvanced={mode === "advanced"}
+            step={step}
+            onStepChange={setStep}
           />
         </>
       )}

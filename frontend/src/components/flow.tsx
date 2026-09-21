@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { ArrowRight, Check } from "@/components/icons"
-import { BlurFade } from "@/components/ui/blur-fade"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { cn } from "@/lib/utils"
 
@@ -281,160 +281,6 @@ export function FlowActions({
 }
 
 /**
- * A grid of the *kinds* of thing you could pick: the six sources, the
- * templates, the databases.
- *
- * For kinds, not for instances. Twenty-two repositories are twenty-two of the
- * same kind and belong in `ChoiceRow`s — a three-column grid of them is a wall
- * of 13px names with nothing to tell them apart, which is worse than the list
- * it replaced. The test is whether the reader is choosing *what sort of thing
- * this is* (grid) or *which one* (rows).
- */
-export function ChoiceGrid({
-  className,
-  columns = 3,
-  children,
-  ...props
-}: React.ComponentProps<"div"> & { columns?: 2 | 3 }) {
-  return (
-    <div
-      data-slot="choice-grid"
-      className={cn(
-        "grid min-w-0 gap-3",
-        columns === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </div>
-  )
-}
-
-/**
- * One kind of thing, as something you pick rather than something you read.
- *
- * The mark is wayfinding and stays (§14 keeps the glyph that is the message —
- * the reader is choosing between kinds, and the glyph is how a kind is found
- * without reading). The edge answers the pointer through `SpotlightBorder`.
- * A chosen card keeps a brand edge and a check; it does not get a fill,
- * because a filled card among unfilled ones is the selected *state* doing the
- * job of the command face.
- *
- * **The whole card is not the button**, for the reason §12 gives about rows:
- * a control takes its accessible name from its contents, so a card that is one
- * `<button>` announces its title, its sentence and every one of its tags as the
- * name of the control. The first version of this component did exactly that,
- * and it was caught by a spec that had to be loosened from
- * `{ name: "Use PostgreSQL", exact: true }` to a prefix match to keep passing —
- * a test being relaxed to fit the markup is the markup being wrong. The title
- * is a real `<button>` carrying the verb, and the press on the card around it
- * is a convenience for the pointer, exactly as `ChoiceRow` and `TableRow` do it.
- */
-export function ChoiceCard({
-  mark,
-  title,
-  verb,
-  description,
-  trailing,
-  selected,
-  disabled,
-  onClick,
-  href,
-  index = 0,
-  className,
-}: {
-  mark?: React.ComponentType<{ className?: string }>
-  title: React.ReactNode
-  /** The accessible name of the title control — "Use PostgreSQL". */
-  verb: string
-  description?: React.ReactNode
-  /** A reading about this option — how many there are, what it costs. */
-  trailing?: React.ReactNode
-  selected?: boolean
-  disabled?: boolean
-  onClick?: () => void
-  href?: string
-  /** Position in the grid, for the arrival stagger. */
-  index?: number
-  className?: string
-}) {
-  const Mark = mark
-  const choose = () => {
-    if (!disabled) onClick?.()
-  }
-  return (
-    <BlurFade delay={index * 0.03} className="h-full">
-      <SpotlightBorder resting={selected ? "lit" : "border"} className="h-full">
-        <div
-          onClick={href ? undefined : choose}
-          aria-current={selected ? true : undefined}
-          className={cn(
-            "group/choice flex h-full min-w-0 flex-col gap-1.5 rounded-xl p-3 text-left",
-            disabled ? "opacity-50" : "cursor-pointer",
-            className,
-          )}
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            {Mark && (
-              <Mark
-                aria-hidden
-                className={cn("size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")}
-              />
-            )}
-            {/* An option that cannot be taken carries no control at all — not a
-                disabled one. A disabled `<button>` is still a button: it
-                answers `getByRole("button")`, a screen reader still announces
-                it as the way to use this thing, and the card then has to say
-                "no" twice. The card stays drawn and dimmed and keeps its
-                sentence, because the reader still needs to know the template
-                exists and why they cannot have it. */}
-            {disabled ? (
-              <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
-            ) : href ? (
-              <Link
-                href={href}
-                aria-label={verb}
-                className="min-w-0 flex-1 truncate rounded-sm text-body font-medium focus-ring"
-              >
-                {title}
-              </Link>
-            ) : (
-              <button
-                type="button"
-                aria-label={verb}
-                aria-pressed={selected}
-                // The card's own handler already fires on the pointer; this one
-                // is for the keyboard and must not choose twice.
-                onClick={(event) => {
-                  event.stopPropagation()
-                  choose()
-                }}
-                className="min-w-0 flex-1 truncate rounded-sm text-left text-body font-medium focus-ring"
-              >
-                {title}
-              </button>
-            )}
-            {selected ? (
-              <Check aria-hidden className="size-4 shrink-0 text-brand" />
-            ) : (
-              <ArrowRight
-                aria-hidden
-                className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-              />
-            )}
-          </span>
-          {description && (
-            <span className="block text-hint text-muted-foreground">{description}</span>
-          )}
-          {trailing && <span className="block text-hint text-muted-foreground">{trailing}</span>}
-        </div>
-      </SpotlightBorder>
-    </BlurFade>
-  )
-}
-
-/**
  * One *instance* among many of the same kind: a repository, an image tag, a
  * container already on the host.
  *
@@ -451,43 +297,85 @@ export function ChoiceRow({
   verb,
   description,
   trailing,
+  actions,
   onSelect,
+  href,
   className,
 }: {
   leading?: React.ReactNode
   title: React.ReactNode
-  /** The accessible name of the title button — "Import Wayy01/api". */
+  /** The accessible name of the title control — "Import Wayy01/api". */
   verb: string
   description?: React.ReactNode
   trailing?: React.ReactNode
-  onSelect: () => void
+  /**
+   * A second thing you can do to this row — discard it, rename it — drawn
+   * beside the trailing readings rather than floating over them.
+   *
+   * It is a slot rather than an overlay because the overlay was a defect: an
+   * `IconAction` positioned `absolute right-2` against the `<li>` while the
+   * row reserved its space with `pr-12` against a box that `ROW_BLEED` had
+   * made twelve pixels wider on each side, so the button sat on top of the
+   * last reading in the row. Laid out in the flow there is nothing to
+   * mis-measure. Use `DimActions` inside it: always drawn, one step of
+   * opacity until the pointer is on the row (§6), because a control revealed
+   * only on hover does not exist on a touch screen.
+   */
+  actions?: React.ReactNode
+  onSelect?: () => void
+  /** Where the row goes, when it navigates rather than choosing in place. */
+  href?: string
   className?: string
 }) {
+  const router = useRouter()
+  const go = () => {
+    if (href) router.push(href)
+    else onSelect?.()
+  }
   return (
     <li data-slot="choice-row" className="min-w-0">
       <SpotlightBorder radius={320}>
         <div
-          onClick={onSelect}
+          onClick={go}
           className={cn(
-            "group/choice flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left",
+            // A fixed minimum, because a description is optional and a run of
+            // cards where some are a line taller than others reads as a list
+            // that failed to load rather than as a list of different things.
+            // A row without one centres its title in the same box; nothing
+            // reserves an empty second line, which would be a row claiming
+            // content it has not got.
+            // The unnamed group as well, so `DimActions` in the actions slot
+            // brightens with the row the way it does in a table.
+            "group group/choice flex min-h-14 min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left",
             className,
           )}
         >
           {leading && <span className="flex shrink-0 items-center">{leading}</span>}
           <span className="min-w-0 flex-1">
-            <button
-              type="button"
-              aria-label={verb}
-              // The row's own handler already fires on the pointer; this one
-              // is for the keyboard and must not run the action twice.
-              onClick={(event) => {
-                event.stopPropagation()
-                onSelect()
-              }}
-              className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
-            >
-              {title}
-            </button>
+            {href ? (
+              <Link
+                href={href}
+                aria-label={verb}
+                onClick={(event) => event.stopPropagation()}
+                className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+              >
+                {title}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                aria-label={verb}
+                // The row's own handler already fires on the pointer; this one
+                // is for the keyboard and must not run the action twice.
+                onClick={(event) => {
+                  event.stopPropagation()
+                  go()
+                }}
+                className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+              >
+                {title}
+              </button>
+            )}
             {description && (
               <span className="block truncate text-hint text-muted-foreground">{description}</span>
             )}
@@ -498,6 +386,17 @@ export function ChoiceRow({
               aria-hidden
               className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
             />
+            {actions && (
+              // The row around these is a click target, so a press that lands
+              // on one of them must not also fire it: discarding a draft
+              // navigated to the draft it had just deleted.
+              <span
+                onClick={(event) => event.stopPropagation()}
+                className="flex shrink-0 items-center"
+              >
+                {actions}
+              </span>
+            )}
           </span>
         </div>
       </SpotlightBorder>

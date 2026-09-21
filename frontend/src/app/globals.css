@@ -18,9 +18,9 @@
 :root {
   --radius: 0.5rem;
 
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.16 0 0);
   --foreground: oklch(1 0 0);
-  --card: oklch(0.168 0 0);
+  --card: oklch(0.183 0 0);
   --card-foreground: oklch(1 0 0);
   --popover: oklch(0.2 0 0);
   --popover-foreground: oklch(1 0 0);
@@ -243,13 +243,24 @@
    *
    * `--flow-surface` is the ground of the one surface per screen that is
    * allowed depth. It is a step above `--card` rather than a new colour,
-   * because what makes it read as foreground is being the only one.
+   * because what makes it read as foreground is being the only one. It was
+   * two steps above and read as a grey slab laid over the page rather than as
+   * the page's own foreground: at L 0.226 against a 0.145 ground it was
+   * lighter than every other surface in the product. The border and the lit
+   * edge do the separating, so the ground only has to be *a* step.
+   *
+   * `--choice-surface` is the ground of a card you pick — a repository, a
+   * template, a database engine. It sits a step *below* the focused surface,
+   * so a run of choices reads as recessed into the panel holding them rather
+   * than as more slabs stacked on it. The three grounds are one ladder:
+   * page 0.145 → choice 0.168 → focused 0.185.
    *
    * `--flow-lit` is the brand at the strength a *border* needs to be seen
    * under the pointer without becoming a glow — it is spent on a one-pixel
    * edge and nowhere else. `--flow-lit-soft` is the same edge at rest on a
    * card that is already chosen. */
-  --flow-surface: color-mix(in oklab, var(--card) 93%, var(--foreground) 7%);
+  --flow-surface: color-mix(in oklab, var(--card) 98%, var(--foreground) 2%);
+  --choice-surface: var(--card);
   --flow-lit: color-mix(in oklab, var(--brand) 76%, transparent);
   --flow-lit-soft: color-mix(in oklab, var(--brand) 24%, transparent);
 
@@ -273,6 +284,57 @@
   --tag-blue: oklch(0.65 0.17 255);
   --tag-violet: oklch(0.65 0.18 295);
   --tag-pink: oklch(0.68 0.19 350);
+
+  /* The colour a language is already known by.
+   *
+   * §14 keeps one exception to "no decorative glyph": a mark the reader is
+   * *finding something by*. A repository list is scanned, and the language is
+   * the second thing that decides which of forty rows is the one — so the
+   * glyph is wayfinding, and a wayfinding mark drawn in the same grey as the
+   * forty words around it is doing the half of its job that costs pixels and
+   * none of the half that saves a read. Twenty identical grey marks are a
+   * texture; twenty hues are an index.
+   *
+   * The hue is not a choice this design system gets to make. It is GitHub
+   * Linguist's, which is the colour the same repository carries on the site
+   * the list was fetched from — the argument `--brand` makes for itself one
+   * screen up, applied to somebody else's mark.
+   *
+   * What the system *does* decide is the lightness, and it is one rule rather
+   * than twenty judgements: the logo's own hue and chroma at 0.72, the rung
+   * `--tag-*` already sits on. Linguist's values were picked for a white page
+   * and four of them (Lua's navy, Ruby's oxblood, Markdown's ink, C's grey)
+   * are near-invisible on a 0.145 ground.
+   *
+   * Written out as literal `oklch()` rather than as `oklch(from <hex> …)`,
+   * which states the rule once and would be the nicer source. Relative colour
+   * syntax is the one modern colour function Lightning CSS cannot downlevel:
+   * every other computed token in this file gets an automatic fallback (see
+   * the `@supports` guards in the built stylesheet), and these twenty would
+   * have shipped without one, below the floor Next's default browserslist
+   * target declares — Firefox 111-127 and Chrome 111-118 are inside it and
+   * parse none of it. The comment on each line carries the Linguist hex the
+   * value came from, which is what a later edit needs. */
+  --language-typescript: oklch(0.72 0.14 253.3); /* #3178c6 */
+  --language-javascript: oklch(0.72 0.153 102.1); /* #f1e05a */
+  --language-python: oklch(0.72 0.102 246.5); /* #3572a5 */
+  --language-go: oklch(0.72 0.13 223.9); /* #00add8 */
+  --language-rust: oklch(0.72 0.081 51.2); /* #dea584 */
+  --language-java: oklch(0.72 0.123 69.4); /* #b07219 */
+  --language-kotlin: oklch(0.72 0.189 297.2); /* #a97bff */
+  --language-ruby: oklch(0.72 0.125 25.8); /* #701516 */
+  --language-php: oklch(0.72 0.091 272); /* #4f5d95 */
+  --language-swift: oklch(0.72 0.199 31.6); /* #f05138 */
+  --language-c: oklch(0.72 0 90); /* #555555 */
+  --language-cpp: oklch(0.72 0.206 6.9); /* #f34b7d */
+  --language-csharp: oklch(0.72 0.198 288.4); /* #7355dd */
+  --language-haskell: oklch(0.72 0.087 294.8); /* #5e5086 */
+  --language-lua: oklch(0.72 0.188 264.1); /* #000080 */
+  --language-r: oklch(0.72 0.166 249.3); /* #198ce7 */
+  --language-html: oklch(0.72 0.194 34.8); /* #e34c26 */
+  --language-css: oklch(0.72 0.16 303.4); /* #663399 */
+  --language-scss: oklch(0.72 0.159 352); /* #c6538c */
+  --language-markdown: oklch(0.72 0.168 261.4); /* #083fa1 */
 }
 
 @theme inline {
@@ -341,6 +403,7 @@
   --color-border-strong: var(--border-strong);
 
   --color-flow-surface: var(--flow-surface);
+  --color-choice-surface: var(--choice-surface);
   --color-flow-lit: var(--flow-lit);
   --color-flow-lit-soft: var(--flow-lit-soft);
   /* Registered so `bg-row-hover` is a real utility. It was written both as
@@ -615,6 +678,21 @@
   outline: 2px solid transparent;
   outline-offset: 2px;
   &:focus-visible {
+    outline-color: var(--ring);
+  }
+}
+
+/* The ring for a *group* of controls drawn as one box — an `InputGroup`, whose
+ * border belongs to the group and whose focus therefore does too. The inner
+ * control drops its own ring (it has no border of its own to hang one on) and
+ * the box answers instead, which is the whole point of drawing the field and
+ * the switch beside it inside one edge. `:has()` rather than `:focus-within`
+ * because only a *keyboard* focus should paint it, the same rule the other
+ * two follow. */
+@utility focus-ring-within {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:has(:focus-visible) {
     outline-color: var(--ring);
   }
 }

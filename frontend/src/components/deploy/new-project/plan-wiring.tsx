@@ -1,10 +1,16 @@
 "use client"
 
 import { useRef } from "react"
-import { Box, Cpu, GitBranch, Globe, Layers, Puzzle, Servers, Wrench } from "@/components/icons"
+import { Cpu, Globe, Wrench } from "@/components/icons"
 import type { DeploymentConfiguration, DeploymentDraftSource, WorkloadProfile } from "@/lib/types"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { frameworkLabel, humanize } from "@/components/deploy/vocabulary"
+import {
+  SOURCE_KIND_LABELS,
+  SourceMark,
+  frameworkLabel,
+  humanize,
+  isGitHubSource,
+} from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 
 /**
@@ -87,17 +93,6 @@ export function PlanWiring({
   const domainCount = configuration.domains.length
   const worker = profile === "worker"
 
-  const SourceIcon =
-    source.kind === "compose"
-      ? Layers
-      : source.kind === "blueprint"
-        ? Puzzle
-        : source.kind === "image"
-          ? Box
-          : source.kind === "import"
-            ? Servers
-            : GitBranch
-
   // A build method of "image" or "none" is not a build: the artifact is
   // pulled or adopted, and saying "no build" is more use than naming a method
   // that never runs.
@@ -153,15 +148,28 @@ export function PlanWiring({
             <WireNode
               nodeRef={sourceMark}
               mark={
-                <WireMark size="md">
-                  <SourceIcon />
+                /* The mark the source was chosen under, drawn from the one
+                   mapping the chooser also reads: this node used to pick its
+                   own, so a repository chosen under GitHub's mark was redrawn
+                   here as a share glyph. */
+                /* `ink` is the tone this vocabulary keeps for a third
+                   party's own mark, and it is how the Credentials picture
+                   already draws GitHub: the octocat is a filled silhouette,
+                   and in the neutral plate — which is sized for a 5px-stroke
+                   outline glyph — it read as a smudge rather than as a logo. */
+                <WireMark size="md" tone={isGitHubSource(source) ? "ink" : "neutral"}>
+                  <SourceMark source={source} />
                 </WireMark>
               }
               eyebrow="Source"
               title={<span className="block truncate">{sourceLabel}</span>}
               hint={
                 <span className="block truncate">
-                  {branch ? <span className="font-mono">{branch}</span> : humanize(source.kind)}
+                  {branch ? (
+                    <span className="font-mono">{branch}</span>
+                  ) : (
+                    SOURCE_KIND_LABELS[source.kind]
+                  )}
                   {framework && ` · ${frameworkLabel(framework)}`}
                 </span>
               }

@@ -195,6 +195,18 @@ export function ErrorState({
  * lockout protection, an editor that validates before it saves, a shell that
  * runs as root. Deliberately quieter than ErrorState: it is context, not a
  * failure, and a page that shouts everything says nothing.
+ *
+ * **The glyph is a mark, not a plate.** This was the last 28px tinted square
+ * with an icon inside it left in the product: §14 took the prop off
+ * `PanelHeader`, `Modal`, `SidePanel`, `Section`, `ChartPanel` and `StatTile`,
+ * and a `Notice` kept one because its glyph is allowed — a severity is a thing
+ * a shape can say. What is not allowed is the plate around it, and on a tinted
+ * banner it was the fourth tinted object in a box that needed one: a wash, a
+ * rule, a plate and the glyph on it, all the same hue, for a sentence saying
+ * the certificate was fine. The glyph stands on the banner's own ground now,
+ * at the size of the title's own line, and `rounded-lg` puts the banner on
+ * §9's fence step beside `Group`, which is what it is, rather than on the
+ * block step beside `Panel`, which it is not.
  */
 export function Notice({
   title,
@@ -212,7 +224,7 @@ export function Notice({
   return (
     <div
       className={cn(
-        "flex min-w-0 items-start gap-3 rounded-xl border p-3.5",
+        "flex min-w-0 items-start gap-2.5 rounded-lg border p-3",
         tone === "default" && "border-hairline bg-card",
         tone === "warning" && "border-rule-warning bg-wash-warning",
         tone === "danger" && "border-rule-danger bg-wash-danger",
@@ -221,17 +233,19 @@ export function Notice({
       )}
     >
       {Icon && (
-        <span
+        <Icon
+          aria-hidden
           className={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-lg",
-            tone === "default" && "bg-muted text-muted-foreground",
-            tone === "warning" && "bg-plot-warning text-warning",
-            tone === "danger" && "bg-plot-danger text-destructive",
-            tone === "success" && "bg-plot-success text-success",
+            // Nudged onto the title's baseline rather than the box's top edge:
+            // 13px of text in an 18px line box puts its optical centre two
+            // pixels below a 16px glyph's.
+            "mt-0.5 size-4 shrink-0",
+            tone === "default" && "text-muted-foreground",
+            tone === "warning" && "text-warning",
+            tone === "danger" && "text-destructive",
+            tone === "success" && "text-success",
           )}
-        >
-          <Icon className="size-3.5" />
-        </span>
+        />
       )}
       <div className="min-w-0 space-y-1">
         <p className="text-body leading-tight font-medium">{title}</p>

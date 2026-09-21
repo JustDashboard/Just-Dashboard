@@ -2,18 +2,65 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { CheckCircle, LockClosed, Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
+import { LockClosed, Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
-import { Field, FormSection, OptionRow } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { cn } from "@/lib/utils"
+import { Field, FormNote, FormSection, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import { Toggle } from "@/components/ui/toggle"
 import type { DeploymentConfiguration, DeploymentHostnameSuggestion } from "@/lib/types"
 
 type Domain = DeploymentConfiguration["domains"][number]
+
+/**
+ * Whether the name is served over HTTPS, as the last segment of the field it
+ * belongs to.
+ *
+ * A `Switch` is the right control for an option in a list of options, where a
+ * sentence names it and the switch answers. It is the wrong one at the end of
+ * a text field: at 14px beside a 36px input it is the smallest thing in a row
+ * of the largest, and the two read as unrelated. Pressed state here is
+ * `aria-pressed` on a control the size of the field, lit with `bg-accent` —
+ * §6's three mechanisms are untouched, the selection one is simply on a
+ * control that can carry it.
+ */
+function HttpsToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <Toggle
+      aria-label="Serve this hostname over HTTPS"
+      pressed={checked}
+      onPressedChange={onChange}
+      className="h-full gap-1.5 rounded-none px-3 text-xs font-medium focus-ring-inset data-[state=off]:text-muted-foreground"
+    >
+      {/* The lock is the mark, and it takes the brand when the scheme is on —
+          the same blue `ChoiceCard` puts on a chosen option's glyph and
+          `FlowSteps` on a completed step. `bg-accent` alone is a step of
+          ground a reader has to compare with the field beside it to see; the
+          tinted glyph says it without the comparison. */}
+      <LockClosed className={cn("size-3.5", checked ? "text-brand" : "text-muted-foreground")} />
+      {/* The word goes on a phone, where 390px of field had become 140px of
+          field and 250px of two labels. The lock is the mark, the group is
+          still one box, and `aria-label` above is what names the control
+          either way. */}
+      <span className="max-sm:hidden">HTTPS</span>
+    </Toggle>
+  )
+}
 
 /**
  * The address the deployment answers on, and the certificate it needs to do
@@ -65,6 +112,26 @@ export function PublicAddress({
   const update = (patch: Partial<Domain>) => setPrimary({ ...base, ...patch })
   const current = checked ?? suggestion
   const matches = current?.hostname.toLowerCase() === hostname.toLowerCase()
+  /**
+   * Whether the name will answer over HTTPS, as a reading at its own label.
+   *
+   * It was a full-width tinted banner under the field, and in the commonest
+   * case — a certificate already covers the name — it repeated the field's own
+   * hint word for word: the server's `detail` line under the input says "the
+   * caddy-… certificate already covers it", and the banner said "the caddy-…
+   * certificate already covers it, so the deploy reuses it". A green box, a
+   * green rule and a green plate, to say a second time what the grey line
+   * above it had already said. A state is a `Status` — a dot and a word (§4) —
+   * and the place for it is beside the thing it is a state of.
+   */
+  const certificate =
+    !https || !matches || !current
+      ? undefined
+      : current.covered
+        ? { tone: "running" as const, label: "HTTPS ready" }
+        : current.certificateMethod
+          ? { tone: "notice" as const, label: "Certificate on deploy" }
+          : { tone: "warning" as const, label: "HTTPS needs attention" }
 
   const recheck = async (value: string) => {
     const trimmed = value.trim().toLowerCase()
@@ -96,17 +163,29 @@ export function PublicAddress({
         }
       >
         <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <Field
-              label="Hostname"
-              htmlFor="public-hostname"
-              hint={
-                matches
-                  ? current?.detail
-                  : "Point a record at this server, or use the one suggested here."
-              }
-            >
-              <Input
+          {/* One field, not three controls that happen to be adjacent.
+              The name, the scheme it is served over and the check on both are
+              one decision, and they were three boxes at three heights in a
+              wrapping flex: a 36px input, a 14px switch and a 36px button,
+              with the smallest of them — the one that decides whether the
+              site answers on 443 — reading as a stray control that had
+              drifted next to the field. In an `InputGroup` they are one box
+              with one border, one height and one focus ring, and the scheme
+              is a `Toggle` the size of the field it belongs to, lit with the
+              same `bg-accent` every other chosen thing in the product wears
+              (§3). */}
+          <Field
+            label="Hostname"
+            htmlFor="public-hostname"
+            trailing={certificate && <Status tone={certificate.tone} label={certificate.label} />}
+            hint={
+              matches
+                ? current?.detail
+                : "Point a record at this server, or use the one suggested here."
+            }
+          >
+            <InputGroup>
+              <InputGroupInput
                 id="public-hostname"
                 value={hostname}
                 onChange={(event) =>
@@ -116,32 +195,41 @@ export function PublicAddress({
                 placeholder="app.example.com"
                 className="font-mono"
               />
-            </Field>
-            <div className="flex items-end gap-3 pb-1">
-              <Label className="flex min-h-9 items-center gap-2 text-xs">
-                <Switch
+              <InputGroupAddon align="inline-end" className="gap-0 p-0">
+                <HttpsToggle
                   checked={https}
-                  onCheckedChange={(nextHttps) =>
+                  onChange={(nextHttps) =>
                     setPrimary({ hostname, https: nextHttps, ownership: "managed" })
                   }
                 />
-                HTTPS
-              </Label>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                pending={checking}
-                onClick={() => void recheck(hostname)}
-              >
-                <RefreshClockwise className="size-3.5" />
-                Re-check
-              </Button>
-            </div>
-          </div>
+                <InputGroupButton
+                  aria-label="Re-check this hostname"
+                  pending={checking}
+                  onClick={() => void recheck(hostname)}
+                >
+                  <RefreshClockwise className="size-3.5" />
+                  <span className="max-sm:hidden">Re-check</span>
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+          {/* Only where something is still going to happen. What the run will
+              do about a certificate it has not got is worth a line; that it
+              already has one is what the `Status` above says, in two words. */}
+          {https && matches && current && !current.covered && current.certificateMethod && (
+            <FormNote>
+              A certificate will be issued during the deploy. The run orders one for{" "}
+              <code className="font-mono">{hostname}</code> over the{" "}
+              {current.certificateMethod === "caddy"
+                ? "managed Caddy ingress"
+                : `${current.certificateMethod} challenge`}{" "}
+              before it starts anything.{" "}
+              {current.certificateMethod === "caddy" ? "Caddy" : "Certbot"} handles renewal
+              automatically.
+            </FormNote>
+          )}
           <OptionRow
             title="Ask visitors for a password"
-            hint="A staging site or a preview a customer should not find. The proxy asks before the application sees the request; previews inherit it."
             checked={Boolean(protection)}
             onCheckedChange={(next) =>
               update({ protection: next ? { username: "", password: "" } : undefined })
@@ -187,42 +275,19 @@ export function PublicAddress({
               </Field>
             </div>
           </OptionRow>
-          {https && matches && current?.covered && (
-            <Notice tone="success" icon={CheckCircle} title="HTTPS is ready for this name">
-              The <code className="font-mono">{current.certificateName}</code> certificate already
-              covers it, so the deploy reuses it rather than ordering another.
-            </Notice>
-          )}
-          {https && matches && current && !current.covered && (
-            <Notice
-              tone={current.certificateMethod ? "default" : "warning"}
-              icon={current.certificateMethod ? LockClosed : Warning}
-              title={
-                current.certificateMethod
-                  ? "A certificate will be issued during the deploy"
-                  : "Automatic HTTPS needs attention"
-              }
-            >
-              {current.certificateMethod ? (
-                <>
-                  The run orders one for <code className="font-mono">{hostname}</code> over the{" "}
-                  {current.certificateMethod === "caddy"
-                    ? "managed Caddy ingress"
-                    : `${current.certificateMethod} challenge`}{" "}
-                  before it starts anything.{" "}
-                  {current.certificateMethod === "caddy" ? "Caddy" : "Certbot"} handles renewal
-                  automatically.
-                </>
-              ) : (
-                <>
-                  {current.certificateIssue ?? "Certificate readiness could not be confirmed."}{" "}
-                  Review certificate options on the{" "}
-                  <Link href="/proxy/certificates" className="underline underline-offset-2">
-                    Certificates page
-                  </Link>
-                  .
-                </>
-              )}
+          {/* One banner, and only for the case that needs a decision. A
+              `Notice` is for what the reader has to act on; the two that said
+              "this is fine" and "this will happen by itself" were framed
+              blocks spending a tinted box each on an outcome nobody has to do
+              anything about. */}
+          {https && matches && current && !current.covered && !current.certificateMethod && (
+            <Notice tone="warning" icon={Warning} title="Automatic HTTPS needs attention">
+              {current.certificateIssue ?? "Certificate readiness could not be confirmed."} Review
+              certificate options on the{" "}
+              <Link href="/proxy/certificates" className="underline underline-offset-2">
+                Certificates page
+              </Link>
+              .
             </Notice>
           )}
 
@@ -232,50 +297,46 @@ export function PublicAddress({
           {extra.length > 0 && (
             <ul className="space-y-2" aria-label="Additional hostnames">
               {extra.map((entry, index) => (
-                <li key={index} className="flex min-w-0 items-end gap-2">
-                  <Field
-                    label={`Also answers to ${index + 2}`}
-                    htmlFor={`extra-hostname-${index}`}
-                    className="min-w-0 flex-1"
-                  >
-                    <Input
-                      id={`extra-hostname-${index}`}
-                      value={entry.hostname}
-                      placeholder="www.example.com"
-                      className="font-mono"
-                      onChange={(event) =>
-                        onChange(
-                          domains.map((item, position) =>
-                            position === index + 1
-                              ? { ...item, hostname: event.target.value }
-                              : item,
-                          ),
-                        )
-                      }
-                    />
+                <li key={index} className="min-w-0">
+                  <Field label={`Also answers to ${index + 2}`} htmlFor={`extra-hostname-${index}`}>
+                    <InputGroup>
+                      <InputGroupInput
+                        id={`extra-hostname-${index}`}
+                        value={entry.hostname}
+                        placeholder="www.example.com"
+                        className="font-mono"
+                        onChange={(event) =>
+                          onChange(
+                            domains.map((item, position) =>
+                              position === index + 1
+                                ? { ...item, hostname: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                      <InputGroupAddon align="inline-end" className="gap-0 p-0">
+                        <HttpsToggle
+                          checked={entry.https}
+                          onChange={(nextHttps) =>
+                            onChange(
+                              domains.map((item, position) =>
+                                position === index + 1 ? { ...item, https: nextHttps } : item,
+                              ),
+                            )
+                          }
+                        />
+                        <InputGroupButton
+                          aria-label={`Remove ${entry.hostname || `hostname ${index + 2}`}`}
+                          onClick={() =>
+                            onChange(domains.filter((_, position) => position !== index + 1))
+                          }
+                        >
+                          <Trash className="size-3.5" />
+                        </InputGroupButton>
+                      </InputGroupAddon>
+                    </InputGroup>
                   </Field>
-                  <Label className="flex min-h-9 items-center gap-2 pb-1 text-xs">
-                    <Switch
-                      checked={entry.https}
-                      onCheckedChange={(nextHttps) =>
-                        onChange(
-                          domains.map((item, position) =>
-                            position === index + 1 ? { ...item, https: nextHttps } : item,
-                          ),
-                        )
-                      }
-                    />
-                    HTTPS
-                  </Label>
-                  <IconAction
-                    label={`Remove ${entry.hostname || `hostname ${index + 2}`}`}
-                    className="mb-1"
-                    onClick={() =>
-                      onChange(domains.filter((_, position) => position !== index + 1))
-                    }
-                  >
-                    <Trash />
-                  </IconAction>
                 </li>
               ))}
             </ul>

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { json, mockNewProject, now } from "./deploy-fixture"
+import { gotoStep, json, mockNewProject, now } from "./deploy-fixture"
 
 /**
  * `/deploy/new` — the plan a setup is building, and the four decisions that
@@ -14,6 +14,9 @@ test("the plan drawing reads the setup back and opens the field that decides eac
   await mockNewProject(page)
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  // The drawing is beside every one of the four configure screens, so it reads
+  // the setup back wherever the reader is standing in the sequence.
+  await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
 
   const plan = page.getByRole("list", { name: "What this setup will create" })
@@ -25,8 +28,9 @@ test("the plan drawing reads the setup back and opens the field that decides eac
   // it, so the plan says so rather than leaving it inside Advanced to find.
   await expect(plan.getByText("No memory or CPU limit")).toBeVisible()
 
-  // Pressing a step opens the fields that decide it. Runtime lives behind the
-  // Advanced disclosure, which starts closed.
+  // Pressing a step goes to the screen that decides it and opens the fold the
+  // node was reading from — the limits are one press away, not a press, a
+  // wall of twenty-five fields and a hunt.
   await expect(page.getByRole("spinbutton", { name: "Memory limit (MB)" })).toHaveCount(0)
   await plan.getByRole("button", { name: "Change the runtime settings" }).click()
   await expect(page.getByRole("spinbutton", { name: "Memory limit (MB)" })).toBeVisible()
@@ -45,15 +49,12 @@ test("an image can be called a web application, which earns it a health gate and
     .getByRole("textbox", { name: "Image reference", exact: true })
     .fill("ghcr.io/acme/app:1")
   await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
 
-  // The port comes from the image's own configuration rather than zero, and
-  // it is on the form instead of hidden behind Advanced.
-  await expect(page.getByRole("spinbutton", { name: "Port the app listens on" })).toHaveValue(
-    "8080",
-  )
-
-  // What the registry manifest could not answer is said, not swallowed.
+  // A registry manifest that could not answer everything is a question for the
+  // operator, so an image opens on the first screen rather than on Review.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What are you building?" }),
+  ).toBeVisible()
   await expect(page.getByText("Confirm runtime command, storage, and readiness")).toBeVisible()
 
   const plan = page.getByRole("list", { name: "What this setup will create" })
@@ -62,15 +63,23 @@ test("an image can be called a web application, which earns it a health gate and
   await page.getByRole("combobox", { name: "Project type" }).click()
   await page.getByRole("option", { name: "Web application" }).click()
 
-  // Preflight only allows candidate-first activation, and only requires a
-  // readiness gate, for a web profile — so saying so has to change both.
+  // The port comes from the image's own configuration rather than zero, and it
+  // is the runtime screen's first field rather than the last line of a fold.
   await expect(plan.getByText("Port 8080 · candidate first")).toBeVisible()
   await page.getByRole("button", { name: "Change the runtime settings" }).click()
+  await expect(page.getByRole("spinbutton", { name: "Port the app listens on" })).toHaveValue(
+    "8080",
+  )
+
+  // Preflight only allows candidate-first activation, and only requires a
+  // readiness gate, for a web profile — so saying so has to change both.
   await expect(page.getByRole("combobox", { name: "Release strategy" })).toContainText(
     "Candidate first",
   )
+  await page.getByRole("button", { name: /Health check/ }).click()
   await expect(page.locator("#readiness-name")).toBeVisible()
 
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Save only", exact: true }).click()
   await expect.poll(() => journey.commits()).toBe(1)
   const saved = journey.configuration() as {
@@ -88,7 +97,7 @@ test("a second hostname can be added before the first deploy", async ({ page }) 
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
+  await gotoStep(page, "runtime")
 
   await page.getByRole("textbox", { name: "Hostname", exact: true }).fill("wesmokefish.test")
   await page.getByRole("button", { name: "Add another hostname" }).click()
@@ -97,6 +106,7 @@ test("a second hostname can be added before the first deploy", async ({ page }) 
   const plan = page.getByRole("list", { name: "What this setup will create" })
   await expect(plan.getByText("HTTPS · +1 more")).toBeVisible()
 
+  await gotoStep(page, "review")
   await page.getByRole("button", { name: "Save only", exact: true }).click()
   await expect.poll(() => journey.commits()).toBe(1)
   const saved = journey.configuration() as { domains: { hostname: string }[] }
@@ -112,7 +122,9 @@ test("automatic deployment is a decision at creation, not a setting to find afte
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
+  // What happens on the *next* push is part of the last look before the
+  // project is made, so it is on the Review screen the flow opens on.
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
 
   const automatic = page.getByRole("switch", { name: "Deploy new commits automatically" })
   await expect(automatic).toBeChecked()
@@ -166,7 +178,9 @@ test("an unfinished setup can be discarded, and changing source discards the one
   // picking a different source has to throw the first away rather than leave
   // it to expire — three tries at one repository were three rows here.
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
+  // The way out of the sequence is the way back from its first screen: there
+  // is no step behind that one, so "Back" is "Change source".
+  await gotoStep(page, "project")
   await page.getByRole("button", { name: "Change source" }).click()
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
   await expect.poll(() => journey.discarded()).toContain("journey-draft")
@@ -221,16 +235,12 @@ test("a finding whose remedy is inside Advanced opens it instead of pointing at 
   })
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
+  // Preflight is the Review screen's own step now, so the findings arrive on
+  // the screen that asked whether the plan was right.
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
 
   await expect(page.getByText("More than one lockfile")).toBeVisible()
-  // The build disclosure is collapsed whenever detection answered it, and the
-  // link used to be drawn for every finding and answered for none but a
-  // variable's.
-  await expect(page.getByRole("combobox", { name: "Package manager" })).toHaveCount(0)
-  await page.getByRole("button", { name: "Open it" }).click()
-  await expect(page.getByRole("combobox", { name: "Package manager" })).toBeVisible()
 
   // A finding whose owner is another feature offers that page rather than a
   // control this screen does not have.
@@ -240,4 +250,14 @@ test("a finding whose remedy is inside Advanced opens it instead of pointing at 
     "href",
     "/backups",
   )
+
+  // "Open it" is a step and a fold: the build settings are folded away on the
+  // Project screen whenever detection answered them, and the link used to be
+  // drawn for every finding and answered for none but a variable's.
+  await expect(page.getByRole("combobox", { name: "Package manager" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Open it" }).click()
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What are you building?" }),
+  ).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "Package manager" })).toBeVisible()
 })

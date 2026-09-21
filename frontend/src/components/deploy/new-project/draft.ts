@@ -1,6 +1,10 @@
 import { del, get, post, put } from "@/lib/api"
 import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
-import { defaultConfiguration } from "@/components/deploy/deployment-defaults"
+import {
+  defaultConfiguration,
+  discoveredEnvironmentRows,
+} from "@/components/deploy/deployment-defaults"
+import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import type {
   DeploymentConfiguration,
   DeploymentDetection,
@@ -12,8 +16,8 @@ import type {
   WorkloadProfile,
 } from "@/lib/types"
 
-/** The six ways into a new project — the source strip's own tab keys. */
-export type SourceTabKey = "git" | "image" | "template" | "database" | "compose" | "existing"
+/** The five ways into a new project — the source strip's own tab keys. */
+export type SourceTabKey = "git" | "image" | "template" | "database" | "compose"
 
 /**
  * The draft state machine every source drives the same way.
@@ -23,7 +27,7 @@ export type SourceTabKey = "git" | "image" | "template" | "database" | "compose"
  * detects — the same four requests `quick-deploy.tsx` made inline. Configure
  * then owns the draft for the rest of its life: re-saving the source when the
  * branch (or a blueprint input) changes, saving the configuration, running
- * preflight, and committing. One place drives the API so six sources cannot
+ * preflight, and committing. One place drives the API so five sources cannot
  * disagree about the sequence.
  */
 
@@ -196,7 +200,7 @@ export type InspectOutcome = {
 /**
  * Everything Configure needs, carried from whichever source tab produced it.
  *
- * One shape for all six sources rather than one state tree per source: a
+ * One shape for all five sources rather than one state tree per source: a
  * source tab's only job is to fill this in and hand it up, and Configure
  * never has to ask which tab it came from except for the three things that
  * genuinely differ (`sourceLabel`, `githubRepo`, `importPreview`).
@@ -216,6 +220,86 @@ export type ConfigureFlow = {
   hostname?: DeploymentHostnameSuggestion
   /** Carried from the existing-workload tab through to the final adopt call. */
   importPreview?: ImportPreview
+}
+
+/**
+ * The four screens Configure was split into, in order.
+ *
+ * One screen held the source controls, the name, the type, a ten-field build
+ * fold, the environment editor, the public address, the automatic-deployment
+ * switches, an "Advanced" fold holding seven more sections, and the findings —
+ * somewhere past forty controls for a Git repository, all of them present
+ * before the reader had answered the first one. They are the same controls,
+ * dealt into the four questions a deployment actually asks: what is it, how
+ * does it run, what does it need, and is it right.
+ */
+export type ConfigureStepKey = "project" | "runtime" | "variables" | "review" | "done"
+
+export const CONFIGURE_STEPS: ConfigureStepKey[] = ["project", "runtime", "variables", "review"]
+
+/** Where this step sits on the spine, whose first segment is the chooser. */
+export function creationStepIndex(step: ConfigureStepKey) {
+  // Past the last segment, so a finished sequence reads as every step done
+  // rather than as one still standing on Review.
+  return step === "done" ? CONFIGURE_STEPS.length + 1 : CONFIGURE_STEPS.indexOf(step) + 1
+}
+
+export function stepBefore(step: ConfigureStepKey) {
+  const at = CONFIGURE_STEPS.indexOf(step)
+  return at > 0 ? CONFIGURE_STEPS[at - 1] : undefined
+}
+
+export function stepAfter(step: ConfigureStepKey) {
+  const at = CONFIGURE_STEPS.indexOf(step)
+  return at >= 0 && at < CONFIGURE_STEPS.length - 1 ? CONFIGURE_STEPS[at + 1] : undefined
+}
+
+/**
+ * Which of the four screens a freshly inspected source opens on.
+ *
+ * Splitting one screen into four buys the reader four small questions and
+ * charges them three presses for it, and the repository whose detection
+ * answered everything should not pay that: importing it used to be two
+ * presses — Import, then Deploy — and the browser test that says so ("One
+ * press: plan saved, preflight run, environment applied, release started") is
+ * the contract this must not break.
+ *
+ * So the steps are the *correction* path. Everything detection left open
+ * decides where the reader lands; when nothing is open they land on Review
+ * with the whole plan read back and Deploy under it, and the earlier steps
+ * read as done because they were **answered**, not because they were visited.
+ */
+export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureStepKey {
+  // `?mode=advanced` is a link asking for the settings that used to live
+  // behind one fold; they are the runtime screen's three folds now.
+  if (advanced) return "runtime"
+  const { configuration, candidate, detection } = flow
+  if (
+    (detection?.candidates?.length ?? 0) > 1 ||
+    (candidate?.needsDecision?.length ?? 0) > 0 ||
+    Boolean(detection?.unavailable) ||
+    !DEPLOYMENT_NAME.test(flow.name) ||
+    (flow.profile === "static" &&
+      configuration.build.method === "recipe" &&
+      !configuration.build.outputDirectory?.trim())
+  )
+    return "project"
+  // A worker answers no requests, and a Compose stack or an adopted workload
+  // publishes whatever its own file or its own container already publishes —
+  // so an unset `internalPort` is only an unanswered question for the profiles
+  // that serve one.
+  const serves = !["worker", "compose", "imported"].includes(flow.profile)
+  if (serves && (configuration.runtime.internalPort ?? 0) === 0) return "runtime"
+  // A blueprint's declared variables are review material — a generated
+  // password, a EULA acceptance — the way the old screen opened Advanced for
+  // one; and a variable the source was read as needing, with nothing in it,
+  // is the one thing nobody else can answer.
+  if (
+    (flow.source.mode === "blueprint" && configuration.variables.length > 0) ||
+    discoveredEnvironmentRows(candidate).some((row) => row.detected && !row.value)
+  )
+    return "variables"
+  return "review"
 }
 
 /** What Configure hands back: a whole flow, nothing (back to the chooser), or an update of the current one. */

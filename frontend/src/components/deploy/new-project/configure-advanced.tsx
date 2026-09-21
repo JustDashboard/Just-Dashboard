@@ -45,21 +45,145 @@ function nonemptyLines(value: string) {
  * checks, dependencies): the plan schema is exact either way, but a row the
  * form validates as you type is a plan a first-time operator can actually
  * finish, and JSON asked for the normalized field names from memory.
+ *
+ * This was one `Advanced` fold holding seven sections at the foot of one
+ * Configure screen — so "is my answer in there" cost a press and a wall of
+ * twenty-five fields, and a preflight finding about a health check had to
+ * open a fold programmatically to point at the control that fixed it. The
+ * seven are exported one at a time now and each is drawn on the step that
+ * owns it: the build extras on Project, the limits, the checks, the storage
+ * and the container on Runtime, the references on Variables. A fold there
+ * holds three fields and says which three while it is shut.
  */
-export function ConfigureAdvanced({
+
+type AdvancedProps = {
+  configuration: DeploymentConfiguration
+  onChange: (configuration: DeploymentConfiguration) => void
+}
+
+/**
+ * What the container is allowed to use. Not the application port — that one
+ * is the first thing the runtime step asks, in the open, because a plan with
+ * no port is a plan with no address.
+ */
+export function RuntimeLimits({
   configuration,
   onChange,
   errors,
-}: {
-  configuration: DeploymentConfiguration
-  onChange: (configuration: DeploymentConfiguration) => void
-  errors: WizardErrors
-}) {
+}: AdvancedProps & { errors: WizardErrors }) {
   const updateRuntime = (patch: Partial<DeploymentConfiguration["runtime"]>) =>
     onChange({ ...configuration, runtime: { ...configuration.runtime, ...patch } })
-  const updateBuild = (patch: Partial<DeploymentConfiguration["build"]>) =>
-    onChange({ ...configuration, build: { ...configuration.build, ...patch } })
+  return (
+    <div className="space-y-4">
+      <FieldRow columns={2}>
+        <Field
+          label="Host port"
+          htmlFor="adv-host-port"
+          hint="0 leaves the service private behind its managed route."
+          error={errors.hostPort}
+        >
+          <Input
+            id="adv-host-port"
+            type="number"
+            min={0}
+            max={65535}
+            value={configuration.runtime.hostPort ?? 0}
+            onChange={(event) => updateRuntime({ hostPort: Number(event.target.value) || 0 })}
+            className="font-mono"
+          />
+        </Field>
+        <Field label="Bind address" htmlFor="adv-bind-address">
+          <Select
+            value={configuration.runtime.bindAddress || "127.0.0.1"}
+            onValueChange={(bindAddress) => updateRuntime({ bindAddress })}
+          >
+            <SelectTrigger id="adv-bind-address" className="w-full font-mono">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="127.0.0.1">127.0.0.1 · loopback</SelectItem>
+              <SelectItem value="::1">::1 · loopback IPv6</SelectItem>
+              <SelectItem value="0.0.0.0">0.0.0.0 · every interface</SelectItem>
+              <SelectItem value="::">:: · every IPv6 interface</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </FieldRow>
+      <FieldRow columns={2}>
+        <Field label="Release strategy" htmlFor="adv-strategy">
+          <Select
+            value={configuration.runtime.strategy}
+            onValueChange={(strategy) =>
+              updateRuntime({ strategy: strategy as "blue_green" | "stop_first" })
+            }
+          >
+            <SelectTrigger id="adv-strategy" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="blue_green">Candidate first</SelectItem>
+              <SelectItem value="stop_first">Stop first</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Restart policy" htmlFor="adv-restart-policy">
+          <Select
+            value={configuration.runtime.restartPolicy || "unless-stopped"}
+            onValueChange={(restartPolicy) =>
+              updateRuntime({ restartPolicy: restartPolicy as DeploymentRestartPolicy })
+            }
+          >
+            <SelectTrigger id="adv-restart-policy" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unless-stopped">Unless stopped</SelectItem>
+              <SelectItem value="always">Always</SelectItem>
+              <SelectItem value="on-failure">On failure</SelectItem>
+              <SelectItem value="no">Never</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </FieldRow>
+      <FieldRow columns={3}>
+        <Field label="Memory limit (MB)" htmlFor="adv-memory" hint="0 for no limit.">
+          <Input
+            id="adv-memory"
+            type="number"
+            min={0}
+            value={configuration.runtime.memoryMb ?? 0}
+            onChange={(event) => updateRuntime({ memoryMb: Number(event.target.value) || 0 })}
+            className="font-mono"
+          />
+        </Field>
+        <Field label="CPU limit (cores)" htmlFor="adv-cpus" hint="0 for no limit.">
+          <Input
+            id="adv-cpus"
+            type="number"
+            min={0}
+            step="0.1"
+            value={configuration.runtime.cpus ?? 0}
+            onChange={(event) => updateRuntime({ cpus: Number(event.target.value) || 0 })}
+            className="font-mono"
+          />
+        </Field>
+        <Field label="Process limit" htmlFor="adv-pids" hint="0 for no limit.">
+          <Input
+            id="adv-pids"
+            type="number"
+            min={0}
+            value={configuration.runtime.pidsLimit ?? 0}
+            onChange={(event) => updateRuntime({ pidsLimit: Number(event.target.value) || 0 })}
+            className="font-mono"
+          />
+        </Field>
+      </FieldRow>
+    </div>
+  )
+}
 
+/** What has to answer before a release is allowed to take traffic. */
+export function HealthChecks({ configuration, onChange }: AdvancedProps) {
   const readiness = configuration.checks.find((check) => check.phase === "readiness")
   const smoke = configuration.checks.find((check) => check.phase === "smoke")
   const setCheck = (previous: Check | undefined, next: Check | undefined) =>
@@ -71,289 +195,249 @@ export function ConfigureAdvanced({
           : [...configuration.checks, next]
         : configuration.checks.filter((check) => check !== previous),
     })
-
-  const mounts = configuration.runtime.mounts ?? []
-  const setMounts = (next: Mount[]) => updateRuntime({ mounts: next })
-
   return (
-    <div className="space-y-6">
-      <FormSection title="Runtime">
-        <FieldRow columns={2}>
-          <Field
-            label="Application port"
-            htmlFor="adv-internal-port"
-            hint="What the container serves on."
-            error={errors.internalPort}
-          >
-            <Input
-              id="adv-internal-port"
-              type="number"
-              min={0}
-              max={65535}
-              value={configuration.runtime.internalPort ?? 0}
-              onChange={(event) => updateRuntime({ internalPort: Number(event.target.value) || 0 })}
-              className="font-mono"
-            />
-          </Field>
-          <Field
-            label="Host port"
-            htmlFor="adv-host-port"
-            hint="0 leaves the service private behind its managed route."
-            error={errors.hostPort}
-          >
-            <Input
-              id="adv-host-port"
-              type="number"
-              min={0}
-              max={65535}
-              value={configuration.runtime.hostPort ?? 0}
-              onChange={(event) => updateRuntime({ hostPort: Number(event.target.value) || 0 })}
-              className="font-mono"
-            />
-          </Field>
-        </FieldRow>
-        <FieldRow columns={2}>
-          <Field label="Bind address" htmlFor="adv-bind-address">
-            <Select
-              value={configuration.runtime.bindAddress || "127.0.0.1"}
-              onValueChange={(bindAddress) => updateRuntime({ bindAddress })}
-            >
-              <SelectTrigger id="adv-bind-address" className="w-full font-mono">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="127.0.0.1">127.0.0.1 · loopback</SelectItem>
-                <SelectItem value="::1">::1 · loopback IPv6</SelectItem>
-                <SelectItem value="0.0.0.0">0.0.0.0 · every interface</SelectItem>
-                <SelectItem value="::">:: · every IPv6 interface</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Release strategy" htmlFor="adv-strategy">
-            <Select
-              value={configuration.runtime.strategy}
-              onValueChange={(strategy) =>
-                updateRuntime({ strategy: strategy as "blue_green" | "stop_first" })
-              }
-            >
-              <SelectTrigger id="adv-strategy" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="blue_green">Candidate first</SelectItem>
-                <SelectItem value="stop_first">Stop first</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-        </FieldRow>
-        <FieldRow columns={2}>
-          <Field label="Restart policy" htmlFor="adv-restart-policy">
-            <Select
-              value={configuration.runtime.restartPolicy || "unless-stopped"}
-              onValueChange={(restartPolicy) =>
-                updateRuntime({ restartPolicy: restartPolicy as DeploymentRestartPolicy })
-              }
-            >
-              <SelectTrigger id="adv-restart-policy" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unless-stopped">Unless stopped</SelectItem>
-                <SelectItem value="always">Always</SelectItem>
-                <SelectItem value="on-failure">On failure</SelectItem>
-                <SelectItem value="no">Never</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <div />
-        </FieldRow>
-        <FieldRow columns={3}>
-          <Field label="Memory limit (MB)" htmlFor="adv-memory" hint="0 for no limit.">
-            <Input
-              id="adv-memory"
-              type="number"
-              min={0}
-              value={configuration.runtime.memoryMb ?? 0}
-              onChange={(event) => updateRuntime({ memoryMb: Number(event.target.value) || 0 })}
-              className="font-mono"
-            />
-          </Field>
-          <Field label="CPU limit (cores)" htmlFor="adv-cpus" hint="0 for no limit.">
-            <Input
-              id="adv-cpus"
-              type="number"
-              min={0}
-              step="0.1"
-              value={configuration.runtime.cpus ?? 0}
-              onChange={(event) => updateRuntime({ cpus: Number(event.target.value) || 0 })}
-              className="font-mono"
-            />
-          </Field>
-          <Field label="Process limit" htmlFor="adv-pids" hint="0 for no limit.">
-            <Input
-              id="adv-pids"
-              type="number"
-              min={0}
-              value={configuration.runtime.pidsLimit ?? 0}
-              onChange={(event) => updateRuntime({ pidsLimit: Number(event.target.value) || 0 })}
-              className="font-mono"
-            />
-          </Field>
-        </FieldRow>
-      </FormSection>
-
-      <FormSection title="Health check">
-        <div className="space-y-3">
-          {readiness ? (
-            <CheckFields
-              idPrefix="readiness"
-              check={readiness}
-              onChange={(next) => setCheck(readiness, next)}
-              onRemove={() => setCheck(readiness, undefined)}
-            />
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setCheck(undefined, {
-                  name: "Readiness",
-                  kind: "http",
-                  phase: "readiness",
-                  required: true,
-                  config: { path: "/", attempts: 20, timeoutSeconds: 5, intervalSeconds: 3 },
-                })
-              }
-            >
-              <Plus className="size-3.5" /> Add a readiness check
-            </Button>
-          )}
-        </div>
-        <div className="border-t border-hairline pt-3">
-          <OptionRow
-            title="Add a smoke check"
-            hint="Run once more against the live route, after activation, before the previous release is retired."
-            checked={Boolean(smoke)}
-            onCheckedChange={(on) =>
-              setCheck(
-                smoke,
-                on
-                  ? {
-                      name: "Smoke test",
-                      kind: "http",
-                      phase: "smoke",
-                      required: false,
-                      config: { path: "/", attempts: 3, timeoutSeconds: 5 },
-                    }
-                  : undefined,
-              )
-            }
-          >
-            {smoke && (
-              <CheckFields
-                idPrefix="smoke"
-                check={smoke}
-                onChange={(next) => setCheck(smoke, next)}
-              />
-            )}
-          </OptionRow>
-        </div>
-      </FormSection>
-
-      <FormSection
-        title="Storage"
-        actions={
+    <div className="space-y-4">
+      <div className="space-y-3">
+        {readiness ? (
+          <CheckFields
+            idPrefix="readiness"
+            check={readiness}
+            onChange={(next) => setCheck(readiness, next)}
+            onRemove={() => setCheck(readiness, undefined)}
+          />
+        ) : (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setMounts([...mounts, { source: "", target: "", ownership: "managed" }])}
+            onClick={() =>
+              setCheck(undefined, {
+                name: "Readiness",
+                kind: "http",
+                phase: "readiness",
+                required: true,
+                config: { path: "/", attempts: 20, timeoutSeconds: 5, intervalSeconds: 3 },
+              })
+            }
           >
-            <Plus className="size-3.5" /> Add mount
+            <Plus className="size-3.5" /> Add a readiness check
           </Button>
-        }
-      >
-        {mounts.length === 0 ? (
-          <p className="text-hint text-muted-foreground">No mounts configured.</p>
-        ) : (
-          <div className="space-y-2">
-            {mounts.map((mount, index) => (
-              <Group
-                key={index}
-                className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_9rem_auto_auto]"
-              >
-                <Input
-                  aria-label={`Mount ${index + 1} source`}
-                  value={mount.source}
-                  placeholder="volume-name or /host/path"
-                  className="font-mono"
-                  onChange={(event) =>
-                    setMounts(
-                      mounts.map((item, i) =>
-                        i === index ? { ...item, source: event.target.value } : item,
-                      ),
-                    )
-                  }
-                />
-                <Input
-                  aria-label={`Mount ${index + 1} target`}
-                  value={mount.target}
-                  placeholder="/data"
-                  className="font-mono"
-                  onChange={(event) =>
-                    setMounts(
-                      mounts.map((item, i) =>
-                        i === index ? { ...item, target: event.target.value } : item,
-                      ),
-                    )
-                  }
-                />
-                <Select
-                  value={mount.ownership}
-                  onValueChange={(ownership) =>
-                    setMounts(
-                      mounts.map((item, i) =>
-                        i === index
-                          ? { ...item, ownership: ownership as Mount["ownership"] }
-                          : item,
-                      ),
-                    )
-                  }
-                >
-                  <SelectTrigger aria-label={`Mount ${index + 1} ownership`} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="managed">Managed</SelectItem>
-                    <SelectItem value="linked">Linked</SelectItem>
-                    <SelectItem value="observed">Observed</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Label className="flex min-h-9 items-center gap-2 text-xs whitespace-nowrap">
-                  <Checkbox
-                    checked={mount.readOnly ?? false}
-                    onCheckedChange={(checked) =>
-                      setMounts(
-                        mounts.map((item, i) =>
-                          i === index ? { ...item, readOnly: checked === true } : item,
-                        ),
-                      )
-                    }
-                  />
-                  Read-only
-                </Label>
-                <IconAction
-                  label={`Remove mount ${index + 1}`}
-                  onClick={() => setMounts(mounts.filter((_, i) => i !== index))}
-                >
-                  <Trash />
-                </IconAction>
-              </Group>
-            ))}
-          </div>
         )}
-      </FormSection>
+      </div>
+      <div className="border-t border-hairline pt-3">
+        <OptionRow
+          title="Add a smoke check against the live route after activation"
+          checked={Boolean(smoke)}
+          onCheckedChange={(on) =>
+            setCheck(
+              smoke,
+              on
+                ? {
+                    name: "Smoke test",
+                    kind: "http",
+                    phase: "smoke",
+                    required: false,
+                    config: { path: "/", attempts: 3, timeoutSeconds: 5 },
+                  }
+                : undefined,
+            )
+          }
+        >
+          {smoke && (
+            <CheckFields
+              idPrefix="smoke"
+              check={smoke}
+              onChange={(next) => setCheck(smoke, next)}
+            />
+          )}
+        </OptionRow>
+      </div>
+    </div>
+  )
+}
+
+/** What survives the container it is written in. */
+export function StorageMounts({ configuration, onChange }: AdvancedProps) {
+  const mounts = configuration.runtime.mounts ?? []
+  const setMounts = (next: Mount[]) =>
+    onChange({ ...configuration, runtime: { ...configuration.runtime, mounts: next } })
+  return (
+    <div className="space-y-3">
+      {mounts.length === 0 ? (
+        <p className="text-hint text-muted-foreground">No mounts configured.</p>
+      ) : (
+        <div className="space-y-2">
+          {mounts.map((mount, index) => (
+            <Group
+              key={index}
+              className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_9rem_auto_auto]"
+            >
+              <Input
+                aria-label={`Mount ${index + 1} source`}
+                value={mount.source}
+                placeholder="volume-name or /host/path"
+                className="font-mono"
+                onChange={(event) =>
+                  setMounts(
+                    mounts.map((item, i) =>
+                      i === index ? { ...item, source: event.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <Input
+                aria-label={`Mount ${index + 1} target`}
+                value={mount.target}
+                placeholder="/data"
+                className="font-mono"
+                onChange={(event) =>
+                  setMounts(
+                    mounts.map((item, i) =>
+                      i === index ? { ...item, target: event.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <Select
+                value={mount.ownership}
+                onValueChange={(ownership) =>
+                  setMounts(
+                    mounts.map((item, i) =>
+                      i === index ? { ...item, ownership: ownership as Mount["ownership"] } : item,
+                    ),
+                  )
+                }
+              >
+                <SelectTrigger aria-label={`Mount ${index + 1} ownership`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="managed">Managed</SelectItem>
+                  <SelectItem value="linked">Linked</SelectItem>
+                  <SelectItem value="observed">Observed</SelectItem>
+                </SelectContent>
+              </Select>
+              <Label className="flex min-h-9 items-center gap-2 text-xs whitespace-nowrap">
+                <Checkbox
+                  checked={mount.readOnly ?? false}
+                  onCheckedChange={(checked) =>
+                    setMounts(
+                      mounts.map((item, i) =>
+                        i === index ? { ...item, readOnly: checked === true } : item,
+                      ),
+                    )
+                  }
+                />
+                Read-only
+              </Label>
+              <IconAction
+                label={`Remove mount ${index + 1}`}
+                onClick={() => setMounts(mounts.filter((_, i) => i !== index))}
+              >
+                <Trash />
+              </IconAction>
+            </Group>
+          ))}
+        </div>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setMounts([...mounts, { source: "", target: "", ownership: "managed" }])}
+      >
+        <Plus className="size-3.5" /> Add mount
+      </Button>
+    </div>
+  )
+}
+
+/** What the container is allowed to reach on the host it runs on. */
+export function ContainerAccess({ configuration, onChange }: AdvancedProps) {
+  const updateRuntime = (patch: Partial<DeploymentConfiguration["runtime"]>) =>
+    onChange({ ...configuration, runtime: { ...configuration.runtime, ...patch } })
+  return (
+    <div className="space-y-3">
+      <div className="flex min-h-9 items-center gap-1.5 text-xs">
+        <Label className="flex items-center gap-2 text-xs">
+          <Switch
+            checked={configuration.runtime.privileged ?? false}
+            onCheckedChange={(privileged) => updateRuntime({ privileged })}
+          />
+          Privileged container
+        </Label>
+        <ExplainIcon name="privileged" />
+      </div>
+      <div className="flex min-h-9 items-center gap-1.5 text-xs">
+        <Label className="flex items-center gap-2 text-xs">
+          <Switch
+            checked={configuration.runtime.hostNetwork ?? false}
+            onCheckedChange={(hostNetwork) => updateRuntime({ hostNetwork })}
+          />
+          Use the host network
+        </Label>
+        <ExplainIcon name="hostNetwork" />
+      </div>
+      <FieldRow columns={2}>
+        <Field label="Linux capabilities" htmlFor="adv-capabilities" hint="One per line.">
+          <Textarea
+            id="adv-capabilities"
+            value={(configuration.runtime.capabilities ?? []).join("\n")}
+            onChange={(event) => updateRuntime({ capabilities: nonemptyLines(event.target.value) })}
+            rows={3}
+            className="font-mono text-xs"
+          />
+        </Field>
+        <Field label="Host devices" htmlFor="adv-devices" hint="One absolute path per line.">
+          <Textarea
+            id="adv-devices"
+            value={(configuration.runtime.devices ?? []).join("\n")}
+            onChange={(event) => updateRuntime({ devices: nonemptyLines(event.target.value) })}
+            rows={3}
+            className="font-mono text-xs"
+          />
+        </Field>
+      </FieldRow>
+    </div>
+  )
+}
+
+/**
+ * The parts of a build nobody sets on a first deployment: which platform it
+ * targets, whether the cache is honoured, the gates that run before
+ * activation, and the secrets BuildKit mounts for one named step.
+ */
+export function BuildExtras({
+  configuration,
+  onChange,
+  errors,
+}: AdvancedProps & { errors: WizardErrors }) {
+  const updateBuild = (patch: Partial<DeploymentConfiguration["build"]>) =>
+    onChange({ ...configuration, build: { ...configuration.build, ...patch } })
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <Field
+          label="Target platform"
+          htmlFor="adv-target-platform"
+          hint="Optional OCI platform, for example linux/amd64."
+        >
+          <Input
+            id="adv-target-platform"
+            value={configuration.build.targetPlatform ?? ""}
+            onChange={(event) => updateBuild({ targetPlatform: event.target.value })}
+            placeholder="linux/amd64"
+            className="font-mono"
+          />
+        </Field>
+        <Label className="flex min-h-9 items-center gap-2 text-xs">
+          <Switch
+            checked={configuration.build.noCache ?? false}
+            onCheckedChange={(noCache) => updateBuild({ noCache })}
+          />
+          Force a clean build
+        </Label>
+      </div>
 
       <FormSection
         title="Release tasks"
@@ -380,84 +464,21 @@ export function ConfigureAdvanced({
           />
         </FormSection>
       )}
-
-      <FormSection title="Container">
-        <div className="space-y-3">
-          <Field
-            label="Target platform"
-            htmlFor="adv-target-platform"
-            hint="Optional OCI platform, for example linux/amd64."
-          >
-            <Input
-              id="adv-target-platform"
-              value={configuration.build.targetPlatform ?? ""}
-              onChange={(event) => updateBuild({ targetPlatform: event.target.value })}
-              placeholder="linux/amd64"
-              className="font-mono"
-            />
-          </Field>
-          <Label className="flex min-h-9 items-center gap-2 text-xs">
-            <Switch
-              checked={configuration.build.noCache ?? false}
-              onCheckedChange={(noCache) => updateBuild({ noCache })}
-            />
-            Force a clean build
-          </Label>
-          <div className="flex min-h-9 items-center gap-1.5 text-xs">
-            <Label className="flex items-center gap-2 text-xs">
-              <Switch
-                checked={configuration.runtime.privileged ?? false}
-                onCheckedChange={(privileged) => updateRuntime({ privileged })}
-              />
-              Privileged container
-            </Label>
-            <ExplainIcon name="privileged" />
-          </div>
-          <div className="flex min-h-9 items-center gap-1.5 text-xs">
-            <Label className="flex items-center gap-2 text-xs">
-              <Switch
-                checked={configuration.runtime.hostNetwork ?? false}
-                onCheckedChange={(hostNetwork) => updateRuntime({ hostNetwork })}
-              />
-              Use the host network
-            </Label>
-            <ExplainIcon name="hostNetwork" />
-          </div>
-          <FieldRow columns={2}>
-            <Field label="Linux capabilities" htmlFor="adv-capabilities" hint="One per line.">
-              <Textarea
-                id="adv-capabilities"
-                value={(configuration.runtime.capabilities ?? []).join("\n")}
-                onChange={(event) =>
-                  updateRuntime({ capabilities: nonemptyLines(event.target.value) })
-                }
-                rows={3}
-                className="font-mono text-xs"
-              />
-            </Field>
-            <Field label="Host devices" htmlFor="adv-devices" hint="One absolute path per line.">
-              <Textarea
-                id="adv-devices"
-                value={(configuration.runtime.devices ?? []).join("\n")}
-                onChange={(event) => updateRuntime({ devices: nonemptyLines(event.target.value) })}
-                rows={3}
-                className="font-mono text-xs"
-              />
-            </Field>
-          </FieldRow>
-        </div>
-      </FormSection>
-
-      <FormSection
-        title="Variable references & scopes"
-        hint="References name a stored/generated value; secret literals do not belong in a plan."
-      >
-        <VariableEditor
-          variables={configuration.variables}
-          onChange={(variables) => onChange({ ...configuration, variables })}
-        />
-      </FormSection>
     </div>
+  )
+}
+
+/**
+ * Variables the *plan* declares, as against the values imported once the
+ * project exists: a reference naming a stored or generated value, and the
+ * scopes that decide which steps can read it.
+ */
+export function VariableReferences({ configuration, onChange }: AdvancedProps) {
+  return (
+    <VariableEditor
+      variables={configuration.variables}
+      onChange={(variables) => onChange({ ...configuration, variables })}
+    />
   )
 }
 
@@ -629,8 +650,11 @@ function CheckFields({
         </FieldRow>
       )}
       <OptionRow
-        title={idPrefix === "smoke" ? "Smoke check required" : "Readiness check required"}
-        hint="A required check that never passes blocks activation."
+        title={
+          idPrefix === "smoke"
+            ? "Required — a failing smoke check blocks the release"
+            : "Required — a failing readiness check blocks activation"
+        }
         checked={check.required}
         onCheckedChange={(required) => onChange({ ...check, required })}
       />

@@ -1,12 +1,25 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Box, Check, CloudUpload, Code, Layers, Servers } from "@/components/icons"
+import {
+  Box,
+  Check,
+  CloudUpload,
+  Code,
+  GitBranch,
+  GitHubMark,
+  GridMasonry,
+  Inspect,
+  Layers,
+  Servers,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime } from "@/lib/format"
 import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import type {
   DeploymentCommit,
+  DeploymentDraftSource,
+  DeploymentSourceKind,
   DeploymentEngineRun,
   DeploymentRecipe,
   DeploymentRunState,
@@ -354,6 +367,74 @@ export function HealthStatus({ health, className }: { health: string; className?
   if (health === "disabled")
     return <Status tone="stopped" label="Checks disabled" className={className} />
   return <Status tone="unknown" label="Not observed" className={className} />
+}
+
+/**
+ * Where a deployment comes from, as the mark the chooser offered it under.
+ *
+ * The chooser (`new-project.tsx`'s five tabs) and the plan drawing on Configure
+ * each had their own kind-to-glyph ternary, and they disagreed: a repository
+ * picked under GitHub's own mark arrived on the next screen drawn as `Share` —
+ * three connected nodes, which in this product means a branch and in every
+ * other one means "send this somewhere". The reader who had just pressed
+ * "Git repository" was shown a different product's icon for the thing they had
+ * chosen. One mapping, so step one and step two cannot drift again (§4).
+ *
+ * GitHub is spelled with its own brand mark rather than a generic git glyph,
+ * for the same reason the chooser does: the identity that reaches the
+ * repository is the fact the reader is checking here, and a repository on some
+ * other host is genuinely a different thing. A non-GitHub remote keeps the
+ * branch glyph — a made-up logo would be worse than none.
+ */
+/**
+ * What the chooser called each kind of source, so step two says the word step
+ * one said. `humanize` on the wire value gives "Blueprint" for the thing the
+ * reader picked as "Template". `import` is no longer offered as a source, and
+ * keeps its word because projects adopted while it was still carry it.
+ */
+export const SOURCE_KIND_LABELS: Record<DeploymentSourceKind, string> = {
+  git: "Git repository",
+  local: "Local checkout",
+  image: "Docker image",
+  compose: "Compose",
+  blueprint: "Template",
+  import: "Existing workload",
+}
+
+export function SourceMark({
+  source,
+  className,
+}: {
+  source: DeploymentDraftSource
+  className?: string
+}) {
+  // Each branch returns the glyph rather than choosing one into a variable:
+  // a component resolved during render resets its state every pass, and the
+  // React compiler's lint rule refuses it.
+  switch (source.kind) {
+    case "image":
+      return <Box className={className} />
+    case "compose":
+      return <Layers className={className} />
+    case "blueprint":
+      return <GridMasonry className={className} />
+    case "import":
+      return <Inspect className={className} />
+    default:
+      return isGitHubSource(source) ? (
+        <GitHubMark className={className} />
+      ) : (
+        <GitBranch className={className} />
+      )
+  }
+}
+
+/** Whether a git source is on github.com, which is what `githubRepo` means. */
+export function isGitHubSource(source: DeploymentDraftSource) {
+  if (source.kind !== "git" && source.kind !== "local") return false
+  // A connected repository is always GitHub — it arrived through the App —
+  // and a pasted URL is one when it names the host.
+  return source.mode === "connected_repository" || /github\.com/i.test(source.url ?? "")
 }
 
 /**
@@ -770,8 +851,23 @@ export function latestAttempts(steps: DeploymentStep[]) {
  * had to agree with the other word for word — which is the shape of a label
  * that is about to disagree.
  */
+/**
+ * The screens a new project is walked through, in order.
+ *
+ * These are the screens the *reader* walks, which is not the same list as the
+ * draft's own steps on the server (`intent` → `source` → `detection` →
+ * `configuration` → `preflight`). Configure was one screen holding nine
+ * sections and something over forty controls, and a spine saying "step 2 of
+ * 3" over it was telling the reader they were halfway through the one screen
+ * that is all of the work. The four configure screens share the server's
+ * single `configuration` step between them; none of them claims a server step
+ * that has not happened, which is the part that matters — `review` is where
+ * preflight actually runs.
+ */
 export const CREATION_STEPS = [
   { key: "source", label: "Source" },
-  { key: "configure", label: "Configure" },
-  { key: "deploy", label: "Deploy" },
+  { key: "project", label: "Project" },
+  { key: "runtime", label: "Runtime" },
+  { key: "variables", label: "Variables" },
+  { key: "review", label: "Review" },
 ]

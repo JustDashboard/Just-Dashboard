@@ -17,7 +17,7 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { GitHubAccount, GitHubDeviceStart, GitHubDeviceState } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { useGitHubAccount } from "@/hooks/use-github"
+import { githubAvatarUrl, useGitHubAccount } from "@/hooks/use-github"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Notice, Spinner } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -168,7 +168,9 @@ export function GitHubAccountControl({
               )}
             >
               <Avatar size="sm" className={compact ? "size-4" : "size-5"}>
-                {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}
+                {/* Through this server: gh reports an avatars.githubusercontent.com
+                    address, which the page's own `img-src 'self'` refuses. */}
+                {account.login && <AvatarImage src={githubAvatarUrl(account.login)} alt="" />}
                 <AvatarFallback className="text-micro">{initials}</AvatarFallback>
               </Avatar>
               {compact !== "avatar" && (

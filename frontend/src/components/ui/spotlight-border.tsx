@@ -22,8 +22,13 @@ import { cn } from "@/lib/utils"
  * the light on the edge — which is the §16 latitude exactly: depth and
  * response, no decoration.
  *
- * It is a register-B component. A reading page's rows answer the pointer with
- * `bg-row-hover` and nothing else, and that stays true.
+ * It belongs to **things you pick**, wherever they are — not to the flow
+ * register. `ChoiceCard` carries it for every caller, so the database dialogs
+ * and the credential picker have the same edge the deploy chooser does. What
+ * it is not for is a row you *read*: a reading page answers the pointer with
+ * `bg-row-hover` and nothing else (§6), because the edge means "this is
+ * takeable" and a table of forty readings where every line lights means
+ * nothing by it.
  *
  * The position is written to a CSS custom property rather than held in React
  * state: a pointer move is up to 120 events a second, and a `setState` at that
@@ -38,11 +43,20 @@ export function SpotlightBorder({
   radius = 220,
   /** The edge this card carries when the pointer is elsewhere. */
   resting = "border",
+  ground = "choice",
 }: {
   children?: React.ReactNode
   className?: string
   radius?: number
-  resting?: "border" | "lit"
+  resting?: "border" | "lit" | "brand"
+  /**
+   * Which ground the padding box is filled with. A pickable card sits on
+   * `--choice-surface`, a step below the focused surface, so a run of them
+   * reads as recessed into the panel holding them; `flow` is for the rare
+   * case of one of these *being* the focused surface. Filling both from one
+   * token made every card inside a `FlowPanel` invisible against it.
+   */
+  ground?: "choice" | "flow"
 }) {
   const host = useRef<HTMLDivElement>(null)
   // A light that follows the pointer is motion, even though no keyframe runs:
@@ -92,7 +106,16 @@ export function SpotlightBorder({
     }
   }, [park, reduced])
 
-  const edge = resting === "lit" ? "var(--flow-lit-soft)" : "var(--border)"
+  // What the edge falls to away from the pointer: the card's own border, the
+  // quiet brand of a card that is already chosen, or the full brand of a
+  // selection (§3 — selection is a mark, and on a card the mark is its edge).
+  const edge =
+    resting === "brand"
+      ? "var(--brand)"
+      : resting === "lit"
+        ? "var(--flow-lit-soft)"
+        : "var(--border)"
+  const fill = ground === "flow" ? "--flow-surface" : "--choice-surface"
 
   return (
     <div
@@ -102,9 +125,9 @@ export function SpotlightBorder({
       className={cn("relative isolate rounded-xl border border-transparent", className)}
       style={{
         background: reduced
-          ? `linear-gradient(var(--flow-surface) 0 0) padding-box,
+          ? `linear-gradient(var(${fill}) 0 0) padding-box,
              linear-gradient(${edge} 0 0) border-box`
-          : `linear-gradient(var(--flow-surface) 0 0) padding-box,
+          : `linear-gradient(var(${fill}) 0 0) padding-box,
              radial-gradient(${radius}px circle at var(--spot-x, -9999px) var(--spot-y, -9999px),
                var(--flow-lit),
                ${edge} 100%) border-box`,

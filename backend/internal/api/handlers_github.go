@@ -46,6 +46,10 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/pulls", s.handle(s.handleGitHubPulls))
 		r.Method(http.MethodGet, "/pulls/{number}", s.handle(s.handleGitHubPull))
 		r.Method(http.MethodGet, "/runs", s.handle(s.handleGitHubRuns))
+		// A picture rather than a reading, and read straight from GitHub
+		// rather than through gh: every surface that names an identity draws
+		// it, including the ones that have no checkout and no sign-in.
+		r.Method(http.MethodGet, "/avatar", s.handle(s.handleGitHubAvatar))
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))

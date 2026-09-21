@@ -8,7 +8,12 @@ import { copyText } from "@/lib/clipboard"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { githubAppStage, useGitHubApp, type GitHubAppStage } from "@/hooks/use-github"
+import {
+  githubAppStage,
+  githubAvatarUrl,
+  useGitHubApp,
+  type GitHubAppStage,
+} from "@/hooks/use-github"
 import type { GitHubAppInstallation, GitHubAppManifestStart, GitHubAppStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Field } from "@/components/form"
@@ -68,11 +73,6 @@ function takeCallback(): { code: string; state: string } | undefined {
   const rest = query.toString()
   window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""))
   return { code, state }
-}
-
-/** GitHub serves every account's picture at a fixed address; no API call needed. */
-function avatarUrl(account: string) {
-  return `https://github.com/${encodeURIComponent(account)}.png?size=80`
 }
 
 function hostOf(url: string | undefined) {
@@ -322,7 +322,7 @@ function AccountNode({
         align="end"
         mark={
           <Avatar className="size-11 border border-hairline">
-            <AvatarImage src={avatarUrl(installation.account)} alt="" />
+            <AvatarImage src={githubAvatarUrl(installation.account)} alt="" />
             <AvatarFallback className="bg-plot-brand text-sm font-semibold text-brand uppercase">
               {installation.account.slice(0, 1)}
             </AvatarFallback>

@@ -3,61 +3,43 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, SettingsSliders } from "@/components/icons"
+import { ArrowRight } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
-  DeploymentBuildMethod,
   DeploymentDraft,
   DeploymentPreflight,
   DeploymentPreflightFinding,
-  DeploymentRecipe,
-  NodePackageManager,
   WorkloadProfile,
   GitHubBranch,
 } from "@/lib/types"
-import { Field, FieldRow, FormSection, OptionList, OptionRow } from "@/components/form"
+import { Disclosure } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
-import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ErrorState, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { BorderBeam } from "@/components/ui/border-beam"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  DEPLOYMENT_NAME,
-  WorkloadMark,
-  frameworkLabel,
-  humanize,
-} from "@/components/deploy/vocabulary"
-import {
-  FindingRow,
-  blockingFindings,
-  findingRemedy,
-  warningFindings,
-} from "@/components/deploy/deployment-findings"
+import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
+import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
   defaultChecks,
   discoveredEnvironmentRows,
   mergeDiscoveredRows,
   validateConfiguration,
-  withPackageManagerRunner,
 } from "@/components/deploy/deployment-defaults"
-import { EnvironmentEditor } from "@/components/deploy/new-project/environment-editor"
-import { PublicAddress } from "@/components/deploy/new-project/public-address"
-import { ConfigureAdvanced } from "@/components/deploy/new-project/configure-advanced"
 import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
-import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
+import { StepProject } from "@/components/deploy/new-project/step-project"
+import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
+import { StepVariables } from "@/components/deploy/new-project/step-variables"
+import { StepReview } from "@/components/deploy/new-project/step-review"
+import {
+  SECTION_FOLDS,
+  SECTION_IDS,
+  SECTION_STEPS,
+  sectionForField,
+  type PlanSection,
+} from "@/components/deploy/new-project/plan-sections"
 import {
   adoptImport,
   commitDraft,
@@ -69,67 +51,50 @@ import {
   reinspect,
   saveConfiguration,
   selectCandidate,
+  stepAfter,
+  stepBefore,
   fetchHostnameSuggestion,
   forgetNewProject,
   type ConfigureFlow,
+  type ConfigureStepKey,
   type DraftGitPolicy,
   type EnvironmentDraft,
   type EnvironmentRow,
   type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
 
-/**
- * Which disclosure holds the control a preflight finding is about.
- *
- * `/detect` and preflight name a plan field; this page keeps half of those
- * fields behind one of two disclosures. Without this map the finding's "Open
- * it" was wired to a handler that returned unless the field was a variable,
- * so every blocked plan whose remedy was a health check, a host port or a
- * package manager rendered a link that did nothing at all.
- */
-const FIELD_SECTIONS: { prefix: string; section: PlanSection }[] = [
-  { prefix: "configuration.build", section: "build" },
-  { prefix: "detection", section: "source" },
-  { prefix: "source", section: "source" },
-  // Everything else preflight can name — the runtime, the checks, the
-  // variables, the dependencies — is drawn inside Advanced.
-  { prefix: "runtime", section: "advanced" },
-  { prefix: "checks", section: "advanced" },
-  { prefix: "variables", section: "advanced" },
-  { prefix: "dependencies", section: "advanced" },
-]
-
-type PlanSection = "source" | "build" | "runtime" | "address" | "advanced"
-
-/** Scroll targets, so the plan drawing and a finding can both send a reader to
- * the fields that decide one step of the plan. */
-const SECTION_IDS = {
-  source: "plan-source",
-  build: "plan-build",
-  address: "plan-address",
-  advanced: "plan-advanced",
-} as const
-
-function sectionForField(fieldId: string | undefined): PlanSection | undefined {
-  if (!fieldId) return undefined
-  return FIELD_SECTIONS.find((entry) => fieldId.startsWith(entry.prefix))?.section
-}
-
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
 }
 
 /**
- * The one configure screen every source lands on, from a picked repository to
- * an adopted container. What differs between sources is which parts show —
- * the build fields are git only, an import ends in one "Adopt workload"
- * button instead of Save/Deploy — not how any of it is built.
+ * The configure half of `/deploy/new`, for every source from a picked
+ * repository to an adopted container — and, since this pass, four screens
+ * rather than one.
+ *
+ * One screen carried the source controls, the name, the type, a ten-field
+ * build fold, the environment editor, the public address, two
+ * automatic-deployment switches, an "Advanced" fold holding seven more
+ * sections, and the findings: past forty controls for a Git repository, every
+ * one of them in the document before the reader had answered the first. The
+ * fix is not fewer settings — each of them is there because a deployment went
+ * wrong without it — it is asking for them four at a time, in the order a
+ * deployment actually decides them.
+ *
+ * This file is the sequence and everything the sequence owns: the draft's
+ * lifecycle, the environment held in memory, preflight and its
+ * acknowledgements, and the one command at the end. Each screen is a file of
+ * its own beside it. What differs between sources is still which parts show —
+ * the build fold is Git-only, an import ends in "Adopt workload" — not how
+ * any of it is built.
  */
 export function Configure({
   flow,
   onFlowChange,
   onChangeSource,
   initialAdvanced,
+  step,
+  onStepChange,
 }: {
   flow: ConfigureFlow
   // Accepts the functional updater form too: the two calls in `submit` below
@@ -142,6 +107,8 @@ export function Configure({
   onFlowChange: (next: FlowUpdate) => void
   onChangeSource: () => void
   initialAdvanced: boolean
+  step: ConfigureStepKey
+  onStepChange: (step: ConfigureStepKey) => void
 }) {
   const router = useRouter()
   const [nameTouched, setNameTouched] = useState(false)
@@ -221,17 +188,8 @@ export function Configure({
       preflight: current?.draftId === draftId ? current.preflight : undefined,
       acknowledged: next,
     }))
-  const [configErrors, setConfigErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
-  // A blueprint's declarative variables (a generated password, a EULA
-  // acceptance) are review material, not a power-user setting — open by
-  // default the same way the old wizard opened them for a blueprint source.
-  const [advancedOpen, setAdvancedOpen] = useSessionState(
-    "deploy.new.configure.advanced",
-    flow.source.mode === "blueprint" && flow.configuration.variables.length > 0,
-    initialAdvanced ? true : undefined,
-  )
   // The server's own defaults, shown rather than assumed: this is the decision
   // that used to be reachable only after the first push had already deployed.
   const [gitPolicy, setGitPolicy] = useSessionState<DraftGitPolicy>(
@@ -286,29 +244,6 @@ export function Configure({
   const configuration = flow.configuration
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const isImport = flow.source.kind === "import"
-  const isImageSource = flow.source.kind === "image"
-  /**
-   * The profile is plan-time intent — preflight reads it to decide whether
-   * blue/green is eligible and whether a readiness check is required, and
-   * nothing in the executor reads it at all. It used to be offered for a Git
-   * source only, which is why an HTTP application shipped as a container
-   * could not be told it was one: it deployed stop-first, with no health
-   * gate and no finding to say so.
-   */
-  const profileOptions = isGitSource
-    ? [
-        { value: "web", label: "Web application" },
-        { value: "static", label: "Static website" },
-        { value: "worker", label: "Worker or bot" },
-      ]
-    : isImageSource
-      ? [
-          { value: "image", label: "Container, as published" },
-          { value: "web", label: "Web application" },
-          { value: "worker", label: "Worker or bot" },
-        ]
-      : []
-  const nameInvalid = nameTouched && !DEPLOYMENT_NAME.test(flow.name)
   const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
@@ -317,11 +252,6 @@ export function Configure({
     envRows.filter((row) => !row.detected || row.value),
     dotenv,
   )
-
-  const setConfiguration = (next: typeof configuration) =>
-    onFlowChange({ ...flow, configuration: next })
-  const updateBuild = (patch: Partial<typeof configuration.build>) =>
-    setConfiguration({ ...configuration, build: { ...configuration.build, ...patch } })
 
   const changeBranch = async (nextRef: string) => {
     setBranch(nextRef)
@@ -417,21 +347,46 @@ export function Configure({
     }
   }
 
-  // Half this form's controls live behind one of two disclosures, both of
-  // which start closed; a finding whose remedy is inside one used to point at
-  // a control nobody could see. Opening the right one and bringing it into
-  // view is what the finding's "Open it" has always promised.
+  const current: ConfigureStepKey = created ? "done" : step === "done" ? "review" : step
+
+  /** The head of the screen, so a step change starts where the question is. */
+  const toTop = () =>
+    requestAnimationFrame(() =>
+      document
+        .querySelector("[data-slot='flow-header']")
+        ?.scrollIntoView({ block: "start", behavior: "smooth" }),
+    )
+
+  const goto = (next: ConfigureStepKey) => {
+    setFailure(undefined)
+    onStepChange(next)
+    toTop()
+  }
+
+  /**
+   * Sends the reader to the fields that decide one part of the plan: a node
+   * of the drawing beside the form, or a preflight finding's "Open it".
+   *
+   * It used to be a scroll and a fold forced open, because every field was on
+   * one screen and half of them were hidden. It is a step first now, and the
+   * fold only matters for the few sections that are still one.
+   */
   const openSection = (section: PlanSection) => {
-    // The runtime fields live in Advanced for every source, and the build
-    // disclosure is collapsed whenever detection already answered it; both
-    // have to be opened before there is anything to scroll to.
-    if (section === "advanced" || section === "runtime") setAdvancedOpen(true)
-    const id = section === "runtime" ? SECTION_IDS.advanced : SECTION_IDS[section]
-    requestAnimationFrame(() => {
-      const target = document.getElementById(id)
-      if (target instanceof HTMLDetailsElement) target.open = true
-      target?.scrollIntoView({ block: "start", behavior: "smooth" })
-    })
+    onStepChange(SECTION_STEPS[section])
+    // Two frames: one for the step being opened to render, one for the fold
+    // inside it to lay out before anything is scrolled to it.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const fold = SECTION_FOLDS[section]
+        if (fold) {
+          const element = document.getElementById(fold)
+          if (element instanceof HTMLDetailsElement) element.open = true
+        }
+        document
+          .getElementById(SECTION_IDS[section])
+          ?.scrollIntoView({ block: "start", behavior: "smooth" })
+      }),
+    )
   }
 
   const openRemedyField = (finding: DeploymentPreflightFinding) => {
@@ -439,46 +394,73 @@ export function Configure({
     if (section) openSection(section)
   }
 
+  /**
+   * What stops this step from being finished, said in the words the reader
+   * can act on.
+   *
+   * The whole list still runs at Deploy — a step is a way of asking, not a
+   * new authority — but a name that cannot be a name, or an environment key
+   * with a space in it, is refused where it was typed rather than four
+   * screens later under a button.
+   */
+  const stepError = (target: ConfigureStepKey): string | undefined => {
+    const errors = validateConfiguration(configuration, flow.profile)
+    if (target === "project") {
+      if (!DEPLOYMENT_NAME.test(flow.name))
+        return "Use 1–64 letters, numbers, dots, dashes, or underscores for the name."
+      if (nameCollides) return `A project is already called ${flow.name}. Choose another name.`
+      if (
+        flow.profile === "static" &&
+        configuration.build.method === "recipe" &&
+        !configuration.build.outputDirectory?.trim()
+      )
+        return "Set the output directory for your static website, such as dist or out."
+      return (
+        errors.buildMethod ?? errors.pythonVersion ?? errors.buildSecrets ?? errors.releaseTasks
+      )
+    }
+    if (target === "runtime") return errors.internalPort ?? errors.hostPort
+    if (target === "variables") {
+      if (
+        envRows.some((row) => (row.name || row.value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.name))
+      )
+        return "Give each environment variable a valid key, using letters, numbers and underscores."
+      const names = envRows.map((row) => row.name).filter(Boolean)
+      if (new Set(names).size !== names.length)
+        return "Each environment variable needs a unique key."
+      return errors.variables ?? errors.eula
+    }
+    return undefined
+  }
+
+  const advance = () => {
+    const problem = stepError(current)
+    if (problem) {
+      if (current === "project") setNameTouched(true)
+      setFailure(new Error(problem))
+      return
+    }
+    const next = stepAfter(current)
+    if (next) goto(next)
+  }
+
+  const back = () => {
+    const previous = stepBefore(current)
+    if (previous) goto(previous)
+    else onChangeSource()
+  }
+
   const submit = async (operation: "save" | "deploy") => {
-    if (!DEPLOYMENT_NAME.test(flow.name)) {
-      setNameTouched(true)
-      setFailure(new Error("Use 1–64 letters, numbers, dots, dashes, or underscores for the name."))
-      return
-    }
-    if (nameCollides) {
-      setNameTouched(true)
-      setFailure(new Error(`A project is already called ${flow.name}. Choose another name.`))
-      return
-    }
-    if (
-      envRows.some((row) => (row.name || row.value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.name))
-    ) {
-      setFailure(
-        new Error(
-          "Give each environment variable a valid key, using letters, numbers and underscores.",
-        ),
-      )
-      return
-    }
-    const names = envRows.map((row) => row.name).filter(Boolean)
-    if (new Set(names).size !== names.length) {
-      setFailure(new Error("Each environment variable needs a unique key."))
-      return
-    }
-    if (
-      flow.profile === "static" &&
-      configuration.build.method === "recipe" &&
-      !configuration.build.outputDirectory?.trim()
-    ) {
-      setFailure(
-        new Error("Set the output directory for your static website, such as dist or out."),
-      )
-      return
-    }
-    const nextErrors = validateConfiguration(configuration, flow.profile)
-    setConfigErrors(nextErrors)
-    if (Object.keys(nextErrors).length) {
-      setFailure(new Error(Object.values(nextErrors)[0]))
+    for (const target of ["project", "runtime", "variables"] as const) {
+      const problem = stepError(target)
+      if (!problem) continue
+      // Refused on the screen that owns the answer, not on Review: a blocked
+      // Deploy that names a field the reader cannot see is the defect the
+      // steps were drawn to remove.
+      if (target === "project") setNameTouched(true)
+      onStepChange(target)
+      setFailure(new Error(problem))
+      toTop()
       return
     }
 
@@ -537,6 +519,7 @@ export function Configure({
             // policy to record; anything else keeps the server's defaults.
             isGitSource ? gitPolicy : undefined,
           )
+      onStepChange("done")
       setCreated({
         projectId: commit.projectId,
         environmentId: commit.environmentId,
@@ -563,9 +546,13 @@ export function Configure({
 
   if (created)
     return (
-      <Panel>
-        <PanelHeader title="Deployment created" />
-        <PanelBody className="space-y-4">
+      /* The outcome lands on the same focused surface the plan was decided on
+         (§17), not on a framed `Panel` borrowed from the reading register —
+         the sequence ends where it was being worked. Its name is the page's
+         `h1`, which is where the question was: a panel header repeating it
+         would be the same sentence twice. */
+      <FlowPanel>
+        <FlowPanelBody className="space-y-4">
           {failure ? (
             <ErrorState error={failure} />
           ) : (
@@ -578,19 +565,18 @@ export function Configure({
               : "Environment setup did not finish. Review the Variables settings before starting the first release."}
           </p>
           {!created.ready && text && (
-            <details>
-              <summary className="cursor-pointer text-body focus-ring">
-                Keep a copy of your environment variables
-              </summary>
+            <Disclosure quiet summary="Keep a copy of your environment variables">
               <Textarea
-                className="mt-3 font-mono text-xs"
+                className="font-mono text-xs"
                 aria-label="Unsaved environment variables"
                 readOnly
                 value={text}
               />
-            </details>
+            </Disclosure>
           )}
-          <Button asChild>
+        </FlowPanelBody>
+        <FlowActions>
+          <Button asChild className="h-11 sm:h-9">
             <Link
               href={
                 created.ready
@@ -602,22 +588,23 @@ export function Configure({
               <ArrowRight className="size-4" />
             </Link>
           </Button>
-        </PanelBody>
-      </Panel>
+        </FlowActions>
+      </FlowPanel>
     )
 
+  const errors = validateConfiguration(configuration, flow.profile)
   const blockers = preflight ? blockingFindings(preflight.findings) : []
   const warnings = preflight ? warningFindings(preflight.findings) : []
   const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
-  const candidates = flow.detection?.candidates ?? []
-  const ambiguous =
-    candidates.length > 1 || blockers.some((finding) => finding.code === "detection_ambiguous")
+  const last = current === "review"
 
   return (
     /* The form on the left and the plan it is building on the right: every
        field changes the drawing beside it, so what a project *is* — a source,
        a build, a container, a name — is on screen while it is being decided
-       rather than discovered afterwards on the overview. */
+       rather than discovered afterwards on the overview. It is also how a
+       four-step sequence stays one thing: the drawing does not change when
+       the step does, and each of its nodes goes to the step that decides it. */
     <div className="grid min-w-0 gap-x-6 gap-y-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
@@ -641,606 +628,97 @@ export function Configure({
             are what the reader is deciding, and the drawing beside them is a
             reading of what they already say. Giving the drawing an edge too
             would be two foregrounds, which is none. */}
-        <FlowPanel className="min-w-0 xl:col-start-1 xl:row-start-1">
-          <FlowPanelBody className="space-y-6">
+        <FlowPanel className="relative min-w-0 xl:col-start-1 xl:row-start-1">
+          {/* §17 pass 7: the surface says its own work is in flight. A save,
+              a re-detect and a preflight all disable the fieldset, and a form
+              that greys out with no other answer reads as one that stopped
+              responding. */}
+          {busy && <BorderBeam duration={3} />}
+          {/* Keyed by step, so each screen rises the way a block that has just
+              arrived does (§11) rather than swapping in place. */}
+          <FlowPanelBody key={current} className="animate-rise space-y-6">
             {failure && <ErrorState error={failure} />}
 
-            <FormSection id={SECTION_IDS.source} title="Source">
-              {/* The source's own name is the first node of the plan drawing, so
-              it is not repeated here: this section is the controls that
-              change it. */}
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <WorkloadMark profile={flow.profile} size="sm" />
-                  {isGitSource &&
-                    (flow.githubRepo ? (
-                      <Select value={branch} onValueChange={(value) => void changeBranch(value)}>
-                        <SelectTrigger aria-label="Branch" className="w-36 font-mono">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(branches.data ?? []).map((entry) => (
-                            <SelectItem key={entry.name} value={entry.name}>
-                              {entry.name}
-                              {entry.default ? " (default)" : ""}
-                            </SelectItem>
-                          ))}
-                          {!(branches.data ?? []).some((entry) => entry.name === branch) && (
-                            <SelectItem value={branch}>{branch}</SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input
-                        aria-label="Branch"
-                        value={branch}
-                        disabled={branchBusy}
-                        className="w-36 font-mono"
-                        onChange={(event) => setBranch(event.target.value)}
-                        onBlur={(event) => void changeBranch(event.target.value)}
-                      />
-                    ))}
-                </div>
-                {flow.candidate?.framework && (
-                  <Tag tone="success">{frameworkLabel(flow.candidate.framework)}</Tag>
-                )}
-              </div>
-              {flow.detection?.unavailable && (
-                <Notice tone="warning" title="Some evidence is unavailable">
-                  {flow.detection.unavailable}
-                </Notice>
-              )}
-              {/* What detection could not settle for itself. An image carries
-              this for the command, the storage and the readiness it cannot
-              read from a registry manifest; it was on the wire from the first
-              day of the planning API and rendered nowhere, so the one source
-              that most needs review looked like the one that needed none. */}
-              {(flow.candidate?.needsDecision?.length ?? 0) > 0 && (
-                <Notice title="Detection could not answer everything">
-                  <ul className="list-disc space-y-1 pl-4">
-                    {flow.candidate!.needsDecision.map((decision) => (
-                      <li key={decision}>{humanize(decision)}</li>
-                    ))}
-                  </ul>
-                </Notice>
-              )}
-              {flow.detection?.compose && (
-                <div className="space-y-2 pt-1">
-                  <div className="flex flex-wrap gap-1.5">
-                    {flow.detection.compose.services.map((service) => (
-                      <Tag key={service.name} mono>
-                        {service.name}
-                      </Tag>
-                    ))}
-                  </div>
-                  {flow.detection.compose.unsupported.map((item) => (
-                    <Notice key={item} tone="warning" title="Needs explicit review">
-                      {item}
-                    </Notice>
-                  ))}
-                  <details>
-                    <summary className="cursor-pointer rounded-sm py-2 text-xs font-medium focus-ring">
-                      Show effective Compose plan
-                    </summary>
-                    <Well className="max-h-72 text-hint whitespace-pre-wrap">
-                      {flow.detection.compose.preview}
-                    </Well>
-                  </details>
-                </div>
-              )}
-            </FormSection>
-
-            {ambiguous && (
-              <FormSection
-                title="Choose the detected candidate"
-                hint="Multiple equally strong roots or build methods were found."
-              >
-                <OptionList role="group" aria-label="Detected candidates">
-                  {candidates.map((item) => (
-                    <OptionRow
-                      key={item.id}
-                      title={item.name}
-                      hint={`${humanize(item.confidence)} confidence · ${
-                        item.framework ? `${item.framework} via ` : ""
-                      }${humanize(item.buildMethod)}${
-                        item.root && item.root !== "." ? ` in ${item.root}` : ""
-                      }`}
-                      checked={item.id === flow.detection?.selectedId}
-                      onCheckedChange={(checked) => checked && void pickCandidate(item.id)}
-                      disabled={busy === "detect"}
-                    />
-                  ))}
-                </OptionList>
-              </FormSection>
-            )}
-
-            <FieldRow columns={2}>
-              <Field
-                label="Project name"
-                htmlFor="deployment-name"
-                hint="Used in URLs, container labels and release history."
-                error={
-                  nameInvalid
-                    ? "Start with a letter or number. Use up to 64 letters, numbers, dots, dashes, or underscores."
-                    : nameCollides
-                      ? "A project already has this name. Choose another before deploying."
-                      : undefined
-                }
-              >
-                <Input
-                  id="deployment-name"
-                  required
-                  maxLength={64}
-                  autoComplete="off"
-                  aria-invalid={nameInvalid || nameCollides}
-                  value={flow.name}
-                  onBlur={() => setNameTouched(true)}
-                  onChange={(event) => onFlowChange({ ...flow, name: event.target.value })}
-                />
-              </Field>
-              {profileOptions.length > 0 && (
-                <Field
-                  label="Project type"
-                  htmlFor="workload-type"
-                  hint={
-                    isImageSource
-                      ? "Calling an image a web application is what earns it a health gate and a release with no downtime."
-                      : undefined
-                  }
-                >
-                  <Select
-                    value={flow.profile}
-                    onValueChange={(value) => changeProfile(value as WorkloadProfile)}
-                  >
-                    <SelectTrigger id="workload-type" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {profileOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
-            </FieldRow>
-
-            {/* The build disclosure is Git-only, and it used to be the only place
-            the container port could be set — so an image deployed on port
-            zero unless the operator went looking in Advanced for it. */}
-            {isImageSource && flow.profile !== "worker" && (
-              <FieldRow columns={2}>
-                <Field
-                  label="Port the app listens on"
-                  htmlFor="image-internal-port"
-                  hint={
-                    flow.candidate?.port
-                      ? "Read from the image's own configuration."
-                      : "What the container serves on, not the host port."
-                  }
-                >
-                  <Input
-                    id="image-internal-port"
-                    type="number"
-                    min={0}
-                    max={65535}
-                    value={configuration.runtime.internalPort ?? 0}
-                    onChange={(event) =>
-                      setConfiguration({
-                        ...configuration,
-                        runtime: {
-                          ...configuration.runtime,
-                          internalPort: Number(event.target.value) || 0,
-                        },
-                      })
-                    }
-                    className="font-mono"
-                  />
-                </Field>
-              </FieldRow>
-            )}
-
-            {isGitSource && (
-              <details
-                id={SECTION_IDS.build}
-                open={
-                  !flow.candidate ||
-                  Boolean(flow.detection?.unavailable) ||
-                  (flow.profile === "static" &&
-                    configuration.build.method === "recipe" &&
-                    !configuration.build.outputDirectory)
-                }
-              >
-                <summary className="cursor-pointer rounded-md py-2 text-body font-medium focus-ring">
-                  Build & output settings
-                  {flow.candidate?.framework
-                    ? ` · ${frameworkLabel(flow.candidate.framework)}`
-                    : ""}
-                </summary>
-                <div className="grid gap-4 pt-3 sm:grid-cols-2">
-                  <Field label="Build method" htmlFor="build-method">
-                    <Select
-                      value={configuration.build.method}
-                      onValueChange={(value) =>
-                        updateBuild({ method: value as DeploymentBuildMethod })
-                      }
-                    >
-                      <SelectTrigger id="build-method" className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="recipe">Automatic recipe</SelectItem>
-                        <SelectItem value="dockerfile">Dockerfile</SelectItem>
-                        <SelectItem value="static">Static files</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field
-                    label="Port the app listens on"
-                    htmlFor="internal-port"
-                    hint="What the container serves on, not the host port."
-                  >
-                    <Input
-                      id="internal-port"
-                      type="number"
-                      min={0}
-                      max={65535}
-                      value={configuration.runtime.internalPort ?? 0}
-                      onChange={(event) =>
-                        setConfiguration({
-                          ...configuration,
-                          runtime: {
-                            ...configuration.runtime,
-                            internalPort: Number(event.target.value) || 0,
-                          },
-                        })
-                      }
-                      className="font-mono"
-                    />
-                  </Field>
-                  {configuration.build.method === "recipe" && (
-                    <Field label="Language" htmlFor="recipe">
-                      <Select
-                        value={configuration.build.recipe ?? "node"}
-                        onValueChange={(value) => {
-                          const recipe = value as DeploymentRecipe
-                          updateBuild({
-                            recipe,
-                            goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
-                            pythonVersion:
-                              recipe === "python" ? configuration.build.pythonVersion : undefined,
-                            packageManager:
-                              recipe === "node" ? configuration.build.packageManager : undefined,
-                          })
-                        }}
-                      >
-                        <SelectTrigger id="recipe" className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {/* Every recipe the builder actually has a toolchain
-                          for. Three of the eight were offered, so a Rust or
-                          PHP repository detection read correctly could not
-                          be corrected here when it read wrongly. */}
-                          <SelectItem value="node">JavaScript / TypeScript</SelectItem>
-                          <SelectItem value="go">Go</SelectItem>
-                          <SelectItem value="python">Python</SelectItem>
-                          <SelectItem value="rust">Rust</SelectItem>
-                          <SelectItem value="java">Java</SelectItem>
-                          <SelectItem value="dotnet">.NET</SelectItem>
-                          <SelectItem value="deno">Deno</SelectItem>
-                          <SelectItem value="php">PHP</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  )}
-                  {configuration.build.method === "recipe" &&
-                    configuration.build.recipe === "node" && (
-                      <Field
-                        label="Package manager"
-                        htmlFor="package-manager"
-                        hint={
-                          (flow.candidate?.packageManagers?.length ?? 0) > 1 &&
-                          !flow.candidate?.packageManager
-                            ? `This repository has lockfiles for ${flow.candidate?.packageManagers?.join(" and ")}. Choose the one it uses.`
-                            : "Leave on the lockfile unless the repository has more than one."
-                        }
-                      >
-                        <Select
-                          value={configuration.build.packageManager ?? "lockfile"}
-                          onValueChange={(value) => {
-                            const packageManager =
-                              value === "lockfile" ? undefined : (value as NodePackageManager)
-                            updateBuild({
-                              packageManager,
-                              buildCommand: withPackageManagerRunner(
-                                configuration.build.buildCommand ?? "",
-                                packageManager,
-                              ),
-                              startCommand: withPackageManagerRunner(
-                                configuration.build.startCommand ?? "",
-                                packageManager,
-                              ),
-                            })
-                          }}
-                        >
-                          <SelectTrigger id="package-manager" className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="lockfile">From the lockfile</SelectItem>
-                            <SelectItem value="bun">Bun</SelectItem>
-                            <SelectItem value="npm">npm</SelectItem>
-                            <SelectItem value="pnpm">pnpm</SelectItem>
-                            <SelectItem value="yarn">Yarn</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    )}
-                  {configuration.build.method === "recipe" &&
-                    configuration.build.recipe === "go" && (
-                      <Field
-                        label="Go version"
-                        htmlFor="go-version"
-                        hint="Leave empty to use .go-version or go.mod."
-                      >
-                        <Input
-                          id="go-version"
-                          value={configuration.build.goVersion ?? ""}
-                          onChange={(event) => updateBuild({ goVersion: event.target.value })}
-                          placeholder="1.26"
-                        />
-                      </Field>
-                    )}
-                  {configuration.build.method === "recipe" &&
-                    configuration.build.recipe === "python" && (
-                      <Field
-                        label="Python version"
-                        htmlFor="python-version"
-                        hint="Leave empty to use .python-version, runtime.txt or pyproject.toml."
-                      >
-                        <Input
-                          id="python-version"
-                          value={configuration.build.pythonVersion ?? ""}
-                          onChange={(event) => updateBuild({ pythonVersion: event.target.value })}
-                          placeholder="3.13"
-                        />
-                      </Field>
-                    )}
-                  {configuration.build.method === "dockerfile" && (
-                    <Field label="Dockerfile path" htmlFor="dockerfile">
-                      <Input
-                        id="dockerfile"
-                        className="font-mono"
-                        value={configuration.build.dockerfile ?? "Dockerfile"}
-                        onChange={(event) => updateBuild({ dockerfile: event.target.value })}
-                      />
-                    </Field>
-                  )}
-                  {configuration.build.method !== "dockerfile" && (
-                    <>
-                      <Field label="Build command" htmlFor="build-command">
-                        <Input
-                          id="build-command"
-                          value={configuration.build.buildCommand ?? ""}
-                          onChange={(event) => updateBuild({ buildCommand: event.target.value })}
-                          placeholder="npm run build"
-                          className="font-mono"
-                        />
-                      </Field>
-                      <Field
-                        label="Start command"
-                        htmlFor="start-command"
-                        hint="Leave empty and set an output directory to serve static files instead."
-                      >
-                        <Input
-                          id="start-command"
-                          value={configuration.build.startCommand ?? ""}
-                          onChange={(event) => updateBuild({ startCommand: event.target.value })}
-                          placeholder="npm run start"
-                          className="font-mono"
-                        />
-                      </Field>
-                    </>
-                  )}
-                  <Field label="Root directory" htmlFor="root-directory" hint="For a monorepo.">
-                    <Input
-                      id="root-directory"
-                      value={configuration.build.rootDirectory ?? ""}
-                      onChange={(event) => updateBuild({ rootDirectory: event.target.value })}
-                      placeholder="apps/web"
-                      className="font-mono"
-                    />
-                  </Field>
-                  <Field
-                    label="Output directory"
-                    htmlFor="output-directory"
-                    hint="Set only for a site with no server process."
-                  >
-                    <Input
-                      id="output-directory"
-                      value={configuration.build.outputDirectory ?? ""}
-                      onChange={(event) => updateBuild({ outputDirectory: event.target.value })}
-                      placeholder="dist"
-                      className="font-mono"
-                    />
-                  </Field>
-                  {(configuration.build.method === "static" ||
-                    (configuration.build.method === "recipe" &&
-                      Boolean(configuration.build.outputDirectory))) && (
-                    <div className="sm:col-span-2">
-                      <OptionRow
-                        title="Single-page application"
-                        hint="Answers paths without a file with index.html, so client-side routes open directly."
-                        checked={configuration.build.spaFallback ?? false}
-                        onCheckedChange={(spaFallback) =>
-                          updateBuild({ spaFallback: spaFallback || undefined })
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
-              </details>
-            )}
-
-            <EnvironmentEditor
-              rows={envRows}
-              onRowsChange={setEnvRows}
-              dotenv={dotenv}
-              onDotenvChange={setDotenv}
-              hostNetwork={configuration.runtime.hostNetwork}
-              databases={flow.candidate?.databases}
-              onConnectDatabase={(connection, url, variable) => {
-                setEnvRows((current) => [
-                  ...current.filter((row) => row.name && row.name !== variable),
-                  { name: variable, value: url },
-                ])
-                setConfiguration({
-                  ...configuration,
-                  dependencies: [
-                    ...configuration.dependencies.filter(
-                      (item) =>
-                        item.resourceKind !== "database_connection" ||
-                        item.resourceId !== String(connection.id),
-                    ),
-                    {
-                      kind: "database",
-                      ownership: "linked",
-                      resourceKind: "database_connection",
-                      resourceId: String(connection.id),
-                      config: {},
-                    },
-                  ],
-                })
-              }}
-            />
-
-            {flow.profile !== "worker" && (
-              <PublicAddress
-                id={SECTION_IDS.address}
-                domains={configuration.domains}
-                suggestion={flow.hostname}
-                onChange={(domains) => setConfiguration({ ...configuration, domains })}
+            {current === "project" && (
+              <StepProject
+                flow={flow}
+                onFlowChange={onFlowChange}
+                onChangeProfile={changeProfile}
+                branch={branch}
+                branchBusy={branchBusy}
+                branches={branches.data ?? []}
+                onChangeBranch={(ref) => void changeBranch(ref)}
+                onPickCandidate={(id) => void pickCandidate(id)}
+                busy={busy}
+                nameTouched={nameTouched}
+                onNameTouched={() => setNameTouched(true)}
+                nameCollides={nameCollides}
+                errors={errors}
               />
             )}
 
-            {isGitSource && (
-              <AutomaticDeployment branch={branch} policy={gitPolicy} onChange={setGitPolicy} />
+            {current === "runtime" && (
+              <StepRuntime
+                flow={flow}
+                onFlowChange={onFlowChange}
+                errors={errors}
+                foldsOpen={initialAdvanced}
+              />
             )}
 
-            <div id={SECTION_IDS.advanced} className="space-y-6">
-              <button
-                type="button"
-                aria-expanded={advancedOpen}
-                onClick={() => setAdvancedOpen(!advancedOpen)}
-                className="flex min-h-11 w-full items-center justify-between rounded-xl border border-hairline bg-surface-header px-3.5 text-body font-medium focus-ring"
-              >
-                <span className="flex items-center gap-2">
-                  <SettingsSliders className="size-4" />
-                  Advanced
-                </span>
-                <span className="text-xs font-normal text-muted-foreground">
-                  {advancedOpen ? "Hide" : "Show"}
-                </span>
-              </button>
-              {advancedOpen && (
-                <ConfigureAdvanced
-                  configuration={configuration}
-                  onChange={setConfiguration}
-                  errors={configErrors}
-                />
-              )}
-            </div>
+            {current === "variables" && (
+              <StepVariables
+                flow={flow}
+                onFlowChange={onFlowChange}
+                rows={envRows}
+                onRowsChange={setEnvRows}
+                dotenv={dotenv}
+                onDotenvChange={setDotenv}
+                referencesOpen={
+                  flow.source.mode === "blueprint" && configuration.variables.length > 0
+                }
+              />
+            )}
 
-            {(blockers.length > 0 || warnings.length > 0) && (
-              <FormSection title="Findings">
-                <div className="space-y-2">
-                  {blockers.map((finding, index) => (
-                    <FindingRow
-                      key={`${finding.code}:${finding.fieldId ?? index}`}
-                      finding={finding}
-                      index={index}
-                      onOpenRemedy={openRemedyField}
-                      canOpenRemedy={Boolean(sectionForField(finding.fieldId))}
-                    />
-                  ))}
-                </div>
-                {warnings.length > 0 && (
-                  <Group tone="warning" className="space-y-2">
-                    {warnings.map((finding, index) => (
-                      <Label
-                        key={`${finding.code}:${finding.fieldId ?? index}`}
-                        className="flex min-h-11 items-start gap-3 text-xs"
-                      >
-                        <Checkbox
-                          className="mt-0.5"
-                          checked={acknowledged.includes(finding.code)}
-                          onCheckedChange={(checked) =>
-                            setAcknowledged(
-                              checked
-                                ? [...new Set([...acknowledged, finding.code])]
-                                : acknowledged.filter((code) => code !== finding.code),
-                            )
-                          }
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-medium">{finding.title}</span>
-                          <span className="mt-0.5 block text-muted-foreground">
-                            {finding.measured || finding.means}
-                          </span>
-                          {/* A warning is a thing to accept *or* fix, and this
-                          said only what it was: the remedy and the owning
-                          feature's page were dropped, so "link a backup job"
-                          arrived with nowhere to do it. */}
-                          {findingRemedy(finding) && (
-                            <span className="mt-1 block font-normal">
-                              <b className="font-medium">Next:</b> {findingRemedy(finding)}
-                              {finding.deepLink && (
-                                <>
-                                  {" · "}
-                                  <Link
-                                    href={finding.deepLink}
-                                    className="underline underline-offset-2"
-                                  >
-                                    Open owning page
-                                  </Link>
-                                </>
-                              )}
-                            </span>
-                          )}
-                        </span>
-                      </Label>
-                    ))}
-                  </Group>
-                )}
-              </FormSection>
+            {current === "review" && (
+              <StepReview
+                flow={flow}
+                branch={isGitSource ? branch : undefined}
+                gitPolicy={gitPolicy}
+                onGitPolicyChange={setGitPolicy}
+                variableCount={envRows.filter((row) => row.name).length}
+                blockers={blockers}
+                warnings={warnings}
+                acknowledged={acknowledged}
+                onAcknowledgedChange={setAcknowledged}
+                onOpenRemedy={openRemedyField}
+                canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
+              />
             )}
           </FlowPanelBody>
-          {/* The gesture that ends the flow, on the foot of the surface holding
-              what it is about to commit (§16). Deploy was already the brand
-              face, but it closed a hairline under a column of plain sections —
-              a command at the foot of nothing, which is how a settings page
-              ends. Change source comes down from the Source header to stand
-              with it: leaving the plan is a way out of this screen, not a
-              control belonging to one of its sections. */}
+          {/* The one gesture that advances, on the foot of the surface holding
+              what it is about to change (§16). On the first step there is no
+              step behind it, so the way back out of the sequence is the way
+              back to the chooser — one control, not two words for it. */}
           <FlowActions
             note={
-              isImport
-                ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
-                : "Deploy saves the plan, applies the environment, and starts the release."
+              !last
+                ? undefined
+                : isImport
+                  ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
+                  : "Deploy saves the plan, applies the environment, and starts the release."
             }
             secondary={
               <>
                 <Button
                   variant="ghost"
                   className="h-11 text-muted-foreground sm:h-9"
-                  onClick={onChangeSource}
+                  onClick={back}
+                  disabled={Boolean(busy)}
                 >
-                  Change source
+                  {current === "project" ? "Change source" : "Back"}
                 </Button>
-                {!isImport && (
+                {last && !isImport && (
                   <Button
                     variant="ghost"
                     className="h-11 sm:h-9"
@@ -1254,21 +732,28 @@ export function Configure({
               </>
             }
           >
-            <Button
-              className="h-11 sm:h-9"
-              onClick={() => void submit("deploy")}
-              pending={busy === "deploy"}
-              disabled={Boolean(busy)}
-            >
-              <ArrowRight className="size-4" />
-              {isImport
-                ? "Adopt workload"
-                : blockers.length
-                  ? "Re-check and deploy"
-                  : outstanding.length
-                    ? "Acknowledge, then deploy"
-                    : "Deploy"}
-            </Button>
+            {last ? (
+              <Button
+                className="h-11 sm:h-9"
+                onClick={() => void submit("deploy")}
+                pending={busy === "deploy"}
+                disabled={Boolean(busy)}
+              >
+                <ArrowRight className="size-4" />
+                {isImport
+                  ? "Adopt workload"
+                  : blockers.length
+                    ? "Re-check and deploy"
+                    : outstanding.length
+                      ? "Acknowledge, then deploy"
+                      : "Deploy"}
+              </Button>
+            ) : (
+              <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>
+                <ArrowRight className="size-4" />
+                Continue
+              </Button>
+            )}
           </FlowActions>
         </FlowPanel>
       </fieldset>

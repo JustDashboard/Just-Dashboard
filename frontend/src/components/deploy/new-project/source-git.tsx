@@ -1,16 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { External, GitHubMark, LockClosed, RefreshClockwise, Terminal } from "@/components/icons"
+import {
+  External,
+  GitHubMark,
+  LockClosed,
+  RefreshClockwise,
+  Terminal,
+  type Icon,
+} from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { githubAppStage, useGitHubAccount, useGitHubApp } from "@/hooks/use-github"
+import { githubAppStage, githubAvatarUrl, useGitHubAccount, useGitHubApp } from "@/hooks/use-github"
 import { useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
-import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
+import { Disclosure, Field, FormNote, OptionList, OptionRow } from "@/components/form"
 import { ChoiceList, ChoiceRow, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -19,6 +26,8 @@ import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
+import { LanguageMark } from "@/components/language-icon"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -71,6 +80,32 @@ type PickableRepo = {
 }
 
 /**
+ * An identity's own face on GitHub.
+ *
+ * Two rows that say "Wayy01" twice under one picture are the same account at a
+ * glance, which is the question the panel exists to answer and which two grey
+ * glyphs never answered. Where there is no account yet — no App installed,
+ * nobody signed in — the kind's glyph stands in, because there is no face to
+ * draw.
+ */
+function IdentityMark({ account, fallback: Fallback }: { account?: string; fallback: Icon }) {
+  // The glyph keeps the avatar's footprint, so the two titles start at the
+  // same place when one identity is connected and the other is not.
+  if (!account)
+    return (
+      <span className="flex size-6 items-center justify-center">
+        <Fallback className="size-4 text-muted-foreground" />
+      </span>
+    )
+  return (
+    <Avatar size="sm" className="border border-hairline">
+      <AvatarImage src={githubAvatarUrl(account)} alt="" />
+      <AvatarFallback className="text-micro uppercase">{account.slice(0, 2)}</AvatarFallback>
+    </Avatar>
+  )
+}
+
+/**
  * Newest push first, and anything that never reported one last. The repository
  * somebody wants to deploy is almost always the one they touched this week,
  * and the list arrived in the order the API happened to answer in.
@@ -93,6 +128,7 @@ export function SourceGit({
 }) {
   const status = useGitHubAccount()
   const signedIn = Boolean(status.data?.available && status.data.account?.loggedIn)
+  const cliLogin = status.data?.account?.login
   const repos = usePoll(
     (signal) => get<GitHubRepoSummary[]>("/git/github/repos", undefined, signal),
     0,
@@ -115,6 +151,13 @@ export function SourceGit({
   // Every read is guarded: an unmocked path answers `[]` in the design-system
   // browser run, so `app.data` is sometimes an array with no fields at all.
   const installations = app.data?.installations ?? []
+  // One operator, one GitHub account, both identities on it — the ordinary
+  // install, and the one where the CLI's own count is always zero because the
+  // App already grants everything it could offer. GitHub logins are
+  // case-insensitive, so the comparison is too.
+  const sameAccount = Boolean(
+    cliLogin && installations.some((one) => one.account.toLowerCase() === cliLogin.toLowerCase()),
+  )
   // Every field is remembered for the tab, so a look at another page — the
   // credential this repository needs, say — never means finding it again.
   const [filter, setFilter] = useSessionState("deploy.new.git.filter", "")
@@ -245,10 +288,12 @@ export function SourceGit({
     <div className="min-w-0 space-y-6">
       {failure && <ErrorState error={failure} />}
 
-      {/* Said once, in one place. Two identities reach GitHub from this
-          server and the screen used to represent them with a 20px avatar and
-          a three-letter tag, so "why are these the repositories I can see"
-          had no answer anywhere on the page. */}
+      {/* Said once, in one place: two identities reach GitHub from this
+          server, and "why are these the repositories I can see" used to have
+          no answer anywhere on the page. Each row is a face, a name and a
+          count — the account's own picture, because when both identities sit
+          on one account that is the fact the reader needs, and no sentence
+          said it as quickly as the same face twice. */}
       <Panel plain className="animate-rise">
         <PanelHeader
           title="Where these repositories come from"
@@ -266,16 +311,26 @@ export function SourceGit({
         <PanelBody flush>
           <RowList aria-label="GitHub connections">
             <Row
-              leading={<GitHubMark className="size-4 text-muted-foreground" />}
-              title={app.data?.app?.name ? `GitHub App · ${app.data.app.name}` : "GitHub App"}
+              leading={<IdentityMark account={installations[0]?.account} fallback={GitHubMark} />}
+              // The account, not the App's generated name: "Just Dashboard
+              // e4e5" is this dashboard's own label for itself, and what the
+              // reader is checking is whose repositories these are.
+              title={
+                installations.length > 0
+                  ? `GitHub App · ${installations.map((one) => one.account).join(", ")}`
+                  : "GitHub App"
+              }
+              // Only where something is missing. A connected identity that
+              // explained itself in a second line was a caption under a title
+              // (§5) — the face, the account and the count say it.
               subtitle={
-                stage === "import"
-                  ? `Installed on ${installations.map((one) => one.account).join(", ")} · clones with an installation token, so nothing expires under you`
-                  : stage === "install"
-                    ? "Created on GitHub, waiting for an account to install it"
-                    : stage === "create"
-                      ? "One App in place of a token and a webhook for every repository"
-                      : "Reading the App…"
+                stage === "install"
+                  ? "Created on GitHub, waiting for an account to install it"
+                  : stage === "create"
+                    ? "One App in place of a token and a webhook for every repository"
+                    : stage === undefined
+                      ? "Reading the App…"
+                      : undefined
               }
               trailing={
                 <>
@@ -308,22 +363,35 @@ export function SourceGit({
               }
             />
             <Row
-              leading={<Terminal className="size-4 text-muted-foreground" />}
-              title={signedIn ? `GitHub CLI · ${status.data?.account?.login}` : "GitHub CLI"}
+              leading={
+                <IdentityMark account={signedIn ? cliLogin : undefined} fallback={Terminal} />
+              }
+              title={signedIn ? `GitHub CLI · ${cliLogin}` : "GitHub CLI"}
               subtitle={
                 signedIn
-                  ? "Clones and pushes as this account, with the token gh stores on this host"
+                  ? undefined
                   : status.data?.available === false
                     ? "gh is not installed on this host, so signing in is not available here"
                     : "Installed on this host, nobody signed in"
               }
               trailing={
                 <>
-                  {signedIn && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {plural(fromCli.length, "repository", "repositories")}
-                    </span>
-                  )}
+                  {/* The App is installed on the same account, and it reaches
+                      every repository this one does: the count read "0
+                      repositories" beside the App's 22, which is true of the
+                      list below and false of the account. It only stays a
+                      count where the CLI reaches something the App does not —
+                      an App installed on a chosen few. */}
+                  {signedIn &&
+                    (sameAccount && fromCli.length === 0 ? (
+                      <span className="text-hint text-muted-foreground">
+                        Same account as the App
+                      </span>
+                    ) : (
+                      <span className="numeric text-hint text-muted-foreground">
+                        {plural(fromCli.length, "repository", "repositories")}
+                      </span>
+                    ))}
                   <Status
                     tone={signedIn ? "running" : "unknown"}
                     label={
@@ -471,25 +539,31 @@ export function SourceGit({
                 which reads as being about the field beside it, and a
                 repository that needed its submodules failed its build with no
                 hint that the switch existed. */}
-            <details className="border-t border-hairline pt-4">
-              <summary className="cursor-pointer rounded-sm py-1 text-xs text-muted-foreground focus-ring">
-                Clone options · apply to every import here
-              </summary>
-              <OptionList className="pt-2">
-                <OptionRow
-                  title="Include submodules"
-                  hint="Fetch the repositories declared in .gitmodules along with this one."
-                  checked={includeSubmodules}
-                  onCheckedChange={setIncludeSubmodules}
-                />
-                <OptionRow
-                  title="Include Git LFS files"
-                  hint="Download Git LFS objects instead of leaving their pointer files."
-                  checked={includeLfs}
-                  onCheckedChange={setIncludeLfs}
-                />
-              </OptionList>
-            </details>
+            {/* The same fold the rest of the flow uses, rather than a bare
+                `<summary>` with the platform triangle: two spellings of
+                "there is more here" on one screen is the drift
+                `components/form.tsx` exists to stop. */}
+            <div className="border-t border-hairline pt-3">
+              {/* The qualifier is in the title, not in `facts`: `facts` says
+                  what a fold holds and yields the row on a phone, and this is
+                  a caveat about what the switches inside reach — a reader who
+                  never opens the fold still has to know the rows above obey
+                  it. */}
+              <Disclosure quiet summary="Clone options · apply to every import here">
+                <OptionList>
+                  <OptionRow
+                    title="Clone the submodules listed in .gitmodules"
+                    checked={includeSubmodules}
+                    onCheckedChange={setIncludeSubmodules}
+                  />
+                  <OptionRow
+                    title="Download Git LFS objects, not their pointer files"
+                    checked={includeLfs}
+                    onCheckedChange={setIncludeLfs}
+                  />
+                </OptionList>
+              </Disclosure>
+            </div>
           </FlowPanelBody>
         </FlowPanel>
 
@@ -509,11 +583,12 @@ export function SourceGit({
                 className="font-mono"
               />
             </Field>
-            <details>
-              <summary className="cursor-pointer rounded-sm py-2 text-xs text-muted-foreground focus-ring">
-                Branch & authentication
-              </summary>
-              <div className="grid gap-3 pt-2">
+            <Disclosure
+              quiet
+              summary="Branch & authentication"
+              facts={credentialId ? "Ref and credential set" : `Defaults to ${manualRef || "main"}`}
+            >
+              <div className="grid gap-3">
                 <Field label="Branch or tag" htmlFor="manual-ref">
                   <Input
                     id="manual-ref"
@@ -530,7 +605,7 @@ export function SourceGit({
                   />
                 </Field>
               </div>
-            </details>
+            </Disclosure>
             {/* Outline while there are repositories to pick, because then the
                 rows are the advance (§16). With neither identity listing one,
                 there is nothing to choose and this field is the way forward,
@@ -609,7 +684,11 @@ function RepoRow({
         <>
           {repo.archived && <Tag>archived</Tag>}
           {repo.fork && <Tag>fork</Tag>}
-          {repo.language && <Tag>{repo.language}</Tag>}
+          {repo.language && (
+            <Tag>
+              <LanguageMark language={repo.language} />
+            </Tag>
+          )}
           {/* The last push is the reading that decides which of forty
               repositories is the one, and it was on the wire and drawn
               nowhere. While an import is in flight the same slot carries the

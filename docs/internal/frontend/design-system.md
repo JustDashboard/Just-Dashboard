@@ -191,6 +191,19 @@ renders on any page.
   are literal strings from the host — a cipher, a port map, a config hash — which run together
   otherwise and which small caps would corrupt.
 - Anything longer than three words is **prose**, and belongs in the row's secondary line or a `Notice`.
+- A **choice** is a `ChoiceCard` or a `ChoiceRow`, from `components/choice-card.tsx` and
+  `components/flow.tsx`. Two shapes, one look: a choice that is *a name* is the whole card, and a
+  choice carrying *a sentence* puts the control on its title and takes a `verb` — an ARIA button
+  names itself from everything inside it, so a card holding a title, a paragraph and three tags
+  announces all of it as the name of one control (§12). A run of the same *kind* of thing is rows;
+  a choice between *kinds* is a grid.
+
+  This one has already gone wrong once, which is why it is written here. `components/choice-card.tsx`
+  existed to stop six places building the same tile six ways; the flow register then shipped a
+  **second** `ChoiceCard` in `components/flow.tsx`, with a lit border the first one did not have — so
+  the deploy pages had the new treatment and the database dialogs, the credential picker and the
+  engine picker kept the old one. There is one again. A component whose name already exists in this
+  product is not a new component.
 
 A tag that annotates a **row** belongs at the row's edge, not against its title: ten of them
 interrupt ten sentences at ten different points, and in a column they are a column.
@@ -241,6 +254,15 @@ A row's actions appear through `RowActions`, `IconAction reveal`, or `rowReveal(
 four mechanisms that sentence hides — pointer, keyboard, open menu, touch — are how five action
 clusters ended up permanently unreachable on a phone.
 
+**An action on a row is laid out, never overlaid.** The draft list positioned its discard button
+`absolute right-2` against the `<li>` while the row reserved space for it with `pr-12` against a box
+that `ROW_BLEED` had made twelve pixels wider on each side — so the button sat on top of the last
+reading in the row. The arithmetic is not the lesson: two boxes measured against different origins
+will drift again the moment either one's padding changes. A second action belongs in a slot in the
+row's own flow (`ChoiceRow`'s `actions`), where there is nothing to mis-measure, and it must stop the
+press from reaching the row around it — discarding a draft used to navigate to the draft it had just
+deleted.
+
 Reveal only where the controls share their space with something else. Where they have a column of
 their own — the containers table — use `DimActions` instead: always drawn, one step of opacity until
 the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
@@ -255,6 +277,8 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
+| `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
+| `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
 | `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
@@ -265,13 +289,114 @@ Before these existed, fourteen pages read as fourteen products.
 
 **What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
 a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
-three side by side; `FormSection` opens a part of a longer form with an eyebrow and a hairline;
+three side by side; `FormSection` opens a part of a longer form with a title and a hairline;
 `OptionRow` is a switch with its sentence, because "Stop on error" as a checkbox label asks the reader
 to guess what an error stops; `FormFacts` states what the form operates on as data under the title;
-and `Statement` shows the SQL a schema-editing form is about to run, nearest the button that runs it.
+`Disclosure` is the part of a form that is folded away; and `Statement` shows the SQL a
+schema-editing form is about to run, nearest the button that runs it.
 The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
 `space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
 beside the field that caused it.
+
+**A field and the controls that belong to it are one box.** `ui/input-group.tsx` — shadcn's
+`InputGroup`, re-sized onto this product's control ladder — holds an `InputGroupInput` with
+`InputGroupAddon`s at either end, separated from the field by a hairline rather than by a gap. It
+exists because of the shape the deployment forms had in four places: an `Input`, a 14px `Switch` and
+a 36px `Button` standing in one wrapping flex, so a single decision — *this host, over HTTPS, check
+it* — was three boxes at three heights, and the smallest of them was the one that decides whether
+the site answers on 443. Inside a group there is one border, one height and one focus ring: the
+group takes `focus-ring-within` and the field drops its own, because the border it would hang a ring
+on now belongs to the group. A binary inside a group is a `Toggle` the height of the field (pressed
+is `bg-accent` and a `text-brand` mark, which is §3's selection), never a `Switch` — a switch is the
+control for an option in a list of options, where a sentence names it and it answers. A group sits
+*inside* a `Field` and takes its label, its hint and its error; it does not replace one.
+**Every rule inside a group is the addon's**, drawn for each child after the first — a call site
+adding its own `border-l` to the button it puts there gets two pixels where §2 asked for one, which
+is what the environment rows shipped with while the hostname field a section above them drew the
+same divider correctly.
+
+**A fold is a section whose head is a button.** `Disclosure` is a native `<details>`, so a page can
+open one from outside by setting `.open` (which is how a preflight finding reaches a control folded
+away inside one) and find-in-page can reveal it; the platform triangle is replaced by the chevron
+the rest of the product draws. It exists because one screen had four of these in three spellings:
+two bare `<summary>`s at different sizes, and — on Configure's Advanced — a full-width framed strip
+in `bg-surface-header`, a ground this file reserves for a `Pane`'s chrome, carrying a glyph §14 does
+not allow a header and the word "Show" at the far end. It was the only block on that screen still
+drawing a box around itself.
+
+Unifying those three left the opposite defect: a left chevron in front of a 13px word, in a column
+of sections that each began with a title and a rule, so the two largest parts of Configure — the
+build settings and Advanced — read as stray lines of text. Giving it a section's anatomy instead —
+the title at a section's rank, a chevron at the far end — fixed the rank and not the affordance, and
+made the affordance worse: the fold was then *indistinguishable* from the `FormSection` heads above
+and below it, and the only thing saying otherwise was a 16px chevron a thousand pixels from the word
+it belonged to. Nothing on it said "press me" until the pointer was already on it, which is no use,
+because the reader has to decide to go there first.
+
+**So a section fold is drawn as what it is: a wide button.** `--control` over `--input` at
+`rounded-lg`, which is the resting anatomy of every other control on the screen — the outline
+button, the select, the field — with the chevron anchored to that edge and the body below it needing
+no rule, because the head has its own. §2 allows a control a face; what it refuses is a block
+pretending to be one, and the framed strip this descends from was refused for its ground
+(`--surface-header`, a `Pane`'s chrome), a glyph §14 bans and the word "Show", never for having an
+edge. `quiet` is the other rank, for a fold *inside* a section — a pasted block, a clone option, an
+effective plan: no face, a hover wash, and its chevron **leading**, because at the far end of a line
+of body text a marker reads as unrelated punctuation.
+
+`facts` says what is inside while it is shut, because "Advanced" tells the reader nothing about
+whether their answer is in there and the cost of finding out is a press and a wall of fields. It is
+drawn in the `<summary>`, which is the one place content survives the fold being closed, so it joins
+the control's accessible name — and that is the right name. It takes a third of the row and no more,
+because the title's `flex-1` gives it a flex base of zero and a facts line sized by its own content
+would otherwise take the width it wanted and truncate the title instead. It yields the row entirely
+below `sm`, which is the one thing to know when choosing what to put in it: **`facts` is what the
+fold holds, never a caveat the reader needs whether or not they open it.** "Clone options · apply to
+every import here" keeps its qualifier in the title for exactly that reason — the switches inside
+govern the rows above the fold, so a phone that never sees the second half of the sentence is a
+phone that cloned without submodules and was not told.
+
+The summary carries `role="button"` and `aria-expanded`: a native `<summary>` is a disclosure widget
+the platform knows about but exposes no readable expanded state, and the framed strip this replaced
+was a real `<button aria-expanded>` that did. `aria-expanded` is seeded from `open` and thereafter
+fed by the element's own `toggle` event rather than derived from the prop — a caller may pass `open`
+without `onOpenChange` (the build fold computes its initial state from detection and has nowhere to
+store the operator's later answer), and React writes the `open` property only when the prop changes,
+so a prop-derived value went on announcing "collapsed" over fields that were plainly on screen. The
+one thing `role="button"` costs is the heading outline: a button's descendants are presentational,
+so a fold cannot also be an `<h3>` the way a `FormSection` is, and the standard
+`<h3><button aria-expanded>` shape is not available inside `<details>`, whose first child must be
+the `<summary>`. That is the same as it was before the unification — the framed strip was not a
+heading either — and the widget semantics are worth more here than the outline entry. A caller that
+has to open one from outside passes `open`/`onOpenChange`; the rest pass neither.
+
+**An option is one control, not a sentence with a switch at the end of it.** Three things had come
+apart in `OptionRow`. Its switch was `size="sm"` — 14px, shorter than the 13px line of text naming
+it, and the only place in the product drawing that size while every other switch was the default 18.
+Its text ran the full measure of a 1200px panel, so the switch was not at the end of a sentence but
+across a void from one. And what the switch *revealed* was a sibling of it at the same rank: on
+Configure, "Hostname" sat directly under "Publish on a public hostname" in the same 13px medium,
+with nothing saying the field existed *because* the switch was on. It is now the product's own
+switch, a label row that washes under the pointer so both ends light as one target, a measure that
+stops where a line stops being readable, and children indented behind a rule — the containment §7
+gives a `Group`, drawn as one line rather than four sides because this fence already has a head.
+The switch is centred on the row rather than hung off the title's line: a two-line option put it
+against the top edge of a box it was nowhere near the middle of, and it read as having slipped.
+
+**And on `/deploy/new`, an option's title says the whole thing.** §5 took the sentence out from under
+every page, panel and chart title in the product and left it under a switch, one rung smaller — so a
+flow screen of six options was six titles and six captions, and the caption is what made the row two
+lines tall in the first place. "Report each release on the commit" plus "Posts a pending, success or
+failure status to GitHub through the dashboard's own credential" is one fact written twice; "Report
+each release as a GitHub commit status" is the fact. Where the hint carried a *consequence* the title
+has to carry it too — "Required — a failing readiness check blocks activation", not "Readiness check
+required" — and where it carried something that belongs to the whole section rather than to one
+switch (which branch is watched, that nothing fires before the first deployment) it moves to the
+section's `FormNote`, where it is said once.
+
+`hint` stays on the component, and §5's second exception is why: the ambiguous-candidate rows on
+Configure pass `high confidence · Next.js via recipe in apps/web`, which is **data** about the option
+rather than prose about the switch, and data stays. Roughly forty-five option rows elsewhere in the
+product still pass prose; they are not wrong so much as not yet done.
 
 ## 8. Type
 
@@ -308,6 +433,16 @@ the title and the panel titles; with the title at 24 the strip has a rank of its
 chrome under a 24px title read as an afterthought. There is no route-level strip to size: since 0.6.7
 the sidebar drills into a section and lists its pages, and a tab that changes the URL is not a thing
 this product has.
+
+A **form runs four ranks**: section (15, semibold) → option (14, medium) → field label (13, medium)
+→ hint (11, muted). `FormSection` opened with the eyebrow's 10px muted small caps, so a Configure
+screen of nine sections set every head *quieter than the 13px field labels it opened* and the
+loudest line in each block was a label — the same argument the paragraph above makes about a panel's
+name, one rung down and one degree worse. The head went to 14 first and 14 was not enough: an
+`OptionRow`'s title is 14 so that it outranks the fields it governs, which left "Public address" and
+"Publish on a public hostname" two lines apart at one size with a weight step between them and
+nothing else. At 15 the four steps are visible and every one of them is a rung the ladder already
+had. A `Disclosure` takes the section's rank, because a fold is a section (§7).
 
 A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to
@@ -511,6 +646,19 @@ judgement: there is no `icon` to pass. `ChartPanel` forwarded one too, and does 
 `StatTile`: the 12px glyph it drew before its eyebrow was the same guess at a smaller size — `Cpu` in
 front of "CPU" is the label twice — and twenty-eight tiles across the product carried one.
 
+`Notice` kept the last one, and it is gone too. A notice's glyph is allowed — a severity is a thing a
+shape can say, which is the exception below — but the 28px tinted square around it never was. On a
+toned banner it was the fourth tinted object in a box that needed one: a wash, a rule, a plate, and
+the glyph on the plate, all the same hue, to say that a certificate was fine. The glyph now stands on
+the banner's own ground at the size of the title's line, and the banner is `rounded-lg` — §9's fence
+step, beside `Group`, which is what it is — rather than the block step beside `Panel`, which it is
+not. **And a `Notice` is for what the reader has to act on.** `/deploy/new`'s public address drew
+three: one saying HTTPS was ready, which repeated the field's own hint word for word; one saying a
+certificate would be issued, which nobody has to do anything about; and one saying automatic HTTPS
+needed attention, which is the only one of the three that asks for a decision. A state is a `Status`
+beside the thing it is a state of; what will happen by itself is a line of hint; a tinted box is for
+the third case.
+
 What the header has instead: the title at `text-title` (§8), the header's own ground and hairline
 doing the separating, and — where there is something to say about state — a `Status` in the actions.
 That was always the honest mark, because its colour is a reading rather than a decoration.
@@ -523,6 +671,30 @@ That was always the honest mark, because its colour is a reading rather than a d
 - **wayfinding** — the sidebar entry, the overview's module tiles, the security page's area rows.
   These are the same glyph the reader is about to click through to, held steady across the product so
   the eye can find "Docker" without reading. A header is not wayfinding: you are already there.
+
+**A wayfinding mark may carry its own colour, and only a wayfinding mark.** A repository list is
+scanned rather than read, and after the name the language is what decides which of forty rows is the
+one — so `LanguageMark` draws the language's logo in front of its word. In `text-muted-foreground`
+that glyph was the same grey as the forty words around it: a mark doing the half of its job that
+costs pixels and none of the half that saves a read, because a column of twenty identical grey
+glyphs is a texture and the reader goes back to reading the words. The hue is not this product's to
+choose — it is GitHub Linguist's, the colour the same repository carries on the site the list was
+fetched from, which is the argument §3 makes for `--brand` applied to somebody else's mark. The
+lightness *is* ours, and it is one rule rather than twenty judgements: every `--language-*` in
+`globals.css` is the logo's hue and chroma at L 0.72, the rung `--tag-*` already sits on, because
+Linguist's values were picked for a white page and four of them (Lua's navy, Ruby's oxblood,
+Markdown's ink, C's grey) are invisible on a 0.16 ground. The rule is written out as twenty literal
+`oklch()` values carrying their source hex in a comment rather than stated once as
+`oklch(from <hex> …)`: relative colour syntax is the one modern colour function Lightning CSS cannot
+downlevel, so those twenty would have been the only tokens in the file shipping without a fallback,
+below the floor Next's default browserslist target declares. Deleting the lightness dimension has a
+price, and it is paid by the pairs Linguist separated by lightness alone — Lua and Markdown come out
+as the same blue. The glyph shapes and the word beside them still tell those two rows apart, and a
+floor high enough to be legible on this ground collapses them either way, so the rule stands as
+written. This
+does not extend to the marks a reader is choosing *between*: the five source kinds on `/deploy/new`
+stay muted with the current one in `--brand`, because there the colour is saying which one you are
+on (§3), and twenty hues in a row of five would be saying nothing.
 
 A `Pane`'s chrome strip is the one place a small inline glyph still sits beside a name (the git tools
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip
@@ -637,6 +809,7 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
+| Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with an engine picker in a dialog gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
 | A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. It carries the spine's last step so the sequence still reads as one, and nothing else changes. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
@@ -680,7 +853,7 @@ Each of these is bought against a specific failure, and each is the smallest thi
   `variant={pickable.length > 0 ? "outline" : "default"}` — which is the rule stated in code rather
   than a colour chosen once and left to be wrong half the time.
 - **A choice is something you pick.** `ChoiceCard` in a `ChoiceGrid` for the *kinds* of thing — the
-  six sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
+  five sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
   kind — twenty-two repositories, a page of image tags. The split is load-bearing: a three-column
   grid of twenty-two 13px names is a wall, and a flat row is the listing this register exists to stop
   a decision from looking like. Both keep §12's shape — the title is a real `<button>` carrying the
@@ -690,6 +863,44 @@ Each of these is bought against a specific failure, and each is the smallest thi
 - **The lit edge.** `ui/spotlight-border.tsx` paints a card's one-pixel border with a radial gradient
   centred on the pointer, brand at the centre and the card's own `--border` a couple of hundred pixels
   out. It is Magic UI's `magic-card` with the glow taken out of it. Depth and response; no decoration.
+
+### Three grounds, one ladder
+
+The focused surface began two steps above the card and read as a grey slab laid over the page rather
+than as the page's own foreground — at L 0.226 against a 0.145 ground it was the lightest thing in
+the product. The border and the lit edge do the separating, so the ground only has to be *a* step:
+
+| Token | L | Is |
+| --- | --- | --- |
+| `--background` | 0.16 | the page |
+| `--choice-surface` | 0.183 | a card you pick — recessed *into* the surface holding it |
+| `--flow-surface` | 0.2 | the one focused surface on a flow screen |
+
+The order matters and is easy to get backwards: choices sit **below** the panel that holds them, not
+above it. Painting both from one token — which is what shipped first — made every card inside a
+`FlowPanel` invisible against it.
+
+### The lit edge is not register B's property
+
+This is the part that decides how the rest of the product changes. The lit edge belongs to **things
+you pick**, wherever they are — the deploy chooser, a database engine in a dialog, a credential kind
+on a settings page. It is not a flow-page decoration, and `ChoiceCard` carries it for every caller
+rather than the deploy pages having a better-looking version of a shared component.
+
+What it does **not** belong to is a row you *read*. A reading page answers the pointer with
+`bg-row-hover` and nothing else (§6), and that stays true, because the edge means *this is takeable*
+and a table of forty readings where every line glows is a page that means nothing by it. So when a
+reading page is revamped:
+
+- a list whose rows are **destinations or choices** — a run to open, a project to enter, an engine to
+  start — becomes a `ChoiceList` of `ChoiceRow`s and gets the edge;
+- a table of **readings** — the audit log, the containers table, a metrics grid — keeps its hairlines,
+  its density and its wash. Twelve columns do not become cards. §12 already says what a wide table
+  does when it stops fitting, and it is not this;
+- a **figure** is still a `StatTile` (§15 pass 2) in either register.
+
+A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
+the honest answer to "use it everywhere": everywhere something is picked.
 
 ### What register B does not get
 

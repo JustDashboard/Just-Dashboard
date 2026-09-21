@@ -1,3 +1,4 @@
+import { expect } from "@playwright/test"
 import type { Page, Route } from "@playwright/test"
 import type {
   DeploymentOperations,
@@ -796,8 +797,24 @@ export async function mockProject(
         activationCompletedAt: "2026-09-03T11:30:00Z",
         windowMinutes: 30,
         latency: true,
-        before: { requests: 600, pages: 200, perMinute: 20, errorRate: 0.002, p95: 55, from: "2026-09-03T11:00:00Z", until: "2026-09-03T11:30:00Z" },
-        after: { requests: 640, pages: 210, perMinute: 21.3, errorRate: 0.02, p95: 240, from: "2026-09-03T11:30:00Z", until: "2026-09-03T12:00:00Z" },
+        before: {
+          requests: 600,
+          pages: 200,
+          perMinute: 20,
+          errorRate: 0.002,
+          p95: 55,
+          from: "2026-09-03T11:00:00Z",
+          until: "2026-09-03T11:30:00Z",
+        },
+        after: {
+          requests: 640,
+          pages: 210,
+          perMinute: 21.3,
+          errorRate: 0.02,
+          p95: 240,
+          from: "2026-09-03T11:30:00Z",
+          until: "2026-09-03T12:00:00Z",
+        },
       }
     } else if (path === "/deploy/7/lifecycle") {
       body = {
@@ -1582,4 +1599,51 @@ function deploymentRequests(url: URL) {
       truncated: false,
     },
   }
+}
+
+/**
+ * The four configure screens of `/deploy/new`, in the order the spine draws
+ * them, and how a test reaches one.
+ *
+ * A source whose detection answered everything opens on Review — that is the
+ * point of the split, and it is what keeps the two-press import — so a test
+ * that wants an earlier answer says which screen holds it rather than
+ * assuming the whole form is on one.
+ */
+export const CONFIGURE_STEPS = ["project", "runtime", "variables", "review"] as const
+
+export type ConfigureStep = (typeof CONFIGURE_STEPS)[number]
+
+/** Each screen's question, which is its `h1` — and how a test knows where it is. */
+export const STEP_QUESTION: Record<ConfigureStep, string> = {
+  project: "What are you building?",
+  runtime: "How should it run?",
+  variables: "What does it need to run?",
+  review: "Ready to deploy?",
+}
+
+export async function currentStep(page: Page): Promise<ConfigureStep> {
+  const heading = page.getByRole("heading", { level: 1 })
+  await expect(heading).toHaveText(
+    new RegExp(
+      `^(${CONFIGURE_STEPS.map((key) => STEP_QUESTION[key].replace("?", "\\?")).join("|")})$`,
+    ),
+  )
+  const text = ((await heading.textContent()) ?? "").trim()
+  const at = CONFIGURE_STEPS.find((key) => STEP_QUESTION[key] === text)
+  if (!at) throw new Error(`not on a configure step: ${text}`)
+  return at
+}
+
+/** Walks the sequence to one screen, forwards or back. */
+export async function gotoStep(page: Page, want: ConfigureStep) {
+  for (let guard = 0; guard < CONFIGURE_STEPS.length; guard++) {
+    const at = await currentStep(page)
+    if (at === want) return
+    const forward = CONFIGURE_STEPS.indexOf(want) > CONFIGURE_STEPS.indexOf(at)
+    const next = CONFIGURE_STEPS[CONFIGURE_STEPS.indexOf(at) + (forward ? 1 : -1)]
+    await page.getByRole("button", { name: forward ? "Continue" : "Back", exact: true }).click()
+    await expect(page.getByRole("heading", { level: 1, name: STEP_QUESTION[next] })).toBeVisible()
+  }
+  throw new Error(`could not reach the ${want} step`)
 }
