@@ -35,11 +35,38 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 
 ## Required checks
 
-Run checks appropriate to the changed surface; before a pull request, the full required gate is:
+**Per change**, run the gate for the surface you touched. This is seconds, not minutes, and it is
+meant to be run repeatedly while working:
+
+```bash
+cd frontend && bun run lint && bunx tsc --noEmit && bun test src
+bunx playwright test tests/browser/<the-spec-for-what-you-changed>.spec.ts
+cd ../backend && go build ./... && go vet ./... && go test ./<changed package>/...
+```
+
+`bun test src` is the fast layer — 83 assertions over the pure logic in `src/lib` and
+`src/components`, in about a tenth of a second. Anything expressible there belongs there rather than
+in a browser spec. `bunx tsc --noEmit` is the inner loop's type check; `bun run build` is slower and
+says the same thing until you are about to ship.
+
+**Run the browser suite against a server you already have up.** `playwright.config.ts` reuses one on
+port 43117 rather than booting its own, so:
+
+```bash
+cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117   # once
+bunx playwright test tests/browser/docker-ui.spec.ts                              # ~30s per spec
+```
+
+Cold, each invocation paid a fresh production server before the first assertion — which is why the
+whole suite was five to ten minutes and nobody ran it during a change. Specs run in parallel
+locally and serially on CI. A UI change also runs `tests/browser/design-system.spec.ts`
+(`design-system.md` §15 pass 10).
+
+**Before a pull request**, the full gate:
 
 ```bash
 cd backend && go build ./... && go vet ./... && go test ./...
-cd ../frontend && bun run lint && bun run build && bun run test:browser
+cd ../frontend && bun run lint && bun test src && bun run build && bun run test:browser
 ```
 
 Install the browser once with `bun run test:browser:install`. Deployment changes have additional live,

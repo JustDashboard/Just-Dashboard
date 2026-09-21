@@ -139,7 +139,7 @@ test("runtime services link to the exact Docker containers and stacks", async ({
 
   await page.getByRole("button", { name: "Actions for web-live" }).click()
   await page.getByRole("menuitem", { name: /Open stack/ }).click()
-  await expect(page).toHaveURL(/\/docker\/stacks\?stack=jd-e12$/)
+  await expect(page).toHaveURL(/\/docker\/stacks\/jd-e12$/)
 })
 
 test("runtime evidence distinguishes unavailable Docker from an empty managed inventory", async ({

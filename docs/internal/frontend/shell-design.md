@@ -95,6 +95,23 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   last subsection of §16 in `design-system.md`.
 - `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
   input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
+
+  **Which detail views are sheets.** A sheet is for a *glance*: you open it with the list still
+  showing, read it, and close it — the list is the context you are using. A detail that holds a
+  **stream, a terminal, or an editor** is not that. You stay in it for minutes, the list behind it is
+  dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
+  destination with a breadcrumb back, built the way `deploy/run-page.tsx` is: `PageHeader` with the
+  parent as an `eyebrow` link, the name and a `Status` as the title, the verbs in `actions`, and what
+  the thing *is* as a `MetricStrip` under it. A container, a compose stack and a backup job went that
+  way on 2026-09-21; every other detail in the product is a `SidePanel` and should stay one.
+
+  Their tabs stay **in** the page — they are views of one thing, which is what `tabClasses` is for.
+  Do not reintroduce a route-level strip for them (see the `SectionNav` note below), and do not give
+  one a `useNavScope`: the rail drills into a *section* with many pages, not into a leaf.
+
+  One thing a sheet gives free that a page does not: `onOpenChange` is a single funnel every exit
+  passes through, which is where `files/file-editor.tsx` guards unsaved work. The App Router cannot
+  block a soft navigation, so a detail that guards a dirty buffer on close stays a sheet.
   `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only
   part that scrolls, a footer strip. Both take `actions` in the title strip; `Modal`'s
   `size="full"` is the whole viewport with that anatomy intact, for the one task that is looking

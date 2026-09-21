@@ -41,7 +41,8 @@
   single row ("9 containers have no memory limit") whose body states the shared reasoning once and names
   the containers as chips that run that container's own remedy. The severity filter strip, the "N
   distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
-  five rows. `ContainerFindings` filters the page's single pass for one container's detail panel.
+  five rows. `ContainerFindings` filters a diagnosis pass for one container; the containers page passes its own,
+  and the container's page asks for one.
   `RuntimeHealthPanel` is the other half and counts what is *fine* as well as what is not, because a
   list of problems can never say "eight healthy, four with no health check at all" — and that last
   number is what stops "all healthy" meaning "nothing is being watched".
@@ -78,7 +79,7 @@ that does something.
   each row carries the stack's state, its services (dot, name, ports, health) and the one action that
   belongs there — deploy when the application is down. It opens with the same search box and state
   chips as the containers page, because "which of these is down" is the same question asked of the same
-  server. The detail panel follows the same rule as a container: the compose verbs that are pressed
+  server. A stack's own page follows the same rule as a container's: the compose verbs that are pressed
   daily (deploy, restart) sit inline, and the rest are behind one overflow menu where each gets its word
   and its sentence — the menu item's word-and-sentence body is `MenuItemBody` in
   `container-actions.tsx`, shared with the container menu. Its services tab, the deploy preview's
@@ -107,10 +108,16 @@ mount, because a shell is a process. The audit link is how the Docker event feed
 event; landing on an unfiltered list of everything the dashboard has ever done is not the entry it
 promised.
 
-Docker's `/docker/containers?container=` and `/docker/stacks?stack=` select the owning detail panel.
-`useQuerySelection` keeps panel selection in browser history so reload and back/forward restore it;
-closing clears only that selection parameter. Deployment runtime rows use these handoffs, including
-when a container disappears between the observation and the click: the owner panel displays its error.
+A container and a stack are their own destinations — `/docker/containers/<id>` and
+`/docker/stacks/<name>` — since 2026-09-21: each holds a live log feed, and the container a shell and
+the stack a compose editor, which is the test for a page rather than a sheet (`shell-design.md`). The
+container takes `?tab=` so a link can ask its question — "show me the logs" lands on the logs. The
+`?container=` and `?stack=` addresses those pages replaced still resolve, by redirect. Deployment
+runtime rows use these handoffs, including when a container disappears between the observation and
+the click: the page reports it, and a container removed from its own page returns to the list.
+
+`useQuerySelection` still keeps the remaining sheets' selections in browser history so reload and
+back/forward restore them; closing clears only that selection parameter.
 
 **Security and proxy** (`components/security/`, `components/proxy/`) follow the same rule — teaching next
 to the control, not in a banner above it. `posture-panel.tsx` turns a finding's `fix` into a button and

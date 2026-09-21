@@ -59,7 +59,7 @@ taking a frame:
   metrics page, every block on the Docker pages (the
   overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
   volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
-  images; the attention and storage blocks inside a container's detail panel), the
+  images; the attention and storage blocks on a container's page), the
   whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
   every area page the readings, the findings under them, the tables and the twenty probe blocks on
   Tools), every block on the proxy pages (the overview's engine facts, attention list, sites and
@@ -641,7 +641,8 @@ The rule that fell out of the Docker pass, and which generalises:
   room to draw. `components/docker/container-actions.tsx` is the pattern: three surfaces used to hold
   three different answers to "what can I do to this container", and they disagreed about which
   capability each needed. `components/verbs.tsx` is that pattern made shareable — a `Verb`, drawn
-  by `VerbActions` in a row (inline icons and one menu), `VerbBar` in a sheet (named buttons and
+  by `VerbActions` in a row (inline icons and one menu), `VerbBar` in a sheet or a detail page's
+  header (named buttons and
   the same menu) and `VerbMenu` alone in a header — and the process, PM2, unit, timer and cron rows
   all draw theirs through it, so four kinds of row did not arrive at four menus. A process row keeps
   nothing inline: the daily verb on a process table is reading it, and a stop glyph beside four

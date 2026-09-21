@@ -25,7 +25,7 @@
   was read from, so a save from anywhere starts it again from the server's copy; a dialog's fields are
   forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
   navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
-  keeps a detail panel's selection in the address bar and, per page and key, in the session store, so
+  keeps a sheet's selection in the address bar and, per page and key, in the session store, so
   arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
   layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
   filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
