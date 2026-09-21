@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import {
@@ -17,7 +18,6 @@ import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import type { ComposeService, ComposeStack } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -26,10 +26,9 @@ import { RowLink, SearchInput } from "@/components/page"
 import { ROW_BLEED } from "@/components/row-list"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { cn } from "@/lib/utils"
-import { PortLink, type ConfirmFn } from "@/components/docker/shared"
+import { PortLink } from "@/components/docker/shared"
 import { MenuItemBody } from "@/components/docker/container-actions"
 import { StackSummary, stackTone } from "@/components/docker/stack-state"
-import { StackDetailPanel } from "@/components/docker/stack-detail"
 import { ExplainIcon, Field, Term } from "@/components/docker/explain"
 import { Modal } from "@/components/modal"
 import { Tag } from "@/components/tag"
@@ -78,16 +77,24 @@ function needsAttention(stack: ComposeStack) {
 }
 
 export function StacksTab({
-  confirm,
   creating: externalCreating,
   onCreatingChange,
 }: {
-  confirm: ConfirmFn
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
 }) {
   const { can } = useAuth()
-  const [selected, setSelected] = useQuerySelection("stack")
+  const router = useRouter()
+
+  /*
+    `?stack=` opened a sheet on this page until 2026-09-21, and a container
+    managed by compose linked to exactly that address. Those links outlive the
+    panel, so they land on the stack.
+  */
+  const legacy = useSearchParams().get("stack")
+  useEffect(() => {
+    if (legacy) router.replace(`/docker/stacks/${encodeURIComponent(legacy)}`)
+  }, [legacy, router])
   const [internalCreating, setInternalCreating] = useState(false)
   const creating = externalCreating ?? internalCreating
   const setCreating = onCreatingChange ?? setInternalCreating
@@ -221,7 +228,7 @@ export function StacksTab({
                 <StackRow
                   key={stack.name}
                   stack={stack}
-                  onOpen={() => setSelected(stack.name)}
+                  onOpen={() => router.push(`/docker/stacks/${encodeURIComponent(stack.name)}`)}
                   onChanged={refresh}
                 />
               ))}
@@ -237,18 +244,12 @@ export function StacksTab({
         </PanelBody>
       </Panel>
 
-      <StackDetailPanel
-        name={selected}
-        onOpenChange={(open) => !open && setSelected(null)}
-        onChanged={refresh}
-        confirm={confirm}
-      />
       <NewStackDialog
         open={creating && can("system.admin") && can("file.write")}
         onOpenChange={setCreating}
         onCreated={(name) => {
           refresh()
-          setSelected(name)
+          router.push(`/docker/stacks/${encodeURIComponent(name)}`)
         }}
       />
     </div>

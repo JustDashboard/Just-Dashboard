@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { useParams, useRouter } from "next/navigation"
 import {
   ArrowCircleUp,
+  ArrowLeft,
   Box,
   Code,
   FloppyDisk,
@@ -24,7 +26,7 @@ import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { PortLink, type ConfirmFn } from "@/components/docker/shared"
+import { PortLink } from "@/components/docker/shared"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
@@ -36,7 +38,8 @@ import {
 } from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
 import { LogViewer } from "@/components/log-viewer"
-import { SidePanel } from "@/components/side-panel"
+import { useConfirm } from "@/components/confirm-dialog"
+import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -63,67 +66,51 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
  * directory is a checkout with uncommitted changes, two commits behind its
  * remote, is exactly the context somebody needs before pressing redeploy — and
  * it is one link away rather than a different product.
+ *
+ * It was a sheet over the stack list until 2026-09-21. A compose editor, a
+ * merged log feed and a watched command are three things you stay with, and
+ * none of them wants the list showing behind it — so a stack is its own
+ * destination with a breadcrumb back.
  */
-export function StackDetailPanel({
-  name,
-  onOpenChange,
-  onChanged,
-  confirm,
-}: {
-  name: string | null
-  onOpenChange: (open: boolean) => void
-  onChanged?: () => void
-  confirm: ConfirmFn
-}) {
-  return (
-    <StackBody
-      key={name ?? "none"}
-      name={name}
-      onOpenChange={onOpenChange}
-      onChanged={onChanged}
-      confirm={confirm}
-    />
-  )
+export function StackPage() {
+  const { name } = useParams<{ name: string }>()
+  const stack = decodeURIComponent(name)
+  return <StackBody key={stack} name={stack} />
 }
 
-function StackBody({
-  name,
-  onOpenChange,
-  onChanged,
-  confirm,
-}: {
-  name: string | null
-  onOpenChange: (open: boolean) => void
-  onChanged?: () => void
-  confirm: ConfirmFn
-}) {
+function StackBody({ name }: { name: string }) {
   const { can } = useAuth()
+  const router = useRouter()
+  const { confirm, dialog } = useConfirm()
   const [tab, setTab] = useViewState("docker.stack.tab", "services")
   const runner = useRunConsole()
 
   const { data, error, loading, refresh } = usePoll<StackDetail>(
-    (signal) =>
-      get<StackDetail>(`/docker/stacks/${encodeURIComponent(name ?? "")}`, undefined, signal),
+    (signal) => get<StackDetail>(`/docker/stacks/${encodeURIComponent(name)}`, undefined, signal),
     // Slower while a command is running: the poll would otherwise fight the
     // console for attention, and the interesting output is in the console.
     runner.running ? 0 : 10000,
     [name],
-    // Not while closed: with no name the path is the stack *list*, and this
-    // panel would render an array's missing fields.
-    { enabled: name !== null },
   )
 
   const reload = useCallback(() => {
     refresh()
-    onChanged?.()
-  }, [refresh, onChanged])
+  }, [refresh])
 
   const run = async (action: string, opts: { confirmPhrase?: string; service?: string } = {}) => {
-    const code = await runner.run(`/docker/stacks/${encodeURIComponent(name ?? "")}/run`, {
+    const code = await runner.run(`/docker/stacks/${encodeURIComponent(name)}/run`, {
       action,
       service: opts.service,
       confirm: opts.confirmPhrase,
     })
+    // `down` removes the containers, and with them the stack this page is
+    // about: compose only knows a stack that has some. Staying here would
+    // report the disappearance as an error about something the reader just
+    // asked for on purpose.
+    if (action === "down" && code === 0) {
+      router.replace("/docker/stacks")
+      return
+    }
     reload()
     if (code !== 0) throw new Error(`compose ${action} exited with status ${code}`)
   }
@@ -138,29 +125,44 @@ function StackBody({
   const confirmRun = (action: string, title: string, description: React.ReactNode) =>
     confirm({
       title,
-      phrase: action === "down" ? (name ?? "") : undefined,
+      phrase: action === "down" ? name : undefined,
       confirmLabel: title.split(" ")[0],
       description,
       action: (phrase) => run(action, { confirmPhrase: phrase }),
     })
 
   return (
-    <SidePanel
-      open={name !== null}
-      onOpenChange={onOpenChange}
-      width="xl"
-      title={
-        <>
-          {name}
-          {data && <StackStateBadge stack={data} />}
-        </>
-      }
-      description={data ? `${data.summary} · ${data.workingDir}` : undefined}
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
-      actions={
-        data && <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
-      }
-    >
+    <Page fill>
+      <div className="flex min-w-0 shrink-0 flex-col gap-4">
+        <PageHeader
+          eyebrow={
+            <Link
+              href="/docker/stacks"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Stacks
+            </Link>
+          }
+          title={
+            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
+              <span className="truncate">{name}</span>
+              {data && <StackStateBadge stack={data} />}
+            </span>
+          }
+          actions={
+            data && <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
+          }
+        />
+        {/* What the stack is, as data under the title rather than the sentence
+            the panel read to a screen reader and drew nowhere (§15 pass 8). */}
+        {data && (
+          <MetricStrip className="animate-rise">
+            <Metric label="Services" value={data.summary} />
+            <Metric label="Directory" value={data.workingDir} />
+          </MetricStrip>
+        )}
+      </div>
+
       {error && <ErrorState error={error} />}
       {loading && !data && <LoadingRows />}
 
@@ -212,8 +214,9 @@ function StackBody({
                 />
               ) : (
                 /* Rows with a hairline between them and nothing around them:
-                   the services are the rows of a table the eye reads down,
-                   and the side panel is already the frame. */
+                   the services are the rows of a table the eye reads down, and
+                   a tab panel under a page header needs no second frame to say
+                   where it starts (§15 pass 1). */
                 <ul className="animate-rise divide-y divide-hairline">
                   {data.services.map((svc) => (
                     <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
@@ -241,7 +244,8 @@ function StackBody({
           </Tabs>
         </>
       )}
-    </SidePanel>
+      {dialog}
+    </Page>
   )
 }
 

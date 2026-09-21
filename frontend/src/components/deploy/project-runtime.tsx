@@ -416,7 +416,7 @@ function ServiceRow({
       label: "Open stack",
       detail: "The Compose stack this service belongs to.",
       icon: Layers,
-      run: () => router.push(`/docker/stacks?stack=${service.stack}`),
+      run: () => router.push(`/docker/stacks/${service.stack}`),
     })
   }
   verbs.push({

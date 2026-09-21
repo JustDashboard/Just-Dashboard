@@ -463,7 +463,7 @@ export default function ContainersPage() {
               {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 animate-rise xl:block">
+              <div className="hidden min-w-0 animate-rise group-data-[plain]/panel:-mx-4 xl:block">
                 <Table>
                   <TableHeader>
                     <TableRow>

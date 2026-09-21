@@ -326,7 +326,7 @@ export default function DockerOverviewPage() {
                   {detected.map((stack) => (
                     <ChoiceRow
                       key={stack.name}
-                      href={`/docker/stacks?stack=${encodeURIComponent(stack.name)}`}
+                      href={`/docker/stacks/${encodeURIComponent(stack.name)}`}
                       verb={`Open ${stack.name}`}
                       leading={
                         <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />

@@ -832,7 +832,7 @@ function ContainerActions({
     return (
       <>
         <Button size="sm" variant="outline" asChild>
-          <Link href={`/docker/stacks?stack=${encodeURIComponent(detail.composeStack ?? "")}`}>
+          <Link href={`/docker/stacks/${encodeURIComponent(detail.composeStack ?? "")}`}>
             <Layers className="size-3.5" />
             Open stack
           </Link>

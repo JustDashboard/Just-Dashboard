@@ -516,6 +516,34 @@ test("a stack that was never deployed says so", async ({ page }) => {
   await expect(page.getByText("0/0")).toHaveCount(0)
 })
 
+/**
+ * A stack is its own page since 2026-09-21: a compose editor, a merged log
+ * feed and a watched command are three things you stay with, and none of them
+ * wants the stack list showing behind it.
+ */
+test("a stack opens as its own page", async ({ page }) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/stacks/running-app", (route) => json(route, stacks[0]))
+  await page.goto("/docker/stacks")
+  await page.getByRole("button", { name: "running-app", exact: true }).first().click()
+
+  await expect(page).toHaveURL(/\/docker\/stacks\/running-app$/)
+  // What the stack is, as facts under the title rather than a sentence read
+  // only to a screen reader.
+  await expect(page.getByText("/srv/running-app").first()).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Compose file" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Stacks" }).first()).toBeVisible()
+})
+
+/** `?stack=` was the address a compose-managed container linked to. */
+test("a link to the old stack query lands on the stack", async ({ page }) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/stacks/running-app", (route) => json(route, stacks[0]))
+  await page.goto("/docker/stacks?stack=running-app")
+
+  await expect(page).toHaveURL(/\/docker\/stacks\/running-app$/)
+})
+
 test("a volume in use offers no delete button", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/volumes")
@@ -900,6 +928,7 @@ for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
       "/docker/containers",
       "/docker/containers/1111111111111111",
       "/docker/stacks",
+      "/docker/stacks/running-app",
       "/docker/images",
       "/docker/volumes",
       "/docker/networks",
