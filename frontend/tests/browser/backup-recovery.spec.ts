@@ -174,6 +174,10 @@ async function mockBackups(page: Page, existing = false) {
       } else {
         result = existing ? [job] : []
       }
+    } else if (path === "/backups/5") {
+      // The job's own page reads the job itself rather than finding it in the
+      // list it used to be opened from.
+      result = job
     } else if (path === "/backups/5/runs") {
       result = {
         running: false,
@@ -231,10 +235,11 @@ async function mockBackups(page: Page, existing = false) {
   }
 }
 
-/** The job's sheet, opened from its name in the list. */
+/** The job's page, entered from its name in the list. */
 async function openJob(page: Page) {
   await page.getByRole("button", { name: "Application backup", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Application backup" })).toBeVisible()
+  await expect(page).toHaveURL(/\/backups\/5$/)
+  await expect(page.getByRole("heading", { name: "Application backup" })).toBeVisible()
 }
 
 async function runMenu(page: Page, item: RegExp) {

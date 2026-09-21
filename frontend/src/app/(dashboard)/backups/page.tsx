@@ -1,16 +1,15 @@
 "use client"
 
 import { useEffect, useMemo, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
-import { Archive, CloudUpload, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
-import { notify } from "@/lib/toast"
-import { del, get, post } from "@/lib/api"
+import { Archive, Plus } from "@/components/icons"
+import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { BackupJob, BackupResource, BackupResourceReport } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, RowLink } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -19,7 +18,7 @@ import { ROW_BLEED } from "@/components/row-list"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -30,21 +29,23 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
-import { JobSheet } from "@/components/backups/job-detail"
 import { CoveragePanel } from "@/components/backups/coverage"
 import { contentsLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
+import { runJobNow, useJobVerbs } from "@/components/backups/job-verbs"
 
 /**
  * Backups, drawn the way the host Overview is: four readings, what needs
  * attention, the jobs as a plain table, and what on this server is and is
- * not covered. A job opens in a sheet; a new one starts from the form, or
+ * not covered. A job is its own page; a new one starts from the form, or
  * from a thing on the server that has no backup yet.
  */
 export default function BackupsPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const search = useSearchParams()
-  const [selectedId, select] = useQuerySelection("job")
+  const router = useRouter()
+  /** One job, as a destination. */
+  const open = (job: BackupJob) => router.push(`/backups/${job.id}`)
   // Another page can send a path here to have it backed up: the form opens
   // with the path already in it, and the address is cleaned so a reload does
   // not open it again.
@@ -53,6 +54,12 @@ export default function BackupsPage() {
   // job dumps it: the form opens on the coverage entry for that database,
   // which already carries the native dump as its suggestion.
   const incomingDatabase = search.get("database")
+  // `?job=` opened a sheet here until 2026-09-21, and a deployment's Databases
+  // settings still links a job that way from anywhere it is deployed.
+  const incomingJob = search.get("job")
+  useEffect(() => {
+    if (incomingJob) router.replace(`/backups/${encodeURIComponent(incomingJob)}`)
+  }, [incomingJob, router])
   // The open form, and its fields in `JobDialog`, are kept in memory for the
   // tab — memory, because a destination's keys are typed into it — so a
   // look at the volume it should cover does not mean filling it in again.
@@ -78,7 +85,6 @@ export default function BackupsPage() {
   )
   const admin = can("system.admin")
   const list = useMemo(() => jobs.data ?? [], [jobs.data])
-  const selected = list.find((j) => String(j.id) === selectedId) ?? null
 
   // The coverage report is what knows how to back a database up — its paths,
   // its native dump, the containers to freeze — so the form waits for it
@@ -109,117 +115,16 @@ export default function BackupsPage() {
     coverage.refresh()
   }
 
-  const runNow = async (job: BackupJob) => {
-    try {
-      await post(`/backups/${job.id}/run`)
-      notify.success(`${job.name} started`, { description: "Progress appears in its run history." })
-      jobs.refresh()
-    } catch (err) {
-      notify.error("Could not start", err)
-    }
-  }
-  const setEnabled = async (job: BackupJob, enabled: boolean) => {
-    try {
-      await post(`/backups/${job.id}/enabled`, { enabled })
-      notify.success(enabled ? `${job.name} resumed` : `${job.name} paused`)
-      refresh()
-    } catch (err) {
-      notify.error(enabled ? "Could not resume" : "Could not pause", err)
-    }
-  }
-  const testTarget = async (job: BackupJob) => {
-    try {
-      const res = await post<{ ok: boolean; error?: string }>(`/backups/${job.id}/test`)
-      if (res.ok) notify.success(`${job.name}: destination is reachable and writable`)
-      else notify.error(`${job.name}: destination unreachable`, res.error)
-    } catch (err) {
-      notify.error("Could not test the destination", err)
-    }
-  }
-  const remove = (job: BackupJob) =>
-    confirm({
-      title: "Delete backup job",
-      confirmLabel: "Delete",
-      description: (
-        <p>
-          Removes the schedule for <b>{job.name}</b>. Archives already taken are kept where they
-          are.
-        </p>
-      ),
-      action: async (c) => {
-        await del(`/backups/${job.id}`, { confirm: c })
-        if (selected?.id === job.id) select(null)
-        refresh()
-      },
-    })
-
-  /** One job's verbs, declared once; the row and the sheet decide how many to draw. */
-  const verbsFor = (job: BackupJob): Verb[] => {
-    const running = job.lastRun?.status === "running"
-    const out: Verb[] = []
-    if (can("service.control")) {
-      out.push({
-        key: "run",
-        label: "Run now",
-        detail: "Take a backup outside the schedule.",
-        icon: Play,
-        inline: true,
-        progressive: "Running…",
-        disabled: running,
-        run: () => void runNow(job),
-      })
-    }
-    if (admin) {
-      out.push(
-        {
-          key: "edit",
-          label: "Edit",
-          detail: "Sources, destination, schedule, retention and checks.",
-          icon: Pencil,
-          inline: true,
-          run: () => setForm({ job }),
-        },
-        job.enabled
-          ? {
-              key: "pause",
-              label: "Pause schedule",
-              detail: "Stops the schedule. Run now still works and archives stay put.",
-              icon: Pause,
-              run: () => void setEnabled(job, false),
-            }
-          : {
-              key: "resume",
-              label: "Resume schedule",
-              detail: job.schedule
-                ? `Starts firing again: ${scheduleLabel(job.schedule).toLowerCase()}.`
-                : "The job has no schedule; set one under Edit.",
-              icon: Play,
-              disabled: !job.schedule,
-              run: () => void setEnabled(job, true),
-            },
-        {
-          key: "test",
-          label: "Test destination",
-          detail: "Checks the directory is writable or the bucket answers.",
-          icon: CloudUpload,
-          run: () => void testTarget(job),
-        },
-        {
-          key: "delete",
-          label: "Delete job",
-          detail: "Removes the schedule and history. Archives already taken are kept.",
-          icon: Trash,
-          danger: true,
-          run: () => void remove(job),
-        },
-      )
-    }
-    return out
-  }
+  const verbsFor = useJobVerbs({
+    confirm,
+    refresh,
+    onEdit: (job) => setForm({ job }),
+    onDeleted: refresh,
+  })
 
   const readings = useMemo(() => summarise(list), [list])
   const findings = useMemo(
-    () => attention(list, coverage.data, (job) => select(String(job.id)), runNow),
+    () => attention(list, coverage.data, open, (job) => runJobNow(job, refresh)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [list, coverage.data],
   )
@@ -332,7 +237,9 @@ export default function BackupsPage() {
           <PanelHeader
             title="Jobs"
             actions={
-              <span className="numeric text-hint text-muted-foreground">{plural(list.length, "job")}</span>
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(list.length, "job")}
+              </span>
             }
           />
           <PanelBody flush>
@@ -349,7 +256,7 @@ export default function BackupsPage() {
                 >
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <div className="flex min-w-0 items-center gap-2">
-                      <RowLink onClick={() => select(String(job.id))}>{job.name}</RowLink>
+                      <RowLink onClick={() => open(job)}>{job.name}</RowLink>
                       {!job.enabled && job.schedule && <Status state="stopped" label="paused" />}
                     </div>
                     <p className="truncate text-hint text-muted-foreground">
@@ -384,10 +291,10 @@ export default function BackupsPage() {
                 </TableHeader>
                 <TableBody className="animate-rise">
                   {list.map((job) => (
-                    <TableRow key={job.id} onActivate={() => select(String(job.id))}>
+                    <TableRow key={job.id} onActivate={() => open(job)}>
                       <TableCell>
                         <div className="flex min-w-0 items-center gap-2">
-                          <RowLink onClick={() => select(String(job.id))}>{job.name}</RowLink>
+                          <RowLink onClick={() => open(job)}>{job.name}</RowLink>
                           {!job.enabled && job.schedule && (
                             <Status state="stopped" label="paused" />
                           )}
@@ -399,18 +306,18 @@ export default function BackupsPage() {
                       <TableCell className="max-w-56 truncate font-mono text-xs">
                         {targetLabel(job)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
                         {scheduleLabel(job.schedule)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <LastRun job={job} />
                       </TableCell>
                       <TableCell
-                        className={`whitespace-nowrap text-xs ${job.overdue ? "text-warning" : "text-muted-foreground"}`}
+                        className={`text-xs whitespace-nowrap ${job.overdue ? "text-warning" : "text-muted-foreground"}`}
                       >
                         {nextLabel(job)}
                       </TableCell>
-                      <TableCell className="numeric text-right whitespace-nowrap text-xs">
+                      <TableCell className="numeric text-right text-xs whitespace-nowrap">
                         {job.stored.runs > 0 ? (
                           <>
                             {bytes(job.stored.bytes)}
@@ -442,15 +349,9 @@ export default function BackupsPage() {
         loading={coverage.loading}
         canCreate={admin}
         onProtect={(res) => openFor(prefillFor(res))}
-        onOpenJob={(id) => select(String(id))}
+        onOpenJob={(id) => router.push(`/backups/${id}`)}
       />
 
-      <JobSheet
-        job={selected}
-        verbs={selected ? verbsFor(selected) : []}
-        confirm={confirm}
-        onOpenChange={(open) => !open && select(null)}
-      />
       {form && admin && (
         <JobDialog
           job={form.job}
@@ -538,11 +439,7 @@ function attention(
   const out: Finding[] = []
   for (const job of list) {
     if (job.lastRun?.status === "failed") {
-      const lastLine = job.lastRun.log
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .at(-1)
+      const lastLine = job.lastRun.log.trim().split("\n").filter(Boolean).at(-1)
       out.push({
         id: `failed-${job.id}`,
         level: "warning",
@@ -563,7 +460,8 @@ function attention(
         detail: job.lastSuccessAt
           ? `Last good backup ${relativeTime(job.lastSuccessAt)}; it should run ${scheduleLabel(job.schedule).toLowerCase()}.`
           : `It has never succeeded and should run ${scheduleLabel(job.schedule).toLowerCase()}.`,
-        advice: "Run it now and watch the log — a run that keeps failing is what usually makes a job go quiet.",
+        advice:
+          "Run it now and watch the log — a run that keeps failing is what usually makes a job go quiet.",
         meta: "overdue",
         action: { label: "Run now", onClick: () => runNow(job) },
       })

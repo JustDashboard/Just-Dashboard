@@ -707,7 +707,7 @@ function DatabasesForm({
                           </Button>
                         )}
                         <Link
-                          href={`/backups?job=${job.id}`}
+                          href={`/backups/${job.id}`}
                           className="inline-flex min-h-9 items-center text-hint underline underline-offset-4 focus-ring"
                         >
                           Open the backup job
