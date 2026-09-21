@@ -831,18 +831,36 @@ test("runtime health keeps every count, including the zeroes", async ({ page }) 
  * Opening a container to find out why it is unhappy used to mean closing it
  * again to do anything about it: the lifecycle verbs lived on the table row and
  * nowhere else.
+ *
+ * A container is its own page since 2026-09-21, so the row is a link and the
+ * verbs are the page's own. The address is asserted because it is the thing
+ * that changed: a container is somewhere you can be, not a panel over a list.
  */
-test("the detail panel can act on the container it is describing", async ({ page }) => {
+test("the container page can act on the container it is describing", async ({ page }) => {
   await mockDocker(page)
   await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
   await page.goto("/docker/containers")
   await page.getByRole("button", { name: "web", exact: true }).first().click()
 
-  const panel = page.getByRole("dialog")
-  await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
-  // And the identity is on screen rather than only in the accessible description.
-  await expect(panel.getByText("nginx:alpine").first()).toBeVisible()
+  await expect(page).toHaveURL(/\/docker\/containers\/1111111111111111$/)
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
+  // And the identity is a fact under the title rather than a tag in it.
+  await expect(page.getByText("nginx:alpine").first()).toBeVisible()
+  // The way back is the eyebrow, where a page's own breadcrumb goes.
+  await expect(page.getByRole("link", { name: "Containers" }).first()).toBeVisible()
+})
+
+/**
+ * `?container=` was this page's address for a detail panel for three releases.
+ * Those links are in bookmarks and tickets, and they land on the container.
+ */
+test("a link to the old container query lands on the container", async ({ page }) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
+  await page.goto("/docker/containers?container=1111111111111111")
+
+  await expect(page).toHaveURL(/\/docker\/containers\/1111111111111111$/)
 })
 
 /**
@@ -880,6 +898,7 @@ for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
     for (const path of [
       "/docker",
       "/docker/containers",
+      "/docker/containers/1111111111111111",
       "/docker/stacks",
       "/docker/images",
       "/docker/volumes",

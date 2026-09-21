@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Box, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -19,7 +19,6 @@ import type {
 } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, SearchInput } from "@/components/page"
@@ -27,7 +26,6 @@ import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { EmptyState, ErrorState } from "@/components/state"
-import { ContainerDetailSheet } from "@/components/docker/container-detail"
 import { AttentionPanel, RuntimeHealthPanel } from "@/components/docker/attention"
 import { ExplainIcon } from "@/components/docker/explain"
 import { PortList } from "@/components/docker/exposure"
@@ -96,8 +94,6 @@ export default function ContainersPage() {
   const [containers, setContainers] = useState<Container[]>([])
   const [stats, setStats] = useState<Record<string, ContainerStats>>({})
   const [socketError, setSocketError] = useState<string>()
-  const [selected, setSelected] = useQuerySelection("container")
-  const [focusTab, setFocusTab] = useState<string>()
   const [filter, setFilter] = useSessionState("docker.containers.query", "")
   const [state, setState] = useSessionState<StateFilter>("docker.containers.state", "all")
 
@@ -145,14 +141,26 @@ export default function ContainersPage() {
   // `refresh` is stable, so the verbs a row memoises stay stable with it.
   const { pending, act } = useContainerControl(health.refresh)
 
-  /** Opens one container's detail panel, optionally straight at a tab. */
+  /** Goes to one container, optionally straight at a tab. */
   const open = useCallback(
     (id: string, tab?: string) => {
-      setFocusTab(tab)
-      setSelected(id)
+      const query = tab ? `?tab=${encodeURIComponent(tab)}` : ""
+      router.push(`/docker/containers/${encodeURIComponent(id)}${query}`)
     },
-    [setSelected],
+    [router],
   )
+
+  /*
+    `?container=` opened a sheet on this page until 2026-09-21, and
+    `useQuerySelection` also put a remembered one back on arrival. Both are
+    addresses that exist in the wild — a bookmark, a tab restored by the
+    browser, a link pasted into a ticket — so they land on the container
+    instead of on a list that quietly ignores them.
+  */
+  const legacy = useSearchParams().get("container")
+  useEffect(() => {
+    if (legacy) router.replace(`/docker/containers/${encodeURIComponent(legacy)}`)
+  }, [legacy, router])
 
   /**
    * A finding's remedy, carried out. This is what separates a diagnosis from a
@@ -491,14 +499,6 @@ export default function ContainersPage() {
         </PanelBody>
       </Panel>
 
-      <ContainerDetailSheet
-        containerId={selected}
-        focusTab={focusTab}
-        onOpenChange={(isOpen) => !isOpen && setSelected(null)}
-        diagnosis={health.data}
-        confirm={confirm}
-        onChanged={() => health.refresh()}
-      />
       {dialog}
     </Page>
   )

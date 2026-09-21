@@ -415,7 +415,7 @@ function IdleRow({
   onChanged: () => void
 }) {
   const router = useRouter()
-  const href = `/docker/containers?container=${encodeURIComponent(container.id)}`
+  const href = `/docker/containers/${encodeURIComponent(container.id)}`
   const verbs = useContainerVerbs({
     container,
     confirm,

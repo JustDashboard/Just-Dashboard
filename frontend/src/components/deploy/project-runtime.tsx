@@ -424,13 +424,13 @@ function ServiceRow({
     label: "Open in Docker",
     detail: "This container, as Docker sees it.",
     icon: External,
-    run: () => router.push(`/docker/containers?container=${service.containerId}`),
+    run: () => router.push(`/docker/containers/${service.containerId}`),
   })
   return (
     <li className="min-w-0 space-y-1.5 px-5 py-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Link
-          href={`/docker/containers?container=${service.containerId}`}
+          href={`/docker/containers/${service.containerId}`}
           className="min-w-0 truncate text-body font-medium underline-offset-4 focus-ring hover:underline"
         >
           {service.name || service.containerId}

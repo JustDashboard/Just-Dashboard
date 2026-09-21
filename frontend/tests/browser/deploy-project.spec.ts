@@ -125,7 +125,7 @@ test("runtime services link to the exact Docker containers and stacks", async ({
     await expect(list.getByText(/Health: Not observed/)).toBeVisible()
     await expect(list.getByRole("link", { name: "web-live", exact: true })).toHaveAttribute(
       "href",
-      "/docker/containers?container=abc123",
+      "/docker/containers/abc123",
     )
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

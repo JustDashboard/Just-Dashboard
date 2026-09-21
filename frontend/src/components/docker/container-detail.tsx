@@ -1,9 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowCircleUp,
+  ArrowLeft,
   Clock,
   Copy,
   Download,
@@ -46,8 +48,8 @@ import { ContainerFindings } from "@/components/docker/attention"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
-import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList } from "@/components/page"
+import { useConfirm } from "@/components/confirm-dialog"
+import { Detail, DetailList, Metric, MetricStrip, Page, PageHeader } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { Tag } from "@/components/tag"
@@ -61,71 +63,60 @@ import { copyText } from "@/lib/clipboard"
 /** How many log lines the panel keeps before dropping the oldest. */
 const LOG_LIMIT = 5000
 
-export function ContainerDetailSheet({
-  containerId,
-  focusTab,
-  onOpenChange,
-  diagnosis,
-  confirm,
-  onChanged,
-}: {
-  containerId: string | null
-  /**
-   * Which tab to land on, when the thing that opened this panel was asking a
-   * particular question — "show me the logs", "open a shell", a finding whose
-   * evidence is the usage chart. Without it every one of those routes arrived
-   * at Overview and cost a second click, which is the reason a log button that
-   * merely selects a row never feels like a log button.
-   */
-  focusTab?: string
-  onOpenChange: (open: boolean) => void
-  /** The page's one diagnosis pass, filtered to this container rather than refetched. */
-  diagnosis?: DockerDiagnosis
-  confirm?: ConfirmFn
-  onChanged?: () => void
-}) {
+/**
+ * One container, as a place of its own.
+ *
+ * This was a `SidePanel` over the container table until 2026-09-21. Seven
+ * tabs, a recorded-usage chart, a live log socket and an interactive shell is
+ * not a thing you glance at with the list showing behind it: an xterm inside a
+ * sheet's `sm:max-w-3xl` is about ninety columns, and the table it half-covers
+ * is not context anybody is using while they read a deploy's output. So a
+ * container is its own destination with a breadcrumb back, the way a
+ * deployment run is one.
+ *
+ * The tabs stayed *in* the page. They switch between views of one thing, which
+ * is what the underlined tab is for; the route-level strip was retired in
+ * 0.6.7 and this is not the reason to bring it back (`shell-design.md`). What
+ * the panel took as a `focusTab` prop is `?tab=` now — the same job, and it
+ * survives a reload and a shared link.
+ */
+export function ContainerPage() {
+  const { id } = useParams<{ id: string }>()
+  const tab = useSearchParams().get("tab")
   return (
-    <ContainerDetailPanel
-      // Keyed on the container *and* the requested tab so asking for the logs
-      // of the container already open still moves to the logs.
-      key={`${containerId ?? "none"}:${focusTab ?? ""}`}
-      containerId={containerId}
-      focusTab={focusTab}
-      onOpenChange={onOpenChange}
-      diagnosis={diagnosis}
-      confirm={confirm}
-      onChanged={onChanged}
-    />
+    // Keyed on the container *and* the requested tab, so a link to the logs of
+    // the container already open still moves to the logs.
+    <ContainerDetailPanel key={`${id}:${tab ?? ""}`} containerId={id} focusTab={tab ?? undefined} />
   )
 }
 
 function ContainerDetailPanel({
   containerId,
   focusTab,
-  onOpenChange,
-  diagnosis,
-  confirm,
-  onChanged,
 }: {
-  containerId: string | null
+  containerId: string
+  /**
+   * Which tab to land on, when the thing that linked here was asking a
+   * particular question — "show me the logs", "open a shell", a finding whose
+   * evidence is the usage chart. Without it every one of those routes arrived
+   * at Overview and cost a second click, which is the reason a log button that
+   * merely selects a row never feels like a log button.
+   */
   focusTab?: string
-  onOpenChange: (open: boolean) => void
-  diagnosis?: DockerDiagnosis
-  confirm?: ConfirmFn
-  onChanged?: () => void
 }) {
   const { can } = useAuth()
+  const router = useRouter()
+  const { confirm, dialog } = useConfirm()
   const [detail, setDetail] = useState<ContainerDetail>()
   const [error, setError] = useState<Error>()
   // Which tab a container opens on. Somebody watching a deploy wants Logs
   // every time, and reopening on Overview is a click paid per container. A
-  // caller that asked for a specific tab overrides the remembered one — it is
+  // link that asked for a specific tab overrides the remembered one — it is
   // answering a question rather than arranging furniture.
   const [remembered, remember] = useViewState("docker.container.tab", "overview")
   // Seeded once, because this component is keyed on the container and the
-  // requested tab: a caller asking for the logs gets the logs, and the moment
-  // the reader moves to another tab that choice becomes the remembered one
-  // again.
+  // requested tab: a link to the logs gets the logs, and the moment the reader
+  // moves to another tab that choice becomes the remembered one again.
   const [tab, setTabState] = useState(focusTab ?? remembered)
   const setTab = useCallback(
     (next: string) => {
@@ -136,73 +127,116 @@ function ContainerDetailPanel({
   )
   const [reloads, setReloads] = useState(0)
 
+  // The page's own diagnosis pass. As a panel this was handed the container
+  // table's single poll, filtered to the open container; on its own route
+  // there is nobody above to ask.
+  const health = usePoll<DockerDiagnosis>(
+    (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
+    60_000,
+  )
+
+  // Whether this page has ever had its container, so a 404 can be told apart
+  // from a bad address.
+  const loaded = useRef(false)
+
   useEffect(() => {
-    if (!containerId) return
     const controller = new AbortController()
     get<ContainerDetail>(
       `/docker/containers/${encodeURIComponent(containerId)}`,
       undefined,
       controller.signal,
     )
-      .then(setDetail)
-      .catch((err) => !controller.signal.aborted && setError(err))
+      .then((next) => {
+        loaded.current = true
+        setDetail(next)
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        // Removing a container is done from this page, and the thing the page
+        // is about then stops existing. An error state about a container the
+        // reader just deleted on purpose is not news — the list is.
+        if (err instanceof ApiError && err.status === 404 && loaded.current) {
+          router.replace("/docker/containers")
+          return
+        }
+        setError(err)
+      })
     return () => controller.abort()
-  }, [containerId, reloads])
+  }, [containerId, reloads, router])
 
   const shell = can("terminal") && detail?.state === "running"
+  const changed = useCallback(() => {
+    setReloads((n) => n + 1)
+    health.refresh()
+  }, [health])
 
   return (
-    <SidePanel
-      open={containerId !== null}
-      onOpenChange={onOpenChange}
-      title={
-        <>
-          {detail?.name ?? "Container"}
-          {detail && (
-            <Status
-              state={detail.state}
-              live={detail.state === "running"}
-              label={statusWord(detail)}
-            />
-          )}
-          {/* What it is running, on screen rather than only in the accessible
-              description. "Which image is this" is the second question anybody
-              opening this panel has, and it used to need the Overview tab. */}
-          {detail && <Tag mono>{detail.image}</Tag>}
-          {detail?.composeStack && <Tag>managed by compose</Tag>}
-        </>
-      }
-      description={detail?.image ?? containerId ?? undefined}
-      bodyClassName="flex min-h-0 flex-1 flex-col p-4"
-      actions={
-        detail && (
-          <>
-            {/* Start, stop and restart were reachable from the table and
-                nowhere else, so opening a container to look at why it is
-                unhappy meant closing it again to do anything about it. */}
-            {confirm && (
-              <ContainerLifecycle
-                detail={detail}
-                confirm={confirm}
-                onOpenTab={setTab}
-                onChanged={() => {
-                  setReloads((n) => n + 1)
-                  onChanged?.()
-                }}
+    <Page fill>
+      <div className="flex min-w-0 shrink-0 flex-col gap-4">
+        <PageHeader
+          eyebrow={
+            <Link
+              href="/docker/containers"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Containers
+            </Link>
+          }
+          title={
+            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
+              <span className="truncate">{detail?.name ?? "Container"}</span>
+              {detail && (
+                <Status
+                  state={detail.state}
+                  live={detail.state === "running"}
+                  label={statusWord(detail)}
+                  className="shrink-0"
+                />
+              )}
+            </span>
+          }
+          actions={
+            detail && (
+              <>
+                {/* Start, stop and restart were reachable from the table and
+                    nowhere else, so opening a container to look at why it is
+                    unhappy meant closing it again to do anything about it. */}
+                <ContainerLifecycle
+                  detail={detail}
+                  confirm={confirm}
+                  onOpenTab={setTab}
+                  onChanged={changed}
+                />
+                <ContainerActions detail={detail} confirm={confirm} onChanged={changed} />
+              </>
+            )
+          }
+        />
+        {/* What the container *is*, as its own row of facts rather than as tags
+            crammed into the title (§15 pass 8, and the same call `ProjectShell`
+            makes). "Which image is this" is the second question anybody opening
+            a container has, and it used to need the Overview tab. */}
+        {detail && (
+          <MetricStrip className="animate-rise">
+            <Metric label="Image" value={detail.image} />
+            <Metric label="Container" value={detail.id.slice(0, 12)} />
+            {detail.composeStack && (
+              <Metric
+                label="Compose stack"
+                value={
+                  <Link
+                    href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}`}
+                    className="rounded-sm focus-ring hover:underline"
+                  >
+                    {detail.composeStack}
+                  </Link>
+                }
               />
             )}
-            <ContainerActions
-              detail={detail}
-              confirm={confirm}
-              onChanged={() => {
-                setReloads((n) => n + 1)
-                onChanged?.()
-              }}
-            />
-          </>
-        )
-      }
-    >
+          </MetricStrip>
+        )}
+      </div>
+
       {error && <ErrorState error={error} />}
       {!detail && !error && <LoadingRows />}
 
@@ -221,17 +255,17 @@ function ContainerDetailPanel({
           <TabsContent value="overview" className="min-h-0 flex-1 space-y-4 overflow-y-auto">
             {/*
               Why it is not working, then what is wrong with it, then the facts
-              about it. An operator who opened this panel opened it for the
+              about it. An operator who opened this page opened it for the
               first of those, and the version this replaces led with the third.
             */}
             <FailurePanel containerId={detail.id} />
-            <ContainerFindings diagnosis={diagnosis} containerId={detail.id} />
+            <ContainerFindings diagnosis={health.data} containerId={detail.id} />
             <OverviewFields detail={detail} />
             <Reachability containerId={detail.id} />
           </TabsContent>
 
           {/* Recorded history rather than a live feed: the point is the spike
-              that happened while nobody had this panel open. The limits sit
+              that happened while nobody had this page open. The limits sit
               above the charts because this is where somebody realises theirs
               are wrong. */}
           <TabsContent value="usage" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
@@ -263,7 +297,8 @@ function ContainerDetailPanel({
           )}
         </Tabs>
       )}
-    </SidePanel>
+      {dialog}
+    </Page>
   )
 }
 
