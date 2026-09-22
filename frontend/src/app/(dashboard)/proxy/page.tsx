@@ -111,7 +111,7 @@ export default function ProxyOverviewPage() {
   const settled = !vhosts.loading && !certs.loading && !streams.loading && !ports.loading
 
   if (loading && !status) {
-    return <PageState eyebrow="Apps" title="Proxy & TLS" />
+    return <PageState eyebrow="Advanced" title="Proxy & TLS" />
   }
   if (!status) return null
 
@@ -125,7 +125,7 @@ export default function ProxyOverviewPage() {
   return (
     <Page className="animate-rise">
       <PageHeader
-        eyebrow="Apps"
+        eyebrow="Advanced"
         title="Proxy & TLS"
         actions={
           admin &&

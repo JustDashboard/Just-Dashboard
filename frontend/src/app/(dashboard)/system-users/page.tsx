@@ -127,7 +127,7 @@ export default function SystemUsersPage() {
   return (
     <Page className="animate-rise">
       <PageHeader
-        eyebrow="System"
+        eyebrow="Advanced"
         title="System users"
         actions={<CreateUserDialog onDone={refresh} />}
       />

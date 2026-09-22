@@ -26,6 +26,7 @@ import {
   LockClosed,
   Logs,
   MagnifyingGlass,
+  Monitoring,
   NetworkDevice,
   Notes,
   Puzzle,
@@ -57,8 +58,9 @@ import type { Capability } from "@/lib/types"
  * eyebrow names the group it came from. It used to live in `app-sidebar.tsx`
  * beside the markup that rendered it; it is a file of its own now because the
  * rail is no longer the only thing that walks it — a section opens a panel of
- * its own pages, and the deployment section opens a third level for one
- * project, so the lists have readers that are not the rail.
+ * its own pages, a group opens a panel of sections, and the deployment section
+ * opens a third level for one project, so the lists have readers that are not
+ * the rail.
  */
 
 export type NavChild = {
@@ -85,31 +87,60 @@ export type NavItem = {
 }
 
 /**
+ * Several entries that belong together, behind one row. Unlike a section it is
+ * not a page: there is nothing that is "Monitoring" as such, only Metrics,
+ * Processes and Logs, so pressing it opens its panel and leaves the page where
+ * it is. An entry inside may itself be a section, which is the one way the
+ * rail gets a third level outside a deployment.
+ */
+export type NavGroup = {
+  title: string
+  href?: undefined
+  icon: React.ComponentType<{ className?: string }>
+  capability?: Capability
+  children: NavItem[]
+}
+
+/** Anything the rail can go into, and what its lists are made of. */
+export type NavEntry = NavItem | NavGroup
+
+/**
  * The rail, top to bottom, in the order a day on the server runs: is the
  * machine well, what is running on it, the tools to work on it, what keeps it
- * safe, and the housekeeping. Deployments open the second group because
- * shipping something is the reason most visits happen; it used to sit fourth
- * in a group called "Operations" between Packages and Backups, where nobody
- * who did not already know looked for it.
+ * safe, the machinery under all of it, and the housekeeping. Deployments open
+ * the second group because shipping something is the reason most visits
+ * happen; it used to sit fourth in a group called "Operations" between Packages
+ * and Backups, where nobody who did not already know looked for it.
+ *
+ * The top-level list is twelve rows, not seventeen. Metrics, Processes and Logs
+ * are one question — how is the machine doing — and sit behind Monitoring; the
+ * proxy, packages, system accounts and audit trail are the pages you open to
+ * change the server rather than to use it, and sit behind Server configuration.
  */
-export const NAV: { label: string; items: NavItem[] }[] = [
+export const NAV: { label: string; items: NavEntry[] }[] = [
   {
     label: "Server",
     items: [
       { title: "Overview", href: "/", icon: Home },
-      { title: "Metrics", href: "/metrics", icon: LineChart },
       {
-        title: "Processes",
-        href: "/processes",
-        icon: ListOrdered,
+        title: "Monitoring",
+        icon: Monitoring,
         children: [
-          { title: "Live", href: "/processes", icon: ListOrdered },
-          { title: "PM2", href: "/processes/pm2", icon: ChartActivity },
-          { title: "Services", href: "/processes/services", icon: Servers },
-          { title: "Scheduled", href: "/processes/scheduled", icon: Clock },
+          { title: "Metrics", href: "/metrics", icon: LineChart },
+          {
+            title: "Processes",
+            href: "/processes",
+            icon: ListOrdered,
+            children: [
+              { title: "Live", href: "/processes", icon: ListOrdered },
+              { title: "PM2", href: "/processes/pm2", icon: ChartActivity },
+              { title: "Services", href: "/processes/services", icon: Servers },
+              { title: "Scheduled", href: "/processes/scheduled", icon: Clock },
+            ],
+          },
+          { title: "Logs", href: "/logs", icon: Logs },
         ],
       },
-      { title: "Logs", href: "/logs", icon: Logs },
     ],
   },
   {
@@ -134,20 +165,6 @@ export const NAV: { label: string; items: NavItem[] }[] = [
         ],
       },
       {
-        title: "Docker",
-        href: "/docker",
-        icon: Box,
-        children: [
-          { title: "Overview", href: "/docker", icon: GridSquare },
-          { title: "Containers", href: "/docker/containers", icon: Box },
-          { title: "Stacks", href: "/docker/stacks", icon: GridMasonry },
-          { title: "Images", href: "/docker/images", icon: Layers },
-          { title: "Volumes", href: "/docker/volumes", icon: Database },
-          { title: "Networks", href: "/docker/networks", icon: NetworkDevice },
-          { title: "Events", href: "/docker/events", icon: Rss },
-        ],
-      },
-      {
         title: "Databases",
         href: "/databases",
         icon: Database,
@@ -163,16 +180,17 @@ export const NAV: { label: string; items: NavItem[] }[] = [
         ],
       },
       {
-        title: "Proxy & TLS",
-        href: "/proxy",
-        icon: Globe,
+        title: "Docker",
+        href: "/docker",
+        icon: Box,
         children: [
-          { title: "Overview", href: "/proxy", icon: GridSquare },
-          { title: "Sites", href: "/proxy/sites", icon: Globe },
-          { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
-          { title: "TLS report", href: "/proxy/tls", icon: Inspect },
-          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
-          { title: "Ports", href: "/proxy/ports", icon: Router },
+          { title: "Overview", href: "/docker", icon: GridSquare },
+          { title: "Containers", href: "/docker/containers", icon: Box },
+          { title: "Stacks", href: "/docker/stacks", icon: GridMasonry },
+          { title: "Images", href: "/docker/images", icon: Layers },
+          { title: "Volumes", href: "/docker/volumes", icon: Database },
+          { title: "Networks", href: "/docker/networks", icon: NetworkDevice },
+          { title: "Events", href: "/docker/events", icon: Rss },
         ],
       },
     ],
@@ -207,11 +225,40 @@ export const NAV: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
+    label: "Advanced",
+    items: [
+      {
+        title: "Server configuration",
+        icon: SettingsSliders,
+        children: [
+          {
+            title: "Proxy & TLS",
+            href: "/proxy",
+            icon: Globe,
+            children: [
+              { title: "Overview", href: "/proxy", icon: GridSquare },
+              { title: "Sites", href: "/proxy/sites", icon: Globe },
+              { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
+              { title: "TLS report", href: "/proxy/tls", icon: Inspect },
+              { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
+              { title: "Ports", href: "/proxy/ports", icon: Router },
+            ],
+          },
+          { title: "Packages", href: "/packages", icon: Puzzle },
+          {
+            title: "System users",
+            href: "/system-users",
+            icon: Users,
+            capability: "system.admin",
+          },
+          { title: "Audit log", href: "/audit", icon: Notes, capability: "system.admin" },
+        ],
+      },
+    ],
+  },
+  {
     label: "System",
     items: [
-      { title: "Packages", href: "/packages", icon: Puzzle },
-      { title: "System users", href: "/system-users", icon: Users, capability: "system.admin" },
-      { title: "Audit log", href: "/audit", icon: Notes, capability: "system.admin" },
       // "Settings", not "Dashboard": inside a product called Dashboard, an
       // entry called Dashboard said nothing about where it went.
       {
@@ -253,12 +300,12 @@ export const PERSONAL_NAV: NavChild[] = [
  * pages drills the rail in exactly as Docker's row does, so the five pages are
  * a list you can walk rather than a menu you have to reopen.
  */
-export const ACCOUNT_SECTION: NavItem = {
+export const ACCOUNT_SECTION = {
   title: "Account",
   href: "/account",
   icon: UserSettings,
   children: PERSONAL_NAV,
-}
+} satisfies NavItem
 
 /**
  * One deployment's pages, in the order a project is read: what it is, what has
@@ -312,38 +359,77 @@ export function navMatches(href: string, pathname: string) {
 }
 
 /**
- * The section whose panel the rail shows for this path — Docker's seven pages
- * for anything under `/docker`, the account's five for anything under
- * `/account`. `null` is a page that stands on its own, and the rail stays on
- * its top-level list.
+ * Whether the path is this entry's page or one inside it. A group has no path
+ * of its own — Metrics, Processes and Logs share no prefix — so it owns
+ * whatever its entries do.
  */
-export function sectionFor(pathname: string): NavItem | null {
-  for (const group of NAV) {
-    for (const item of group.items) {
-      if (item.children && navMatches(item.href, pathname)) return item
+export function navOwns(entry: NavEntry, pathname: string): boolean {
+  return entry.href === undefined
+    ? entry.children.some((child) => navOwns(child, pathname))
+    : navMatches(entry.href, pathname)
+}
+
+function chainIn(entries: NavEntry[], pathname: string): NavEntry[] {
+  for (const entry of entries) {
+    if (entry.children && navOwns(entry, pathname)) {
+      return [entry, ...chainIn(entry.children, pathname)]
     }
   }
-  if (navMatches(ACCOUNT_SECTION.href, pathname)) return ACCOUNT_SECTION
+  return []
+}
+
+/**
+ * The sections whose panels the rail shows for this path, outermost first —
+ * Docker alone for anything under `/docker`, Monitoring then Processes for
+ * `/processes/pm2`, the account for anything under `/account`. Empty is a page
+ * that stands on its own, and the rail stays on its top-level list.
+ */
+export function sectionsFor(pathname: string): NavEntry[] {
+  for (const group of NAV) {
+    const chain = chainIn(group.items, pathname)
+    if (chain.length > 0) return chain
+  }
+  if (navMatches(ACCOUNT_SECTION.href, pathname)) return [ACCOUNT_SECTION]
+  return []
+}
+
+function locate(
+  entries: NavEntry[],
+  pathname: string,
+  nested: boolean,
+): { parents: string[]; title: string } | null {
+  for (const entry of entries) {
+    // Inside a section a page is where you are or it is not; a section, a
+    // group, or a row of the top-level list also owns the pages under it.
+    const here = entry.children || !nested ? navOwns(entry, pathname) : entry.href === pathname
+    if (!here) continue
+    if (entry.children) {
+      const inner = locate(
+        entry.children.filter((child) => child.href !== entry.href),
+        pathname,
+        true,
+      )
+      if (inner) return { parents: [entry.title, ...inner.parents], title: inner.title }
+    }
+    return { parents: [], title: entry.title }
+  }
   return null
 }
 
 /**
- * The group, page and — for a nested feature like Docker — the parent it
- * belongs to, for anything that has to name the current location. A child's
- * exact path wins over the parent's prefix match, so `/docker/images` reads as
- * "Images", not "Docker".
+ * The group, the sections it sits inside, and the page, for anything that has
+ * to name the current location. A child's exact path wins over the section's
+ * prefix match, so `/docker/images` reads as "Images", not "Docker", and a
+ * section's own landing page — which shares its href — reads as the section.
  */
 export function navLocation(
   pathname: string,
-): { group?: string; parent?: string; title: string } | null {
+): { group?: string; parents: string[]; title: string } | null {
   for (const group of NAV) {
-    for (const item of group.items) {
-      const child = item.children?.find((c) => c.href === pathname && c.href !== item.href)
-      if (child) return { group: group.label, parent: item.title, title: child.title }
-      if (navMatches(item.href, pathname)) return { group: group.label, title: item.title }
-    }
+    const found = locate(group.items, pathname, false)
+    if (found) return { group: group.label, ...found }
   }
   const personal = PERSONAL_NAV.find((i) => i.href === pathname)
-  if (personal) return { group: "Account", title: personal.title }
+  if (personal) return { group: "Account", parents: [], title: personal.title }
   return null
 }

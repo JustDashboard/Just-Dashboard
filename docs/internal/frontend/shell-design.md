@@ -26,12 +26,14 @@ them. **Those strips are gone. There is no route-level tab anywhere in the produ
 remains switches between views of one page, never between pages (see `components/tabs.tsx` below).
 
 Which panel is showing is derived from the route, not remembered, so a pasted link opens with the rail
-already inside the right section. The single piece of state is the step back out, which shows the level
-above without leaving the page you are on and is dropped on the next navigation. Three levels exist:
-the top-level list, a section, and one deployment inside Deployments.
+already inside the right section. The single piece of state is a look elsewhere without leaving the
+page you are on — the step back out, or a group opened from the list — and it is dropped on the next
+navigation. Three levels exist: the top-level list, a section, and one deployment inside Deployments —
+or, inside a group, the group, a section in it, and that section's pages (Monitoring → Processes →
+PM2; Server configuration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
-`PROJECT_SETTINGS_NAV`, `navMatches`, `sectionFor`, `navLocation` — so `app-sidebar.tsx` and
+`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation` — so `app-sidebar.tsx` and
 `command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
 may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
 the one surface that still sees them all at once.
@@ -40,6 +42,13 @@ A section's `children` are its pages **including its own landing page, first and
 shows** — "Browse", "Live", "Version", otherwise "Overview" — so every destination in a panel is a leaf
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
+
+A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, Processes and
+Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
+that is "Monitoring" as such, so pressing the row opens its panel over the page you are on rather than
+navigating, and a group owns a path only through its entries (`navOwns`) — Metrics, Processes and Logs
+share no prefix. `sectionsFor` returns the chain of groups and sections a path sits inside, and the rail
+draws one panel per link of it; the breadcrumb names every link (`navLocation().parents`).
 
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
 `useNavScope(...)` and the rail draws what it publishes: the databases layout, because which pages exist
@@ -51,11 +60,13 @@ reflow — only the name fills in. The alternative was the rail polling the driv
 on every page in the product to draw a list the page beneath it already holds.
 
 The groups run in the order a day on the server runs, and a page's header eyebrow is its group's
-label: **Server** (Overview, Metrics, Processes, Logs), **Apps** (Deployments first, then Docker,
-Databases, Proxy & TLS), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups) and
-**System** (Packages, System users, Audit log, Settings). Deployments open the second group because
-shipping something is the reason most visits happen; until 0.6.7 it sat fourth in a group called
-Operations, between Packages and Backups.
+label: **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
+then Databases, Docker), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups),
+**Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
+(Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
+one question, and the four configuration pages are opened to change the server rather than to use it.
+Deployments open the second group because shipping something is the reason most visits happen; until
+0.6.7 it sat fourth in a group called Operations, between Packages and Backups.
 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
 `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a

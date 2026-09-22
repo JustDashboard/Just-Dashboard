@@ -8,9 +8,10 @@ import { deployment, mockProject, project } from "./deploy-fixture"
  * strip of route tabs across the top of every page in that section, so the six
  * multi-page sections each said where you were twice and the rail could be
  * thirty rows deep. The rail drills into a section now: one list at a time,
- * always the list for where you are.
+ * always the list for where you are. A group — Monitoring, Server configuration
+ * — is a row with no page of its own that opens a panel of the pages it holds.
  *
- * These are the four claims that makes, plus the one it removes. They are
+ * These are the claims that makes, plus the one it removes. They are
  * written against the rail's landmark rather than against a page's markup,
  * because the point of the change is that the answer to "which pages does this
  * section have" lives in one place.
@@ -114,13 +115,53 @@ test("stepping back out shows everything without leaving the page", async ({ pag
 
   // The rail came out a level; the page did not move.
   await expect(page).toHaveURL(/\/docker\/images$/)
-  await expect(rail(page).getByRole("link", { name: "Metrics", exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Backups", exact: true })).toBeVisible()
   await expect(rail(page).getByRole("link", { name: "Containers" })).toHaveCount(0)
 
   // And navigating drops the step, so the rail follows where you went.
-  await rail(page).getByRole("link", { name: "Metrics", exact: true }).click()
-  await expect(page).toHaveURL(/\/metrics$/)
-  await expect(rail(page).getByRole("link", { name: "Metrics", exact: true })).toBeVisible()
+  await rail(page).getByRole("link", { name: "Security", exact: true }).click()
+  await expect(page).toHaveURL(/\/security$/)
+  await expect(rail(page).getByRole("link", { name: "Firewall", exact: true })).toBeVisible()
+})
+
+test("a group opens its panel without leaving the page", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/")
+
+  // Monitoring is not a page, so it is a button, and what it holds is nowhere
+  // until it is pressed.
+  await expect(rail(page).getByRole("link", { name: "Metrics" })).toHaveCount(0)
+  await rail(page).getByRole("button", { name: "Monitoring", exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  for (const name of ["Metrics", "Processes", "Logs"])
+    await expect(rail(page).getByRole("link", { name, exact: true })).toBeVisible()
+
+  // A section inside a group is a third level, and back from it is the group.
+  await rail(page).getByRole("link", { name: "Processes", exact: true }).click()
+  await expect(page).toHaveURL(/\/processes$/)
+  await expect(rail(page).getByRole("link", { name: "PM2", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Back to Monitoring" }).click()
+  await expect(rail(page).getByRole("link", { name: "Logs", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Back to All pages" }).click()
+  await expect(rail(page).getByRole("button", { name: "Monitoring", exact: true })).toBeVisible()
+})
+
+test("a deep link inside a group opens every level of it", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/proxy/sites")
+
+  await expect(rail(page).getByRole("link", { name: "Certificates", exact: true })).toBeVisible()
+
+  await page.getByRole("button", { name: "Back to Server configuration" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
+  for (const name of ["Proxy & TLS", "Packages", "System users", "Audit log"])
+    await expect(rail(page).getByRole("link", { name, exact: true })).toBeVisible()
+
+  // Stepping out to the top and pressing the group you are inside puts the
+  // rail back where it was rather than on the group's first level.
+  await page.getByRole("button", { name: "Back to All pages" }).click()
+  await rail(page).getByRole("button", { name: "Server configuration", exact: true }).click()
+  await expect(rail(page).getByRole("link", { name: "Certificates", exact: true })).toBeVisible()
 })
 
 test("a project is a third level, and back from it lands on Deployments", async ({ page }) => {

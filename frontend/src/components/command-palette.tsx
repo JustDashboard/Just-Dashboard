@@ -4,10 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useRouter } from "next/navigation"
 import { CloudUpload, Logout, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
-import type { DeploymentFleet } from "@/lib/types"
+import type { Capability, DeploymentFleet } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { NAV, PERSONAL_NAV } from "@/components/nav"
+import { NAV, PERSONAL_NAV, type NavEntry, type NavItem } from "@/components/nav"
 import { PaletteModal } from "@/components/modal"
 import {
   Command,
@@ -67,6 +67,28 @@ export function useCommandPalette() {
   return ctx
 }
 
+/**
+ * Every page under a rail entry, with the sections it sits inside, so a nested
+ * feature's pages are reachable here even when the sidebar is collapsed to the
+ * icon rail and hides them. A group is not a page and contributes only what it
+ * holds; a section's landing page shares its href and is the section's own row.
+ */
+function pagesUnder(
+  entry: NavEntry,
+  can: (capability: Capability) => boolean,
+  trail: string[] = [],
+): { page: NavItem; trail: string[] }[] {
+  // A child can be privileged where its parent is not.
+  if (entry.capability && !can(entry.capability)) return []
+  const children: NavEntry[] = entry.children ?? []
+  return [
+    ...(entry.href === undefined ? [] : [{ page: entry, trail }]),
+    ...children
+      .filter((child) => child.href !== entry.href)
+      .flatMap((child) => pagesUnder(child, can, [...trail, entry.title])),
+  ]
+}
+
 function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const router = useRouter()
   const { can, logout } = useAuth()
@@ -102,41 +124,23 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
           <CommandEmpty>Nothing matches.</CommandEmpty>
 
           {NAV.map((group) => {
-            const items = group.items.filter((item) => !item.capability || can(item.capability))
-            if (items.length === 0) return null
+            const pages = group.items.flatMap((item) => pagesUnder(item, can))
+            if (pages.length === 0) return null
             return (
               <CommandGroup key={group.label} heading={group.label}>
-                {items.flatMap((item) => {
-                  const rows = [
-                    <CommandItem
-                      key={item.href}
-                      value={`${group.label} ${item.title}`}
-                      onSelect={() => run(() => router.push(item.href))}
-                    >
-                      <item.icon className="size-4" />
-                      {item.title}
-                    </CommandItem>,
-                  ]
-                  // A nested feature's pages are reachable here even when the
-                  // sidebar is collapsed to the icon rail and hides them.
-                  for (const child of item.children ?? []) {
-                    if (child.href === item.href) continue
-                    // A child can be privileged where its parent is not.
-                    if (child.capability && !can(child.capability)) continue
-                    rows.push(
-                      <CommandItem
-                        key={child.href}
-                        value={`${group.label} ${item.title} ${child.title}`}
-                        onSelect={() => run(() => router.push(child.href))}
-                      >
-                        <child.icon className="size-4" />
-                        <span className="text-muted-foreground">{item.title}</span>
-                        {child.title}
-                      </CommandItem>,
-                    )
-                  }
-                  return rows
-                })}
+                {pages.map(({ page, trail }) => (
+                  <CommandItem
+                    key={page.href}
+                    value={[group.label, ...trail, page.title].join(" ")}
+                    onSelect={() => run(() => router.push(page.href))}
+                  >
+                    <page.icon className="size-4" />
+                    {trail.length > 0 && (
+                      <span className="text-muted-foreground">{trail[trail.length - 1]}</span>
+                    )}
+                    {page.title}
+                  </CommandItem>
+                ))}
               </CommandGroup>
             )
           })}

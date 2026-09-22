@@ -18,8 +18,9 @@ import {
   PROJECT_NAV,
   PROJECT_SETTINGS_NAV,
   navMatches,
-  sectionFor,
-  type NavItem,
+  navOwns,
+  sectionsFor,
+  type NavEntry,
 } from "@/components/nav"
 import { useNavScopeValue, type NavScope, type NavScopeEntry } from "@/components/nav-scope"
 import {
@@ -66,12 +67,25 @@ import {
  *
  * Which panel is showing is read off the route, not remembered, so a link
  * pasted into a browser opens with the rail already inside the right section.
- * The one piece of state is the step back out, which shows the level above
- * without leaving the page you are on, and is dropped the moment you navigate.
+ * The one piece of state is a look elsewhere without leaving the page you are
+ * on — the step back out, or a group opened from the list — and it is dropped
+ * the moment you navigate.
  */
 
-/** One drawn row: a page to go to, or a section to go into. */
-type Row = NavScopeEntry & { section?: boolean }
+/** One drawn row: a page to go to, or a section or group to go into. */
+type Row = NavScopeEntry | SectionRow
+
+/**
+ * A row the rail goes into. A section's row is still a link to its landing
+ * page; a group's has no page to link to, so it only opens the panel.
+ */
+type SectionRow = Omit<NavScopeEntry, "href"> & { href?: string; section: NavEntry }
+
+function rowsOf(entries: NavEntry[]): Row[] {
+  return entries.map((entry) =>
+    entry.href === undefined || entry.children ? { ...entry, section: entry } : entry,
+  )
+}
 
 type Panel = {
   key: string
@@ -86,23 +100,14 @@ type Panel = {
 const ROOT: Panel = {
   key: "root",
   root: true,
-  groups: NAV.map((group) => ({
-    label: group.label,
-    items: group.items.map((item) => ({
-      title: item.title,
-      href: item.href,
-      icon: item.icon,
-      capability: item.capability,
-      section: Boolean(item.children),
-    })),
-  })),
+  groups: NAV.map((group) => ({ label: group.label, items: rowsOf(group.items) })),
 }
 
-function fromSection(section: NavItem): Panel {
+function fromSection(section: NavEntry): Panel {
   return {
-    key: `section:${section.href}`,
+    key: `section:${section.href ?? section.title}`,
     title: section.title,
-    groups: [{ items: section.children ?? [] }],
+    groups: [{ items: rowsOf(section.children ?? []) }],
   }
 }
 
@@ -154,12 +159,10 @@ function projectIdFrom(pathname: string): number | null {
 
 /**
  * Every panel between the top-level list and where you are, outermost first.
- * The last of them is what the rail draws unless you have stepped back.
+ * The last of them is what the rail draws unless you are looking elsewhere.
  */
 function levelsFor(pathname: string, scope: NavScope | null): Panel[] {
-  const levels: Panel[] = [ROOT]
-  const section = sectionFor(pathname)
-  if (section) levels.push(fromSection(section))
+  const levels: Panel[] = [ROOT, ...sectionsFor(pathname).map(fromSection)]
 
   const live = scope && navMatches(scope.path, pathname) ? scope : null
   if (live?.replaces) levels[levels.length - 1] = fromScope(live)
@@ -180,22 +183,34 @@ export function AppSidebar() {
   const scope = useNavScopeValue()
 
   const levels = levelsFor(pathname, scope)
-  const deepest = levels.length - 1
-  const here = deepest > 0 ? sectionFor(pathname) : null
+  const chain = sectionsFor(pathname)
 
-  // Stepping back out is the one thing here the route does not decide, and it
-  // survives exactly until the next navigation: you go up to find something,
-  // and finding it puts the rail wherever that something lives.
-  const [back, setBack] = useState<number | null>(null)
+  // Looking elsewhere — back out a level, or into a group — is the one thing
+  // here the route does not decide, and it survives exactly until the next
+  // navigation: you go looking for something, and finding it puts the rail
+  // wherever that something lives.
+  const [view, setView] = useState<Panel[] | null>(null)
   const [seenPath, setSeenPath] = useState(pathname)
   if (pathname !== seenPath) {
     setSeenPath(pathname)
-    setBack(null)
+    setView(null)
   }
 
-  const depth = Math.min(back ?? deepest, deepest)
-  const panel = levels[depth]
-  const parent = depth > 0 ? levels[depth - 1] : null
+  const stack = view ?? levels
+  const depth = stack.length - 1
+  const panel = stack[depth]
+  const parent = depth > 0 ? stack[depth - 1] : null
+  const onRoute = stack.every((level, index) => level.key === levels[index]?.key)
+
+  // Pressing the section you stepped out of means "put it back", not "throw
+  // away the page I was on and open the section's front door". Any other
+  // section's row is a link and goes to its landing page; a group has none,
+  // so its panel opens over the page you are on.
+  function enter(section: NavEntry) {
+    if (onRoute && chain[depth] === section) return () => setView(null)
+    if (section.href === undefined) return () => setView([...stack, fromSection(section)])
+    return undefined
+  }
 
   // Which way the panel came from. Going in arrives from the right, coming
   // back out from the left, which is the only part of this that says a level
@@ -271,7 +286,9 @@ export function AppSidebar() {
           key={panel.key}
           className={cn("animate-drill", inward ? "[--drill-from:10px]" : "[--drill-from:-10px]")}
         >
-          {parent && <PanelHead panel={panel} parent={parent} onBack={() => setBack(depth - 1)} />}
+          {parent && (
+            <PanelHead panel={panel} parent={parent} onBack={() => setView(stack.slice(0, -1))} />
+          )}
           {panel.groups.map((group, index) => {
             const items = group.items.filter((item) => !item.capability || can(item.capability))
             if (items.length === 0) return null
@@ -291,26 +308,29 @@ export function AppSidebar() {
                 )}
                 <SidebarGroupContent>
                   <SidebarMenu className="gap-0.5">
-                    {items.map((item) => (
-                      <NavRow
-                        key={item.href}
-                        item={item}
-                        // A section's own landing page is the first row in its
-                        // panel and shares the section's href, so a prefix
-                        // match would light it up on every page of the section.
-                        // Inside a panel a row is where you are or it is not.
-                        active={
-                          panel.root ? navMatches(item.href, pathname) : isCurrent(item, pathname)
-                        }
-                        // Stepping out to look at the whole list and then
-                        // pressing the section you are already in means "put it
-                        // back", not "throw away the page I was on and open the
-                        // section's front door".
-                        reenter={
-                          depth === 0 && item.href === here?.href ? () => setBack(null) : undefined
-                        }
-                      />
-                    ))}
+                    {items.map((item) =>
+                      "section" in item ? (
+                        <NavRow
+                          key={item.href ?? item.title}
+                          item={item}
+                          active={navOwns(item.section, pathname)}
+                          enter={enter(item.section)}
+                        />
+                      ) : (
+                        <NavRow
+                          key={item.href}
+                          item={item}
+                          // A section's own landing page is the first row in
+                          // its panel and shares the section's href, so a
+                          // prefix match would light it up on every page of the
+                          // section. Inside a panel a row is where you are or
+                          // it is not.
+                          active={
+                            panel.root ? navMatches(item.href, pathname) : isCurrent(item, pathname)
+                          }
+                        />
+                      ),
+                    )}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
@@ -341,7 +361,7 @@ export function AppSidebar() {
  * own state in the query string (the databases panel puts the connection
  * there) is the same page whatever that state says.
  */
-function isCurrent(item: Row, pathname: string) {
+function isCurrent(item: NavScopeEntry, pathname: string) {
   const path = item.href.split("?")[0]
   return path === pathname
 }
@@ -351,8 +371,9 @@ function isCurrent(item: Row, pathname: string) {
  * are inside.
  *
  * The back control names the level above rather than saying "Back", because
- * the rail has three of them — the top-level list, a section, one deployment
- * — and "back to Deployments" and "back to everything" are different answers.
+ * the rail has several — the top-level list, a group, a section, one
+ * deployment — and "back to Deployments" and "back to everything" are
+ * different answers.
  * Collapsed to the icon rail the name has nowhere to go, so it becomes the
  * button's tooltip and its accessible name.
  */
@@ -417,50 +438,67 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
 }
 
 /**
- * A row in whichever panel is showing. A page, or — on the top-level list — a
- * section, which is the same row with a chevron saying the rail goes in rather
- * than the page changes.
+ * A row in whichever panel is showing. A page, or a section or group, which is
+ * the same row with a chevron saying the rail goes in rather than the page
+ * changes.
  */
 function NavRow({
   item,
   active,
-  reenter,
+  enter,
 }: {
   item: Row
   active: boolean
-  /** Given only to the section row you are standing inside; see the call site. */
-  reenter?: () => void
+  /** Opens the row's panel instead of following its link; see `enter`. */
+  enter?: () => void
 }) {
   const Icon = item.icon
+  const content = (
+    <>
+      <Icon className="size-4" />
+      <span className="flex-1 truncate">{item.title}</span>
+      {item.pending && (
+        <span
+          role="img"
+          aria-label="Changes pending"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
+        />
+      )}
+      {"section" in item && (
+        // No explicit colour — inherits the row's, so it follows the hover
+        // and active states instead of staying one flat grey.
+        <ChevronRight className="size-4 shrink-0 opacity-70" />
+      )}
+    </>
+  )
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild isActive={active} tooltip={item.title} className="h-8 text-body">
-        <Link
-          href={item.href}
-          onClick={
-            reenter &&
-            ((event) => {
-              event.preventDefault()
-              reenter()
-            })
-          }
+      {item.href === undefined ? (
+        <SidebarMenuButton
+          type="button"
+          isActive={active}
+          tooltip={item.title}
+          className="h-8 text-body"
+          onClick={enter}
         >
-          <Icon className="size-4" />
-          <span className="flex-1 truncate">{item.title}</span>
-          {item.pending && (
-            <span
-              role="img"
-              aria-label="Changes pending"
-              className="size-1.5 shrink-0 rounded-full bg-warning"
-            />
-          )}
-          {item.section && (
-            // No explicit colour — inherits the row's, so it follows the hover
-            // and active states instead of staying one flat grey.
-            <ChevronRight className="size-4 shrink-0 opacity-70" />
-          )}
-        </Link>
-      </SidebarMenuButton>
+          {content}
+        </SidebarMenuButton>
+      ) : (
+        <SidebarMenuButton asChild isActive={active} tooltip={item.title} className="h-8 text-body">
+          <Link
+            href={item.href}
+            onClick={
+              enter &&
+              ((event) => {
+                event.preventDefault()
+                enter()
+              })
+            }
+          >
+            {content}
+          </Link>
+        </SidebarMenuButton>
+      )}
     </SidebarMenuItem>
   )
 }

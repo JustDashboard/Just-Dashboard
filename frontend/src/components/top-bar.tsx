@@ -1,5 +1,6 @@
 "use client"
 
+import { Fragment } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ChevronRight, Cpu, GridSquare, MagnifyingGlass } from "@/components/icons"
@@ -40,12 +41,12 @@ export function TopBar() {
             <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground/60 sm:inline" />
           </>
         )}
-        {here?.parent && (
-          <>
-            <span className="hidden truncate text-muted-foreground sm:inline">{here.parent}</span>
+        {here?.parents.map((parent) => (
+          <Fragment key={parent}>
+            <span className="hidden truncate text-muted-foreground sm:inline">{parent}</span>
             <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground/60 sm:inline" />
-          </>
-        )}
+          </Fragment>
+        ))}
         <span className="truncate font-medium">{here?.title ?? "Just Dashboard"}</span>
       </nav>
 

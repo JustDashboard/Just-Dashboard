@@ -68,7 +68,7 @@ export default function AuditPage() {
   return (
     <Page className="animate-rise">
       <PageHeader
-        eyebrow="System"
+        eyebrow="Advanced"
         title="Audit log"
         actions={
           total !== undefined && (

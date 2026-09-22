@@ -213,7 +213,7 @@ export default function PackagesPage() {
     <Page>
       {dialog}
       <PageHeader
-        eyebrow="System"
+        eyebrow="Advanced"
         title="Packages"
         actions={
           <>
