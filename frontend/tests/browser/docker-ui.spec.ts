@@ -310,7 +310,19 @@ const networks = [
 const detail = {
   ...containers[0],
   env: ["PATH=/usr/bin", "JD_MASTER_KEY=s3cr3t-master", "JD_BOOTSTRAP_PASSWORD=hunter2"],
-  mounts: [],
+  mounts: [
+    {
+      type: "volume",
+      name: "app-data",
+      source: "/var/lib/docker/volumes/app-data/_data",
+      destination: "/usr/share/nginx/html",
+      mode: "z",
+      rw: true,
+    },
+    // Memory. There is nowhere on this filesystem to look, which is the case
+    // the Storage tab has to draw without offering to look.
+    { type: "tmpfs", name: "", source: "", destination: "/tmp", mode: "", rw: true },
+  ],
   networkMode: "bridge",
   networkDetails: [],
   restartPolicy: "unless-stopped",
@@ -322,6 +334,50 @@ const detail = {
   entrypoint: [],
   workingDir: "/",
   user: "root",
+}
+
+/**
+ * What the file API answers for a volume's directory.
+ *
+ * The listing is the whole point of the storage browser, so a spec that stubs
+ * the Docker half and not this one asserts an empty box.
+ */
+function entry(name: string, isDir: boolean, size = 0) {
+  return {
+    name,
+    path: `/var/lib/docker/volumes/app-data/_data/${name}`,
+    size,
+    mode: isDir ? "drwxr-xr-x" : "-rw-r--r--",
+    modeOctal: isDir ? "0755" : "0644",
+    isDir,
+    isSymlink: false,
+    modified: now,
+    owner: "root",
+    group: "root",
+    uid: 0,
+    gid: 0,
+  }
+}
+
+const volumeListing = {
+  path: "/var/lib/docker/volumes/app-data/_data",
+  parent: "/var/lib/docker/volumes/app-data",
+  entries: [entry("base", true), entry("postgresql.conf", false, 28 * 1024)],
+  roots: ["/"],
+}
+
+async function mockVolumeFiles(page: Page) {
+  await page.route(/\/api\/v1\/files\/list/, (route) => json(route, volumeListing))
+  await page.route(/\/api\/v1\/files\/read/, (route) =>
+    json(route, {
+      path: "/var/lib/docker/volumes/app-data/_data/postgresql.conf",
+      content: "shared_buffers = 128MB\n",
+      size: 28 * 1024,
+      language: "ini",
+      binary: false,
+      modeOctal: "0644",
+    }),
+  )
 }
 
 const rawInspect = {
@@ -1019,4 +1075,74 @@ test("the inspect tab does not undo the masking the environment tab applies", as
 
   // Values that are not credential-shaped were never touched.
   await expect(page.getByText(/\/usr\/bin/).first()).toBeVisible()
+})
+
+/**
+ * A volume was a name, a size and a path to somewhere else.
+ *
+ * "Browse files" closed this panel, changed page, and asked the operator to
+ * recognise the volume again as a path under /var/lib/docker — for an answer
+ * ("did the backup land", "what did it write") that is four lines long. The
+ * contents are in the panel now, and the button survives inside the browser
+ * pointed at whichever directory was reached.
+ */
+test("a volume's contents are in the volume, not a page away", async ({ page }) => {
+  await mockDocker(page)
+  await mockVolumeFiles(page)
+  await page.route("**/api/v1/docker/volumes/app-data", (route) => json(route, volumes[0]))
+  await page.goto("/docker/volumes")
+  await page.getByRole("button", { name: "app-data", exact: true }).first().click()
+
+  const panel = page.getByRole("dialog")
+  await expect(panel.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+  await expect(panel.getByRole("button", { name: "base" })).toBeVisible()
+
+  // The file manager is still one click away, and it is handed the directory.
+  await expect(panel.getByRole("link", { name: "Open in Files" })).toHaveAttribute(
+    "href",
+    "/files?path=%2Fvar%2Flib%2Fdocker%2Fvolumes%2Fapp-data%2F_data",
+  )
+
+  // Postgres' own files, under a running container: reading is safe, and the
+  // editor one click below this line is not.
+  await expect(panel.getByText(/corrupts it in ways that only show up later/)).toBeVisible()
+
+  // And a file opens in the editor, with its contents, over the panel rather
+  // than instead of it. Both are Radix dialogs, and a nested one that
+  // dismissed its parent would drop the operator back on the volumes table
+  // with no idea what they had been reading. While the editor is open the
+  // panel is deliberately aria-hidden behind it; closing has to land back on
+  // the volume, still showing its contents.
+  await page.getByRole("button", { name: "postgresql.conf" }).click()
+  await expect(page.getByRole("heading", { name: "postgresql.conf" })).toBeVisible()
+  await expect(page.getByText("shared_buffers")).toBeVisible()
+
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("heading", { name: "postgresql.conf" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "app-data" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+})
+
+/**
+ * The Storage tab named every mount and showed the contents of none.
+ *
+ * A row opens onto what is in it. A tmpfs row does not, and must not grow a
+ * control that could only fail: it is memory in the container's namespace and
+ * there is nothing on this filesystem to list.
+ */
+test("the storage tab opens onto what is in a mount", async ({ page }) => {
+  await mockDocker(page)
+  await mockVolumeFiles(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
+  await page.goto("/docker/containers/1111111111111111")
+  await page.getByRole("tab", { name: "Storage" }).click()
+
+  const volume = page.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
+  await expect(volume).toHaveAttribute("aria-expanded", "false")
+  await volume.click()
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+
+  // Temporary memory names itself and offers nothing to open.
+  await expect(page.getByRole("button").filter({ hasText: "Temporary memory" })).toHaveCount(0)
+  await expect(page.getByText("Temporary memory")).toBeVisible()
 })

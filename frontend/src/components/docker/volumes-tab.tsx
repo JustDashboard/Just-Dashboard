@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import Link from "next/link"
-import { FolderOpen, Servers, Trash } from "@/components/icons"
+import { Servers, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, truncateMiddle } from "@/lib/format"
@@ -19,8 +18,13 @@ import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
-import type { ConfirmFn } from "@/components/docker/shared"
+import {
+  DatabaseStorageWarning,
+  looksLikeDatabase,
+  type ConfirmFn,
+} from "@/components/docker/shared"
 import { Hint, Term } from "@/components/docker/explain"
+import { FileBrowser } from "@/components/files/inline-browser"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
@@ -400,23 +404,6 @@ function VolumeListItem({
  * they were looking at. Docker only fills the figure in for local volumes it
  * has walked, so the absence is common and worth naming.
  */
-/**
- * Whether this volume is likely to hold a database's own files.
- *
- * A guess from the mount path and the containers using it, and treated as one:
- * it decides whether a warning is shown, never whether an action is allowed.
- * Getting it wrong in one direction costs a sentence somebody did not need; in
- * the other it costs a corrupted database, so it leans towards warning.
- */
-function looksLikeDatabase(volume: VolumeDetail): boolean {
-  if (volume.usedBy.length === 0) return false
-  const hints = /(postgres|mysql|mariadb|mongo|redis|elastic|clickhouse|cassandra|influx|couch)/i
-  return (
-    hints.test(volume.name) ||
-    volume.usedBy.some((u) => hints.test(u.name) || hints.test(u.destination))
-  )
-}
-
 function VolumeSize({ volume }: { volume: VolumeDetail }) {
   if (volume.size > 0) return <>{bytes(volume.size)}</>
   if (volume.driver !== "local") {
@@ -459,6 +446,13 @@ function VolumeDetailPanel({
     { enabled: name !== null },
   )
 
+  // A volume nothing mounts is not a database anybody is running, whatever it
+  // is called: the warning is about writing underneath a live process.
+  const databaseFiles =
+    data !== undefined &&
+    data.usedBy.length > 0 &&
+    looksLikeDatabase(data.name, ...data.usedBy.flatMap((u) => [u.name, u.destination]))
+
   return (
     <SidePanel
       open={name !== null}
@@ -487,28 +481,23 @@ function VolumeDetailPanel({
             landed, to read a config a container wrote — is the difference
             between a volume being an opaque handle and being storage.
 
-            The warning is not decoration. A database's files are consistent
-            only from the database's point of view; editing one underneath a
-            running Postgres is how a volume stops being restorable, and the
-            file manager gives no hint that this directory is different from
-            any other.
+            It is the contents rather than a link to them. "Browse files" was
+            a button that closed this panel, changed page, and asked the
+            operator to recognise the volume again by a path under
+            /var/lib/docker; the answer it was fetching is four lines long and
+            fits here. The button survives inside the browser, pointed at
+            whichever directory you reached.
           */}
           {data.mountpoint && (
-            <div className="space-y-1.5">
-              <Button size="sm" variant="outline" asChild>
-                <Link href={`/files?path=${encodeURIComponent(data.mountpoint)}`}>
-                  <FolderOpen className="size-3.5" />
-                  Browse files
-                </Link>
-              </Button>
-              {looksLikeDatabase(data) && (
-                <Hint className="text-warning">
-                  This looks like a database volume and something is using it. Reading is safe;
-                  changing or deleting a file underneath a running database corrupts it in ways that
-                  only show up later. Stop the container first if you need to write here.
-                </Hint>
-              )}
-            </div>
+            <section className="space-y-1.5">
+              <p className="eyebrow">Contents</p>
+              {databaseFiles && <DatabaseStorageWarning />}
+              <FileBrowser
+                root={data.mountpoint}
+                label={data.name}
+                emptyNote="Nothing has been written to this volume yet."
+              />
+            </section>
           )}
 
           <section className="space-y-1.5">

@@ -95,7 +95,12 @@ that does something.
   container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
   *inside* the container — the one the application's own configuration names — states the kind of storage
   in words rather than as a Docker noun, and puts where it actually lives on the second line; the header
-  answers the question the tab is opened with, which is how much of this survives a rebuild. Its Usage
+  answers the question the tab is opened with, which is how much of this survives a rebuild. A volume or
+  bind row also opens onto what is *in* it — `files/inline-browser.tsx`, the same component the volume
+  panel uses — because naming a mount does not answer whether the backup landed or what the application
+  wrote; a tmpfs row does not, since memory has nowhere on this filesystem to look. Storage that looks
+  like a database's own files is named as such above the browser while the container is running
+  (`docker/shared.tsx`). Its Usage
   tab drops the network chart entirely for a container on the host's network namespace: Docker reports no
   per-container interface there, and a chart-shaped hole explaining itself beside a real chart draws the
   eye first to say "nothing here". `build-dialog.tsx` is where the git panel and Docker stop being two

@@ -115,6 +115,13 @@ services:
       # inserted into the host-side PTY names the bytes the backend wrote.
       - /tmp/just-dashboard:/tmp/just-dashboard
       - /var/log:/var/log
+      # Where the local volume driver keeps a volume's files. Docker reports a
+      # volume's mountpoint as /var/lib/docker/volumes/<name>/_data and this
+      # dashboard offers to open it; without this entry that path exists on the
+      # host and not in here, so every volume answered "not found". `rslave` so
+      # a volume that is itself a mount — an NFS one, or `o=bind` at some other
+      # disk — shows what is in it rather than an empty _data.
+      - /var/lib/docker/volumes:/var/lib/docker/volumes:rslave
       - /var/lib/just-dashboard:/var/lib/just-dashboard
       - /var/backups/just-dashboard:/var/backups/just-dashboard
       - /run/systemd:/run/systemd

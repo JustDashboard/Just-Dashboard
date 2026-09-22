@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowCircleUp,
   ArrowLeft,
+  ChevronRight,
   Clock,
   Copy,
   Download,
@@ -47,7 +48,12 @@ import { useContainerControl, useContainerVerbs } from "@/components/docker/cont
 import { ContainerFindings } from "@/components/docker/attention"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
-import type { ConfirmFn } from "@/components/docker/shared"
+import {
+  DatabaseStorageWarning,
+  looksLikeDatabase,
+  type ConfirmFn,
+} from "@/components/docker/shared"
+import { FileBrowser } from "@/components/files/inline-browser"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Metric, MetricStrip, Page, PageHeader } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -282,7 +288,7 @@ function ContainerDetailPanel({
           </TabsContent>
 
           <TabsContent value="mounts" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-            <MountList mounts={detail.mounts} />
+            <MountList detail={detail} />
             <WritableLayer containerId={detail.id} />
           </TabsContent>
 
@@ -995,8 +1001,13 @@ const MOUNT_KIND: Record<
   },
 }
 
-function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
+function MountList({ detail }: { detail: ContainerDetail }) {
+  const mounts = detail.mounts
   const kept = mounts.filter((mount) => MOUNT_KIND[mount.type]?.survives).length
+  // One at a time. Two open browsers is two listings of a hundred files each
+  // in a tab whose other half is the writable layer, and the question a row
+  // was expanded to answer is always about that row.
+  const [open, setOpen] = useState<string | null>(null)
 
   return (
     // Plain: the side panel is the frame, and the mount rows are the whole of
@@ -1025,34 +1036,124 @@ function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
           </EmptyNote>
         ) : (
           <ul className="divide-y divide-hairline">
-            {mounts.map((mount, i) => {
-              const kind = MOUNT_KIND[mount.type]
-              const Icon = kind?.icon ?? Servers
-              return (
-                <li key={i} className={cn("flex min-w-0 items-start gap-3 px-4 py-2.5", ROW_BLEED)}>
-                  <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    {/* The path the application inside was configured with. */}
-                    <span className="block font-mono text-body break-all">{mount.destination}</span>
-                    <span className="mt-0.5 block text-hint break-all text-muted-foreground">
-                      {kind ? kind.where(mount) : mount.source}
-                      {" · "}
-                      {mount.rw ? "the container can write to it" : "read-only"}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <Tag tone={kind?.survives === false ? "warning" : "default"}>
-                      {kind?.label ?? mount.type}
-                    </Tag>
-                    {kind && <ExplainIcon name={kind.term} />}
-                  </span>
-                </li>
-              )
-            })}
+            {mounts.map((mount, i) => (
+              <MountRow
+                key={i}
+                mount={mount}
+                container={detail}
+                open={open === String(i)}
+                onOpenChange={(next) => setOpen(next ? String(i) : null)}
+              />
+            ))}
           </ul>
         )}
       </PanelBody>
     </Panel>
+  )
+}
+
+/**
+ * One mount, and on request what is inside it.
+ *
+ * The row was a label: a path in the container, a volume name, and a tag
+ * saying the data outlives the container. Every one of those is a fact about
+ * the storage and none of them is a fact about the *data*, which is what
+ * somebody opening this tab wants — did the backup land, did the app write
+ * its config, is this the volume with the database in it. The row opens onto
+ * the answer rather than sending the operator to the file manager to look the
+ * directory up again by a path under /var/lib/docker.
+ *
+ * Only a volume or a bind has somewhere to look. A tmpfs mount is memory: it
+ * exists in the container's namespace and nowhere on this filesystem, so its
+ * row stays what it was rather than growing a control that could only fail.
+ */
+function MountRow({
+  mount,
+  container,
+  open,
+  onOpenChange,
+}: {
+  mount: ContainerDetail["mounts"][number]
+  container: ContainerDetail
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const kind = MOUNT_KIND[mount.type]
+  const Icon = kind?.icon ?? Servers
+  const where = kind ? kind.where(mount) : mount.source
+  const browsable = (mount.type === "volume" || mount.type === "bind") && Boolean(mount.source)
+  // Writing into a live database's own files is how a volume stops being
+  // restorable. A stopped container is not running that database, and telling
+  // somebody to stop what is already stopped is noise.
+  const databaseFiles =
+    container.state === "running" &&
+    looksLikeDatabase(mount.name, mount.destination, mount.source, container.image)
+
+  const body = (
+    <>
+      <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        {/* The path the application inside was configured with. */}
+        <span className="block font-mono text-body break-all">{mount.destination}</span>
+        <span className="mt-0.5 block text-hint break-all text-muted-foreground">
+          {where}
+          {" · "}
+          {mount.rw ? "the container can write to it" : "read-only"}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <Tag tone={kind?.survives === false ? "warning" : "default"}>
+          {kind?.label ?? mount.type}
+        </Tag>
+        {kind && <ExplainIcon name={kind.term} />}
+      </span>
+    </>
+  )
+
+  if (!browsable) {
+    return (
+      <li className={cn("flex min-w-0 items-start gap-3 px-4 py-2.5", ROW_BLEED)}>
+        <span className="w-3.5 shrink-0" aria-hidden />
+        {body}
+      </li>
+    )
+  }
+
+  return (
+    <li className="min-w-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+        className={cn(
+          "flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left transition-colors focus-ring-inset hover:bg-row-hover",
+          ROW_BLEED,
+        )}
+      >
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        {body}
+      </button>
+      {open && (
+        <div className="space-y-1.5 px-4 pt-1 pb-3">
+          {databaseFiles && <DatabaseStorageWarning />}
+          <FileBrowser
+            root={mount.source}
+            label={mount.type === "volume" ? where : undefined}
+            emptyNote={
+              mount.type === "volume"
+                ? "Nothing has been written to this volume yet."
+                : "This folder is empty."
+            }
+          />
+        </div>
+      )}
+    </li>
   )
 }
 
