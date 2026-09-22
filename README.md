@@ -33,8 +33,10 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 - **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
   database started here gets a connection string, and one press opens it to the internet or
   closes it again.
-- **Fifty-three reviewed templates.** PostgreSQL, Redis, MinIO, n8n, Grafana, Uptime Kuma,
-  Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama and more, one click each.
+- **Fifty-seven reviewed templates, each one saying how you get in.** PostgreSQL, Redis, n8n,
+  Grafana, Uptime Kuma, Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama, Open WebUI, ntfy,
+  Qdrant, NocoDB and more, one click each — and every card says whether you create the first
+  account yourself, sign in with a password this server generated, or find no sign-in page at all.
 - **Automatic Git deployments, previews and notifications.** Push to deploy, approved previews
   per pull request, and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
   the commit's status on GitHub.

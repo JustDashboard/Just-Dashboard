@@ -1,0 +1,124 @@
+{
+  "id": "nocodb",
+  "version": "1.0.0",
+  "name": "NocoDB",
+  "category": "http",
+  "profile": "web",
+  "description": "A no-code database: tables edited as a spreadsheet and shown again as forms, kanban boards and galleries, each one also served as a REST API. It keeps everything in its own SQLite file on the data volume.",
+  "iconId": "globe",
+  "docsUrl": "https://nocodb.com/docs/product-docs",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "NC_ADMIN_EMAIL",
+    "secretVariable": "NC_ADMIN_PASSWORD",
+    "note": "NocoDB creates one super-admin account the first time it starts on an empty database: the address you enter here, with the generated password from the Variables tab. Sign in with those, then change the password inside NocoDB — these two values only seed that very first account, so a later redeploy that rotates the password will not reset the account you already have. Public sign-up stays open until you close it: a stranger who finds the address can register, though the account arrives with no access to any base and cannot create one. Close it in NocoDB's super-admin settings, under Account Settings, where invite-only sign-up is a toggle; the NC_INVITE_ONLY_SIGNUP environment variable is no longer read in this version."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Sustainable Use License",
+    "upstreamUrl": "https://github.com/nocodb/nocodb",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "nocodb/nocodb:2026.09.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address other people open. NocoDB ignores the proxy's forwarded scheme and would otherwise report its own origin as plain http, so it is told this address instead — which is why it is required here."
+    },
+    {
+      "name": "admin-email",
+      "kind": "text",
+      "label": "Super admin email",
+      "variable": "NC_ADMIN_EMAIL",
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "description": "The address that signs in the first time. NocoDB uses it as the account name; it never sends mail to it unless you configure SMTP."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The web interface and the REST API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/usr/app/data",
+      "purpose": "The SQLite database holding every base, table and view",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v1/health",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "NC_SITE_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "NC_DISABLE_TELE",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "NocoDB runs its own schema migrations on start, and the first start after an upgrade can take several minutes before the address answers.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "tables.example.test",
+        "admin-email": "admin@example.test"
+      },
+      "digest": "sha256:ab156a876b7b9d1b94769e86d109522b373bcd3e7ef66c73835c8a441689d0fe"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "NC_ADMIN_PASSWORD",
+      "label": "Super admin password",
+      "length": 32,
+      "description": "Only used to create the first account; change it inside NocoDB afterwards."
+    }
+  ]
+}

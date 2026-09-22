@@ -1,0 +1,91 @@
+{
+  "id": "seerr",
+  "version": "1.0.0",
+  "name": "Seerr",
+  "category": "http",
+  "profile": "web",
+  "description": "A request desk in front of a media server: people search for a film or a series, ask for it, and the owner approves. One container with its own SQLite database; it is the continuation of Overseerr and Jellyseerr, which merged under this name.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.seerr.dev/",
+  "access": {
+    "kind": "setup",
+    "path": "/setup",
+    "note": "Seerr has no account of its own. The first visitor lands on /setup, points it at a Jellyfin, Plex or Emby server that already exists, and signs in with an account from that server — which then becomes the owner here. Without such a server the wizard cannot be finished, so have one ready before deploying, and open the address yourself first."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/seerr-team/seerr",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ghcr.io/seerr-team/seerr:v3.4.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open. Seerr keeps its own \"Application URL\" — the one it puts in notification emails — in Settings rather than in the environment, so set it there too once you are signed in."
+    }
+  ],
+  "secrets": [],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5055,
+      "protocol": "tcp",
+      "purpose": "The web interface and the request API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "config",
+      "target": "/app/config",
+      "purpose": "settings.json, the SQLite database of users and requests, and the logs",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Status endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v1/status",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Seerr migrates its database on start. It runs strictly as an unprivileged user, so the config volume must be writable by it — a fresh named volume is.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:65cb9c4d6e393cbabc5e47bea30de68a5877b29f16820341630d40733f37a308"
+    }
+  ]
+}

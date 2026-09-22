@@ -559,18 +559,50 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue is 53 reviewed definitions (36 added in the sixth pass: whoami, IT-Tools, draw.io,
-  CyberChef, linkding, FreshRSS, wallabag, Memos, Trilium, Actual, Gotify, Healthchecks, Directus,
-  Jellyfin, Navidrome, Nextcloud, Shlink, Kavita, Homepage, Audiobookshelf, pgAdmin, phpMyAdmin,
-  Mongo Express, code-server, Portainer, File Browser, Syncthing, Stirling PDF, Metabase, Jupyter,
-  Ollama, Meilisearch, Typesense, RabbitMQ, InfluxDB, MySQL), every image reference resolved against
-  its registry (`docker manifest inspect`; the Minecraft and MinIO pins had gone stale and were
-  repointed) and every deployable one started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`
+  catalogue ships 62 reviewed definitions, 57 of them offered (see "how the first sign-in works"
+  below for the five that are retired), every image reference resolved against
+  its registry (`docker manifest inspect`) and every deployable one started live:
+  `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`
   renders each definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
-  `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage,
-  Healthchecks) are configured to accept any, since the proxy in front only ever forwards the domain.
+  `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage) are
+  configured to accept any, since the proxy in front only ever forwards the domain.
+- **How the first sign-in works**, declared rather than described. Every definition carries an
+  `access` block: a closed `kind` — `setup` (the application asks the first visitor to create the
+  account), `credentials` (a name from an input plus a password from a generated secret, both
+  injected as environment before the container starts), `token` (one generated secret is the whole
+  credential), `client` (nothing signs in through a browser; a program connects with the named
+  secret), `open` (no authentication of its own) or `unavailable` — plus the sentence the operator
+  reads. `validateAccess` refuses a `credentials` or `token` kind that does not name a declared
+  generated secret, refuses a credential named on a `setup` or `open` kind, refuses a `client` kind
+  with nothing to hand over, and allows `unavailable` only on a definition that also carries
+  `retired`. That last pair is the whole point: an image whose first password exists only in its own
+  container log cannot be offered. The block is catalogue metadata, not plan input — `Render` never
+  reads it, so it carries no digest — and it reaches the picker on `Summary.access` (a word on every
+  card, the full sentence beside the chosen one) and the project overview's First sign-in card, which
+  reveals the username and password through the audited variable reveal route.
+  `retired` is why a definition is no longer offered. A retired definition stays shipped, stays
+  parsed and stays held to every rule, because `ValidateForDeployment` re-resolves the definition on
+  every redeploy: deleting the file would turn a running service into an unredeployable one.
+  `Catalog()` is the offered set, `All()` is everything. Retired in this pass: File Browser (upstream
+  archived; first password only in the container log; `FB_PASSWORD` takes a hash), wallabag (its only
+  account is `wallabag`/`wallabag` with no environment variable for either half), MinIO (upstream
+  archived, no pullable newer release, and the console is not the routed port), Syncthing (no
+  environment variable sets the web interface's password before it starts, and until one is set the
+  interface is full control of the sync configuration) and Healthchecks (sign-up completes by
+  clicking an emailed link, and one image has no mail server, so the sign-up page answers 500).
+  Added in the same pass, each one image with its own embedded store, each one started live and each
+  one admitted for a first sign-in this catalogue can state: Open WebUI (the interface Ollama shipped
+  without), ntfy, Beszel, Opengist, Qdrant, NocoDB, DocuSeal, Seerr and SearXNG. Speedtest Tracker was
+  rejected on a rule the catalogue cannot express: Laravel's `APP_KEY` must be exactly 32 bytes, and
+  `RotateVariable` always hands back 43 characters of base64, so the dashboard's own Rotate button
+  would stop the application from starting.
+  Two more global refusals landed with it: an operation may not template an input that is optional
+  with no default (`expand` substitutes the empty string, so Grafana's root URL rendered as
+  `https:///`), and an `accept` input may not declare a `variable` (`Render` records the acceptance
+  and moves on, so both Minecraft definitions' `EULA` never reached the container — it is a startup
+  operation now).
 - Published ports. `runtime.ports[]` (`hostPort`, `containerPort`, `protocol` tcp/udp, optional
   `bindAddress`, every interface when empty) publishes container ports beside the routed one for
   protocols a reverse proxy cannot carry. Validation bounds each, refuses a repeated host port per

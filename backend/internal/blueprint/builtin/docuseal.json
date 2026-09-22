@@ -1,0 +1,103 @@
+{
+  "id": "docuseal",
+  "version": "1.0.0",
+  "name": "DocuSeal",
+  "category": "http",
+  "profile": "web",
+  "description": "Document signing: build a form over a PDF, send it to the people who have to sign, and keep the completed copy with its audit trail. One container — the SQLite database, the job queue and the uploaded files all live in the data volume.",
+  "iconId": "globe",
+  "docsUrl": "https://www.docuseal.com/docs",
+  "access": {
+    "kind": "setup",
+    "path": "/setup",
+    "note": "DocuSeal ships with no account. The first visitor is sent to /setup and creates the owner there, so open the address yourself as soon as the deployment is ready rather than leaving that page facing the internet. Signing invitations are emailed, which needs SMTP filled in under Settings; without it you copy each signing link out of the submission and send it yourself."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/docusealco/docuseal",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "docuseal/docuseal:3.2.6",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address other people open. It is also the address DocuSeal writes into signing invitations and webhooks, which are built by a background job that has no request to copy it from, so it cannot be left blank."
+    }
+  ],
+  "secrets": [],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The web interface, the signing pages and the API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data/docuseal",
+      "purpose": "The SQLite database, uploaded documents, and docuseal.env — which holds the key DocuSeal generates on first start and encrypts its SMTP and e-signing settings with",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/up",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "APP_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "FORCE_SSL",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "DocuSeal migrates its database on start. It also keeps its own SECRET_KEY_BASE in docuseal.env inside the data volume, so nothing here has to be carried between releases — but a restore that brings back the database without that file leaves the stored SMTP and e-signing settings unreadable.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": { "domain": "sign.example.test" },
+      "digest": "sha256:9c47ff061fb7d465d966bcd350013c3eff2b6d4c918102b4931abd8eb964882e"
+    }
+  ]
+}
