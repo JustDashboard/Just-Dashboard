@@ -4,6 +4,80 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.7.0 — 22 September 2026
+
+**Git is a whole workbench, every template says how you get in, and a deployment's Logs page reads its traffic**
+
+The Git workspace could commit, branch, merge and push, and everything past that was a terminal. 0.7.0 brings the rest into the same three columns: conflicts resolved side by side, single lines staged, local history rebased behind a recovery branch, worktrees, submodules, LFS and patches, reviews on GitHub pull requests and on GitLab and Gitea requests. Every reviewed template now declares how its first sign-in works, the five that could not say are no longer offered, and nine new ones join the catalogue. New project opens on whatever is still unanswered and checks the plan the moment Review is reached. A deployment's Logs page answers from the requests the proxy actually served, with insights, marks on the chart and traffic alerts. A container, a compose stack and a backup job are pages of their own, every page remembers what you were doing on it, and the rail's top level is twelve rows instead of seventeen.
+
+### Added
+
+- Resolve a conflict side by side, and stage single lines
+  - Merge, cherry-pick and revert started from the workspace keep their conflicts instead of aborting, and each conflicted file opens on its base, current, incoming and working result: edit the result, or take one side whole, then continue or abort. Taking a whole side and aborting discard work, so both ask for a typed phrase. The changes panel stages or unstages chosen hunks or individual changed lines, rebuilt on the server from its own snapshot of the diff and refused if the file moved underneath it. Binary files, symlinks and very large diffs keep the whole-file action.
+- Rewrite local history with a recovery branch, and get a lost commit back
+  - An interactive rebase over up to a hundred local commits reorders, rewords, squashes and drops them from a plan, writes a jd-before-rebase branch before touching anything, survives a server restart mid-conflict, and refuses commits already on a fetched remote. The reflog pages back through HEAD and rescues any commit into a new branch without switching to it. Blame jumps from a line to its commit, and a commit says whether its signature is verified, bad, expired, revoked or simply unchecked.
+- Worktrees, submodules, Git LFS and patches open in the same workspace
+  - Worktrees are listed, created on an existing or a new branch, opened in Git or the Terminal, and removed only when clean, unlocked, and neither the main checkout nor the one you are in. Submodules can be added, initialised, synced, deinitialised and removed; LFS lists its tracked patterns and files, tracks and untracks, and fetches the working objects without ever rewriting history; a patch can be exported, checked and applied. The backend image now ships git-lfs.
+- Compare branches file by file, search the graph, and set upstream and remote URLs
+  - A comparison lists its changed files and opens each diff against the exact base and head it was computed for. The graph searches, filters by ref and pages into older history; History filters by author. Remote URLs can be edited and a branch's upstream set or unset, a commit's message can be amended with nothing staged, and a clone can pick a branch or tag, a shallow depth and sparse directories.
+- Review GitHub pull requests and read Actions job logs without leaving the dashboard
+  - A pull request's changed files and its conversation page in beside the workspace. A comment, approval or request for changes is sent against the head you were reading, so a push in between cannot be approved by accident. A workflow run opens on its jobs and steps, and a step's log, or only its failure output, is read in the preview with a link back to GitHub when the log has expired.
+- GitLab and Gitea merge requests, with a token kept per checkout
+  - A checkout on GitLab or Gitea takes the provider, its address, the project and an access token. The token is sealed, belongs to that checkout and its Linux owner, and never becomes a git argument. Requests can then be listed, read with their files and conversation, opened, reviewed and merged the way GitHub's are.
+- Every template says how the first sign-in works, before and after it is deployed
+  - Each card carries a word for it — you create the first account, a password generated here, a token, no sign-in page, or no sign-in at all — and the chosen template the full sentence. Once it runs, the project overview's First sign-in card says what to do and reveals the generated username and password through the audited reveal.
+- Nine more templates: Open WebUI, ntfy, Beszel, Opengist, Qdrant, NocoDB, DocuSeal, Seerr and SearXNG
+  - Each is one image with its own store, each was started live before it shipped, and each was admitted only with a first sign-in the catalogue can state. Open WebUI is the interface Ollama shipped without.
+- Decide auto-deploy, extra hostnames and an image's project type when the project is created
+  - The configure screen draws the plan as source, build, runtime and address, each step opening the fields that decide it. Whether pushes deploy themselves, a second and third hostname, and whether an image is an HTTP application with a health-gated cutover are settled before the first release rather than found as settings afterwards. A name already taken is flagged while it is typed, a template's domain arrives filled in with the suggested hostname, and an abandoned or failed setup is deleted rather than left as unfinished work.
+- A deployment's Logs page answers from the requests the proxy served
+  - Container output for a modern framework is a banner and then silence, so the page now reads the access record the proxy keeps for the route: requests per minute, page views, the failing share, the slow tenth, bytes served and container events, over a chart that marks a release going live, an exit or a restart. Insights breaks the window down by page, client, agent, referrer and status, names scanners and offers to block them, and a failing request jumps to the container's output around that moment. The window exports as CSV, and routes written before recording existed are switched on in place by the lifecycle pass.
+- Traffic alerts, and the fleet's pulse on every project card
+  - A rule watches one environment for its failing share, its p95, or silence from a route that used to be busy, and announces only when it starts firing and when it recovers, through the existing notification channels. Rules read as sentences on Automation settings and can send a test. Project cards carry the last hour as a sparkline, and a run's Metrics view compares requests, failures and p95 before and after activation.
+- Browse a volume's files where the volume is named
+  - A volume's panel and a container's Storage tab embed the file browser, clamped to the mount, with Open in Files carrying the directory reached. Storage that looks like a running database's own files carries a warning above it. The backend now mounts /var/lib/docker/volumes, without which every volume answered not found.
+- Every page remembers what you were doing when you come back to it
+  - Filters, chips, the page of results, the open row, the SQL in the editor, half-filled dialogs and a new project's source and settings survive navigating away for the life of the tab. Secrets are kept in memory only and never written to browser storage.
+
+### Changed
+
+- The Git page is a list of repository cards, worst first
+  - The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. Each card carries the branch, where it lives, the last commit with its author's colour, and how far it stands from its upstream, ordered under Needs attention by what is most wrong. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls.
+- New project opens on the question still open, and checks the plan when Review is reached
+  - An unset port opens Runtime, a required variable with no value opens Variables with its references unfolded, and a name another project holds opens Project. A port the source did not name stays unset instead of becoming 3000, and what detection already found — a Dockerfile's single EXPOSE, an image's exposed port, a Go module, a Deno server, a static site's root — is no longer asked again. Review saves and runs preflight on arrival rather than inside the Deploy press, re-checks when the plan changes, and reads back kept mounts and their backup coverage, generated variables, the readiness target, the cutover's cost and every passed check.
+- New project says which GitHub identity reaches each repository
+  - The Git tab opens on the GitHub App and the CLI, each with its status, what it grants and the repair for whichever is missing, and repositories are grouped under the identity that clones them, newest push first. All six sources start on the page's own left edge instead of collapsing into a narrow column, and the whole flow is drawn in a register for deciding rather than reading: a question, a step spine, and one focused surface.
+- Container events say who caused them, and can be searched, followed and linked
+  - The deployment's Events view matches the audit log, container first and then the project, so a release can be seen causing a recreate. An exit, an OOM kill or a health flip is never blamed on a release. The feed covers the deployment's networks, follows new events live, links a release to its run, and keeps its view in the address.
+- A release is a timeline, and the project overview draws the path a request takes
+  - The release path is one bar whose segments are as long as each stage took, and a release that goes live while you watch it build gets a burst of confetti. Details rows open in place to what the engine recorded about each step. The overview shows the site as one linked tile beside a drawing of source, live release, containers and domains, and each project carries its website's own icon, fetched through the dashboard and bound to the recorded endpoint. The GitHub App and Notifications pages are drawn as what they connect.
+- A deployment's Databases page says what the deployment would otherwise refuse too late
+  - It names a linked database the declared backup job does not cover, with one press to add the dump; names the variables that carry each link and offers them with its removal; says why a binding could not be repaired; and gives links, jobs and volumes their engine, schedule, last success and mount.
+- A container, a compose stack and a backup job are pages of their own
+  - Each held a log stream, a shell, an editor or a restore inside a sheet over its list. They are /docker/containers/[id], /docker/stacks/[name] and /backups/[job] now, with a breadcrumb back and their tab in the address; the old ?container=, ?stack= and ?job= links redirect.
+- The rail's top level is twelve rows instead of seventeen
+  - Metrics, Processes and Logs sit behind Monitoring, and Proxy & TLS, Packages, System users and the Audit log behind Server configuration under a new Advanced heading. A group opens its panel over the page you are on, the breadcrumb names every level, and the command palette lists every nested page so they stay reachable with the rail collapsed.
+
+### Fixed
+
+- Grafana's address and the Minecraft servers' EULA reach the container, and every template's pins are current
+  - An optional input with no default rendered as an empty string, so Grafana's root URL was https:///, and an accepted EULA was recorded without ever reaching either Minecraft server. Both shapes are now refused for every definition. Image pins, digests, readiness paths and review dates were refreshed across the catalogue, among them Adminer 6 and Caddy 2.11.
+- Container output is read for what it says
+  - A healthy Next.js project's Logs read "13 errors", every one a notice on stderr, above a line of cursor-movement bytes. Stderr is no longer promoted to an error, terminal control sequences are resolved to what a terminal would have shown, and JSON log lines are read for their level, message and time.
+- Token clones, most registry logins and the GitHub App setup work
+  - HTTPS token clones sent a bearer header GitHub's git endpoint answers with a username prompt, so none ever worked; registry credentials were encoded without padding, so the daemon dropped most of them and pulled anonymously; and the page's Content Security Policy stopped the GitHub App manifest reaching github.com, while the callback it returned to could not see the session cookie. The Credentials page itself was rebuilt: kinds are chosen as cards, a pasted URL becomes the bare host, and Test asks every kind for something concrete to try.
+- The database browser tells the truth about the rows it shows
+  - Export takes the filters and order it was launched from, and states its row cap. A table with no row estimate no longer claims to be empty, and ClickHouse connections, which answered every catalogue read with an error, work again. Each row offers the tables that reference it, paging has First, Last, a page you can type and Refresh, and selecting rows to copy no longer needs write access.
+- The terminal stays usable at narrow widths and on a phone
+  - The git panel's commit row and repository strip no longer run past the column's edge, and below the large breakpoint the session rail and tools cover the terminal one at a time instead of squeezing it to one line.
+- Installing or updating no longer runs out of memory on a 2 GB server
+  - The image build ran the type-check in a second process alongside the compiler, which intermittently exceeded a small server's memory. The image build skips it; the application it emits is identical, and the developer's build still type-checks.
+
+### Removed
+
+- File Browser, wallabag, MinIO, Syncthing and Healthchecks are no longer offered
+  - Each has a first credential nobody can know before the container starts: a password printed only into its own log, a fixed default account with no way to change it, an archived upstream, a web interface that is full control until someone sets a password, or a sign-up that needs mail. Deployments already made from them keep redeploying, because the definitions still ship and are still validated.
+
 ## 0.6.7 — 12 September 2026
 
 **A deployment is a plan, a run, and a release you can go back to**
