@@ -223,7 +223,7 @@ export function NewProject({
         // environment included: the two are different setups.
         forgetConfigure()
         setFlow(resumed)
-        setStep(landingStep(resumed))
+        setStep(landingStep(resumed, mode === "advanced"))
         setLinkArrived(false)
       })
       .catch((error) => {
@@ -235,7 +235,7 @@ export function NewProject({
     return () => {
       cancelled = true
     }
-  }, [draftId, setFlow, setStep])
+  }, [draftId, mode, setFlow, setStep])
 
   // A remembered flow names a draft on the server, and the server may have
   // let it go: drafts expire, and another tab can finish one. Asked once per

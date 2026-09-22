@@ -387,7 +387,7 @@ test("a private image reference sends the chosen registry credential", async ({ 
   await page.getByRole("combobox", { name: "Credential" }).click()
   await page.getByRole("option", { name: "Registry login" }).click()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
 
   expect(selectedSource).toMatchObject({
     kind: "image",
@@ -475,10 +475,11 @@ test("resuming a duplicated draft shows its copied variable needing a value, and
 
   // The copied variable — a name and a scope, no value — is a row in the
   // "Variable references & scopes" fold a blueprint's declared variables use,
-  // on the screen that asks what the project needs to run.
+  // on the screen that asks what the project needs to run. It is also why the
+  // sequence landed on that screen, so the fold holding the answer arrives
+  // open rather than as one more press.
   await gotoStep(page, "variables")
   const references = page.getByRole("button", { name: /Variable references & scopes/ })
-  await references.click()
   await expect(references).toHaveAttribute("aria-expanded", "true")
   const reference = page.getByRole("textbox", { name: "Variable DATABASE_URL reference" })
   await expect(reference).toHaveValue("")
@@ -566,6 +567,79 @@ test("Add database from Configure creates a database, retries after a failed con
   expect(quick.imported()?.dotenv).toContain('API_KEY="another-secret"')
 })
 
+test("a template that needs its own public URL arrives with one this server can deliver", async ({
+  page,
+}) => {
+  const journey = await mockNewProject(page)
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Template", exact: true }).click()
+  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
+
+  // Eight reviewed definitions need their own public URL — n8n writes it into
+  // every webhook, Vaultwarden into its WebAuthn origin — and the panel used to
+  // send nothing, so choosing one ended in the server's own `"domain" is
+  // required` after a draft had already been created. `/deploy/hostname`
+  // always knew a name that resolves here with no DNS record to create.
+  const domain = page.getByRole("textbox", { name: "Public domain" })
+  await expect(domain).toHaveValue("wesmokefish-a1b2c3.203-0-113-7.sslip.io")
+  await expect(page.getByText(/Replace it with your own domain if you have one/)).toBeVisible()
+
+  await page.getByRole("button", { name: "Use this template", exact: true }).click()
+  // A blueprint's declared variables are review material, so the sequence
+  // opens there; the plan is what the last screen reads back.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What does it need to run?" }),
+  ).toBeVisible()
+  await gotoStep(page, "review")
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
+  expect(journey.source()).toMatchObject({
+    blueprintId: "vaultwarden",
+    blueprintInputs: { domain: "wesmokefish-a1b2c3.203-0-113-7.sslip.io" },
+  })
+
+  // Review used to be one section of four facts under the irreversible
+  // button: no finding is drawn until preflight has run, and preflight ran
+  // inside the press. It runs on arrival now, and the plan is read back.
+  await expect(page.getByRole("heading", { name: "Checked against this server" })).toBeVisible()
+  await expect(page.getByText("Runtime plan is valid")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Data it keeps" })).toBeVisible()
+  await expect(page.getByText("/data", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Everything this vault holds/)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Secrets made on this server" })).toBeVisible()
+  await expect(page.getByText(/48 characters, made when this plan is saved/)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Before it takes traffic" })).toBeVisible()
+  await expect(page.getByText(/GET \/alive · up to 60s to answer/)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "At the cutover" })).toBeVisible()
+  await expect(page.getByText(/unreachable for a few seconds/)).toBeVisible()
+  // The count is what reaches the container, not the rows somebody typed.
+  await expect(page.getByText("3 declared", { exact: true })).toBeVisible()
+  // The name the application was told is the route the release publishes —
+  // both come from this one input, so the two leave this screen agreeing.
+  expect(journey.configuration()).toMatchObject({
+    domains: [{ hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io", https: true }],
+  })
+})
+
+test("a template input the page cannot answer is named before the press, not after it", async ({
+  page,
+}) => {
+  const journey = await mockNewProject(page)
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Template", exact: true }).click()
+  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
+  await page.getByRole("textbox", { name: "Public domain" }).fill("")
+
+  await page.getByRole("button", { name: "Use this template", exact: true }).click()
+  await expect(
+    page.getByText("Public domain is needed before Vaultwarden can be used."),
+  ).toBeVisible()
+  await expect(page.getByRole("alert").filter({ hasText: "Required." })).toBeVisible()
+  // Refused here, so the server was never asked to start a setup that cannot
+  // finish: every earlier attempt left a draft in the unfinished-setups list.
+  expect(journey.started()).toBe(0)
+  await expect(page.getByRole("heading", { name: "Application templates" })).toBeVisible()
+})
+
 test("a supported blueprint reaches a reviewed plan with the server's rendered configuration", async ({
   page,
 }) => {
@@ -606,6 +680,30 @@ test("a supported blueprint reaches a reviewed plan with the server's rendered c
     ]),
   })
   expect(JSON.stringify(journey.configuration())).not.toContain("hunter")
+})
+
+test("the catalogue says how each template is signed into before it is deployed", async ({
+  page,
+}) => {
+  // The defect this covers: an operator deployed a template, opened its
+  // address, and met a login form for an account nobody had created and a
+  // password nobody had given them. The reviewed definition now declares how
+  // its first sign-in works, and the picker has to spend that on the card —
+  // where the template is chosen — and not only after the deploy.
+  await mockNewProject(page)
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Template", exact: true }).click()
+
+  const kuma = page.getByRole("group", { name: "Web applications" })
+  await expect(kuma.getByText("you create the first account")).toBeVisible()
+  await expect(kuma.getByText("token generated here")).toBeVisible()
+  await expect(
+    page.getByRole("group", { name: "Databases" }).getByText("no sign-in page"),
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
+  await expect(page.getByText("Sign in with the token generated here")).toBeVisible()
+  await expect(page.getByText(/invite your own account/)).toBeVisible()
 })
 
 test("an unavailable blueprint explains its status and offers no way to use it", async ({
@@ -806,9 +904,25 @@ test("pasting a Compose file surfaces its services, unsupported items and the ef
   await expect(page.getByText("build: .")).toBeVisible()
   // The variable the Compose file references becomes a required runtime
   // variable — reviewable where the project's variables are, without retyping.
+  // Preflight refuses a required variable with nothing in it, so it is also
+  // what this setup is asked about: the screen is where the sequence lands and
+  // the fold holding the row arrives open.
   await gotoStep(page, "variables")
-  await page.getByRole("button", { name: /Variable references & scopes/ }).click()
-  await expect(page.getByRole("textbox", { name: "Variable API_KEY reference" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Variable references & scopes/ })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  )
+  const apiKey = page.getByRole("textbox", { name: "Variable API_KEY reference" })
+  await expect(apiKey).toBeVisible()
+  // Typing the value answers the reason the fold was opened, which must not be
+  // the reason it shuts: `open` on a `<details>` is written again every time
+  // the prop changes, so a fold computed on each render closes mid-word.
+  await apiKey.fill("${{credential.api}}")
+  await expect(page.getByRole("button", { name: /Variable references & scopes/ })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  )
+  await expect(apiKey).toBeVisible()
 })
 
 test("quick deploy shows the actual HTTPS blocker instead of assuming Certbot is missing", async ({

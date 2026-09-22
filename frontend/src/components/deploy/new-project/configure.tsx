@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
-  defaultChecks,
+  checksForRuntime,
   discoveredEnvironmentRows,
   mergeDiscoveredRows,
   validateConfiguration,
@@ -43,6 +43,7 @@ import {
 import {
   adoptImport,
   commitDraft,
+  declaredVariablesNeedReview,
   enqueueDeploy,
   environmentText,
   importEnvironment,
@@ -167,24 +168,43 @@ export function Configure({
   }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
+  /**
+   * The plan as it stands, as one comparable value.
+   *
+   * `flow.configuration` is replaced wholesale by every edit, so its identity
+   * cannot say whether anything actually changed — a re-render that rebuilt
+   * the same plan would read as a change, and re-checking on each of those is
+   * a request per keystroke.
+   */
+  const planSignature = useMemo(() => JSON.stringify(flow.configuration), [flow.configuration])
   // Preflight's findings and which warnings were acknowledged belong to the
-  // draft they were computed for, so a fresh source never inherits them.
+  // draft they were computed for, so a fresh source never inherits them — and
+  // to the *plan* they were computed for, which is what `checked` records.
+  // Review draws its passes now, not only its refusals, so a reader who goes
+  // back from it to change the port and returns would otherwise be reading a
+  // list of things this server agreed to about a plan that no longer exists.
   const [review, setReview] = useSessionState<{
     draftId: string
+    checked?: string
     preflight?: DeploymentPreflight
     acknowledged: string[]
   } | null>("deploy.new.configure.preflight", null)
-  const preflight = review?.draftId === draftId ? review.preflight : undefined
+  // A result computed for a different plan reads as no result: the sections
+  // it feeds empty, and the effect below asks again.
+  const preflight =
+    review?.draftId === draftId && review.checked === planSignature ? review.preflight : undefined
   const acknowledged = review?.draftId === draftId ? review.acknowledged : []
-  const setPreflight = (next: DeploymentPreflight) =>
+  const setPreflight = (next: DeploymentPreflight, checked: string) =>
     setReview((current) => ({
       draftId,
+      checked,
       preflight: next,
       acknowledged: current?.draftId === draftId ? current.acknowledged : [],
     }))
   const setAcknowledged = (next: string[]) =>
     setReview((current) => ({
       draftId,
+      checked: current?.draftId === draftId ? current.checked : undefined,
       preflight: current?.draftId === draftId ? current.preflight : undefined,
       acknowledged: next,
     }))
@@ -247,11 +267,11 @@ export function Configure({
   const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
-  // value that fails somewhere far from here.
-  const text = environmentText(
-    envRows.filter((row) => !row.detected || row.value),
-    dotenv,
-  )
+  // value that fails somewhere far from here. Review counts these same rows:
+  // the environment lives in memory and the step in the session store, so a
+  // reload used to land back on Review reading "3 values" with none to send.
+  const sentRows = envRows.filter((row) => row.name.trim() && (!row.detected || row.value))
+  const text = environmentText(sentRows, dotenv)
 
   const changeBranch = async (nextRef: string) => {
     setBranch(nextRef)
@@ -282,20 +302,14 @@ export function Configure({
         ? 0
         : profile === "static" && configuration.build.method !== "dockerfile"
           ? 80
-          : configuration.runtime.internalPort || flow.candidate?.port || 3000
+          : configuration.runtime.internalPort || flow.candidate?.port || 0
     // Saying "this is a web application" is what makes the release safe:
     // preflight only allows candidate-first activation, and only requires a
     // readiness gate, for a web or static profile. Choosing one and leaving
     // the plan stop-first with nothing verifying it would answer half the
     // question the operator just answered.
     const gated = profile === "web" || profile === "static"
-    const hasReadiness = configuration.checks.some((check) => check.phase === "readiness")
-    const checks =
-      gated && !hasReadiness && internalPort > 0
-        ? [...configuration.checks, ...defaultChecks(profile, internalPort)]
-        : profile === "worker"
-          ? configuration.checks.filter((check) => check.phase !== "readiness")
-          : configuration.checks
+    const checks = checksForRuntime(configuration.checks, profile, internalPort)
     return onFlowChange({
       ...flow,
       profile,
@@ -419,7 +433,16 @@ export function Configure({
         errors.buildMethod ?? errors.pythonVersion ?? errors.buildSecrets ?? errors.releaseTasks
       )
     }
-    if (target === "runtime") return errors.internalPort ?? errors.hostPort
+    if (target === "runtime") {
+      // Only the profiles preflight demands a readiness gate from: an image or
+      // a service may legitimately publish nothing.
+      if (
+        (flow.profile === "web" || flow.profile === "static") &&
+        (configuration.runtime.internalPort ?? 0) === 0
+      )
+        return "Set the port your application listens on inside the container."
+      return errors.internalPort ?? errors.hostPort
+    }
     if (target === "variables") {
       if (
         envRows.some((row) => (row.name || row.value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.name))
@@ -450,7 +473,7 @@ export function Configure({
     else onChangeSource()
   }
 
-  const submit = async (operation: "save" | "deploy") => {
+  const submit = async (operation: "save" | "deploy" | "check") => {
     for (const target of ["project", "runtime", "variables"] as const) {
       const problem = stepError(target)
       if (!problem) continue
@@ -502,7 +525,10 @@ export function Configure({
       onFlowChange((current) =>
         current ? { ...current, draft: checkedDraft.draft, configuration: toSave } : current,
       )
-      setPreflight(checkedDraft.preflight)
+      setPreflight(checkedDraft.preflight, planSignature)
+      // Review's own arrival runs this far and no further: the screen asks
+      // "is this right", and it cannot answer without having asked the server.
+      if (operation === "check") return
 
       const blockers = blockingFindings(checkedDraft.preflight.findings)
       const warnings = warningFindings(checkedDraft.preflight.findings)
@@ -543,6 +569,36 @@ export function Configure({
       setBusy("")
     }
   }
+
+  /**
+   * Preflight, when Review is reached rather than when Deploy is pressed.
+   *
+   * It ran inside the press, so the screen titled "Ready to deploy?" had
+   * checked nothing by the time it was read: with no finding to draw, a plan
+   * with nothing wrong with it showed one section of four facts, and the
+   * first press was a check whose findings appeared under a button the reader
+   * had already pressed. Running it on arrival is what makes the step the
+   * last look it is named for, and what makes Deploy one press.
+   *
+   * Guarded on there being no result *for this plan* — `preflight` reads as
+   * undefined once `planSignature` moves — so arriving asks once, re-reading
+   * the same screen asks nothing, and going back to change the port and
+   * returning asks again rather than showing what the server agreed to about
+   * the previous plan. `submit` runs the three step gates first, so an arrival
+   * carrying an unanswered field is still sent to the screen that owns it —
+   * and that changes `current`, which is what stops this from firing again.
+   */
+  useEffect(() => {
+    if (current !== "review" || preflight || busy || created) return
+    // Scheduled rather than called: `submit` raises the busy flag as its first
+    // act, and a state write in an effect's own body is a cascading render.
+    // The cleanup drops a check nobody is waiting for any more.
+    const timer = setTimeout(() => void submit("check"), 0)
+    return () => clearTimeout(timer)
+    // `submit` closes over the whole form; re-running this for each of those
+    // is what the `preflight` guard is there to make unnecessary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, preflight, busy, created])
 
   if (created)
     return (
@@ -674,9 +730,7 @@ export function Configure({
                 onRowsChange={setEnvRows}
                 dotenv={dotenv}
                 onDotenvChange={setDotenv}
-                referencesOpen={
-                  flow.source.mode === "blueprint" && configuration.variables.length > 0
-                }
+                referencesOpen={declaredVariablesNeedReview(flow)}
               />
             )}
 
@@ -686,7 +740,9 @@ export function Configure({
                 branch={isGitSource ? branch : undefined}
                 gitPolicy={gitPolicy}
                 onGitPolicyChange={setGitPolicy}
-                variableCount={envRows.filter((row) => row.name).length}
+                variableCount={sentRows.length}
+                findings={preflight?.findings ?? []}
+                checking={busy === "check"}
                 blockers={blockers}
                 warnings={warnings}
                 acknowledged={acknowledged}

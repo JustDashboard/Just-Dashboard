@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   canGenerateSecret,
+  checksForRuntime,
   defaultConfiguration,
   discoveredEnvironmentRows,
   generateSecretValue,
@@ -115,6 +116,33 @@ describe("catalogue defaults carried into the plan", () => {
     )
     expect(server.build.spaFallback).toBeUndefined()
     expect(server.runtime.internalPort).toBe(3000)
+  })
+  test("a web candidate whose source named no port is left asking rather than given 3000", () => {
+    // `Port` is `omitempty`, so a Dockerfile with no EXPOSE — or several —
+    // arrives with no port at all. Inventing one here let it reach Review with
+    // a readiness check built on a port nothing listens to; zero is what sends
+    // the reader to the screen that owns the field.
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", buildMethod: "dockerfile" }),
+    )
+    expect(plan.runtime.internalPort).toBe(0)
+    expect(plan.checks).toEqual([])
+  })
+  test("typing the port a gated workload was missing earns it the readiness gate", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", buildMethod: "dockerfile" }),
+    )
+    const checks = checksForRuntime(plan.checks, "web", 8080)
+    expect(checks).toContainEqual(
+      expect.objectContaining({ kind: "http", phase: "readiness", required: true }),
+    )
+    // Only once: a plan that already verifies itself is not given a second gate.
+    expect(checksForRuntime(checks, "web", 8080)).toHaveLength(checks.length)
+    // And a workload preflight demands no gate from keeps what it had.
+    expect(checksForRuntime(plan.checks, "image", 8080)).toEqual(plan.checks)
+    expect(checksForRuntime(checks, "worker", 8080)).toEqual([])
   })
   test("a Python candidate keeps its interpreter and framework port", () => {
     const plan = defaultConfiguration(

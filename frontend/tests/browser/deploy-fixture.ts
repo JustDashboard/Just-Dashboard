@@ -326,6 +326,10 @@ export const blueprintCatalogue = [
     license: "Apache-2.0",
     maintainer: "Just Dashboard",
     reviewedAt: "2026-09-11",
+    access: {
+      kind: "open",
+      note: "Players join with the Java Edition client; the whitelist is off until you turn it on.",
+    },
     image: "itzg/minecraft-server:2026.9.1-java21",
     memoryMb: 2048,
     requiresAcceptance: true,
@@ -342,7 +346,33 @@ export const blueprintCatalogue = [
     license: "MIT",
     maintainer: "Just Dashboard",
     reviewedAt: "2026-09-11",
+    access: {
+      kind: "setup",
+      note: "The first visitor is shown a Create-admin form, so open it the moment it is ready.",
+    },
     image: "louislam/uptime-kuma:1.23.16",
+    memoryMb: 512,
+    deploymentSupported: true,
+  },
+  {
+    id: "vaultwarden",
+    version: "1.0.0",
+    name: "Vaultwarden",
+    category: "http",
+    profile: "web",
+    description: "A password manager that needs its own public URL.",
+    iconId: "lock",
+    docsUrl: "https://github.com/dani-garcia/vaultwarden/wiki",
+    license: "AGPL-3.0",
+    maintainer: "Just Dashboard",
+    reviewedAt: "2026-09-11",
+    access: {
+      kind: "token",
+      secretVariable: "ADMIN_TOKEN",
+      path: "/admin",
+      note: "Sign in at /admin with the generated admin token and invite your own account.",
+    },
+    image: "vaultwarden/server:1.32.7-alpine",
     memoryMb: 512,
     deploymentSupported: true,
   },
@@ -358,6 +388,12 @@ export const blueprintCatalogue = [
     license: "PostgreSQL",
     maintainer: "Just Dashboard",
     reviewedAt: "2026-09-11",
+    access: {
+      kind: "client",
+      usernameVariable: "POSTGRES_USER",
+      secretVariable: "POSTGRES_PASSWORD",
+      note: "Nothing signs in through a browser; other containers connect with these over the Docker network.",
+    },
     image: "postgres:16-alpine",
     memoryMb: 512,
     deploymentSupported: true,
@@ -365,7 +401,7 @@ export const blueprintCatalogue = [
 ]
 
 export const postgresBlueprint = {
-  ...blueprintCatalogue[2],
+  ...blueprintCatalogue[3],
   provenance: {
     maintainer: "Just Dashboard",
     license: "PostgreSQL",
@@ -396,6 +432,35 @@ export const postgresBlueprint = {
   secrets: [
     { name: "password", variable: "POSTGRES_PASSWORD", label: "Database password", length: 40 },
   ],
+}
+
+/**
+ * The shape the eight definitions that need their own public URL share: one
+ * required `domain` and nothing else the operator has to know. Its name is
+ * written into the application's own configuration *and* becomes the plan's
+ * domain, which is why the page asks for it once.
+ */
+export const vaultwardenBlueprint = {
+  ...blueprintCatalogue[2],
+  provenance: {
+    maintainer: "Just Dashboard",
+    license: "AGPL-3.0",
+    upstreamUrl: "https://github.com/dani-garcia/vaultwarden",
+    reviewedAt: "2026-09-11",
+    minimumDashboard: "0.6.7",
+  },
+  resources: { memoryMb: 512, minMemoryMb: 256 },
+  update: { detector: "registry", backupFirst: true, notes: "" },
+  inputs: [
+    {
+      name: "domain",
+      kind: "domain",
+      label: "Public domain",
+      required: true,
+      description: "Vaultwarden needs its exact public URL; WebAuthn and app links break without it.",
+    },
+  ],
+  secrets: [],
 }
 
 export const postgresRenderedConfiguration = {
@@ -1156,6 +1221,7 @@ export async function mockDraftJourney(page: Page) {
   let currentStep = "intent"
   let data: Record<string, unknown> = {}
   let commits = 0
+  let started = 0
   let commitBody: Record<string, unknown> | undefined
   const discarded: string[] = []
   const currentDraft = () => ({
@@ -1187,6 +1253,7 @@ export async function mockDraftJourney(page: Page) {
     if (path === "/deploy/blueprints/minecraft-java") return json(route, minecraftBlueprint)
     if (path === "/deploy/blueprints/minecraft-java/versions") return json(route, minecraftVersions)
     if (path === "/deploy/blueprints/postgresql") return json(route, postgresBlueprint)
+    if (path === "/deploy/blueprints/vaultwarden") return json(route, vaultwardenBlueprint)
     if (path === "/deploy/blueprints/uptime-kuma") {
       return json(route, {
         ...blueprintCatalogue[1],
@@ -1196,7 +1263,10 @@ export async function mockDraftJourney(page: Page) {
         inputs: [],
       })
     }
-    if (path === "/deploy/drafts" && method === "POST") return json(route, currentDraft())
+    if (path === "/deploy/drafts" && method === "POST") {
+      started += 1
+      return json(route, currentDraft())
+    }
     if (path.startsWith("/deploy/drafts/") && method === "DELETE") {
       discarded.push(path.slice("/deploy/drafts/".length))
       return route.fulfill({ status: 204, body: "" })
@@ -1226,6 +1296,96 @@ export async function mockDraftJourney(page: Page) {
         image?: string
         blueprintId?: string
         blueprintInputs?: Record<string, string>
+      }
+      if (source.kind === "blueprint" && source.blueprintId === "vaultwarden") {
+        revision += 1
+        currentStep = "detection"
+        const hostname = source.blueprintInputs?.domain ?? ""
+        data = {
+          ...data,
+          // `Render` puts a `domain` input in the plan's own domains, so the
+          // route the release publishes is the name the application was told.
+          // The rest is the shape every reviewed template renders to — a
+          // managed data volume, a generated secret, a readiness check — which
+          // is what Review reads back.
+          configuration: {
+            ...structuredClone(postgresRenderedConfiguration),
+            runtime: {
+              ...structuredClone(postgresRenderedConfiguration.runtime),
+              image: "vaultwarden/server:1.32.7-alpine",
+              internalPort: 80,
+              strategy: "stop_first",
+              mounts: [
+                {
+                  source: "vaultwarden-0123456789abcdef-data",
+                  target: "/data",
+                  ownership: "managed",
+                },
+              ],
+            },
+            variables: [
+              { name: "DOMAIN", sensitivity: "plain", scopes: ["runtime"], value: `https://${hostname}` },
+              { name: "SIGNUPS_ALLOWED", sensitivity: "plain", scopes: ["runtime"], value: "false" },
+              {
+                name: "ADMIN_TOKEN",
+                sensitivity: "secret",
+                scopes: ["runtime"],
+                required: true,
+                generate: 48,
+              },
+            ],
+            dependencies: [
+              {
+                kind: "storage",
+                ownership: "managed",
+                resourceKind: "docker_volume",
+                resourceId: "vaultwarden-0123456789abcdef-data",
+                config: { purpose: "Everything this vault holds", data: true, backup: true },
+              },
+            ],
+            checks: [
+              {
+                name: "Vault answers",
+                kind: "http",
+                phase: "readiness",
+                required: true,
+                config: { path: "/alive", attempts: 30, intervalSeconds: 2, timeoutSeconds: 10 },
+              },
+            ],
+            domains: [{ hostname, https: true, ownership: "managed" }],
+          },
+          detection: {
+            source: {
+              kind: "blueprint",
+              repository: "docker.io/vaultwarden/server:1.32.7-alpine",
+              ref: "vaultwarden@1.0.0",
+              revision: `sha256:${"e".repeat(64)}`,
+              digest: `sha256:${"f".repeat(64)}`,
+              platforms: ["linux/amd64"],
+            },
+            candidates: [
+              {
+                id: "vaultwarden",
+                name: "Vaultwarden",
+                root: "",
+                profile: "web",
+                buildMethod: "image",
+                confidence: "high",
+                port: 80,
+                evidence: [
+                  { path: "vaultwarden@1.0.0", reason: "reviewed blueprint shipped with this dashboard" },
+                ],
+                needsDecision: [],
+              },
+            ],
+            selectedId: "vaultwarden",
+            scannedFiles: 0,
+            scannedBytes: 0,
+            truncated: false,
+            gitRequirements: { submodules: false, lfs: false },
+          },
+        }
+        return json(route, currentDraft())
       }
       if (source.kind === "blueprint" && source.blueprintId === "postgresql") {
         revision += 1
@@ -1286,7 +1446,9 @@ export async function mockDraftJourney(page: Page) {
             { path: source.image, reason: `registry digest sha256:${"a".repeat(64)}` },
             { path: source.image, reason: "image exposes 8080/tcp" },
           ],
-          needsDecision: ["confirm runtime command, storage, and readiness"],
+          // The exposure answered the only question an image is asked, which is
+          // what detection now reports — so this lands on Review, not step one.
+          needsDecision: [],
         }
         data = {
           ...data,
@@ -1401,6 +1563,9 @@ export async function mockDraftJourney(page: Page) {
     commits: () => commits,
     commitBody: () => commitBody,
     discarded: () => discarded,
+    /** Drafts the server was asked to create — one per press that reached it. */
+    started: () => started,
+    source: () => data.source as Record<string, unknown> | undefined,
     configuration: () => data.configuration as Record<string, unknown> | undefined,
   }
 }

@@ -76,7 +76,33 @@ only renderer/executor/validation authority for their feature.
   project already holds is reported by `GET /deploy/hostname?name=` as `nameTaken` and flagged beside
   the field while it is typed, rather than refused by the schema's UNIQUE constraint at commit after
   the whole setup has been filled in. What detection could not settle for itself (`needsDecision`)
-  is shown on the source row. Deploy saves the configuration, runs
+  is shown on the source row, and it decides which screen the sequence opens on — so a decision is
+  an *unanswered question*, emitted only when the thing it names is genuinely open. A Dockerfile
+  whose single literal `EXPOSE` gave a port, an image whose exposure was read, a Go module (the
+  recipe resolves its own executable and starts the binary it writes, and preflight asks a service
+  for no readiness gate), a Deno project (the port is `Deno.serve`'s own default) and a static site
+  (a marker's root is the directory its files were found in, so the candidate's root *is* the one
+  holding the `index.html`, which is what an empty output directory serves) record evidence instead;
+  a Dockerfile naming no port or several, an image this host holds no copy of, and a Compose file
+  spotted in a Git checkout but never parsed still owe one. Everything else that is open is carried by the plan
+  rather than by prose, which is what lets it open the screen that owns the field: an unset
+  `internalPort` opens the runtime screen (and the port field seeds the readiness check a gated
+  profile needs, the way choosing the type does); a required plan variable with no reference, value
+  or generation — a Compose `${VAR}`, a blueprint input, a duplicated project's copied variable —
+  opens the variables screen with its references fold already open, the same rule preflight refuses
+  at Deploy as `variable_required_*`; and `nameTaken` opens the project screen, so a name a live
+  project already holds is corrected before Deploy rather than by it. Nothing open means Review,
+  with the plan read back and Deploy under it. **Review saves the configuration and runs preflight on
+  arrival**, not under the button: preflight used to run inside the press, so the screen asking "is
+  this right" had checked nothing by the time it was read, its findings landed under a button the
+  reader had already pressed, and the first press of Deploy was really a check. It reads the plan back
+  as what the drawing beside it cannot carry — the mounts kept between rebuilds and their backup
+  coverage, the variables generated on this server and their length, the readiness check's target and
+  budget, and what the cutover strategy costs — plus every preflight `pass` as a checked line, where
+  before only `blocked`, `decision` and `warning` were drawn and a plan with nothing wrong with it
+  showed four facts. A stored result is keyed to the plan it was computed for as well as to the
+  draft, so going back to change the port and returning re-checks rather than reading back what this
+  server agreed to about the previous plan. Deploy then saves the configuration, runs
   preflight, commits, imports the environment text and enqueues the first run; Save only stops after
   the import. The saved draft revision is adopted before preflight, so a failed preflight never
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
@@ -538,6 +564,15 @@ only renderer/executor/validation authority for their feature.
   and CPU from the definition's resources, managed `docker_volume` mounts named
   `<slug>-<hash>-<volume>`, command/HTTP checks with bounded retries, domains — and the configure form offers
   it for review instead of composing a default; the runtime and variable sections open for a blueprint.
+  The template panel answers what it can before the press: a `domain` input arrives filled in with
+  `GET /deploy/hostname`'s suggestion (the same `<slug>.<address>.sslip.io` the public-address field
+  takes, and `Render` turns that input into the plan's own domain, so the two start as one answer —
+  though only as far as the handoff: nothing re-renders a blueprint after detection, so a hostname
+  edited on the runtime screen moves the route and leaves `N8N_HOST` and its like on the old name),
+  and a required input the panel cannot answer is marked and
+  refused there rather than reaching `Render` — which used to refuse `"domain" is required` for the
+  eight definitions that declare one, after a draft had already been created. A press that fails
+  discards the draft it started, so a refused attempt is not an unfinished setup.
   Input values become plain variables through the additive `PlannedVariable.value` field (refused for
   secrets and for anything shaped like a reference); declared secrets become
   `PlannedVariable.generate` (16–128 characters, secret only) and commit produces each value from

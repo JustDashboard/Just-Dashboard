@@ -255,6 +255,30 @@ export function stepAfter(step: ConfigureStepKey) {
 }
 
 /**
+ * Whether the plan's own declared variables are review material.
+ *
+ * Two kinds of variable land in this list and neither can be answered
+ * anywhere else: a blueprint's declared inputs — a generated password, a EULA
+ * acceptance — and the `${VAR}` references a Compose file was read as
+ * needing, which arrive required with nothing in them. Preflight refuses the
+ * second kind at Deploy as `variable_required_*`, so a setup that lands
+ * anywhere but the variables screen is one the reader is sent back from.
+ *
+ * Shared with the variables screen's `referencesOpen`: landing there with the
+ * fold that holds the answer shut is the same defect as not landing there.
+ */
+export function declaredVariablesNeedReview(flow: ConfigureFlow) {
+  const declared = flow.configuration.variables
+  return (
+    (flow.source.mode === "blueprint" && declared.length > 0) ||
+    declared.some(
+      (variable) =>
+        variable.required && !variable.reference && !variable.value && !variable.generate,
+    )
+  )
+}
+
+/**
  * Which of the four screens a freshly inspected source opens on.
  *
  * Splitting one screen into four buys the reader four small questions and
@@ -279,6 +303,10 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
     (candidate?.needsDecision?.length ?? 0) > 0 ||
     Boolean(detection?.unavailable) ||
     !DEPLOYMENT_NAME.test(flow.name) ||
+    // The name was asked about while the source was inspected, so a collision
+    // is known before the first screen is drawn. Without this the reader lands
+    // on Review and is sent back here by the Deploy they just pressed.
+    Boolean(flow.hostname?.nameTaken) ||
     (flow.profile === "static" &&
       configuration.build.method === "recipe" &&
       !configuration.build.outputDirectory?.trim())
@@ -295,7 +323,7 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   // one; and a variable the source was read as needing, with nothing in it,
   // is the one thing nobody else can answer.
   if (
-    (flow.source.mode === "blueprint" && configuration.variables.length > 0) ||
+    declaredVariablesNeedReview(flow) ||
     discoveredEnvironmentRows(candidate).some((row) => row.detected && !row.value)
   )
     return "variables"
@@ -358,9 +386,19 @@ export async function inspectSource(
   source: DeploymentDraftSource,
 ): Promise<InspectOutcome> {
   const created = await createDraft()
-  const named = await saveIntent(created, { name, profile })
-  const sourced = await saveSource(named, source)
-  return detectAndResolve(sourced, profile, source)
+  try {
+    const named = await saveIntent(created, { name, profile })
+    const sourced = await saveSource(named, source)
+    return await detectAndResolve(sourced, profile, source)
+  } catch (error) {
+    // The draft exists from the first of those four requests, so a source that
+    // cannot be read left one behind on every attempt — a repository URL typed
+    // with a typo, a blueprint missing a required input — and three tries at
+    // the same thing read as three pieces of unfinished work in the resume
+    // list. A press that did not work is not an unfinished setup.
+    await discardAbandoned(created.id)
+    throw error
+  }
 }
 
 /** Changing the branch, or a blueprint input: re-save the source, re-detect. */

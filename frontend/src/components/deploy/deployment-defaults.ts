@@ -255,9 +255,12 @@ export function defaultConfiguration(
     (source?.kind === "image" ? "image" : source?.kind === "compose" ? "compose" : "none")
   const packagedStatic =
     method === "static" || (method === "recipe" && !!candidate?.outputDirectory)
-  const port = packagedStatic
-    ? 80
-    : (candidate?.port ?? (game ? 25565 : profile === "web" ? 3000 : 0))
+  // A port the source did not name is an unanswered question, not a 3000 to
+  // assume: `Port` is `omitempty`, so an undetected one arrives as undefined,
+  // and every recipe framework already supplies its own default. Inventing
+  // one here let a Dockerfile with no EXPOSE reach Review with a readiness
+  // check built on a port nothing listens to.
+  const port = packagedStatic ? 80 : (candidate?.port ?? (game ? 25565 : 0))
   const composeVariables = detection?.compose?.variables ?? []
   return {
     build: {
@@ -355,6 +358,27 @@ export function defaultChecks(
       },
     ]
   return []
+}
+
+/**
+ * The checks a plan carries once its profile and its port are both known.
+ *
+ * Preflight only allows candidate-first activation, and only requires a
+ * readiness gate, for a web or static workload — so the moment one of those
+ * has a port it also needs something verifying it. Two controls answer half
+ * of that question each: the type Select and the port field. Only the first
+ * used to add the check, so a plan that got its port from the second reached
+ * Deploy with `readiness_missing` standing over a control nobody had touched.
+ */
+export function checksForRuntime(
+  checks: DeploymentConfiguration["checks"],
+  profile: WorkloadProfile,
+  port: number,
+): DeploymentConfiguration["checks"] {
+  if (profile === "worker") return checks.filter((check) => check.phase !== "readiness")
+  const gated = profile === "web" || profile === "static"
+  if (!gated || port <= 0 || checks.some((check) => check.phase === "readiness")) return checks
+  return [...checks, ...defaultChecks(profile, port)]
 }
 
 /**

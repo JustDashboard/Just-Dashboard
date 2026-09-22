@@ -2,7 +2,7 @@
 
 import { Disclosure, Field, FormSection } from "@/components/form"
 import { Input } from "@/components/ui/input"
-import type { WizardErrors } from "@/components/deploy/deployment-defaults"
+import { checksForRuntime, type WizardErrors } from "@/components/deploy/deployment-defaults"
 import {
   ContainerAccess,
   HealthChecks,
@@ -111,12 +111,14 @@ export function StepRuntime({
               min={0}
               max={65535}
               value={runtime.internalPort ?? 0}
-              onChange={(event) =>
+              onChange={(event) => {
+                const internalPort = Number(event.target.value) || 0
                 setConfiguration({
                   ...configuration,
-                  runtime: { ...runtime, internalPort: Number(event.target.value) || 0 },
+                  runtime: { ...runtime, internalPort },
+                  checks: checksForRuntime(configuration.checks, flow.profile, internalPort),
                 })
-              }
+              }}
               className="font-mono"
             />
           </Field>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { ArrowUpRight, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
@@ -13,6 +13,7 @@ import type {
   BlueprintInput,
   BlueprintSummary,
   DeploymentDraftSource,
+  DeploymentHostnameSuggestion,
   GameImportPreview,
   GameVersionList,
   WorkloadProfile,
@@ -100,15 +101,95 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
     setSelectedId(entry.id)
     setInputs({})
     setShowAdvanced(false)
+    setAttempted(false)
   }
 
   const declared = definition?.inputs ?? []
-  const basic = declared.filter((input) => !input.advanced)
-  const advanced = declared.filter((input) => input.advanced)
+  // A field that must be filled is never behind a fold. Everything else about
+  // `advanced` holds; what does not hold is hiding the one answer without
+  // which the template cannot be used at all.
+  const basic = declared.filter((input) => !input.advanced || input.required)
+  const advanced = declared.filter((input) => input.advanced && !input.required)
   const blocked = definition?.deploymentSupported === false
+
+  /**
+   * The public name this template's own application will be told it answers
+   * to — asked for under the name the project is about to be created with,
+   * which is the same question the public-address field asks later.
+   *
+   * Eight of the reviewed definitions declare a required `domain`: n8n writes
+   * it into every webhook URL, Vaultwarden into its WebAuthn origin, Nextcloud
+   * refuses any other host. That is a real requirement of those applications
+   * and not something the dashboard invented — but nobody's first server owns
+   * a domain, and the answer already exists: `/deploy/hostname` returns a
+   * `<slug>.<address>.sslip.io` name that resolves to this host with no record
+   * to create. A `domain` input *is* the plan's domain — `Render` puts it in
+   * `plan.Domains` — so filling it in here is the same act as setting the
+   * route, and the application's idea of its URL cannot drift from the route
+   * that serves it.
+   */
+  const wantsDomain = declared.some((input) => input.kind === "domain")
+  const projectName = definition ? deploymentName(definition.name) : ""
+  const suggestion = usePoll(
+    (signal) =>
+      get<DeploymentHostnameSuggestion>(
+        `/deploy/hostname?name=${encodeURIComponent(projectName)}`,
+        undefined,
+        signal,
+      ),
+    0,
+    [projectName],
+    { enabled: wantsDomain && Boolean(projectName) },
+  )
+  const suggested =
+    suggestion.data && suggestion.data.method !== "none" ? suggestion.data.hostname : undefined
+  useEffect(() => {
+    if (!definition || !suggested) return
+    setInputs((current) => {
+      // Keyed on presence, not on emptiness: a domain the operator cleared on
+      // purpose stays cleared rather than being filled in again under them.
+      const seeded = { ...current }
+      let changed = false
+      for (const input of definition.inputs ?? []) {
+        if (input.kind !== "domain" || input.default || input.name in seeded) continue
+        seeded[input.name] = suggested
+        changed = true
+      }
+      return changed ? seeded : current
+    })
+  }, [definition, suggested, setInputs])
+
+  /**
+   * What the reviewed definition will refuse, asked here instead.
+   *
+   * `Render` rejects a missing required input with `"domain" is required` —
+   * after the draft has been created, named and saved, and phrased as the
+   * server's own field name. The same rule, run before the press, names the
+   * field the reader is looking at and costs nothing.
+   */
+  const [attempted, setAttempted] = useState(false)
+  const missing = declared.filter((input) =>
+    !input.required
+      ? false
+      : input.kind === "accept"
+        ? inputs[input.name] !== "true"
+        : !(inputs[input.name] ?? input.default ?? "").trim(),
+  )
+  const missingNames = new Set(missing.map((input) => input.name))
 
   const use = async () => {
     if (!definition || blocked || busy) return
+    setAttempted(true)
+    if (missing.length > 0) {
+      setFailure(
+        new Error(
+          `${missing.map((input) => input.label).join(", ")} ${
+            missing.length === 1 ? "is" : "are"
+          } needed before ${definition.name} can be used.`,
+        ),
+      )
+      return
+    }
     setBusy(true)
     setFailure(undefined)
     try {
@@ -317,6 +398,8 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                 key={input.name}
                 input={input}
                 value={inputs[input.name] ?? input.default ?? ""}
+                missing={attempted && missingNames.has(input.name)}
+                suggested={input.kind === "domain" ? suggestion.data : undefined}
                 onChange={(value) => setInputs((current) => ({ ...current, [input.name]: value }))}
               />
             ))}
@@ -337,6 +420,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                   key={input.name}
                   input={input}
                   value={inputs[input.name] ?? input.default ?? ""}
+                  missing={attempted && missingNames.has(input.name)}
                   onChange={(value) =>
                     setInputs((current) => ({ ...current, [input.name]: value }))
                   }
@@ -377,10 +461,16 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
 function BlueprintField({
   input,
   value,
+  missing,
+  suggested,
   onChange,
 }: {
   input: BlueprintInput
   value: string
+  /** The definition requires this and it is empty, and Use has been pressed. */
+  missing?: boolean
+  /** Where a pre-filled hostname came from, so the field can say so. */
+  suggested?: DeploymentHostnameSuggestion
   onChange: (value: string) => void
 }) {
   const id = `blueprint-${input.name}`
@@ -407,12 +497,31 @@ function BlueprintField({
               Read the agreement <ArrowUpRight className="size-3" />
             </Link>
           )}
+          {missing && (
+            <span role="alert" className="block text-destructive">
+              This has to be accepted before the template can be used.
+            </span>
+          )}
         </span>
       </Label>
     )
   }
   return (
-    <Field label={input.label} htmlFor={id} hint={input.description}>
+    <Field
+      label={input.label}
+      htmlFor={id}
+      hint={
+        suggested && value === suggested.hostname && suggested.method === "sslip"
+          ? `${suggested.detail} Replace it with your own domain if you have one.`
+          : input.description
+      }
+      error={missing ? "Required." : undefined}
+      trailing={
+        input.required && (
+          <span className="text-hint text-muted-foreground">Required</span>
+        )
+      }
+    >
       {input.kind === "boolean" ? (
         <div className="flex min-h-9 items-center gap-2">
           <Switch

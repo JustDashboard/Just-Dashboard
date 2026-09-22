@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Disclosure } from "@/components/form"
 import { VariableReferences } from "@/components/deploy/new-project/configure-advanced"
 import { EnvironmentEditor } from "@/components/deploy/new-project/environment-editor"
@@ -43,6 +44,12 @@ export function StepVariables({
   const setConfiguration = (next: typeof configuration) =>
     onFlowChange({ ...flow, configuration: next })
   const declared = configuration.variables.length
+  // Seeded once, the way the build fold's own state is: the fold opens for the
+  // same reason the sequence landed on this screen, and the first character
+  // typed into the last empty reference answers that reason. Read on every
+  // render it would shut itself under the reader's hands mid-word, because
+  // `open` on a `<details>` is written again whenever the prop changes.
+  const [openOnArrival] = useState(referencesOpen)
 
   return (
     <>
@@ -90,7 +97,7 @@ export function StepVariables({
             ? `${declared} declared by the plan`
             : "Plan-declared names, not literal secrets"
         }
-        open={referencesOpen}
+        open={openOnArrival}
       >
         <VariableReferences configuration={configuration} onChange={setConfiguration} />
       </Disclosure>

@@ -50,16 +50,16 @@ test("an image can be called a web application, which earns it a health gate and
     .fill("ghcr.io/acme/app:1")
   await page.getByRole("button", { name: "Continue", exact: true }).click()
 
-  // A registry manifest that could not answer everything is a question for the
-  // operator, so an image opens on the first screen rather than on Review.
-  await expect(
-    page.getByRole("heading", { level: 1, name: "What are you building?" }),
-  ).toBeVisible()
-  await expect(page.getByText("Confirm runtime command, storage, and readiness")).toBeVisible()
+  // The port the image exposes answers the only question an image is asked, so
+  // it opens on Review with the plan read back — the two-press import, for an
+  // image. Calling it a web application is a correction, which is what the
+  // earlier screens are for.
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
 
   const plan = page.getByRole("list", { name: "What this setup will create" })
   await expect(plan.getByText("Port 8080 · stop first")).toBeVisible()
 
+  await gotoStep(page, "project")
   await page.getByRole("combobox", { name: "Project type" }).click()
   await page.getByRole("option", { name: "Web application" }).click()
 
