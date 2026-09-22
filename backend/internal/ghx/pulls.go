@@ -46,6 +46,8 @@ type PullRequest struct {
 	Deletions int    `json:"deletions,omitempty"`
 	Files     int    `json:"files,omitempty"`
 	Body      string `json:"body,omitempty"`
+	HeadSHA   string `json:"headSha,omitempty"`
+	BaseSHA   string `json:"baseSha,omitempty"`
 }
 
 // pullFields is what `gh pr list` and `gh pr view` are asked for. The review
@@ -78,6 +80,8 @@ type ghPull struct {
 	Deletions    int    `json:"deletions"`
 	ChangedFiles int    `json:"changedFiles"`
 	Body         string `json:"body"`
+	HeadSHA      string `json:"headRefOid"`
+	BaseSHA      string `json:"baseRefOid"`
 }
 
 func (p ghPull) pullRequest() PullRequest {
@@ -88,6 +92,7 @@ func (p ghPull) pullRequest() PullRequest {
 		Review:    strings.ToLower(p.ReviewDecision),
 		Mergeable: strings.ToLower(p.Mergeable),
 		Additions: p.Additions, Deletions: p.Deletions, Files: p.ChangedFiles, Body: p.Body,
+		HeadSHA: p.HeadSHA, BaseSHA: p.BaseSHA,
 	}
 	// The rollup mixes two shapes — a status context carries `state`, a check
 	// run carries `status` and `conclusion` — and one failure outranks any
@@ -192,7 +197,7 @@ func (s *Service) ViewPull(ctx context.Context, dir string, number int) (*PullRe
 		return nil, fmt.Errorf("a pull request number is required")
 	}
 	out, err := s.run(ctx, dir, "", "pr", "view", fmt.Sprint(number),
-		"--json", pullFields+",mergeable,additions,deletions,changedFiles,body")
+		"--json", pullFields+",mergeable,additions,deletions,changedFiles,body,headRefOid,baseRefOid")
 	if err != nil {
 		return nil, ghErr("read the pull request", out)
 	}

@@ -45,7 +45,11 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/branches", s.handle(s.handleGitHubBranches))
 		r.Method(http.MethodGet, "/pulls", s.handle(s.handleGitHubPulls))
 		r.Method(http.MethodGet, "/pulls/{number}", s.handle(s.handleGitHubPull))
+		r.Method(http.MethodGet, "/pulls/{number}/files", s.handle(s.handleGitHubPullFiles))
+		r.Method(http.MethodGet, "/pulls/{number}/conversation", s.handle(s.handleGitHubConversation))
 		r.Method(http.MethodGet, "/runs", s.handle(s.handleGitHubRuns))
+		r.Method(http.MethodGet, "/runs/{id}", s.handle(s.handleGitHubRun))
+		r.Method(http.MethodGet, "/runs/{id}/log", s.handle(s.handleGitHubRunLog))
 		// A picture rather than a reading, and read straight from GitHub
 		// rather than through gh: every surface that names an identity draws
 		// it, including the ones that have no checkout and no sign-in.
@@ -54,6 +58,7 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/pulls", s.handle(s.handleGitHubPullCreate))
+			r.Method(http.MethodPost, "/pulls/{number}/review", s.handle(s.handleGitHubReview))
 			// Merging changes the base branch on GitHub and checking out
 			// fetches somebody else's branch into this working tree: both
 			// are recoverable — a merge is reverted, a checkout switched

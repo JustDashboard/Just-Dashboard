@@ -42,7 +42,8 @@ var (
 const DefaultHost = "github.com"
 
 type Service struct {
-	http *http.Client
+	http    *http.Client
+	command func(context.Context, string, string, ...string) (string, error)
 
 	mu       sync.Mutex
 	flows    map[string]*deviceFlow
@@ -64,6 +65,9 @@ func New() *Service {
 // credential helper naming a path — none of which the account that owns the
 // repository, and therefore runs the push, can use.
 func (s *Service) Available() bool {
+	if s.command != nil {
+		return true
+	}
 	_, err := exec.LookPath("gh")
 	return err == nil
 }
@@ -395,6 +399,9 @@ func (s *Service) git(ctx context.Context, dir string, args ...string) (string, 
 // answer one, and the failure mode of an unanswered prompt is a subprocess
 // that hangs until the context expires rather than an error anybody can read.
 func (s *Service) run(ctx context.Context, dir, stdin string, args ...string) (string, error) {
+	if s.command != nil {
+		return s.command(ctx, dir, stdin, args...)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
@@ -412,8 +419,13 @@ func (s *Service) run(ctx context.Context, dir, stdin string, args ...string) (s
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	var out boundedOutput
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err := cmd.Run()
+	if out.overflow {
+		return "GitHub response exceeds 8 MiB; open it on GitHub to read the complete output", fmt.Errorf("GitHub response too large")
+	}
+	return out.String(), err
 }
 
 func ownerName(dir string) string {
