@@ -238,8 +238,6 @@ test("a finding whose remedy is inside Advanced opens it instead of pointing at 
   // Preflight is the Review screen's own step now, so the findings arrive on
   // the screen that asked whether the plan was right.
   await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-  await page.getByRole("button", { name: "Deploy", exact: true }).click()
-
   await expect(page.getByText("More than one lockfile")).toBeVisible()
 
   // A finding whose owner is another feature offers that page rather than a

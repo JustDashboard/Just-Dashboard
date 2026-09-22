@@ -145,13 +145,15 @@ test.describe("A stage that fails /preflight", () => {
     await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
     const deploy = page.getByRole("button", { name: "Deploy", exact: true })
 
-    // First press: the save succeeds (revision 5 -> 6) but preflight 500s.
-    await deploy.click()
+    // Arriving checks the plan: the save succeeds (revision 5 -> 6) but
+    // preflight 500s — and a failed check is not asked again on its own.
     await expect(page.getByText("preflight exploded")).toBeVisible()
+    await page.waitForTimeout(500)
     expect(saveCount).toBe(1)
+    expect(preflightCount).toBe(1)
 
-    // Second press must save with the revision the first save already
-    // produced, not the one the draft opened with — otherwise this 409s.
+    // Deploy must save with the revision the failed check already produced,
+    // not the one the draft opened with — otherwise this 409s.
     await deploy.click()
     await page.waitForURL(/\/deploy\/501\/runs\/999$/)
     expect(saveCount).toBe(2)

@@ -102,7 +102,8 @@ only renderer/executor/validation authority for their feature.
   before only `blocked`, `decision` and `warning` were drawn and a plan with nothing wrong with it
   showed four facts. A stored result is keyed to the plan it was computed for as well as to the
   draft, so going back to change the port and returning re-checks rather than reading back what this
-  server agreed to about the previous plan. Deploy then saves the configuration, runs
+  server agreed to about the previous plan. The arrival check runs once per plan: a check that fails
+  is shown and not retried on its own, and Deploy is the retry. Deploy then saves the configuration, runs
   preflight, commits, imports the environment text and enqueues the first run; Save only stops after
   the import. The saved draft revision is adopted before preflight, so a failed preflight never
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a

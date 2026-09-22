@@ -587,18 +587,29 @@ export function Configure({
    * the previous plan. `submit` runs the three step gates first, so an arrival
    * carrying an unanswered field is still sent to the screen that owns it —
    * and that changes `current`, which is what stops this from firing again.
+   *
+   * A check that fails leaves `preflight` empty and clears `busy`, which is
+   * every condition above, so on its own this would save and ask again at
+   * once — a revision a pass, for as long as preflight kept failing. It asks
+   * once per plan; after a failure, Deploy is the retry.
    */
+  const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
+    const plan = `${draftId}:${planSignature}`
     if (current !== "review" || preflight || busy || created) return
+    if (autoChecked.current === plan) return
     // Scheduled rather than called: `submit` raises the busy flag as its first
     // act, and a state write in an effect's own body is a cascading render.
     // The cleanup drops a check nobody is waiting for any more.
-    const timer = setTimeout(() => void submit("check"), 0)
+    const timer = setTimeout(() => {
+      autoChecked.current = plan
+      void submit("check")
+    }, 0)
     return () => clearTimeout(timer)
     // `submit` closes over the whole form; re-running this for each of those
     // is what the `preflight` guard is there to make unnecessary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, preflight, busy, created])
+  }, [current, preflight, busy, created, draftId, planSignature])
 
   if (created)
     return (
