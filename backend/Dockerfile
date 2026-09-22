@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       tzdata \
       git \
+      git-lfs \
       openssh-client \
       systemd \
       tmux \

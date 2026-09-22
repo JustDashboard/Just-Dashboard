@@ -35,6 +35,18 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/log", s.handle(s.handleGitLog))
 		r.Method(http.MethodGet, "/commit", s.handle(s.handleGitCommit))
 		r.Method(http.MethodGet, "/compare", s.handle(s.handleGitCompare))
+		r.Method(http.MethodGet, "/compare/diff", s.handle(s.handleGitCompareDiff))
+		r.Method(http.MethodGet, "/reflog", s.handle(s.handleGitReflog))
+		r.Method(http.MethodGet, "/blame", s.handle(s.handleGitBlame))
+		r.Method(http.MethodGet, "/signature", s.handle(s.handleGitSignature))
+		r.Method(http.MethodGet, "/worktrees", s.handle(s.handleGitWorktrees))
+		r.Method(http.MethodGet, "/conflict", s.handle(s.handleGitConflict))
+		r.Method(http.MethodGet, "/patch", s.handle(s.handleGitPartialDiff))
+		r.Method(http.MethodGet, "/rebase/plan", s.handle(s.handleGitRebasePlan))
+		r.Method(http.MethodGet, "/submodules", s.handle(s.handleGitSubmodules))
+		r.Method(http.MethodGet, "/lfs", s.handle(s.handleGitLFS))
+		r.Method(http.MethodGet, "/patch/export", s.handle(s.handleGitPatchExport))
+		r.Method(http.MethodPost, "/patch/check", s.handle(s.handleGitPatchCheck))
 		r.Method(http.MethodGet, "/branches", s.handle(s.handleGitBranches))
 		r.Method(http.MethodGet, "/tags", s.handle(s.handleGitTags))
 		r.Method(http.MethodGet, "/stashes", s.handle(s.handleGitStashes))
@@ -72,12 +84,29 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/commit", s.handle(s.handleGitCommitCreate))
 			r.Method(http.MethodPost, "/identity", s.handle(s.handleGitIdentity))
 			r.Method(http.MethodPost, "/remote", s.handle(s.handleGitRemoteAdd))
+			r.Method(http.MethodPost, "/remote/update", s.handle(s.handleGitRemoteUpdate))
+			r.Method(http.MethodPost, "/upstream", s.handle(s.handleGitUpstream))
+			r.Method(http.MethodPost, "/recover", s.handle(s.handleGitRecover))
+			r.Method(http.MethodPost, "/worktree", s.handle(s.handleGitWorktreeAdd))
+			r.Method(http.MethodPost, "/operation/start", s.handle(s.handleGitOperationStart))
+			r.Method(http.MethodPost, "/operation/continue", s.handle(s.handleGitOperationContinue))
+			r.Method(http.MethodPost, "/patch/stage", s.handle(s.handleGitStagePartial))
+			r.Method(http.MethodPost, "/rebase", s.handle(s.handleGitRebase))
+			r.Method(http.MethodPost, "/submodule", s.handle(s.handleGitSubmodule))
+			r.With(httpx.RequireCapability(auth.CapFileWrite)).Method(http.MethodPost, "/lfs", s.handle(s.handleGitLFSAction))
+			r.With(httpx.RequireCapability(auth.CapFileWrite)).Method(http.MethodPost, "/patch/import", s.handle(s.handleGitPatchImport))
+			r.With(httpx.RequireCapability(auth.CapFileWrite)).Method(http.MethodPost, "/conflict/resolve", s.handle(s.handleGitConflictResolve))
 		})
 
 		// Signing in to GitHub, and the operations git has no verb for.
 		s.mountGitHubRoutes(r)
+		s.mountForgeRoutes(r)
 
 		s.destructive(r, func(r chi.Router) {
+			r.Method(http.MethodPost, "/submodule/remove", s.handle(s.handleGitSubmoduleRemove))
+			r.Method(http.MethodPost, "/worktree/remove", s.handle(s.handleGitWorktreeRemove))
+			r.Method(http.MethodPost, "/operation/abort", s.handle(s.handleGitOperationAbort))
+			r.Method(http.MethodPost, "/conflict/choose", s.handle(s.handleGitConflictChoose))
 			r.Method(http.MethodPost, "/discard", s.handle(s.handleGitDiscard))
 			r.Method(http.MethodPost, "/reset", s.handle(s.handleGitReset))
 			r.Method(http.MethodPost, "/stash/drop", s.handle(s.handleGitStashDrop))
@@ -322,7 +351,11 @@ func (s *Server) handleGitGraph(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	graph, err := s.modules.git.Graph(r.Context(), path, limit)
+	q := r.URL.Query()
+	skip, _ := strconv.Atoi(q.Get("skip"))
+	graph, err := s.modules.git.GraphPage(r.Context(), path, gitx.GraphQuery{
+		Limit: limit, Skip: skip, Search: q.Get("search"), Ref: q.Get("ref"),
+	})
 	if err != nil {
 		return gitErr(err)
 	}
@@ -361,6 +394,8 @@ func (s *Server) gitAction(w http.ResponseWriter, r *http.Request, action string
 func (s *Server) gitActionAt(w http.ResponseWriter, r *http.Request, action, path string,
 	fn func(path string) (*gitx.Result, error),
 ) error {
+	unlock := s.modules.git.Lock(path)
+	defer unlock()
 	res, err := fn(path)
 	httpx.SetAudit(r, "git."+action, path, map[string]any{"ok": err == nil})
 	if err != nil {
@@ -379,6 +414,7 @@ type gitCloneRequest struct {
 	URL    string `json:"url"`
 	Parent string `json:"parent"`
 	Name   string `json:"name"`
+	gitx.CloneOptions
 }
 
 // handleGitClone gets a repository onto this server. The parent directory is
@@ -397,7 +433,7 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) error {
 	// answering before the files exist.
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
 	defer cancel()
-	target, res, err := s.modules.git.Clone(ctx, req.Parent, req.URL, req.Name)
+	target, res, err := s.modules.git.CloneWithOptions(ctx, req.Parent, req.URL, req.Name, req.CloneOptions)
 	httpx.SetAudit(r, "git.clone", req.Parent, map[string]any{"ok": err == nil, "url": req.URL, "name": req.Name})
 	if err != nil {
 		if res != nil {

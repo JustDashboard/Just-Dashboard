@@ -267,6 +267,14 @@ func (s *Service) changedFiles(ctx context.Context, path string, c Commit) ([]Ch
 	if err != nil {
 		return nil, err
 	}
+	numOut, err := s.run(ctx, path, base("--numstat")...)
+	if err != nil {
+		return nil, err
+	}
+	return parseChangedFiles(statusOut, numOut), nil
+}
+
+func parseChangedFiles(statusOut, numOut string) []ChangedFile {
 	files := []ChangedFile{}
 	fields := strings.Split(statusOut, "\x00")
 	for i := 0; i+1 < len(fields); i++ {
@@ -289,10 +297,6 @@ func (s *Service) changedFiles(ctx context.Context, path string, c Commit) ([]Ch
 			}
 		}
 		files = append(files, f)
-	}
-	numOut, err := s.run(ctx, path, base("--numstat")...)
-	if err != nil {
-		return files, nil //nolint:nilerr // counts are an annotation; the list stands without them
 	}
 	counts := map[string]ChangedFile{}
 	nf := strings.Split(numOut, "\x00")
@@ -320,20 +324,23 @@ func (s *Service) changedFiles(ctx context.Context, path string, c Commit) ([]Ch
 			files[i].Insertions, files[i].Deletions, files[i].Binary = cf.Insertions, cf.Deletions, cf.Binary
 		}
 	}
-	return files, nil
+	return files
 }
 
 // Comparison is what one branch has that another does not: the commits, and
 // the size of the diff — what a pull request from head into base would carry.
 type Comparison struct {
-	Base       string   `json:"base"`
-	Head       string   `json:"head"`
-	Ahead      int      `json:"ahead"`
-	Behind     int      `json:"behind"`
-	Commits    []Commit `json:"commits"`
-	Files      int      `json:"files"`
-	Insertions int      `json:"insertions"`
-	Deletions  int      `json:"deletions"`
+	Base       string        `json:"base"`
+	Head       string        `json:"head"`
+	Ahead      int           `json:"ahead"`
+	Behind     int           `json:"behind"`
+	Commits    []Commit      `json:"commits"`
+	Files      int           `json:"files"`
+	Insertions int           `json:"insertions"`
+	Deletions  int           `json:"deletions"`
+	BaseSHA    string        `json:"baseSha"`
+	HeadSHA    string        `json:"headSha"`
+	Changes    []ChangedFile `json:"changes"`
 }
 
 // Compare answers "what would merging head into base bring". The two refs
@@ -347,6 +354,16 @@ func (s *Service) Compare(ctx context.Context, path, base, head string) (*Compar
 		return nil, err
 	}
 	cmp := &Comparison{Base: base, Head: head, Commits: []Commit{}}
+	var err error
+	cmp.BaseSHA, err = s.commitID(ctx, path, base)
+	if err != nil {
+		return nil, err
+	}
+	cmp.HeadSHA, err = s.commitID(ctx, path, head)
+	if err != nil {
+		return nil, err
+	}
+	base, head = cmp.BaseSHA, cmp.HeadSHA
 	out, err := s.run(ctx, path, "rev-list", "--left-right", "--count", base+"..."+head, "--")
 	if err != nil {
 		return nil, err
@@ -363,8 +380,19 @@ func (s *Service) Compare(ctx context.Context, path, base, head string) (*Compar
 	cmp.Commits = parseLog(out)
 	// Three dots: the diff from the merge base, which is what the merge
 	// would apply — two dots would also count everything base did since.
-	if out, err := s.run(ctx, path, "diff", "--shortstat", base+"..."+head, "--"); err == nil {
-		cmp.Files, cmp.Insertions, cmp.Deletions = parseShortstat(strings.TrimSpace(out))
+	statusOut, err := s.run(ctx, path, "diff", "--no-ext-diff", "--no-textconv", "-M", "-z", "--name-status", base+"..."+head, "--")
+	if err != nil {
+		return nil, err
+	}
+	numOut, err := s.run(ctx, path, "diff", "--no-ext-diff", "--no-textconv", "-M", "-z", "--numstat", base+"..."+head, "--")
+	if err != nil {
+		return nil, err
+	}
+	cmp.Changes = parseChangedFiles(statusOut, numOut)
+	for _, f := range cmp.Changes {
+		cmp.Files++
+		cmp.Insertions += f.Insertions
+		cmp.Deletions += f.Deletions
 	}
 	return cmp, nil
 }

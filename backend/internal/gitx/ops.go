@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -549,11 +550,25 @@ func validateDirName(name string) error {
 // else here, so the files land owned by the account that owns the place they
 // were put.
 func (s *Service) Clone(ctx context.Context, parent, url, name string) (string, *Result, error) {
+	return s.CloneWithOptions(ctx, parent, url, name, CloneOptions{})
+}
+
+type CloneOptions struct {
+	Branch string   `json:"branch"`
+	Depth  int      `json:"depth"`
+	Sparse []string `json:"sparse"`
+}
+
+func (s *Service) CloneWithOptions(ctx context.Context, parent, url, name string, options CloneOptions) (string, *Result, error) {
 	dir, err := s.ResolveDir(parent)
 	if err != nil {
 		return "", nil, err
 	}
 	if err := ValidateRemoteURL(url); err != nil {
+		return "", nil, err
+	}
+	args, err := cloneArgs(options)
+	if err != nil {
 		return "", nil, err
 	}
 	if name == "" {
@@ -566,11 +581,55 @@ func (s *Service) Clone(ctx context.Context, parent, url, name string) (string, 
 	if _, err := os.Lstat(target); err == nil {
 		return "", nil, fmt.Errorf("%w: %s already exists", ErrInvalidRef, target)
 	}
-	res, err := s.op(ctx, dir, 10*time.Minute, "clone", "--", strings.TrimSpace(url), name)
+	res, err := s.op(ctx, dir, 10*time.Minute, append(args, "--", strings.TrimSpace(url), name)...)
 	if err != nil {
 		return "", res, err
 	}
+	if len(options.Sparse) > 0 {
+		selected, err := s.op(ctx, target, time.Minute, append([]string{"sparse-checkout", "set", "--cone", "--"}, options.Sparse...)...)
+		if err != nil {
+			selected.Output = "Cloned into " + target + ", but could not select the sparse folders:\n" + selected.Output
+			return target, selected, err
+		}
+		res.Output += "\n" + selected.Output
+	}
 	return target, res, nil
+}
+
+func cloneArgs(options CloneOptions) ([]string, error) {
+	args := []string{"clone"}
+	if options.Branch != "" {
+		if err := ValidateRef(options.Branch); err != nil {
+			return nil, err
+		}
+		args = append(args, "--branch", options.Branch)
+	}
+	if options.Depth < 0 || options.Depth > 100000 {
+		return nil, fmt.Errorf("%w: clone depth must be between 0 and 100000", ErrInvalidRef)
+	}
+	if options.Depth > 0 {
+		args = append(args, "--depth", strconv.Itoa(options.Depth))
+	}
+	if len(options.Sparse) > 100 {
+		return nil, fmt.Errorf("%w: at most 100 sparse folders", ErrInvalidRef)
+	}
+	for _, path := range options.Sparse {
+		if err := validatePath(path); err != nil {
+			return nil, err
+		}
+		if path == "." || strings.ContainsAny(path, "\r\n") {
+			return nil, fmt.Errorf("%w: name a repository-relative folder", ErrInvalidRef)
+		}
+		for _, part := range strings.Split(path, "/") {
+			if part == ".git" || part == "" {
+				return nil, fmt.Errorf("%w: invalid sparse folder", ErrInvalidRef)
+			}
+		}
+	}
+	if len(options.Sparse) > 0 {
+		args = append(args, "--sparse", "--filter=blob:none")
+	}
+	return args, nil
 }
 
 // nameFromURL is what git itself would call a clone of this URL: the last

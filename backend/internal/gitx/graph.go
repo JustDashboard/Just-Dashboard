@@ -20,6 +20,15 @@ type GraphCommit struct {
 type Graph struct {
 	Commits []GraphCommit `json:"commits"`
 	Lanes   int           `json:"lanes"`
+	HasMore bool          `json:"hasMore"`
+	Skip    int           `json:"skip"`
+}
+
+type GraphQuery struct {
+	Limit  int
+	Skip   int
+	Search string
+	Ref    string
 }
 
 // Graph reads every local and remote branch tip plus tags and lays their shared
@@ -32,13 +41,28 @@ type Graph struct {
 // a lane is a branch rather than a zigzag. --branches --remotes --tags rather
 // than --all so refs/stash and note refs stay out of it.
 func (s *Service) Graph(ctx context.Context, path string, limit int) (*Graph, error) {
+	return s.GraphPage(ctx, path, GraphQuery{Limit: limit})
+}
+
+func (s *Service) GraphPage(ctx context.Context, path string, q GraphQuery) (*Graph, error) {
+	limit := q.Limit
 	if limit <= 0 || limit > 400 {
 		limit = 200
 	}
-	out, err := s.run(ctx, path,
-		"log", "--branches", "--remotes", "--tags",
-		"--topo-order", "--max-count="+strconv.Itoa(limit),
-		"--pretty=format:"+commitFields, "--")
+	args := []string{"log", "--topo-order", "--max-count=" + strconv.Itoa(limit+1),
+		"--skip=" + strconv.Itoa(max(0, q.Skip)), "--pretty=format:" + commitFields}
+	if q.Search != "" {
+		args = append(args, "--fixed-strings", "--regexp-ignore-case", "--grep="+q.Search)
+	}
+	if q.Ref != "" {
+		if err := ValidateRef(q.Ref); err != nil {
+			return nil, err
+		}
+		args = append(args, q.Ref)
+	} else {
+		args = append(args, "--branches", "--remotes", "--tags")
+	}
+	out, err := s.run(ctx, path, append(args, "--")...)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +72,13 @@ func (s *Service) Graph(ctx context.Context, path string, limit int) (*Graph, er
 			commits = append(commits, c)
 		}
 	}
-	return layoutGraph(commits), nil
+	more := len(commits) > limit
+	if more {
+		commits = commits[:limit]
+	}
+	graph := layoutGraph(commits)
+	graph.HasMore, graph.Skip = more, max(0, q.Skip)
+	return graph, nil
 }
 
 // layoutGraph assigns each commit a lane. It walks the commits newest-first, so
