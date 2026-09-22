@@ -125,6 +125,10 @@ pictures, chmod, search by content, archive and extract. Every path is checked a
 
 Every repository under the configured roots. Stage, commit, push, stash, branch, merge, tag, and
 open pull requests from the page, signed in to GitHub with the same device flow `gh` uses.
+Stage individual lines or chunks, resolve conflicts, compare branches, inspect blame and signatures,
+recover commits, and edit local history with a recovery branch. Worktrees, submodules, Git LFS and
+patch import/export open in the same workspace. Review GitHub pull requests and Actions job logs,
+or connect a GitLab/Gitea token for requests on those providers.
 
 ### Deployments
 

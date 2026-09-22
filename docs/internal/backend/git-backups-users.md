@@ -21,8 +21,8 @@ change lists draw it once each with the letter for that side; the unmerged codes
 `DD`) are read as conflicts rather than as additions ready to commit. The summary names the branch
 through `symbolic-ref`, so a fresh `git init` reads as `main` with no commits rather than as no branch,
 and carries the upstream, whether it is gone, and the staged/untracked/conflict breakdown. Status also
-reports the committer identity git resolves here and any merge, rebase, revert, cherry-pick or bisect a
-shell left half-finished. History takes a limit and a skip for paging, a literal case-insensitive search
+reports the committer identity git resolves here and any merge, rebase, revert, cherry-pick or bisect
+in progress, including operations started by the workspace. History takes a limit and a skip for paging, a literal case-insensitive search
 over messages (`--grep` inside one argument, so a dashed term is a term), an author filter, and a single
 path followed across renames. `Show` reads one commit's record, body and changed files (status letters
 and line counts from two NUL-separated `diff-tree` reads against the first parent, or the empty tree
@@ -38,7 +38,9 @@ configured roots" as honest non-error states.
 All Git subprocesses receive explicit argv and run as the checkout owner through `hostexec.AsOwner`, so a
 web operation does not leave root-owned files. They run with `GIT_OPTIONAL_LOCKS=0`, so a page polling
 `status` never takes `.git/index.lock` from under a commit typed in a terminal, and with `GIT_EDITOR=true`,
-so no operation can open an editor the request cannot drive. Refs reject leading dashes, traversal-like
+so no operation can open an interactive editor. Local rebase instead uses the server's private
+`--git-editor` entrypoint with a validated JSON plan; caller text never becomes an editor command.
+Refs reject leading dashes, traversal-like
 `..`, invalid characters, and `.lock` suffixes (`~` and `^` are allowed, for `HEAD~1`); a working-tree
 path is judged by segment, so `v1..v2.diff` is an ordinary file, and rejects absolute, traversing and
 option-shaped values behind an explicit `--`. A stash is addressed by integer index and the `stash@{N}`
@@ -47,8 +49,9 @@ accept `https://`, `http://`, `ssh://`, `git://` and the scp-like `user@host:pat
 a local path or an option; a clone's directory name is one path segment that is neither hidden nor
 option-shaped. Pull is fast-forward-only; push never forces and establishes a missing upstream on the
 branch's own remote; checkout never forces, and a remote branch is checked out as a new local branch
-that tracks it; merge, revert and cherry-pick run their own `--abort` on failure, so a conflict leaves the
-tree exactly as it was and git's own message says which files clashed; branch deletion defaults to Git's
+that tracks it. The legacy merge, revert and cherry-pick endpoints still abort on failure. The workspace
+uses `/operation/start`, which requires a clean checkout and retains conflicts for the visual resolver,
+`/operation/continue` and typed `/operation/abort`. Branch deletion defaults to Git's
 merged-only mode; stash includes untracked files; discard restores a tracked path from the index and
 deletes an untracked one (`clean -fd`); a hard reset may also clean untracked files; an identity is
 written into the repository's own config; a clone lands only in a new directory under a root, as the
@@ -64,6 +67,14 @@ reflogs/remotes. Every mutation lands in the audit log as `git.<verb>` with the 
 `api/handlers_git_test.go` drives the routes against a real repository and pins the phrase policy and the
 capability tiers. GitHub authentication, pull requests and workflow runs are detailed in
 [`processes-terminal-github.md`](processes-terminal-github.md#github-sign-in).
+
+The expanded reads, mutation capabilities, consistency guards and operational limits are documented in
+[`git-workspace-expansion.md`](git-workspace-expansion.md). Message-only amend uses the existing commit
+endpoint. Branch comparisons now include changed files and frozen base/head SHAs; the diff endpoint uses
+those revisions. Graph search/ref filtering and `skip`/`hasMore` page through older history. Git commands
+receiving file pathspecs treat them literally; this is deliberately not a global environment setting,
+because `git stash` uses its own special pathspecs internally. Dashboard Git mutations are serialized
+per checkout, with Git's native locks still protecting against terminal clients.
 
 ## Backups
 

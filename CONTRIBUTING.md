@@ -78,6 +78,11 @@ carries no licensing question at all.
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`.
+- Git workspace changes also exercise `internal/gitx`, `internal/ghx` and `internal/forgex`, including
+  race checks, plus `git-features.spec.ts`, `git-ui.spec.ts` and `design-system.spec.ts`. The LFS lifecycle
+  test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
+  repository. Provider fixture tests do not publish live comments or reviews. See
+  [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
   Twenty-two fixtures: the locked Node starters, FastAPI, Flask, Django, Streamlit, Gradio, Go, axum,
   Maven, Gradle, ASP.NET Core, Deno, Laravel and plain PHP.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the

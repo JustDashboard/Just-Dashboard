@@ -32,6 +32,8 @@ strategy, and feature ownership behind those rules.
   cron, PTYs, terminal organization, and GitHub device authentication.
 - [`backend/git-backups-users.md`](backend/git-backups-users.md) — Git working copies and mutations,
   backup scheduling/storage/restore, and host accounts/SSH keys.
+- [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
+  partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
 - [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — eight database engines,
   nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent mode, configuration, releases, self-update, and the
   dashboard's own settings (restart, rebuild, rollback, Tailscale certificates).

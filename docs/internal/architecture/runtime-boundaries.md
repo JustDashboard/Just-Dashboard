@@ -5,7 +5,7 @@
 `api.Server` holds config, logger, store, auth service, sealer, audit logger, authenticator, WS
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
-`table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `updates`, `selfUpdate`, `proxy`, `dbs`,
+`table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
 `linuxUsers`, `netsec`, `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
@@ -55,6 +55,12 @@ only bound.
   UID/GID and groups, clear capabilities and set no-new-privileges. PM2 uses this path with a minimal
   environment; a user-owned executable is never run as the dashboard's root identity.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
+
+Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server
+executable with the fixed `--git-editor` mode. Git invokes that fixed command itself; request values
+remain in a validated JSON plan and never enter shell syntax. The helper starts before server flags or
+configuration, accepts only Git's expected metadata targets, and supports no arbitrary command or
+`exec` todo entries. Continue uses the same persisted plan after a conflict or server restart.
 
 `files.Resolve` is the single choke point for client-supplied paths: it checks the cleaned path *and*
 the symlink-resolved path (the nearest existing ancestor for new paths) against `JD_FILE_ROOTS`. Every new

@@ -219,3 +219,15 @@ session.
   `service.control` like every other recoverable git write, and each is audited with the request number.
   `gitConfigured` answers "would a commit and push from this page be this account's" with one dot, and
   knows an **ssh** remote never consults a credential helper.
+- **Reviews stay on the viewed revision.** `/pulls/{number}/files` pages through changed-file patches,
+  checking the head before and after each read. Missing binary/large patches and GitHub's 3,000-file
+  ceiling are explicit. `/conversation` combines issue comments, review summaries and inline comments
+  in pages. `/review` requires `service.control`, a closed review event, and the viewed head SHA; the
+  server verifies that head and sends `commit_id` through `gh api --input -`. Comment text is never an
+  argument or audit field. Enterprise API calls derive their hostname from the authenticated repo URL.
+- **Runs open inside the preview.** `/runs/{id}` returns jobs and steps; `/runs/{id}/log` verifies the
+  selected job/step belongs to that run and reads normal or failed logs through `gh run view`. Step
+  selection uses gh's tab-separated step labels. Missing labels, unavailable/expired logs and responses
+  over 8 MiB produce an explanation and retain the link to GitHub. All gh output is capped at 8 MiB.
+- **GitLab and Gitea** use the separate `forgex` REST adapter and encrypted per-checkout account setup,
+  described in [`git-workspace-expansion.md`](git-workspace-expansion.md#provider-accounts).

@@ -726,6 +726,18 @@ does not extend to the marks a reader is choosing *between*: the five source kin
 stay muted with the current one in `--brand`, because there the colour is saying which one you are
 on (§3), and twenty hues in a row of five would be saying nothing.
 
+**The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
+and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
+near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
+the drawing. `components/git/glyphs.tsx` takes six from Material Design Icons, which is already the
+dependency `files/file-icon.tsx` reaches for wherever Heroicons has nothing to draw. Nothing else is
+imported from MDI there: a glyph that exists in both sets stays Heroicons, or the git pages grow a
+second icon weight. `AuthorMark` in `git/marks.tsx` is the coloured-wayfinding rule again — a column
+of commits where mine and the bot's are two hues is scanned, one where they are the same grey is read
+— on the eight fixed `--tag-*` hues the branch graph gives its lanes, and drawn as a square with a
+3px radius rather than a circle, because a filled 16px round mark with a character in it is the pill
+§4 deleted.
+
 A `Pane`'s chrome strip is the one place a small inline glyph still sits beside a name (the git tools
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip
 is deliberately tighter than a panel's, and the mark there is a bare 14px outline rather than a tinted
@@ -768,6 +780,15 @@ The passes, in order. Each one is a diff you can review on its own.
    A reading is `warning` where the *absence* of an answer is the answer: an uncapped container and
    a port open on every interface are the two facts an operator wants off that page without opening
    a fold.
+
+   **And the one page with no tiles, which is the shape of the argument for dropping this pass.**
+   `/git` had four — repositories, uncommitted, behind, unpushed — and the operator asked for them to
+   go. Nothing was lost, because every one of those numbers already sat on a filter chip under them,
+   and a chip says what is waiting *and* narrows the list to it where a tile could only say it. What
+   the tiles also did — put the urgent thing first — is done by ordering the repository cards
+   worst-first under a *Needs attention* rule. A page may drop this pass when it can name where each
+   figure went and what now does the job the figures were doing; `app/(dashboard)/git/page.tsx`
+   carries that in its doc comment, the way a surviving frame carries its sentence in pass 1.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
