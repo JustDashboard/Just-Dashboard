@@ -67,8 +67,10 @@ for (const admin of [false, true]) {
     await expect(page.getByRole("button", { name: "Create stack", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
+    // A stack is a page of its own, so its controls are checked there.
     await page.getByRole("button", { name: "permission-test", exact: true }).click()
-    const panel = page.getByRole("dialog")
+    await page.waitForURL(/\/docker\/stacks\/permission-test$/)
+    const panel = page.getByRole("main")
     await expect(panel.getByText("worker", { exact: true })).toBeVisible()
     await expect(panel.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(
       admin ? 1 : 0,

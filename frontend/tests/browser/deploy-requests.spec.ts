@@ -13,7 +13,10 @@ import { json, mockProject } from "./deploy-fixture"
  */
 
 test.describe("a deployment's traffic", () => {
-  test.use({ timezoneId: "UTC" })
+  // The readings count up on an overdamped spring that takes seconds to
+  // settle, longer than an assertion waits on a loaded machine; reduced
+  // motion draws the figure itself, which is what these tests read.
+  test.use({ timezoneId: "UTC", contextOptions: { reducedMotion: "reduce" } })
 
   test("the page opens on requests, with the readings that say whether anything is wrong", async ({
     page,

@@ -608,7 +608,11 @@ for (const kind of ["gitlab", "gitea"] as const) {
     await page.goto("/git?repo=%2Fsrv%2Fapp")
     await openAction(page, "GitLab and Gitea")
     await page.getByRole("button", { name: /Review this change/ }).click()
-    await page.getByRole("button", { name: "a.txt", exact: true }).last().click()
+    // The file tree carries an a.txt of its own; wait for the request's before
+    // taking the last one, or the click lands in the tree.
+    const files = page.getByRole("button", { name: "a.txt", exact: true })
+    await expect(files).toHaveCount(2)
+    await files.last().click()
     await expect(page.locator("pre").filter({ hasText: "+provider" })).toBeVisible()
     await page.getByRole("textbox", { name: "Provider comment" }).fill("Provider review")
     await page.getByRole("button", { name: "Publish review", exact: true }).click()

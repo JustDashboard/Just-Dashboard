@@ -372,7 +372,7 @@ test.describe("Databases & backups", () => {
     await expect(page.getByText("Observed · last run success")).toBeVisible()
     await expect(page.getByRole("link", { name: "Open the backup job" })).toHaveAttribute(
       "href",
-      "/backups?job=4",
+      "/backups/4",
     )
   })
 
