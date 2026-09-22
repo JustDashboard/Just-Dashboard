@@ -7,11 +7,16 @@
   "description": "Continuous file synchronisation between devices, peer to peer. The sync protocol is a direct port because devices connect to it, not to a browser.",
   "iconId": "globe",
   "docsUrl": "https://docs.syncthing.net/",
+  "access": {
+    "kind": "unavailable",
+    "note": "Syncthing has no way to be given a web-interface user and password before it starts, and until one is set its interface is a full control surface: any visitor can add their own device, share every synced folder to it, browse the container's filesystem, and set a password that locks the operator out."
+  },
+  "retired": "Retired 2026-09-22. Syncthing offers no environment variable that sets its web interface's user and password, so a one-image deployment cannot be secured before it first answers — and what it answers with is full control of the sync configuration and a filesystem browser. The race between the operator and everyone else is not a first sign-in this catalogue can promise. Syncthing's own sync protocol is unaffected; the interface is the problem.",
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MPL-2.0",
     "upstreamUrl": "https://github.com/syncthing/syncthing",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

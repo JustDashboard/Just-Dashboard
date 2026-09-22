@@ -7,14 +7,18 @@
   "description": "Serves a directory of files over HTTP behind the dashboard's reverse proxy. The usual first thing a new server runs.",
   "iconId": "globe",
   "docsUrl": "https://nginx.org/en/docs/",
+  "access": {
+    "kind": "open",
+    "note": "There is no login and no upload page: anyone who reaches this address can read every file in the site volume, and you add files with the dashboard's file manager, not through the site. A fresh deploy answers with nginx's own \"Welcome to nginx!\" page, because Docker seeds the empty site volume from the image; once you replace it, the site root must still contain an index.html or requests to / answer 403."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "BSD-2-Clause",
     "upstreamUrl": "https://hub.docker.com/_/nginx",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "nginx:1.27-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "image": { "reference": "nginx:1.30-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
   "inputs": [
     {
       "name": "domain",
@@ -37,7 +41,7 @@
   "operations": {
     "stop": [{ "kind": "stop_signal", "signal": "SIGQUIT" }]
   },
-  "update": { "detector": "registry", "notes": "Nginx stable tags move within a minor series for security fixes." },
+  "update": { "detector": "registry", "notes": "Nginx's stable series is the even minor, 1.30 today, and 1.30-alpine moves within it for security fixes." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": { "domain": "site.example.test" }, "digest": "sha256:f43dfbf18908980238aece279bf6a432cb4378e65d15a40c29d9f09e34589523" }]
+  "fixtures": [{ "name": "default", "inputs": { "domain": "site.example.test" }, "digest": "sha256:727b82e0840a6d0659bd099937f0c9218d9eac793cea85c9defba232ddf17647" }]
 }

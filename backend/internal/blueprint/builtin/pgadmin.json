@@ -7,11 +7,17 @@
   "description": "The PostgreSQL administration app. It manages the databases you point it at; the servers it knows are kept in its own volume.",
   "iconId": "database",
   "docsUrl": "https://www.pgadmin.org/docs/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "PGADMIN_DEFAULT_EMAIL",
+    "secretVariable": "PGADMIN_DEFAULT_PASSWORD",
+    "note": "Sign in with the e-mail address you entered here and the generated password shown beside it. The pgAdmin container creates that administrator account itself the first time it starts on an empty data volume; changing either value afterwards does not change the account, you change the password from inside pgAdmin."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "PostgreSQL",
     "upstreamUrl": "https://github.com/pgadmin-org/pgadmin4",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

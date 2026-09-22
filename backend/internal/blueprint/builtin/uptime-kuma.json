@@ -7,14 +7,19 @@
   "description": "Self-hosted uptime monitoring with a web dashboard, notifications and status pages.",
   "iconId": "monitoring",
   "docsUrl": "https://github.com/louislam/uptime-kuma/wiki",
+  "access": {
+    "kind": "setup",
+    "path": "/setup",
+    "note": "Uptime Kuma ships with no accounts and no default password. The first visitor is shown a Create-admin form, and the account it creates owns the server and every monitor. Open the address the moment the deploy finishes — whoever reaches it first becomes the owner."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/louislam/uptime-kuma",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "louislam/uptime-kuma:1.23.16", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "image": { "reference": "louislam/uptime-kuma:2.5.5", "tagPolicy": "pinned", "pullPolicy": "missing" },
   "inputs": [
     { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Where the dashboard will be reachable." }
   ],
@@ -28,8 +33,11 @@
   "checks": [
     { "name": "Dashboard answers", "kind": "http", "phase": "readiness", "required": true, "path": "/", "timeoutSeconds": 60 }
   ],
-  "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
-  "update": { "detector": "registry", "backupFirst": true, "notes": "Uptime Kuma migrates its database on first start after an upgrade." },
+  "operations": {
+    "startup": [{ "kind": "set_variable", "name": "UPTIME_KUMA_DB_TYPE", "value": "sqlite" }],
+    "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }]
+  },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "The 1.x to 2.x migration runs automatically on first start, is one-way, and can take a while on a long history. Back up the data volume first." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": { "domain": "status.example.test" }, "digest": "sha256:e741140fc9dcd18812936f1ef22427ff71acb1aada1962ad4224ca8f67c4c2bb" }]
+  "fixtures": [{ "name": "default", "inputs": { "domain": "status.example.test" }, "digest": "sha256:b16b8e17276e3452d848e83c1f0dba95ac96c0116cbc3672f2d642ecb6a69dc7" }]
 }

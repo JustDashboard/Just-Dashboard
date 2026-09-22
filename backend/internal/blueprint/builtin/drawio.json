@@ -4,14 +4,18 @@
   "name": "draw.io",
   "category": "tool",
   "profile": "tool",
-  "description": "The diagram editor, served from this host so a diagram never has to leave it. Files are saved by the browser, not by this server.",
+  "description": "The diagram editor, served from this host. Files are saved by the browser rather than on the server, though the editor's own export step still posts the diagram to the upstream conversion service.",
   "iconId": "bolt",
   "docsUrl": "https://www.drawio.com/doc/",
+  "access": {
+    "kind": "open",
+    "note": "draw.io has no accounts and no login. The first visit asks where diagrams should be kept — pick Device or Browser, because no cloud service is configured on this deployment — and then offers Create New Diagram; nothing you draw is stored on the server. Anyone who reaches the address also reaches the Tomcat endpoints the editor ships at the same host: /proxy fetches public URLs on the server's behalf, and /export forwards diagram XML to convert.diagrams.net, so keep the domain private if that matters."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/jgraph/docker-drawio",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -24,8 +28,8 @@
       "name": "domain",
       "kind": "domain",
       "label": "Public domain",
-      "required": false,
-      "description": "Optional; the address other people open; nothing else here changes when it does."
+      "required": true,
+      "description": "The address other people open. It is also written into DRAWIO_BASE_URL, so the embed and publish snippets the editor generates point back here rather than at localhost."
     }
   ],
   "ports": [
@@ -54,6 +58,13 @@
     }
   ],
   "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "DRAWIO_BASE_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ],
     "stop": [
       {
         "kind": "stop_signal",
@@ -69,8 +80,8 @@
   "fixtures": [
     {
       "name": "default",
-      "inputs": {},
-      "digest": "sha256:54066f620cc06f432c40a187927e95de08893fb1eef4848152fcf4f7533d4e31"
+      "inputs": { "domain": "diagrams.example.test" },
+      "digest": "sha256:8af0f2ec8bd356e4b798cbb61021516410e876e10a2b1f98c3c5f976bfe8d37b"
     }
   ]
 }

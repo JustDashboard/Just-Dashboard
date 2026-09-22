@@ -4,14 +4,20 @@
   "name": "Directus",
   "category": "http",
   "profile": "web",
-  "description": "A headless CMS and data platform over a database, with a full admin app and REST and GraphQL APIs. Runs on SQLite here; link a PostgreSQL database later for anything larger.",
+  "description": "A headless CMS and data platform over a database, with a full admin app and REST and GraphQL APIs. Runs on SQLite, which is what one image can carry.",
   "iconId": "globe",
   "docsUrl": "https://docs.directus.io/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "ADMIN_EMAIL",
+    "secretVariable": "ADMIN_PASSWORD",
+    "note": "Directus creates the first administrator while it bootstraps the empty SQLite database, so the login screen at https://<domain>/ takes the e-mail you typed here and the generated Admin password — reveal it from the Variables tab. Both values are read only on that very first start; changing them later does nothing to a database that already has users, and a forgotten password can only be reset from the CLI unless you configure e-mail."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "BUSL-1.1",
     "upstreamUrl": "https://github.com/directus/directus",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -94,6 +100,11 @@
     "startup": [
       {
         "kind": "set_variable",
+        "name": "IP_TRUST_PROXY",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
         "name": "PUBLIC_URL",
         "value": "https://{{input.domain}}"
       },
@@ -122,7 +133,7 @@
         "domain": "cms.example.test",
         "admin-email": "admin@example.com"
       },
-      "digest": "sha256:e6107e962f1746cc15e333783a0f2763d17309b7a8e2d5040fc726045c5972cf"
+      "digest": "sha256:45b27b65717f5cc8d56cb9e9b45dfa541360f11ec61040530bd05fa01b07e35b"
     }
   ],
   "secrets": [

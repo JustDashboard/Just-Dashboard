@@ -7,15 +7,19 @@
   "description": "GCHQ's data-transformation workbench: encode, decode, compress, hash and parse, entirely in the browser. Served from here so the page loads on a private network.",
   "iconId": "bolt",
   "docsUrl": "https://gchq.github.io/CyberChef/",
+  "access": {
+    "kind": "open",
+    "note": "CyberChef has no accounts and no login screen: whoever opens this address gets the full workbench immediately. Nothing is stored on the server and every recipe runs in the visitor's own browser, so the exposure is that strangers can use your copy, not that they can read anything you put into it."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/gchq/CyberChef",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
-    "reference": "ghcr.io/gchq/cyberchef:11.4.0",
+    "reference": "ghcr.io/gchq/cyberchef:11.5.0",
     "tagPolicy": "pinned",
     "pullPolicy": "missing"
   },
@@ -70,7 +74,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:230954869193f77fa1478898d468932e34d1567d84de9f169374920ed03c8b8a"
+      "digest": "sha256:aa4f017153640de40fd0b9a086bc1e28fca085de5a9a08b1b2da9ae320729a2b"
     }
   ]
 }

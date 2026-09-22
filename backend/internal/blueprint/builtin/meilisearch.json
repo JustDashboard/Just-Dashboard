@@ -7,11 +7,16 @@
   "description": "A search engine for applications: fast, typo-tolerant, with an API applications call directly. The master key is generated here; derive per-app keys from it inside Meilisearch.",
   "iconId": "database",
   "docsUrl": "https://www.meilisearch.com/docs",
+  "access": {
+    "kind": "client",
+    "secretVariable": "MEILI_MASTER_KEY",
+    "note": "Nothing here signs in through a browser: this blueprint sets MEILI_ENV=production, which switches off Meilisearch's built-in search preview, so the address answers {\"status\":\"Meilisearch is running\"} and nothing else. Applications authenticate by sending the generated master key as an \"Authorization: Bearer <key>\" header — use it once against /keys to mint a narrower key per application."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/meilisearch/meilisearch",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -33,7 +38,7 @@
       "name": "http",
       "internal": 7700,
       "protocol": "tcp",
-      "purpose": "The search API and dashboard",
+      "purpose": "The search API",
       "exposure": "proxy",
       "primary": true
     }
@@ -86,7 +91,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:7e52cc44f595ea99d71c6d14df9b6cf706d3a4afdb84603f3138967cb6d28e86"
+      "digest": "sha256:2eb447b954923185613754630c93688a4d3b9886b2a3b1215ba13e9e52e8c876"
     }
   ],
   "secrets": [

@@ -7,14 +7,18 @@
   "description": "A metrics database that scrapes targets you configure. Its own dashboard is minimal; Grafana is the usual front end.",
   "iconId": "monitoring",
   "docsUrl": "https://prometheus.io/docs/introduction/overview/",
+  "access": {
+    "kind": "open",
+    "note": "Prometheus has no login of its own: anyone who reaches this address can run any PromQL query over everything it has scraped and read its scrape configuration, though they cannot reload it, shut it down or delete series, because it starts without --web.enable-lifecycle and --web.enable-admin-api. Out of the box it scrapes only itself, so add your own targets to prometheus.yml in the config volume and restart."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://hub.docker.com/r/prom/prometheus",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "prom/prometheus:v3.1.0", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "image": { "reference": "prom/prometheus:v3.14.0", "tagPolicy": "pinned", "pullPolicy": "missing" },
   "inputs": [
     { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Prometheus has no authentication of its own. Put it behind the proxy and restrict it." }
   ],
@@ -22,17 +26,15 @@
     { "name": "http", "internal": 9090, "protocol": "tcp", "purpose": "Query interface and API", "exposure": "proxy", "primary": true }
   ],
   "volumes": [
-    { "name": "data", "target": "/prometheus", "purpose": "The time series database", "data": true, "backup": true }
+    { "name": "data", "target": "/prometheus", "purpose": "The time series database", "data": true, "backup": true },
+    { "name": "config", "target": "/etc/prometheus", "purpose": "The scrape configuration, seeded from the image on first start", "data": false, "backup": true }
   ],
   "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
   "checks": [
     { "name": "Answers a health probe", "kind": "http", "phase": "readiness", "required": true, "path": "/-/healthy", "timeoutSeconds": 60 }
   ],
   "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
-  "files": [
-    { "path": "/etc/prometheus/prometheus.yml", "label": "Scrape configuration", "format": "yaml", "restartRequired": true }
-  ],
-  "update": { "detector": "registry", "notes": "Prometheus reads the TSDB written by the previous version." },
+  "update": { "detector": "registry", "notes": "Prometheus reads the TSDB written by the previous version. The scrape configuration lives in the config volume and is edited with the dashboard's file manager; Prometheus reads it once at start, so a change needs a restart." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:fd2acb89efc6677d8d18ef88f284fa5d70042c136eabef40cc6adc42f5f0de1c" }]
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:7a667c811ed01d59f01930cf3e1c75161722cd21258d5b0460fe867ae3521751" }]
 }

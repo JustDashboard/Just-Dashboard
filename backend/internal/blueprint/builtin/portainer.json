@@ -4,14 +4,18 @@
   "name": "Portainer CE",
   "category": "tool",
   "profile": "tool",
-  "description": "A container management interface over the Docker daemon on this host. It needs the Docker socket, which is full control of every container here; the first visit creates the admin account.",
+  "description": "A container management interface over the Docker daemon on this host. It needs the Docker socket, which is full control of every container here; the first visit creates the admin account, and it must happen within five minutes of the container starting.",
   "iconId": "logs",
   "docsUrl": "https://docs.portainer.io/",
+  "access": {
+    "kind": "setup",
+    "note": "Portainer will not create its first administrator without a one-time setup token, which it otherwise prints only into its own container log. This deployment generates it instead: reveal PORTAINER_SETUP_TOKEN from the Variables tab and paste it into the Setup token field, then choose the administrator name and a password of at least twelve characters. Do it within five minutes of the container starting, or Portainer disables initialization and the container has to be restarted before you can try again."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Zlib",
     "upstreamUrl": "https://github.com/portainer/portainer",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -55,6 +59,15 @@
       "readOnly": true
     }
   ],
+  "secrets": [
+    {
+      "name": "setup-token",
+      "variable": "PORTAINER_SETUP_TOKEN",
+      "label": "Setup token",
+      "length": 64,
+      "description": "Portainer asks for this once, on the screen that creates the administrator account. Generated here so it never has to be read out of the container log."
+    }
+  ],
   "resources": {
     "memoryMb": 256,
     "minMemoryMb": 128
@@ -65,7 +78,7 @@
       "kind": "http",
       "phase": "readiness",
       "required": true,
-      "path": "/api/status",
+      "path": "/api/system/status",
       "timeoutSeconds": 60
     }
   ],
@@ -89,7 +102,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:8a79ebb80ace9f4aef3e1c712dc9dd2231668103fc7b32969cec3703d078118c"
+      "digest": "sha256:184e0e4cf495627d5844bf38c8987dabdc13f4fba5a5c35eaa200266ea181d75"
     }
   ]
 }

@@ -7,11 +7,17 @@
   "description": "A web administration interface for MongoDB. Give it the connection string of the database it should manage, and a password of its own.",
   "iconId": "database",
   "docsUrl": "https://github.com/mongo-express/mongo-express#readme",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "ME_CONFIG_BASICAUTH_USERNAME",
+    "secretVariable": "ME_CONFIG_BASICAUTH_PASSWORD",
+    "note": "The browser asks for a name and password before any page loads: the sign-in user you chose here and the generated password beside it. It is a browser prompt rather than a sign-in page, and it covers every path except the health endpoint."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/mongo-express/mongo-express",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

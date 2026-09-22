@@ -7,11 +7,16 @@
   "description": "A web file manager over one directory: upload, download, share links and editing, with its own users. The first admin password is printed in the container's logs on first start.",
   "iconId": "logs",
   "docsUrl": "https://filebrowser.org/",
+  "access": {
+    "kind": "unavailable",
+    "note": "On first start File Browser creates one account called admin and prints its randomly generated password once into the container's own log. There is no environment variable that can set it to a value this dashboard could show you, so the login form it presents cannot be passed without going to read that log."
+  },
+  "retired": "Retired 2026-09-22. Upstream archived the repository with v2.63.23 as the last planned release and no further security fixes, and its own README tells operators not to expose it to the internet without separate authentication in front. Its first password exists only in the container log, and the hashed FB_PASSWORD is not something a generated secret can be — so there is no first sign-in this catalogue can promise.",
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/filebrowser/filebrowser",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

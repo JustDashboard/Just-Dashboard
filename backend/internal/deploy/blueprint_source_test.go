@@ -143,8 +143,12 @@ func TestDatabaseBlueprintsNeverPublishAPortIntoThePlan(t *testing.T) {
 				generated++
 			}
 		}
-		if generated == 0 {
-			t.Fatalf("%s declares no generated credential", id)
+		definition, err := blueprint.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if generated == 0 && definition.Access.Kind != blueprint.AccessOpen {
+			t.Fatalf("%s declares no generated credential and does not say it is open", id)
 		}
 	}
 }
@@ -273,5 +277,80 @@ func TestSecondaryDirectPortsArePublishedNextToTheRoutedPort(t *testing.T) {
 	game := renderGamePlan(t, "solo", map[string]string{"eula": "true"})
 	if game.Configuration.Runtime.HostPort != 25565 || len(game.Configuration.Runtime.Ports) != 0 {
 		t.Fatalf("game runtime = %#v", game.Configuration.Runtime)
+	}
+}
+
+// What `/deploy/new` can answer on the operator's behalf, and what it cannot.
+//
+// The template panel sends the inputs it has: a definition's own defaults, and
+// — for a `domain` input — the hostname `/deploy/hostname` suggests, which
+// resolves to this server with no DNS record to create. Everything else is a
+// value only the operator holds, and the panel marks it Required and refuses
+// the press rather than letting `Render` refuse the draft.
+//
+// Without this, eight reviewed definitions declared a required `domain`, the
+// panel sent none, and choosing n8n, Nextcloud, Vaultwarden, Wallabag, Shlink,
+// Directus, Healthchecks or Gitea ended in `"domain" is required` — the server
+// naming its own field, after a draft had already been created. The live
+// catalogue sweep never saw it because it renders from each definition's
+// fixtures, which supply every input.
+func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
+	t.Parallel()
+	// Deployments that genuinely cannot start without a value nobody but the
+	// operator has. Each entry is a template that costs one typed field, not a
+	// template that is broken — but the list is short on purpose: a new
+	// definition joining it is a new template nobody can deploy in one press.
+	typed := map[string][]string{
+		"mongo-express": {"mongodb-url"},
+		"pgadmin":       {"admin-email"},
+		"directus":      {"admin-email"},
+		"nocodb":        {"admin-email"},
+		"open-webui":    {"admin-email"},
+	}
+	definitions, err := blueprint.Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range definitions {
+		if supported, _ := blueprint.DeploymentSupport(definition); !supported {
+			continue
+		}
+		t.Run(definition.ID, func(t *testing.T) {
+			inputs := map[string]string{}
+			for _, input := range definition.Inputs {
+				if input.Kind == blueprint.InputDomain {
+					inputs[input.Name] = "app-2f9c1a.203-0-113-7.sslip.io"
+				}
+			}
+			for _, name := range typed[definition.ID] {
+				// Stood in for here so the rest of the render is still checked;
+				// the panel asks the operator for exactly these.
+				inputs[name] = "operator@example.com"
+				if name == "mongodb-url" {
+					inputs[name] = "mongodb://root:secret@10.0.0.2:27017/"
+				}
+			}
+			if _, err := RenderBlueprintPlan(DraftSourceConfig{
+				Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+				BlueprintID: definition.ID, BlueprintVersion: definition.Version,
+				BlueprintInputs: inputs,
+			}, definition.Name); err != nil {
+				t.Fatalf("a chosen template refused the page's own inputs: %v", err)
+			}
+			// Anything the page has to ask for must be declared required, which
+			// is what makes it a marked field and a refusal before the press
+			// rather than the server's own error string afterwards.
+			for _, name := range typed[definition.ID] {
+				input, found := "", false
+				for _, declared := range definition.Inputs {
+					if declared.Name == name {
+						input, found = declared.Name, declared.Required
+					}
+				}
+				if input == "" || !found {
+					t.Fatalf("%s must declare %q required so the page can ask for it", definition.ID, name)
+				}
+			}
+		})
 	}
 }

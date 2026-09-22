@@ -6,16 +6,20 @@
   "profile": "web",
   "description": "A hierarchical note-taking application with a tree of notes, scripting and a sync server, kept in one data directory.",
   "iconId": "globe",
-  "docsUrl": "https://github.com/TriliumNext/Notes/wiki",
+  "docsUrl": "https://docs.triliumnotes.org/",
+  "access": {
+    "kind": "setup",
+    "note": "A fresh data directory boots into the setup wizard at the address itself, with no password at all: the first visitor chooses \"new document\" and is then asked to pick one. Open the address yourself the moment it is ready, because until that password is set anyone who can reach it can claim the instance and its knowledge base."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "AGPL-3.0",
-    "upstreamUrl": "https://github.com/TriliumNext/Notes",
-    "reviewedAt": "2026-09-18",
+    "upstreamUrl": "https://github.com/TriliumNext/Trilium",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
-    "reference": "triliumnext/notes:v0.95.0",
+    "reference": "triliumnext/trilium:v0.105.0",
     "tagPolicy": "pinned",
     "pullPolicy": "missing"
   },
@@ -62,6 +66,18 @@
     }
   ],
   "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "TRILIUM_NETWORK_TRUSTEDREVERSEPROXY",
+        "value": "uniquelocal"
+      },
+      {
+        "kind": "set_variable",
+        "name": "TRILIUM_DATA_DIR",
+        "value": "/home/node/trilium-data"
+      }
+    ],
     "stop": [
       {
         "kind": "stop_signal",
@@ -79,7 +95,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:58f0229c4a1b56740c42857a70e4a6f20624cc887bb11444d500564f8634b18e"
+      "digest": "sha256:cdafd882f2b32323adfcacdd63f366db8b93bed9ed31eef22a56c57d957f59b6"
     }
   ]
 }

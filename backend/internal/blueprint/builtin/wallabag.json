@@ -7,11 +7,16 @@
   "description": "A read-it-later service that keeps a clean copy of every saved page. Uses its own SQLite database; the domain is baked into every link it sends, so choose it once.",
   "iconId": "globe",
   "docsUrl": "https://doc.wallabag.org/",
+  "access": {
+    "kind": "unavailable",
+    "note": "The image creates its only account on first start as wallabag / wallabag and offers no environment variable for either half, so the password protecting the deployment is the one documented in its upstream README."
+  },
+  "retired": "Retired 2026-09-22. The image seeds its only account as wallabag / wallabag with no environment variable for either half, so deploying it published a service at the operator's domain whose password is published in its upstream README. The catalogue cannot describe that honestly and cannot fix it.",
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/wallabag/wallabag",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

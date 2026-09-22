@@ -7,20 +7,26 @@
   "description": "A lightweight Bitwarden-compatible password server. Its data volume holds every secret it stores, so backups are not optional.",
   "iconId": "key",
   "docsUrl": "https://github.com/dani-garcia/vaultwarden/wiki",
+  "access": {
+    "kind": "token",
+    "secretVariable": "ADMIN_TOKEN",
+    "path": "/admin",
+    "note": "Vaultwarden starts with no accounts and new sign-ups are off, so sign in at /admin with the generated admin token and invite your own e-mail address from the Users page. No mail server is configured, so the account is created immediately and you set its master password from the register link on the vault's own login page."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "AGPL-3.0",
     "upstreamUrl": "https://github.com/dani-garcia/vaultwarden",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "vaultwarden/server:1.32.7-alpine", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "image": { "reference": "vaultwarden/server:1.37.3-alpine", "tagPolicy": "pinned", "pullPolicy": "missing" },
   "inputs": [
     { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Vaultwarden needs its exact public URL; WebAuthn and app links break without it." },
     { "name": "signups", "kind": "boolean", "label": "Allow new sign-ups", "default": "false", "variable": "SIGNUPS_ALLOWED", "description": "Leave this off and invite users instead, unless the server is not reachable from the internet." }
   ],
   "secrets": [
-    { "name": "admin-token", "variable": "ADMIN_TOKEN", "label": "Admin panel token", "length": 48, "description": "Generated here and never displayed again after you copy it. It unlocks the /admin page." }
+    { "name": "admin-token", "variable": "ADMIN_TOKEN", "label": "Admin panel token", "length": 48, "description": "Reveal it from the Variables tab to open the /admin page, where you invite your own account." }
   ],
   "ports": [
     { "name": "http", "internal": 80, "protocol": "tcp", "purpose": "Web vault and API", "exposure": "proxy", "primary": true }
@@ -38,5 +44,5 @@
   },
   "update": { "detector": "registry", "backupFirst": true, "notes": "Vaultwarden upgrades migrate the database in place; restore needs the pre-update backup." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": { "domain": "vault.example.test" }, "digest": "sha256:5a69f75f15186a3a545e487afd0c8619c63433d107f8f32b7d48aec02bc28cd6" }]
+  "fixtures": [{ "name": "default", "inputs": { "domain": "vault.example.test" }, "digest": "sha256:65a366d6bc322c2805416d807819f1f7ea2ddd54f267d9eae4fca10a1b82d3fa" }]
 }

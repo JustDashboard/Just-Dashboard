@@ -57,6 +57,9 @@ func Validate(blueprint *Blueprint) error {
 	if err := validateProvenance(blueprint.Provenance); err != nil {
 		return fail("%v", err)
 	}
+	if err := validateAccess(blueprint); err != nil {
+		return fail("%v", err)
+	}
 	if err := validateImage(blueprint.Image); err != nil {
 		return fail("%v", err)
 	}
@@ -79,6 +82,9 @@ func Validate(blueprint *Blueprint) error {
 		return fail("%v", err)
 	}
 	if err := validateOperations(blueprint.Operations); err != nil {
+		return fail("%v", err)
+	}
+	if err := validateTemplatedInputs(blueprint); err != nil {
 		return fail("%v", err)
 	}
 	if err := validateFiles(blueprint.Files); err != nil {
@@ -141,6 +147,84 @@ func validateProvenance(provenance Provenance) error {
 	}
 	if !versionRE.MatchString(provenance.MinimumDashboard) {
 		return fmt.Errorf("minimumDashboard %q is not major.minor.patch", provenance.MinimumDashboard)
+	}
+	return nil
+}
+
+// validateAccess enforces the promise the picker makes on every card: that
+// the operator is told, before deploying, how they will get in afterwards. An
+// image that only prints its first password into its own log is an image this
+// catalogue has to give credentials to, not one it may ship with a shrug.
+func validateAccess(blueprint *Blueprint) error {
+	access := blueprint.Access
+	switch access.Kind {
+	case AccessSetup, AccessCredentials, AccessToken, AccessClient, AccessOpen:
+	case AccessUnavailable:
+		// The whole point of the vocabulary. An image whose first password
+		// exists only in its own log, or is the same for everybody, cannot be
+		// offered: there is no sign-in to promise, so the definition is
+		// retired and says so.
+		if strings.TrimSpace(blueprint.Retired) == "" {
+			return errors.New("access.kind \"unavailable\" means the first credential cannot be handed over, so the definition must also be retired")
+		}
+	case "":
+		return errors.New("access.kind is required: every blueprint says how the first sign-in works")
+	default:
+		return fmt.Errorf("access.kind %q is not one of setup, credentials, token, client, open", access.Kind)
+	}
+	if strings.TrimSpace(access.Note) == "" {
+		return errors.New("access.note is required: the sentence the operator reads before deploying")
+	}
+	if access.Path != "" && !strings.HasPrefix(access.Path, "/") {
+		return fmt.Errorf("access.path %q is not an absolute path", access.Path)
+	}
+	secrets := map[string]bool{}
+	for _, secret := range blueprint.Secrets {
+		secrets[secret.Variable] = true
+	}
+	inputVariables := map[string]bool{}
+	for _, input := range blueprint.Inputs {
+		if input.Variable != "" {
+			inputVariables[input.Variable] = true
+		}
+	}
+	if access.SecretVariable != "" && !secrets[access.SecretVariable] {
+		return fmt.Errorf("access names %q as the credential, which is not a generated secret of this blueprint", access.SecretVariable)
+	}
+	if access.UsernameVariable != "" && !inputVariables[access.UsernameVariable] {
+		return fmt.Errorf("access names %q as the account name, which no input writes", access.UsernameVariable)
+	}
+	if access.Username != "" && access.UsernameVariable != "" {
+		return errors.New("access declares both a fixed account name and an input that chooses one")
+	}
+	switch access.Kind {
+	case AccessCredentials:
+		if access.SecretVariable == "" {
+			return errors.New("a credentials sign-in must name the generated secret that is its password")
+		}
+		if access.Username == "" && access.UsernameVariable == "" {
+			return errors.New("a credentials sign-in must name the account the password belongs to")
+		}
+	case AccessToken:
+		if access.SecretVariable == "" {
+			return errors.New("a token sign-in must name the generated secret that is the token")
+		}
+		if access.Username != "" || access.UsernameVariable != "" {
+			return errors.New("a token sign-in has no account name")
+		}
+	case AccessClient:
+		// The kind means "another program connects with the generated
+		// credential". Without one there is no credential to hand over, and
+		// the honest answer is that the workload is open.
+		if access.SecretVariable == "" {
+			return errors.New("a client credential must name the generated secret the connecting program uses")
+		}
+	case AccessSetup, AccessOpen, AccessUnavailable:
+		// Nothing is handed over, so naming a credential here would describe a
+		// sign-in that does not happen.
+		if access.SecretVariable != "" || access.Username != "" || access.UsernameVariable != "" {
+			return fmt.Errorf("a %q sign-in hands over no credential, so it must not name one", access.Kind)
+		}
 	}
 	return nil
 }
@@ -248,6 +332,15 @@ func validateInputs(blueprint *Blueprint) error {
 		case InputAccept:
 			if err := validateHTTPSURL(input.AcceptURL); err != nil {
 				return fmt.Errorf("input %q accepts nothing in particular: %v", input.Name, err)
+			}
+			// Render records an acceptance and moves on, so a variable declared
+			// here is never emitted. Both Minecraft definitions declared EULA
+			// this way and both images exited 1 on every start, because the
+			// agreement the operator had just signed never reached them. An
+			// image that wants the answer as environment takes it from a
+			// startup operation, where it is visible in the rendered plan.
+			if input.Variable != "" {
+				return fmt.Errorf("input %q is an acceptance and cannot become variable %q; set it from a startup operation instead", input.Name, input.Variable)
 			}
 			if input.Default != "" {
 				return fmt.Errorf("input %q pre-accepts an agreement", input.Name)
@@ -522,6 +615,40 @@ func validateOperation(operation Operation) error {
 		}
 	default:
 		return fmt.Errorf("uses unsupported kind %q", operation.Kind)
+	}
+	return nil
+}
+
+// validateTemplatedInputs refuses an operation that templates an input the
+// operator can leave blank.
+//
+// expand substitutes a declared-but-empty input with the empty string and does
+// not complain, so `https://{{input.domain}}` on an optional domain renders the
+// literal "https://" — which Grafana then keeps as its root URL and builds
+// every share link from. An input that steers a variable is an input the
+// blueprint has to insist on, or give a default to.
+func validateTemplatedInputs(blueprint *Blueprint) error {
+	declared := map[string]Input{}
+	for _, input := range blueprint.Inputs {
+		declared[input.Name] = input
+	}
+	for _, list := range [][]Operation{
+		blueprint.Operations.Install, blueprint.Operations.Release,
+		blueprint.Operations.Startup, blueprint.Operations.Stop,
+	} {
+		for _, operation := range list {
+			for _, field := range []string{operation.Value, operation.Content, operation.URL} {
+				for _, match := range placeholderRE.FindAllStringSubmatch(field, -1) {
+					input, found := declared[match[1]]
+					if !found {
+						return fmt.Errorf("an operation templates undeclared input %q", match[1])
+					}
+					if !input.Required && input.Default == "" {
+						return fmt.Errorf("an operation templates input %q, which is optional with no default, so it renders as an empty substitution", input.Name)
+					}
+				}
+			}
+		}
 	}
 	return nil
 }

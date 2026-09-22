@@ -2392,11 +2392,31 @@ export type DockerTemplate = {
   spec: ContainerSpec
 }
 
+/**
+ * How the first person to open a deployed template gets in. The catalogue
+ * declares it; the picker promises it before the deploy and the project's
+ * overview makes good on it afterwards.
+ */
+export type BlueprintAccess = {
+  /**
+   * `unavailable` never reaches the picker — it is legal only on a retired
+   * definition — but it does reach the project overview, because a deployment
+   * already running one still resolves its definition on every redeploy.
+   */
+  kind: "setup" | "credentials" | "token" | "client" | "open" | "unavailable"
+  username?: string
+  usernameVariable?: string
+  secretVariable?: string
+  path?: string
+  note: string
+}
+
 export type BlueprintSummary = {
   deploymentSupported?: boolean
   unavailableReason?: string
   id: string
   version: string
+  access: BlueprintAccess
   name: string
   category: "http" | "database" | "tool" | "automation" | "game"
   profile: "web" | "database" | "tool" | "worker" | "game" | "compose"
@@ -2465,6 +2485,7 @@ export type BlueprintAutomation = {
 }
 
 export type BlueprintDetail = BlueprintSummary & {
+  retired?: string
   provenance: {
     maintainer: string
     license: string

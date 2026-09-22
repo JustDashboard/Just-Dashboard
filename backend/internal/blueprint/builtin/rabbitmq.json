@@ -7,11 +7,17 @@
   "description": "A message broker with the management interface enabled. Applications connect on the AMQP port over the Docker network; the management page is what the proxy serves.",
   "iconId": "database",
   "docsUrl": "https://www.rabbitmq.com/docs",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "RABBITMQ_DEFAULT_USER",
+    "secretVariable": "RABBITMQ_DEFAULT_PASS",
+    "note": "If you gave this deployment a domain, its root shows the RabbitMQ management login: sign in with the user you chose here and the password generated for this deployment. Without a domain there is no management page at all, only the AMQP port on the Docker network. RabbitMQ writes that account once, on the first boot of an empty data volume, so a later redeploy with a regenerated password will not change it - the original password keeps working."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MPL-2.0",
     "upstreamUrl": "https://github.com/rabbitmq/rabbitmq-server",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

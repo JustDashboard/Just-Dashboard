@@ -7,11 +7,15 @@
   "description": "An audiobook and podcast server with progress sync and mobile apps.",
   "iconId": "globe",
   "docsUrl": "https://www.audiobookshelf.org/docs",
+  "access": {
+    "kind": "setup",
+    "note": "There is no default username or password. The very first visitor is shown a form that creates the root administrator account for this server. Open the address immediately after deploying — whoever reaches it first becomes the owner."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-3.0",
     "upstreamUrl": "https://github.com/advplyr/audiobookshelf",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

@@ -80,6 +80,54 @@ const (
 	CheckHandshake CheckKind = "game_handshake"
 )
 
+// AccessKind is how the first person to open this workload gets in. It is a
+// closed vocabulary because the alternative is what the catalogue used to
+// ship: a sentence in the description, or nothing at all, and an operator
+// staring at a login form for an account that does not exist.
+type AccessKind string
+
+const (
+	// AccessSetup: the application asks the first visitor to create the
+	// account. Whoever opens the address first becomes its owner.
+	AccessSetup AccessKind = "setup"
+	// AccessCredentials: a name decided here, a password generated here, both
+	// handed to the image as environment before it ever starts.
+	AccessCredentials AccessKind = "credentials"
+	// AccessToken: one generated value is the whole credential.
+	AccessToken AccessKind = "token"
+	// AccessClient: nothing signs in through a browser. Another program
+	// connects with the generated credential.
+	AccessClient AccessKind = "client"
+	// AccessOpen: no authentication of its own.
+	AccessOpen AccessKind = "open"
+	// AccessUnavailable: the first credential is not something this dashboard
+	// can hand over — the image prints it into its own log, or ships the same
+	// one to everybody. It is the defect this field was added to find, so it is
+	// legal only on a definition that has been retired for it.
+	AccessUnavailable AccessKind = "unavailable"
+)
+
+// Access is the answer to "I deployed it, I opened it, now what?". Every
+// blueprint declares one, and validation refuses a credentials or token kind
+// that does not name a generated secret: "the password is in the container
+// logs" is a thing an image may do and a thing this catalogue may not ship.
+type Access struct {
+	Kind AccessKind `json:"kind"`
+	// Username is the account name an image fixes and does not let the
+	// operator choose, such as Grafana's admin.
+	Username string `json:"username,omitempty"`
+	// UsernameVariable is the environment variable an input writes the chosen
+	// account name into. It is named rather than copied so the dashboard reads
+	// the value the deployment actually runs with.
+	UsernameVariable string `json:"usernameVariable,omitempty"`
+	// SecretVariable is the generated secret that is the password or the token.
+	SecretVariable string `json:"secretVariable,omitempty"`
+	// Path is where the first sign-in happens when it is not the root.
+	Path string `json:"path,omitempty"`
+	// Note is what the operator is told before deploying and again afterwards.
+	Note string `json:"note"`
+}
+
 type Provenance struct {
 	Maintainer       string `json:"maintainer"`
 	License          string `json:"license"`
@@ -267,28 +315,34 @@ type Fixture struct {
 }
 
 type Blueprint struct {
-	ID          string       `json:"id"`
-	Version     string       `json:"version"`
-	Name        string       `json:"name"`
-	Category    Category     `json:"category"`
-	Profile     Profile      `json:"profile"`
-	Description string       `json:"description"`
-	IconID      string       `json:"iconId"`
-	DocsURL     string       `json:"docsUrl"`
-	Provenance  Provenance   `json:"provenance"`
-	Image       Image        `json:"image"`
-	Inputs      []Input      `json:"inputs,omitempty"`
-	Secrets     []Secret     `json:"secrets,omitempty"`
-	Ports       []Port       `json:"ports,omitempty"`
-	Volumes     []Volume     `json:"volumes,omitempty"`
-	Resources   Resources    `json:"resources"`
-	Checks      []Check      `json:"checks,omitempty"`
-	Operations  Operations   `json:"operations"`
-	Files       []ConfigFile `json:"files,omitempty"`
-	Automation  []Automation `json:"automation,omitempty"`
-	Update      Update       `json:"update"`
-	Security    Security     `json:"security"`
-	Fixtures    []Fixture    `json:"fixtures,omitempty"`
+	ID          string   `json:"id"`
+	Version     string   `json:"version"`
+	Name        string   `json:"name"`
+	Category    Category `json:"category"`
+	Profile     Profile  `json:"profile"`
+	Description string   `json:"description"`
+	IconID      string   `json:"iconId"`
+	DocsURL     string   `json:"docsUrl"`
+	Access      Access   `json:"access"`
+	// Retired is why this definition is no longer offered. A retired blueprint
+	// stays shipped and stays resolvable, because a deployment already running
+	// one re-resolves its definition on every redeploy; deleting the file would
+	// turn somebody's working service into an unredeployable one.
+	Retired    string       `json:"retired,omitempty"`
+	Provenance Provenance   `json:"provenance"`
+	Image      Image        `json:"image"`
+	Inputs     []Input      `json:"inputs,omitempty"`
+	Secrets    []Secret     `json:"secrets,omitempty"`
+	Ports      []Port       `json:"ports,omitempty"`
+	Volumes    []Volume     `json:"volumes,omitempty"`
+	Resources  Resources    `json:"resources"`
+	Checks     []Check      `json:"checks,omitempty"`
+	Operations Operations   `json:"operations"`
+	Files      []ConfigFile `json:"files,omitempty"`
+	Automation []Automation `json:"automation,omitempty"`
+	Update     Update       `json:"update"`
+	Security   Security     `json:"security"`
+	Fixtures   []Fixture    `json:"fixtures,omitempty"`
 }
 
 var ErrUnknownField = errors.New("blueprint contains an unsupported field")

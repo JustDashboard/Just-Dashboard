@@ -7,11 +7,16 @@
   "description": "Cron and heartbeat monitoring: a job pings a URL, and an alert goes out when it stops. Runs on SQLite here; create the first account from the sign-up page.",
   "iconId": "monitoring",
   "docsUrl": "https://healthchecks.io/docs/self_hosted/",
+  "access": {
+    "kind": "unavailable",
+    "note": "Healthchecks has no account until someone creates one, and creating one finishes by clicking a link it emails you. With no mail server configured the sign-up page answers with a server error, so there is no way in at all — and a mail account's password is not something this catalogue can carry."
+  },
+  "retired": "Retired 2026-09-22. Sign-up completes by clicking a link Healthchecks emails, and a one-image deployment has no mail server, so the sign-up page answers 500 and no account can ever exist. The only way round it is a shell string in the image command, which this catalogue ships data instead of. An alerting service that cannot deliver mail is also the wrong first recommendation when the dashboard already watches uptime and routes its own notifications.",
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "BSD-3-Clause",
     "upstreamUrl": "https://github.com/healthchecks/healthchecks",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

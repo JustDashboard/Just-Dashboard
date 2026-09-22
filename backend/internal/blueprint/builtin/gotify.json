@@ -7,11 +7,17 @@
   "description": "A push-notification server with a web interface and mobile apps. Applications post messages with a token; people receive them on their phone.",
   "iconId": "bolt",
   "docsUrl": "https://gotify.net/docs/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "GOTIFY_DEFAULTUSER_NAME",
+    "secretVariable": "GOTIFY_DEFAULTUSER_PASS",
+    "note": "Gotify creates exactly one account the first time it starts on an empty database: the admin user named here, with the generated password. Sign in with those at the address, then change the password inside Gotify — this value only seeds the very first account, so a later redeploy that rotates it will not reset the account you already have."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/gotify/server",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

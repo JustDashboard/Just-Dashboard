@@ -7,11 +7,15 @@
   "description": "Runs open language models locally and serves them over an API. Models are large; the volume holds every one that is pulled, and memory decides which fit.",
   "iconId": "bolt",
   "docsUrl": "https://github.com/ollama/ollama/tree/main/docs",
+  "access": {
+    "kind": "open",
+    "note": "Ollama has no accounts, no password and no API key: opening this address returns the plain text \"Ollama is running\" rather than a login form. Every endpoint is unauthenticated, so anyone who reaches the domain can generate against your models, pull new ones until the disk is full, and delete the ones you have. Keep it off a public domain, or put a password on the route in front of it."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/ollama/ollama",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

@@ -33,7 +33,7 @@ func TestEveryBuiltInParsesAndValidates(t *testing.T) {
 // catches.
 func TestEveryFixtureRendersToItsRecordedDigest(t *testing.T) {
 	t.Parallel()
-	entries, err := Catalog()
+	entries, err := All()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestEveryFixtureRendersToItsRecordedDigest(t *testing.T) {
 
 func TestRenderingIsDeterministicAndSecretFree(t *testing.T) {
 	t.Parallel()
-	entries, err := Catalog()
+	entries, err := All()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRenderingIsDeterministicAndSecretFree(t *testing.T) {
 // still fails here.
 func TestNoBuiltInShipsADefaultCredential(t *testing.T) {
 	t.Parallel()
-	entries, err := Catalog()
+	entries, err := All()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestNoBuiltInShipsADefaultCredential(t *testing.T) {
 // catalogue can ship. A stateful workload with nowhere to keep state is second.
 func TestBuiltInsNeverExposeADatabaseAndAlwaysDeclarePersistence(t *testing.T) {
 	t.Parallel()
-	entries, err := Catalog()
+	entries, err := All()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestBuiltInsNeverExposeADatabaseAndAlwaysDeclarePersistence(t *testing.T) {
 
 func TestBuiltInsDeclareAHealthCheckThatSeparatesStartedFromWorking(t *testing.T) {
 	t.Parallel()
-	entries, err := Catalog()
+	entries, err := All()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestBuiltInsDeclareAHealthCheckThatSeparatesStartedFromWorking(t *testing.T
 // set currently needs one, and adding one silently should be impossible.
 func TestNoBuiltInTakesPrivilegeWithoutDeclaringWhy(t *testing.T) {
 	t.Parallel()
-	entries, err := Catalog()
+	entries, err := All()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +172,87 @@ func TestNoBuiltInTakesPrivilegeWithoutDeclaringWhy(t *testing.T) {
 		if privileged && strings.TrimSpace(security.Reason) == "" {
 			t.Fatalf("%s takes privilege without a reason", entry.ID)
 		}
+	}
+}
+
+// Every offered template answers the question the operator asks the moment it
+// is running: how do I get in? The catalogue used to answer it in prose, or
+// not at all — File Browser generated a random admin password, printed it into
+// its own log and left the operator at a login form.
+func TestEveryBuiltInSaysHowTheFirstSignInWorks(t *testing.T) {
+	t.Parallel()
+	entries, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		access := entry.Access
+		if access.Kind == "" || strings.TrimSpace(access.Note) == "" {
+			t.Fatalf("%s does not say how its first sign-in works", entry.ID)
+		}
+		// A credential the dashboard cannot show is a credential the operator
+		// has to go digging for, which is the defect this field exists to end.
+		if access.SecretVariable != "" {
+			generated := false
+			for _, secret := range entry.Secrets {
+				if secret.Variable == access.SecretVariable {
+					generated = true
+				}
+			}
+			if !generated {
+				t.Fatalf("%s signs in with %s, which it does not generate", entry.ID, access.SecretVariable)
+			}
+		}
+		if access.Kind == AccessUnavailable && entry.Retired == "" {
+			t.Fatalf("%s is offered even though its first credential cannot be handed over", entry.ID)
+		}
+		switch access.Kind {
+		case AccessCredentials:
+			if access.SecretVariable == "" || (access.Username == "" && access.UsernameVariable == "") {
+				t.Fatalf("%s claims a credentials sign-in without naming both halves of it", entry.ID)
+			}
+		case AccessToken:
+			if access.SecretVariable == "" {
+				t.Fatalf("%s claims a token sign-in without naming the token", entry.ID)
+			}
+		}
+	}
+}
+
+// A retired definition stays resolvable. A deployment already running one
+// re-resolves its definition on every redeploy, so deleting the file would
+// turn a working service into an unredeployable one.
+func TestRetiredBuiltInsAreNotOfferedButStayResolvable(t *testing.T) {
+	t.Parallel()
+	offered, err := Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range offered {
+		if entry.Retired != "" {
+			t.Fatalf("retired blueprint %q is still offered in the catalogue", entry.ID)
+		}
+	}
+	retired := 0
+	for _, entry := range all {
+		if entry.Retired == "" {
+			continue
+		}
+		retired++
+		found, getErr := Get(entry.ID)
+		if getErr != nil || found.ID != entry.ID {
+			t.Fatalf("retired blueprint %q is no longer resolvable: %v", entry.ID, getErr)
+		}
+		if _, versionErr := GetVersion(entry.ID, entry.Version); versionErr != nil {
+			t.Fatalf("retired blueprint %q cannot be redeployed at its own version: %v", entry.ID, versionErr)
+		}
+	}
+	if len(all)-retired != len(offered) {
+		t.Fatalf("catalogue offers %d of %d shipped definitions but %d are retired", len(offered), len(all), retired)
 	}
 }
 
@@ -188,6 +269,7 @@ func minimalBlueprint() *Blueprint {
 		ID: "probe", Version: "1.0.0", Name: "Probe", Description: "A probe.",
 		Category: CategoryTool, Profile: ProfileTool, IconID: "box",
 		DocsURL: "https://example.test/docs",
+		Access:  Access{Kind: AccessOpen, Note: "Anyone who reaches the probe can use it."},
 		Provenance: Provenance{
 			Maintainer: "Just Dashboard", License: "MIT", UpstreamURL: "https://example.test",
 			ReviewedAt: "2026-09-11", MinimumDashboard: "0.6.7",

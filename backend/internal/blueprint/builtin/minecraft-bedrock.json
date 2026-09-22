@@ -7,11 +7,15 @@
   "description": "A Minecraft Bedrock server for console, mobile and Windows players. Bedrock speaks UDP, so its port is published directly and cannot go behind the HTTP proxy.",
   "iconId": "game",
   "docsUrl": "https://github.com/itzg/docker-minecraft-bedrock-server",
+  "access": {
+    "kind": "open",
+    "note": "A Bedrock server has no web sign-in: players join from a console, phone or Windows client at your host on UDP port 19132. As shipped the allow list is off and nobody is an operator, so any Xbox-Live-authenticated player who learns the address and port can join and build in your world."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/itzg/docker-minecraft-bedrock-server",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7",
     "updateNotes": "The image is pinned; the Bedrock server build is resolved at deployment and recorded on the release."
   },
@@ -133,7 +137,6 @@
       "kind": "accept",
       "label": "I accept the Minecraft EULA",
       "required": true,
-      "variable": "EULA",
       "acceptUrl": "https://aka.ms/MinecraftEULA",
       "description": "The server refuses to start without this, and the acceptance is recorded with your name and the time."
     }
@@ -171,6 +174,13 @@
     }
   ],
   "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "EULA",
+        "value": "TRUE"
+      }
+    ],
     "stop": [
       {
         "kind": "console_command",
@@ -277,7 +287,7 @@
       "inputs": {
         "eula": "true"
       },
-      "digest": "sha256:dd1b067a731c3dbe610486a1dd6a2836f9faf899650cca1e6cd2395d4942df7d"
+      "digest": "sha256:ed9c0b12620fddfd75f1f8789eb3dba79b7da0b9085b149af13b5ba4ae59986c"
     }
   ]
 }

@@ -7,11 +7,15 @@
   "description": "Dashboards and questions over the databases you connect. Its own application database is an embedded H2 file here, which is what a backup has to carry.",
   "iconId": "monitoring",
   "docsUrl": "https://www.metabase.com/docs/latest/",
+  "access": {
+    "kind": "setup",
+    "note": "The first person to open this address gets Metabase's setup wizard and the account they create there is the instance admin. Open it yourself as soon as the deployment reports ready, because nobody can take that first account back."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "AGPL-3.0",
     "upstreamUrl": "https://github.com/metabase/metabase",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

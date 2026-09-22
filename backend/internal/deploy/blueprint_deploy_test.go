@@ -153,11 +153,8 @@ func TestUnsupportedBlueprintsAreRefusedBeforeAnyResourceExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"prometheus", "minecraft-java"} {
-		inputs := map[string]string{}
-		if id == "minecraft-java" {
-			inputs["eula"] = "true"
-		}
+	for _, id := range []string{"minecraft-java", "minecraft-bedrock"} {
+		inputs := map[string]string{"eula": "true"}
 		_, err := fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{
 			Revision: draft.Revision, Step: DraftSource,
 			Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: id, BlueprintVersion: "1.0.0", BlueprintInputs: inputs},
@@ -169,7 +166,8 @@ func TestUnsupportedBlueprintsAreRefusedBeforeAnyResourceExists(t *testing.T) {
 	// A preview-only blueprint still renders for the catalogue, without a
 	// registry lookup and therefore without a deployable digest.
 	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), &planningDockerFake{}, nil)
-	detection, err := analyzer.Analyze(ctx, DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "prometheus", BlueprintVersion: "1.0.0"})
+	detection, err := analyzer.Analyze(ctx, DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+		BlueprintID: "minecraft-java", BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"}})
 	if err != nil || detection.Source.Digest != "" {
 		t.Fatalf("preview render = %#v, %v", detection.Source, err)
 	}
