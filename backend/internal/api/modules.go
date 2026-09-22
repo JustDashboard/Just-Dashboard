@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/forgex"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
@@ -58,6 +59,7 @@ type moduleSet struct {
 	files         *files.Service
 	git           *gitx.Service
 	github        *ghx.Service
+	forge         *forgex.Service
 	updates       *updates.Service
 	selfUpdate    *selfupdate.Service
 	selfConfig    *selfcfg.Service
@@ -132,6 +134,7 @@ func (s *Server) initModules() {
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()
+	s.modules.forge = forgex.New(s.Store, s.Sealer)
 	s.modules.updates = updates.New()
 	// The one module that manages the dashboard rather than the server. It is
 	// given a *function* for listing containers rather than the Docker client,
