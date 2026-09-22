@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type {
+  BlueprintDetail,
   TrafficPulse,
   ContainerHistory,
   ContainerStats,
@@ -34,6 +35,7 @@ import {
   runTitle,
   sourceLine,
 } from "@/components/deploy/vocabulary"
+import { FirstSignIn } from "@/components/deploy/first-sign-in"
 import { SitePreview } from "@/components/deploy/site-preview"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ProjectWiring } from "@/components/deploy/project-wiring"
@@ -97,6 +99,26 @@ export function ProjectOverview() {
       ? (runtime.services.find((service) => service.liveRelease) ?? runtime.services[0])
       : undefined
   const buildLogsRun = deployment.activeRun ?? project.liveRun
+  /**
+   * How to get into what was just deployed.
+   *
+   * A template deployment's source identity carries the reviewed `id@version`,
+   * and the definition behind it declares how its first sign-in works. That
+   * declaration is the whole point: the operator who deployed a template and
+   * met a login form for an account nobody had created was reading a page that
+   * knew the image, the port and the volumes, and had nothing to say about the
+   * one thing they needed.
+   */
+  const blueprintId =
+    deployment.sourceKind === "blueprint" ? (deployment.sourceRef ?? "").split("@")[0] : ""
+  const blueprint = usePoll(
+    (signal) => get<BlueprintDetail>(`/deploy/blueprints/${blueprintId}`, undefined, signal),
+    0,
+    [blueprintId],
+    { enabled: Boolean(blueprintId) },
+  )
+  const access = blueprint.data?.id === blueprintId ? blueprint.data.access : undefined
+
   const rollbackEligible = project.releases.some(
     (release) => release.state === "retained" && release.id !== deployment.liveReleaseId,
   )
@@ -165,6 +187,16 @@ export function ProjectOverview() {
           />
         </PanelBody>
       </Panel>
+
+      {access && (
+        <FirstSignIn
+          access={access}
+          url={url}
+          projectId={project.projectId}
+          environmentId={project.environmentId}
+          canReveal={can("system.admin")}
+        />
+      )}
 
       {findings.length > 0 && (
         <Panel plain>

@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName, humanize } from "@/components/deploy/vocabulary"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
 
@@ -208,6 +209,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                         }
                         trailing={
                           <span className="flex min-w-0 flex-wrap items-center gap-2">
+                            <AccessTag access={entry.access} />
                             {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
                             {entry.privileged && <Tag tone="danger">privileged</Tag>}
                             <Tag mono>{entry.image}</Tag>
@@ -281,6 +283,8 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                 {definition.unavailableReason || "Choose a different template."}
               </Notice>
             )}
+
+            <AccessPromise access={definition.access} />
 
             {definition.profile === "game" && (
               <ExistingServerImport
