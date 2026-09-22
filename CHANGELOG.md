@@ -60,6 +60,8 @@ The Git workspace could commit, branch, merge and push, and everything past that
 
 ### Fixed
 
+- Signing in to GitHub on the Git page also works from the Terminal and over ssh
+  - The sign-in wrote a credential helper naming the dashboard container's own copy of gh, which does not exist on the host, so any git push from the Terminal page or an ssh shell failed with "/usr/bin/gh: not found" while the Git page said the account was set up. The helper now names gh without a path, so each side runs its own copy against the same token. An install signed in before this shows a warning on the account button once; Use this account for git rewrites the line. A shell can only use it where gh is installed on the host.
 - Grafana's address and the Minecraft servers' EULA reach the container, and every template's pins are current
   - An optional input with no default rendered as an empty string, so Grafana's root URL was https:///, and an accepted EULA was recorded without ever reaching either Minecraft server. Both shapes are now refused for every definition. Image pins, digests, readiness paths and review dates were refreshed across the catalogue, among them Adminer 6 and Caddy 2.11.
 - Container output is read for what it says

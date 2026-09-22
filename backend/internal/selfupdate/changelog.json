@@ -38,6 +38,11 @@
           "detail": "A checkout on GitLab or Gitea takes the provider, its address, the project and an access token. The token is sealed, belongs to that checkout and its Linux owner, and never becomes a git argument. Requests can then be listed, read with their files and conversation, opened, reviewed and merged the way GitHub's are."
         },
         {
+          "kind": "fixed",
+          "text": "Signing in to GitHub on the Git page also works from the Terminal and over ssh",
+          "detail": "The sign-in wrote a credential helper naming the dashboard container's own copy of gh, which does not exist on the host, so any git push from the Terminal page or an ssh shell failed with \"/usr/bin/gh: not found\" while the Git page said the account was set up. The helper now names gh without a path, so each side runs its own copy against the same token. An install signed in before this shows a warning on the account button once; Use this account for git rewrites the line. A shell can only use it where gh is installed on the host."
+        },
+        {
           "kind": "changed",
           "text": "The Git page is a list of repository cards, worst first",
           "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. Each card carries the branch, where it lives, the last commit with its author's colour, and how far it stands from its upstream, ordered under Needs attention by what is most wrong. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."

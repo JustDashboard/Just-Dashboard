@@ -124,7 +124,9 @@ https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.lis
 # gh would run as the host's root in the host's namespaces, and the account
 # that actually pushes would never see either half. Signed in from this image,
 # both halves land in the same account's home — which is bind-mounted from the
-# host, so a shell over ssh finds the same credential.
+# host. The helper gh writes names this image's /usr/bin/gh, so ghx rewrites it
+# to plain `gh` and a shell over ssh runs the host's own copy against the same
+# token.
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli.gpg \

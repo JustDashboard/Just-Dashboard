@@ -185,7 +185,7 @@ export function GitHubAccountControl({
         <TooltipContent>
           {account.gitConfigured
             ? `Commits and pushes from this page are made as ${account.login}`
-            : "Signed in, but git here is not set up to use the account"}
+            : "Signed in, but git on this server is not set up to use the account everywhere"}
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-72">
@@ -215,7 +215,7 @@ export function GitHubAccountControl({
             <p className="text-hint text-muted-foreground">
               {!account.committerEmail
                 ? "git here has no name and address, so it cannot record a commit as you yet."
-                : "git here is not set up to hand the token to a push yet."}
+                : "git on this server is not set up to hand the token to every push yet, from the Terminal and ssh as well as this page."}
             </p>
             <Button
               size="sm"

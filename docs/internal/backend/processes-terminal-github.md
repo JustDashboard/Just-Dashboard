@@ -181,7 +181,13 @@ session.
   `deploy`, and the push is anonymous again. Every route takes `?path=`.
 - **gh is in the image, not borrowed from the host** — the host's copy runs as the host's root in the
   host's namespaces, and the account that pushes would see neither token nor helper. From this image both
-  land in the same account's home, bind-mounted, so ssh finds the same credential.
+  land in the same account's home, bind-mounted. `gh auth setup-git` writes the helper as its own
+  absolute path (`/usr/bin/gh`, the image's copy), which the Terminal page and ssh — both host shells —
+  cannot run, so `setupGit` rewrites it to `!gh auth git-credential` and each side runs the gh on its
+  own PATH against the same token. gh's blank entry in front of it stays, so a generic helper such as
+  `store` never answers for GitHub first. A helper still pinned to a path reads as not configured, which
+  is what offers "Use this account for git" once to installs signed in before the rewrite. A host with no
+  gh on an interactive shell's PATH still cannot push over HTTPS from a shell; the Git page is unaffected.
 - **The login is the CLI's own device flow, performed here.** `gh auth login` is a series of prompts and a
   web request has nobody to answer one, so `device.go` runs the OAuth device flow against the GitHub
   CLI's public client id — which is what makes the token indistinguishable from one gh minted, and what
@@ -189,7 +195,7 @@ session.
   device code stays server-side and the token never reaches the browser; the page holds an opaque flow id.
   The polling interval is enforced from the flow's own clock, because GitHub's remedy for polling too fast
   is to slow the whole flow. `LoginWithToken` is three steps that are one operation (store, `gh auth
-  setup-git`, write a committer identity if missing) — any two without the third is a state nobody can
+  setup-git` and its rewrite, write a committer identity if missing) — any two without the third is a state nobody can
   see: a token with no helper pushes anonymously, a helper with no identity fails at the commit.
 - **An account's picture is read here, not by the browser.** `GET /git/github/avatar?account=` reads
   a GitHub account's picture on the page's behalf, for the same reason `/deploy/{id}/favicon` reads a
