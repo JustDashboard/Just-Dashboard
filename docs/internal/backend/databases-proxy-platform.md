@@ -485,6 +485,15 @@ which `install.sh` runs when the terminal is enabled: it installs `zsh`, `zsh-au
 `zsh-syntax-highlighting` where missing and, on success, appends `JD_TERMINAL_SHELL=<zsh path>` to a fresh
 `.env`. A re-run that kept its `.env` asks first, and never touches a file that already names a shell.
 That install is best effort: a failure is a warning, and the terminal opens the account's own shell.
+`jd_install_host_tools` runs on every install and re-run, before any question: the web terminal is a host
+shell, so its git and the Git page's GitHub sign-in need host packages, and Security → Tools runs `whois`
+and `traceroute` on the host. It installs whichever of `git`, `git-lfs`, `whois` and `traceroute` are
+missing one package at a time, so an unavailable one costs only itself, and `gh` through `jd_install_gh`:
+GitHub's signed apt repository on Debian and Ubuntu (their packaged gh is years behind on an LTS release;
+the image uses the same repository), the distribution's package on dnf, yum and zypper with GitHub's RPM
+repository as the fallback, and `github-cli` on apk and pacman. Failures are named and warned about, never
+fatal. Firewalls, fail2ban and cron are deliberately absent: the dashboard manages them when present, and
+installing one changes the host's security or scheduling rather than supplying a tool.
 The backend image still includes Certbot for container execution; host installation supplies host tooling
 and the distribution renewal schedule. `python3 scripts/test_install_dependencies.py` verifies the
 installer with fake package commands, without changing host packages. Hostname readiness returns

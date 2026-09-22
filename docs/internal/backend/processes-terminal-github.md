@@ -186,8 +186,10 @@ session.
   cannot run, so `setupGit` rewrites it to `!gh auth git-credential` and each side runs the gh on its
   own PATH against the same token. gh's blank entry in front of it stays, so a generic helper such as
   `store` never answers for GitHub first. A helper still pinned to a path reads as not configured, which
-  is what offers "Use this account for git" once to installs signed in before the rewrite. A host with no
-  gh on an interactive shell's PATH still cannot push over HTTPS from a shell; the Git page is unaffected.
+  is what offers "Use this account for git" once to installs signed in before the rewrite. The host's gh
+  comes from `install.sh` (`jd_install_host_tools`, GitHub's own repository on Debian and Ubuntu), at
+  `/usr/bin/gh`, which is on every PATH, interactive or not. An install upgraded without re-running the
+  installer and with no gh of its own cannot push over HTTPS from a shell; the Git page is unaffected.
 - **The login is the CLI's own device flow, performed here.** `gh auth login` is a series of prompts and a
   web request has nobody to answer one, so `device.go` runs the OAuth device flow against the GitHub
   CLI's public client id — which is what makes the token indistinguishable from one gh minted, and what

@@ -77,6 +77,19 @@ source scripts/install-dependencies.sh
 source scripts/dotenv.sh
 jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
 
+# The web terminal is a shell on this host, not in the dashboard's image, so
+# the git, gh and network tools it and the dashboard's pages reach for have to
+# be host packages. Missing ones are a warning: the dashboard itself runs
+# without them, and a re-run installs whatever is still missing.
+step "Installing the tools the dashboard uses on this host"
+if jd_install_host_tools; then
+	ok "git, git-lfs, gh, whois and traceroute are ready"
+else
+	warn "Some host tools could not be installed (named above). The dashboard runs without them,"
+	warn "but a push from the web terminal or ssh over HTTPS needs gh for the Git page's GitHub"
+	warn "sign-in, and Security → Tools needs whois and traceroute. Re-run this to try again."
+fi
+
 step "Checking what this machine already has"
 
 need_docker=0

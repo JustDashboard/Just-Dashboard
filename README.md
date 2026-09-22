@@ -57,10 +57,14 @@ The installer asks how you intend to reach it. **Tailscale is the default**: the
 invisible to the internet and the dashboard answers at `https://your-box.tailnet-name.ts.net:8443`
 with a real certificate. **An SSH tunnel is the fallback**, served on loopback. It then generates
 the master key and a first password, builds the stack and prints the command to get in.
-Everything it asked is editable afterwards under **Settings → Configuration**.
+Everything it asked is editable afterwards under **Settings → Configuration**. It also installs
+the host tools the web terminal and the dashboard's pages run on the server itself — `gh` from
+GitHub's own repository, `git-lfs`, `whois` and `traceroute` — where they are missing, so a GitHub
+sign-in on the Git page works from the terminal and over ssh too.
 
 To upgrade, `git pull` and `docker compose up -d --build`, use the in-app update, or run
-`sudo ./install.sh` again. All three keep your `.env`, database, accounts and sessions.
+`sudo ./install.sh` again. All three keep your `.env`, database, accounts and sessions; only
+the installer adds host tools a newer release relies on.
 
 ## Read this before you expose it
 

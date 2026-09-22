@@ -40,7 +40,12 @@
         {
           "kind": "fixed",
           "text": "Signing in to GitHub on the Git page also works from the Terminal and over ssh",
-          "detail": "The sign-in wrote a credential helper naming the dashboard container's own copy of gh, which does not exist on the host, so any git push from the Terminal page or an ssh shell failed with \"/usr/bin/gh: not found\" while the Git page said the account was set up. The helper now names gh without a path, so each side runs its own copy against the same token. An install signed in before this shows a warning on the account button once; Use this account for git rewrites the line. A shell can only use it where gh is installed on the host."
+          "detail": "The sign-in wrote a credential helper naming the dashboard container's own copy of gh, which does not exist on the host, so any git push from the Terminal page or an ssh shell failed with \"/usr/bin/gh: not found\" while the Git page said the account was set up. The helper now names gh without a path, so each side runs its own copy against the same token. An install signed in before this shows a warning on the account button once; Use this account for git rewrites the line. The installer now puts gh on the host, so a new install has it; an existing one gets it by running sudo ./install.sh again."
+        },
+        {
+          "kind": "added",
+          "text": "The installer sets up the host tools the terminal and the dashboard's pages rely on",
+          "detail": "The web terminal is a shell on the server itself, not inside the dashboard, so its git uses the server's packages. install.sh now installs whichever of gh (from GitHub's own signed repository on Debian and Ubuntu), git-lfs, whois and traceroute are missing, one at a time, and names any it could not get instead of stopping. That is what lets a GitHub sign-in on the Git page push from the terminal and over ssh, LFS repositories check out there, and Security → Tools look up and trace addresses. Re-running sudo ./install.sh on an existing install adds them."
         },
         {
           "kind": "changed",
