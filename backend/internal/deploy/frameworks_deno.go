@@ -100,7 +100,9 @@ func denoCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "add a start task to deno.json or choose the entry file to run")
 		}
 	}
-	candidate.NeedsDecision = append(candidate.NeedsDecision, "confirm the port the server listens on; Deno.serve defaults to 8000")
+	candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
+		Path: joinRoot(marker.root, marker.denoJSONPath), Reason: "Deno.serve default port 8000",
+	})
 	return candidate
 }
 

@@ -48,15 +48,14 @@ func TestImageDetectionSeedsThePortTheImageExposes(t *testing.T) {
 	if !strings.Contains(evidence, "image exposes 8080/tcp") {
 		t.Fatalf("port evidence = %q, want the exposure it was read from", evidence)
 	}
-	// The decision the operator still owes shrinks by exactly the one that was
-	// answered; the rest is still theirs.
-	for _, decision := range candidate.NeedsDecision {
-		if strings.Contains(decision, "ports") {
-			t.Fatalf("a port that was detected is still listed as undecided: %#v", candidate.NeedsDecision)
-		}
-	}
-	if len(candidate.NeedsDecision) == 0 {
-		t.Fatalf("an image with a port still owes command, storage and readiness decisions")
+	// A port read from the image answers the only question the plan asks of an
+	// image: the command is the image's own, no finding fires on an empty mount
+	// list, and preflight demands a readiness gate of web and static workloads
+	// rather than of this one. An image that still owed a decision here landed
+	// the reader on the first screen of the sequence to read a sentence with no
+	// field under it.
+	if len(candidate.NeedsDecision) != 0 {
+		t.Fatalf("an image whose port was read still owes decisions: %#v", candidate.NeedsDecision)
 	}
 }
 

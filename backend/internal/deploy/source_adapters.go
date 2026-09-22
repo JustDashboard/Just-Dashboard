@@ -401,7 +401,13 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 	decisions := []string{"confirm runtime command, ports, storage, and readiness"}
 	if port > 0 {
 		evidence = append(evidence, DetectionEvidence{Path: reference, Reason: portReason})
-		decisions = []string{"confirm runtime command, storage, and readiness"}
+		// The port was the only thing the plan actually asks an image for. The
+		// command is the image's own, an empty mount list is a plan preflight
+		// passes, and a readiness gate is demanded of web and static workloads
+		// rather than of an image — so nothing is left to confirm, and saying
+		// otherwise sent every image to the first screen to read a sentence
+		// with no field under it.
+		decisions = []string{}
 	}
 	candidate := newDetectedCandidate("", BuildImage, DetectedCandidate{
 		Name: reference, Profile: ProfileImage, Confidence: ConfidenceHigh,

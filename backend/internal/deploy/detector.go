@@ -605,12 +605,24 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		rootLabel = "."
 	}
 	if marker.dockerfile != "" {
+		// A single literal EXPOSE is the port, which is what detectedDockerfilePort
+		// already decides: evidence, not a question. A Dockerfile that names none,
+		// or names several, leaves the port unset, and an unset port is the plan's
+		// own way of asking for one — on the screen that owns the field, rather
+		// than as a sentence on the first screen that owns nothing.
+		port := detectedDockerfilePort(marker.dockerfileContent)
+		evidence := []DetectionEvidence{{Path: marker.dockerfile, Reason: "container build definition"}}
+		if port > 0 {
+			evidence = append(evidence, DetectionEvidence{
+				Path: marker.dockerfile, Reason: fmt.Sprintf("EXPOSE %d/tcp", port),
+			})
+		}
 		result = append(result, newDetectedCandidate(marker.root, BuildDockerfile, DetectedCandidate{
 			Name: "Dockerfile in " + rootLabel, Profile: ProfileWeb, Confidence: ConfidenceHigh,
 			Dockerfile:    filepath.Base(marker.dockerfile),
-			Port:          detectedDockerfilePort(marker.dockerfileContent),
-			Evidence:      []DetectionEvidence{{Path: marker.dockerfile, Reason: "container build definition"}},
-			NeedsDecision: []string{"confirm container port and readiness check"},
+			Port:          port,
+			Evidence:      evidence,
+			NeedsDecision: []string{},
 		}))
 	}
 	if len(marker.compose) > 0 {
@@ -632,8 +644,13 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		candidate := DetectedCandidate{
 			Name: "Go service in " + rootLabel, Profile: ProfileService, Confidence: ConfidenceHigh,
 			Framework: "go", Recipe: "go",
-			Evidence:      []DetectionEvidence{{Path: marker.goMod, Reason: "Go module definition"}},
-			NeedsDecision: []string{"confirm executable, start command, port, and readiness check"},
+			Evidence: []DetectionEvidence{{Path: marker.goMod, Reason: "Go module definition"}},
+			// The recipe finds the executable itself — it refuses a module that
+			// does not have exactly one main package — and starts the binary it
+			// writes; preflight asks a service for no readiness gate. The port is
+			// all that was ever owed here, and an unset port asks for it on the
+			// screen that has the field.
+			NeedsDecision: []string{},
 		}
 		version, err := chooseGoRecipeVersion("", string(marker.goVersionFile), marker.goModContent)
 		candidate.GoMinimumVersion = goModuleMinimum(marker.goModContent)
@@ -663,11 +680,17 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
 	if marker.staticFile != "" && len(marker.packageJSON) == 0 {
+		// There is no public directory left to confirm. A marker's root is the
+		// directory its files were found in, so this candidate's root is
+		// already the one holding the index.html — at the top of the checkout,
+		// under public/, under docs/, each is its own candidate — and
+		// renderStaticDockerfile serves exactly that root when the output
+		// directory is empty, which is how this candidate is planned.
 		result = append(result, newDetectedCandidate(marker.root, BuildStatic, DetectedCandidate{
 			Name: "Static site in " + rootLabel, Profile: ProfileStatic, Confidence: ConfidenceMedium,
 			Port:          80,
 			Evidence:      []DetectionEvidence{{Path: marker.staticFile, Reason: "static HTML entry point"}},
-			NeedsDecision: []string{"confirm the public directory"},
+			NeedsDecision: []string{},
 		}))
 	}
 	return result
