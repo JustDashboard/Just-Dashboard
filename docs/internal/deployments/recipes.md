@@ -192,6 +192,10 @@ still leave `target/release/<binary>`. `axum` (3000), `actix-web` (8080), `rocke
 ask to confirm it; a crate with none is a worker that asks. A workspace without a root package is a
 `recipe_unsupported` finding: set the root directory to the member crate.
 
+When `package.default-run` is declared, it selects the served binary ahead of that fallback, including
+automatically discovered `src/bin` targets. This keeps a maintenance command from being launched in
+place of the HTTP service just because its `[[bin]]` appears first.
+
 ## Java and Kotlin
 
 A `pom.xml` builds with `maven:3-eclipse-temurin-<release>` (`mvn -q -B -DskipTests package`); a
@@ -211,12 +215,18 @@ root directory to the module that builds the application.
 The one `.csproj` at the root — or, among several, the one `Microsoft.NET.Sdk.Web` project — is restored
 (its own layer under the install secret mount) and published with `mcr.microsoft.com/dotnet/sdk:<target>`
 into `/out`, then run on `mcr.microsoft.com/dotnet/aspnet:<target>` (a console project on
-`runtime:<target>`) as the image's `app` user. The target comes from `<TargetFramework>`; net8.0, net9.0
+`runtime:<target>`) as the image's `app` user. The target comes from `<TargetFramework>` or the newest
+supported portable entry in `<TargetFrameworks>`; restore and publish explicitly select that same
+framework. Platform-specific-only target lists require a Dockerfile. net8.0, net9.0
 and net10.0 are in the catalogue. Kestrel reads its port from `ASPNETCORE_HTTP_PORTS`, so the default
 start command bridges the `PORT` the runtime injects: `ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet
 /app/<Assembly>.dll`. A web project listens on 8080; a console program asks whether it serves.
 
 ## Deno
+
+Configuration parsing accepts JSONC comments and trailing commas without rewriting URLs, escaped
+quotes or comment-like text inside task strings. Invalid configuration does not contribute partially
+parsed tasks.
 
 `deno.json`/`deno.jsonc` (comments and trailing commas tolerated) supplies the `build` and `start`
 tasks; without a start task the conventional entry file (`main.ts`, `server.ts`, `mod.ts`, …) is run

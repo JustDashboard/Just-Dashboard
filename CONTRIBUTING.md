@@ -47,12 +47,14 @@ carries no licensing question at all.
 ## Before you open a pull request
 
 - Run the checks: `cd backend && go build ./... && go vet ./... && go test ./...`, then
-  `cd ../frontend && bun run lint && bun run build && bun run test:browser`. Install the required
+  `cd ../frontend && bun run lint && bun test src && bun run build && bun run test:browser`. Install the required
   Chromium build once with `bun run test:browser:install`.
-  Browser tests use the freshly built production frontend on loopback port 43117 and refuse to reuse
-  an unrelated server. Run `bun run build` after source changes before running browser tests alone.
-  `JD_BROWSER_BASE_URL` explicitly selects an externally managed test frontend when needed.
-- **`bun run build` here is the type-check gate, and it is the only one.** `frontend/Dockerfile`
+  Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
+  the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
+  an explicitly managed frontend on another port when worktrees run alongside one another.
+  For the inner loop, also run `bunx tsc --noEmit` and the affected browser spec plus
+  `tests/browser/design-system.spec.ts` for UI changes.
+- **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
   sets `JD_IMAGE_BUILD=1`, which tells `next.config.ts` to skip the type-check pass and the
   prerender source maps. That is deliberate: install and update are both
   `docker compose up --build`, so the image build runs on the operator's own server, where
@@ -89,6 +91,9 @@ carries no licensing question at all.
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
+  Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
+  the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
+  generate credentials, require setup, have no application login, or remain unavailable.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
@@ -170,8 +175,8 @@ carries no licensing question at all.
   live, restores the dump into a drill database over the typed-confirmation route and checks the live
   database was not touched.
 - Blueprint, planning or activation changes also run `python3 scripts/e2e-deployments.py`, which
-  starts an isolated backend and deploys real nginx, busybox and Redis-blueprint releases through the
-  public API.
+  starts an isolated backend and deploys real nginx, busybox and PostgreSQL-blueprint releases through
+  the public API, including generated-password authentication over TCP and paused backup automation.
 - Keep the security posture intact. The network allowlist runs before
   authentication, enrolled accounts always require their second factor, every destructive route sits behind
   the destructive capability with an audit entry, and the rare irreversible ones

@@ -143,6 +143,9 @@ or connect a GitLab/Gitea token for requests on those providers.
 Point it at a repository, an image, a template, a Compose stack or something already running. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
 an overview with a live preview, deployments with rollback, logs, runtime, a console and settings.
+Setup can generate template credentials and suggest a public address, create and connect a private
+database on this server, or use an external database connection. Build commands, variables, storage,
+health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 

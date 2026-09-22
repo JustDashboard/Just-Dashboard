@@ -11,11 +11,12 @@ import (
 // and binary names a build produces, whether the file is a workspace, and
 // the crates it depends on.
 type cargoManifest struct {
-	name      string
-	bins      []string
-	workspace bool
-	hasPkg    bool
-	deps      map[string]bool
+	name       string
+	defaultRun string
+	bins       []string
+	workspace  bool
+	hasPkg     bool
+	deps       map[string]bool
 }
 
 var (
@@ -62,6 +63,8 @@ func parseCargoManifest(content []byte) cargoManifest {
 		switch {
 		case table == "package" && key == "name":
 			manifest.name = strings.Trim(value, `"'`)
+		case table == "package" && key == "default-run":
+			manifest.defaultRun = strings.Trim(value, `"'`)
 		case table == "bin" && key == "name" && len(manifest.bins) > 0 && manifest.bins[len(manifest.bins)-1] == "":
 			manifest.bins[len(manifest.bins)-1] = strings.Trim(value, `"'`)
 		case table == "dependencies":
@@ -76,6 +79,16 @@ func parseCargoManifest(content []byte) cargoManifest {
 	}
 	manifest.bins = bins
 	return manifest
+}
+
+func (manifest cargoManifest) binary() string {
+	if manifest.defaultRun != "" {
+		return manifest.defaultRun
+	}
+	if len(manifest.bins) > 0 {
+		return manifest.bins[0]
+	}
+	return manifest.name
 }
 
 func normalizeCrate(name string) string {
@@ -126,12 +139,9 @@ func rustCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 		candidate.Confidence = ConfidenceLow
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "Cargo.toml names no package; confirm the binary the build produces")
 	}
-	binary := manifest.name
-	if len(manifest.bins) > 0 {
-		binary = manifest.bins[0]
-		if len(manifest.bins) > 1 {
-			candidate.NeedsDecision = append(candidate.NeedsDecision, "several binaries are declared; the first, "+binary+", is built — set a build command for another")
-		}
+	binary := manifest.binary()
+	if len(manifest.bins) > 1 && manifest.defaultRun == "" {
+		candidate.NeedsDecision = append(candidate.NeedsDecision, "several binaries are declared; the first, "+binary+", is served — set package.default-run in Cargo.toml to choose another")
 	}
 	if binary != "" {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "Cargo.toml"), Reason: "binary target " + binary})
@@ -186,10 +196,7 @@ func selectRustRecipe(root string, config BuildPlanConfig) (rustRecipe, error) {
 	if manifest.workspace && !manifest.hasPkg {
 		return rustRecipe{}, fmt.Errorf("%w: Cargo workspace without a root package; set the root directory to the member crate or use a Dockerfile", ErrUnsupportedBuilder)
 	}
-	binary := manifest.name
-	if len(manifest.bins) > 0 {
-		binary = manifest.bins[0]
-	}
+	binary := manifest.binary()
 	if binary == "" {
 		return rustRecipe{}, fmt.Errorf("%w: Cargo.toml names no package or binary to build", ErrUnsupportedBuilder)
 	}

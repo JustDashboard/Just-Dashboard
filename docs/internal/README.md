@@ -61,6 +61,8 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-09-22-deploy-new/README.md`](../audits/2026-09-22-deploy-new/README.md) — deployment
+  creation audit, template/framework coverage, implementation plan and verification evidence.
 - [`../audits/2026-09-16-deployments/README.md`](../audits/2026-09-16-deployments/README.md) — deployment capability audit, fresh verification results, competitor comparison, and prioritized gaps.
 - [`../audits/2026-09-17-proxy/README.md`](../audits/2026-09-17-proxy/README.md) — proxy and TLS audit: defects fixed under the hood, capability map, competitor comparison, and ranked gaps.
 - [`../audits/0.6.7/remediation-report.md`](../audits/0.6.7/remediation-report.md) — audit fixes,

@@ -288,6 +288,10 @@ func validateInputs(blueprint *Blueprint) error {
 			}
 		}
 		switch input.Kind {
+		case InputSecret:
+			if input.Variable == "" || input.Default != "" || input.Pattern != "" {
+				return fmt.Errorf("secret input %q must name a variable and cannot have a default or pattern; its value is supplied through encrypted variables", input.Name)
+			}
 		case InputText, InputDomain:
 			if input.Pattern != "" {
 				if _, err := regexp.Compile(input.Pattern); err != nil {
@@ -637,11 +641,21 @@ func validateTemplatedInputs(blueprint *Blueprint) error {
 		blueprint.Operations.Startup, blueprint.Operations.Stop,
 	} {
 		for _, operation := range list {
+			if operation.Kind == OperationSetVariable {
+				for _, input := range blueprint.Inputs {
+					if input.Kind == InputSecret && input.Variable == operation.Name {
+						return fmt.Errorf("an operation overwrites secret input %q", input.Name)
+					}
+				}
+			}
 			for _, field := range []string{operation.Value, operation.Content, operation.URL} {
 				for _, match := range placeholderRE.FindAllStringSubmatch(field, -1) {
 					input, found := declared[match[1]]
 					if !found {
 						return fmt.Errorf("an operation templates undeclared input %q", match[1])
+					}
+					if input.Kind == InputSecret {
+						return fmt.Errorf("an operation templates secret input %q; secret values cannot enter rendered operations", input.Name)
 					}
 					if !input.Required && input.Default == "" {
 						return fmt.Errorf("an operation templates input %q, which is optional with no default, so it renders as an empty substitution", input.Name)

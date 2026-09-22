@@ -15,6 +15,7 @@ import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,
   inspectAndPrepare,
@@ -40,18 +41,19 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
   )
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()
+  const inspection = useSourceInspection(onInspected)
 
   // A tag already pulled onto this server needs no credential to reuse — the
   // picker only matters for a reference typed by hand, which is also the one
   // that might name a private registry.
   const doInspect = async (chosen: string, withCredential = false) => {
     const trimmed = chosen.trim()
-    if (!trimmed) return
+    if (!trimmed || busy) return
     setBusy(true)
     setFailure(undefined)
     try {
-      onInspected(
-        await inspectAndPrepare(
+      await inspection.inspect(() =>
+        inspectAndPrepare(
           deploymentName(imageName(trimmed)),
           "image",
           {

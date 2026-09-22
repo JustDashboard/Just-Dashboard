@@ -42,6 +42,11 @@ type Server struct {
 	// scans are enough for the UI without letting requests multiply host I/O.
 	diskScans chan struct{}
 
+	// Reserve database names during image pulls so concurrent quick setups
+	// cannot both select the same free container and persistent volume.
+	databaseProvisionMu    sync.Mutex
+	databaseProvisionNames map[string]bool
+
 	// The dashboard's own address, for links that leave the dashboard
 	// (notifications, commit statuses). See dashboardEndpoint.
 	endpointMu       sync.Mutex

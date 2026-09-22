@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -12,19 +13,21 @@ import (
 // framework and runs it on the matching ASP.NET Core (or plain runtime)
 // image. Supported targets are the releases Microsoft still ships images for.
 var (
-	dotnetRecipeVersions = map[string]bool{"8.0": true, "9.0": true, "10.0": true}
-	dotnetTargetRE       = regexp.MustCompile(`<TargetFrameworks?>\s*net([0-9]+\.[0-9]+)`)
+	dotnetRecipeVersions = []string{"8.0", "9.0", "10.0"}
+	dotnetTargetRE       = regexp.MustCompile(`<TargetFramework(s?)>\s*([^<]+)\s*</TargetFrameworks?>`)
+	dotnetVersionRE      = regexp.MustCompile(`^net([0-9]+\.[0-9]+)$`)
 	dotnetSdkRE          = regexp.MustCompile(`Sdk\s*=\s*"([^"]+)"`)
 	dotnetAssemblyRE     = regexp.MustCompile(`<AssemblyName>\s*([^<\s]+)\s*</AssemblyName>`)
 	dotnetOutputTypeRE   = regexp.MustCompile(`<OutputType>\s*([A-Za-z]+)\s*</OutputType>`)
 )
 
 type dotnetProject struct {
-	file     string
-	version  string
-	web      bool
-	exe      bool
-	assembly string
+	file        string
+	version     string
+	web         bool
+	exe         bool
+	assembly    string
+	multiTarget bool
 }
 
 func parseDotnetProject(file string, content []byte) (dotnetProject, error) {
@@ -43,9 +46,18 @@ func parseDotnetProject(file string, content []byte) (dotnetProject, error) {
 	if match == nil {
 		return project, fmt.Errorf("%w: %s declares no <TargetFramework>; the .NET recipe needs one to choose its SDK", ErrUnsupportedBuilder, file)
 	}
-	project.version = match[1]
-	if !dotnetRecipeVersions[project.version] {
-		return project, fmt.Errorf("%w: the .NET recipe builds net8.0, net9.0 and net10.0; %s targets net%s — use a Dockerfile for other releases", ErrUnsupportedBuilder, file, project.version)
+	project.multiTarget = match[1] == "s"
+	for _, target := range strings.Split(match[2], ";") {
+		parsed := dotnetVersionRE.FindStringSubmatch(strings.TrimSpace(target))
+		if parsed == nil || !slices.Contains(dotnetRecipeVersions, parsed[1]) {
+			continue
+		}
+		if slices.Index(dotnetRecipeVersions, parsed[1]) > slices.Index(dotnetRecipeVersions, project.version) {
+			project.version = parsed[1]
+		}
+	}
+	if project.version == "" || (!project.multiTarget && strings.Contains(match[2], ";")) {
+		return project, fmt.Errorf("%w: the .NET recipe builds portable net8.0, net9.0 and net10.0 targets; %s targets %s — use a Dockerfile for other targets", ErrUnsupportedBuilder, file, strings.TrimSpace(match[2]))
 	}
 	return project, nil
 }
@@ -147,14 +159,23 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 		return nil, ErrBuilderUnavailable
 	}
 	build := strings.TrimSpace(config.BuildCommand)
+	restore := "dotnet restore " + project.file
+	framework := ""
+	if project.multiTarget {
+		// Publishing several frameworks requires an explicit target; restore
+		// the same target so an older or Windows-only sibling does not need a
+		// different SDK or workload inside this Linux recipe.
+		framework = " --framework net" + project.version
+		restore += " -p:TargetFramework=net" + project.version
+	}
 	if build == "" {
-		build = "dotnet publish " + project.file + " -c Release --no-restore -o /out"
+		build = "dotnet publish " + project.file + " -c Release --no-restore -o /out" + framework
 	}
 	lines := []string{
 		"FROM " + immutableImageReference(bases[0]) + " AS build",
 		"WORKDIR /src",
 		"COPY . .",
-		"RUN " + installSecrets + "dotnet restore " + project.file,
+		"RUN " + installSecrets + restore,
 		"RUN " + buildSecrets + build,
 		"RUN test -f /out/" + project.assembly + ".dll || (echo '.NET publish must write /out/" + project.assembly + ".dll; configure the build command and project together' >&2; exit 1)",
 		"FROM " + immutableImageReference(bases[1]),

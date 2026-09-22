@@ -14,12 +14,10 @@ import type {
   WorkloadProfile,
   GitHubBranch,
 } from "@/lib/types"
-import { Disclosure } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
@@ -43,14 +41,16 @@ import {
 import {
   adoptImport,
   commitDraft,
+  configurationForSave,
   declaredVariablesNeedReview,
   enqueueDeploy,
   environmentText,
-  importEnvironment,
   loadDraft,
   preflightDraft,
   reinspect,
+  redetectedConfiguration,
   saveConfiguration,
+  saveIntent,
   selectCandidate,
   stepAfter,
   stepBefore,
@@ -131,27 +131,60 @@ export function Configure({
   )
   const draftId = flow.draft.id
   const own = environment?.draftId === draftId ? environment : null
-  const discovered = useMemo(() => discoveredEnvironmentRows(flow.candidate), [flow.candidate])
+  const discovered = useMemo(
+    () =>
+      discoveredEnvironmentRows(flow.candidate).map((row) =>
+        flow.draft.environmentKeys?.includes(row.name)
+          ? { ...row, value: "", generated: false }
+          : row,
+      ),
+    [flow.candidate, flow.draft.environmentKeys],
+  )
   const envRows = own?.rows ?? discovered
   const dotenv = own?.dotenv ?? ""
+  const retainedKeys = own?.retainedKeys ?? flow.draft.environmentKeys ?? []
   const setEnvRows = (next: EnvironmentRow[] | ((rows: EnvironmentRow[]) => EnvironmentRow[])) =>
     setEnvironment((current) => {
       const mine = current?.draftId === draftId ? current : null
       const rows = typeof next === "function" ? next(mine?.rows ?? discovered) : next
-      return { draftId, rows, dotenv: mine?.dotenv ?? "" }
+      return {
+        draftId,
+        rows,
+        dotenv: mine?.dotenv ?? "",
+        retainedKeys: mine?.retainedKeys ?? retainedKeys,
+      }
     })
   const setDotenv = (value: string) =>
     setEnvironment((current) => {
       const mine = current?.draftId === draftId ? current : null
-      return { draftId, rows: mine?.rows ?? discovered, dotenv: value }
+      return {
+        draftId,
+        rows: mine?.rows ?? discovered,
+        dotenv: value,
+        retainedKeys: mine?.retainedKeys ?? retainedKeys,
+      }
     })
+  const removeRetainedKey = (key: string) =>
+    setEnvironment((current) => ({
+      draftId,
+      rows: current?.draftId === draftId ? current.rows : discovered,
+      dotenv: current?.draftId === draftId ? current.dotenv : "",
+      retainedKeys: (current?.draftId === draftId ? current.retainedKeys : retainedKeys).filter(
+        (name) => name !== key,
+      ),
+    }))
   // The detected rows are written down as soon as they exist, so a generated
   // value (a Laravel key) is the same one on every visit rather than minted
   // again each time the page mounts.
   useEffect(() => {
     if (own) return
-    setEnvironment({ draftId, rows: discovered, dotenv: "" })
-  }, [own, draftId, discovered, setEnvironment])
+    setEnvironment({
+      draftId,
+      rows: discovered,
+      dotenv: "",
+      retainedKeys: flow.draft.environmentKeys ?? [],
+    })
+  }, [own, draftId, discovered, setEnvironment, flow.draft.environmentKeys])
   // A branch change re-detects, and the new candidate may read variables the
   // old one did not; they join the rows without touching anything typed.
   const rowsCandidate = useRef(flow.candidate)
@@ -159,15 +192,32 @@ export function Configure({
     const previous = rowsCandidate.current
     if (previous === flow.candidate) return
     rowsCandidate.current = flow.candidate
-    const found = discoveredEnvironmentRows(flow.candidate)
     setEnvironment((current) => {
       const mine = current?.draftId === draftId ? current : null
+      const found = discoveredEnvironmentRows(flow.candidate).map((row) =>
+        mine?.retainedKeys.includes(row.name) ? { ...row, value: "", generated: false } : row,
+      )
       const rows = mine?.rows ?? discoveredEnvironmentRows(previous)
-      return { draftId, rows: mergeDiscoveredRows(rows, found), dotenv: mine?.dotenv ?? "" }
+      return {
+        draftId,
+        rows: mergeDiscoveredRows(rows, found),
+        dotenv: mine?.dotenv ?? "",
+        retainedKeys: mine?.retainedKeys ?? [],
+      }
     })
   }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
+  const sentRows = envRows.filter((row) => row.name.trim() && (!row.detected || row.value))
+  const text = environmentText(sentRows, dotenv)
+  const environmentNames = new Set([
+    ...retainedKeys,
+    ...sentRows.map((row) => row.name),
+    ...Array.from(
+      dotenv.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
+      (match) => match[1],
+    ),
+  ])
   /**
    * The plan as it stands, as one comparable value.
    *
@@ -176,14 +226,24 @@ export function Configure({
    * the same plan would read as a change, and re-checking on each of those is
    * a request per keystroke.
    */
-  const planSignature = useMemo(() => JSON.stringify(flow.configuration), [flow.configuration])
+  const signatureFor = (configuration: typeof flow.configuration) =>
+    JSON.stringify({
+      name: flow.name,
+      profile: flow.profile,
+      source: flow.source,
+      configuration: configurationForSave(configuration),
+      dotenv: text,
+      retainedKeys,
+    })
+  const planSignature = signatureFor(flow.configuration)
   // Preflight's findings and which warnings were acknowledged belong to the
   // draft they were computed for, so a fresh source never inherits them — and
   // to the *plan* they were computed for, which is what `checked` records.
   // Review draws its passes now, not only its refusals, so a reader who goes
   // back from it to change the port and returns would otherwise be reading a
   // list of things this server agreed to about a plan that no longer exists.
-  const [review, setReview] = useSessionState<{
+  // The signature includes unsaved environment values, so it belongs in memory.
+  const [review, setReview] = useMemoryState<{
     draftId: string
     checked?: string
     preflight?: DeploymentPreflight
@@ -193,13 +253,15 @@ export function Configure({
   // it feeds empty, and the effect below asks again.
   const preflight =
     review?.draftId === draftId && review.checked === planSignature ? review.preflight : undefined
-  const acknowledged = review?.draftId === draftId ? review.acknowledged : []
+  const acknowledged =
+    review?.draftId === draftId && review.checked === planSignature ? review.acknowledged : []
   const setPreflight = (next: DeploymentPreflight, checked: string) =>
     setReview((current) => ({
       draftId,
       checked,
       preflight: next,
-      acknowledged: current?.draftId === draftId ? current.acknowledged : [],
+      acknowledged:
+        current?.draftId === draftId && current.checked === checked ? current.acknowledged : [],
     }))
   const setAcknowledged = (next: string[]) =>
     setReview((current) => ({
@@ -209,6 +271,7 @@ export function Configure({
       acknowledged: next,
     }))
   const [busy, setBusy] = useState("")
+  const mutating = useRef(false)
   const [failure, setFailure] = useState<Error>()
   // The server's own defaults, shown rather than assumed: this is the decision
   // that used to be reachable only after the first push had already deployed.
@@ -219,7 +282,6 @@ export function Configure({
   const [created, setCreated] = useState<{
     projectId: number
     environmentId: number
-    ready: boolean
   }>()
   // Once the project exists nothing about this setup is unfinished, and the
   // next "New project" starts blank. Forgotten on the way out rather than at
@@ -270,28 +332,45 @@ export function Configure({
   // value that fails somewhere far from here. Review counts these same rows:
   // the environment lives in memory and the step in the session store, so a
   // reload used to land back on Review reading "3 values" with none to send.
-  const sentRows = envRows.filter((row) => row.name.trim() && (!row.detected || row.value))
-  const text = environmentText(sentRows, dotenv)
 
   const changeBranch = async (nextRef: string) => {
-    setBranch(nextRef)
-    if (!nextRef.trim() || nextRef === flow.source.ref) return
+    const ref = nextRef.trim()
+    setBranch(ref)
+    if (!ref || ref === flow.source.ref || mutating.current) return
+    mutating.current = true
     setBranchBusy(true)
     setFailure(undefined)
     try {
-      const nextSource = { ...flow.source, ref: nextRef }
+      const nextSource = { ...flow.source, ref }
       const result = await reinspect(flow.draft, flow.profile, nextSource)
-      onFlowChange({
-        ...flow,
-        source: nextSource,
-        draft: result.draft,
-        candidate: result.candidate,
-        detection: result.detection,
-        configuration: result.configuration,
-      })
+      const profile =
+        flow.profile === flow.candidate?.profile
+          ? (result.candidate?.profile ?? flow.profile)
+          : flow.profile
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              source: nextSource,
+              profile,
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: redetectedConfiguration(flow, result, profile),
+            }
+          : current,
+      )
     } catch (error) {
+      // Saving the source may have succeeded before detection failed.
+      try {
+        const fresh = await loadDraft(draftId)
+        onFlowChange((current) => (current ? { ...current, draft: fresh } : current))
+      } catch {
+        /* The original inspection error is the useful one. */
+      }
       setFailure(asError(error))
     } finally {
+      mutating.current = false
       setBranchBusy(false)
     }
   }
@@ -339,6 +418,8 @@ export function Configure({
   // `selectedId`, but nothing sent one, so the finding blocked every ambiguous
   // plan with no way to resolve it from this screen.
   const pickCandidate = async (id: string) => {
+    if (mutating.current) return
+    mutating.current = true
     setFailure(undefined)
     setBusy("detect")
     try {
@@ -350,13 +431,15 @@ export function Configure({
               draft: result.draft,
               candidate: result.candidate,
               detection: result.detection,
-              configuration: result.configuration,
+              profile: result.candidate?.profile ?? current.profile,
+              configuration: redetectedConfiguration(flow, result),
             }
           : current,
       )
     } catch (error) {
       setFailure(asError(error))
     } finally {
+      mutating.current = false
       setBusy("")
     }
   }
@@ -365,11 +448,20 @@ export function Configure({
 
   /** The head of the screen, so a step change starts where the question is. */
   const toTop = () =>
-    requestAnimationFrame(() =>
-      document
-        .querySelector("[data-slot='flow-header']")
-        ?.scrollIntoView({ block: "start", behavior: "smooth" }),
-    )
+    requestAnimationFrame(() => {
+      const header = document.querySelector<HTMLElement>("[data-slot='flow-header']")
+      const heading = header?.querySelector("h1")
+      if (heading) {
+        heading.tabIndex = -1
+        heading.focus({ preventScroll: true })
+      }
+      header?.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+      })
+    })
 
   const goto = (next: ConfigureStepKey) => {
     setFailure(undefined)
@@ -420,6 +512,8 @@ export function Configure({
   const stepError = (target: ConfigureStepKey): string | undefined => {
     const errors = validateConfiguration(configuration, flow.profile)
     if (target === "project") {
+      if (isGitSource && branch.trim() !== (flow.source.ref ?? "main"))
+        return "Apply a valid branch before continuing."
       if (!DEPLOYMENT_NAME.test(flow.name))
         return "Use 1–64 letters, numbers, dots, dashes, or underscores for the name."
       if (nameCollides) return `A project is already called ${flow.name}. Choose another name.`
@@ -474,6 +568,7 @@ export function Configure({
   }
 
   const submit = async (operation: "save" | "deploy" | "check") => {
+    if (mutating.current) return
     for (const target of ["project", "runtime", "variables"] as const) {
       const problem = stepError(target)
       if (!problem) continue
@@ -487,27 +582,25 @@ export function Configure({
       return
     }
 
+    mutating.current = true
     setBusy(operation)
     setFailure(undefined)
     try {
       // Readiness follows the runtime publication, which may differ from the
       // container port when Docker allocates a free host port.
-      const toSave = {
-        ...configuration,
-        // An "Add another hostname" row left blank is a change of mind, not a
-        // request to publish nothing: the plan validator refuses an empty
-        // hostname as `domains[1] invalid or duplicate planned domain`, which
-        // is a refusal about a field the operator never filled in.
-        domains: configuration.domains.filter((domain) => domain.hostname.trim()),
-        checks: configuration.checks.map((check) =>
-          check.phase === "readiness" && check.kind === "http"
-            ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
-            : check,
-        ),
+      const toSave = configurationForSave(configuration)
+      let working = flow.draft
+      const savePlan = async (draft: DeploymentDraft) => {
+        working = draft
+        if (draft.data.intent?.name !== flow.name || draft.data.intent?.profile !== flow.profile) {
+          working = await saveIntent(working, { name: flow.name, profile: flow.profile })
+          onFlowChange((current) => (current ? { ...current, draft: working } : current))
+        }
+        return saveConfiguration(working, toSave, text, retainedKeys)
       }
       let saved: DeploymentDraft
       try {
-        saved = await saveConfiguration(flow.draft, toSave)
+        saved = await savePlan(working)
       } catch (error) {
         // saveConfiguration bumps the revision on the server whether or not
         // what follows succeeds; without this, a failure past this point
@@ -516,16 +609,19 @@ export function Configure({
         // itself just produced (or another tab's, either way the current one).
         if (!(error instanceof ApiError) || error.code !== "draft_revision_conflict") throw error
         const fresh = await loadDraft(flow.draft.id)
-        saved = await saveConfiguration(fresh, toSave)
+        saved = await savePlan(fresh)
       }
+      // The server seals visitor passwords and records staged variable scopes.
+      // Keeping the submitted copy would lose those values on reload.
+      const canonical = saved.data.configuration ?? toSave
       onFlowChange((current) =>
-        current ? { ...current, draft: saved, configuration: toSave } : current,
+        current ? { ...current, draft: saved, configuration: canonical } : current,
       )
       const checkedDraft = await preflightDraft(saved)
       onFlowChange((current) =>
-        current ? { ...current, draft: checkedDraft.draft, configuration: toSave } : current,
+        current ? { ...current, draft: checkedDraft.draft, configuration: canonical } : current,
       )
-      setPreflight(checkedDraft.preflight, planSignature)
+      setPreflight(checkedDraft.preflight, signatureFor(canonical))
       // Review's own arrival runs this far and no further: the screen asks
       // "is this right", and it cannot answer without having asked the server.
       if (operation === "check") return
@@ -549,13 +645,7 @@ export function Configure({
       setCreated({
         projectId: commit.projectId,
         environmentId: commit.environmentId,
-        ready: !text.trim(),
       })
-
-      if (text.trim()) {
-        await importEnvironment(commit.projectId, commit.environmentId, commit.planRevision, text)
-      }
-      setCreated({ projectId: commit.projectId, environmentId: commit.environmentId, ready: true })
 
       if (operation === "deploy" && !isImport) {
         const run = await enqueueDeploy(commit.projectId, commit.environmentId)
@@ -566,6 +656,7 @@ export function Configure({
     } catch (error) {
       setFailure(asError(error))
     } finally {
+      mutating.current = false
       setBusy("")
     }
   }
@@ -626,32 +717,14 @@ export function Configure({
             <p className="text-body">Starting the first release…</p>
           )}
           <p className="text-body text-muted-foreground">
-            Your project and configuration are saved.{" "}
-            {created.ready
-              ? "Open the deployment to check its run history and continue."
-              : "Environment setup did not finish. Review the Variables settings before starting the first release."}
+            Your project, configuration and environment are saved. Open the deployment to check its
+            run history and continue.
           </p>
-          {!created.ready && text && (
-            <Disclosure quiet summary="Keep a copy of your environment variables">
-              <Textarea
-                className="font-mono text-xs"
-                aria-label="Unsaved environment variables"
-                readOnly
-                value={text}
-              />
-            </Disclosure>
-          )}
         </FlowPanelBody>
         <FlowActions>
           <Button asChild className="h-11 sm:h-9">
-            <Link
-              href={
-                created.ready
-                  ? `/deploy/${created.projectId}/deployments`
-                  : `/deploy/${created.projectId}/settings/variables`
-              }
-            >
-              {created.ready ? "Open deployment" : "Finish environment setup"}
+            <Link href={`/deploy/${created.projectId}/deployments`}>
+              Open deployment
               <ArrowRight className="size-4" />
             </Link>
           </Button>
@@ -676,7 +749,7 @@ export function Configure({
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
           silently reverted once the response handler lands (§14). */}
-      <fieldset disabled={Boolean(busy)} className="contents">
+      <fieldset disabled={Boolean(busy) || branchBusy} className="contents">
         <aside className="min-w-0 xl:col-start-2 xl:row-start-1">
           <div className="xl:sticky xl:top-6">
             <PlanWiring
@@ -700,7 +773,7 @@ export function Configure({
               a re-detect and a preflight all disable the fieldset, and a form
               that greys out with no other answer reads as one that stopped
               responding. */}
-          {busy && <BorderBeam duration={3} />}
+          {(busy || branchBusy) && <BorderBeam duration={3} />}
           {/* Keyed by step, so each screen rises the way a block that has just
               arrived does (§11) rather than swapping in place. */}
           <FlowPanelBody key={current} className="animate-rise space-y-6">
@@ -715,6 +788,7 @@ export function Configure({
                 branchBusy={branchBusy}
                 branches={branches.data ?? []}
                 onChangeBranch={(ref) => void changeBranch(ref)}
+                onEditBranch={setBranch}
                 onPickCandidate={(id) => void pickCandidate(id)}
                 busy={busy}
                 nameTouched={nameTouched}
@@ -741,6 +815,9 @@ export function Configure({
                 onRowsChange={setEnvRows}
                 dotenv={dotenv}
                 onDotenvChange={setDotenv}
+                retainedKeys={retainedKeys}
+                onRemoveRetainedKey={removeRetainedKey}
+                suppliedVariables={[...environmentNames]}
                 referencesOpen={declaredVariablesNeedReview(flow)}
               />
             )}
@@ -751,7 +828,12 @@ export function Configure({
                 branch={isGitSource ? branch : undefined}
                 gitPolicy={gitPolicy}
                 onGitPolicyChange={setGitPolicy}
-                variableCount={sentRows.length}
+                variableCount={
+                  [...environmentNames].filter(
+                    (name) => !configuration.variables.some((variable) => variable.name === name),
+                  ).length
+                }
+                suppliedVariables={[...environmentNames]}
                 findings={preflight?.findings ?? []}
                 checking={busy === "check"}
                 blockers={blockers}

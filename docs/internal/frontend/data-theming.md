@@ -52,6 +52,10 @@
   socket. Available log streams show their connection state, including reconnects.
 - Blueprint catalogue entries expose `deploymentSupported` and `unavailableReason`. Unsupported
   entries remain visible with their reason but cannot be selected or inspected for deployment.
+  Template selection keeps a stable details column while fetching, preserves per-template edits, and
+  ignores obsolete inspection responses. The new-project flow keeps secret-bearing inputs in memory;
+  saved environment values resume as masked names from the encrypted server draft. Hostname changes
+  update only unchanged template-derived URL defaults, and retain visitor password protection.
 - Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
   action's existing capability. Stack pages hide those controls from limited accounts, explain the
   restriction, and retain stack/config/log read views. Direct container controls retain their separate

@@ -1160,6 +1160,9 @@ func (s *PlanningStore) SaveEnvironmentSource(
 	if err := source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
+	if err := source.validateBlueprintSecretInputs(); err != nil {
+		return nil, err
+	}
 	if exists, err := s.credentialExists(ctx, source.CredentialID); err != nil {
 		return nil, err
 	} else if !exists {

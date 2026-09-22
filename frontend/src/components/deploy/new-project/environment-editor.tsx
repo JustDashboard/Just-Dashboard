@@ -3,6 +3,7 @@
 import { Plus, Trash } from "@/components/icons"
 import { Disclosure, Field, FormNote, FormSection } from "@/components/form"
 import { Tag } from "@/components/tag"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -20,8 +21,8 @@ import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 /**
  * Key/value rows plus a pasted block, the way `quick-deploy.tsx` handed
- * environment text to the draft: never part of the plan, only ever imported
- * once the project exists (§1 rule 15 — secrets never enter the URL or
+ * environment text to the draft: encrypted separately from the plan and
+ * committed with the project (§1 rule 15 — secrets never enter the URL or
  * browser storage, so Configure holds this in memory, where it survives a
  * walk to another page and nothing else, until submit).
  */
@@ -30,6 +31,8 @@ export function EnvironmentEditor({
   onRowsChange,
   dotenv,
   onDotenvChange,
+  retainedKeys = [],
+  onRemoveRetainedKey,
   onConnectDatabase,
   hostNetwork,
   databases = [],
@@ -38,6 +41,8 @@ export function EnvironmentEditor({
   onRowsChange: (rows: EnvironmentRow[]) => void
   dotenv: string
   onDotenvChange: (value: string) => void
+  retainedKeys?: string[]
+  onRemoveRetainedKey?: (key: string) => void
   onConnectDatabase: (connection: DbConnection, url: string, variable: string) => void
   hostNetwork?: boolean
   /** The engines detection found the source connecting to, each offered as one button. */
@@ -45,16 +50,39 @@ export function EnvironmentEditor({
 }) {
   const update = (index: number, patch: Partial<EnvironmentRow>) =>
     onRowsChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
-  const unset = rows.filter((row) => row.detected && !row.value).length
+  const unset = rows.filter(
+    (row) => row.detected && !row.value && !retainedKeys.includes(row.name),
+  ).length
   // A suggestion is spent once its variable holds a value, whether the
   // sheet filled it or the operator typed it.
   const pending = databases.filter(
-    (database) => !rows.some((row) => row.name === database.variable && row.value),
+    (database) =>
+      !retainedKeys.includes(database.variable) &&
+      !rows.some((row) => row.name === database.variable && row.value),
   )
 
   return (
     <FormSection title="Environment variables">
       <div className="space-y-3">
+        {retainedKeys.length > 0 && (
+          <div className="space-y-2">
+            <FormNote>
+              These values are saved encrypted with this setup. Enter a value with the same key to
+              replace one.
+            </FormNote>
+            {retainedKeys.map((name) => (
+              <div key={name} className="flex items-center justify-between gap-2">
+                <Tag mono>{name}</Tag>
+                <IconAction
+                  label={`Remove saved variable ${name}`}
+                  onClick={() => onRemoveRetainedKey?.(name)}
+                >
+                  <Trash />
+                </IconAction>
+              </div>
+            ))}
+          </div>
+        )}
         {rows.map((row, index) => (
           /* Two fields, and nothing in a third column. The remove used to
              stand in one, `items-end`, so it aligned to the bottom of

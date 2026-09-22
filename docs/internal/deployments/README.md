@@ -1,5 +1,7 @@
 # Deployment guides
 
+- [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
+  usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, preview variables, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.

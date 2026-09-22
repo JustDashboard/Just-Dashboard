@@ -9,7 +9,7 @@ operator at each step — notifications, transcript, evidence and Docker state.
 
     python3 scripts/e2e-deployments.py
 
-It needs Docker (the busybox:1.36 and nginx:1.27-alpine images are pulled),
+It needs Docker (busybox:1.36, nginx:1.27-alpine and postgres:16-alpine are pulled),
 Go from go.mod, and free loopback ports 8090 and 18081 (JD_E2E_PORT,
 JD_E2E_HOOK_PORT). It touches only its own data directory and the containers
 of the environments it created; the running dashboard on the same host is not
@@ -38,6 +38,7 @@ PORT = int(os.environ.get("JD_E2E_PORT", "8090"))
 API = f"http://127.0.0.1:{PORT}/api/v1"
 HOOK_PORT = int(os.environ.get("JD_E2E_HOOK_PORT", "18081"))
 PASSWORD = "E2e-" + secrets.token_hex(8)
+RUN_SUFFIX = secrets.token_hex(6)
 received = []
 
 
@@ -130,7 +131,7 @@ def call(method, path, body=None, expect=(200, 201, 202)):
     return parsed
 
 
-def plan_project(name, image, command, port, checks, profile="web", limits=None):
+def plan_project(name, image, command, port, checks, profile="web", limits=None, environment=None):
     draft = call("POST", "/deploy/drafts", {})
     draft = call("PUT", f"/deploy/drafts/{draft['id']}", {
         "revision": draft["revision"], "step": "intent", "intent": {"name": name, "profile": profile}})
@@ -148,8 +149,17 @@ def plan_project(name, image, command, port, checks, profile="web", limits=None)
         "build": {"method": "image", "noCache": False, "secrets": [], "releaseTasks": []},
         "runtime": runtime, "variables": [], "dependencies": [], "checks": checks, "domains": [],
     }
+    for key in environment or {}:
+        configuration["variables"].append({
+            "name": key, "sensitivity": "secret", "scopes": ["runtime"], "required": True})
     draft = call("PUT", f"/deploy/drafts/{draft['id']}", {
-        "revision": draft["revision"], "step": "configuration", "configuration": configuration})
+        "revision": draft["revision"], "step": "configuration", "configuration": configuration,
+        "dotenv": "\n".join(f"{key}={json.dumps(value)}" for key, value in (environment or {}).items())})
+    if environment:
+        resumed = call("GET", f"/deploy/drafts/{draft['id']}")
+        if set(resumed.get("environmentKeys", [])) != set(environment) or any(
+                value in json.dumps(resumed) for value in environment.values()):
+            raise SystemExit("staged values were missing or exposed by the draft response")
     preflight = call("POST", f"/deploy/drafts/{draft['id']}/preflight", {"revision": draft["revision"]})
     draft = preflight["draft"]
     blockers = [f for f in preflight["preflight"]["findings"] if f["severity"] in ("blocked", "decision")]
@@ -216,12 +226,22 @@ def main():
     backend = start_backend()
     report = {"checks": []}
     created_environments = []
+    created_volumes = []
 
     def check(name, ok, detail=""):
         report["checks"].append({"name": name, "ok": bool(ok), "detail": detail})
         print(("PASS " if ok else "FAIL ") + name + (f" — {detail}" if detail else ""))
 
     try:
+        # Docker names are derived from environment IDs, while this fixture's
+        # store is fresh. Allocate a unique range before its first deployment
+        # so it cannot claim the live dashboard's low-numbered environments.
+        with sqlite3.connect(os.path.join(DATA, "vpsd.db")) as db:
+            if db.execute("SELECT COUNT(*) FROM deploy_environments").fetchone()[0]:
+                raise SystemExit("deployment acceptance requires a fresh data directory")
+            db.execute("DELETE FROM sqlite_sequence WHERE name='deploy_environments'")
+            db.execute("INSERT INTO sqlite_sequence(name, seq) VALUES('deploy_environments', ?)",
+                       (time.time_ns() // 1000 + secrets.randbelow(1000),))
         call("POST", "/auth/login", {"username": "e2e", "password": PASSWORD})
         # A bootstrap account must replace its temporary password before it may
         # do anything else; the change ends the session, so sign in again.
@@ -238,11 +258,13 @@ def main():
               len(options["kinds"]) == 5 and len(options["events"]) == 4)
 
         # 1. A healthy image with resource limits.
+        staged_secret = secrets.token_hex(24)
         project, environment = plan_project(
             "e2e-nginx", "nginx:1.27-alpine", [], 80,
             [{"name": "HTTP readiness", "kind": "http", "phase": "readiness", "required": True,
               "config": {"path": "/", "attempts": 20, "timeoutSeconds": 5, "intervalSeconds": 2}}],
-            limits={"memoryMb": 128, "cpus": 0.5, "pidsLimit": 64, "restartPolicy": "on-failure"})
+            limits={"memoryMb": 128, "cpus": 0.5, "pidsLimit": 64, "restartPolicy": "on-failure"},
+            environment={"JD_E2E_SECRET": staged_secret})
         created_environments.append(environment)
         snapshot = run_and_wait(project, environment)
         run_id = snapshot["run"]["id"]
@@ -261,7 +283,10 @@ def main():
         signature = next((v for k, v in succeeded[0]["headers"].items() if k.lower() == "x-jd-signature-256"), "")
         check("webhook body is signed", signature.startswith("sha256="), signature[:16])
         container = f"jd-e{environment}-r1"
-        inspect = json.loads(docker("inspect", container))[0]["HostConfig"]
+        observed = json.loads(docker("inspect", container))[0]
+        inspect = observed["HostConfig"]
+        check("required encrypted draft input reaches the first runtime",
+              "JD_E2E_SECRET=" + staged_secret in observed["Config"]["Env"])
         check("Docker applied memory 128 MiB, 0.5 CPU, 64 pids and on-failure restart",
               inspect["Memory"] == 128 << 20 and inspect["NanoCpus"] == 500_000_000 and inspect["PidsLimit"] == 64
               and inspect["RestartPolicy"]["Name"] == "on-failure",
@@ -334,51 +359,69 @@ def main():
 
         # 4. A one-click service from the reviewed catalogue.
         catalogue = {entry["id"]: entry for entry in call("GET", "/deploy/blueprints/")}
-        check("catalogue offers Redis and PostgreSQL and explains why Prometheus is preview-only",
+        check("catalogue offers Redis and PostgreSQL and explains why Minecraft is preview-only",
               catalogue["redis"]["deploymentSupported"] and catalogue["postgresql"]["deploymentSupported"]
-              and not catalogue["prometheus"]["deploymentSupported"] and "configuration files" in catalogue["prometheus"]["unavailableReason"],
+              and not catalogue["minecraft-java"]["deploymentSupported"] and "Game servers" in catalogue["minecraft-java"]["unavailableReason"],
               json.dumps({k: (v["deploymentSupported"], v.get("unavailableReason", "")[:40]) for k, v in catalogue.items() if k in ("redis", "postgresql", "prometheus", "minecraft-java")}))
-        project3, environment3, detection, rendered, warnings = plan_blueprint("e2e-redis", "redis", {"maxmemory": "128"})
+        project3, environment3, detection, rendered, warnings = plan_blueprint("e2e-postgres-" + RUN_SUFFIX, "postgresql", {})
         created_environments.append(environment3)
+        created_volumes.extend(mount["source"] for mount in rendered["runtime"].get("mounts", [])
+                               if mount.get("ownership") == "managed")
         check("blueprint inspection resolved an immutable image digest and a render digest",
               detection["source"]["kind"] == "blueprint" and detection["source"]["digest"].startswith("sha256:")
-              and detection["source"]["revision"].startswith("sha256:") and detection["source"]["ref"] == "redis@1.0.0",
+              and detection["source"]["revision"].startswith("sha256:") and detection["source"]["ref"] == "postgresql@1.0.0",
               json.dumps({k: detection["source"].get(k) for k in ("repository", "ref", "digest")}))
-        password = next((v for v in rendered["variables"] if v["name"] == "REDIS_PASSWORD"), {})
+        password = next((v for v in rendered["variables"] if v["name"] == "POSTGRES_PASSWORD"), {})
         check("rendered plan carries the reviewed defaults: image, managed volume, command check, memory limit, generated secret",
-              rendered["runtime"]["image"] == "redis:7.4-alpine" and rendered["runtime"]["strategy"] == "stop_first"
-              and rendered["runtime"]["mounts"][0]["target"] == "/data" and rendered["runtime"]["mounts"][0]["ownership"] == "managed"
-              and rendered["checks"][0]["kind"] == "command" and rendered["runtime"].get("memoryMb") == 128
+              rendered["runtime"]["image"] == "postgres:16-alpine" and rendered["runtime"]["strategy"] == "stop_first"
+              and rendered["runtime"]["mounts"][0]["target"] == "/var/lib/postgresql/data" and rendered["runtime"]["mounts"][0]["ownership"] == "managed"
+              and rendered["checks"][0]["kind"] == "command" and rendered["runtime"].get("memoryMb") == 512
               and password.get("generate") == 40 and password.get("sensitivity") == "secret" and "value" not in password,
               json.dumps({"image": rendered["runtime"]["image"], "memoryMb": rendered["runtime"].get("memoryMb"), "password": password}))
         check("preflight only warned about the missing backup policy", warnings == ["backup_policy_missing"], json.dumps(warnings))
         snapshot3 = run_and_wait(project3, environment3)
-        check("Redis blueprint deployment succeeded", snapshot3["run"]["state"] == "succeeded",
+        check("PostgreSQL blueprint deployment succeeded", snapshot3["run"]["state"] == "succeeded",
               f"state={snapshot3['run']['state']} code={snapshot3['run'].get('terminalCode')} reason={snapshot3['run'].get('terminalReason')}")
-        redis_container = f"jd-e{environment3}-r1"
-        redis_inspect = json.loads(docker("inspect", redis_container))[0]
-        ping = subprocess.run(["docker", "exec", redis_container, "redis-cli", "ping"], capture_output=True, text=True).stdout.strip()
-        mounts = [m for m in redis_inspect["Mounts"] if m["Destination"] == "/data"]
-        # The blueprint's `maxmemory` input is a memory kind, so the value the
-        # operator typed (128 MB) becomes the container limit as well.
-        check("Redis answers PONG from a container with the blueprint's memory limit and a managed data volume",
-              ping == "PONG" and redis_inspect["HostConfig"]["Memory"] == 128 << 20 and mounts and mounts[0]["Type"] == "volume"
-              and mounts[0]["Name"].startswith("e2e-redis-") and mounts[0]["Name"].endswith("-data")
-              and redis_inspect["Config"]["Image"].startswith("sha256:"),
-              f"ping={ping} memory={redis_inspect['HostConfig']['Memory']} volume={mounts[0]['Name'] if mounts else None} image={redis_inspect['Config']['Image'][:20]}")
-        env_values = {e.split("=", 1)[0]: e.split("=", 1)[1] for e in redis_inspect["Config"]["Env"] if "=" in e}
+        postgres_container = f"jd-e{environment3}-r1"
+        postgres_inspect = json.loads(docker("inspect", postgres_container))[0]
+        mounts = [m for m in postgres_inspect["Mounts"] if m["Destination"] == "/var/lib/postgresql/data"]
+        check("PostgreSQL has the blueprint's memory limit and a managed data volume",
+              postgres_inspect["HostConfig"]["Memory"] == 512 << 20 and mounts and mounts[0]["Type"] == "volume"
+              and mounts[0]["Name"].startswith("e2e-postgres-") and mounts[0]["Name"].endswith("-data")
+              and postgres_inspect["Config"]["Image"].startswith("sha256:"),
+              f"memory={postgres_inspect['HostConfig']['Memory']} volume={mounts[0]['Name'] if mounts else None} image={postgres_inspect['Config']['Image'][:20]}")
+        env_values = {e.split("=", 1)[0]: e.split("=", 1)[1] for e in postgres_inspect["Config"]["Env"] if "=" in e}
         variables = call("GET", f"/deploy/{project3}/environments/{environment3}/variables")
-        listed = next((v for v in variables if v.get("name") == "REDIS_PASSWORD"), None) if isinstance(variables, list) else None
-        revealed = call("GET", f"/deploy/{project3}/environments/{environment3}/variables/REDIS_PASSWORD/reveal")
+        listed = next((v for v in variables if v.get("name") == "POSTGRES_PASSWORD"), None) if isinstance(variables, list) else None
+        revealed = call("GET", f"/deploy/{project3}/environments/{environment3}/variables/POSTGRES_PASSWORD/reveal")
         revealed_value = revealed.get("value") if isinstance(revealed, dict) else revealed
         check("the generated password is listed by name only", listed is not None and listed.get("sensitivity") == "secret",
               json.dumps(listed)[:160])
         check("generated secret reached the container and the reveal route agrees",
               isinstance(revealed_value, str) and re.fullmatch(r"[A-Za-z0-9]{40}", revealed_value or "") is not None
-              and env_values.get("REDIS_PASSWORD") == revealed_value and revealed_value not in json.dumps(variables),
+              and env_values.get("POSTGRES_PASSWORD") == revealed_value and revealed_value not in json.dumps(variables),
               f"len={len(revealed_value or '')} masked_list={revealed_value not in json.dumps(variables)}")
+        # The image trusts local sockets and loopback. Use its Docker address
+        # to exercise the password rule that another container will reach.
+        postgres_address = next(network["IPAddress"] for network in
+                                postgres_inspect["NetworkSettings"]["Networks"].values()
+                                if network.get("IPAddress"))
+        psql = ["docker", "exec", "-e", "PGPASSWORD", postgres_container,
+                "psql", "-h", postgres_address, "-U", "app", "-d", "app", "-w", "-Atc", "SELECT 1"]
+        authenticated = subprocess.run(psql, capture_output=True, text=True,
+                                       env={**os.environ, "PGPASSWORD": revealed_value or ""})
+        refused = subprocess.run(psql, capture_output=True, text=True,
+                                 env={**os.environ, "PGPASSWORD": "invalid-" + secrets.token_hex(12)})
+        check("PostgreSQL accepts the generated password over TCP and refuses an incorrect password",
+              authenticated.returncode == 0 and authenticated.stdout.strip() == "1"
+              and refused.returncode != 0 and "password authentication failed" in refused.stderr,
+              f"authenticated={authenticated.returncode} incorrect_password={refused.returncode}")
         schedules = call("GET", f"/deploy/{project3}/environments/{environment3}/schedules")
-        check("no failing default schedule was created for a blueprint without a backup preset", schedules == [] or all(s.get("enabled") for s in schedules), json.dumps(schedules)[:200])
+        check("the default nightly backup stays paused until a backup policy is linked",
+              len(schedules) == 1 and schedules[0].get("name") == "Nightly backup"
+              and schedules[0].get("enabled") is False and schedules[0].get("expression") == "0 3 * * *"
+              and [step["action"] for step in schedules[0].get("steps", [])] == ["backup"],
+              json.dumps(schedules)[:200])
     finally:
         # Only this instance's environments. The live dashboard on this host owns
         # other jd-e* containers and they must not be touched.
@@ -390,14 +433,8 @@ def main():
             for name in names:
                 if re.fullmatch(rf"jd-e{environment_id}-r\d+", name):
                     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        # The blueprint's managed volume is named from this run's project name.
-        try:
-            volumes = docker("volume", "ls", "--filter", "name=^e2e-redis-", "--format", "{{.Name}}").split()
-        except Exception:
-            volumes = []
-        for volume in volumes:
-            if re.fullmatch(r"e2e-redis-[0-9a-f]{16}-data", volume):
-                subprocess.run(["docker", "volume", "rm", "-f", volume], capture_output=True)
+        for volume in created_volumes:
+            subprocess.run(["docker", "volume", "rm", "-f", volume], capture_output=True)
         backend.send_signal(signal.SIGTERM)
         try:
             backend.wait(timeout=30)

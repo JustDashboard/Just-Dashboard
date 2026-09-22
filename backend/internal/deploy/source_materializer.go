@@ -122,6 +122,11 @@ func (a *HostSourceAnalyzer) Materialize(
 	if err := source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
+	var err error
+	source, err = source.withoutBlueprintSecretInputs()
+	if err != nil {
+		return nil, err
+	}
 	if err := makePrivateDirectory(workspaceRoot); err != nil {
 		return nil, err
 	}

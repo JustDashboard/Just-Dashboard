@@ -5,6 +5,13 @@ connection as a dependency. Execution resolves that identity through Databases u
 encrypted credentials. The explicit admin URL read remains audited and non-cacheable. It is read-only:
 it does not create a network, publish a port, or change the saved host DSN.
 
+Creation stages entered variables in the draft's encrypted environment column before preflight and
+commits them with the initial project transaction. A required connection can therefore be satisfied by
+a managed database reference or an external provider URL before the first run. The browser receives
+only staged variable names when resuming, never saved values. Closing the database sheet cancels a
+pending connection read; a delayed reply cannot add a database to an abandoned form. Standalone
+provisioning remembers an already-created container across source-tab changes and resumes its setup.
+
 For a saved loopback connection backed by a recognized running Docker database, the container URL uses
 `db-ID.jd.internal` and the engine's internal port. Discovery requires the exact observed loopback
 address and published port; ambiguous localhost bindings and unsupported network namespaces fail.
@@ -72,6 +79,12 @@ Existing literal IP values are not rewritten. Reconnect the database once in dep
 to save its typed reference. Saved non-loopback IP connections, remote servers and service URLs do not
 receive automatic container discovery. Application drivers must reconnect and resolve DNS after a
 database interruption; this feature does not preserve an existing TCP connection through replacement.
+
+External providers remain ordinary saved connections or encrypted application variables: provider
+credentials, TLS options and hostnames are preserved. For Supabase, choose the connection URL suited to
+the server's network; its direct endpoint generally uses IPv6, while the shared session pooler supports
+IPv4. See [Supabase's connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres).
+No hosted-provider account or live provider credentials are required by the local test fixtures.
 
 ## Verification
 

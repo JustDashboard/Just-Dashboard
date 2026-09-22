@@ -44,8 +44,8 @@ bunx playwright test tests/browser/<the-spec-for-what-you-changed>.spec.ts
 cd ../backend && go build ./... && go vet ./... && go test ./<changed package>/...
 ```
 
-`bun test src` is the fast layer — 83 assertions over the pure logic in `src/lib` and
-`src/components`, in about a tenth of a second. Anything expressible there belongs there rather than
+`bun test src` is the fast layer over the pure logic in `src/lib` and
+`src/components`, usually in well under a second. Anything expressible there belongs there rather than
 in a browser spec. `bunx tsc --noEmit` is the inner loop's type check; `bun run build` is slower and
 says the same thing until you are about to ship.
 

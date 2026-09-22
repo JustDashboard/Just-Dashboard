@@ -473,10 +473,15 @@ export function BuildExtras({
  * project exists: a reference naming a stored or generated value, and the
  * scopes that decide which steps can read it.
  */
-export function VariableReferences({ configuration, onChange }: AdvancedProps) {
+export function VariableReferences({
+  configuration,
+  onChange,
+  overriddenNames,
+}: AdvancedProps & { overriddenNames?: string[] }) {
   return (
     <VariableEditor
       variables={configuration.variables}
+      overriddenNames={overriddenNames}
       onChange={(variables) => onChange({ ...configuration, variables })}
     />
   )
@@ -666,9 +671,11 @@ function CheckFields({
 function VariableEditor({
   variables,
   onChange,
+  overriddenNames = [],
 }: {
   variables: Variable[]
   onChange: (variables: Variable[]) => void
+  overriddenNames?: string[]
 }) {
   return (
     <div className="space-y-3">
@@ -722,7 +729,13 @@ function VariableEditor({
                   onChange(
                     variables.map((item, i) =>
                       i === index
-                        ? { ...item, sensitivity: sensitivity as "plain" | "secret" }
+                        ? {
+                            ...item,
+                            sensitivity: sensitivity as "plain" | "secret",
+                            ...(sensitivity === "secret"
+                              ? { value: undefined, domainTemplate: undefined }
+                              : { generate: undefined }),
+                          }
                         : item,
                     ),
                   )
@@ -742,7 +755,11 @@ function VariableEditor({
               {variable.generate ? (
                 <Input
                   aria-label={`Variable ${variable.name || index + 1} value`}
-                  value={`Generated on save (${variable.generate} characters)`}
+                  value={
+                    overriddenNames.includes(variable.name)
+                      ? `Supplied value overrides the ${variable.generate}-character default`
+                      : `Generated on save (${variable.generate} characters)`
+                  }
                   readOnly
                   className="font-mono text-muted-foreground"
                 />
@@ -767,7 +784,15 @@ function VariableEditor({
                   onChange={(event) =>
                     onChange(
                       variables.map((item, i) =>
-                        i === index ? { ...item, reference: event.target.value } : item,
+                        i === index
+                          ? {
+                              ...item,
+                              reference: event.target.value,
+                              value: undefined,
+                              generate: undefined,
+                              domainTemplate: undefined,
+                            }
+                          : item,
                       ),
                     )
                   }

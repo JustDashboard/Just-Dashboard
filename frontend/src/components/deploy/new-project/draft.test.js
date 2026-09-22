@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test"
 import { defaultConfiguration } from "../deployment-defaults"
-import { landingStep } from "./draft"
+import {
+  configurationForSave,
+  landingStep,
+  mergeDetectedConfiguration,
+  persistableFlow,
+  withSuggestedHostname,
+} from "./draft"
 
 /**
  * Where a freshly inspected source opens, for every shape detection produces.
@@ -178,4 +184,75 @@ test("a static recipe with no output directory is asked where its site is built"
 
 test("?mode=advanced asks for the runtime screen whatever detection answered", () => {
   expect(landingStep(flowFor({ candidate: candidate({ port: 3000 }) }), true)).toBe("runtime")
+})
+
+test("automatic hostnames are limited to HTTP workloads and preserve an explicit address", () => {
+  const hostname = { hostname: "app.example.test", method: "sslip" }
+  for (const profile of ["game", "service", "image", "compose", "worker"]) {
+    const configuration = defaultConfiguration(profile)
+    expect(
+      withSuggestedHostname(configuration, profile, { kind: "blueprint" }, hostname).domains,
+    ).toEqual([])
+  }
+  const web = defaultConfiguration("web")
+  expect(withSuggestedHostname(web, "web", { kind: "git" }, hostname).domains[0].hostname).toBe(
+    "app.example.test",
+  )
+  web.domains = [{ hostname: "custom.example.test", https: false, ownership: "managed" }]
+  expect(withSuggestedHostname(web, "web", { kind: "git" }, hostname).domains).toEqual(web.domains)
+})
+
+test("re-detection changes defaults while preserving operator overrides", () => {
+  const old = defaultConfiguration("web", candidate({ port: 3000, startCommand: "bun start" }))
+  const edited = structuredClone(old)
+  edited.build.startCommand = "bun run custom"
+  edited.runtime.memoryMb = 1024
+  edited.domains = [{ hostname: "custom.example.test", ownership: "managed", https: true }]
+  const detected = defaultConfiguration(
+    "web",
+    candidate({ port: 8080, startCommand: "node server.js" }),
+  )
+  const merged = mergeDetectedConfiguration(old, edited, detected)
+  expect(merged.runtime.internalPort).toBe(8080)
+  expect(merged.runtime.memoryMb).toBe(1024)
+  expect(merged.build.startCommand).toBe("bun run custom")
+  expect(merged.domains).toEqual(edited.domains)
+})
+
+test("saving normalizes blank hostnames and derived readiness ports idempotently", () => {
+  const configuration = defaultConfiguration("web", candidate({ port: 3000 }))
+  configuration.domains = [{ hostname: " ", ownership: "managed" }]
+  configuration.checks[0].config.port = 3000
+  const normalized = configurationForSave(configuration)
+  expect(normalized.domains).toEqual([])
+  expect(normalized.checks[0].config.port).toBeUndefined()
+  expect(JSON.stringify(configurationForSave(normalized))).toBe(JSON.stringify(normalized))
+  expect(configuration.checks[0].config.port).toBe(3000)
+})
+
+test("persisting a flow excludes credentials from both live and server draft snapshots", () => {
+  const flow = flowFor({ candidate: candidate({ port: 3000 }) })
+  flow.source.url = "https://operator:git-password@example.test/repo.git"
+  flow.source.composeFiles = [{ path: "compose.yml", content: "PASSWORD=compose-secret" }]
+  flow.configuration.domains = [
+    { hostname: "example.test", protection: { username: "reader", password: "visitor-secret" } },
+  ]
+  flow.draft.data = {
+    source: structuredClone(flow.source),
+    configuration: structuredClone(flow.configuration),
+  }
+  flow.detection = { compose: { preview: "# preview-private-value" } }
+  flow.draft.data.detection = structuredClone(flow.detection)
+  flow.draft.planPreview = JSON.stringify({ compose: { preview: "# preview-private-value" } })
+  const saved = persistableFlow(flow)
+  for (const secret of [
+    "git-password",
+    "compose-secret",
+    "visitor-secret",
+    "preview-private-value",
+  ]) {
+    expect(JSON.stringify(saved)).not.toContain(secret)
+    expect(JSON.stringify(flow)).toContain(secret)
+  }
+  expect(saved.configuration.domains[0].protection.username).toBe("reader")
 })

@@ -301,11 +301,10 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 	// template that is broken — but the list is short on purpose: a new
 	// definition joining it is a new template nobody can deploy in one press.
 	typed := map[string][]string{
-		"mongo-express": {"mongodb-url"},
-		"pgadmin":       {"admin-email"},
-		"directus":      {"admin-email"},
-		"nocodb":        {"admin-email"},
-		"open-webui":    {"admin-email"},
+		"pgadmin":    {"admin-email"},
+		"directus":   {"admin-email"},
+		"nocodb":     {"admin-email"},
+		"open-webui": {"admin-email"},
 	}
 	definitions, err := blueprint.Catalog()
 	if err != nil {
@@ -326,16 +325,28 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 				// Stood in for here so the rest of the render is still checked;
 				// the panel asks the operator for exactly these.
 				inputs[name] = "operator@example.com"
-				if name == "mongodb-url" {
-					inputs[name] = "mongodb://root:secret@10.0.0.2:27017/"
-				}
 			}
-			if _, err := RenderBlueprintPlan(DraftSourceConfig{
+			plan, err := RenderBlueprintPlan(DraftSourceConfig{
 				Kind: SourceBlueprint, Mode: SourceModeBlueprint,
 				BlueprintID: definition.ID, BlueprintVersion: definition.Version,
 				BlueprintInputs: inputs,
-			}, definition.Name); err != nil {
+			}, definition.ID)
+			if err != nil {
 				t.Fatalf("a chosen template refused the page's own inputs: %v", err)
+			}
+			if err := plan.Configuration.Validate(); err != nil {
+				t.Fatalf("the page's template inputs cannot be saved: %v", err)
+			}
+			draft := &Draft{Data: DraftData{
+				Intent: &DraftIntentConfig{Name: definition.ID, Profile: plan.Detection.Candidates[0].Profile},
+				Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+					BlueprintID: definition.ID, BlueprintVersion: definition.Version, BlueprintInputs: inputs},
+				Detection: &plan.Detection, Configuration: &plan.Configuration,
+			}}
+			for _, finding := range preflightFindings(draft, plan.Configuration, HostObservation{}, true) {
+				if finding.Code == "strategy_ineligible" || finding.Code == "readiness_missing" {
+					t.Fatalf("the page's template defaults cannot deploy: %+v", finding)
+				}
 			}
 			// Anything the page has to ask for must be declared required, which
 			// is what makes it a marked field and a refusal before the press

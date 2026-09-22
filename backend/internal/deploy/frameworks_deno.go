@@ -3,18 +3,11 @@ package deploy
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
 // The Deno recipe runs a project's own `start` task on the official image,
 // after `deno install` has cached what deno.json imports.
-
-var (
-	denoLineCommentRE  = regexp.MustCompile(`(?m)^\s*//.*$`)
-	denoBlockCommentRE = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	denoTrailingComma  = regexp.MustCompile(`,(\s*[}\]])`)
-)
 
 type denoConfig struct {
 	Tasks   map[string]json.RawMessage `json:"tasks"`
@@ -30,11 +23,82 @@ func parseDenoConfig(content []byte) denoConfig {
 	if json.Unmarshal(content, &config) == nil {
 		return config
 	}
-	cleaned := denoBlockCommentRE.ReplaceAll(content, nil)
-	cleaned = denoLineCommentRE.ReplaceAll(cleaned, nil)
-	cleaned = denoTrailingComma.ReplaceAll(cleaned, []byte("$1"))
-	_ = json.Unmarshal(cleaned, &config)
+	config = denoConfig{}
+	if json.Unmarshal(denoJSONWithoutComments(content), &config) != nil {
+		return denoConfig{}
+	}
 	return config
+}
+
+// Comments and trailing commas are syntax only outside strings. Replacing
+// them with whitespace preserves URLs, shell globs and escaped task quotes.
+func denoJSONWithoutComments(content []byte) []byte {
+	cleaned := append([]byte(nil), content...)
+	inString := false
+	for i := 0; i < len(cleaned); i++ {
+		if inString {
+			if cleaned[i] == '\\' {
+				i++
+			} else if cleaned[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if cleaned[i] == '"' {
+			inString = true
+			continue
+		}
+		if cleaned[i] != '/' || i+1 == len(cleaned) {
+			continue
+		}
+		switch cleaned[i+1] {
+		case '/':
+			for i < len(cleaned) && cleaned[i] != '\n' && cleaned[i] != '\r' {
+				cleaned[i] = ' '
+				i++
+			}
+		case '*':
+			start := i
+			i += 2
+			for i+1 < len(cleaned) && !(cleaned[i] == '*' && cleaned[i+1] == '/') {
+				i++
+			}
+			if i+1 == len(cleaned) || i == len(cleaned) {
+				return nil
+			}
+			i++
+			for j := start; j <= i; j++ {
+				if cleaned[j] != '\n' && cleaned[j] != '\r' {
+					cleaned[j] = ' '
+				}
+			}
+		}
+	}
+	inString = false
+	for i := 0; i < len(cleaned); i++ {
+		if inString {
+			if cleaned[i] == '\\' {
+				i++
+			} else if cleaned[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if cleaned[i] == '"' {
+			inString = true
+		} else if cleaned[i] == ',' {
+			for j := i + 1; j < len(cleaned); j++ {
+				if strings.ContainsRune(" \t\r\n", rune(cleaned[j])) {
+					continue
+				}
+				if cleaned[j] == '}' || cleaned[j] == ']' {
+					cleaned[i] = ' '
+				}
+				break
+			}
+		}
+	}
+	return cleaned
 }
 
 // denoTask reads a task's command, which is a string or an object with a

@@ -103,9 +103,11 @@ only renderer/executor/validation authority for their feature.
   showed four facts. A stored result is keyed to the plan it was computed for as well as to the
   draft, so going back to change the port and returning re-checks rather than reading back what this
   server agreed to about the previous plan. The arrival check runs once per plan: a check that fails
-  is shown and not retried on its own, and Deploy is the retry. Deploy then saves the configuration, runs
-  preflight, commits, imports the environment text and enqueues the first run; Save only stops after
-  the import. The saved draft revision is adopted before preflight, so a failed preflight never
+  is shown and not retried on its own, and Deploy is the retry. Review and Deploy save edited intent,
+  configuration and encrypted environment inputs before preflight. Commit creates the project and its
+  initial variable revisions in one transaction, then Deploy enqueues the first run; Save only stops
+  after commit. Required variables are checked against those same values, so an entered connection
+  string cannot be rejected merely because it used to be imported after commit. The saved draft revision is adopted before preflight, so a failed preflight never
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
@@ -121,9 +123,18 @@ only renderer/executor/validation authority for their feature.
   [`../frontend/data-theming.md`](../frontend/data-theming.md)): the source tab and its form, and the
   configure screen's flow, findings and Advanced disclosure, survive a walk to another page and a
   reload until the project is created or the source is changed, and a remembered flow whose draft has
-  expired is dropped with a notice on the way in. Environment text never enters the URL or browser
-  storage: Configure holds it in memory only (`useMemoryState`), where it survives navigation and is
-  the one part of a setup a reload does not keep.
+  expired is dropped with a notice on the way in. Unsaved environment values and visitor passwords never
+  enter the URL or browser storage. Configuration saves stage environment values in the additive
+  `deploy_drafts.environment_enc` column, sealed with the install key; only `environmentKeys` returns
+  to the browser, including names whose explicit empty override must survive a reload. An omitted
+  `dotenv` preserves staged inputs, an explicit empty document clears them,
+  and `retainEnvironmentKeys` preserves individually named masked values when a resumed form submits
+  new input. New values override retained values, plain defaults and generation requests while keeping
+  declared scopes. Original defaults and generators remain available if the override is removed; commit
+  seals every supplied value as secret regardless of the fallback's sensitivity. A source change clears
+  staged values; reinspection of another branch of the same
+  repository preserves them. Invalid parsing, revision conflicts and failed commits cannot partially
+  save credentials. Required-variable and reference-graph checks use the same effective values as commit.
   The environment section opens with the variables detection found the source reading — the template's
   example as the placeholder, the file it was read from beside the key — and a detected row left empty
   is skipped at submit rather than set to nothing; each database the source connects to is one button
@@ -567,26 +578,41 @@ only renderer/executor/validation authority for their feature.
   it for review instead of composing a default; the runtime and variable sections open for a blueprint.
   The template panel answers what it can before the press: a `domain` input arrives filled in with
   `GET /deploy/hostname`'s suggestion (the same `<slug>.<address>.sslip.io` the public-address field
-  takes, and `Render` turns that input into the plan's own domain, so the two start as one answer —
-  though only as far as the handoff: nothing re-renders a blueprint after detection, so a hostname
-  edited on the runtime screen moves the route and leaves `N8N_HOST` and its like on the old name),
-  and a required input the panel cannot answer is marked and
+  takes, and `Render` turns that input into the plan's own domain). Reviewed plain variables derived
+  from that primary domain carry `domainTemplate` metadata using only `{{hostname}}` and `{{scheme}}`.
+  Runtime-screen hostname and HTTPS edits update values still matching their old automatic value;
+  explicit overrides remain unchanged. Removing publication clears matching automatic values; a
+  required domain setting then needs a value before deployment. Editing a route retains its visitor
+  password protection, and disabling public publication removes all aliases as well as the primary.
+  A required input the panel cannot answer is marked and
   refused there rather than reaching `Render` — which used to refuse `"domain" is required` for the
   eight definitions that declare one, after a draft had already been created. A press that fails
   discards the draft it started, so a refused attempt is not an unfinished setup.
-  Input values become plain variables through the additive `PlannedVariable.value` field (refused for
-  secrets and for anything shaped like a reference); declared secrets become
+  Ordinary input values become plain variables through the additive `PlannedVariable.value` field
+  (refused for secrets and for anything shaped like a reference). A `secret` input is deferred to the
+  Variables screen as a required secret variable, never accepted in `blueprintInputs`; Mongo Express
+  uses this for its MongoDB URI and offers the MongoDB connection sheet. Declared generated secrets become
   `PlannedVariable.generate` (16–128 characters, secret only) and commit produces each value from
   `crypto/rand` so it exists only sealed, revealed through the audited reveal route. Preflight accepts a
-  literal or generated value for a required variable, and a managed `docker_volume` that Docker has not
+  literal, generated, referenced or encrypted draft value for a required variable, and a managed `docker_volume` that Docker has not
   created yet passes as `storage_pending_creation` (Docker creates it on first start); a linked or
   uninspectable volume still blocks. Default automation presets that need a backup job arrive paused so
   the operator links a job under Settings → Automation instead of a nightly `invalid_plan` failure. Preview
   volume names include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked
   and read-only, startup budgets use bounded retries, and Bedrock does not receive Java save commands.
   UDP remains an explicit unsupported runtime protocol, never silently converted to TCP.
-  `scripts/e2e-deployments.py` deploys the Redis blueprint against a real backend and Docker daemon and
-  checks the digest, the rendered plan, the container's limit and volume, and the generated password.
+  HTTP tool templates use the web profile so their default candidate-first strategy is eligible.
+  Retired definitions cannot create new projects; existing release operations retain their compatibility
+  contract. The template chooser keeps its detail column during loading, displays retryable failures,
+  retains edits separately per template and ignores abandoned inspections. Below the desktop two-column
+  breakpoint, selecting a template brings its settings above the catalogue and focuses them; Choose
+  another template returns to the catalogue, respecting reduced motion. Successful inspection consumes
+  the source/deploy-link query parameters so a reload returns to Configure. Git branch typing stays local
+  until blur or Enter, and reinspection preserves explicit configuration overrides. Session snapshots
+  omit raw Compose documents, detection previews and the serialized exact-plan preview.
+  `scripts/e2e-deployments.py` deploys the PostgreSQL blueprint against a real backend and Docker daemon
+  and checks the digest, rendered plan, container limit and volume, generated-password authentication
+  over TCP (including rejection of an incorrect password), and paused backup automation without a policy.
 - A definition's `image.command` (an argument vector, never a shell string, never templated) replaces the
   image's default arguments and renders as `Plan.Command`; MinIO needs `server /data --console-address
   :9001` and had none, so it printed its usage and never listened. A definition's readiness timeout is a
