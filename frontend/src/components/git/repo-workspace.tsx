@@ -6,13 +6,12 @@ import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
   Archive,
-  BranchPlus,
   ChevronDoubleDown,
   ChevronDoubleUp,
   CloudUpload,
   CornerUpLeft,
+  ClockRewind,
   FolderOpen,
-  GitBranch,
   Link as LinkIcon,
   RefreshClockwise,
   Terminal,
@@ -28,6 +27,8 @@ import { useGitHubAccount } from "@/hooks/use-github"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FileTree, type ConfirmRequest as TreeConfirmRequest } from "@/components/files/file-tree"
+import { SourceBranch, SourceFork } from "@/components/git/glyphs"
+import { branchLabel } from "@/components/git/marks"
 import { AheadBehind } from "@/components/git/ahead-behind"
 import { GitHelp } from "@/components/git/help"
 import { ChangesPanel } from "@/components/git/changes-panel"
@@ -39,6 +40,7 @@ import { GitHubPanel } from "@/components/git/github-panel"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import { PreviewPanel, type GitPreview, type PreviewContext } from "@/components/git/preview-panel"
 import { RemotesDialog } from "@/components/git/remotes-dialog"
+import { WorktreesDialog } from "@/components/git/worktrees-dialog"
 import { useGitRun } from "@/components/git/run"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
@@ -57,6 +59,14 @@ type Tab = "changes" | "history" | "branches" | "github"
 // dragged wider; at 1280 with the sidebar open the diff still gets 400px.
 const TREE = { min: 208, max: 480, base: 240 }
 const WORK = { min: 300, max: 640, base: 368 }
+// What the preview column may never be dragged below. A per-panel maximum is
+// not a layout constraint: two panes each inside their own limit still add up
+// to more than a 1280 row has, and the preview — `flex-1 min-w-0`, so it
+// yields to everything — collapsed to nothing. This is the number that makes
+// the row's arithmetic close.
+const PREVIEW_MIN = 360
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 /**
  * One repository, as a place to work rather than a report to read.
@@ -96,14 +106,45 @@ export function RepoWorkspace({
   const [historyFile, setHistoryFile] = useState<string>()
   const [remotesOpen, setRemotesOpen] = useState(false)
   const [identityOpen, setIdentityOpen] = useState(false)
-  const [treePx, setTreeWidth, resetTreeWidth] = usePanelSize("git.tree", TREE.base)
-  const [workPx, setWorkWidth, resetWorkWidth] = usePanelSize("git.work", WORK.base)
+  const [worktreesOpen, setWorktreesOpen] = useState(false)
+  const [treeWidth, setTreeWidth, resetTreeWidth] = usePanelSize("git.tree", TREE.base)
+  const [workWidth, setWorkWidth, resetWorkWidth] = usePanelSize("git.work", WORK.base)
+  const [rowWidth, setRowWidth] = useState(0)
 
   // Opening a diff or a file takes the right column, so the graph steps aside.
   const setPreview = useCallback((p: GitPreview | null) => {
     setPreviewState(p)
     if (p) setGraphOpen(false)
   }, [])
+
+  // What the three columns actually have between them, which is the only thing
+  // that can say whether a stored width still fits. The row is measured rather
+  // than assumed because the sidebar opens and closes beside it.
+  //
+  // A ref callback rather than an effect, because an effect runs *after* the
+  // browser has painted: with a width left over from a wider monitor, one
+  // frame of the collapsed layout would be drawn before the fit applied. React
+  // flushes the state set here before paint, and runs the returned cleanup
+  // when the node goes.
+  const rowRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    setRowWidth(el.clientWidth)
+    const observer = new ResizeObserver(() => setRowWidth(el.clientWidth))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // A width the operator asked for, reduced to one the row can honour. The
+  // middle column is fitted first and the tree second, so when the row runs
+  // out it is the file names that give way and not the work: the changes list
+  // is what the screen is open for. Below `lg` the columns stack and neither
+  // width is applied, so the numbers here are free to be nonsense there.
+  const fitPanel = (want: number, self: { min: number; max: number }, other: number) => {
+    if (!rowWidth) return clamp(want, self.min, self.max)
+    return Math.max(self.min, Math.min(self.max, rowWidth - PREVIEW_MIN - other, want))
+  }
+  const workPx = fitPanel(workWidth, WORK, TREE.min)
+  const treePx = fitPanel(treeWidth, TREE, workPx)
 
   const canControl = can("service.control")
   const canDestruct = can("destructive")
@@ -157,6 +198,7 @@ export function RepoWorkspace({
   const activeKey = previewKey(preview)
 
   const ctx: PreviewContext = {
+    canAdmin: can("system.admin"),
     repoPath: repo.path,
     branch: branch || "HEAD",
     canWrite,
@@ -212,9 +254,9 @@ export function RepoWorkspace({
         icon: CloudUpload,
         disabled: !!busy,
         run: () =>
-          void run("Pushed tags", () =>
-            post<GitResult>("/git/push/tags", {}, { query: q }),
-          ).catch(() => undefined),
+          void run("Pushed tags", () => post<GitResult>("/git/push/tags", {}, { query: q })).catch(
+            () => undefined,
+          ),
       },
       {
         key: "identity",
@@ -233,12 +275,64 @@ export function RepoWorkspace({
     run: () => setRemotesOpen(true),
   })
   more.push({
+    key: "worktrees",
+    label: "Worktrees",
+    detail: "Work on branches in separate folders, each with its own changes.",
+    icon: SourceBranch,
+    run: () => setWorktreesOpen(true),
+  })
+  more.push({
+    key: "recovery",
+    label: "Recovery timeline",
+    detail: "Find an earlier branch position and rescue its commits.",
+    icon: ClockRewind,
+    run: () => setPreview({ kind: "recovery" }),
+  })
+  if (canControl)
+    more.push({
+      key: "rebase",
+      label: "Edit local history",
+      detail: "Reorder, squash, reword or drop local commits with a recovery branch.",
+      icon: ClockRewind,
+      disabled: !!busy || !!status.data?.operation,
+      run: () => setPreview({ kind: "rebase" }),
+    })
+  more.push({
     key: "files",
     label: "Open in Files",
     detail: "The same folder in the file manager.",
     icon: FolderOpen,
     run: () => router.push(`/files?path=${encodeURIComponent(repo.path)}`),
   })
+  for (const item of [
+    {
+      kind: "forge" as const,
+      label: "GitLab and Gitea",
+      detail: "Connect a provider account and manage pull or merge requests.",
+    },
+    {
+      kind: "submodules" as const,
+      label: "Submodules",
+      detail: "Initialize, update or remove repositories pinned inside this checkout.",
+    },
+    {
+      kind: "lfs" as const,
+      label: "Git LFS",
+      detail: "Inspect large files, track patterns and download objects.",
+    },
+    {
+      kind: "exchange" as const,
+      label: "Patch exchange",
+      detail: "Export changes or check and import a patch.",
+    },
+  ])
+    more.push({
+      key: item.kind,
+      label: item.label,
+      detail: item.detail,
+      icon: SourceBranch,
+      run: () => setPreview({ kind: item.kind }),
+    })
   if (can("terminal")) {
     more.push({
       key: "shell",
@@ -254,19 +348,62 @@ export function RepoWorkspace({
   return (
     <Page fill className="gap-3 px-2 py-2 md:px-3 md:py-3">
       {operation && (
-        <Notice tone="danger" title={`A ${operation} is half-finished in this working tree`}>
-          Something left it mid-way — most likely a shell. Nothing here can commit until it is
-          finished or abandoned there:{" "}
-          <span className="font-mono">git {operation} --continue</span> or{" "}
-          <span className="font-mono">git {operation} --abort</span>.{" "}
-          {can("terminal") && (
-            <Link
-              href={`/terminal?cwd=${encodeURIComponent(repo.path)}`}
-              className="text-foreground underline underline-offset-4"
-            >
-              Open a shell here
-            </Link>
-          )}
+        <Notice tone="warning" title={`A ${operation} is in progress`}>
+          {operation === "bisect"
+            ? "Finish the bisect in the terminal with git bisect reset."
+            : "Resolve each conflicted file in Changes, then continue when the result is ready."}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button size="xs" variant="outline" onClick={() => setTab("changes")}>
+              Show changes
+            </Button>
+            {operation !== "bisect" && canControl && (
+              <Button
+                size="xs"
+                disabled={
+                  !!busy || (status.data?.files.some((file) => file.label === "conflicted") ?? true)
+                }
+                onClick={() =>
+                  void run("Operation continued", () =>
+                    post<GitResult>("/git/operation/continue", {}, { query: q }),
+                  ).catch(() => undefined)
+                }
+              >
+                Continue {operation}
+              </Button>
+            )}
+            {operation !== "bisect" && canDestruct && (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={!!busy}
+                onClick={() =>
+                  confirm({
+                    title: `Abort ${operation}`,
+                    phrase: "abort operation",
+                    confirmLabel: "Abort operation",
+                    description:
+                      "Return to the state before the operation started. Uncommitted conflict resolutions made since it started are discarded.",
+                    action: async (phrase) => {
+                      await run("Operation aborted", () =>
+                        post<GitResult>("/git/operation/abort", {}, { query: q, confirm: phrase }),
+                      )
+                      setPreview(null)
+                    },
+                  })
+                }
+              >
+                Abort
+              </Button>
+            )}
+            {can("terminal") && (
+              <Link
+                href={`/terminal?cwd=${encodeURIComponent(repo.path)}`}
+                className="text-foreground underline underline-offset-4"
+              >
+                Open a shell here
+              </Link>
+            )}
+          </div>
         </Notice>
       )}
 
@@ -312,7 +449,7 @@ export function RepoWorkspace({
                 onClick={() => setTab("branches")}
                 className="flex min-w-0 shrink items-center gap-1.5 text-left focus-ring-inset"
               >
-                <GitBranch
+                <SourceBranch
                   className={cn(
                     "size-3.5 shrink-0",
                     head.detached ? "text-destructive" : "text-muted-foreground",
@@ -325,7 +462,7 @@ export function RepoWorkspace({
                       head.detached && "text-destructive",
                     )}
                   >
-                    {head.branch || "—"}
+                    {branchLabel(head.branch, head.detached)}
                   </span>
                   <span className="hidden max-w-[14rem] truncate text-micro text-muted-foreground sm:block">
                     {head.empty
@@ -429,7 +566,10 @@ export function RepoWorkspace({
             Definite is the load-bearing word: a pane sized by its content
             puts the commit box below the fold of a page that does not
             scroll, which is exactly where it went. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+        <div
+          ref={rowRef}
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
+        >
           <div className="relative flex h-[15rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-tree) lg:border-r lg:border-b-0">
             <FileTree
               // Remount on a branch switch: a different branch can be a different
@@ -451,14 +591,14 @@ export function RepoWorkspace({
               value={treePx}
               min={TREE.min}
               max={TREE.max}
-              onChange={(px, commit) => setTreeWidth(px, commit)}
+              onChange={(px, commit) => setTreeWidth(clamp(px, TREE.min, TREE.max), commit)}
               onReset={resetTreeWidth}
               className="absolute inset-y-0 -right-1 z-20"
             />
           </div>
 
           <div className="relative flex h-[30rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-work) lg:border-r lg:border-b-0">
-            <div className="flex h-9 shrink-0 items-center overflow-x-auto border-b border-hairline px-1 [scrollbar-width:none]">
+            <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1">
               <TabButton active={tab === "changes"} onClick={() => setTab("changes")}>
                 Changes
                 {changeCount > 0 && <ChipCount>{changeCount}</ChipCount>}
@@ -488,7 +628,7 @@ export function RepoWorkspace({
                     )}
                     onClick={() => setGraphOpen((v) => !v)}
                   >
-                    <BranchPlus className="size-3.5" />
+                    <SourceFork className="size-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>See every branch and where it forked</TooltipContent>
@@ -561,13 +701,16 @@ export function RepoWorkspace({
               value={workPx}
               min={WORK.min}
               max={WORK.max}
-              onChange={(px, commit) => setWorkWidth(px, commit)}
+              onChange={(px, commit) => setWorkWidth(clamp(px, WORK.min, WORK.max), commit)}
               onReset={resetWorkWidth}
               className="absolute inset-y-0 -right-1 z-20"
             />
           </div>
 
-          <div className="flex h-[26rem] shrink-0 flex-col lg:h-auto lg:min-h-0 lg:min-w-0 lg:flex-1 lg:shrink">
+          <div
+            data-slot="git-preview"
+            className="flex h-[26rem] shrink-0 flex-col lg:h-auto lg:min-h-0 lg:min-w-0 lg:flex-1 lg:shrink"
+          >
             {graphOpen ? (
               <GraphPanel
                 repoPath={repo.path}
@@ -580,6 +723,16 @@ export function RepoWorkspace({
           </div>
         </div>
       </div>
+      <WorktreesDialog
+        open={worktreesOpen}
+        onOpenChange={setWorktreesOpen}
+        repoPath={repo.path}
+        canControl={canControl}
+        canDestruct={canDestruct}
+        canTerminal={can("terminal")}
+        confirm={confirm}
+        onChanged={onChanged}
+      />
       <RemotesDialog
         open={remotesOpen}
         onOpenChange={setRemotesOpen}
@@ -605,12 +758,18 @@ export function RepoWorkspace({
 function previewKey(p: GitPreview | null): string | undefined {
   if (!p) return undefined
   switch (p.kind) {
+    case "partial":
+      return `${p.staged ? "staged" : "unstaged"}:${p.file}`
+    case "conflict":
+      return `unstaged:${p.file}`
     case "commit":
       return `commit:${p.sha}`
     case "stash":
       return `stash:${p.stash.sha}`
     case "pull":
       return `pull:${p.number}`
+    case "workflow":
+      return `workflow:${p.id}`
     case "diff":
       return `${p.subtitle?.startsWith("staged") ? "staged" : "unstaged"}:${p.title}`
     default:

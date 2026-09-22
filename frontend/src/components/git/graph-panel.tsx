@@ -1,13 +1,23 @@
 "use client"
 
-import { useMemo } from "react"
-import { BranchPlus, Cross } from "@/components/icons"
+import { useEffect, useMemo, useState } from "react"
+import { Cross } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
-import type { GitGraph, GitGraphCommit } from "@/lib/types"
+import type { GitBranch, GitGraph, GitGraphCommit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { GitPreview } from "@/components/git/preview-panel"
+import { SourceFork } from "@/components/git/glyphs"
 import { RefTags } from "@/components/git/ref-tags"
+import { HistoryPaging } from "@/components/git/inspect-panels"
+import { SearchInput } from "@/components/page"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
@@ -66,10 +76,38 @@ export function GraphPanel({
   // the history list makes, and the graph is one button away again.
   const show = (c: GitGraphCommit) => onSelect({ kind: "commit", sha: c.sha, subject: c.subject })
 
-  const graph = usePoll(
-    (signal) => get<GitGraph>("/git/graph", { path: repoPath, limit: 250 }, signal),
+  const [search, setSearch] = useState("")
+  const [term, setTerm] = useState("")
+  const [ref, setRef] = useState("all")
+  const [skip, setSkip] = useState(0)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setTerm(search.trim())
+      setSkip(0)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+  const branches = usePoll(
+    (signal) => get<GitBranch[]>("/git/branches", { path: repoPath }, signal),
     0,
     [repoPath],
+  )
+
+  const graph = usePoll(
+    (signal) =>
+      get<GitGraph>(
+        "/git/graph",
+        {
+          path: repoPath,
+          limit: 250,
+          skip,
+          search: term || undefined,
+          ref: ref === "all" ? undefined : ref,
+        },
+        signal,
+      ),
+    0,
+    [repoPath, skip, term, ref],
   )
 
   const rows = useMemo(() => graph.data?.commits ?? [], [graph.data])
@@ -104,16 +142,14 @@ export function GraphPanel({
     return out
   }, [rows, index])
 
-  if (graph.error) return <ErrorState error={graph.error} className="m-3" />
-  if (graph.loading && !graph.data) return <LoadingRows className="p-3" rows={10} />
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PaneHeader className="gap-2 px-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-body font-medium">Branch graph</p>
           <p className="truncate text-hint text-muted-foreground">
-            {rows.length} commit{rows.length === 1 ? "" : "s"} across every local and remote branch
+            {rows.length} commit{rows.length === 1 ? "" : "s"} ·{" "}
+            {ref === "all" ? "all branches and tags" : ref}
           </p>
         </div>
         <Tooltip>
@@ -132,8 +168,40 @@ export function GraphPanel({
         </Tooltip>
       </PaneHeader>
 
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-3 py-2">
+        <SearchInput
+          dense
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search graph commits"
+          placeholder="Search messages…"
+          containerClassName="min-w-0 flex-1 sm:w-auto"
+        />
+        <Select
+          value={ref}
+          onValueChange={(value) => {
+            setRef(value)
+            setSkip(0)
+          }}
+        >
+          <SelectTrigger size="sm" aria-label="Graph branch" className="max-w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All branches and tags</SelectItem>
+            {branches.data?.map((branch) => (
+              <SelectItem key={branch.name} value={branch.name}>
+                {branch.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {graph.error && <ErrorState error={graph.error} className="m-3" />}
+      {graph.loading && !graph.data && <LoadingRows className="p-3" rows={10} />}
+
       {rows.length === 0 ? (
-        <EmptyState className="m-3" icon={BranchPlus} title="No commits yet" />
+        <EmptyState className="m-3" icon={SourceFork} title="No commits yet" />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="relative" style={{ minHeight: rows.length * ROW }}>
@@ -174,6 +242,15 @@ export function GraphPanel({
           </div>
         </div>
       )}
+      <HistoryPaging
+        start={skip}
+        count={rows.length}
+        hasMore={!!graph.data?.hasMore}
+        busy={graph.loading}
+        unit="commits"
+        onPrevious={() => setSkip(Math.max(0, skip - 250))}
+        onNext={() => setSkip(skip + 250)}
+      />
     </div>
   )
 }

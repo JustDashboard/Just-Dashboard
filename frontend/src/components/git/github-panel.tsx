@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { BranchPlus, External, GitMerge, GitPullRequest, Plus } from "@/components/icons"
+import { External, Plus } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { relativeTime } from "@/lib/format"
@@ -16,6 +16,7 @@ import type {
   GitPullRequest as PR,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { SourceBranch, SourceMerge, SourcePull } from "@/components/git/glyphs"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import type { GitRun } from "@/components/git/run"
@@ -111,7 +112,7 @@ export function GitHubPanel({
     return (
       <EmptyState
         className="m-3"
-        icon={GitPullRequest}
+        icon={SourcePull}
         title="The GitHub CLI is not installed"
         description="Pull requests and workflow runs come through gh. Install it on this host to use them from here."
       />
@@ -121,7 +122,7 @@ export function GitHubPanel({
     return (
       <EmptyState
         className="m-3"
-        icon={GitPullRequest}
+        icon={SourcePull}
         title="Not signed in to GitHub"
         description="Sign in from the header above to see and open pull requests for this repository."
       />
@@ -147,7 +148,7 @@ export function GitHubPanel({
         key: "merge",
         label: "Merge",
         detail: "Merge it into its base branch on GitHub.",
-        icon: GitMerge,
+        icon: SourceMerge,
         disabled: !!busy || p.draft,
         run: () => setMerging(p),
       })
@@ -155,7 +156,7 @@ export function GitHubPanel({
         key: "checkout",
         label: "Check out the branch",
         detail: `Fetch ${p.head} and switch this working tree to it.`,
-        icon: BranchPlus,
+        icon: SourceBranch,
         disabled: !!busy,
         run: () =>
           void run(`Checked out ${p.head}`, () =>
@@ -227,7 +228,7 @@ export function GitHubPanel({
         {pulls.data && list.length === 0 && (
           <EmptyState
             className="m-3"
-            icon={GitPullRequest}
+            icon={SourcePull}
             title={`No ${state} pull requests`}
             description={
               state === "open"
@@ -318,11 +319,11 @@ export function GitHubPanel({
               <ul className="animate-rise divide-y divide-hairline">
                 {runs.data.map((r) => (
                   <li key={r.id} className="min-w-0">
-                    <a
-                      href={r.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="group flex min-w-0 items-center gap-2 px-3 py-1.5 transition-colors hover:bg-row-hover"
+                    <button
+                      type="button"
+                      onClick={() => onSelect({ kind: "workflow", id: r.id })}
+                      aria-pressed={active === `workflow:${r.id}`}
+                      className="group flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
                     >
                       <Status
                         tone={
@@ -349,7 +350,7 @@ export function GitHubPanel({
                       <External
                         className={cn("size-3.5 shrink-0 text-muted-foreground", rowReveal())}
                       />
-                    </a>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -502,7 +503,7 @@ function CreatePullDialog({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button disabled={busy || !title.trim() || !base} onClick={create} pending={busy}>
-                <GitPullRequest className="size-4" />
+                <SourcePull className="size-4" />
                 Push and open
               </Button>
             </TooltipTrigger>
@@ -568,7 +569,11 @@ function CreatePullDialog({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Description" htmlFor="pr-body" hint="What a reviewer needs to know. Markdown works.">
+        <Field
+          label="Description"
+          htmlFor="pr-body"
+          hint="What a reviewer needs to know. Markdown works."
+        >
           <Textarea
             id="pr-body"
             rows={5}

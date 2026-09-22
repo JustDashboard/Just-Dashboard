@@ -5,7 +5,6 @@ import {
   Archive,
   Check,
   CloudUpload,
-  GitCommit,
   Minus,
   Plus,
   RotateCounterClockwise,
@@ -13,13 +12,14 @@ import {
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post } from "@/lib/api"
+import { post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { describeChange, gitLetter, gitStyle, gitTone, type GitSide } from "@/lib/git-status"
 import type { GitFileChange, GitResult, GitStash, GitStatus } from "@/lib/types"
 import type { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
+import { SourceCommit } from "@/components/git/glyphs"
 import { GitExplain } from "@/components/git/help"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
@@ -81,23 +81,12 @@ export function ChangesPanel({
   const [identityOpen, setIdentityOpen] = useState(false)
   const q = { path: repoPath }
 
-  const showDiff = async (file: GitFileChange, side: GitSide) => {
-    try {
-      const res = await get<{ diff: string }>("/git/diff", {
-        path: repoPath,
-        file: file.path,
-        staged: side === "staged" ? "true" : undefined,
-      })
-      onSelect({
-        kind: "diff",
-        title: file.path,
-        subtitle: side === "staged" ? "staged — ready to commit" : `working tree — ${file.label}`,
-        body: res.diff || "No textual diff (binary file, or no line changes).",
-        singleFile: true,
-      })
-    } catch (err) {
-      notify.error("Could not read the diff", err)
-    }
+  const showDiff = (file: GitFileChange, side: GitSide) => {
+    onSelect(
+      file.label === "conflicted"
+        ? { kind: "conflict", file: file.path }
+        : { kind: "partial", file: file.path, staged: side === "staged" },
+    )
   }
 
   // Fire-and-forget: `run` already reports failures, so the rejection is
@@ -165,10 +154,8 @@ export function ChangesPanel({
       description: (
         <p className="text-destructive">
           Every tracked file is put back to the last commit.{" "}
-          {clean
-            ? "Untracked files are deleted as well."
-            : "Untracked files are left alone."}{" "}
-          This cannot be undone.
+          {clean ? "Untracked files are deleted as well." : "Untracked files are left alone."} This
+          cannot be undone.
         </p>
       ),
       action: async (c) => {
@@ -187,7 +174,11 @@ export function ChangesPanel({
   const identity = status.data?.identity
   const hasIdentity = Boolean(identity?.name && identity?.email)
   const canCommit =
-    staged.length > 0 && (message.trim().length > 0 || amend) && conflicts === 0 && hasIdentity
+    (staged.length > 0 || (amend && !status.data?.repo.empty)) &&
+    (message.trim().length > 0 || amend) &&
+    conflicts === 0 &&
+    !status.data?.operation &&
+    hasIdentity
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -382,8 +373,8 @@ export function ChangesPanel({
           {conflicts > 0 && (
             <p className="flex items-center gap-1.5 text-hint text-destructive">
               <Warning className="size-3.5 shrink-0" />
-              {conflicts} conflicted file{conflicts === 1 ? "" : "s"} must be resolved in a shell
-              before anything can be committed.
+              {conflicts} conflicted file{conflicts === 1 ? "" : "s"}. Select each file to resolve
+              it.
             </p>
           )}
           <Textarea
@@ -457,7 +448,7 @@ export function ChangesPanel({
                   pending={busy === "Committed"}
                   onClick={() => void commit(false)}
                 >
-                  <GitCommit className="size-3.5" />
+                  <SourceCommit className="size-3.5" />
                   Commit
                 </Button>
               </TooltipTrigger>

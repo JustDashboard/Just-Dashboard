@@ -3690,6 +3690,78 @@ export type GitComparison = {
   files: number
   insertions: number
   deletions: number
+  baseSha?: string
+  headSha?: string
+  changes?: GitChangedFile[]
+}
+
+export type GitReflogEntry = {
+  sha: string
+  selector: string
+  message: string
+  author: string
+  at: string
+}
+
+export type GitBlame = {
+  ref: string
+  file: string
+  hasMore: boolean
+  lines: {
+    sha: string
+    line: number
+    originalLine: number
+    author: string
+    at: string
+    subject: string
+    content: string
+  }[]
+}
+
+export type GitSignature = {
+  status: string
+  signer?: string
+  key?: string
+  fingerprint?: string
+}
+
+export type GitWorktree = {
+  path: string
+  head: string
+  branch: string
+  current: boolean
+  main: boolean
+  locked: boolean
+  prunable: boolean
+  accessible: boolean
+}
+
+export type GitConflictSide = {
+  present: boolean
+  content: string
+  binary: boolean
+  mode?: string
+  object?: string
+}
+
+export type GitConflict = {
+  file: string
+  version: string
+  base: GitConflictSide
+  ours: GitConflictSide
+  theirs: GitConflictSide
+  result: string
+  editable: boolean
+  operation: string
+}
+
+export type GitPartialDiff = {
+  file: string
+  staged: boolean
+  body: string
+  version: string
+  lines: number[]
+  reason?: string
 }
 
 export type GitCommit = {
@@ -3714,6 +3786,8 @@ export type GitGraph = {
   commits: GitGraphCommit[]
   /** How many lanes wide the busiest row gets — the canvas is sized from this. */
   lanes: number
+  hasMore?: boolean
+  skip?: number
 }
 
 export type GitBranch = {
@@ -3826,6 +3900,8 @@ export type GitHubDeviceState = {
 }
 
 export type GitPullRequest = {
+  headSha?: string
+  baseSha?: string
   number: number
   title: string
   url: string

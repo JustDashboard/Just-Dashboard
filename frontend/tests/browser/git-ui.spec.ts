@@ -25,7 +25,14 @@ const user = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -83,7 +90,14 @@ const status = {
   files: [
     { path: "a.txt", index: "M", worktree: "M", label: "modified", staged: true, unstaged: true },
     { path: "b.txt", index: "A", worktree: "", label: "added", staged: true, unstaged: false },
-    { path: "new.txt", index: "?", worktree: "?", label: "untracked", staged: false, unstaged: true },
+    {
+      path: "new.txt",
+      index: "?",
+      worktree: "?",
+      label: "untracked",
+      staged: false,
+      unstaged: true,
+    },
   ],
   clean: false,
   stashes: 1,
@@ -137,17 +151,20 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   await page.goto("/git")
   await expect(page.getByRole("heading", { name: "Git" })).toBeVisible()
 
-  // Four readings, and the ones that matter carry a figure.
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(0)).toContainText("2")
-  await expect(tiles.nth(1)).toContainText("1")
-  await expect(tiles.nth(2)).toContainText("1")
-
-  // The chips exist only for states something is in: nothing is detached.
-  await expect(page.getByRole("button", { name: /^Uncommitted/ })).toBeVisible()
+  // The readings are on the chips, which is where the four stat tiles went:
+  // each one names a state and carries its count, and pressing it is how the
+  // answer is acted on. A state nothing is in gets no chip at all.
+  await expect(page.getByRole("button", { name: "Uncommitted 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Behind 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Unpushed 1" })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Detached/ })).toHaveCount(0)
-  await page.getByRole("button", { name: /^Behind/ }).click()
+
+  // The urgent one is first without being asked: `app` is dirty, `lib` is not.
+  const names = page.getByRole("button", { name: /^(app|lib)$/ })
+  await expect(names.first()).toHaveText("app")
+  await expect(page.getByText("Needs attention")).toBeVisible()
+
+  await page.getByRole("button", { name: "Behind 1" }).click()
   await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "lib", exact: true })).toHaveCount(0)
 
@@ -200,6 +217,61 @@ test("discarding a file sends the typed phrase the server demands", async ({ pag
 })
 
 /**
+ * Dragging a column wider has a floor, and the floor is the other column.
+ *
+ * The widths were stored raw: `usePanelSize` deliberately does not clamp
+ * ("only the page knows what else is on the row") and this page did no
+ * clamping at all, so the tree and the changes list could each be dragged to
+ * any width at all and the preview — `flex-1 min-w-0`, so it yields to
+ * everything — was squeezed to nothing and the diff disappeared.
+ */
+test("a column cannot be dragged over the preview", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGit(page)
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  const preview = page.locator("[data-slot=git-preview]")
+  await expect(preview).toBeVisible()
+  const before = (await preview.boundingBox())!.width
+
+  const handle = page.getByRole("separator", { name: "Changes panel width" })
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 2000, box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+
+  const after = (await preview.boundingBox())!.width
+  // The drag did something — and stopped where the diff still has room.
+  expect(after).toBeLessThan(before)
+  expect(after).toBeGreaterThan(320)
+  // The separator reports the width it actually has, not the one asked for.
+  expect(Number(await handle.getAttribute("aria-valuenow"))).toBeLessThanOrEqual(640)
+})
+
+/**
+ * And a width stored on a wider monitor gives way on arrival, not a frame
+ * later. The fit is applied from a ref callback rather than an effect for
+ * exactly this: an effect runs after the browser has painted, so the collapsed
+ * layout would be drawn once before the correction.
+ */
+test("a width left over from a wider screen is fitted on arrival", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockGit(page)
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "jd.panel.sizes",
+      JSON.stringify({ "git.tree": 2400, "git.work": 2400 }),
+    )
+  })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  const preview = page.locator("[data-slot=git-preview]")
+  await expect(preview).toBeVisible()
+  expect((await preview.boundingBox())!.width).toBeGreaterThan(320)
+})
+
+/**
  * The design system's structural rules, on both faces of the page: every
  * icon-only control carries an accessible name, and nothing is a filled pill.
  */
@@ -208,7 +280,9 @@ for (const path of ["/git", "/git?repo=%2Fsrv%2Fapp"] as const) {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockGit(page)
     await page.goto(path)
-    await expect(page.locator("[data-slot=stat-tile], [data-slot=pane-header]").first()).toBeVisible()
+    await expect(
+      page.locator("[data-slot=page-header], [data-slot=pane-header]").first(),
+    ).toBeVisible()
 
     const unnamed = await page.evaluate(() => {
       const bad: string[] = []

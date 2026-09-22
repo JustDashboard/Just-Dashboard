@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 import type { GitHubRepoSummary, GitHubStatus, GitResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
-import { Field, FormNote } from "@/components/form"
+import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
+import { Textarea } from "@/components/ui/textarea"
 import { SearchInput } from "@/components/page"
 import { Notice, Spinner } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -58,6 +59,9 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
   const [name, setName] = useState("")
   const [dir, setDir] = useState("")
   const [query, setQuery] = useState("")
+  const [branch, setBranch] = useState("")
+  const [depth, setDepth] = useState("")
+  const [sparse, setSparse] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -102,6 +106,12 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
         url: url.trim(),
         parent: destination,
         name: name.trim() || undefined,
+        branch: branch.trim() || undefined,
+        depth: depth ? Number(depth) : undefined,
+        sparse: sparse
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
       })
       notify.success("Cloned", { description: res.path })
       onDone(res.path)
@@ -131,7 +141,10 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
     }
   }
 
-  const canClone = url.trim().length > 0 && destination.length > 0 && !busy
+  const validDepth =
+    depth === "" ||
+    (Number.isInteger(Number(depth)) && Number(depth) >= 1 && Number(depth) <= 100000)
+  const canClone = url.trim().length > 0 && destination.length > 0 && validDepth && !busy
   const canInit = dir.trim().startsWith("/") && !busy
 
   return (
@@ -211,7 +224,7 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
                             setName(r.name)
                           }}
                           className={cn(
-                            "flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-row-hover focus-ring-inset",
+                            "flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover",
                             url === r.cloneUrl && "bg-accent",
                           )}
                         >
@@ -262,7 +275,9 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
               <Field label="Into" hint="One of the folders the Git page looks in.">
                 <Select value={destination} onValueChange={setParent}>
                   <SelectTrigger className="w-full font-mono">
-                    <SelectValue placeholder={rootList.length ? "Choose a folder" : "No roots exist"} />
+                    <SelectValue
+                      placeholder={rootList.length ? "Choose a folder" : "No roots exist"}
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {rootList.map((r) => (
@@ -273,7 +288,11 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="Folder name" htmlFor="clone-name" hint="Left empty, git picks it from the URL.">
+              <Field
+                label="Folder name"
+                htmlFor="clone-name"
+                hint="Left empty, git picks it from the URL."
+              >
                 <Input
                   id="clone-name"
                   autoComplete="off"
@@ -285,6 +304,58 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
                 />
               </Field>
             </div>
+            <Disclosure
+              summary="Clone options"
+              facts="Choose a branch, limit history or check out selected folders."
+            >
+              <div className="space-y-3">
+                <FieldRow>
+                  <Field
+                    label="Branch or tag"
+                    htmlFor="clone-branch"
+                    hint="Leave empty for the remote’s default branch."
+                  >
+                    <Input
+                      id="clone-branch"
+                      value={branch}
+                      onChange={(e) => setBranch(e.target.value)}
+                      placeholder="main"
+                      className="font-mono"
+                    />
+                  </Field>
+                  <Field
+                    label="History depth"
+                    htmlFor="clone-depth"
+                    hint="Leave empty for full history. A shallow clone initially fetches one branch."
+                    error={!validDepth ? "Enter a whole number from 1 to 100000." : undefined}
+                  >
+                    <Input
+                      id="clone-depth"
+                      type="number"
+                      min={1}
+                      max={100000}
+                      value={depth}
+                      onChange={(e) => setDepth(e.target.value)}
+                      placeholder="Full history"
+                    />
+                  </Field>
+                </FieldRow>
+                <Field
+                  label="Sparse folders"
+                  htmlFor="clone-sparse"
+                  hint="Optional: one repository-relative folder per line. Root files are included too."
+                >
+                  <Textarea
+                    id="clone-sparse"
+                    rows={3}
+                    value={sparse}
+                    onChange={(e) => setSparse(e.target.value)}
+                    placeholder={"src\npackages/shared"}
+                    className="font-mono"
+                  />
+                </Field>
+              </div>
+            </Disclosure>
             {destination && (
               <FormNote>
                 Lands at{" "}
@@ -319,7 +390,10 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
 
 /** What git would call a clone of this URL: the last path element, without .git. */
 function nameFromUrl(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, "").replace(/\.git$/, "")
+  const trimmed = url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "")
   const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf(":"))
   return i >= 0 ? trimmed.slice(i + 1) : trimmed
 }

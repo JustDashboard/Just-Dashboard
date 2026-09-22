@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { GitMerge } from "@/components/icons"
+
 import { errorMessage, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
+import { SourceMerge } from "@/components/git/glyphs"
 import type { GitPullRequest } from "@/lib/types"
 import { Modal } from "@/components/modal"
 import { Field, FormFacts, FormFact, OptionList, OptionRow } from "@/components/form"
@@ -91,7 +92,7 @@ export function MergePullDialog({
             Cancel
           </Button>
           <Button onClick={merge} disabled={busy} pending={busy}>
-            <GitMerge className="size-4" />
+            <SourceMerge className="size-4" />
             Merge on GitHub
           </Button>
         </>

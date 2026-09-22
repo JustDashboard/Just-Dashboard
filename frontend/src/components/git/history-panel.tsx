@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import {
-  BranchPlus,
   ClockRewind,
   Copy,
   CornerUpLeft,
@@ -17,6 +16,7 @@ import { notify } from "@/lib/toast"
 import { copyText } from "@/lib/clipboard"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { SourceBranch } from "@/components/git/glyphs"
 import type { GitCommit, GitResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -74,15 +74,20 @@ export function HistoryPanel({
 }) {
   const [search, setSearch] = useSessionState("git.history.search", "")
   const [term, setTerm] = useState("")
+  const [author, setAuthor] = useSessionState("git.history.author", "")
+  const [authorTerm, setAuthorTerm] = useState("")
   const [loadingMore, setLoadingMore] = useState(false)
   const [naming, setNaming] = useState<{ kind: "branch" | "tag"; commit: GitCommit } | null>(null)
 
   // Typing settles for a third of a second before it becomes a query — a
   // history search is a git process per keystroke otherwise.
   useEffect(() => {
-    const timer = setTimeout(() => setTerm(search.trim()), 300)
+    const timer = setTimeout(() => {
+      setTerm(search.trim())
+      setAuthorTerm(author.trim())
+    }, 300)
     return () => clearTimeout(timer)
-  }, [search])
+  }, [search, author])
 
   // The first page follows the query; the pages after it are appended by the
   // button and tagged with the query they belong to, so a query change shows
@@ -91,13 +96,19 @@ export function HistoryPanel({
     (signal) =>
       get<GitCommit[]>(
         "/git/log",
-        { path: repoPath, limit: PAGE, search: term || undefined, file },
+        {
+          path: repoPath,
+          limit: PAGE,
+          search: term || undefined,
+          author: authorTerm || undefined,
+          file,
+        },
         signal,
       ),
     0,
-    [repoPath, term, file ?? ""],
+    [repoPath, term, authorTerm, file ?? ""],
   )
-  const key = `${repoPath}|${term}|${file ?? ""}`
+  const key = JSON.stringify([repoPath, term, authorTerm, file ?? ""])
   const [extra, setExtra] = useState<{ key: string; commits: GitCommit[]; exhausted: boolean }>()
   const tail = extra?.key === key ? extra : undefined
   const commits = first.data ? [...first.data, ...(tail?.commits ?? [])] : undefined
@@ -113,6 +124,7 @@ export function HistoryPanel({
         limit: PAGE,
         skip: commits.length,
         search: term || undefined,
+        author: authorTerm || undefined,
         file,
       })
       setExtra((prev) => ({
@@ -136,9 +148,9 @@ export function HistoryPanel({
       confirmLabel: hard ? "Reset hard" : "Undo to here",
       description: hard ? (
         <p className="text-destructive">
-          The branch moves back to <span className="font-mono">{c.short}</span> — “{c.subject}”
-          — and every file is overwritten to match it. Commits after it and every uncommitted
-          change are gone.
+          The branch moves back to <span className="font-mono">{c.short}</span> — “{c.subject}” —
+          and every file is overwritten to match it. Commits after it and every uncommitted change
+          are gone.
         </p>
       ) : (
         <div className="space-y-1.5">
@@ -172,7 +184,7 @@ export function HistoryPanel({
           key: "branch",
           label: "Branch from here",
           detail: "Start a new branch at this commit and switch to it.",
-          icon: BranchPlus,
+          icon: SourceBranch,
           run: () => setNaming({ kind: "branch", commit: c }),
         },
         {
@@ -190,7 +202,11 @@ export function HistoryPanel({
           disabled: !!busy,
           run: () =>
             void run("Cherry-picked", () =>
-              post<GitResult>("/git/cherry-pick", { ref: c.sha }, { query: q }),
+              post<GitResult>(
+                "/git/operation/start",
+                { operation: "cherry-pick", ref: c.sha },
+                { query: q },
+              ),
             ).catch(() => undefined),
         },
         {
@@ -206,13 +222,17 @@ export function HistoryPanel({
               confirmLabel: "Revert",
               description: (
                 <p>
-                  A new commit is recorded that undoes “{c.subject}”. Nothing is rewritten; if the
-                  undo clashes with later changes, git gives up cleanly and says which files.
+                  A new commit is recorded that undoes “{c.subject}”. Nothing is rewritten. If the
+                  undo clashes with later changes, resolve the conflicts in Changes and continue.
                 </p>
               ),
               action: async () => {
                 await run("Reverted", () =>
-                  post<GitResult>("/git/revert", { ref: c.sha }, { query: q }),
+                  post<GitResult>(
+                    "/git/operation/start",
+                    { operation: "revert", ref: c.sha },
+                    { query: q },
+                  ),
                 )
               },
             }),
@@ -220,12 +240,13 @@ export function HistoryPanel({
       )
     }
     // Undoing to the current tip is a no-op, so it is offered only below it.
-    if (canDestruct && i > 0 && !file && !term) {
+    if (canDestruct && i > 0 && !file && !term && !authorTerm) {
       verbs.push(
         {
           key: "undo",
           label: "Undo to here, keep changes",
-          detail: "Move the branch back to this commit; the later edits stay as uncommitted changes.",
+          detail:
+            "Move the branch back to this commit; the later edits stay as uncommitted changes.",
           icon: ClockRewind,
           danger: true,
           run: () => resetTo(c, false),
@@ -233,7 +254,8 @@ export function HistoryPanel({
         {
           key: "hard",
           label: "Reset hard to here",
-          detail: "Move the branch back and overwrite every file to match. Nothing after it survives.",
+          detail:
+            "Move the branch back and overwrite every file to match. Nothing after it survives.",
           icon: Warning,
           danger: true,
           run: () => resetTo(c, true),
@@ -252,6 +274,16 @@ export function HistoryPanel({
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search commit messages…"
           aria-label="Search commit messages"
+          containerClassName="min-w-0 flex-1 sm:w-auto"
+        />
+      </div>
+      <div className="flex shrink-0 items-center border-b border-hairline px-2 py-1.5">
+        <SearchInput
+          dense
+          value={author}
+          onChange={(e) => setAuthor(e.target.value)}
+          placeholder="Filter by author name or email…"
+          aria-label="Filter commits by author"
           containerClassName="min-w-0 flex-1 sm:w-auto"
         />
       </div>
@@ -302,9 +334,7 @@ export function HistoryPanel({
                 <button
                   type="button"
                   aria-pressed={active === `commit:${c.sha}`}
-                  onClick={() =>
-                    onSelect({ kind: "commit", sha: c.sha, subject: c.subject, file })
-                  }
+                  onClick={() => onSelect({ kind: "commit", sha: c.sha, subject: c.subject, file })}
                   className="min-w-0 flex-1 text-left focus-ring-inset"
                 >
                   <span className="flex min-w-0 items-center gap-1.5">

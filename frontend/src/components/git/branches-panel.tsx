@@ -1,21 +1,11 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import {
-  ArrowLeftRight,
-  BranchPlus,
-  CloudUpload,
-  Cross,
-  GitBranch as GitBranchIcon,
-  GitMerge,
-  GitTag,
-  Pencil,
-  Plus,
-  Trash,
-} from "@/components/icons"
+import { ArrowLeftRight, CloudUpload, Cross, GitTag, Pencil, Plus, Trash } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
 import type { GitBranch, GitResult, GitTag as GitTagType } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -77,16 +67,15 @@ export function BranchesPanel({
 }) {
   const [creating, setCreating] = useState<"branch" | "tag" | null>(null)
   const [renaming, setRenaming] = useState<GitBranch | null>(null)
+  const [tracking, setTracking] = useState<GitBranch | null>(null)
   const branches = usePoll(
     (signal) => get<GitBranch[]>("/git/branches", { path: repoPath }, signal),
     0,
     [repoPath],
   )
-  const tags = usePoll(
-    (signal) => get<GitTagType[]>("/git/tags", { path: repoPath }, signal),
-    0,
-    [repoPath],
-  )
+  const tags = usePoll((signal) => get<GitTagType[]>("/git/tags", { path: repoPath }, signal), 0, [
+    repoPath,
+  ])
   const q = { path: repoPath }
   const refresh = () => {
     branches.refresh()
@@ -143,8 +132,8 @@ export function BranchesPanel({
       confirmLabel: "Delete tag",
       description: (
         <p>
-          Removes the tag here. The commit it named is untouched, and a copy already pushed stays
-          on the remote.
+          Removes the tag here. The commit it named is untouched, and a copy already pushed stays on
+          the remote.
         </p>
       ),
       action: async () => {
@@ -170,8 +159,8 @@ export function BranchesPanel({
           key: "merge",
           label: `Merge into ${current}`,
           detail:
-            "Bring this branch's commits into the current one. If they clash, nothing changes and git says which files.",
-          icon: GitMerge,
+            "Bring this branch’s commits into the current one. Resolve any conflicts in Changes.",
+          icon: SourceMerge,
           disabled: !!busy,
           run: () =>
             confirm({
@@ -181,12 +170,16 @@ export function BranchesPanel({
                 <p>
                   Every commit on <span className="font-mono">{b.name}</span> that{" "}
                   <span className="font-mono">{current}</span> lacks is brought in. A conflict
-                  abandons the merge cleanly rather than leaving it half done.
+                  pauses the merge so you can resolve it in Changes and continue.
                 </p>
               ),
               action: async () => {
                 await run(`Merged ${b.name}`, () =>
-                  post<GitResult>("/git/merge", { ref: b.name }, { query: q }),
+                  post<GitResult>(
+                    "/git/operation/start",
+                    { operation: "merge", ref: b.name },
+                    { query: q },
+                  ),
                 )
                 refresh()
               },
@@ -201,6 +194,23 @@ export function BranchesPanel({
         disabled: !!busy || !!b.worktree,
         run: () => setRenaming(b),
       })
+      verbs.push({
+        key: "upstream",
+        label: "Set upstream",
+        detail: "Choose the branch this one pulls from and pushes to.",
+        icon: ArrowLeftRight,
+        disabled: !!busy,
+        run: () => setTracking(b),
+      })
+      if (b.upstream)
+        verbs.push({
+          key: "untrack",
+          label: "Stop tracking upstream",
+          detail: `Remove the link to ${b.upstream}; both branches keep their commits.`,
+          icon: SourceBranch,
+          disabled: !!busy,
+          run: () => act("Upstream removed", "/git/upstream", { name: b.name, ref: "" }),
+        })
     }
     if (canDestruct && !b.current && !b.worktree) {
       verbs.push(
@@ -268,7 +278,7 @@ export function BranchesPanel({
         key: "show",
         label: "Show the commit",
         detail: "What the tagged commit changed.",
-        icon: GitBranchIcon,
+        icon: SourceBranch,
         run: () => onSelect({ kind: "commit", sha: t.commit! }),
       })
     }
@@ -523,10 +533,27 @@ export function BranchesPanel({
         </ul>
 
         {local.length === 0 && remote.length === 0 && (
-          <EmptyState className="m-2" icon={BranchPlus} title="No branches" />
+          <EmptyState className="m-2" icon={SourceBranch} title="No branches" />
         )}
       </div>
 
+      <NameDialog
+        open={tracking !== null}
+        onOpenChange={(open) => !open && setTracking(null)}
+        title={`Set upstream for ${tracking?.name ?? "branch"}`}
+        label="Upstream branch"
+        initial={tracking?.upstream ?? ""}
+        placeholder="origin/main"
+        hint="Fetch first if the remote branch is new."
+        confirmLabel="Set upstream"
+        onSubmit={async (ref) => {
+          if (!tracking) return
+          await run("Upstream updated", () =>
+            post<GitResult>("/git/upstream", { name: tracking.name, ref }, { query: q }),
+          )
+          refresh()
+        }}
+      />
       <NameDialog
         open={renaming !== null}
         onOpenChange={(o) => !o && setRenaming(null)}
