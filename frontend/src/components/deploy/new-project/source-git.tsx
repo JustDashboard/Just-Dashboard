@@ -14,7 +14,7 @@ import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { githubAppStage, githubAvatarUrl, useGitHubAccount, useGitHubApp } from "@/hooks/use-github"
-import { useSessionState } from "@/lib/view-state"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
 import { Disclosure, Field, FormNote, OptionList, OptionRow } from "@/components/form"
@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select"
 import Link from "next/link"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { useSourceInspection } from "./use-source-inspection"
 import {
   inspectAndPrepare,
   repositoryName,
@@ -166,7 +167,7 @@ export function SourceGit({
   // it: what arrives in the address bar is the whole answer, never a mix of
   // the link and what was typed last time.
   const linked = initialUrl !== undefined
-  const [manualUrl, setManualUrl] = useSessionState(
+  const [manualUrl, setManualUrl] = useMemoryState(
     "deploy.new.git.url",
     "",
     linked ? cloneURL(initialUrl) : undefined,
@@ -189,6 +190,7 @@ export function SourceGit({
   const [includeLfs, setIncludeLfs] = useSessionState("deploy.new.git.lfs", false)
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
+  const inspection = useSourceInspection(onInspected)
 
   const doImport = async (
     source: DeploymentDraftSource,
@@ -197,10 +199,13 @@ export function SourceGit({
     githubRepo: string | undefined,
     key: string,
   ) => {
+    if (busy) return
     setBusy(key)
     setFailure(undefined)
     try {
-      onInspected(await inspectAndPrepare(name, "web", source, { sourceLabel, githubRepo }))
+      await inspection.inspect(() =>
+        inspectAndPrepare(name, "web", source, { sourceLabel, githubRepo }),
+      )
     } catch (error) {
       setFailure(asError(error))
     } finally {

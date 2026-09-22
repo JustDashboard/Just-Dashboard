@@ -457,7 +457,8 @@ export const vaultwardenBlueprint = {
       kind: "domain",
       label: "Public domain",
       required: true,
-      description: "Vaultwarden needs its exact public URL; WebAuthn and app links break without it.",
+      description:
+        "Vaultwarden needs its exact public URL; WebAuthn and app links break without it.",
     },
   ],
   secrets: [],
@@ -1224,11 +1225,14 @@ export async function mockDraftJourney(page: Page) {
   let started = 0
   let commitBody: Record<string, unknown> | undefined
   const discarded: string[] = []
+  let environment: Record<string, string> = {}
+  let staged: Record<string, unknown> | undefined
   const currentDraft = () => ({
     id: "journey-draft",
     ownerUsername: "operator",
     currentStep,
     revision,
+    environmentKeys: Object.keys(environment).sort(),
     data,
     findings: [],
     planPreview: revision > 4 ? "source -> build -> verify -> route" : "",
@@ -1280,12 +1284,47 @@ export async function mockDraftJourney(page: Page) {
         intent?: unknown
         source?: unknown
         configuration?: unknown
+        dotenv?: string
+        retainEnvironmentKeys?: string[]
       }
       revision += 1
       currentStep = body.step
       if (body.intent) data = { ...data, intent: body.intent }
       if (body.source) data = { ...data, source: body.source }
-      if (body.configuration) data = { ...data, configuration: body.configuration }
+      if (body.configuration) data = { ...data, configuration: structuredClone(body.configuration) }
+      if (body.dotenv !== undefined) {
+        environment = Object.fromEntries(
+          (body.retainEnvironmentKeys ?? [])
+            .filter((key) => key in environment)
+            .map((key) => [key, environment[key]]),
+        )
+        for (const line of body.dotenv.split("\n")) {
+          const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/)
+          if (match) environment[match[1]] = match[2]
+        }
+        staged = { dotenv: body.dotenv, retainEnvironmentKeys: body.retainEnvironmentKeys }
+      }
+      if (body.configuration) {
+        const configuration = data.configuration as {
+          variables: Array<Record<string, unknown>>
+          domains: Array<{ protection?: { username: string; password?: string; hash?: string } }>
+        }
+        for (const domain of configuration.domains) {
+          if (domain.protection?.password) {
+            domain.protection.hash = "fixture-sealed-password"
+            delete domain.protection.password
+          }
+        }
+        for (const name of Object.keys(environment)) {
+          const variable = configuration.variables.find((entry) => entry.name === name)
+          if (!variable)
+            configuration.variables.push({
+              name,
+              sensitivity: "secret",
+              scopes: ["runtime", "build"],
+            })
+        }
+      }
       return json(route, currentDraft())
     }
     if (path === "/deploy/drafts/journey-draft/detect" && method === "POST") {
@@ -1324,8 +1363,18 @@ export async function mockDraftJourney(page: Page) {
               ],
             },
             variables: [
-              { name: "DOMAIN", sensitivity: "plain", scopes: ["runtime"], value: `https://${hostname}` },
-              { name: "SIGNUPS_ALLOWED", sensitivity: "plain", scopes: ["runtime"], value: "false" },
+              {
+                name: "DOMAIN",
+                sensitivity: "plain",
+                scopes: ["runtime"],
+                value: `https://${hostname}`,
+              },
+              {
+                name: "SIGNUPS_ALLOWED",
+                sensitivity: "plain",
+                scopes: ["runtime"],
+                value: "false",
+              },
               {
                 name: "ADMIN_TOKEN",
                 sensitivity: "secret",
@@ -1373,7 +1422,10 @@ export async function mockDraftJourney(page: Page) {
                 confidence: "high",
                 port: 80,
                 evidence: [
-                  { path: "vaultwarden@1.0.0", reason: "reviewed blueprint shipped with this dashboard" },
+                  {
+                    path: "vaultwarden@1.0.0",
+                    reason: "reviewed blueprint shipped with this dashboard",
+                  },
                 ],
                 needsDecision: [],
               },
@@ -1566,13 +1618,15 @@ export async function mockDraftJourney(page: Page) {
     /** Drafts the server was asked to create — one per press that reached it. */
     started: () => started,
     source: () => data.source as Record<string, unknown> | undefined,
+    intent: () => data.intent as Record<string, unknown> | undefined,
+    staged: () => staged,
+    environmentKeys: () => Object.keys(environment).sort(),
     configuration: () => data.configuration as Record<string, unknown> | undefined,
   }
 }
 
 export async function mockNewProject(page: Page) {
   const journey = await mockDraftJourney(page)
-  let imported: Record<string, unknown> | undefined
   let runs = 0
   await page.route("**/api/v1/git/github**", (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
@@ -1611,15 +1665,11 @@ export async function mockNewProject(page: Page) {
         "Resolves to 203.0.113.7 with no DNS record to create. No certificate covers it yet; one can be issued for it from here.",
     }),
   )
-  await page.route("**/api/v1/deploy/77/environments/78/variables/import", (route) => {
-    imported = route.request().postDataJSON() as Record<string, unknown>
-    return json(route, { desiredRevision: 9, variables: [] })
-  })
   await page.route("**/api/v1/deploy/77/environments/78/runs", (route) => {
     runs += 1
     return json(route, { id: 84, state: "queued" })
   })
-  return { ...journey, imported: () => imported, runs: () => runs }
+  return { ...journey, runs: () => runs }
 }
 
 /**

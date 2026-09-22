@@ -82,11 +82,15 @@ export async function detectSource(draft: DeploymentDraft, selectedId?: string) 
 export async function saveConfiguration(
   draft: DeploymentDraft,
   configuration: DeploymentConfiguration,
+  dotenv?: string,
+  retainEnvironmentKeys?: string[],
 ) {
   return put<DeploymentDraft>(`/deploy/drafts/${draft.id}`, {
     revision: draft.revision,
     step: "configuration",
     configuration,
+    dotenv,
+    retainEnvironmentKeys,
   })
 }
 
@@ -334,6 +338,45 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
 export type FlowUpdate =
   ConfigureFlow | null | ((current: ConfigureFlow | null) => ConfigureFlow | null)
 
+/** Session storage remembers the form, while credentials stay in the live memory copy. */
+export function persistableFlow(flow: ConfigureFlow | null): ConfigureFlow | null {
+  if (!flow) return null
+  const safe = structuredClone(flow)
+  const scrubSource = (source: DeploymentDraftSource | undefined) => {
+    if (!source) return
+    for (const document of source.composeFiles ?? []) document.content = ""
+    if (source.url && /^[a-z]+:\/\//i.test(source.url)) {
+      try {
+        const url = new URL(source.url)
+        if (url.password || (url.protocol.startsWith("http") && url.username)) {
+          url.username = ""
+          url.password = ""
+          source.url = url.toString()
+        }
+      } catch {
+        source.url = ""
+      }
+    }
+  }
+  const scrubConfiguration = (configuration: DeploymentConfiguration | undefined) => {
+    if (!configuration) return
+    for (const domain of configuration.domains) {
+      if (domain.protection) delete domain.protection.password
+    }
+    for (const variable of configuration.variables) {
+      if (variable.sensitivity === "secret") delete variable.value
+    }
+  }
+  scrubSource(safe.source)
+  scrubSource(safe.draft.data.source)
+  scrubConfiguration(safe.configuration)
+  scrubConfiguration(safe.draft.data.configuration)
+  if (safe.detection?.compose) safe.detection.compose.preview = ""
+  if (safe.draft.data.detection?.compose) safe.draft.data.detection.compose.preview = ""
+  safe.draft.planPreview = ""
+  return safe
+}
+
 /**
  * The environment as typed on Configure, held in memory for one draft. Never
  * Web Storage and never the URL: it is the one part of a setup that carries
@@ -343,6 +386,7 @@ export type EnvironmentDraft = {
   draftId: string
   rows: EnvironmentRow[]
   dotenv: string
+  retainedKeys: string[]
 }
 
 function effectiveConfiguration(
@@ -358,6 +402,103 @@ function effectiveConfiguration(
   return defaultConfiguration(candidate?.profile ?? fallbackProfile, candidate, source, detection)
 }
 
+/** Match the saved plan so pruning an empty address never triggers another preflight. */
+export function configurationForSave(
+  configuration: DeploymentConfiguration,
+): DeploymentConfiguration {
+  return {
+    ...configuration,
+    domains: configuration.domains.filter((domain) => domain.hostname.trim()),
+    checks: configuration.checks.map((check) =>
+      check.phase === "readiness" && check.kind === "http"
+        ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
+        : check,
+    ),
+  }
+}
+
+/** Non-HTTP templates must never receive a Caddy route to their database or game port. */
+export function withSuggestedHostname(
+  configuration: DeploymentConfiguration,
+  profile: WorkloadProfile,
+  source: DeploymentDraftSource,
+  hostname?: DeploymentHostnameSuggestion,
+): DeploymentConfiguration {
+  const http =
+    profile === "web" ||
+    profile === "static" ||
+    configuration.checks.some((check) => check.kind === "http")
+  if (
+    !http ||
+    ["worker", "game", "compose", "imported"].includes(profile) ||
+    source.kind === "compose" ||
+    configuration.domains.length ||
+    !hostname ||
+    hostname.method === "none"
+  )
+    return configuration
+  return {
+    ...configuration,
+    domains: [{ hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" }],
+  }
+}
+
+/** Re-detection updates defaults; an explicit edit remains the operator's choice. */
+export function mergeDetectedConfiguration(
+  previous: DeploymentConfiguration,
+  current: DeploymentConfiguration,
+  detected: DeploymentConfiguration,
+): DeploymentConfiguration {
+  function merge(before: unknown, edited: unknown, after: unknown): unknown {
+    if (JSON.stringify(before) === JSON.stringify(edited)) return after
+    if (
+      before &&
+      edited &&
+      after &&
+      typeof before === "object" &&
+      typeof edited === "object" &&
+      typeof after === "object" &&
+      !Array.isArray(before) &&
+      !Array.isArray(edited) &&
+      !Array.isArray(after)
+    ) {
+      const old = before as Record<string, unknown>
+      const own = edited as Record<string, unknown>
+      const next = after as Record<string, unknown>
+      return Object.fromEntries(
+        [...new Set([...Object.keys(own), ...Object.keys(next)])].map((key) => [
+          key,
+          merge(old[key], own[key], next[key]),
+        ]),
+      )
+    }
+    return edited
+  }
+  return merge(previous, current, detected) as DeploymentConfiguration
+}
+
+export function redetectedConfiguration(
+  flow: ConfigureFlow,
+  result: InspectOutcome,
+  profile = result.candidate?.profile ?? flow.profile,
+): DeploymentConfiguration {
+  const previous = effectiveConfiguration(
+    flow.profile,
+    flow.source,
+    flow.draft,
+    flow.candidate,
+    flow.detection,
+  )
+  const merged = mergeDetectedConfiguration(previous, flow.configuration, result.configuration)
+  if (profile !== "worker") return merged
+  return {
+    ...merged,
+    domains: [],
+    runtime: { ...merged.runtime, internalPort: 0, hostPort: 0, strategy: "stop_first" },
+    checks: result.configuration.checks,
+  }
+}
+
 /** Runs `/detect` against a draft already carrying a saved source, and derives
  * the outcome every caller below needs from its result. */
 async function detectAndResolve(
@@ -366,11 +507,15 @@ async function detectAndResolve(
   source: DeploymentDraftSource,
   selectedId?: string,
 ): Promise<InspectOutcome> {
-  const detected = await detectSource(draft, selectedId)
+  let detected = await detectSource(draft, selectedId)
   const detection = detected.data.detection
   const candidate =
     detection?.candidates.find((entry) => entry.id === detection.selectedId) ??
     detection?.candidates[0]
+  const intent = detected.data.intent
+  if (intent && candidate && intent.profile !== candidate.profile) {
+    detected = await saveIntent(detected, { ...intent, profile: candidate.profile })
+  }
   return {
     draft: detected,
     detection,
@@ -451,22 +596,12 @@ export async function inspectAndPrepare(
   // HTTPS is offered by default because it is what anyone wants, but a
   // hostname is only pre-filled when one can actually be delivered: a worker
   // has no route, and a host with no address at all has nothing to suggest.
-  const configuration =
-    effectiveProfile !== "worker" &&
-    result.configuration.domains.length === 0 &&
-    hostname &&
-    hostname.method !== "none"
-      ? {
-          ...result.configuration,
-          domains: [
-            {
-              hostname: hostname.hostname.toLowerCase(),
-              https: true,
-              ownership: "managed" as const,
-            },
-          ],
-        }
-      : result.configuration
+  const configuration = withSuggestedHostname(
+    result.configuration,
+    effectiveProfile,
+    source,
+    hostname,
+  )
   return {
     name,
     profile: effectiveProfile,
@@ -536,9 +671,18 @@ export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow>
     detection?.candidates.find((entry) => entry.id === detection?.selectedId) ??
     detection?.candidates[0]
   configuration ??= effectiveConfiguration(intent.profile, source, current, candidate, detection)
+  const profile =
+    draft.data.configuration && source.kind !== "blueprint"
+      ? intent.profile
+      : (candidate?.profile ?? intent.profile)
+  const hostname = await fetchHostnameSuggestion(intent.name)
+  if (!draft.data.configuration)
+    configuration = withSuggestedHostname(configuration, profile, source, hostname)
   return {
     name: intent.name,
-    profile: candidate?.profile ?? intent.profile,
+    // A saved configuration records the operator's profile choice; detection
+    // is a default only until that choice has been saved.
+    profile,
     source,
     draft: current,
     candidate,
@@ -546,7 +690,7 @@ export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow>
     configuration,
     sourceLabel: sourceLabelFromDraft(source),
     githubRepo: source.kind === "git" ? (source.repository ?? githubRepoOf(source.url)) : undefined,
-    hostname: await fetchHostnameSuggestion(intent.name),
+    hostname,
   }
 }
 

@@ -216,6 +216,12 @@ test.describe("An ambiguous detection", () => {
     const detectBodies: { selectedId?: string }[] = []
 
     await page.route("**/api/v1/deploy/drafts/candidate-draft", async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON()
+        const draft = draftPayload("worker-candidate", 6)
+        draft.data.intent = body.intent
+        return json(route, draft)
+      }
       if (route.request().method() !== "GET") return route.fallback()
       return json(route, draftPayload("", 4))
     })
@@ -238,5 +244,8 @@ test.describe("An ambiguous detection", () => {
 
     await expect.poll(() => detectBodies.at(-1)?.selectedId).toBe("worker-candidate")
     await expect(picker.getByRole("switch", { name: /Background worker/ })).toBeChecked()
+    await expect(page.getByRole("combobox", { name: "Project type" })).toContainText(
+      "Worker or bot",
+    )
   })
 })

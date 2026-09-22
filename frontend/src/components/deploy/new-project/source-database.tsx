@@ -2,6 +2,7 @@
 
 import { FlowPanel } from "@/components/flow"
 import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
+import { useSessionState } from "@/lib/view-state"
 
 /**
  * A database is infrastructure, not a deployment project: it never reaches
@@ -18,9 +19,17 @@ import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
  * was the one tab on the chooser with nothing in front of the page.
  */
 export function SourceDatabase() {
+  const [started, setStarted] = useSessionState<{ container: string; engine: string } | undefined>(
+    "deploy.new.database.started",
+    undefined,
+  )
   return (
     <FlowPanel className="w-full max-w-3xl min-w-0 p-4">
-      <DatabaseQuickDeploy />
+      <DatabaseQuickDeploy
+        resume={started}
+        onStarted={setStarted}
+        onReset={() => setStarted(undefined)}
+      />
     </FlowPanel>
   )
 }

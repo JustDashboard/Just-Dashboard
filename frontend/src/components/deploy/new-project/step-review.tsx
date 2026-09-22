@@ -45,6 +45,7 @@ export function StepReview({
   gitPolicy,
   onGitPolicyChange,
   variableCount,
+  suppliedVariables = [],
   findings,
   checking,
   blockers,
@@ -60,6 +61,7 @@ export function StepReview({
   onGitPolicyChange: (policy: DraftGitPolicy) => void
   /** Rows with a key, which is what actually reaches the project. */
   variableCount: number
+  suppliedVariables?: string[]
   /** Everything preflight reported, passes included. */
   findings: DeploymentPreflightFinding[]
   /** Preflight is in flight: it runs on arrival, not under the button. */
@@ -74,7 +76,9 @@ export function StepReview({
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const configuration = flow.configuration
   const declared = configuration.variables
-  const generated = declared.filter((variable) => (variable.generate ?? 0) > 0)
+  const generated = declared.filter(
+    (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
+  )
   const mounts = configuration.runtime.mounts ?? []
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
   const smoke = configuration.checks.filter((check) => check.phase === "smoke")
@@ -170,7 +174,11 @@ export function StepReview({
                 <span className="text-foreground">{check.name}</span>
                 <span className="text-muted-foreground">
                   {" — "}
-                  {[checkTarget(check), checkBudget(check), check.phase === "smoke" && "after it is live"]
+                  {[
+                    checkTarget(check),
+                    checkBudget(check),
+                    check.phase === "smoke" && "after it is live",
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>

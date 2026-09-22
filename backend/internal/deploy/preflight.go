@@ -415,7 +415,7 @@ func PreflightDraft(
 	if err := draft.Data.Intent.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := draft.Data.Source.ValidateForDeployment(); err != nil {
+	if err := draft.Data.Source.validateForNewDeployment(); err != nil {
 		return nil, err
 	}
 	if err := validateDetectionResult(draft.Data.Source, *draft.Data.Detection); err != nil {
@@ -892,16 +892,22 @@ func preflightFindings(
 				"", "deploy", "runtime.strategy"))
 		}
 	}
+	resolvedVariables, _, variableErr := ResolveVariableGraph(draft.variableValues(configuration), nil)
+	if variableErr != nil {
+		findings = append(findings, finding("variable_graph_invalid", PreflightBlocked,
+			"Variable references cannot resolve", "", "A variable reference is missing or cyclic.",
+			"Correct the variable references before deployment.", "deploy", "variables"))
+	}
 	for _, variable := range configuration.Variables {
 		// A literal value or a generation request satisfies a required
-		// variable as well as a typed reference does.
-		if variable.Required && variable.Reference == "" && variable.Value == "" && variable.Generate == 0 {
+		// variable as well as a typed reference or sealed draft input does.
+		if variable.Required && resolvedVariables[variable.Name] == "" {
 			findings = append(findings, finding("variable_required_"+strings.ToLower(variable.Name), PreflightDecision,
 				"Required variable needs a value", variable.Name, "The runtime would receive an empty required value.",
 				"Set or reference the variable.", "deploy", "variables."+variable.Name))
 		}
 	}
-	if len(configuration.Variables) > 0 {
+	if len(configuration.Variables) > 0 && variableErr == nil {
 		findings = append(findings, finding("variable_graph_valid", PreflightPass,
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))

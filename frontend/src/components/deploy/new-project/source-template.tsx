@@ -40,6 +40,8 @@ import { Switch } from "@/components/ui/switch"
 import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName, humanize } from "@/components/deploy/vocabulary"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
+import { useSourceInspection } from "./use-source-inspection"
+import { templateInputErrors } from "./template-inputs"
 
 const CATEGORY_LABEL: Record<BlueprintSummary["category"], string> = {
   http: "Web applications",
@@ -67,12 +69,16 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
   const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
   const [selectedId, setSelectedId] = useSessionState("deploy.new.template.selected", "")
   const [inputs, setInputs] = useSessionState<Record<string, string>>(
-    "deploy.new.template.inputs",
+    `deploy.new.template.inputs.${selectedId}`,
     {},
   )
-  const [showAdvanced, setShowAdvanced] = useSessionState("deploy.new.template.advanced", false)
+  const [showAdvanced, setShowAdvanced] = useSessionState(
+    `deploy.new.template.advanced.${selectedId}`,
+    false,
+  )
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()
+  const inspection = useSourceInspection(onInspected)
 
   const detail = usePoll(
     (signal) => get<BlueprintDetail>(`/deploy/blueprints/${selectedId}`, undefined, signal),
@@ -97,11 +103,28 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
     return [...map.entries()]
   }, [catalogue.data, filter])
 
+  const revealOnSmallScreen = (id: string) => {
+    if (window.matchMedia("(min-width: 1280px)").matches) return
+    requestAnimationFrame(() => {
+      const panel = document.getElementById(id)
+      panel?.focus({ preventScroll: true })
+      panel?.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+      })
+    })
+  }
   const select = (entry: BlueprintSummary) => {
-    setSelectedId(entry.id)
-    setInputs({})
-    setShowAdvanced(false)
-    setAttempted(false)
+    if (entry.id !== selectedId) {
+      inspection.cancel()
+      setBusy(false)
+      setSelectedId(entry.id)
+      setAttempted(false)
+      setFailure(undefined)
+    }
+    revealOnSmallScreen("template-settings")
   }
 
   const declared = definition?.inputs ?? []
@@ -168,30 +191,22 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
    * field the reader is looking at and costs nothing.
    */
   const [attempted, setAttempted] = useState(false)
-  const missing = declared.filter((input) =>
-    !input.required
-      ? false
-      : input.kind === "accept"
-        ? inputs[input.name] !== "true"
-        : !(inputs[input.name] ?? input.default ?? "").trim(),
-  )
-  const missingNames = new Set(missing.map((input) => input.name))
+  const errors = templateInputErrors(declared, inputs)
+  const invalid = declared.filter((input) => errors[input.name])
 
   const use = async () => {
     if (!definition || blocked || busy) return
     setAttempted(true)
-    if (missing.length > 0) {
+    if (invalid.length > 0) {
+      if (invalid.some((input) => input.advanced)) setShowAdvanced(true)
       setFailure(
-        new Error(
-          `${missing.map((input) => input.label).join(", ")} ${
-            missing.length === 1 ? "is" : "are"
-          } needed before ${definition.name} can be used.`,
-        ),
+        new Error(invalid.map((input) => `${input.label}: ${errors[input.name]}`).join(" ")),
       )
       return
     }
     setBusy(true)
     setFailure(undefined)
+    let current = true
     try {
       const profile: WorkloadProfile = definition.profile === "game" ? "game" : "service"
       const source: DeploymentDraftSource = {
@@ -199,17 +214,21 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
         mode: "blueprint",
         blueprintId: definition.id,
         blueprintVersion: definition.version,
-        blueprintInputs: inputs,
+        blueprintInputs: Object.fromEntries(
+          declared
+            .filter((input) => input.kind !== "secret" && input.name in inputs)
+            .map((input) => [input.name, inputs[input.name]]),
+        ),
       }
-      onInspected(
-        await inspectAndPrepare(deploymentName(definition.name), profile, source, {
+      current = await inspection.inspect(() =>
+        inspectAndPrepare(deploymentName(definition.name), profile, source, {
           sourceLabel: definition.name,
         }),
       )
     } catch (error) {
       setFailure(asError(error))
     } finally {
-      setBusy(false)
+      if (current) setBusy(false)
     }
   }
 
@@ -227,11 +246,11 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
     <div
       className={cn(
         "grid min-w-0 items-start gap-x-10 gap-y-6",
-        definition ? "xl:grid-cols-[minmax(0,1fr)_26rem]" : "max-w-4xl",
+        selectedId ? "xl:grid-cols-[minmax(0,1fr)_26rem]" : "max-w-4xl",
       )}
     >
       {failure && <ErrorState error={failure} className="xl:col-span-2" />}
-      <Panel plain className="min-w-0">
+      <Panel plain id="template-catalogue" tabIndex={-1} className="min-w-0 scroll-mt-4">
         <PanelHeader
           title="Application templates"
           actions={
@@ -315,138 +334,173 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
         </PanelBody>
       </Panel>
 
-      {selectedId && definition && (
+      {selectedId && (
         // The one surface with depth on this screen (§16). Until a template is
         // chosen there is no foreground at all and the advance is the cards'
         // own lit edges; once one is chosen, what is being decided is its
         // inputs and the command that leaves the screen, so that is what takes
         // the depth. The catalogue stays plain: a second framed surface is two
         // foregrounds, which is none.
-        <FlowPanel className="min-w-0 xl:sticky xl:top-6">
+        <FlowPanel
+          id="template-settings"
+          aria-label="Selected template settings"
+          tabIndex={-1}
+          className="order-first min-w-0 scroll-mt-4 xl:sticky xl:top-6 xl:order-last"
+          aria-busy={detail.loading || busy}
+        >
           <FlowPanelHeader
-            title={definition.name}
-            actions={<Tag mono>v{definition.version}</Tag>}
+            title={
+              definition?.name ??
+              catalogue.data?.find((entry) => entry.id === selectedId)?.name ??
+              "Template"
+            }
+            actions={definition && <Tag mono>v{definition.version}</Tag>}
           />
           <FlowPanelBody className="space-y-4">
-            {/* Facts, not a fenced block: inside the one framed surface a
+            {detail.loading && (
+              <div role="status" aria-label="Loading template settings">
+                <LoadingRows rows={6} />
+              </div>
+            )}
+            {detail.error && <ErrorState error={detail.error} onRetry={detail.refresh} />}
+            {definition && (
+              <fieldset disabled={busy} className="min-w-0 space-y-4">
+                {/* Facts, not a fenced block: inside the one framed surface a
                 hairline box is a frame drawn inside a frame. */}
-            <div className="min-w-0 space-y-1.5 text-xs text-muted-foreground">
-              <p className="flex flex-wrap items-center gap-2">
-                <Tag>{definition.provenance.license}</Tag>
-              </p>
-              <p>
-                Reviewed {definition.provenance.reviewedAt} by {definition.provenance.maintainer}.
-                Recommended memory {definition.resources.memoryMb} MB.
-              </p>
-              {definition.update.notes && <p>{definition.update.notes}</p>}
-              <p className="flex flex-wrap gap-3">
-                <Link
-                  href={definition.docsUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex min-h-9 items-center gap-1 underline underline-offset-4 focus-ring"
-                >
-                  Documentation <ArrowUpRight className="size-3" />
-                </Link>
-                <Link
-                  href={definition.provenance.upstreamUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex min-h-9 items-center gap-1 underline underline-offset-4 focus-ring"
-                >
-                  Upstream project <ArrowUpRight className="size-3" />
-                </Link>
-              </p>
-            </div>
+                <div className="min-w-0 space-y-1.5 text-xs text-muted-foreground">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <Tag>{definition.provenance.license}</Tag>
+                  </p>
+                  <p>
+                    Reviewed {definition.provenance.reviewedAt} by{" "}
+                    {definition.provenance.maintainer}. Recommended memory{" "}
+                    {definition.resources.memoryMb} MB.
+                  </p>
+                  {definition.update.notes && <p>{definition.update.notes}</p>}
+                  <p className="flex flex-wrap gap-3">
+                    <Link
+                      href={definition.docsUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex min-h-9 items-center gap-1 underline underline-offset-4 focus-ring"
+                    >
+                      Documentation <ArrowUpRight className="size-3" />
+                    </Link>
+                    <Link
+                      href={definition.provenance.upstreamUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex min-h-9 items-center gap-1 underline underline-offset-4 focus-ring"
+                    >
+                      Upstream project <ArrowUpRight className="size-3" />
+                    </Link>
+                  </p>
+                </div>
 
-            {blocked && (
-              <Notice tone="warning" icon={Warning} title="Blueprint deployment unavailable">
-                {definition.unavailableReason || "Choose a different template."}
-              </Notice>
-            )}
+                {blocked && (
+                  <Notice tone="warning" icon={Warning} title="Blueprint deployment unavailable">
+                    {definition.unavailableReason || "Choose a different template."}
+                  </Notice>
+                )}
 
-            <AccessPromise access={definition.access} />
+                <AccessPromise access={definition.access} />
 
-            {definition.profile === "game" && (
-              <ExistingServerImport
-                onAdopt={(preview) => {
-                  const adopted: Record<string, string> = {}
-                  if (preview.version) adopted.version = preview.version
-                  const properties = preview.properties ?? {}
-                  for (const [key, name] of [
-                    ["motd", "server-name"],
-                    ["max-players", "max-players"],
-                    ["difficulty", "difficulty"],
-                  ] as const) {
-                    if (properties[key]) adopted[name] = properties[key]
-                  }
-                  setInputs((current) => ({ ...current, ...adopted }))
-                }}
-              />
-            )}
+                {definition.profile === "game" && (
+                  <ExistingServerImport
+                    key={definition.id}
+                    onAdopt={(preview) => {
+                      const adopted: Record<string, string> = {}
+                      if (preview.version) adopted.version = preview.version
+                      const properties = preview.properties ?? {}
+                      for (const [key, name] of [
+                        ["motd", "server-name"],
+                        ["max-players", "max-players"],
+                        ["difficulty", "difficulty"],
+                      ] as const) {
+                        if (properties[key]) adopted[name] = properties[key]
+                      }
+                      setInputs((current) => ({ ...current, ...adopted }))
+                    }}
+                  />
+                )}
 
-            {definition.profile === "game" && (
-              <GameVersionField
-                blueprintId={definition.id}
-                value={inputs.version ?? ""}
-                onChange={(value) => setInputs((current) => ({ ...current, version: value }))}
-              />
-            )}
+                {definition.profile === "game" && (
+                  <GameVersionField
+                    blueprintId={definition.id}
+                    value={inputs.version ?? ""}
+                    onChange={(value) => setInputs((current) => ({ ...current, version: value }))}
+                  />
+                )}
 
-            {basic.map((input) => (
-              <BlueprintField
-                key={input.name}
-                input={input}
-                value={inputs[input.name] ?? input.default ?? ""}
-                missing={attempted && missingNames.has(input.name)}
-                suggested={input.kind === "domain" ? suggestion.data : undefined}
-                onChange={(value) => setInputs((current) => ({ ...current, [input.name]: value }))}
-              />
-            ))}
+                {basic.map((input) => (
+                  <BlueprintField
+                    key={input.name}
+                    input={input}
+                    value={inputs[input.name] ?? input.default ?? ""}
+                    error={attempted ? errors[input.name] : undefined}
+                    suggested={input.kind === "domain" ? suggestion.data : undefined}
+                    onChange={(value) =>
+                      setInputs((current) => ({ ...current, [input.name]: value }))
+                    }
+                  />
+                ))}
 
-            {advanced.length > 0 && (
-              <button
-                type="button"
-                aria-expanded={showAdvanced}
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
-              >
-                {showAdvanced ? "Hide" : "Show"} advanced blueprint settings
-              </button>
-            )}
-            {showAdvanced &&
-              advanced.map((input) => (
-                <BlueprintField
-                  key={input.name}
-                  input={input}
-                  value={inputs[input.name] ?? input.default ?? ""}
-                  missing={attempted && missingNames.has(input.name)}
-                  onChange={(value) =>
-                    setInputs((current) => ({ ...current, [input.name]: value }))
-                  }
-                />
-              ))}
-
-            {(definition.secrets?.length ?? 0) > 0 && (
-              <Notice title="Secrets are generated on this server" icon={Warning}>
-                <ul className="list-disc space-y-1 pl-4">
-                  {definition.secrets?.map((secret) => (
-                    <li key={secret.name}>
-                      <b>{secret.label}</b> — {secret.description ?? `${secret.length} characters`}.
-                      It is created when this plan is saved and never shipped with the blueprint.
-                    </li>
+                {advanced.length > 0 && (
+                  <button
+                    type="button"
+                    aria-expanded={showAdvanced}
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
+                  >
+                    {showAdvanced ? "Hide" : "Show"} advanced blueprint settings
+                  </button>
+                )}
+                {showAdvanced &&
+                  advanced.map((input) => (
+                    <BlueprintField
+                      key={input.name}
+                      input={input}
+                      value={inputs[input.name] ?? input.default ?? ""}
+                      error={attempted ? errors[input.name] : undefined}
+                      onChange={(value) =>
+                        setInputs((current) => ({ ...current, [input.name]: value }))
+                      }
+                    />
                   ))}
-                </ul>
-              </Notice>
+
+                {(definition.secrets?.length ?? 0) > 0 && (
+                  <Notice title="Secrets are generated on this server" icon={Warning}>
+                    <ul className="list-disc space-y-1 pl-4">
+                      {definition.secrets?.map((secret) => (
+                        <li key={secret.name}>
+                          <b>{secret.label}</b> —{" "}
+                          {secret.description ?? `${secret.length} characters`}. It is created when
+                          this plan is saved and never shipped with the blueprint.
+                        </li>
+                      ))}
+                    </ul>
+                  </Notice>
+                )}
+              </fieldset>
             )}
           </FlowPanelBody>
           {/* The one brand-faced command on the screen, at the foot of the
               surface it acts on. */}
-          <FlowActions>
+          <FlowActions
+            secondary={
+              <Button
+                variant="ghost"
+                className="h-11 xl:hidden"
+                onClick={() => revealOnSmallScreen("template-catalogue")}
+              >
+                Choose another template
+              </Button>
+            }
+          >
             <Button
               className="h-11 sm:h-9"
               pending={busy}
-              disabled={blocked}
+              disabled={!definition || blocked}
               onClick={() => void use()}
             >
               Use this template
@@ -461,19 +515,27 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
 function BlueprintField({
   input,
   value,
-  missing,
+  error,
   suggested,
   onChange,
 }: {
   input: BlueprintInput
   value: string
   /** The definition requires this and it is empty, and Use has been pressed. */
-  missing?: boolean
+  error?: string
   /** Where a pre-filled hostname came from, so the field can say so. */
   suggested?: DeploymentHostnameSuggestion
   onChange: (value: string) => void
 }) {
   const id = `blueprint-${input.name}`
+  if (input.kind === "secret") {
+    return (
+      <Notice title={input.label}>
+        {input.description} Connect a database or enter {input.variable ?? input.name} in the
+        Variables step. Credentials stay out of the template settings.
+      </Notice>
+    )
+  }
   if (input.kind === "accept") {
     return (
       <Label htmlFor={id} className="flex min-h-11 items-start gap-2 text-xs text-foreground">
@@ -497,9 +559,9 @@ function BlueprintField({
               Read the agreement <ArrowUpRight className="size-3" />
             </Link>
           )}
-          {missing && (
+          {error && (
             <span role="alert" className="block text-destructive">
-              This has to be accepted before the template can be used.
+              {error}
             </span>
           )}
         </span>
@@ -515,12 +577,8 @@ function BlueprintField({
           ? `${suggested.detail} Replace it with your own domain if you have one.`
           : input.description
       }
-      error={missing ? "Required." : undefined}
-      trailing={
-        input.required && (
-          <span className="text-hint text-muted-foreground">Required</span>
-        )
-      }
+      error={error}
+      trailing={input.required && <span className="text-hint text-muted-foreground">Required</span>}
     >
       {input.kind === "boolean" ? (
         <div className="flex min-h-9 items-center gap-2">
@@ -600,7 +658,7 @@ function GameVersionField({
       }
     >
       {usable ? (
-        <Select value={value || list.recommended || ""} onValueChange={onChange}>
+        <Select value={value} onValueChange={onChange}>
           <SelectTrigger id="blueprint-version">
             <SelectValue placeholder="Choose a version" />
           </SelectTrigger>
@@ -672,11 +730,12 @@ function ExistingServerImport({ onAdopt }: { onAdopt: (preview: GameImportPrevie
       <Field
         label="Server directory"
         htmlFor="game-import-path"
-        hint="Read-only. Nothing is copied or started until you review the plan."
+        hint="Read-only settings inspection. World files, mods and plugins are not copied."
       >
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Input
             id="game-import-path"
+            disabled={busy}
             value={path}
             placeholder="/srv/minecraft"
             className="min-w-0 flex-1 font-mono"
@@ -750,8 +809,8 @@ function ExistingServerImport({ onAdopt }: { onAdopt: (preview: GameImportPrevie
             </Notice>
           )}
           <p className="text-muted-foreground">
-            The fields above were filled in from this server. Review them, then continue: the world
-            is copied into a managed volume when the plan runs.
+            The fields above were filled in from this server. This creates a new server; transfer
+            your world files, mods and plugins separately if you want to keep them.
           </p>
         </div>
       )}

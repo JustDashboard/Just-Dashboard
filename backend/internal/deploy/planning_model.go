@@ -61,6 +61,11 @@ type Draft struct {
 	CreatedAt          time.Time          `json:"createdAt"`
 	UpdatedAt          time.Time          `json:"updatedAt"`
 	ExpiresAt          time.Time          `json:"expiresAt"`
+	EnvironmentKeys    []string           `json:"environmentKeys,omitempty"`
+	// Values live only in the separately sealed draft column, never data_json,
+	// plan previews, or the draft returned to a browser.
+	environment    map[string]string
+	environmentEnc string
 }
 
 type DraftData struct {
@@ -380,6 +385,9 @@ type PlannedVariable struct {
 	// input such as a database name. Secrets never travel this way; they are
 	// typed references or are generated.
 	Value string `json:"value,omitempty"`
+	// DomainTemplate lets the setup form keep reviewed public URL defaults in
+	// step with the primary route while leaving explicit overrides alone.
+	DomainTemplate string `json:"domainTemplate,omitempty"`
 	// Generate asks commit to produce a random secret of this many characters
 	// instead of accepting a value. It is how a blueprint's declared secrets
 	// exist on this host without ever appearing in a plan or a request.
@@ -1056,6 +1064,17 @@ func (c PlanConfiguration) Validate() error {
 			seenScopes[scope] = true
 		}
 		variableScopes[variable.Name] = seenScopes
+		if variable.DomainTemplate != "" {
+			template := variable.DomainTemplate
+			literal := strings.NewReplacer("{{hostname}}", "example.com", "{{scheme}}", "https").Replace(template)
+			if variable.Sensitivity != "plain" || len(template) > 4096 ||
+				!strings.Contains(template, "{{hostname}}") || strings.ContainsAny(literal, "{}\x00\r\n") {
+				return invalidField(variable.Name, "domain template for %s is malformed or not plain", variable.Name)
+			}
+			if err := rejectPlanSecretLiteral("domain template for "+variable.Name, literal); err != nil {
+				return invalidField(variable.Name, "%v", err)
+			}
+		}
 		if variable.Reference != "" {
 			reference, err := ParseVariableReference(variable.Reference)
 			if err != nil {

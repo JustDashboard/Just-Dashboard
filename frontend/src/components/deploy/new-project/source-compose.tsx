@@ -17,9 +17,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useSessionState } from "@/lib/view-state"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type { DeploymentComposeDocument, DeploymentDraftSource } from "@/lib/types"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { useSourceInspection } from "./use-source-inspection"
 import { validateSource, type WizardErrors } from "@/components/deploy/deployment-defaults"
 import {
   inspectAndPrepare,
@@ -40,12 +41,12 @@ function asError(error: unknown) {
  */
 export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
   const [mode, setMode] = useSessionState<FilesMode>("deploy.new.compose.mode", "compose_paste")
-  const [documents, setDocuments] = useSessionState<DeploymentComposeDocument[]>(
+  const [documents, setDocuments] = useMemoryState<DeploymentComposeDocument[]>(
     "deploy.new.compose.documents",
     [{ path: "compose.yml", content: "", order: 0 }],
   )
   const [selectors, setSelectors] = useSessionState<string[]>("deploy.new.compose.selectors", [])
-  const [gitUrl, setGitUrl] = useSessionState("deploy.new.compose.url", "")
+  const [gitUrl, setGitUrl] = useMemoryState("deploy.new.compose.url", "")
   const [gitRef, setGitRef] = useSessionState("deploy.new.compose.ref", "main")
   const [credentialId, setCredentialId] = useSessionState("deploy.new.compose.credential", 0)
   const [localPath, setLocalPath] = useSessionState("deploy.new.compose.path", "")
@@ -53,6 +54,7 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
   const [errors, setErrors] = useState<WizardErrors>({})
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()
+  const inspection = useSourceInspection(onInspected)
 
   const buildSource = (): DeploymentDraftSource => {
     // Omitted rather than sent empty: the server finds docker-compose.yml or
@@ -90,6 +92,7 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
         : "compose"
 
   const inspect = async () => {
+    if (busy) return
     const source = buildSource()
     const validation = validateSource(source)
     if (Object.keys(validation).length) {
@@ -100,8 +103,8 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
     setBusy(true)
     setFailure(undefined)
     try {
-      onInspected(
-        await inspectAndPrepare(deploymentName(name), "compose", source, {
+      await inspection.inspect(() =>
+        inspectAndPrepare(deploymentName(name), "compose", source, {
           sourceLabel: "Compose stack",
         }),
       )

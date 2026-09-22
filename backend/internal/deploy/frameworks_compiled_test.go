@@ -294,3 +294,63 @@ func TestCompiledLanguagesCoexistAsSeparateRoots(t *testing.T) {
 		}
 	}
 }
+
+func TestRustDefaultRunSelectsTheApplicationInsteadOfTheFirstBinary(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []struct {
+		name string
+		bins string
+	}{
+		{"explicit binaries", "\n[[bin]]\nname = \"maintenance\"\n[[bin]]\nname = \"serve\"\n"},
+		{"automatic binary targets", ""},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeBuildFixture(t, root, "Cargo.toml", "[package]\nname = \"api\"\ndefault-run = \"serve\"\n[dependencies]\naxum = \"0.8\"\n"+fixture.bins)
+			result, err := (Detector{}).DetectPath(context.Background(), root, SourceIdentity{})
+			if err != nil || len(result.Candidates) != 1 {
+				t.Fatalf("detect: %+v, %v", result, err)
+			}
+			candidate := result.Candidates[0]
+			found := false
+			for _, evidence := range candidate.Evidence {
+				found = found || evidence.Reason == "binary target serve"
+			}
+			if !found || strings.Contains(strings.Join(candidate.NeedsDecision, " "), "several binaries") {
+				t.Fatalf("default-run was not honored: %+v", candidate)
+			}
+			prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root,
+				BuildPlanConfig{Method: BuildRecipe, Recipe: "rust"}, false, "t:1")
+			if err != nil || !strings.Contains(prepared.DockerfilePreview, "cp /src/target/release/serve /out/app") {
+				t.Fatalf("wrong runtime binary: %v\n%s", err, prepared.DockerfilePreview)
+			}
+		})
+	}
+}
+
+func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing.T) {
+	t.Parallel()
+	for _, frameworks := range []string{"net8.0;net10.0", "net10.0;net8.0", "net6.0;net10.0-windows;net10.0"} {
+		t.Run(frameworks, func(t *testing.T) {
+			root := t.TempDir()
+			writeBuildFixture(t, root, "Api.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFrameworks>`+frameworks+`</TargetFrameworks></PropertyGroup></Project>`)
+			prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root,
+				BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}, false, "t:1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range []string{"dotnet/sdk:10.0@sha256:", "dotnet restore Api.csproj -p:TargetFramework=net10.0",
+				"dotnet publish Api.csproj -c Release --no-restore -o /out --framework net10.0", "dotnet/aspnet:10.0@sha256:"} {
+				if !strings.Contains(prepared.DockerfilePreview, expected) {
+					t.Fatalf("multi-target recipe missing %q:\n%s", expected, prepared.DockerfilePreview)
+				}
+			}
+		})
+	}
+	for _, framework := range []string{"net8.0-windows", "net10.0-android", "net10.0;net8.0"} {
+		_, err := parseDotnetProject("Api.csproj", []byte(`<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>`+framework+`</TargetFramework></PropertyGroup></Project>`))
+		if !errors.Is(err, ErrUnsupportedBuilder) {
+			t.Fatalf("unsupported single target %s was accepted: %v", framework, err)
+		}
+	}
+}

@@ -46,6 +46,7 @@ type InputKind string
 
 const (
 	InputText    InputKind = "text"
+	InputSecret  InputKind = "secret"
 	InputNumber  InputKind = "number"
 	InputBoolean InputKind = "boolean"
 	InputChoice  InputKind = "choice"

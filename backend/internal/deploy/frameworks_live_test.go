@@ -175,7 +175,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle)" ||
 				name == "streamlit" && (candidate.Framework != "streamlit" || candidate.Port != 8501) ||
 				name == "gradio" && (candidate.Framework != "gradio" || candidate.Port != 7860) ||
-				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 8.0") ||
+				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||
 				name == "deno" && candidate.Port != 8000 ||
 				name == "laravel" && (candidate.Framework != "laravel" || result.Prepared.Toolchain != "php 8.4") ||
 				name == "php" && candidate.Framework != "php" {

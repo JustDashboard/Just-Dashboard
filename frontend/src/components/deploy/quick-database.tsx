@@ -19,12 +19,14 @@ export function DatabaseQuickDeploy({
   onConnect,
   resume,
   onStarted,
+  onReset,
   initialEngine,
 }: {
   target?: "host" | "container"
   canConnect?: boolean
   resume?: { container: string; engine: string }
   onStarted?: (started: { container: string; engine: string }) => void
+  onReset?: () => void
   onConnect?: (connection: DbConnection, url: string) => void
   /** The engine detection found the source connecting to, preselected. */
   initialEngine?: string
@@ -35,6 +37,7 @@ export function DatabaseQuickDeploy({
   const [revealed, setRevealed] = useState(false)
   const { copy } = useCopy()
   const [options, setOptions] = useState<DbProvisionOption[]>()
+  const [optionsAttempt, setOptionsAttempt] = useState(0)
   const [engine, setEngine] = useState(resume?.engine ?? initialEngine ?? "")
   const [name, setName] = useState("")
   const [database, setDatabase] = useState("")
@@ -54,10 +57,15 @@ export function DatabaseQuickDeploy({
   }, [])
 
   useEffect(() => {
-    get<DbProvisionOption[]>("/databases/provision/options")
+    const controller = new AbortController()
+    get<DbProvisionOption[]>("/databases/provision/options", undefined, controller.signal)
       .then(setOptions)
-      .catch((error) => setFailure(error instanceof Error ? error : new Error(String(error))))
-  }, [])
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setFailure(error instanceof Error ? error : new Error(String(error)))
+      })
+    return () => controller.abort()
+  }, [optionsAttempt])
 
   const selected = options?.find((option) => option.engine === engine)
 
@@ -143,7 +151,7 @@ export function DatabaseQuickDeploy({
             htmlFor="database-connection-string"
             hint={
               target === "container"
-                ? "This private address is reachable by applications on Docker's default bridge. Reconnect the database if its container is replaced."
+                ? "Use this database to connect the application over its managed private network. The saved connection follows replacement database containers."
                 : "This address is for processes on the host. Use Add database during project setup to get the address for an application container."
             }
           >
@@ -191,10 +199,12 @@ export function DatabaseQuickDeploy({
             <Button
               onClick={() => {
                 setCreated(undefined)
+                setRevealed(false)
                 setStartedContainer(undefined)
                 setEngine("")
                 setName("")
                 setDatabase("")
+                onReset?.()
               }}
             >
               <Database className="size-4" />
@@ -243,11 +253,15 @@ export function DatabaseQuickDeploy({
                   </span>
                 </ChoiceCard>
               ))}
-              {!options && <Spinner />}
+              {!options && !failure && <Spinner />}
             </div>
             {selected && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Container name" htmlFor="db-name" hint={`Defaults to jd-${engine}.`}>
+                <Field
+                  label="Container name"
+                  htmlFor="db-name"
+                  hint={`Defaults to an available name starting with jd-${engine}.`}
+                >
                   <Input
                     id="db-name"
                     value={name}
@@ -273,14 +287,25 @@ export function DatabaseQuickDeploy({
         )}
       </PanelBody>
       <PanelFooter className="justify-end">
-        <Button
-          className="h-11 sm:h-9"
-          disabled={!selected || Boolean(progress)}
-          onClick={() => void create()}
-        >
-          <Database className="size-4" />
-          {startedContainer ? "Retry connection setup" : "Create database"}
-        </Button>
+        {!options && failure ? (
+          <Button
+            onClick={() => {
+              setFailure(undefined)
+              setOptionsAttempt((attempt) => attempt + 1)
+            }}
+          >
+            Retry loading database engines
+          </Button>
+        ) : (
+          <Button
+            className="h-11 sm:h-9"
+            disabled={!selected || Boolean(progress)}
+            onClick={() => void create()}
+          >
+            <Database className="size-4" />
+            {startedContainer ? "Retry connection setup" : "Create database"}
+          </Button>
+        )}
       </PanelFooter>
     </Panel>
   )

@@ -43,11 +43,12 @@ func TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks(t *testing.T) {
 		t.Run(definition.ID, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Minute)
 			defer cancel()
+			stamp := time.Now().UnixNano()
 			fixture := definition.Fixtures[0]
 			plan, err := RenderBlueprintPlan(DraftSourceConfig{
 				Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: definition.ID,
 				BlueprintVersion: definition.Version, BlueprintInputs: fixture.Inputs,
-			}, "catalogue "+definition.ID)
+			}, fmt.Sprintf("catalogue %d %s", stamp, definition.ID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,7 +76,6 @@ func TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks(t *testing.T) {
 			for index := range runtime.Ports {
 				runtime.Ports[index].BindAddress, runtime.Ports[index].HostPort = "127.0.0.1", liveC5LoopbackPort(t)
 			}
-			stamp := time.Now().UnixNano()
 			container := fmt.Sprintf("jd-e%d-r1", stamp)
 			t.Cleanup(func() {
 				cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

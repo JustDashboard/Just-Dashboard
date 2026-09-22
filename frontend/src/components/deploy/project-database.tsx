@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Database, Plus } from "@/components/icons"
 import { Field } from "@/components/form"
 import { SidePanel } from "@/components/side-panel"
@@ -48,6 +48,17 @@ export function ProjectDatabase({
   const [started, setStarted] = useState<{ container: string; engine: string }>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
+  const request = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => request.current?.abort(), [])
+  const cancelConnection = () => {
+    request.current?.abort()
+    setBusy(false)
+    setError(undefined)
+  }
+  const changeOpen = (next: boolean) => {
+    if (!next) cancelConnection()
+    setOpen(next)
+  }
   const connections = usePoll(
     (signal) => get<DbConnection[]>("/databases/", undefined, signal),
     0,
@@ -64,19 +75,24 @@ export function ProjectDatabase({
   }
   const useExisting = async () => {
     const connection = connections.data?.find((item) => String(item.id) === selected)
-    if (!connection || !valid) return
+    if (!connection || !valid || busy) return
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
     setBusy(true)
     setError(undefined)
     try {
       const result = await get<{ url: string; reference?: string }>(
         `/databases/${connection.id}/url`,
         { target },
+        controller.signal,
       )
-      connect(connection, result.reference || result.url)
+      if (!controller.signal.aborted) connect(connection, result.reference || result.url)
     } catch (caught) {
-      setError(caught instanceof Error ? caught : new Error(String(caught)))
+      if (!controller.signal.aborted)
+        setError(caught instanceof Error ? caught : new Error(String(caught)))
     } finally {
-      setBusy(false)
+      if (!controller.signal.aborted) setBusy(false)
     }
   }
   return (
@@ -93,7 +109,7 @@ export function ProjectDatabase({
       </div>
       <SidePanel
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={changeOpen}
         title="Connect a database"
         description="Create a database or link an existing connection to this project."
         width="md"
@@ -112,6 +128,7 @@ export function ProjectDatabase({
             <Input
               id="database-variable"
               value={variable}
+              disabled={busy}
               onChange={(event) => setVariable(event.target.value)}
               aria-invalid={!valid}
               className="font-mono"
@@ -121,7 +138,10 @@ export function ProjectDatabase({
             <Button
               type="button"
               variant={mode === "create" ? "secondary" : "ghost"}
-              onClick={() => setMode("create")}
+              onClick={() => {
+                cancelConnection()
+                setMode("create")
+              }}
             >
               Create new
             </Button>
@@ -148,7 +168,7 @@ export function ProjectDatabase({
           ) : (
             <div className="space-y-4">
               {(error || connections.error) && <ErrorState error={error || connections.error!} />}
-              <Select value={selected} onValueChange={setSelected}>
+              <Select value={selected} onValueChange={setSelected} disabled={busy}>
                 <SelectTrigger aria-label="Existing database" className="w-full">
                   <SelectValue placeholder="Choose a database" />
                 </SelectTrigger>

@@ -141,13 +141,18 @@ Test connection verb, and `?target=container` behind Copy application URL, which
 audited there as everywhere else.
 Quick setup provisions with `exposure: local`, so those ports are published to host loopback only;
 the Databases page's own dialog defaults to every interface (above). The data volume is named
-`<container>-data`, and provisioning refuses with `409 volume_exists` when that volume already exists:
+`<container>-data`. With no name supplied, provisioning reserves the first available `jd-<engine>`,
+`jd-<engine>-2`, etc., checking both containers and retained data volumes. In-flight requests reserve
+distinct names before pulling images. Explicit names remain exact and provisioning refuses with
+`409 volume_exists` when that volume already exists:
 an official image that finds a populated data directory skips initialisation, so the freshly generated
 password is never set and the server refuses every sign-in while looking reachable. The `/ping` reply's
 `error` is surfaced by both creation dialogs so an engine's own refusal is not reported as "not ready".
-`/adopt` is idempotent by address: a container whose address is already covered by a connection gets
-that row back, and when the container's credentials differ from the stored DSN the row is re-sealed in
-place (audited as `database.connection.refresh`, pool dropped) rather than returned stale — a database
+`/adopt` is idempotent by driver, address, database and login user: a matching connection gets that row
+back, and when the container's password differs the row is re-sealed in place while preserving its
+transport and query options (audited as `database.connection.refresh`, pool dropped). Different databases,
+users and engines on one address are never overwritten; ambiguous duplicate matches require an explicit
+saved-connection choice. This keeps replacement credentials current — a database
 removed and created again under the same name takes the same loopback port back with a new password,
 and a `${{database.N}}` reference must keep resolving to a URL that works.
 The URL endpoint's `target=container`

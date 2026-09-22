@@ -151,9 +151,8 @@ test("a GitHub repository reaches a running release with a 44px Deploy target an
   expect(savedChecks[0].config).not.toHaveProperty("port")
   expect(quick.commits()).toBe(1)
   expect(quick.runs()).toBe(1)
-  expect(quick.imported()).toMatchObject({
+  expect(quick.staged()).toMatchObject({
     dotenv: "NEXT_PUBLIC_SITE_URL=https://example.test",
-    scopes: ["runtime", "build"],
   })
   expect(quick.configuration()).toMatchObject({
     build: { buildCommand: "bun run build", startCommand: "bun start" },
@@ -213,15 +212,13 @@ test("editing the name and pasting environment text keeps the text out of the UR
   await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
-  expect(quick.imported()).toMatchObject({
+  expect(quick.staged()).toMatchObject({
     dotenv: "API_TOKEN=handoff-secret",
-    sensitivity: "secret",
-    scopes: ["runtime", "build"],
   })
   expect(quick.commits()).toBe(1)
 })
 
-for (const stage of ["variables/import", "runs"]) {
+for (const stage of ["runs"]) {
   test(`quick creation recovers an existing project after ${stage} fails`, async ({ page }) => {
     const quick = await mockNewProject(page)
     await page.route(`**/api/v1/deploy/77/environments/78/${stage}`, (route) =>
@@ -246,20 +243,10 @@ for (const stage of ["variables/import", "runs"]) {
     await expect(page.getByText("Setup service unavailable", { exact: true })).toBeVisible()
     expect(quick.commits()).toBe(1)
     await expect(page.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(0)
-    if (stage === "variables/import") {
-      await page.getByText("Keep a copy of your environment variables").click()
-      await expect(
-        page.getByRole("textbox", { name: "Unsaved environment variables" }),
-      ).toHaveValue("API_TOKEN=keep-this-value")
-      await expect(page.getByRole("link", { name: "Finish environment setup" })).toHaveAttribute(
-        "href",
-        "/deploy/77/settings/variables",
-      )
-    } else {
-      await expect(
-        page.getByRole("link", { name: "Open deployment", exact: true }),
-      ).toHaveAttribute("href", "/deploy/77/deployments")
-    }
+    await expect(page.getByRole("link", { name: "Open deployment", exact: true })).toHaveAttribute(
+      "href",
+      "/deploy/77/deployments",
+    )
   })
 }
 
@@ -563,8 +550,8 @@ test("Add database from Configure creates a database, retries after a failed con
       },
     ],
   })
-  expect(quick.imported()?.dotenv).toContain("${{database.42}}")
-  expect(quick.imported()?.dotenv).toContain('API_KEY="another-secret"')
+  expect(quick.staged()?.dotenv).toContain("${{database.42}}")
+  expect(quick.staged()?.dotenv).toContain('API_KEY="another-secret"')
 })
 
 test("a template that needs its own public URL arrives with one this server can deliver", async ({
@@ -630,10 +617,8 @@ test("a template input the page cannot answer is named before the press, not aft
   await page.getByRole("textbox", { name: "Public domain" }).fill("")
 
   await page.getByRole("button", { name: "Use this template", exact: true }).click()
-  await expect(
-    page.getByText("Public domain is needed before Vaultwarden can be used."),
-  ).toBeVisible()
-  await expect(page.getByRole("alert").filter({ hasText: "Required." })).toBeVisible()
+  await expect(page.getByText("Public domain: Required.", { exact: true })).toBeVisible()
+  await expect(page.getByRole("alert").filter({ hasText: /^Required\.$/ })).toBeVisible()
   // Refused here, so the server was never asked to start a setup that cannot
   // finish: every earlier attempt left a draft in the unfinished-setups list.
   expect(journey.started()).toBe(0)
@@ -1104,7 +1089,7 @@ test("a detected site opens with its variables, its database and its single-page
   await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await page.waitForURL(/\/deploy\/77\/runs\/84$/)
-  expect(quick.imported()?.dotenv).toBe('SESSION_SECRET="s3cret"')
+  expect(quick.staged()?.dotenv).toBe('SESSION_SECRET="s3cret"')
   const saved = quick.configuration() as { build: Record<string, unknown> }
   expect(saved.build.spaFallback).toBe(true)
   expect(saved.build.outputDirectory).toBe("dist")
@@ -1226,6 +1211,9 @@ test("the public address can ask visitors for a password before the first deploy
   await page.getByRole("switch", { name: "Ask visitors for a password" }).click()
   await page.getByRole("textbox", { name: "User name" }).fill("client")
   await page.locator("#public-protection-password").fill("show and tell")
+  expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
+    "show and tell",
+  )
   await gotoStep(page, "review")
   await page.getByRole("button", { name: "Deploy", exact: true }).click()
   await page.waitForURL(/\/deploy\/77\/runs\/84$/)
@@ -1235,7 +1223,7 @@ test("the public address can ask visitors for a password before the first deploy
       hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
       https: true,
       ownership: "managed",
-      protection: { username: "client", password: "show and tell" },
+      protection: { username: "client", hash: "fixture-sealed-password" },
     },
   ])
 })

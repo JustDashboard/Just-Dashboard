@@ -235,8 +235,8 @@ export function useSessionState<T>(key: string, fallback: T, arrival?: T | null)
  * `useState`, for a value that must never be written down: a secret in a form
  * that has not been saved yet. Survives navigation, not a reload.
  */
-export function useMemoryState<T>(key: string, fallback: T): [T, Setter<T>] {
-  return useStored(memory, key, fallback)
+export function useMemoryState<T>(key: string, fallback: T, arrival?: T | null): [T, Setter<T>] {
+  return useStored(memory, key, fallback, arrival)
 }
 
 /**

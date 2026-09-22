@@ -475,3 +475,45 @@ func TestGetVersionRefusesAVersionThisDashboardDoesNotShip(t *testing.T) {
 		t.Fatal("served an unknown blueprint")
 	}
 }
+
+func TestExternalSecretInputsCannotBecomeRenderedValuesOrOperations(t *testing.T) {
+	t.Parallel()
+	definition, err := Get("mongo-express")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Render(definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, variable := range plan.Variables {
+		if variable.Name == "ME_CONFIG_MONGODB_URL" {
+			found = variable.Sensitivity == "secret" && variable.Required && !variable.Generated && variable.Value == ""
+		}
+	}
+	if !found {
+		t.Fatal("required external secret was not represented in the plan")
+	}
+	if _, err := Render(definition, map[string]string{"mongodb-url": "mongodb://user:private@host/db"}); err == nil || strings.Contains(err.Error(), "private") {
+		t.Fatalf("secret input was accepted or echoed: %v", err)
+	}
+	copy := *definition
+	copy.Operations = definition.Operations
+	copy.Operations.Startup = append([]Operation(nil), definition.Operations.Startup...)
+	copy.Operations.Startup = append(copy.Operations.Startup, Operation{Kind: OperationSetVariable, Name: "CONNECTION", Value: "{{input.mongodb-url}}"})
+	if err := Validate(&copy); err == nil || !strings.Contains(err.Error(), "templates secret input") {
+		t.Fatalf("secret operation interpolation accepted: %v", err)
+	}
+}
+
+func TestBlueprintDomainsHaveDNSLengthLimits(t *testing.T) {
+	t.Parallel()
+	definition, err := Get("n8n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(definition, map[string]string{"domain": strings.Repeat("a.", 126) + "aa"}); err == nil {
+		t.Fatal("a 254-byte hostname was accepted")
+	}
+}

@@ -22,6 +22,7 @@ type RenderedVariable struct {
 	Value       string `json:"value,omitempty"`
 	Sensitivity string `json:"sensitivity"`
 	Generated   bool   `json:"generated,omitempty"`
+	Required    bool   `json:"required,omitempty"`
 	Length      int    `json:"length,omitempty"`
 	Label       string `json:"label,omitempty"`
 }
@@ -148,6 +149,12 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 		if input.Variable == "" {
 			continue
 		}
+		if input.Kind == InputSecret {
+			variables[input.Variable] = RenderedVariable{
+				Name: input.Variable, Sensitivity: "secret", Required: input.Required, Label: input.Label,
+			}
+			continue
+		}
 		variables[input.Variable] = RenderedVariable{
 			Name: input.Variable, Value: value, Sensitivity: "plain", Label: input.Label,
 		}
@@ -167,8 +174,8 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 				return nil, expandErr
 			}
 			existing, found := variables[operation.Name]
-			if found && existing.Generated {
-				return nil, fmt.Errorf("%w: startup overwrites generated secret %s", ErrInvalidInput, operation.Name)
+			if found && existing.Sensitivity == "secret" {
+				return nil, fmt.Errorf("%w: startup overwrites secret variable %s", ErrInvalidInput, operation.Name)
 			}
 			variables[operation.Name] = RenderedVariable{
 				Name: operation.Name, Value: expanded, Sensitivity: "plain",
@@ -293,8 +300,18 @@ func resolveInputs(blueprint *Blueprint, supplied map[string]string) (map[string
 	values := map[string]string{}
 	for _, input := range blueprint.Inputs {
 		value, provided := supplied[input.Name]
+		if input.Kind == InputSecret {
+			if value != "" {
+				return nil, fmt.Errorf("%w: %q must be supplied through encrypted variables, not blueprint inputs", ErrInvalidInput, input.Name)
+			}
+			values[input.Name] = ""
+			continue
+		}
 		if !provided || value == "" {
 			value = input.Default
+		}
+		if input.Kind == InputDomain {
+			value = strings.ToLower(value)
 		}
 		if input.Required && strings.TrimSpace(value) == "" {
 			return nil, fmt.Errorf("%w: %q is required", ErrInvalidInput, input.Name)
@@ -327,7 +344,7 @@ func validateValue(input Input, value string) error {
 			return fmt.Errorf("%w: %q does not match the required format", ErrInvalidInput, input.Name)
 		}
 	case InputDomain:
-		if !domainRE.MatchString(value) {
+		if len(value) > 253 || !domainRE.MatchString(value) {
 			return fmt.Errorf("%w: %q is not a hostname", ErrInvalidInput, input.Name)
 		}
 	case InputNumber, InputMemory:

@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/docker/docker/errdefs"
 )
 
 // Finding and making database servers, so nobody has to write a DSN by hand.
@@ -237,30 +238,22 @@ func (s *Server) handleDBAdopt(w http.ResponseWriter, r *http.Request) error {
 	// server retries this until the engine inside it is actually answering, and
 	// the first attempt is the one that creates the row. Returning what is
 	// already there beats a UNIQUE violation on the name.
-	existing, err := s.existingDSNs(r.Context())
+	conn, stored, existing, err := s.adoptedDatabaseConnection(ctx, cand.Driver, dsn)
 	if err != nil {
 		return err
 	}
-	if have, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-		conn, stored, err := s.connectionByName(r.Context(), have)
+	if conn != nil {
+		dsn, err = refreshedDatabasePassword(cand.Driver, stored, password)
 		if err != nil {
-			return err
+			return httpx.Internal(err)
 		}
 		if stored == dsn {
 			httpx.SkipAudit(r)
 			httpx.JSON(w, http.StatusOK, conn)
 			return nil
 		}
-		// Same address, different credentials. One process listens on a port,
-		// so whatever this row used to reach is gone and the container standing
-		// there now is what the row has to mean — which is exactly what happens
-		// when a database is removed and created again under the same name:
-		// it takes the same loopback port back, with a password generated a
-		// moment ago. Handing back the old row as it stood made the caller poll
-		// a server that would refuse the stored password for as long as anyone
-		// waited, with nothing in the log to say so. Refreshing the row keeps
-		// its name and everything linked to it — a deployment's ${{database.N}}
-		// reference resolves to a URL that works again.
+		// Preserve this login's database and transport options. A replacement
+		// container may rotate its password without changing its logical identity.
 		sealed, err := s.Sealer.Seal(dsn)
 		if err != nil {
 			return httpx.Internal(err)
@@ -855,10 +848,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = "jd-" + req.Engine
-	}
-	if !containerNameRe.MatchString(name) {
+	if name != "" && !containerNameRe.MatchString(name) {
 		return httpx.BadRequest("a container name may contain letters, digits, dots, dashes and underscores")
 	}
 	database := strings.TrimSpace(req.Database)
@@ -877,21 +867,12 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
 	defer cancel()
 
-	// The data volume is named after the container, and a volume outlives the
-	// container that made it. Starting a fresh server on a leftover one is the
-	// worst kind of failure: the image sees a populated data directory, skips
-	// its own initialisation, and the password generated a moment ago is never
-	// set — so the engine comes up, answers, and refuses every sign-in from the
-	// dashboard for as long as anybody waits. Refusing here names the volume
-	// and the two ways out, instead of three minutes of "not reachable".
-	volume := name + "-data"
-	if exists, err := s.modules.docker.VolumeExists(ctx, volume); err != nil {
-		return httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
-	} else if exists {
-		return httpx.Err(http.StatusConflict, "volume_exists", fmt.Sprintf(
-			"a data volume named %s is left over from an earlier %s server, and a new one would reuse its data and its old password; remove that volume on the Docker page to start fresh, or choose another name",
-			volume, tmpl.label))
+	name, releaseName, err := s.reserveDatabaseName(ctx, name, req.Engine)
+	if err != nil {
+		return err
 	}
+	defer releaseName()
+	volume := name + "-data"
 
 	port, err := freeHostPort(tmpl.port, hostIP)
 	if err != nil {
@@ -962,6 +943,62 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	httpx.JSON(w, http.StatusAccepted, resp)
 	return nil
+}
+
+// The default name must work for a second database too. A leftover volume is
+// occupied even without its container: reusing it would keep the old password
+// while saving a newly generated one that the engine never accepted.
+func (s *Server) reserveDatabaseName(ctx context.Context, requested, engine string) (string, func(), error) {
+	s.databaseProvisionMu.Lock()
+	defer s.databaseProvisionMu.Unlock()
+	if s.databaseProvisionNames == nil {
+		s.databaseProvisionNames = make(map[string]bool)
+	}
+	for attempt := 1; attempt <= 1000; attempt++ {
+		name := requested
+		if name == "" {
+			name = "jd-" + engine
+			if attempt > 1 {
+				name += "-" + strconv.Itoa(attempt)
+			}
+		}
+		occupied := s.databaseProvisionNames[name]
+		if !occupied {
+			_, err := s.modules.docker.Inspect(ctx, name)
+			switch {
+			case err == nil:
+				occupied = true
+			case !errdefs.IsNotFound(err):
+				return "", nil, httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
+			}
+		}
+		if occupied {
+			if requested != "" {
+				return "", nil, httpx.Err(http.StatusConflict, "container_exists",
+					"a container named "+name+" already exists or is being created; choose another name")
+			}
+			continue
+		}
+		volume := name + "-data"
+		exists, err := s.modules.docker.VolumeExists(ctx, volume)
+		if err != nil {
+			return "", nil, httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
+		}
+		if exists {
+			if requested != "" {
+				return "", nil, httpx.Err(http.StatusConflict, "volume_exists", fmt.Sprintf(
+					"a data volume named %s is left over from an earlier server, and a new one would reuse its data and its old password; choose another name, or manage that data on the Docker page", volume))
+			}
+			continue
+		}
+		s.databaseProvisionNames[name] = true
+		return name, func() {
+			s.databaseProvisionMu.Lock()
+			delete(s.databaseProvisionNames, name)
+			s.databaseProvisionMu.Unlock()
+		}, nil
+	}
+	return "", nil, httpx.Err(http.StatusConflict, "name_unavailable", "choose a container name; the automatic database names are already in use")
 }
 
 // freeHostPort returns the engine's own port when nothing holds it, and the

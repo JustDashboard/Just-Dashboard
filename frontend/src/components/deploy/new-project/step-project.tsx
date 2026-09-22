@@ -64,6 +64,7 @@ export function StepProject({
   branchBusy,
   branches,
   onChangeBranch,
+  onEditBranch,
   onPickCandidate,
   busy,
   nameTouched,
@@ -78,6 +79,7 @@ export function StepProject({
   branchBusy: boolean
   branches: GitHubBranch[]
   onChangeBranch: (ref: string) => void
+  onEditBranch: (ref: string) => void
   onPickCandidate: (id: string) => void
   busy: string
   nameTouched: boolean
@@ -107,6 +109,7 @@ export function StepProject({
         { value: "web", label: "Web application" },
         { value: "static", label: "Static website" },
         { value: "worker", label: "Worker or bot" },
+        { value: "service", label: "Service" },
       ]
     : isImageSource
       ? [
@@ -195,8 +198,13 @@ export function StepProject({
                 value={branch}
                 disabled={branchBusy}
                 className="font-mono"
-                onChange={(event) => onChangeBranch(event.target.value)}
+                onChange={(event) => onEditBranch(event.target.value)}
                 onBlur={(event) => onChangeBranch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return
+                  event.preventDefault()
+                  onChangeBranch(event.currentTarget.value)
+                }}
               />
             )}
           </Field>

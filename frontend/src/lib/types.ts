@@ -2441,7 +2441,7 @@ export type BlueprintChoice = {
 
 export type BlueprintInput = {
   name: string
-  kind: "text" | "number" | "boolean" | "choice" | "domain" | "memory" | "accept"
+  kind: "text" | "secret" | "number" | "boolean" | "choice" | "domain" | "memory" | "accept"
   label: string
   description?: string
   default?: string
@@ -3309,6 +3309,8 @@ export type DeploymentConfiguration = {
     reference?: string
     // A plain literal a blueprint input became; secrets never travel here.
     value?: string
+    /** Recomputes this blueprint default when its primary domain changes. */
+    domainTemplate?: string
     // Length of a secret the server generates when the deployment is saved.
     generate?: number
   }[]
@@ -3461,6 +3463,8 @@ export type DeploymentDraft = {
   ownerUsername: string
   currentStep: "intent" | "source" | "detection" | "configuration" | "preflight"
   revision: number
+  /** Names saved encrypted on the server; values are never returned. */
+  environmentKeys?: string[]
   data: {
     intent?: { name: string; profile: WorkloadProfile }
     source?: DeploymentDraftSource

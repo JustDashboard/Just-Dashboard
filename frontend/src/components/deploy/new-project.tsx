@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import {
   ArrowLeft,
@@ -14,7 +14,7 @@ import {
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { useSessionState } from "@/lib/view-state"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageHeader, PageState } from "@/components/page"
@@ -33,9 +33,11 @@ import {
   landingStep,
   loadDraft,
   resumeFlow,
+  persistableFlow,
   type ConfigureFlow,
   type ConfigureStepKey,
   type SourceTabKey,
+  type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
 import { SourceGit } from "@/components/deploy/new-project/source-git"
 import { SourceImage } from "@/components/deploy/new-project/source-image"
@@ -159,7 +161,27 @@ export function NewProject({
   // a source comes back naming it, and a key no button carries is a page with
   // nothing under the strip at all.
   const tab = TABS.some((option) => option.key === lastTab) ? lastTab : "git"
-  const [flow, setFlow] = useSessionState<ConfigureFlow | null>("deploy.new.configure.flow", null)
+  const [savedFlow, setSavedFlow] = useSessionState<ConfigureFlow | null>(
+    "deploy.new.configure.flow",
+    null,
+  )
+  const [liveFlow, setLiveFlow] = useMemoryState<ConfigureFlow | null>(
+    "deploy.new.configure.liveFlow",
+    null,
+  )
+  const flow = liveFlow ?? savedFlow
+  const setFlow = useCallback(
+    (update: FlowUpdate) =>
+      setSavedFlow((persisted) => {
+        let next = persisted
+        setLiveFlow((current) => {
+          next = typeof update === "function" ? update(current ?? persisted) : update
+          return next
+        })
+        return persistableFlow(next)
+      }),
+    [setSavedFlow, setLiveFlow],
+  )
   // Which of the four configure screens is open. Under the `configure.` prefix
   // so that changing the source forgets it with everything else the setup knew.
   const [step, setStep] = useSessionState<ConfigureStepKey>("deploy.new.configure.step", "project")
@@ -177,11 +199,35 @@ export function NewProject({
     if (flow && flow.draft.id !== next.draft.id) void discardAbandoned(flow.draft.id)
     setLinkArrived(false)
     setFlow(next)
+    // Arrival parameters choose a source once. Leaving them in the address
+    // bar would reopen that chooser over the completed setup on every reload.
+    const address = new URL(window.location.href)
+    for (const key of ["source", "profile", "repo", "ref", "draft"])
+      address.searchParams.delete(key)
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${address.pathname}${address.search}${address.hash}`,
+    )
     // Everything detection answered is a screen the reader does not have to
     // visit: a repository it read completely opens on Review with the plan
     // read back and Deploy under it, which is the two-press import the page
     // had before it had steps at all.
     setStep(landingStep(next, mode === "advanced"))
+    requestAnimationFrame(() => {
+      const header = document.querySelector<HTMLElement>("[data-slot='flow-header']")
+      const heading = header?.querySelector("h1")
+      if (heading) {
+        heading.tabIndex = -1
+        heading.focus({ preventScroll: true })
+      }
+      header?.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+      })
+    })
   }
   const changeSource = () => {
     void discardAbandoned(flow?.draft.id)

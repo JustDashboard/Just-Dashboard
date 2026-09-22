@@ -8,6 +8,35 @@ import (
 	"testing"
 )
 
+func TestOpenAddsSealedEnvironmentToExistingDrafts(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`ALTER TABLE deploy_drafts DROP COLUMN environment_enc`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO deploy_drafts(id,owner_user_id,owner_username,created_at,updated_at,expires_at) VALUES('existing',1,'operator',1,1,2)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var owner, sealed string
+	if err := st.DB.QueryRow(`SELECT owner_username,environment_enc FROM deploy_drafts WHERE id='existing'`).Scan(&owner, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "operator" || sealed != "" {
+		t.Fatal("draft migration changed the existing row")
+	}
+}
+
 // The schema is one CREATE TABLE IF NOT EXISTS block and there is no migration
 // tool, so a column added later is a no-op against a database that already has
 // the table. This is the test that the second mechanism — applyAddedColumns —

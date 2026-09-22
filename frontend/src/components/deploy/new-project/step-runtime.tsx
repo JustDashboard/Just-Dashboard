@@ -12,6 +12,7 @@ import {
 import { PublicAddress } from "@/components/deploy/new-project/public-address"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
+import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
 
 /**
  * Step two: **how it runs, and where it answers.**
@@ -130,7 +131,7 @@ export function StepRuntime({
           id={SECTION_IDS.address}
           domains={configuration.domains}
           suggestion={flow.hostname}
-          onChange={(domains) => setConfiguration({ ...configuration, domains })}
+          onChange={(domains) => setConfiguration(synchronizePrimaryDomain(configuration, domains))}
         />
       )}
 

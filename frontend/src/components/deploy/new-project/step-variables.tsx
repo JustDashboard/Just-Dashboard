@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Disclosure } from "@/components/form"
+import { Notice } from "@/components/state"
 import { VariableReferences } from "@/components/deploy/new-project/configure-advanced"
 import { EnvironmentEditor } from "@/components/deploy/new-project/environment-editor"
 import type {
@@ -15,8 +16,8 @@ import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
  * Step three: **what it needs to run.**
  *
  * Two different things wear the word "variable" in this product and they used
- * to sit eight sections apart on one screen: the values imported into the
- * project once it exists — typed here, held in memory, never in the URL or
+ * to sit eight sections apart on one screen: the values saved encrypted with
+ * the draft — typed here, held in memory, never in the URL or
  * Web Storage — and the variables the *plan* declares, which name a stored or
  * generated value and carry the scopes deciding which build steps may read
  * them. The first is the screen; the second is the fold under it, open
@@ -30,6 +31,9 @@ export function StepVariables({
   onRowsChange,
   dotenv,
   onDotenvChange,
+  retainedKeys,
+  onRemoveRetainedKey,
+  suppliedVariables,
   referencesOpen,
 }: {
   flow: ConfigureFlow
@@ -38,6 +42,9 @@ export function StepVariables({
   onRowsChange: (next: EnvironmentRow[] | ((rows: EnvironmentRow[]) => EnvironmentRow[])) => void
   dotenv: string
   onDotenvChange: (value: string) => void
+  retainedKeys: string[]
+  onRemoveRetainedKey: (key: string) => void
+  suppliedVariables: string[]
   referencesOpen: boolean
 }) {
   const configuration = flow.configuration
@@ -50,6 +57,37 @@ export function StepVariables({
   // render it would shut itself under the reader's hands mid-word, because
   // `open` on a `<details>` is written again whenever the prop changes.
   const [openOnArrival] = useState(referencesOpen)
+  const [referenceError, setReferenceError] = useState("")
+  const changeReferences = (next: typeof configuration) => {
+    const replacements = next.variables
+      .filter((variable) => {
+        const previous = configuration.variables.find((entry) => entry.name === variable.name)
+        return (
+          (variable.reference && variable.reference !== previous?.reference) ||
+          (variable.generate && variable.generate !== previous?.generate)
+        )
+      })
+      .map((variable) => variable.name)
+    const pasted = new Set(
+      Array.from(
+        dotenv.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
+        (match) => match[1],
+      ),
+    )
+    const conflicts = replacements.filter((name) => pasted.has(name))
+    if (conflicts.length) {
+      setReferenceError(
+        `Remove ${conflicts.join(", ")} from the pasted .env before changing its reference or generator.`,
+      )
+      return
+    }
+    setReferenceError("")
+    if (replacements.length) {
+      onRowsChange((current) => current.filter((row) => !replacements.includes(row.name)))
+      for (const name of replacements) onRemoveRetainedKey(name)
+    }
+    setConfiguration(next)
+  }
 
   return (
     <>
@@ -58,6 +96,8 @@ export function StepVariables({
         onRowsChange={onRowsChange}
         dotenv={dotenv}
         onDotenvChange={onDotenvChange}
+        retainedKeys={retainedKeys}
+        onRemoveRetainedKey={onRemoveRetainedKey}
         hostNetwork={configuration.runtime.hostNetwork}
         databases={flow.candidate?.databases}
         onConnectDatabase={(connection, url, variable) => {
@@ -99,7 +139,16 @@ export function StepVariables({
         }
         open={openOnArrival}
       >
-        <VariableReferences configuration={configuration} onChange={setConfiguration} />
+        {referenceError && (
+          <Notice tone="warning" title="Remove the pasted value first">
+            {referenceError}
+          </Notice>
+        )}
+        <VariableReferences
+          configuration={configuration}
+          onChange={changeReferences}
+          overriddenNames={suppliedVariables}
+        />
       </Disclosure>
     </>
   )

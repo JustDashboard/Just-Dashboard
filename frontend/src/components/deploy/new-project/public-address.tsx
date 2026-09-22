@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { LockClosed, Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
-import { get } from "@/lib/api"
+import { errorMessage, get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Field, FormNote, FormSection, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"
@@ -93,14 +93,16 @@ export function PublicAddress({
 }) {
   const [checked, setChecked] = useState<DeploymentHostnameSuggestion | undefined>(suggestion)
   const [checking, setChecking] = useState(false)
+  const [checkError, setCheckError] = useState<{ hostname: string; message: string }>()
+  const checkRequest = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => checkRequest.current?.abort(), [])
 
   // Annotated rather than inferred: indexing an array answers `Domain` under
   // this compiler's settings, and "is there a primary domain at all" is the
   // question the whole section turns on.
   const domain: Domain | undefined = domains[0]
   const extra = domains.slice(1)
-  const setPrimary = (next: Domain | undefined) =>
-    onChange(next ? [next, ...extra] : extra.length > 0 ? extra : [])
+  const setPrimary = (next: Domain) => onChange([next, ...extra])
   const publish = domain !== undefined
   const hostname = domain?.hostname ?? suggestion?.hostname ?? ""
   const https = domain?.https ?? true
@@ -110,8 +112,9 @@ export function PublicAddress({
   // in one literal, which reads as a merge and is really a dead branch.
   const base: Domain = domain ?? { hostname, https, ownership: "managed" }
   const update = (patch: Partial<Domain>) => setPrimary({ ...base, ...patch })
-  const current = checked ?? suggestion
-  const matches = current?.hostname.toLowerCase() === hostname.toLowerCase()
+  const normalizedHostname = hostname.trim().toLowerCase()
+  const current = checked?.hostname.toLowerCase() === normalizedHostname ? checked : suggestion
+  const matches = current?.hostname.toLowerCase() === normalizedHostname
   /**
    * Whether the name will answer over HTTPS, as a reading at its own label.
    *
@@ -136,18 +139,23 @@ export function PublicAddress({
   const recheck = async (value: string) => {
     const trimmed = value.trim().toLowerCase()
     if (!trimmed) return
+    checkRequest.current?.abort()
+    const controller = new AbortController()
+    checkRequest.current = controller
     setChecking(true)
+    setCheckError(undefined)
     try {
-      setChecked(
-        await get<DeploymentHostnameSuggestion>(
-          `/deploy/hostname?hostname=${encodeURIComponent(trimmed)}`,
-        ),
+      const result = await get<DeploymentHostnameSuggestion>(
+        "/deploy/hostname",
+        { hostname: trimmed },
+        controller.signal,
       )
-    } catch {
-      // Leaving the last answer on screen is better than blanking the panel:
-      // it was true a moment ago, and the run itself is what settles this.
+      if (!controller.signal.aborted) setChecked(result)
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setCheckError({ hostname: trimmed, message: errorMessage(error) })
     } finally {
-      setChecking(false)
+      if (!controller.signal.aborted) setChecking(false)
     }
   }
 
@@ -157,9 +165,7 @@ export function PublicAddress({
         title="Publish on a public hostname"
         checked={publish}
         onCheckedChange={(next) =>
-          setPrimary(
-            next ? { hostname: hostname.toLowerCase(), https, ownership: "managed" } : undefined,
-          )
+          onChange(next ? [{ ...base, hostname: normalizedHostname }] : [])
         }
       >
         <div className="space-y-3">
@@ -177,6 +183,7 @@ export function PublicAddress({
           <Field
             label="Hostname"
             htmlFor="public-hostname"
+            error={checkError?.hostname === normalizedHostname ? checkError.message : undefined}
             trailing={certificate && <Status tone={certificate.tone} label={certificate.label} />}
             hint={
               matches
@@ -188,9 +195,7 @@ export function PublicAddress({
               <InputGroupInput
                 id="public-hostname"
                 value={hostname}
-                onChange={(event) =>
-                  setPrimary({ hostname: event.target.value, https, ownership: "managed" })
-                }
+                onChange={(event) => update({ hostname: event.target.value })}
                 onBlur={(event) => void recheck(event.target.value)}
                 placeholder="app.example.com"
                 className="font-mono"
@@ -198,9 +203,7 @@ export function PublicAddress({
               <InputGroupAddon align="inline-end" className="gap-0 p-0">
                 <HttpsToggle
                   checked={https}
-                  onChange={(nextHttps) =>
-                    setPrimary({ hostname, https: nextHttps, ownership: "managed" })
-                  }
+                  onChange={(nextHttps) => update({ https: nextHttps })}
                 />
                 <InputGroupButton
                   aria-label="Re-check this hostname"
