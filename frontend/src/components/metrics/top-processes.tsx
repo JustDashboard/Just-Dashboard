@@ -2,7 +2,7 @@
 
 import { useCallback } from "react"
 import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
+import { ArrowRight, Cpu } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, percent, rate } from "@/lib/format"
 import type { ProcessRow } from "@/lib/types"
@@ -12,6 +12,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { LoadingRows } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { ProductLogo, processProduct } from "@/components/product-logo"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 type Sort = "cpu" | "memory" | "io"
@@ -87,6 +88,9 @@ export function TopProcesses({ className }: { className?: string }) {
             {rows.map((p) => (
               <Row
                 key={p.pid}
+                // The process as the product it is, where it is one: a list of
+                // names is read, a list of Postgres, Caddy and Docker is seen.
+                leading={<ProductLogo id={processProduct(p.name)} size="sm" fallback={Cpu} />}
                 title={
                   <span className="flex min-w-0 items-baseline gap-2">
                     <span className="truncate">{p.name}</span>

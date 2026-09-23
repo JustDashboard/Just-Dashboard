@@ -9,9 +9,10 @@ import type { LogSource, LogSourceIndex } from "@/lib/types"
 import { EMPTY_FILTER, readLogWindow } from "@/lib/log-filter"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
+import { Page, PageHeader } from "@/components/page"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -37,6 +38,7 @@ function toLocalInput(date: Date) {
  */
 export default function LogsPage() {
   const params = useSearchParams()
+  const { host } = useMetrics()
   const sources = usePoll(
     (signal) => get<LogSourceIndex>("/logs/sources", undefined, signal),
     60000,
@@ -134,15 +136,6 @@ export default function LogsPage() {
     window.history.replaceState(null, "", url)
   }, [sourceId, mode, filter.q, range, since, until, windowError])
 
-  const archiveCount = useMemo(
-    () => (sources.data?.sources ?? []).reduce((n, s) => n + (s.archives ?? 0), 0),
-    [sources.data],
-  )
-  const archiveBytes = useMemo(
-    () => (sources.data?.sources ?? []).reduce((n, s) => n + (s.archiveBytes ?? 0), 0),
-    [sources.data],
-  )
-
   const railToggle = (
     <IconAction
       label={showRail ? "Hide the sources" : "Show the sources"}
@@ -159,23 +152,13 @@ export default function LogsPage() {
       <PageHeader
         eyebrow="Server"
         title="Logs"
+        // The counts that stood here — sources, units, archives — were the
+        // rail's own header and rows said again above them. The export is
+        // the one thing the header can do that the workbench cannot.
         actions={
-          <>
-            {sources.data && (
-              <MetricStrip className="animate-rise">
-                <Metric label="Sources" value={sources.data.sources.length} />
-                {sources.data.units.length > 0 && (
-                  <Metric label="Units" value={sources.data.units.length} />
-                )}
-                {archiveCount > 0 && (
-                  <Metric label="Archives" value={archiveCount} hint={bytes(archiveBytes)} />
-                )}
-              </MetricStrip>
-            )}
-            {sourceId && (
-              <ExportDialog sourceId={sourceId} source={selected} filter={filter} boot={boot} />
-            )}
-          </>
+          sourceId && (
+            <ExportDialog sourceId={sourceId} source={selected} filter={filter} boot={boot} />
+          )
         }
       />
 
@@ -199,6 +182,7 @@ export default function LogsPage() {
                 if (source.kind !== "journal") setUnit("")
               }}
               onRescan={() => sources.refresh()}
+              platform={host?.platform}
             />
             <ResizeHandle
               side="left"

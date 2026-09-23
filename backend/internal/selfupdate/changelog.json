@@ -139,6 +139,11 @@
         },
         {
           "kind": "changed",
+          "text": "Logs are coloured by what is in them, and the Overview and Metrics draw the machine as itself",
+          "detail": "Every log line is drawn by its shapes: the level in its colour, the program in its own hue, addresses, request lines and paths told apart, a status read by its class and the words that say something failed in red, with error and warning rows washed so they are found by scrolling. A JSON line is its message and its fields rather than raw JSON, the line's own timestamp and this host's name are not repeated beside the time column, the sources are drawn as their products, and one toggle shows every line exactly as written. The Overview opens on one line naming the distribution, processor and hypervisor by their marks, each moving reading carries its last hour inside its tile, and the service tiles show the products they count; Metrics names its processor the same way and draws its top processes as what they are."
+        },
+        {
+          "kind": "changed",
           "text": "Restarts and rebuilds are read line by line, and the dashboard's own pages are about what they set",
           "detail": "A restart's or an upgrade's transcript is the whole run in a console — every line numbered, each BuildKit step coloured by the service it builds, the line that failed washed where it sits — rather than the last 64 KB in a small box, and new lines arrive a few at a time instead of landing in one jump. Restart and Rebuild are the two cards beside the stack's three services, the run shows its stages, and the tinted banners around it are gone. Configuration is a form in five sections, each saying what it currently is; Version is one line about the install over the history, drawn as a timeline."
         },
