@@ -47,6 +47,7 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/symlink", s.handle(s.handleFileSymlink))
 			r.Method(http.MethodPost, "/extract", s.handle(s.handleFileExtract))
 			r.Method(http.MethodPut, "/bookmarks", s.handle(s.handleFileBookmarks))
+			r.Method(http.MethodPut, "/colours", s.handle(s.handleFileColour))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -317,9 +318,14 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	if err := req.validate(); err != nil {
 		return err
 	}
+	src, dst, err := s.modules.files.MoveEnds(req.From, req.To)
+	if err != nil {
+		return mapFileError(err)
+	}
 	if err := s.modules.files.Move(req.From, req.To, req.Overwrite); err != nil {
 		return mapFileError(err)
 	}
+	s.moveFileColours(r.Context(), src, dst)
 	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
 	httpx.NoContent(w)
 	return nil
@@ -378,9 +384,14 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error 
 			return err
 		}
 	}
+	entry, err := s.modules.files.ResolveEntry(path)
+	if err != nil {
+		return mapFileError(err)
+	}
 	if err := s.modules.files.Delete(path, recursive); err != nil {
 		return mapFileError(err)
 	}
+	s.dropFileColours(r.Context(), entry)
 	httpx.SetAudit(r, "file.delete", path, map[string]any{"recursive": recursive})
 	httpx.NoContent(w)
 	return nil

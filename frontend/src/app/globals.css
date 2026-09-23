@@ -335,6 +335,41 @@
   --language-css: oklch(0.72 0.16 303.4); /* #663399 */
   --language-scss: oklch(0.72 0.159 352); /* #c6538c */
   --language-markdown: oklch(0.72 0.168 261.4); /* #083fa1 */
+
+  /* The file manager's own artwork: a folder and a sheet of paper.
+   *
+   * A folder is the colour it was labelled — blue until somebody says
+   * otherwise, the way a desktop's folders are — and a label is the operator's
+   * (§3's tag argument: "the red one is production" has to stay red). Only the
+   * face is named here; the tab behind it and the emblem pressed into it are a
+   * step and two steps darker of whatever the face is, mixed in the glyph
+   * (`[data-folder]` below), so nine labels are nine values rather than
+   * twenty-seven.
+   *
+   * The sheet is light on purpose. A document is drawn as paper with the
+   * format's own logo on it, and those logos were drawn for paper — Rust's
+   * black gear and Markdown's ink vanish on a 0.16 ground and are themselves on
+   * a page. It stops short of white so a folder of forty files is a column of
+   * pages rather than forty lamps. The band along its foot carries the
+   * extension in the format's colour (`--language-*`, `--tag-*`). */
+  --folder-blue: oklch(0.72 0.12 243);
+  --folder-teal: oklch(0.72 0.1 200);
+  --folder-green: oklch(0.72 0.14 150);
+  --folder-yellow: oklch(0.8 0.14 92);
+  --folder-orange: oklch(0.74 0.15 60);
+  --folder-red: oklch(0.67 0.17 25);
+  --folder-pink: oklch(0.72 0.15 350);
+  --folder-purple: oklch(0.68 0.14 300);
+  --folder-graphite: oklch(0.62 0.015 260);
+  --doc-page: oklch(0.93 0.005 250);
+  --doc-fold: oklch(0.8 0.012 250);
+  --doc-line: oklch(0.78 0.015 250);
+  --doc-label: oklch(0.99 0 0);
+}
+
+[data-folder] {
+  --folder-back: color-mix(in oklab, var(--folder) 80%, #000);
+  --folder-mark: color-mix(in oklab, var(--folder) 64%, #000);
 }
 
 @theme inline {

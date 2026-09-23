@@ -1,21 +1,21 @@
 "use client"
 
-import { Clock, Cross, Star } from "@/components/icons"
+import { Cross } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { truncateMiddle } from "@/lib/format"
 import type { FileBookmark, FilePlaces } from "@/lib/types"
 import { LoadingRows } from "@/components/state"
-import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { IconAction, rowReveal } from "@/components/icon-action"
+import { rowReveal } from "@/components/icon-action"
 import {
   bookmarkName,
   destinations,
-  PlaceIcon,
+  PlaceMark,
   placeHint,
   placeName,
 } from "@/components/files/places-menu"
+import { FolderIcon } from "@/components/files/file-icon"
+import { baseOf, parentOf } from "@/components/files/media"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
 /**
@@ -33,6 +33,13 @@ import { useDropTarget, type DropMode } from "@/components/files/dnd"
  *
  * Every row takes a drop: a row dragged from the listing onto one moves
  * there, and a file from the desktop uploads there.
+ *
+ * It has no header of its own. Its name and its close button were a strip of
+ * chrome above a list whose three headings already say what it is, and the
+ * toggle that shows and hides it lives in the workbench's strip with the rest
+ * of the page's controls. Each row is drawn as what it is — the folder in its
+ * colour with what it holds pressed into it, the machine's own distribution
+ * for `/` — so the column is found by looking, the way the listing is.
  */
 export function FilesSidebar({
   places,
@@ -43,7 +50,6 @@ export function FilesSidebar({
   onBookmarksChange,
   onDropPaths,
   onDropFiles,
-  onClose,
   className,
 }: {
   places: FilePlaces | undefined
@@ -55,109 +61,101 @@ export function FilesSidebar({
   onBookmarksChange: (next: FileBookmark[]) => void
   onDropPaths: (paths: string[], dir: string, mode: DropMode) => void
   onDropFiles: (transfer: DataTransfer, dir: string) => void
-  onClose: () => void
   className?: string
 }) {
   const rows = destinations(places, recent)
   const bookmarks = places?.bookmarks ?? []
 
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
-      <PaneHeader className="gap-1 pr-1.5 pl-3">
-        <span className="min-w-0 flex-1 truncate text-body font-medium">Places</span>
-        <IconAction label="Hide the sidebar" className="size-7" onClick={onClose}>
-          <Cross />
-        </IconAction>
-      </PaneHeader>
-
-      <div className="min-h-0 flex-1 overflow-auto">
-        {places === undefined ? (
-          <LoadingRows rows={6} className="p-3" />
-        ) : (
-          <>
-            <div className="py-1.5">
-              {rows.places.map((place) => (
+    <nav
+      aria-label="Places"
+      className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-auto", className)}
+    >
+      {places === undefined ? (
+        <LoadingRows rows={6} className="p-3" />
+      ) : (
+        <>
+          <div className="py-2">
+            <p className="eyebrow px-3 pt-1 pb-1.5">Places</p>
+            {rows.places.map((place) => (
+              <PlaceRow
+                key={place.path}
+                dir={place.path}
+                active={place.path === path}
+                icon={<PlaceMark place={place} className="size-5" />}
+                name={placeName(place)}
+                hint={placeHint(place)}
+                onNavigate={onNavigate}
+                onDropPaths={onDropPaths}
+                onDropFiles={onDropFiles}
+              />
+            ))}
+          </div>
+          {rows.starred.length > 0 && (
+            <div className="border-t border-hairline py-2">
+              <p className="eyebrow px-3 pt-1 pb-1.5">Starred</p>
+              {rows.starred.map((bookmark) => (
                 <PlaceRow
-                  key={place.path}
-                  dir={place.path}
-                  active={place.path === path}
+                  key={bookmark.path}
+                  dir={bookmark.path}
+                  active={bookmark.path === path}
                   icon={
-                    <PlaceIcon
-                      place={place}
-                      className={cn(
-                        "size-3.5 shrink-0",
-                        place.kind === "home" ? "text-brand" : "text-muted-foreground",
-                      )}
+                    <FolderIcon
+                      name={baseOf(bookmark.path)}
+                      path={bookmark.path}
+                      className="size-5"
                     />
                   }
-                  name={placeName(place)}
-                  hint={placeHint(place)}
+                  name={bookmarkName(bookmark)}
+                  onNavigate={onNavigate}
+                  onDropPaths={onDropPaths}
+                  onDropFiles={onDropFiles}
+                  trailing={
+                    canWrite && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            className={cn("text-muted-foreground", rowReveal("row"))}
+                            aria-label={`Unstar ${bookmarkName(bookmark)}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onBookmarksChange(bookmarks.filter((b) => b.path !== bookmark.path))
+                            }}
+                          >
+                            <Cross />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Unstar</TooltipContent>
+                      </Tooltip>
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+          {rows.recent.length > 0 && (
+            <div className="border-t border-hairline py-2">
+              <p className="eyebrow px-3 pt-1 pb-1.5">Recent</p>
+              {rows.recent.map((p) => (
+                <PlaceRow
+                  key={p}
+                  dir={p}
+                  active={p === path}
+                  icon={<FolderIcon name={baseOf(p)} path={p} className="size-5" />}
+                  name={baseOf(p) || "/"}
+                  hint={p === "/" ? undefined : parentOf(p)}
                   onNavigate={onNavigate}
                   onDropPaths={onDropPaths}
                   onDropFiles={onDropFiles}
                 />
               ))}
             </div>
-            {rows.starred.length > 0 && (
-              <div className="border-t border-hairline py-1.5">
-                <p className="eyebrow px-3 pt-1 pb-1">Starred</p>
-                {rows.starred.map((bookmark) => (
-                  <PlaceRow
-                    key={bookmark.path}
-                    dir={bookmark.path}
-                    active={bookmark.path === path}
-                    icon={<Star className="size-3.5 shrink-0 text-warning" />}
-                    name={bookmarkName(bookmark)}
-                    onNavigate={onNavigate}
-                    onDropPaths={onDropPaths}
-                    onDropFiles={onDropFiles}
-                    trailing={
-                      canWrite && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost"
-                              className={cn("text-muted-foreground", rowReveal("row"))}
-                              aria-label={`Unstar ${bookmarkName(bookmark)}`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                onBookmarksChange(bookmarks.filter((b) => b.path !== bookmark.path))
-                              }}
-                            >
-                              <Cross />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Unstar</TooltipContent>
-                        </Tooltip>
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            )}
-            {rows.recent.length > 0 && (
-              <div className="border-t border-hairline py-1.5">
-                <p className="eyebrow px-3 pt-1 pb-1">Recent</p>
-                {rows.recent.map((p) => (
-                  <PlaceRow
-                    key={p}
-                    dir={p}
-                    active={p === path}
-                    icon={<Clock className="size-3.5 shrink-0 text-muted-foreground" />}
-                    name={truncateMiddle(p, 34)}
-                    mono
-                    onNavigate={onNavigate}
-                    onDropPaths={onDropPaths}
-                    onDropFiles={onDropFiles}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+          )}
+        </>
+      )}
+    </nav>
   )
 }
 
@@ -167,7 +165,6 @@ function PlaceRow({
   icon,
   name,
   hint,
-  mono,
   trailing,
   onNavigate,
   onDropPaths,
@@ -178,7 +175,6 @@ function PlaceRow({
   icon: React.ReactNode
   name: string
   hint?: string
-  mono?: boolean
   trailing?: React.ReactNode
   onNavigate: (path: string) => void
   onDropPaths: (paths: string[], dir: string, mode: DropMode) => void
@@ -204,20 +200,12 @@ function PlaceRow({
         onClick={() => onNavigate(dir)}
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2.5 pl-3 text-left",
-          hint ? "py-1.5" : "py-[3px]",
+          hint ? "py-1.5" : "py-1",
         )}
       >
         {icon}
         <span className="min-w-0 flex-1">
-          <span
-            className={cn(
-              "block truncate",
-              active && "font-medium",
-              mono && "font-mono text-xs",
-            )}
-          >
-            {name}
-          </span>
+          <span className={cn("block truncate", active && "font-medium")}>{name}</span>
           {hint && (
             <span className="block truncate font-mono text-hint text-muted-foreground">{hint}</span>
           )}

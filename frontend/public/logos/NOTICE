@@ -65,3 +65,21 @@ both unchanged. All three are used under the MIT License:
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
+
+The format marks the file manager draws on a file's page come from devicon too,
+under the same MIT License: apache.svg, bash.svg, cmake.svg, cplusplus.svg,
+csharp.svg, css3.svg, dart.svg, elixir.svg, haskell.svg, html5.svg, java.svg,
+javascript.svg, json.svg, kotlin.svg, latex.svg, lua.svg, markdown.svg,
+perl.svg, php.svg, pnpm.svg, powershell.svg, r.svg, react.svg, ruby.svg,
+rust.svg, sass.svg, scala.svg, svelte.svg, swift.svg, tailwindcss.svg,
+typescript.svg, vitejs.svg, vuejs.svg, xml.svg, yaml.svg, yarn.svg and zig.svg
+are its <name>-original.svg and graphql.svg its graphql-plain.svg, unchanged;
+c.svg is c-original.svg as of devicon v2.15.1, whose hexagon reads on a page
+where the later letterform's pale grey does not.
+
+mono/ holds the single-colour marks pressed into a folder's face. Every file
+there is from Simple Icons (https://simpleicons.org), CC0 1.0, unchanged, renamed
+after the product key the folders use: nodedotjs.svg is nodejs.svg,
+nextdotjs.svg nextjs.svg, letsencrypt.svg lets-encrypt.svg, rubygems.svg
+ruby.svg, openjdk.svg java.svg, visualstudiocode.svg vscode.svg and gnubash.svg
+bash.svg.

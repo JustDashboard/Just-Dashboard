@@ -260,9 +260,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - `workspace-tools.tsx` is the Files/Diff companion. Its header is two section tabs (`tabClasses`, the
   brand underline, no glyphs) with the changed-file count beside "Diff". Under that, the Files half is a
   strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
-  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip; the Files page's sidebar
-  drops it (`chrome={false}`) and draws its own place switcher above the same tree, which there also
-  reveals the folder being browsed, reloads its open folders on `refreshTick`, and takes drops. The
+  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip, and each entry in the
+  same folders and pages the Files page draws (`files/file-icon.tsx`), in the colours folders were
+  labelled with there. (The Files page's own sidebar is no longer this tree but a fixed list of
+  places, `files-sidebar.tsx`.) The
   second tab is **Diff** (`diff-tools.tsx`), and it is only that: the work in the repository the shell
   is in, read rather than operated on. It was a git client — pull, push, stash, stage, commit, history,
   branches — beside a terminal that already has git in it and a Git page that is the client, so it was

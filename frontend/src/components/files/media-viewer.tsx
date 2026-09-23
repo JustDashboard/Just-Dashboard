@@ -314,7 +314,7 @@ function OtherStage({ entry }: { entry: FileEntry }) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-      <FileIcon entry={entry} className="size-16" />
+      <FileIcon entry={entry} detail className="size-20" />
       <p className="text-body">
         {bytes(preview.size)} of binary data. Download it to open it locally.
       </p>

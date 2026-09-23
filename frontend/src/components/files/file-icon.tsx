@@ -1,300 +1,361 @@
 "use client"
 
-import { forwardRef, type Ref } from "react"
+import { createContext, useContext, type CSSProperties } from "react"
 import {
-  mdiApplicationBrackets,
-  mdiArchive,
-  mdiBookOpenPageVariant,
-  mdiCodeBraces,
-  mdiCodeJson,
-  mdiConsoleLine,
-  mdiDatabase,
-  mdiDocker,
-  mdiFileCog,
-  mdiFileCode,
-  mdiFileDelimited,
-  mdiFileDocument,
-  mdiFileExcelBox,
-  mdiFileGifBox,
-  mdiFileImage,
-  mdiFileJpgBox,
-  mdiFileKey,
-  mdiFileLock,
-  mdiFileMusic,
-  mdiFileOutline,
-  mdiFilePdfBox,
-  mdiFilePngBox,
-  mdiFilePowerpointBox,
-  mdiFileVideo,
-  mdiFileWordBox,
-  mdiFileXmlBox,
-  mdiFolder,
-  mdiFolderCog,
-  mdiFolderHome,
-  mdiFolderKey,
-  mdiFolderMinus,
-  mdiFolderNetwork,
-  mdiFolderOpen,
-  mdiFolderSync,
-  mdiFormatFont,
-  mdiGit,
-  mdiHammerWrench,
-  mdiLanguageCss3,
-  mdiLanguageHtml5,
-  mdiLanguageMarkdown,
-  mdiLicense,
-  mdiPackageVariantClosed,
-  mdiSvg,
-  mdiTextBox,
-} from "@mdi/js"
-import { Link, type Icon, type IconProps } from "@/components/icons"
+  Archive,
+  BookOpen,
+  Box,
+  Clock,
+  CodeBracket,
+  Cpu,
+  Database,
+  DesktopDevice,
+  Download,
+  FileText,
+  FileZip,
+  Globe,
+  Home,
+  Image,
+  Key,
+  LockClosed,
+  Logs,
+  Music,
+  Servers,
+  SettingsGear,
+  Table,
+  Terminal,
+  TextFormat,
+  Trash,
+  Video,
+  Wrench,
+  type Icon,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 
 /**
- * One file glyph out of one MDI path.
+ * What a file *is*, drawn: a folder, or a sheet of paper with the format on it.
  *
- * `@mdi/js` ships raw path data, not components, so this file wraps the paths
- * it needs in the same `Icon` shape the rest of the product uses: a 24-grid
- * glyph painting `currentColor`, defaulting to 16 unless a `size-*` class says
- * otherwise (CSS beats the width/height attributes below, so rows sizing with
- * `size-full` are untouched).
+ * The listing used to draw Material Design Icons' file family — a glyph per
+ * category in one flat tone, the same silhouette for a folder at every size.
+ * It told a config from a certificate, but a directory of forty files read as
+ * forty stencils, and the one thing a reader recognises a format by — its own
+ * logo — was nowhere. The drawing is now the one every desktop file manager
+ * has trained the eye on:
+ *
+ * - **A folder is a folder**, two-toned with its tab behind it, in the colour
+ *   it was labelled (blue until somebody says otherwise). A folder whose name
+ *   says what it holds carries that pressed into its face: the product's own
+ *   mark for `.git`, `.docker` or `node_modules` (Simple Icons' single-colour
+ *   drawings, so it can be one step darker than the face), a glyph from the
+ *   product's vocabulary for `.ssh`, `etc` or `logs`. Build output and
+ *   installed dependencies are graphite unless relabelled: nothing in them is
+ *   yours to edit, and the grey says "walk past this one" before the name is
+ *   read.
+ * - **A file is a page**, its corner folded, with the format drawn on it — the
+ *   language's or the product's own logo in its own colours where it has one
+ *   (§14: a product is drawn as itself), a glyph in the format's colour where
+ *   it does not, the lines of a text page where it is only text — and a band
+ *   along its foot in the format's colour, carrying the extension once the
+ *   icon is large enough to set it.
+ *
+ * The band's colour is by format rather than by category. A category (code,
+ * data, media) was one hue for twenty formats, which is a legend to learn;
+ * a TypeScript file in TypeScript's blue and a Python file in Python's is a
+ * legend the reader already has. The hues are the product's tokens —
+ * `--language-*` for a language GitHub colours, `--tag-*` for the rest — at
+ * one lightness, so no format outshouts another.
+ *
+ * A symlink keeps its target's drawing and gains the alias arrow in its
+ * corner: what a link points at is the useful fact. A broken one's corner is
+ * red.
  */
-function mdi(path: string, name: string): Icon {
-  function MdiGlyph({ size = 16, title, ...props }: IconProps, ref: Ref<SVGSVGElement>) {
-    return (
-      <svg ref={ref} viewBox="0 0 24 24" fill="currentColor" width={size} height={size} {...props}>
-        {title ? <title>{title}</title> : null}
-        <path d={path} />
-      </svg>
-    )
-  }
-  const Forwarded = forwardRef<SVGSVGElement, Omit<IconProps, "ref">>(MdiGlyph)
-  Forwarded.displayName = name
-  return Forwarded
+
+// ---- Folder labels ---------------------------------------------------------
+
+export const FOLDER_COLOURS = [
+  "blue",
+  "teal",
+  "green",
+  "yellow",
+  "orange",
+  "red",
+  "pink",
+  "purple",
+  "graphite",
+] as const
+export type FolderColour = (typeof FOLDER_COLOURS)[number]
+
+export const FOLDER_COLOUR_NAMES: Record<FolderColour, string> = {
+  blue: "Blue",
+  teal: "Teal",
+  green: "Green",
+  yellow: "Yellow",
+  orange: "Orange",
+  red: "Red",
+  pink: "Pink",
+  purple: "Purple",
+  graphite: "Graphite",
 }
-const MdiCode = mdi(mdiFileCode, "MdiCode")
-const MdiHtml = mdi(mdiLanguageHtml5, "MdiHtml")
-const MdiXml = mdi(mdiFileXmlBox, "MdiXml")
-const MdiCss = mdi(mdiLanguageCss3, "MdiCss")
-const MdiBraces = mdi(mdiCodeBraces, "MdiBraces")
-const MdiJson = mdi(mdiCodeJson, "MdiJson")
-const MdiDelimited = mdi(mdiFileDelimited, "MdiDelimited")
-const MdiExcel = mdi(mdiFileExcelBox, "MdiExcel")
-const MdiDatabase = mdi(mdiDatabase, "MdiDatabase")
-const MdiDocument = mdi(mdiFileDocument, "MdiDocument")
-const MdiPdf = mdi(mdiFilePdfBox, "MdiPdf")
-const MdiWord = mdi(mdiFileWordBox, "MdiWord")
-const MdiSlides = mdi(mdiFilePowerpointBox, "MdiSlides")
-const MdiMarkdown = mdi(mdiLanguageMarkdown, "MdiMarkdown")
-const MdiImage = mdi(mdiFileImage, "MdiImage")
-const MdiPng = mdi(mdiFilePngBox, "MdiPng")
-const MdiJpg = mdi(mdiFileJpgBox, "MdiJpg")
-const MdiGif = mdi(mdiFileGifBox, "MdiGif")
-const MdiSvg = mdi(mdiSvg, "MdiSvg")
-const MdiVideo = mdi(mdiFileVideo, "MdiVideo")
-const MdiAudio = mdi(mdiFileMusic, "MdiAudio")
-const MdiArchive = mdi(mdiArchive, "MdiArchive")
-const MdiConsole = mdi(mdiConsoleLine, "MdiConsole")
-const MdiCog = mdi(mdiFileCog, "MdiCog")
-const MdiKeyFile = mdi(mdiFileKey, "MdiKeyFile")
-const MdiBinary = mdi(mdiApplicationBrackets, "MdiBinary")
-const MdiFont = mdi(mdiFormatFont, "MdiFont")
-const MdiLog = mdi(mdiTextBox, "MdiLog")
-const MdiPackage = mdi(mdiPackageVariantClosed, "MdiPackage")
-const MdiDocker = mdi(mdiDocker, "MdiDocker")
-const MdiPlain = mdi(mdiFileOutline, "MdiPlain")
-const MdiLock = mdi(mdiFileLock, "MdiLock")
-const MdiMake = mdi(mdiHammerWrench, "MdiMake")
-const MdiReadme = mdi(mdiBookOpenPageVariant, "MdiReadme")
-const MdiLicence = mdi(mdiLicense, "MdiLicence")
-const MdiGit = mdi(mdiGit, "MdiGit")
-const MdiFolder = mdi(mdiFolder, "MdiFolder")
-const MdiFolderOpen = mdi(mdiFolderOpen, "MdiFolderOpen")
-const MdiFolderMinus = mdi(mdiFolderMinus, "MdiFolderMinus")
-const MdiFolderHome = mdi(mdiFolderHome, "MdiFolderHome")
-const MdiFolderCog = mdi(mdiFolderCog, "MdiFolderCog")
-const MdiFolderKey = mdi(mdiFolderKey, "MdiFolderKey")
-const MdiFolderNetwork = mdi(mdiFolderNetwork, "MdiFolderNetwork")
-const MdiFolderSync = mdi(mdiFolderSync, "MdiFolderSync")
 
 /**
- * What a file *is*, drawn.
+ * The labels the operator gave folders on this server, by path.
  *
- * Every row in this page used to carry one of three glyphs — folder, link, or
- * the generic sheet of paper — which meant a directory of forty files was
- * forty identical icons and the only way to tell a config from a certificate
- * from a database dump was to read the extension off the end of the name. An
- * icon that says nothing is worse than no icon: it costs the same space and
- * trains you to ignore the column.
- *
- * The colours are the shared semantic `--tag-*` tokens rather than anything
- * computed from the palette, for the same reason they are there: a category
- * is a label, and a label whose hue changes with the theme stops being the
- * same label. They are fixed hues that hold up on a near-black card and a
- * near-white one alike.
- *
- * The mapping is deliberately by *category* rather than by language. Twenty
- * distinct icons is a legend to memorise; eight categories with one hue each
- * is something the eye picks up in a directory or two — code is blue, data is
- * amber, media is pink, keys and certificates are green because they are the
- * ones you must not paste into a chat window.
- *
- * **The glyphs are Material Design Icons' file family, and that is what lets
- * the mapping be both categorical and literal.** A general UI set has no `JSON`
- * or `JPG` to draw; MDI's file boxes spell the format on the sheet (`PDF`,
- * `XLS`, `JPG`, `GIF`), so a badge that says what it is needs nothing
- * memorised. They keep their category's hue, so the colour system is untouched
- * and a `.csv` is still the green of tabular data. Source stays one glyph in
- * code blue whatever language it is written in — per-language logos would be a
- * second legend on top of the categories.
- *
- * The symlink corner badge is the one glyph here that is not MDI: it is the
- * product's own `Link` from the Heroicons vocabulary in `components/icons.tsx`,
- * because it marks a filesystem relation rather than a file type.
+ * A context rather than a prop because a folder is drawn in seven places —
+ * the rows, the tiles, the inspector, the strip, the sidebar, the finder, the
+ * viewer — and a label that reached only the ones someone remembered to
+ * thread it through is a folder that is red in the listing and blue beside it.
  */
-export type FileTone =
-  "slate" | "red" | "amber" | "green" | "cyan" | "blue" | "violet" | "pink" | "primary"
+const FolderColours = createContext<Record<string, string>>({})
 
-export type FileKind = {
-  icon: Icon
-  tone: FileTone
-  /** What this is, in the words somebody would use out loud. */
-  label: string
+export function FolderColourProvider({
+  colours,
+  children,
+}: {
+  colours: Record<string, string>
+  children: React.ReactNode
+}) {
+  return <FolderColours value={colours}>{children}</FolderColours>
 }
 
-const CODE: FileKind = { icon: MdiCode, tone: "blue", label: "Source code" }
-const HTML: FileKind = { icon: MdiHtml, tone: "violet", label: "Markup" }
-const XML: FileKind = { icon: MdiXml, tone: "violet", label: "Markup" }
-const STYLE: FileKind = { icon: MdiCss, tone: "violet", label: "Stylesheet" }
-const DATA: FileKind = { icon: MdiBraces, tone: "amber", label: "Structured data" }
-const JSON_: FileKind = { icon: MdiJson, tone: "amber", label: "JSON" }
-const SHEET: FileKind = { icon: MdiDelimited, tone: "green", label: "Tabular data" }
-const XLS: FileKind = { icon: MdiExcel, tone: "green", label: "Spreadsheet" }
-const SQL: FileKind = { icon: MdiDatabase, tone: "amber", label: "SQL" }
-const DOC: FileKind = { icon: MdiDocument, tone: "slate", label: "Document" }
-const PDF: FileKind = { icon: MdiPdf, tone: "slate", label: "PDF" }
-const WORD: FileKind = { icon: MdiWord, tone: "slate", label: "Word document" }
-const SLIDES: FileKind = { icon: MdiSlides, tone: "slate", label: "Presentation" }
-const MARKDOWN: FileKind = { icon: MdiMarkdown, tone: "slate", label: "Markdown" }
-const IMAGE: FileKind = { icon: MdiImage, tone: "pink", label: "Image" }
-const PNG: FileKind = { icon: MdiPng, tone: "pink", label: "Image" }
-const SVG: FileKind = { icon: MdiSvg, tone: "pink", label: "Vector image" }
-const JPEG: FileKind = { icon: MdiJpg, tone: "pink", label: "Image" }
-const GIF: FileKind = { icon: MdiGif, tone: "pink", label: "Animation" }
-const VIDEO: FileKind = { icon: MdiVideo, tone: "violet", label: "Video" }
-const AUDIO: FileKind = { icon: MdiAudio, tone: "cyan", label: "Audio" }
-const ARCHIVE: FileKind = { icon: MdiArchive, tone: "amber", label: "Archive" }
-const SHELL: FileKind = { icon: MdiConsole, tone: "green", label: "Shell script" }
-const CONFIG: FileKind = { icon: MdiCog, tone: "cyan", label: "Configuration" }
-const SECRET: FileKind = { icon: MdiKeyFile, tone: "green", label: "Key or certificate" }
-const BINARY: FileKind = { icon: MdiBinary, tone: "red", label: "Binary" }
-const FONT: FileKind = { icon: MdiFont, tone: "violet", label: "Font" }
-const LOG: FileKind = { icon: MdiLog, tone: "amber", label: "Log" }
-const PACKAGE: FileKind = { icon: MdiPackage, tone: "red", label: "Package" }
-const DOCKER: FileKind = { icon: MdiDocker, tone: "blue", label: "Container build" }
-const PLAIN: FileKind = { icon: MdiPlain, tone: "slate", label: "File" }
+const isFolderColour = (value: string | undefined): value is FolderColour =>
+  (FOLDER_COLOURS as readonly string[]).includes(value ?? "")
+
+/** The colour a folder takes with no label: what its name suggests, else blue. */
+export function defaultFolderColour(name: string, path?: string): FolderColour {
+  return folderKind(name, path).colour ?? "blue"
+}
+
+/** The colour a folder is drawn in, given the labels: its own, else its default. */
+export function folderColourOf(
+  labelled: Record<string, string>,
+  path: string | undefined,
+  name: string,
+): FolderColour {
+  const own = path ? labelled[path] : undefined
+  return isFolderColour(own) ? own : defaultFolderColour(name, path)
+}
+
+export function useFolderColour(path: string | undefined, name: string): FolderColour {
+  return folderColourOf(useContext(FolderColours), path, name)
+}
+
+// ---- Kinds -----------------------------------------------------------------
+
+export type FileKind = {
+  /** What this is, in the words somebody would use out loud. */
+  label: string
+  /** The band's colour: the format's own. */
+  tone: string
+  /** The format's logo, under `public/logos/`, drawn on the page in its own colours. */
+  logo?: string
+  /** A drawing for a format with no logo, in the band's colour. */
+  glyph?: Icon
+  /** The band's word, where the extension is not it ("LOCK" on a lockfile). */
+  tag?: string
+}
+
+type FolderKind = {
+  label: string
+  /** A product's single-colour mark, under `public/logos/mono/`. */
+  mark?: string
+  emblem?: Icon
+  /** The colour it takes until labelled. */
+  colour?: FolderColour
+}
+
+const TONE = {
+  slate: "var(--tag-slate)",
+  red: "var(--tag-red)",
+  amber: "var(--tag-amber)",
+  green: "var(--tag-green)",
+  cyan: "var(--tag-cyan)",
+  blue: "var(--tag-blue)",
+  violet: "var(--tag-violet)",
+  pink: "var(--tag-pink)",
+}
+const lang = (name: string) => `var(--language-${name})`
+
+const kind = (label: string, tone: string, more: Omit<FileKind, "label" | "tone"> = {}) => ({
+  label,
+  tone,
+  ...more,
+})
+
+const TYPESCRIPT = kind("TypeScript", lang("typescript"), { logo: "typescript.svg" })
+const TSX = kind("TypeScript React", lang("typescript"), { logo: "react.svg" })
+const JAVASCRIPT = kind("JavaScript", lang("javascript"), { logo: "javascript.svg" })
+const JSX = kind("JavaScript React", lang("javascript"), { logo: "react.svg" })
+const PYTHON = kind("Python", lang("python"), { logo: "python.svg" })
+const GO = kind("Go", lang("go"), { logo: "go.svg" })
+const RUST = kind("Rust", lang("rust"), { logo: "rust.svg" })
+const JAVA = kind("Java", lang("java"), { logo: "java.svg" })
+const KOTLIN = kind("Kotlin", lang("kotlin"), { logo: "kotlin.svg" })
+const SWIFT = kind("Swift", lang("swift"), { logo: "swift.svg" })
+const C = kind("C", lang("c"), { logo: "c.svg" })
+const CPP = kind("C++", lang("cpp"), { logo: "cplusplus.svg" })
+const CSHARP = kind("C#", lang("csharp"), { logo: "csharp.svg" })
+const PHP = kind("PHP", lang("php"), { logo: "php.svg" })
+const RUBY = kind("Ruby", lang("ruby"), { logo: "ruby.svg" })
+const LUA = kind("Lua", lang("lua"), { logo: "lua.svg" })
+const HASKELL = kind("Haskell", lang("haskell"), { logo: "haskell.svg" })
+const R = kind("R", lang("r"), { logo: "r.svg" })
+const DART = kind("Dart", TONE.cyan, { logo: "dart.svg" })
+const ELIXIR = kind("Elixir", TONE.violet, { logo: "elixir.svg" })
+const SCALA = kind("Scala", TONE.red, { logo: "scala.svg" })
+const PERL = kind("Perl", TONE.blue, { logo: "perl.svg" })
+const ZIG = kind("Zig", TONE.amber, { logo: "zig.svg" })
+const VUE = kind("Vue component", TONE.green, { logo: "vuejs.svg" })
+const SVELTE = kind("Svelte component", TONE.red, { logo: "svelte.svg" })
+const HTML = kind("HTML", lang("html"), { logo: "html5.svg" })
+const CSS = kind("Stylesheet", lang("css"), { logo: "css3.svg" })
+const SASS = kind("Sass stylesheet", lang("scss"), { logo: "sass.svg" })
+const MARKDOWN = kind("Markdown", lang("markdown"), { logo: "markdown.svg" })
+const JSON_ = kind("JSON", TONE.amber, { logo: "json.svg" })
+const YAML = kind("YAML", TONE.red, { logo: "yaml.svg" })
+const TOML = kind("TOML", TONE.amber, { glyph: SettingsGear })
+const XML = kind("XML", TONE.amber, { logo: "xml.svg" })
+const GRAPHQL = kind("GraphQL", TONE.pink, { logo: "graphql.svg" })
+const SHELL = kind("Shell script", TONE.green, { logo: "bash.svg" })
+const POWERSHELL = kind("PowerShell script", TONE.blue, { logo: "powershell.svg" })
+const BATCH = kind("Batch script", TONE.slate, { glyph: Terminal })
+const SQL = kind("SQL", TONE.amber, { glyph: Database })
+const SQLITE = kind("SQLite database", TONE.cyan, { logo: "sqlite.svg" })
+const CSV = kind("Tabular data", TONE.green, { glyph: Table })
+const SHEET = kind("Spreadsheet", TONE.green, { glyph: Table })
+const PDF = kind("PDF", TONE.red, { glyph: FileText })
+const WORD = kind("Word document", TONE.blue)
+const SLIDES = kind("Presentation", TONE.amber)
+const TEXT = kind("Text", TONE.slate)
+const LOG = kind("Log", TONE.slate, { glyph: Logs })
+const LATEX = kind("LaTeX", TONE.cyan, { logo: "latex.svg" })
+const IMAGE = kind("Image", TONE.pink, { glyph: Image })
+const VECTOR = kind("Vector image", TONE.amber, { glyph: Image })
+const VIDEO = kind("Video", TONE.violet, { glyph: Video })
+const AUDIO = kind("Audio", TONE.cyan, { glyph: Music })
+const FONT = kind("Font", TONE.violet, { glyph: TextFormat })
+const ARCHIVE = kind("Archive", TONE.amber, { glyph: FileZip })
+const DEBIAN = kind("Debian package", TONE.red, { logo: "debian.svg" })
+const PACKAGE = kind("Package", TONE.red, { glyph: Box })
+const DISK = kind("Disk image", TONE.slate, { glyph: Servers })
+const CONFIG = kind("Configuration", TONE.cyan, { glyph: SettingsGear })
+const UNIT = kind("systemd unit", TONE.cyan, { glyph: SettingsGear })
+const TERRAFORM = kind("Terraform", TONE.violet, { logo: "terraform.svg" })
+const SECRET = kind("Key or certificate", TONE.green, { glyph: Key })
+const BINARY = kind("Binary", TONE.slate, { glyph: Cpu })
+const JUPYTER = kind("Jupyter notebook", TONE.amber, { logo: "jupyter.svg", tag: "NB" })
+const PLAIN = kind("File", TONE.slate)
 
 const BY_EXTENSION: Record<string, FileKind> = {
-  // Code
-  go: CODE,
-  rs: CODE,
-  py: CODE,
-  rb: CODE,
-  php: CODE,
-  java: CODE,
-  kt: CODE,
-  swift: CODE,
-  c: CODE,
-  h: CODE,
-  cpp: CODE,
-  cc: CODE,
-  hpp: CODE,
-  cs: CODE,
-  ts: CODE,
-  tsx: CODE,
-  js: CODE,
-  jsx: CODE,
-  mjs: CODE,
-  cjs: CODE,
-  mts: CODE,
-  lua: CODE,
-  pl: CODE,
-  ex: CODE,
-  exs: CODE,
-  erl: CODE,
-  hs: CODE,
-  scala: CODE,
-  clj: CODE,
-  dart: CODE,
-  r: CODE,
-  zig: CODE,
-  vue: CODE,
-  svelte: CODE,
-  astro: CODE,
-  // Shell and automation
+  ts: TYPESCRIPT,
+  mts: TYPESCRIPT,
+  cts: TYPESCRIPT,
+  tsx: TSX,
+  js: JAVASCRIPT,
+  mjs: JAVASCRIPT,
+  cjs: JAVASCRIPT,
+  jsx: JSX,
+  py: PYTHON,
+  pyi: PYTHON,
+  pyw: PYTHON,
+  ipynb: JUPYTER,
+  go: GO,
+  rs: RUST,
+  java: JAVA,
+  class: JAVA,
+  jar: kind("Java archive", lang("java"), { logo: "java.svg" }),
+  kt: KOTLIN,
+  kts: KOTLIN,
+  swift: SWIFT,
+  c: C,
+  h: C,
+  cpp: CPP,
+  cc: CPP,
+  cxx: CPP,
+  hpp: CPP,
+  hh: CPP,
+  cs: CSHARP,
+  php: PHP,
+  rb: RUBY,
+  rake: RUBY,
+  gemspec: RUBY,
+  lua: LUA,
+  hs: HASKELL,
+  r: R,
+  dart: DART,
+  ex: ELIXIR,
+  exs: ELIXIR,
+  scala: SCALA,
+  sc: SCALA,
+  pl: PERL,
+  pm: PERL,
+  zig: ZIG,
+  vue: VUE,
+  svelte: SVELTE,
+  html: HTML,
+  htm: HTML,
+  css: CSS,
+  less: CSS,
+  scss: SASS,
+  sass: SASS,
+  md: MARKDOWN,
+  mdx: MARKDOWN,
+  markdown: MARKDOWN,
+  json: JSON_,
+  jsonc: JSON_,
+  json5: JSON_,
+  ndjson: JSON_,
+  yaml: YAML,
+  yml: YAML,
+  toml: TOML,
+  xml: XML,
+  plist: XML,
+  graphql: GRAPHQL,
+  gql: GRAPHQL,
   sh: SHELL,
   bash: SHELL,
   zsh: SHELL,
   fish: SHELL,
-  ps1: SHELL,
-  bat: SHELL,
-  cmd: SHELL,
-  // Markup and style
-  html: HTML,
-  htm: HTML,
-  xml: XML,
-  svg: SVG,
-  css: STYLE,
-  scss: STYLE,
-  sass: STYLE,
-  less: STYLE,
-  // Data
-  json: JSON_,
-  jsonc: JSON_,
-  json5: JSON_,
-  yaml: DATA,
-  yml: DATA,
-  toml: DATA,
-  proto: DATA,
-  graphql: DATA,
-  gql: DATA,
-  ndjson: JSON_,
-  csv: SHEET,
-  tsv: SHEET,
-  ods: SHEET,
-  xlsx: XLS,
-  xls: XLS,
+  ps1: POWERSHELL,
+  bat: BATCH,
+  cmd: BATCH,
   sql: SQL,
-  db: SQL,
-  sqlite: SQL,
-  sqlite3: SQL,
   dump: SQL,
-  // Documents
-  md: MARKDOWN,
-  mdx: MARKDOWN,
-  txt: DOC,
-  rst: DOC,
-  adoc: DOC,
+  db: SQLITE,
+  sqlite: SQLITE,
+  sqlite3: SQLITE,
+  csv: CSV,
+  tsv: CSV,
+  xlsx: SHEET,
+  xls: SHEET,
+  ods: SHEET,
   pdf: PDF,
   doc: WORD,
   docx: WORD,
+  odt: WORD,
+  rtf: WORD,
   ppt: SLIDES,
   pptx: SLIDES,
   odp: SLIDES,
+  key: SECRET,
+  txt: TEXT,
+  rst: TEXT,
+  adoc: TEXT,
   log: LOG,
-  // Media
-  png: PNG,
-  jpg: JPEG,
-  jpeg: JPEG,
-  gif: GIF,
+  tex: LATEX,
+  png: IMAGE,
+  jpg: IMAGE,
+  jpeg: IMAGE,
+  gif: IMAGE,
   webp: IMAGE,
   avif: IMAGE,
   bmp: IMAGE,
   ico: IMAGE,
+  tif: IMAGE,
   tiff: IMAGE,
   heic: IMAGE,
   psd: IMAGE,
+  svg: VECTOR,
   mp4: VIDEO,
   webm: VIDEO,
   mkv: VIDEO,
@@ -307,12 +368,12 @@ const BY_EXTENSION: Record<string, FileKind> = {
   ogg: AUDIO,
   m4a: AUDIO,
   aac: AUDIO,
+  opus: AUDIO,
   woff: FONT,
   woff2: FONT,
   ttf: FONT,
   otf: FONT,
   eot: FONT,
-  // Archives and packages
   zip: ARCHIVE,
   tar: ARCHIVE,
   gz: ARCHIVE,
@@ -322,31 +383,31 @@ const BY_EXTENSION: Record<string, FileKind> = {
   zst: ARCHIVE,
   "7z": ARCHIVE,
   rar: ARCHIVE,
-  jar: ARCHIVE,
-  deb: PACKAGE,
+  deb: DEBIAN,
   rpm: PACKAGE,
   apk: PACKAGE,
-  whl: PACKAGE,
-  iso: PACKAGE,
-  // Configuration
+  whl: kind("Python wheel", lang("python"), { logo: "python.svg" }),
+  iso: DISK,
+  img: DISK,
+  qcow2: DISK,
   conf: CONFIG,
   cfg: CONFIG,
+  cnf: CONFIG,
   ini: CONFIG,
-  env: CONFIG,
+  env: kind("Environment file", TONE.amber, { glyph: Key }),
   properties: CONFIG,
-  service: CONFIG,
-  socket: CONFIG,
-  timer: CONFIG,
-  mount: CONFIG,
   rules: CONFIG,
-  tf: CONFIG,
-  tfvars: CONFIG,
-  hcl: CONFIG,
-  nginx: CONFIG,
   list: CONFIG,
-  // Secrets
+  service: UNIT,
+  socket: UNIT,
+  timer: UNIT,
+  mount: UNIT,
+  target: UNIT,
+  path: UNIT,
+  tf: TERRAFORM,
+  tfvars: TERRAFORM,
+  hcl: TERRAFORM,
   pem: SECRET,
-  key: SECRET,
   crt: SECRET,
   cer: SECRET,
   csr: SECRET,
@@ -356,7 +417,6 @@ const BY_EXTENSION: Record<string, FileKind> = {
   gpg: SECRET,
   asc: SECRET,
   kdbx: SECRET,
-  // Binary
   so: BINARY,
   o: BINARY,
   a: BINARY,
@@ -366,201 +426,448 @@ const BY_EXTENSION: Record<string, FileKind> = {
   dat: BINARY,
   pyc: BINARY,
   wasm: BINARY,
-  img: BINARY,
   swp: BINARY,
 }
 
-/** Files a server keeps that have no extension to key off at all. */
+const LOCKFILE = (logo: string) => kind("Lockfile", TONE.slate, { logo, tag: "LOCK" })
+const HISTORY = (logo: string) => kind("Shell history", TONE.slate, { logo, tag: "HIST" })
+
+/** Files a server keeps whose whole name says more than any extension. */
 const BY_NAME: Record<string, FileKind> = {
-  dockerfile: DOCKER,
-  containerfile: DOCKER,
-  "docker-compose.yml": DOCKER,
-  "docker-compose.yaml": DOCKER,
-  "compose.yml": DOCKER,
-  "compose.yaml": DOCKER,
-  ".dockerignore": DOCKER,
-  makefile: { icon: MdiMake, tone: "cyan", label: "Makefile" },
-  gnumakefile: { icon: MdiMake, tone: "cyan", label: "Makefile" },
-  caddyfile: CONFIG,
-  vagrantfile: CONFIG,
-  procfile: CONFIG,
-  gemfile: CODE,
-  rakefile: CODE,
-  "package.json": { icon: MdiPackage, tone: "red", label: "npm manifest" },
-  "package-lock.json": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "bun.lock": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "bun.lockb": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "yarn.lock": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "pnpm-lock.yaml": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "go.sum": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "cargo.lock": { icon: MdiLock, tone: "slate", label: "Lockfile" },
-  "go.mod": { icon: MdiPackage, tone: "cyan", label: "Go module" },
-  "cargo.toml": { icon: MdiPackage, tone: "red", label: "Cargo manifest" },
-  "requirements.txt": { icon: MdiPackage, tone: "blue", label: "Python requirements" },
-  license: { icon: MdiLicence, tone: "slate", label: "Licence" },
-  "license.md": { icon: MdiLicence, tone: "slate", label: "Licence" },
-  readme: { icon: MdiReadme, tone: "cyan", label: "Readme" },
-  "readme.md": { icon: MdiMarkdown, tone: "cyan", label: "Readme" },
-  changelog: DOC,
-  "changelog.md": MARKDOWN,
-  ".gitignore": { icon: MdiGit, tone: "slate", label: "git exclusions" },
-  ".gitconfig": CONFIG,
-  ".env": { icon: MdiKeyFile, tone: "amber", label: "Environment file" },
-  ".bashrc": SHELL,
-  ".zshrc": SHELL,
-  ".profile": SHELL,
-  ".bash_profile": SHELL,
-  ".editorconfig": CONFIG,
-  authorized_keys: SECRET,
-  known_hosts: SECRET,
-  passwd: { icon: MdiKeyFile, tone: "red", label: "Account database" },
-  shadow: { icon: MdiKeyFile, tone: "red", label: "Password hashes" },
-  fstab: CONFIG,
-  hosts: CONFIG,
-  crontab: CONFIG,
+  dockerfile: kind("Container build", TONE.blue, { logo: "docker.svg", tag: "DOCK" }),
+  containerfile: kind("Container build", TONE.blue, { logo: "docker.svg", tag: "DOCK" }),
+  ".dockerignore": kind("Docker exclusions", TONE.slate, { logo: "docker.svg", tag: "IGN" }),
+  "docker-compose.yml": kind("Compose file", TONE.blue, { logo: "docker-compose.webp" }),
+  "docker-compose.yaml": kind("Compose file", TONE.blue, { logo: "docker-compose.webp" }),
+  "compose.yml": kind("Compose file", TONE.blue, { logo: "docker-compose.webp" }),
+  "compose.yaml": kind("Compose file", TONE.blue, { logo: "docker-compose.webp" }),
+  makefile: kind("Makefile", TONE.amber, { glyph: Wrench, tag: "MAKE" }),
+  gnumakefile: kind("Makefile", TONE.amber, { glyph: Wrench, tag: "MAKE" }),
+  "cmakelists.txt": kind("CMake build", TONE.green, { logo: "cmake.svg" }),
+  caddyfile: kind("Caddy configuration", TONE.green, { logo: "caddy.svg", tag: "CADDY" }),
+  "nginx.conf": kind("nginx configuration", TONE.green, { logo: "nginx.svg" }),
+  ".htaccess": kind("Apache configuration", TONE.red, { logo: "apache.svg", tag: "HTA" }),
+  "httpd.conf": kind("Apache configuration", TONE.red, { logo: "apache.svg" }),
+  procfile: kind("Procfile", TONE.violet, { glyph: Terminal, tag: "PROC" }),
+  gemfile: kind("Gemfile", lang("ruby"), { logo: "ruby.svg", tag: "GEM" }),
+  "gemfile.lock": LOCKFILE("ruby.svg"),
+  "package.json": kind("npm manifest", TONE.red, { logo: "npm.svg" }),
+  "package-lock.json": LOCKFILE("npm.svg"),
+  ".npmrc": kind("npm configuration", TONE.red, { logo: "npm.svg", tag: "RC" }),
+  "bun.lock": LOCKFILE("bun.svg"),
+  "bun.lockb": LOCKFILE("bun.svg"),
+  "bunfig.toml": kind("Bun configuration", TONE.amber, { logo: "bun.svg" }),
+  "yarn.lock": LOCKFILE("yarn.svg"),
+  "pnpm-lock.yaml": LOCKFILE("pnpm.svg"),
+  "pnpm-workspace.yaml": kind("pnpm workspace", TONE.amber, { logo: "pnpm.svg" }),
+  "deno.json": kind("Deno configuration", TONE.slate, { logo: "deno.svg" }),
+  "deno.lock": LOCKFILE("deno.svg"),
+  "tsconfig.json": kind("TypeScript configuration", lang("typescript"), { logo: "typescript.svg" }),
+  "go.mod": kind("Go module", lang("go"), { logo: "go.svg", tag: "MOD" }),
+  "go.sum": LOCKFILE("go.svg"),
+  "go.work": kind("Go workspace", lang("go"), { logo: "go.svg", tag: "WORK" }),
+  "cargo.toml": kind("Cargo manifest", lang("rust"), { logo: "rust.svg" }),
+  "cargo.lock": LOCKFILE("rust.svg"),
+  "requirements.txt": kind("Python requirements", lang("python"), { logo: "python.svg" }),
+  "pyproject.toml": kind("Python project", lang("python"), { logo: "python.svg" }),
+  pipfile: kind("Pipfile", lang("python"), { logo: "python.svg", tag: "PIP" }),
+  "pipfile.lock": LOCKFILE("python.svg"),
+  "poetry.lock": LOCKFILE("python.svg"),
+  "uv.lock": LOCKFILE("python.svg"),
+  "composer.json": kind("Composer manifest", lang("php"), { logo: "php.svg" }),
+  "composer.lock": LOCKFILE("php.svg"),
+  "next.config.js": kind("Next.js configuration", TONE.slate, { logo: "nextjs.svg" }),
+  "next.config.mjs": kind("Next.js configuration", TONE.slate, { logo: "nextjs.svg" }),
+  "next.config.ts": kind("Next.js configuration", TONE.slate, { logo: "nextjs.svg" }),
+  "vite.config.js": kind("Vite configuration", TONE.violet, { logo: "vitejs.svg" }),
+  "vite.config.ts": kind("Vite configuration", TONE.violet, { logo: "vitejs.svg" }),
+  "tailwind.config.js": kind("Tailwind configuration", TONE.cyan, { logo: "tailwindcss.svg" }),
+  "tailwind.config.ts": kind("Tailwind configuration", TONE.cyan, { logo: "tailwindcss.svg" }),
+  "claude.md": kind("Claude instructions", TONE.amber, { logo: "claude.svg" }),
+  ".gitignore": kind("git exclusions", TONE.slate, { logo: "git.svg", tag: "IGN" }),
+  ".gitattributes": kind("git attributes", TONE.slate, { logo: "git.svg", tag: "ATTR" }),
+  ".gitmodules": kind("git submodules", TONE.slate, { logo: "git.svg", tag: "MOD" }),
+  ".gitconfig": kind("git configuration", TONE.slate, { logo: "git.svg", tag: "CONF" }),
+  ".env": kind("Environment file", TONE.amber, { glyph: Key, tag: "ENV" }),
+  ".bashrc": kind("Shell startup", TONE.green, { logo: "bash.svg", tag: "RC" }),
+  ".bash_profile": kind("Shell startup", TONE.green, { logo: "bash.svg", tag: "RC" }),
+  ".bash_logout": kind("Shell startup", TONE.green, { logo: "bash.svg", tag: "RC" }),
+  ".profile": kind("Shell startup", TONE.green, { logo: "bash.svg", tag: "RC" }),
+  ".zshrc": kind("Shell startup", TONE.green, { logo: "bash.svg", tag: "RC" }),
+  ".bash_history": HISTORY("bash.svg"),
+  ".zsh_history": HISTORY("bash.svg"),
+  ".python_history": HISTORY("python.svg"),
+  ".node_repl_history": HISTORY("nodejs.svg"),
+  ".psql_history": HISTORY("postgresql.svg"),
+  ".mysql_history": HISTORY("mysql.svg"),
+  ".vimrc": kind("Vim configuration", TONE.green, { logo: "vim.svg", tag: "RC" }),
+  ".viminfo": kind("Vim state", TONE.slate, { logo: "vim.svg", tag: "INFO" }),
+  ".editorconfig": kind("Editor configuration", TONE.cyan, { glyph: SettingsGear, tag: "CONF" }),
+  license: kind("Licence", TONE.slate, { glyph: BookOpen, tag: "LIC" }),
+  "license.md": kind("Licence", TONE.slate, { glyph: BookOpen }),
+  "license.txt": kind("Licence", TONE.slate, { glyph: BookOpen }),
+  copying: kind("Licence", TONE.slate, { glyph: BookOpen, tag: "LIC" }),
+  readme: kind("Readme", TONE.cyan, { glyph: BookOpen, tag: "READ" }),
+  authorized_keys: kind("Authorised SSH keys", TONE.green, { glyph: Key, tag: "SSH" }),
+  known_hosts: kind("Known SSH hosts", TONE.green, { glyph: Key, tag: "SSH" }),
+  passwd: kind("Account database", TONE.red, { glyph: Key, tag: "PWD" }),
+  shadow: kind("Password hashes", TONE.red, { glyph: LockClosed, tag: "PWD" }),
+  sudoers: kind("sudo rules", TONE.red, { glyph: LockClosed, tag: "SUDO" }),
+  fstab: kind("Filesystem table", TONE.cyan, { glyph: SettingsGear, tag: "CONF" }),
+  hosts: kind("Host names", TONE.cyan, { glyph: SettingsGear, tag: "CONF" }),
+  hostname: kind("Host name", TONE.cyan, { glyph: SettingsGear, tag: "CONF" }),
+  crontab: kind("Cron table", TONE.cyan, { glyph: Clock, tag: "CRON" }),
 }
+
+/** SSH key pairs are named by the tool, not by an extension. */
+const SSH_KEY = /^id_(rsa|dsa|ecdsa|ed25519)(_sk)?$/
+
+/** Suffixes a saved copy takes, under which the real format still lives. */
+const BACKUP_SUFFIXES = new Set(["bak", "old", "orig", "save", "disabled", "dpkg-old", "rpmsave"])
 
 /**
- * Folders whose name says more than "folder" does.
- *
- * The build and dependency directories take the minus folder rather than a
- * folder-with-a-gear: what they have in common is not that they are
- * configured, it is that nothing in them is yours to edit, and a folder with
- * a minus in it says "walk past this one" at a glance.
- */
-const FOLDERS_BY_NAME: Record<string, FileKind> = {
-  ".git": { icon: MdiGit, tone: "amber", label: "git repository" },
-  node_modules: { icon: MdiFolderMinus, tone: "slate", label: "Installed packages" },
-  vendor: { icon: MdiFolderMinus, tone: "slate", label: "Vendored dependencies" },
-  ".next": { icon: MdiFolderMinus, tone: "slate", label: "Build output" },
-  dist: { icon: MdiFolderMinus, tone: "slate", label: "Build output" },
-  build: { icon: MdiFolderMinus, tone: "slate", label: "Build output" },
-  target: { icon: MdiFolderMinus, tone: "slate", label: "Build output" },
-  etc: { icon: MdiFolderCog, tone: "cyan", label: "Configuration" },
-  home: { icon: MdiFolderHome, tone: "primary", label: "Home directories" },
-  root: { icon: MdiFolderHome, tone: "primary", label: "root's home" },
-  var: { icon: MdiFolder, tone: "amber", label: "Variable data" },
-  log: { icon: MdiFolder, tone: "amber", label: "Logs" },
-  logs: { icon: MdiFolder, tone: "amber", label: "Logs" },
-  www: { icon: MdiFolderNetwork, tone: "violet", label: "Web root" },
-  public: { icon: MdiFolderNetwork, tone: "violet", label: "Public assets" },
-  ssl: { icon: MdiFolderKey, tone: "green", label: "Certificates" },
-  ssh: { icon: MdiFolderKey, tone: "green", label: "SSH configuration" },
-  ".ssh": { icon: MdiFolderKey, tone: "green", label: "SSH keys" },
-  backups: { icon: MdiFolderSync, tone: "amber", label: "Backups" },
-}
-
-const TONE_VAR: Record<FileTone, string> = {
-  slate: "var(--tag-slate)",
-  red: "var(--tag-red)",
-  amber: "var(--tag-amber)",
-  green: "var(--tag-green)",
-  cyan: "var(--tag-cyan)",
-  blue: "var(--tag-blue)",
-  violet: "var(--tag-violet)",
-  pink: "var(--tag-pink)",
-  primary: "var(--primary)",
-}
-
-/**
- * The kind of a name.
+ * The kind of a file's name.
  *
  * Order matters: the whole name first (a `docker-compose.yml` is not merely
  * YAML), then the extension, then the extension *under* a backup suffix — an
  * `nginx.conf.bak` is still a config file, and the pass that forgets this is
  * how a directory of saved configs turns into a wall of blank sheets.
  */
-export function fileKind(name: string, isDir = false): FileKind {
+export function fileKind(name: string): FileKind & { ext?: string } {
   const lower = name.toLowerCase()
-  if (isDir) {
-    return FOLDERS_BY_NAME[lower] ?? { icon: MdiFolder, tone: "primary", label: "Folder" }
-  }
-  if (BY_NAME[lower]) return BY_NAME[lower]
+  // A name known whole still has its extension to set on the band: a
+  // `package.json` is npm's, and it is still JSON.
+  if (BY_NAME[lower]) return { ...BY_NAME[lower], ext: extensionOf(lower) }
+  if (SSH_KEY.test(lower)) return kind("SSH private key", TONE.green, { glyph: Key, tag: "KEY" })
+  if (lower.startsWith(".env.")) return BY_NAME[".env"]
 
   const parts = lower.split(".")
   if (parts.length > 1) {
     const ext = parts[parts.length - 1]
-    if (BY_EXTENSION[ext]) return BY_EXTENSION[ext]
+    if (BY_EXTENSION[ext]) return { ...BY_EXTENSION[ext], ext }
     if (parts.length > 2 && BACKUP_SUFFIXES.has(ext)) {
-      const under = BY_EXTENSION[parts[parts.length - 2]]
-      if (under) return under
+      const under = parts[parts.length - 2]
+      if (BY_EXTENSION[under]) return { ...BY_EXTENSION[under], tag: "BAK" }
     }
     // `.tar.gz` and friends: the archive is the pair, not the last word.
     if (parts.length > 2 && parts[parts.length - 2] === "tar") return ARCHIVE
+    // A dotfile's "extension" is its whole name, which is no format at all.
+    if (parts[0] !== "" || parts.length > 2) return { ...PLAIN, ext }
   }
   return PLAIN
 }
 
-const BACKUP_SUFFIXES = new Set(["bak", "old", "orig", "save", "disabled", "dpkg-old", "rpmsave"])
-
-export function kindOfEntry(entry: Pick<FileEntry, "name" | "isDir">): FileKind {
-  return fileKind(entry.name, entry.isDir)
+/** The last word after a dot, unless the dot only opens a dotfile's name. */
+function extensionOf(lower: string): string | undefined {
+  const dot = lower.lastIndexOf(".")
+  return dot > 0 ? lower.slice(dot + 1) : undefined
 }
 
-/** The CSS colour for a kind, for anything that draws its own glyph. */
-export function toneColour(tone: FileTone): string {
-  return TONE_VAR[tone]
+const BUILD = (label: string): FolderKind => ({ label, colour: "graphite" })
+
+/** Folders whose name says what they hold. */
+const FOLDERS_BY_NAME: Record<string, FolderKind> = {
+  ".git": { label: "git repository", mark: "git.svg" },
+  ".github": { label: "GitHub configuration", mark: "github.svg" },
+  ".docker": { label: "Docker configuration", mark: "docker.svg" },
+  docker: { label: "Docker", mark: "docker.svg" },
+  node_modules: { label: "Installed packages", mark: "nodejs.svg", colour: "graphite" },
+  ".nvm": { label: "Node versions", mark: "nodejs.svg" },
+  ".npm": { label: "npm cache", mark: "npm.svg" },
+  ".npm-global": { label: "npm packages", mark: "npm.svg" },
+  ".yarn": { label: "Yarn cache", mark: "yarn.svg" },
+  ".pnpm-store": { label: "pnpm store", mark: "pnpm.svg" },
+  ".bun": { label: "Bun", mark: "bun.svg" },
+  ".deno": { label: "Deno", mark: "deno.svg" },
+  go: { label: "Go workspace", mark: "go.svg" },
+  ".cargo": { label: "Cargo", mark: "rust.svg" },
+  ".rustup": { label: "Rust toolchains", mark: "rust.svg" },
+  ".venv": { label: "Python environment", mark: "python.svg", colour: "graphite" },
+  venv: { label: "Python environment", mark: "python.svg", colour: "graphite" },
+  __pycache__: { label: "Python bytecode", mark: "python.svg", colour: "graphite" },
+  ".pyenv": { label: "Python versions", mark: "python.svg" },
+  ".gem": { label: "Ruby gems", mark: "ruby.svg" },
+  ".m2": { label: "Maven repository", mark: "java.svg" },
+  ".gradle": { label: "Gradle", mark: "gradle.svg" },
+  ".kube": { label: "Kubernetes configuration", mark: "kubernetes.svg" },
+  ".terraform": { label: "Terraform state", mark: "terraform.svg", colour: "graphite" },
+  ".pm2": { label: "PM2", mark: "pm2.svg" },
+  ".claude": { label: "Claude", mark: "claude.svg" },
+  ".vscode": { label: "Editor settings", mark: "vscode.svg" },
+  ".vscode-server": { label: "Editor server", mark: "vscode.svg" },
+  ".vim": { label: "Vim", mark: "vim.svg" },
+  nvim: { label: "Neovim", mark: "neovim.svg" },
+  nginx: { label: "nginx", mark: "nginx.svg" },
+  caddy: { label: "Caddy", mark: "caddy.svg" },
+  letsencrypt: { label: "Certificates", mark: "lets-encrypt.svg" },
+  postgresql: { label: "PostgreSQL", mark: "postgresql.svg" },
+  postgres: { label: "PostgreSQL", mark: "postgresql.svg" },
+  mysql: { label: "MySQL", mark: "mysql.svg" },
+  redis: { label: "Redis", mark: "redis.svg" },
+  grafana: { label: "Grafana", mark: "grafana.svg" },
+  prometheus: { label: "Prometheus", mark: "prometheus.svg" },
+  tailscale: { label: "Tailscale", mark: "tailscale.svg" },
+  ".next": BUILD("Build output"),
+  dist: BUILD("Build output"),
+  build: BUILD("Build output"),
+  out: BUILD("Build output"),
+  target: BUILD("Build output"),
+  vendor: BUILD("Vendored dependencies"),
+  ".cache": { label: "Cache", emblem: Clock },
+  cache: { label: "Cache", emblem: Clock },
+  tmp: { label: "Temporary files", emblem: Clock },
+  temp: { label: "Temporary files", emblem: Clock },
+  ".config": { label: "Configuration", emblem: SettingsGear },
+  config: { label: "Configuration", emblem: SettingsGear },
+  etc: { label: "Configuration", emblem: SettingsGear },
+  "conf.d": { label: "Configuration", emblem: SettingsGear },
+  home: { label: "Home directories", emblem: Home },
+  root: { label: "root's home", emblem: Home },
+  ".ssh": { label: "SSH keys", emblem: Key },
+  ssh: { label: "SSH configuration", emblem: Key },
+  ssl: { label: "Certificates", emblem: Key },
+  certs: { label: "Certificates", emblem: Key },
+  ".gnupg": { label: "GPG keys", emblem: Key },
+  bin: { label: "Programs", emblem: Terminal },
+  sbin: { label: "System programs", emblem: Terminal },
+  scripts: { label: "Scripts", emblem: Terminal },
+  src: { label: "Source", emblem: CodeBracket },
+  lib: { label: "Libraries", emblem: CodeBracket },
+  www: { label: "Web root", emblem: Globe },
+  html: { label: "Web root", emblem: Globe },
+  public: { label: "Public assets", emblem: Globe },
+  static: { label: "Static assets", emblem: Globe },
+  "sites-available": { label: "Sites", emblem: Globe },
+  "sites-enabled": { label: "Sites", emblem: Globe },
+  log: { label: "Logs", emblem: Logs },
+  logs: { label: "Logs", emblem: Logs },
+  downloads: { label: "Downloads", emblem: Download },
+  documents: { label: "Documents", emblem: FileText },
+  docs: { label: "Documentation", emblem: FileText },
+  pictures: { label: "Pictures", emblem: Image },
+  images: { label: "Images", emblem: Image },
+  photos: { label: "Photos", emblem: Image },
+  music: { label: "Music", emblem: Music },
+  videos: { label: "Videos", emblem: Video },
+  desktop: { label: "Desktop", emblem: DesktopDevice },
+  backup: { label: "Backups", emblem: Archive },
+  backups: { label: "Backups", emblem: Archive },
+  data: { label: "Data", emblem: Database },
+  db: { label: "Databases", emblem: Database },
+  opt: { label: "Optional software", emblem: Box },
+  srv: { label: "Served data", emblem: Servers },
+  proc: { label: "Processes", emblem: Cpu },
+  sys: { label: "Kernel objects", emblem: Cpu },
+  ".trash": { label: "Trash", emblem: Trash },
+  ".local": { label: "Local data" },
 }
+
+export function folderKind(name: string, path?: string): FolderKind {
+  const named = FOLDERS_BY_NAME[name.toLowerCase()]
+  if (named) return named
+  // A folder directly under /home is somebody's home, whatever it is called.
+  if (path && /^\/home\/[^/]+$/.test(path)) return { label: "Home folder", emblem: Home }
+  return { label: "Folder" }
+}
+
+export function kindOfEntry(entry: Pick<FileEntry, "name" | "isDir"> & { path?: string }): {
+  label: string
+} {
+  return entry.isDir ? folderKind(entry.name, entry.path) : fileKind(entry.name)
+}
+
+// ---- Drawing ---------------------------------------------------------------
+
+// A 32-unit grid. The folder's tab sits behind its face; the page's corner is
+// folded over at the top right, and the band runs along its foot.
+const FOLDER_BACK =
+  "M2.5 8A2.5 2.5 0 0 1 5 5.5H11.2A2 2 0 0 1 12.7 6.2L14.3 8A2 2 0 0 0 15.8 8.7H27A2.5 2.5 0 0 1 29.5 11.2V24.5A2.5 2.5 0 0 1 27 27H5A2.5 2.5 0 0 1 2.5 24.5Z"
+const FOLDER_FRONT =
+  "M2.5 13A2.5 2.5 0 0 1 5 10.5H27A2.5 2.5 0 0 1 29.5 13V24.5A2.5 2.5 0 0 1 27 27H5A2.5 2.5 0 0 1 2.5 24.5Z"
+/** The face swung open: what the tree draws for the folder it has expanded. */
+const FOLDER_OPEN =
+  "M6.6 13.5H29.8A1.6 1.6 0 0 1 31.3 15.4L29.2 25.3A2.2 2.2 0 0 1 27 27H4.2A1.6 1.6 0 0 1 2.7 25.1L4.6 15A2 2 0 0 1 6.6 13.5Z"
+const PAGE =
+  "M8 2H19.5L26.5 9V27.5A2.5 2.5 0 0 1 24 30H8A2.5 2.5 0 0 1 5.5 27.5V4.5A2.5 2.5 0 0 1 8 2Z"
+const FOLD = "M19.5 2V6.5A2.5 2.5 0 0 0 22 9H26.5Z"
+const band = (top: number) => `M5.5 ${top}H26.5V27.5A2.5 2.5 0 0 1 24 30H8A2.5 2.5 0 0 1 5.5 27.5Z`
+const TEXT_LINES = "M9.5 8.5H17M9.5 12H22.5M9.5 15.5H22.5M9.5 19H18.5"
 
 /**
  * The icon for one entry.
  *
- * A symlink keeps its target's icon and gains the link glyph as a corner
- * badge rather than replacing it: what a link points at is the useful fact,
- * and the old listing threw it away to draw a chain on every one of them.
- *
- * **The colour is a fallback, not a fixed value.** A row that selects itself
- * with a solid `bg-primary` — the places rail does — is white in dark mode and
- * black in light, and a tone painted straight onto the glyph is then a folder
- * the same colour as the thing behind it: `primary` on `bg-primary` is
- * invisible in *both* themes, which is the one way to get it wrong twice. The
- * tone is therefore the fallback of `--file-icon-colour`, so any ancestor can
- * say "in here, icons are my foreground" by setting that one property. It has
- * to be a custom property rather than a class because this is an inline style,
- * and nothing but inline beats inline.
- *
- * A directory used to be tinted with `fill-current/15` to set it apart from a
- * file. That worked on a stroked set, whose paths carry no fill of their own
- * and so inherit one; every path in this set paints itself `currentColor`, so
- * the class is now a no-op that only looks like it does something. It is gone,
- * and nothing replaces it — the MDI folder is already a different silhouette
- * from every file glyph, which is the distinction the tint was standing in
- * for.
+ * `detail` is for the sizes where a page is large enough to carry a word — a
+ * tile, the viewer — and sets the extension on the band. In a row the band
+ * is colour alone and the logo takes the room the word would have.
  */
 export function FileIcon({
   entry,
   open,
+  detail,
   className,
-  badgeClassName,
 }: {
-  entry: Pick<FileEntry, "name" | "isDir" | "isSymlink" | "linkBroken">
-  /** Draw an opened folder — the row the listing is currently inside. */
+  entry: Pick<FileEntry, "name" | "isDir" | "isSymlink" | "linkBroken"> & { path?: string }
+  /** Draw an opened folder — the row the tree has expanded. */
   open?: boolean
+  detail?: boolean
   className?: string
-  badgeClassName?: string
 }) {
-  const kind = kindOfEntry(entry)
-  const Glyph = entry.isDir && open ? MdiFolderOpen : kind.icon
   return (
-    <span className={cn("relative inline-flex shrink-0", className)}>
-      <Glyph
-        className="size-full"
-        style={{
-          color: `var(--file-icon-colour, ${
-            entry.linkBroken ? "var(--tag-red)" : TONE_VAR[kind.tone]
-          })`,
-        }}
-        aria-hidden
-      />
-      {entry.isSymlink && (
-        <Link
-          className={cn(
-            "absolute -right-0.5 -bottom-0.5 size-1/2 rounded-[2px] bg-card text-muted-foreground",
-            badgeClassName,
-          )}
-          aria-hidden
-        />
+    <span aria-hidden className={cn("relative inline-flex shrink-0", className)}>
+      {entry.isDir ? (
+        <FolderGlyph name={entry.name} path={entry.path} open={open} />
+      ) : (
+        <DocumentGlyph name={entry.name} detail={detail} />
       )}
+      {entry.isSymlink && <AliasBadge broken={entry.linkBroken} />}
     </span>
+  )
+}
+
+/** A folder alone, for a place that is not an entry: the strip, the sidebar. */
+export function FolderIcon({
+  name,
+  path,
+  className,
+}: {
+  name: string
+  path?: string
+  className?: string
+}) {
+  return (
+    <span aria-hidden className={cn("relative inline-flex shrink-0", className)}>
+      <FolderGlyph name={name} path={path} />
+    </span>
+  )
+}
+
+/** A folder face in one label's colour: the swatch a colour menu offers. */
+export function FolderSwatch({ colour, className }: { colour: FolderColour; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      data-folder=""
+      className={cn("relative inline-flex shrink-0", className)}
+      style={{ "--folder": `var(--folder-${colour})` } as CSSProperties}
+    >
+      <svg viewBox="0 0 32 32" className="size-full">
+        <path d={FOLDER_BACK} fill="var(--folder-back)" />
+        <path d={FOLDER_FRONT} fill="var(--folder)" />
+      </svg>
+    </span>
+  )
+}
+
+function FolderGlyph({ name, path, open }: { name: string; path?: string; open?: boolean }) {
+  const colour = useFolderColour(path, name)
+  const { mark, emblem: Emblem } = folderKind(name, path)
+  // Centred on the face, which sits lower once it has swung open.
+  const place = cn(
+    "absolute left-1/2 size-[30%] -translate-x-1/2 -translate-y-1/2",
+    open ? "top-[64%]" : "top-[59%]",
+  )
+  return (
+    <span
+      data-folder=""
+      className="relative block size-full"
+      style={{ "--folder": `var(--folder-${colour})` } as CSSProperties}
+    >
+      <svg viewBox="0 0 32 32" className="size-full">
+        <path d={FOLDER_BACK} fill="var(--folder-back)" />
+        <path d={open ? FOLDER_OPEN : FOLDER_FRONT} fill="var(--folder)" />
+      </svg>
+      {mark ? (
+        // A mask rather than an <img>: the mark is pressed into the face in
+        // the face's own colour, a step darker, and Simple Icons draws every
+        // product as one shape so its alpha is the whole of the drawing.
+        <span
+          className={place}
+          style={{
+            background: "var(--folder-mark)",
+            WebkitMask: `url(/logos/mono/${mark}) center / contain no-repeat`,
+            mask: `url(/logos/mono/${mark}) center / contain no-repeat`,
+          }}
+        />
+      ) : Emblem ? (
+        <Emblem className={place} style={{ color: "var(--folder-mark)" }} />
+      ) : null}
+    </span>
+  )
+}
+
+function DocumentGlyph({ name, detail }: { name: string; detail?: boolean }) {
+  const kind = fileKind(name)
+  const Glyph = kind.glyph
+  const word = kind.tag ?? kind.ext?.toUpperCase()
+  const tag = detail && word && word.length <= 5 ? word : undefined
+  // The band is a word's height on a tile and a stripe in a row, where the
+  // mark gets the room back.
+  const top = detail ? 21.5 : 23
+  const mark = detail ? { x: 10.5, y: 7, size: 11 } : { x: 9.5, y: 6.5, size: 13 }
+  return (
+    <svg viewBox="0 0 32 32" className="size-full">
+      <path d={PAGE} fill="var(--doc-page)" />
+      <path d={FOLD} fill="var(--doc-fold)" />
+      {kind.logo ? (
+        <image
+          href={`/logos/${kind.logo}`}
+          x={mark.x}
+          y={mark.y}
+          width={mark.size}
+          height={mark.size}
+          preserveAspectRatio="xMidYMid meet"
+        />
+      ) : Glyph ? (
+        <Glyph
+          x={mark.x}
+          y={mark.y}
+          width={mark.size}
+          height={mark.size}
+          style={{ color: kind.tone }}
+        />
+      ) : (
+        <path d={TEXT_LINES} stroke="var(--doc-line)" strokeWidth={1.5} strokeLinecap="round" />
+      )}
+      <path d={band(top)} fill={kind.tone} />
+      {tag && (
+        <text
+          x={16}
+          y={27.6}
+          textAnchor="middle"
+          fontSize={tag.length <= 3 ? 5.6 : tag.length === 4 ? 4.8 : 4}
+          fontWeight={700}
+          letterSpacing={0.2}
+          fill="var(--doc-label)"
+        >
+          {tag}
+        </text>
+      )}
+    </svg>
+  )
+}
+
+/** The alias arrow: a link is its target's drawing with this in the corner. */
+function AliasBadge({ broken }: { broken?: boolean }) {
+  return (
+    <svg viewBox="0 0 12 12" className="absolute -bottom-px -left-px size-[40%]">
+      <rect
+        x={0.5}
+        y={0.5}
+        width={11}
+        height={11}
+        rx={2.5}
+        fill={broken ? "var(--destructive)" : "var(--doc-page)"}
+        stroke="var(--background)"
+        strokeWidth={0.75}
+      />
+      <path
+        d="M3.5 8.8C3.5 6 5 4.6 8.3 4.6M6.4 2.8L8.3 4.6L6.4 6.4"
+        fill="none"
+        stroke={broken ? "var(--doc-label)" : "var(--background)"}
+        strokeWidth={1.3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }

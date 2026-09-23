@@ -1,8 +1,12 @@
 "use client"
 
-import { Clock, FolderClosed, Home, Servers, Star } from "@/components/icons"
-import { truncateMiddle } from "@/lib/format"
+import { Servers } from "@/components/icons"
 import type { FileBookmark, FilePlace, FilePlaces } from "@/lib/types"
+import { useMetrics } from "@/hooks/use-metrics"
+import { platformProduct, ProductGlyph } from "@/components/product-logo"
+import { FolderIcon } from "@/components/files/file-icon"
+import { baseOf, parentOf } from "@/components/files/media"
+import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,10 +48,29 @@ export function placeHint(place: FilePlace): string | undefined {
   return place.kind === "home" || place.kind === "user" ? place.path : place.hint
 }
 
-export function PlaceIcon({ place, className }: { place: FilePlace; className?: string }) {
-  if (place.kind === "home") return <Home className={className} />
-  if (place.kind === "root") return <Servers className={className} />
-  return <FolderClosed className={className} />
+/**
+ * A place, drawn as what it is: a home as a folder with a house pressed into
+ * it, `/` as the machine's own distribution (§14: the host is a product too),
+ * and every other place as its folder — `/etc` with its gear, `/var/log` with
+ * its lines — in the colour it was labelled.
+ */
+export function PlaceMark({ place, className }: { place: FilePlace; className?: string }) {
+  const { host } = useMetrics()
+  if (place.kind === "root") {
+    const product = platformProduct(host?.platform)
+    return product ? (
+      <span
+        aria-hidden
+        className={cn("inline-flex shrink-0 items-center justify-center", className)}
+      >
+        <ProductGlyph id={product} className="size-[85%]" />
+      </span>
+    ) : (
+      <Servers aria-hidden className={cn("text-muted-foreground", className)} />
+    )
+  }
+  const name = place.kind === "home" || place.kind === "user" ? "home" : baseOf(place.path)
+  return <FolderIcon name={name} path={place.path} className={className} />
 }
 
 export function bookmarkName(bookmark: FileBookmark): string {
@@ -83,10 +106,7 @@ export function PlacesMenu({
             onSelect={() => onPick(place.path)}
             className="items-start gap-2.5 py-1.5"
           >
-            <PlaceIcon
-              place={place}
-              className={place.kind === "home" ? "mt-0.5 size-3.5 text-brand" : "mt-0.5 size-3.5"}
-            />
+            <PlaceMark place={place} className="mt-0.5 size-4" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-body">{placeName(place)}</span>
               <span className="block truncate font-mono text-hint text-muted-foreground">
@@ -108,7 +128,7 @@ export function PlacesMenu({
                 onSelect={() => onPick(bookmark.path)}
                 className="gap-2.5"
               >
-                <Star className="size-3.5 text-warning" />
+                <FolderIcon name={baseOf(bookmark.path)} path={bookmark.path} className="size-4" />
                 <span className="min-w-0 flex-1 truncate text-body">{bookmarkName(bookmark)}</span>
               </DropdownMenuItem>
             ))}
@@ -120,9 +140,10 @@ export function PlacesMenu({
             <DropdownMenuLabel className="eyebrow py-1">Recent</DropdownMenuLabel>
             {rows.recent.map((path) => (
               <DropdownMenuItem key={path} onSelect={() => onPick(path)} className="gap-2.5">
-                <Clock className="size-3.5" />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                  {truncateMiddle(path, 34)}
+                <FolderIcon name={baseOf(path)} path={path} className="size-4" />
+                <span className="min-w-0 flex-1 truncate text-body">{baseOf(path)}</span>
+                <span className="max-w-[45%] shrink truncate font-mono text-hint text-muted-foreground">
+                  {parentOf(path)}
                 </span>
               </DropdownMenuItem>
             ))}

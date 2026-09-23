@@ -1581,6 +1581,8 @@ export type FilePlaces = {
   roots: string[]
   places: FilePlace[]
   bookmarks: FileBookmark[]
+  /** The colour each labelled folder is drawn in, by resolved path. Absent before 0.7.0. */
+  colours?: Record<string, string>
 }
 
 export type FileFindHit = {
