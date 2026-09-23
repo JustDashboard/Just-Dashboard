@@ -16,26 +16,29 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
 import { DiffView } from "@/components/files/diff-view"
-import { GitTools } from "@/components/terminal/git-tools"
+import { DiffTools } from "@/components/terminal/diff-tools"
 import { Tag } from "@/components/tag"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { Pane, PaneHeader } from "@/components/panel"
 
-type Overlay =
-  | { kind: "file"; path: string }
-  | { kind: "diff"; title: string; subtitle?: string; body: string; singleFile?: boolean }
-  | null
+type Overlay = { kind: "file"; path: string } | null
+
+type Tab = "files" | "diff"
 
 /**
- * The Files + Git companion for the terminal.
+ * The Files + Diff companion for the terminal.
  *
  * It owns the git detection and status polls once for both tabs — the tree
- * borrows the status to badge changed files, and the git tab drives them — and
- * it owns every surface that would otherwise be a portalled dialog: the file
- * viewer/editor, the diff, and the confirm. They are drawn *inside* this panel
- * so the whole thing keeps working when the workspace is in the browser's real
- * fullscreen, where a portal to document.body renders outside the fullscreen
- * element and vanishes.
+ * borrows the status to badge changed files, and the diff tab reads it as the
+ * list of what changed — and it owns every surface that would otherwise be a
+ * portalled dialog: the file viewer/editor and the confirm. They are drawn
+ * *inside* this panel so the whole thing keeps working when the workspace is
+ * in the browser's real fullscreen, where a portal to document.body renders
+ * outside the fullscreen element and vanishes.
+ *
+ * The second tab was a git client — stage, commit, push, history, branches —
+ * and is now only the diff: beside a shell the question is what the work is,
+ * and the Git page is the client, one click away from the tab's own link.
  */
 export function WorkspaceTools({
   dir,
@@ -49,7 +52,9 @@ export function WorkspaceTools({
   const { can } = useAuth()
   // Which half of the companion you had open, kept across a navigation:
   // somebody working out of git is on that tab all afternoon.
-  const [tab, setTab] = useViewState<"files" | "git">("terminal.tools.tab", "files")
+  const [stored, setTab] = useViewState<Tab | "git">("terminal.tools.tab", "files")
+  // A browser that last had the old Git tab open comes back to what replaced it.
+  const tab: Tab = stored === "git" ? "diff" : stored
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
 
@@ -61,7 +66,7 @@ export function WorkspaceTools({
    * Going to the other tab *is* leaving the file — there is one panel here,
    * not two — and the file is one click away in the tree either way.
    */
-  const showTab = (next: "files" | "git") => {
+  const showTab = (next: Tab) => {
     setOverlay(null)
     setTab(next)
   }
@@ -122,11 +127,11 @@ export function WorkspaceTools({
           Files
         </TabButton>
         <TabButton
-          active={tab === "git"}
-          onClick={() => showTab("git")}
-          hint="Stage, commit and push the repository the shell is in"
+          active={tab === "diff"}
+          onClick={() => showTab("diff")}
+          hint="What changed in the repository the shell is in — the Git page does the rest"
         >
-          Git
+          Diff
           {changed > 0 && <ChipCount>{changed}</ChipCount>}
         </TabButton>
         <span className="flex-1" />
@@ -144,7 +149,7 @@ export function WorkspaceTools({
                 <SidebarRight className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Hide files &amp; git</TooltipContent>
+            <TooltipContent>Hide files &amp; diff</TooltipContent>
           </Tooltip>
         )}
       </PaneHeader>
@@ -180,18 +185,12 @@ export function WorkspaceTools({
                 onOpenInFiles={onOpenInFiles}
               />
             </div>
-            <div className={cn("flex min-h-0 flex-1 flex-col", tab !== "git" && "hidden")}>
-              <GitTools
-                dir={dir ?? ""}
+            <div className={cn("flex min-h-0 flex-1 flex-col", tab !== "diff" && "hidden")}>
+              <DiffTools
                 detect={detect.data}
                 detectLoading={detect.loading}
                 detectError={detect.error}
                 status={status}
-                canControl={can("service.control")}
-                canDestruct={can("destructive")}
-                onShowDiff={(d) => setOverlay({ kind: "diff", ...d })}
-                onConfirm={setConfirm}
-                onChanged={refreshGit}
               />
             </div>
           </>
@@ -208,15 +207,6 @@ export function WorkspaceTools({
             repoPath={repoPath}
             onClose={() => setOverlay(null)}
             onSaved={refreshGit}
-          />
-        )}
-        {overlay?.kind === "diff" && (
-          <InlineDiff
-            title={overlay.title}
-            subtitle={overlay.subtitle}
-            body={overlay.body}
-            singleFile={overlay.singleFile}
-            onClose={() => setOverlay(null)}
           />
         )}
       </div>
@@ -449,49 +439,6 @@ function InlineFile({
           </>
         )}
       </div>
-    </div>
-  )
-}
-
-/** A unified diff, coloured, drawn over the panel body. */
-function InlineDiff({
-  title,
-  subtitle,
-  body,
-  singleFile,
-  onClose,
-}: {
-  title: string
-  subtitle?: string
-  body: string
-  singleFile?: boolean
-  onClose: () => void
-}) {
-  return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-card">
-      <PaneHeader className="items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-xs" title={title}>
-            {title}
-          </p>
-          {subtitle && <p className="truncate text-micro text-muted-foreground">{subtitle}</p>}
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-              aria-label="Close"
-              onClick={onClose}
-            >
-              <Cross className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Close the diff (Esc)</TooltipContent>
-        </Tooltip>
-      </PaneHeader>
-      <DiffView body={body} singleFile={singleFile} className="min-h-0 flex-1" />
     </div>
   )
 }

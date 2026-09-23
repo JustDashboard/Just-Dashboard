@@ -24,6 +24,18 @@ centos.svg had their darkest colour lifted to the same hue at the L 0.72 rung
 (#a80030 to #ff6a79, #294172 to #87a5dd, #0d597f to #6aadd7, #262577 to
 #8e9cf9) so they read on a dark ground.
 
+The marks for what a backup covers and where it goes, and for the programs a
+terminal runs, come from the same collection: git.svg, backblaze.svg,
+nodejs.svg, python.svg, vim.svg, neovim.svg, npm.svg, kubernetes.svg and
+terraform.svg keep their names; claude.svg is its claude-ai.svg and deno.svg
+its deno-light variant.
+
+terminal.svg is no product's mark and comes from nowhere: it is drawn for
+this project, as the mark of a terminal window whose program has none.
+
+bun.svg is from Simple Icons (CC0 1.0), filled with Bun's cream #fbf0df
+because Simple Icons ships the path alone and its brand hex is black.
+
 jupyter.svg is from Simple Icons (https://simpleicons.org), CC0 1.0, and so
 are intel.svg and pm2.svg, filled with their brand colour lifted to the L 0.72
 rung (#0071C5 to #4fa9ff, #2B037A to #9a93ff) because Simple Icons ships the

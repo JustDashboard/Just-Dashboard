@@ -2,9 +2,13 @@
 
 import { useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { Box, CloudUpload, Database, GitBranch, Globe, Layers, SettingsGear } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
-import type { BackupResource, BackupResourceKind, BackupResourceReport } from "@/lib/types"
+import type {
+  BackupResource,
+  BackupResourceKind,
+  BackupResourceReport,
+  Container,
+} from "@/lib/types"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
@@ -14,20 +18,7 @@ import { EmptyNote, LoadingRows } from "@/components/state"
 import { FormNote } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { RESOURCE_KIND_LABEL } from "@/components/backups/shared"
-
-/**
- * The wayfinding glyph for each kind of thing — the same mark its own page
- * carries in the sidebar, so "this is a volume" is read without reading.
- */
-const KIND_ICON: Record<BackupResourceKind, React.ComponentType<{ className?: string }>> = {
-  dashboard: SettingsGear,
-  proxy: Globe,
-  volume: Box,
-  stack: Layers,
-  deployment: CloudUpload,
-  repository: GitBranch,
-  database: Database,
-}
+import { ResourceMark, resourceProducts } from "@/components/backups/marks"
 
 type Filter = "unprotected" | "all"
 
@@ -40,12 +31,15 @@ type Filter = "unprotected" | "all"
  */
 export function CoveragePanel({
   report,
+  containers,
   loading,
   canCreate,
   onProtect,
   onOpenJob,
 }: {
   report: BackupResourceReport | undefined
+  /** For the marks: a volume or a stack is drawn as the images its containers run. */
+  containers: Container[]
   loading: boolean
   canCreate: boolean
   onProtect: (resource: BackupResource) => void
@@ -53,15 +47,13 @@ export function CoveragePanel({
 }) {
   const resources = useMemo(() => report?.resources ?? [], [report])
   const unprotected = resources.filter((r) => !r.protected)
+  const paused = unprotected.filter((r) => r.coveredBy.some((c) => !c.enabled)).length
   const [filter, setFilter] = useSessionState<Filter>("backups.coverage.filter", "unprotected")
   const [kind, setKind] = useSessionState<BackupResourceKind | "all">(
     "backups.coverage.kind",
     "all",
   )
-  const kinds = useMemo(
-    () => [...new Set(resources.map((r) => r.kind))].sort(),
-    [resources],
-  )
+  const kinds = useMemo(() => [...new Set(resources.map((r) => r.kind))].sort(), [resources])
   const visible = resources.filter(
     (r) => (filter === "all" || !r.protected) && (kind === "all" || r.kind === kind),
   )
@@ -73,9 +65,11 @@ export function CoveragePanel({
         title="Coverage"
         actions={
           resources.length > 0 && (
-            <span className="numeric text-hint text-muted-foreground">
-              {resources.length - unprotected.length} of {resources.length} protected
-            </span>
+            <CoverageMeter
+              total={resources.length}
+              protectedCount={resources.length - unprotected.length}
+              paused={paused}
+            />
           )
         }
       />
@@ -116,13 +110,17 @@ export function CoveragePanel({
         {visible.length > 0 && (
           <RowList className="animate-rise">
             {visible.map((res) => {
-              const Icon = KIND_ICON[res.kind]
               const covering = res.coveredBy.filter((c) => c.enabled)
               const paused = res.coveredBy.filter((c) => !c.enabled)
               return (
                 <Row
                   key={`${res.kind}:${res.id}`}
-                  leading={<Icon aria-hidden className="size-3.5 text-muted-foreground" />}
+                  leading={
+                    <ResourceMark
+                      kind={res.kind}
+                      ids={resourceProducts(res, containers, resources)}
+                    />
+                  }
                   title={
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="truncate">{res.name}</span>
@@ -178,5 +176,35 @@ export function CoveragePanel({
         )}
       </PanelBody>
     </Panel>
+  )
+}
+
+/**
+ * How much of the server is covered, as a bar split the way the list is: what
+ * an enabled job protects in green, what only a paused job covers in amber,
+ * and the rest the empty track — the list below exists to fill that track.
+ */
+function CoverageMeter({
+  total,
+  protectedCount,
+  paused,
+}: {
+  total: number
+  protectedCount: number
+  paused: number
+}) {
+  return (
+    <span className="flex items-center gap-3">
+      <span
+        aria-hidden
+        className="flex h-1.5 w-32 overflow-hidden rounded-full bg-meter-track sm:w-48"
+      >
+        <span className="bg-success" style={{ width: `${(protectedCount / total) * 100}%` }} />
+        <span className="bg-warning" style={{ width: `${(paused / total) * 100}%` }} />
+      </span>
+      <span className="numeric text-hint text-muted-foreground">
+        <span className="font-medium text-foreground">{protectedCount}</span> of {total} protected
+      </span>
+    </span>
   )
 }

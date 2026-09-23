@@ -195,7 +195,7 @@ alone, and its copyable commands sit on the control ground.
 `components/terminal/` is the session rail and window strip; `components/xterm-pane.tsx` is the emulator. The
 split matters — the pane is reused by the compose runner and knows nothing about sessions.
 
-- The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
+- The page is **one framed workbench**. The rail, the emulator and the Files/Diff column are `Pane flush`
   inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
   edge and the tools column's left edge). Three framed panes with a gutter between them read as three
   boxes floating on the page; the screen is one working surface. Immersive mode drops the wrapper's
@@ -249,7 +249,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   tab you had open, which is furniture. Entries for sessions that have ended are dropped as the
   listing arrives.
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
-  toggles: sessions on the left and Files/Git on the right. The strip is embedded in the emulator's own
+  toggles: sessions on the left and Files/Diff on the right. The strip is embedded in the emulator's own
   title bar; there is no separate workspace bar or working-directory/shell title.
   A tab is its label with the activity mark's slot in front of it, lit while the window is working or
   has just finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
@@ -257,27 +257,32 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   layout or colour actions. Closing the last window closes its session through the session endpoint.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.
-- `workspace-tools.tsx` is the Files/Git companion. Its header is two section tabs (`tabClasses`, the
-  brand underline, no glyphs) with the changed-file count beside "Git". Under that, the Files half is a
+- `workspace-tools.tsx` is the Files/Diff companion. Its header is two section tabs (`tabClasses`, the
+  brand underline, no glyphs) with the changed-file count beside "Diff". Under that, the Files half is a
   strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
   new folder / open in Files behind one menu — `file-tree.tsx` draws that strip; the Files page's sidebar
   drops it (`chrome={false}`) and draws its own place switcher above the same tree, which there also
-  reveals the folder being browsed, reloads its open folders on `refreshTick`, and takes drops. The Git half (`git-tools.tsx`) is two strips before content: the repository's
-  reading (branch, `detached` tag, ahead/behind, the GitHub account) with **pull** and **push** inline
-  and fetch / stash / pop behind one menu where each verb carries a sentence (§13). That strip stays
-  one row at every width and the branch is what it keeps: under 400px the account shows its avatar
-  alone, and under 320px (the column's minimum, or a phone) pull and push join the menu rather than
-  being pushed off the edge. The commit row under the changes wraps its two buttons under "Amend"
-  when the column is too narrow for all three. Then a `FilterChip`
-  row switching Changes / History / Branches, with a `+` for a new branch on the Branches view that
-  opens an inline create row rather than a permanent form. Changed-file rows colour only the status
-  letter; the list is all changes, so a tinted band on every row said nothing. A file staged and then
-  edited again is listed under both headings with the letter for each side (`lib/git-status.ts` takes
-  the side), and discarding an untracked file deletes it and says so. Clicking a changed
-  file shows its diff, untracked files included — the server diffs those against nothing, so a new
-  file reads as the addition it is, and the file viewer's Diff toggle does the same. Branches are
-  grouped: local first, remotes under their own label, no per-row glyph and no "remote" word on every
-  line.
+  reveals the folder being browsed, reloads its open folders on `refreshTick`, and takes drops. The
+  second tab is **Diff** (`diff-tools.tsx`), and it is only that: the work in the repository the shell
+  is in, read rather than operated on. It was a git client — pull, push, stash, stage, commit, history,
+  branches — beside a terminal that already has git in it and a Git page that is the client, so it was
+  cut to the one question a column beside a shell answers: *what have I changed?* A strip names the
+  branch (with the git mark, and ahead/behind) and links **Open in Git** to `/git?repo=<path>`; a
+  second says how many files and how many lines added and removed, with fold-all and unfold-all; then
+  every changed file under its name — the status letter in its colour (M amber, A and untracked green,
+  D red, R cyan), the directory muted before the file name, the file's own +/− — with its diff below
+  it, staged and unstaged halves both shown and labelled when a file has both. Long diffs start folded.
+  The list is the status the panel already polls; the diffs are read again when that list changes, as
+  the whole unstaged and the whole staged diff plus one request per untracked file (the first twenty),
+  split per file by `lib/diff-files.ts`. A browser that had the old Git tab open (`terminal.tools.tab`
+  stored as `git`) comes back to Diff.
+  Each rail row and each window tab also carries **the program it is running** as that program's own
+  mark (`ProgramMark` in `activity-mark.tsx`, `programProduct` in `product-logo.tsx`: Claude, Neovim,
+  Vim, Node, Bun, Python, Go, git, Docker, psql, redis-cli, kubectl and the rest), read off the
+  foreground process the backend reports while a window is busy. A shell at its prompt, or a program
+  with no mark of its own (`htop`, Codex, OpenCode), is drawn as a terminal
+  (`public/logos/terminal.svg`, drawn for this product): left empty, an agent with no logo read as a
+  window with nothing in it.
   The emulator toolbar keeps search, snippets, appearance and fullscreen visible, with copy, export,
   folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and

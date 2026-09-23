@@ -237,7 +237,8 @@ async function mockBackups(page: Page, existing = false) {
 
 /** The job's page, entered from its name in the list. */
 async function openJob(page: Page) {
-  await page.getByRole("button", { name: "Application backup", exact: true }).click()
+  // The job is a card that opens its page, so its name is a link.
+  await page.getByRole("link", { name: "Application backup", exact: true }).click()
   await expect(page).toHaveURL(/\/backups\/5$/)
   await expect(page.getByRole("heading", { name: "Application backup" })).toBeVisible()
 }
@@ -340,9 +341,12 @@ test("coverage lists what the server has and writes a job for an unprotected vol
 }) => {
   const api = await mockBackups(page, true)
   await page.goto("/backups")
-  // The readings and the attention list read from the same jobs.
+  // What is not covered is the coverage list's to say, under its meter; the
+  // attention list is for jobs that failed or went quiet.
   await expect(page.getByText("1 of 2 protected", { exact: true })).toBeVisible()
-  await expect(page.getByText("shop_data has no backup", { exact: true })).toBeVisible()
+  await expect(page.getByText("shop_data", { exact: true })).toBeVisible()
+  await expect(page.getByText("shop_data has no backup", { exact: true })).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await page.getByRole("button", { name: "Back up", exact: true }).click()
   await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
     "Volume shop_data",

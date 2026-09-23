@@ -95,8 +95,11 @@ taking a frame:
   `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
   as `FormSection aside`s whose heads sit in a rail — the framed things on those two pages are the
   transcript console, which is a `Pane`, and the cards you pick; the Backups page —
-  four readings, an attention list, the jobs as a plain table under a hairline and the coverage list
-  under its filter chips, with a job's sheet built from a fact list and plain panels; and the three views on
+  an attention list of the jobs that failed or went quiet, the jobs as destination cards (a
+  `ChoiceList`, each drawn as the products it covers, with its destination's mark and its last
+  fourteen runs as a strip) and the coverage list under its filter chips and a meter of how much is
+  covered, every thing on it drawn as its product, with a job's own page built from a fact list and
+  plain panels; and the three views on
   Packages — the installed and updates tables and the software search, under one underlined strip
   (`tabClasses`) rather than a filled tab list — each a toolbar, a hairline and rows on the page's own
   edge, with what needs acting on (security updates waiting, a reboot owed, a stale index) said as a
@@ -783,6 +786,16 @@ database connection as its engine — in the section title's switcher and in eve
 which are one `EngineCard` (`choice-card.tsx`) rather than three shapes that had already drifted.
 Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
 
+**What a backup covers is a product, and so is what a terminal runs.** A coverage row is drawn as
+the thing it protects — a saved database as its engine, the proxy's configuration as nginx or Caddy,
+a repository as git, a volume as the product of the container that keeps its data there (joined
+through the container list, since the report names containers rather than images; a database
+container run from a bare image id is its connection's engine), a stack as its services overlapping,
+the dashboard as its own mark — and a job as the products of what it covers, with Backblaze drawn as
+itself where it writes (S3 is a protocol a dozen providers speak, and keeps a glyph). The terminal
+draws the program in each window's foreground the same way. A thing none of these can name keeps its
+kind's glyph on the same tile.
+
 **The host is a product too.** The Overview, Metrics and the logs rail draw the machine as what it
 reports itself to be — its distribution (`platformProduct`, from `/etc/os-release`'s id), its processor
 (`cpuProduct`, from the model string: AMD, Intel, Arm), its hypervisor (`virtualizationProduct`: QEMU for
@@ -883,6 +896,10 @@ The passes, in order. Each one is a diff you can review on its own.
    worst-first under a *Needs attention* rule. A page may drop this pass when it can name where each
    figure went and what now does the job the figures were doing; `app/(dashboard)/git/page.tsx`
    carries that in its doc comment, the way a surviving frame carries its sentence in pass 1.
+
+   Backups took it too: its four readings (jobs, last backup, next backup, stored) each said what
+   one job's card says, so the counts went to the Jobs header and the rest to the cards, ordered
+   worst first under an attention list of the jobs that failed or went quiet.
 
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
    on a page you configure is best drawn beside the control that sets it. Version's Installed,
