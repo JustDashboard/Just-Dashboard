@@ -147,7 +147,7 @@ export function WorkspaceTools({
                 className="mr-1 ml-auto size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
                 onClick={onClose}
               >
-                <SidebarRightClose className="size-3.5" />
+                <SidebarRightClose />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Hide files &amp; diff</TooltipContent>

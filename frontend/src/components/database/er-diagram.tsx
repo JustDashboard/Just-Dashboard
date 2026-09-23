@@ -831,11 +831,7 @@ function Canvas({
             title="Inspector (i)"
             className="size-7 min-w-0 px-0"
           >
-            {inspector ? (
-              <SidebarRightClose className="size-3.5" />
-            ) : (
-              <SidebarRightOpen className="size-3.5" />
-            )}
+            {inspector ? <SidebarRightClose /> : <SidebarRightOpen />}
           </Toggle>
           <Button
             size="icon-sm"

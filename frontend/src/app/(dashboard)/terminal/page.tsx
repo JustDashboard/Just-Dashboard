@@ -77,6 +77,11 @@ export default function TerminalPage() {
   // What each visited window's socket last said it was doing — newer than any
   // poll, and dropped when the socket closes so the polled fields take over.
   const [activity, setActivity] = useState<Record<string, TerminalActivity>>({})
+  // Windows whose socket in this browser has dropped, until it is back. The
+  // listing cannot say so — to the server the PTY is alive and well — and the
+  // server sends a window's state the moment a socket attaches, so the first
+  // activity from a reattached socket is what clears it.
+  const [dropped, setDropped] = useState<Record<string, boolean>>({})
   const [windowLists, setWindowLists] = useState<Record<string, Window[]>>({})
   const [visitedWindows, setVisitedWindows] = useState<{ id: string; sessionId: string }[]>([])
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
@@ -218,6 +223,9 @@ export default function TerminalPage() {
   if (active && activeWindow && !openWindows.some((window) => window.id === activeWindow.id)) {
     openWindows.push({ id: activeWindow.id, sessionId: active })
   }
+  const droppedWindows = openWindows.filter((window) => dropped[window.id])
+  const disconnectedWindows = new Set(droppedWindows.map((window) => window.id))
+  const disconnectedSessions = new Set(droppedWindows.map((window) => window.sessionId))
   if (
     openWindows.length !== visitedWindows.length ||
     openWindows.some((window, index) => window !== visitedWindows[index])
@@ -468,6 +476,7 @@ export default function TerminalPage() {
           windows={windowList}
           activeId={activeWindow?.id ?? null}
           activity={activity}
+          disconnected={disconnectedWindows}
           onSelect={(id) => {
             showWindow(id)
             focusPaneRef.current?.()
@@ -524,6 +533,7 @@ export default function TerminalPage() {
               folders={data.folders}
               activeId={active}
               activity={activity}
+              disconnected={disconnectedSessions}
               onSelect={select}
               onRename={(session, title) => setMeta(session.id, { title })}
               onTogglePinned={(session) => setMeta(session.id, { favourite: !session.favourite })}
@@ -568,8 +578,12 @@ export default function TerminalPage() {
               onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
               focusRef={focusPaneRef}
               className="min-h-0 flex-1"
-              onActivity={(state) => setActivity((prev) => ({ ...prev, [window.id]: state }))}
+              onActivity={(state) => {
+                setActivity((prev) => ({ ...prev, [window.id]: state }))
+                setDropped((prev) => (prev[window.id] ? { ...prev, [window.id]: false } : prev))
+              }}
               onExit={() => {
+                setDropped((prev) => ({ ...prev, [window.id]: true }))
                 setActivity((prev) => {
                   if (!(window.id in prev)) return prev
                   const next = { ...prev }
@@ -658,7 +672,7 @@ function WorkspaceToggle({
           )}
           onClick={onClick}
         >
-          <Icon className="size-3.5" />
+          <Icon />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{chord ? `${label} · ${formatChord(chord)}` : label}</TooltipContent>

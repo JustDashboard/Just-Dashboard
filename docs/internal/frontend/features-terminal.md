@@ -231,20 +231,26 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   `state` frame the moment it changes, which is what makes a tab's mark and title move with the
   shell rather than with the poll. The server side is in
   [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).
-- **The activity mark** (`activity-mark.tsx`) says what is happening in a window, and it is the
-  product's own vocabulary rather than a spinner: a breathing `StatusDot` — "this is live" — while the
-  window is *working*, and a check once it has finished. It is drawn on every window tab and, for
-  the session, on its row in the rail. The mark's box is one fixed size whatever it holds and is
-  present even when empty, so a tab sized to its label does not grow and shrink as a dot becomes a
-  check or a mark appears. Working is the server's word for "output has
-  been arriving for a second and still is, or the job is burning CPU": an agent streaming an answer,
-  a build, a test run. A program that is merely open — an editor, Claude Code or Codex waiting for
-  the next message — holds the terminal and gets no mark, because nothing is happening; that is
-  exactly when an agent's own title glyph goes still, and the tab follows the same signal. Nothing
-  is announced for a command over in a blink (`ls`), so the label never flickers. The finished check
-  is a notification: `useFinished` keeps it on a tab or row you are not looking at until you go
-  there, and shows it for four seconds on the one you are, after which that finish counts as seen
-  (`terminal.viewed` in `view-state`, keyed by session or `session/window`, pruned with the sessions).
+- **The activity mark** (`activity-mark.tsx`) is one `StatusDot` whose colour is the window's state,
+  in this order: **red** when this browser's socket to the window has dropped, **green and
+  breathing** while it is *working*, **green and still** once that has finished, and **yellow** when
+  it is idle. There is no check: a dot for working and a check for finished were two marks, and a row
+  and a tab could show the two for the same moment. It is drawn on every window tab and, for the
+  session, on its row in the rail; a row is red when any window of it that this browser attached has
+  dropped. The mark's box is one fixed size, so a tab does not change width as its state changes.
+  Working is the server's word for "output has been arriving for a second and still is, or the job is
+  burning CPU": an agent streaming an answer, a build, a test run. A program that is merely open — an
+  editor, Claude Code or Codex waiting for the next message — holds the terminal and is idle, because
+  nothing is happening; that is exactly when an agent's own title glyph goes still, and the tab
+  follows the same signal. Nothing is announced for a command over in a blink (`ls`), so the label
+  never flickers. Finished is a notification: `useFinished` keeps it on a tab or row you are not
+  looking at until you go there, and shows it for four seconds on the one you are, after which that
+  finish counts as seen and the dot turns idle (`terminal.viewed` in `view-state`, keyed by session
+  or `session/window`, pruned with the sessions). Disconnected is known only in the browser — to the
+  server the PTY is alive — so `page.tsx` sets it when a window's socket closes and clears it on the
+  first `state` frame a reattached socket receives, which the server sends on every attach. Idle is
+  the resting state and is hidden from screen readers; the other three are named (`role="img"`), and
+  the mark carries its state as `data-activity`.
 - **The page remembers where you were.** Which session was open, and within each session which
   window, live in `view-state` (`terminal.session`, `terminal.windows`) rather than in component
   state, so leaving for another page and coming back lands on the same window rather than on the
@@ -256,8 +262,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   the way pressing it moves the panel (`SidebarLeftOpen`/`Close`, `SidebarRightOpen`/`Close`). The strip
   is embedded in the emulator's own title bar; there is no separate workspace bar or
   working-directory/shell title.
-  A tab is its label with the activity mark's slot in front of it, lit while the window is working or
-  has just finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
+  A tab is its label with the activity mark in front of it: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
   way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
   layout or colour actions. Closing the last window closes its session through the session endpoint.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
