@@ -300,6 +300,8 @@ export function ChoiceRow({
   actions,
   onSelect,
   href,
+  disabled,
+  children,
   className,
 }: {
   leading?: React.ReactNode
@@ -325,6 +327,19 @@ export function ChoiceRow({
   onSelect?: () => void
   /** Where the row goes, when it navigates rather than choosing in place. */
   href?: string
+  /**
+   * A row that names something with nowhere to go yet — a service compose has
+   * not created. It keeps its card and its actions, and loses the arrow, the
+   * pointer and the control, because a card that looks pressable and does
+   * nothing is the defect `ChoiceCard`'s own `disabled` exists to prevent.
+   */
+  disabled?: boolean
+  /**
+   * What the row carries beneath its line at the full width of the card — a
+   * container's live readings on a screen too narrow to hold them beside its
+   * name. Presses inside it still reach the row, except on a control.
+   */
+  children?: React.ReactNode
   className?: string
 }) {
   const router = useRouter()
@@ -332,11 +347,74 @@ export function ChoiceRow({
     if (href) router.push(href)
     else onSelect?.()
   }
+  const line = (
+    <>
+      {leading && <span className="flex shrink-0 items-center">{leading}</span>}
+      <span className="min-w-0 flex-1">
+        {disabled ? (
+          <span className="block max-w-full min-w-0 truncate text-body font-medium">{title}</span>
+        ) : href ? (
+          <Link
+            href={href}
+            aria-label={verb}
+            onClick={(event) => event.stopPropagation()}
+            className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+          >
+            {title}
+          </Link>
+        ) : (
+          <button
+            type="button"
+            aria-label={verb}
+            // The row's own handler already fires on the pointer; this one
+            // is for the keyboard and must not run the action twice.
+            onClick={(event) => {
+              event.stopPropagation()
+              go()
+            }}
+            className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+          >
+            {title}
+          </button>
+        )}
+        {description && (
+          <span className="block truncate text-hint text-muted-foreground">{description}</span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {trailing}
+        {!disabled && (
+          <ArrowRight
+            aria-hidden
+            className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
+          />
+        )}
+        {actions && (
+          // The row around these is a click target, so a press that lands
+          // on one of them must not also fire it: discarding a draft
+          // navigated to the draft it had just deleted.
+          <span onClick={(event) => event.stopPropagation()} className="flex shrink-0 items-center">
+            {actions}
+          </span>
+        )}
+      </span>
+    </>
+  )
   return (
     <li data-slot="choice-row" className="min-w-0">
       <SpotlightBorder radius={320}>
         <div
-          onClick={go}
+          onClick={(event) => {
+            if (disabled) return
+            // A control of its own inside the row — a copy button in the
+            // second line, a switch beneath it — is not a press on the row.
+            if (
+              event.target !== event.currentTarget &&
+              (event.target as HTMLElement).closest(CONTROL)
+            )
+              return
+            go()
+          }}
           className={cn(
             // A fixed minimum, because a description is optional and a run of
             // cards where some are a line taller than others reads as a list
@@ -346,61 +424,44 @@ export function ChoiceRow({
             // content it has not got.
             // The unnamed group as well, so `DimActions` in the actions slot
             // brightens with the row the way it does in a table.
-            "group group/choice flex min-h-14 min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left",
+            "group group/choice flex min-h-14 min-w-0 rounded-xl px-3 py-2.5 text-left",
+            !disabled && "cursor-pointer",
+            children ? "flex-col gap-2.5" : "items-center gap-3",
             className,
           )}
         >
-          {leading && <span className="flex shrink-0 items-center">{leading}</span>}
-          <span className="min-w-0 flex-1">
-            {href ? (
-              <Link
-                href={href}
-                aria-label={verb}
-                onClick={(event) => event.stopPropagation()}
-                className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
-              >
-                {title}
-              </Link>
-            ) : (
-              <button
-                type="button"
-                aria-label={verb}
-                // The row's own handler already fires on the pointer; this one
-                // is for the keyboard and must not run the action twice.
-                onClick={(event) => {
-                  event.stopPropagation()
-                  go()
-                }}
-                className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
-              >
-                {title}
-              </button>
-            )}
-            {description && (
-              <span className="block truncate text-hint text-muted-foreground">{description}</span>
-            )}
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            {trailing}
-            <ArrowRight
-              aria-hidden
-              className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-            />
-            {actions && (
-              // The row around these is a click target, so a press that lands
-              // on one of them must not also fire it: discarding a draft
-              // navigated to the draft it had just deleted.
-              <span
-                onClick={(event) => event.stopPropagation()}
-                className="flex shrink-0 items-center"
-              >
-                {actions}
-              </span>
-            )}
-          </span>
+          {children ? (
+            <>
+              <div className="flex min-w-0 items-center gap-3">{line}</div>
+              {children}
+            </>
+          ) : (
+            line
+          )}
         </div>
       </SpotlightBorder>
     </li>
+  )
+}
+
+/** Anything inside a row that owns its own press — mirrors `TableRow`'s rule. */
+const CONTROL = "a, button, input, select, textarea, label, [role='menuitem'], [role='switch']"
+
+/**
+ * What the next run of cards is, and how many of them.
+ *
+ * A hairline running off to the right rather than a panel header: these are
+ * parts of one list, not blocks of their own, and a second framed title under
+ * the page's would rank them as sections they are not. The Git page's
+ * checkouts and the Docker lists split the same way — what needs you first.
+ */
+export function GroupRule({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <p className="eyebrow shrink-0">{label}</p>
+      <span className="numeric shrink-0 text-micro text-muted-foreground">{count}</span>
+      <span aria-hidden className="h-px min-w-0 flex-1 bg-hairline" />
+    </div>
   )
 }
 

@@ -293,7 +293,7 @@ press from reaching the row around it — discarding a draft used to navigate to
 deleted.
 
 Reveal only where the controls share their space with something else. Where they have a column of
-their own — the containers table — use `DimActions` instead: always drawn, one step of opacity until
+their own — a container card's actions slot — use `DimActions` instead: always drawn, one step of opacity until
 the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
 
 ## 7. Which surface
@@ -595,21 +595,28 @@ A wide table narrows by dropping columns, and that is the right answer until it 
 half of them the reader is no longer looking at a table — they are looking at the remains of one: a
 wide first cell, a wedge of empty space, and two stubs where seven columns used to be.
 
-**When more than half the columns would go, replace the layout instead.** The containers table is
-nine columns wide and keeps three on a phone, so below `xl` the same rows are drawn down the row
-instead of across it (`components/docker/container-card.tsx`). The test of that replacement is that
-**nothing was dropped to achieve it**: the image, the ports, both live readings and the issue count
-are all present, because a phone is where somebody checks whether the thing they just deployed is
-alive and every one of those is part of that answer.
+**When more than half the columns would go, replace the layout instead.** The containers table was
+nine columns wide and kept three on a phone, so below `xl` the same rows were drawn down the row
+instead of across it. The test of that replacement is that **nothing was dropped to achieve it**:
+the image, the ports, both live readings and the issue count are all present, because a phone is
+where somebody checks whether the thing they just deployed is alive and every one of those is part
+of that answer.
 
-**The breakpoint is where the table stops fitting, not where the viewport stops being wide.** This
-one swaps at `xl` (1280) rather than `lg` (1024), because the sidebar takes 256px of it: at 1024 the
+**The breakpoint is where the table stops fitting, not where the viewport stops being wide.** That
+one swapped at `xl` (1280) rather than `lg` (1024), because the sidebar takes 256px of it: at 1024 the
 table appeared already scrolling inside its own panel, with Issues and the row's actions past the
-right edge — a table that arrives broken. The ninth column waits for `2xl` for the same reason.
+right edge — a table that arrives broken.
 
-It is still a row, not a card: no frame of its own, a hairline between it and the next, a wash under
-the pointer. Two nested frames spend sixteen pixels of a 390px viewport saying what the panel's own
-edge already said.
+**And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
+containers, images, volumes, networks and stacks lists are cards at every width — the argument
+`git/repo-row.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
+panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
+paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
+because there is no header over it; below, they go beneath the name at the card's full width. Which
+shape is drawn is chosen once by the page (`useMediaQuery`) rather than by `hidden`/`xl:block` twins,
+because a reading that exists in a hidden copy is two answers to every query a test or a screen
+reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
+frames, which is the stacking this section refuses.
 
 A row drawn this way is a **click target, not a control**. `role="button"` on the wrapper is the
 obvious way to make a whole card pressable and is wrong: an ARIA button takes its accessible name
@@ -730,7 +737,7 @@ on (§3), and twenty hues in a row of five would be saying nothing.
 **A product is not a kind, and it is drawn as itself.** The template catalogue is sixty-two products
 the reader already knows by their marks — n8n, Grafana, Redis — and set as sixty-two names in one grey
 face it was a wall of words, with the language marks on the Git tab the only colour anywhere in the
-flow. `deploy/product-logo.tsx` draws each product's *own* logo, in its own colours, on the recessed
+flow. `components/product-logo.tsx` draws each product's *own* logo, in its own colours, on the recessed
 tile `ProjectMark` uses for a deployment's favicon, so a template and the project it becomes are drawn
 the same way: every template card, the five database engines, the images on the Images tab (by the
 last segment of the reference, Docker's whale for the rest), and the settings panel's header. The
@@ -743,6 +750,15 @@ one file whose own colour failed that ground, MySQL's navy dolphin, was lifted t
 sits beside a card's words rather than in front of a header's title — and the source strip still
 stays muted, because five *kinds* are not five products. A repository row on the Git tab carries its
 owner's picture on the same reasoning: the face is the account, which a glyph could only guess at.
+
+The same marks carry into Docker and Databases, because they are the same products. A container,
+an image and a stack's service are drawn as the product their image is (`imageProduct` reads the
+last segment of the reference; anything it cannot name is Docker's whale), a stack as its services'
+products overlapping (`ProductLogos`, the way a group of avatars overlaps; Compose's own mark when
+none has a logo), a volume as the product of the container that keeps its data there, and a
+database connection as its engine — in the section title's switcher and in every engine picker,
+which are one `EngineCard` (`choice-card.tsx`) rather than three shapes that had already drifted.
+Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
 
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
@@ -990,9 +1006,11 @@ reading page is revamped:
 
 - a list whose rows are **destinations or choices** — a run to open, a project to enter, an engine to
   start — becomes a `ChoiceList` of `ChoiceRow`s and gets the edge;
-- a table of **readings** — the audit log, the containers table, a metrics grid — keeps its hairlines,
-  its density and its wash. Twelve columns do not become cards. §12 already says what a wide table
-  does when it stops fitting, and it is not this;
+- a table of **readings** — the audit log, a metrics grid, a process table — keeps its hairlines, its
+  density and its wash. Twelve columns of readings do not become cards. The containers table was the
+  example here until 2026-09-23 and is the case that shows where the line is: its cells were live
+  readings, but every row opened the container's own page, so the row was a destination with
+  readings on it — which is the Git card's shape, not a table's (§12);
 - a **figure** is still a `StatTile` (§15 pass 2) in either register.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is

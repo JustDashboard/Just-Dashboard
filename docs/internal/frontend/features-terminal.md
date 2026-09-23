@@ -88,7 +88,7 @@ that does something.
   the section keeps, and a diff or a captured compose file sits in a `Well`.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
   place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
-  tagged by service, links to Files, git and a shell in the stack's directory. `container-detail.tsx` adds
+  tagged by service, a Files tab over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
   URL), the writable-layer investigator, the failure diagnosis, editable limits, raw inspect, and
   Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
@@ -97,7 +97,7 @@ that does something.
   in words rather than as a Docker noun, and puts where it actually lives on the second line; the header
   answers the question the tab is opened with, which is how much of this survives a rebuild. A volume or
   bind row also opens onto what is *in* it — `files/inline-browser.tsx`, the same component the volume
-  panel uses — because naming a mount does not answer whether the backup landed or what the application
+  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane — because naming a mount does not answer whether the backup landed or what the application
   wrote; a tmpfs row does not, since memory has nowhere on this filesystem to look. Storage that looks
   like a database's own files is named as such above the browser while the container is running
   (`docker/shared.tsx`). Its Usage

@@ -342,8 +342,10 @@ held twenty-eight of them.
   compared case-insensitively — the identity is one row: the face, the login, "GitHub App · GitHub
   CLI", the repository count and "Connected". Two accounts are still two rows. Each repository row
   carries its owner's picture, with the owner stepped back in the title; an avatar still loading
-  shows the GitHub glyph rather than initials in a circle (§4).
-- **Products are drawn as themselves.** `deploy/product-logo.tsx` maps every blueprint id, the five
+  shows the GitHub glyph rather than initials in a circle (§4). The list and the identity row are
+  drawn once, after both identities have answered: the App's rows used to land first under
+  placeholders for the CLI's `gh` round trip, and the list redrew itself when the second answer came.
+- **Products are drawn as themselves.** `components/product-logo.tsx` (then `deploy/product-logo.tsx`) maps every blueprint id, the five
   quick-setup engines and image names to a bundled logo in `public/logos/` (homarr-labs
   dashboard-icons under Apache-2.0, Jupyter from Simple Icons, MySQL from devicon lifted to L 0.72 —
   `NOTICE` travels with them). §14 records why the colour is the artwork's and the strip's is not.

@@ -9,7 +9,6 @@ import {
   Box,
   Code,
   FloppyDisk,
-  FolderOpen,
   GitBranch,
   Play,
   RefreshClockwise,
@@ -40,6 +39,9 @@ import { CodeEditor } from "@/components/code-editor"
 import { LogViewer } from "@/components/log-viewer"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FileBrowser } from "@/components/files/inline-browser"
+import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -145,6 +147,7 @@ function StackBody({ name }: { name: string }) {
           }
           title={
             <span className="inline-flex max-w-full min-w-0 items-center gap-3">
+              {data && <StackLogos stack={data} />}
               <span className="truncate">{name}</span>
               {data && <StackStateBadge stack={data} />}
             </span>
@@ -202,6 +205,12 @@ function StackBody({ name }: { name: string }) {
               {/* What a deploy would change, before it changes it. */}
               <TabsTrigger value="preview">Deploy preview</TabsTrigger>
               <TabsTrigger value="compose">Compose file</TabsTrigger>
+              {/* The stack's own directory, read where the stack is: the
+                  compose file's neighbours — an `.env`, a mounted config, the
+                  data a bind mount writes — are what a stack is opened to
+                  check, and a link to another page asked for a second
+                  navigation to see them. */}
+              {data.workingDir && <TabsTrigger value="files">Files</TabsTrigger>}
               <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
@@ -213,15 +222,15 @@ function StackBody({ name }: { name: string }) {
                   description="This stack has a compose file but no containers. Bring it up to start them."
                 />
               ) : (
-                /* Rows with a hairline between them and nothing around them:
-                   the services are the rows of a table the eye reads down, and
-                   a tab panel under a page header needs no second frame to say
-                   where it starts (§15 pass 1). */
-                <ul className="animate-rise divide-y divide-hairline">
+                /* Cards, because each service is its container to open — the
+                   same lit edge the containers list gives the same container
+                   (§16). A tab panel under a page header needs no frame of its
+                   own around them. */
+                <ChoiceList aria-label="Services" className="animate-rise">
                   {data.services.map((svc) => (
                     <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
                   ))}
-                </ul>
+                </ChoiceList>
               )}
             </TabsContent>
             <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto">
@@ -235,6 +244,17 @@ function StackBody({ name }: { name: string }) {
                 canValidate={can("system.admin")}
               />
             </TabsContent>
+            {data.workingDir && (
+              <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto">
+                {tab === "files" && (
+                  <FileBrowser
+                    root={data.workingDir}
+                    label={data.name}
+                    emptyNote="This stack's directory is empty."
+                  />
+                )}
+              </TabsContent>
+            )}
             <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
               {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
             </TabsContent>
@@ -355,8 +375,9 @@ function StackActions({
 /**
  * The links out.
  *
- * A stack is a directory; this dashboard has a file manager, a git panel and a
- * terminal that can each be pointed at one. The git line is the load-bearing
+ * A stack is a directory; this dashboard has a git panel and a terminal that
+ * can each be pointed at one. Its files are the Files tab, which opens onto
+ * the file manager from there. The git line is the load-bearing
  * part — "uncommitted changes" means compose will deploy something that is in
  * no commit, and "2 behind" means a pull would change what deploying does.
  */
@@ -365,12 +386,6 @@ function StackLinks({ data }: { data: StackDetail }) {
   if (!data.workingDir) return null
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Button size="xs" variant="outline" asChild>
-        <Link href={`/files?path=${encodeURIComponent(data.workingDir)}`}>
-          <FolderOpen className="size-3" />
-          Files
-        </Link>
-      </Button>
       {can("terminal") && (
         <Button size="xs" variant="outline" asChild>
           <Link href={`/terminal?cwd=${encodeURIComponent(data.workingDir)}`}>
@@ -404,6 +419,19 @@ function StackLinks({ data }: { data: StackDetail }) {
   )
 }
 
+/** What a stack is made of, beside its name: its services' products, or Compose. */
+function StackLogos({ stack }: { stack: StackDetail }) {
+  const images = stack.services.map((service) => service.image).filter(Boolean)
+  return (
+    <ProductLogos ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]} size="md" />
+  )
+}
+
+/**
+ * One service, as the card that opens its container. A service compose has
+ * not created yet has no container to open, and says so where its image would
+ * be.
+ */
 function ServiceRow({
   service,
   managed,
@@ -415,12 +443,23 @@ function ServiceRow({
 }) {
   const { can } = useAuth()
   const published = service.ports.filter((p) => p.publicPort)
+  const control = managed && can("system.admin") && can("service.control")
 
   return (
-    <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
-      <div className="min-w-0 flex-1 basis-48">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="truncate text-body font-medium">{service.name}</span>
+    <ChoiceRow
+      verb={service.name}
+      disabled={service.missing}
+      href={
+        service.container
+          ? `/docker/containers/${encodeURIComponent(service.container)}`
+          : undefined
+      }
+      leading={
+        <ProductLogo id={service.image ? imageProduct(service.image) : undefined} size="sm" />
+      }
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{service.name}</span>
           {service.missing ? (
             <Status verdict="warning" label="Not created" />
           ) : (
@@ -432,48 +471,52 @@ function ServiceRow({
               label={service.health.charAt(0).toUpperCase() + service.health.slice(1)}
             />
           )}
-        </div>
-        <p className="truncate font-mono text-hint text-muted-foreground">
+        </span>
+      }
+      description={
+        <span className="font-mono">
           {service.missing
             ? "defined in the compose file, but no container exists for it"
             : service.image}
-        </p>
-      </div>
-
-      {published.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {published.map((p, i) => (
-            <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
-          ))}
-        </div>
-      )}
-
-      {managed && can("system.admin") && can("service.control") && !service.missing && (
-        <Button
-          size="xs"
-          variant="ghost"
-          title="Recreates this service from the compose file without touching the rest of the stack"
-          onClick={() =>
-            onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
-          }
-        >
-          <RefreshClockwise className="size-3" />
-          Recreate service
-        </Button>
-      )}
-      {managed && can("system.admin") && can("service.control") && service.missing && (
-        <Button
-          size="xs"
-          variant="outline"
-          onClick={() =>
-            onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
-          }
-        >
-          <Play className="size-3" />
-          Create it
-        </Button>
-      )}
-    </li>
+        </span>
+      }
+      trailing={
+        published.length > 0 && (
+          <span className="hidden flex-wrap justify-end gap-1 sm:flex">
+            {published.map((p, i) => (
+              <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
+            ))}
+          </span>
+        )
+      }
+      actions={
+        control &&
+        (service.missing ? (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() =>
+              onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
+            }
+          >
+            <Play className="size-3" />
+            Create it
+          </Button>
+        ) : (
+          <Button
+            size="xs"
+            variant="ghost"
+            title="Recreates this service from the compose file without touching the rest of the stack"
+            onClick={() =>
+              onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
+            }
+          >
+            <RefreshClockwise className="size-3" />
+            Recreate service
+          </Button>
+        ))
+      }
+    />
   )
 }
 

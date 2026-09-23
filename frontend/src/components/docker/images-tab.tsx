@@ -7,6 +7,7 @@ import {
   CheckCircle,
   ChevronDoubleDown,
   Download,
+  Layers,
   Question,
   RefreshClockwise,
   Servers,
@@ -15,7 +16,6 @@ import {
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
-import { cn } from "@/lib/utils"
 import type { DockerImage, ImageDetail, ImageUpdateStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -30,9 +30,11 @@ import {
 } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
-import { Row, ROW_BLEED, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
+import { Detail, DetailList, SearchInput } from "@/components/page"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { DiskPanel } from "@/components/docker/disk-panel"
 import { Hint, Term } from "@/components/docker/explain"
@@ -43,14 +45,6 @@ import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * What an operator types to confirm removing an image, and what the dialog
@@ -166,8 +160,9 @@ export function ImagesTab({
       )}
 
       {/* Plain: the image list is the whole of the page under the disk
-          readings, and a title with a hairline marks it. */}
-      <Panel className="animate-rise">
+          readings, and each image is a card with its own edge — a frame around
+          framed cards is the nesting §12 refuses. */}
+      <Panel plain className="animate-rise">
         <PanelHeader
           title="Images"
           actions={
@@ -220,170 +215,26 @@ export function ImagesTab({
           {visible.length === 0 ? (
             <EmptyState icon={Box} title={filter ? "Nothing matches" : "No images"} />
           ) : (
-            <>
-              {/*
-                Below `xl` the table is replaced rather than squeezed, for the
-                reason the containers page states at length: past roughly half
-                the columns removed, what remains is the wreckage of a table
-                rather than a layout. The list keeps *everything* the six
-                columns said — the tags, the id, the registry's verdict, the
-                size, what is running from it and when it arrived — drawn down
-                the row instead of across it.
-              */}
-              <ul className="divide-y divide-hairline xl:hidden">
-                {visible.map((image) => {
-                  const tag = primaryTag(image)
-                  return (
-                    <ImageListItem
-                      key={image.id}
-                      image={image}
-                      update={tag ? updates.data?.[tag] : undefined}
-                      confirm={confirm}
-                      onOpen={() => setSelected(image.id)}
-                      onPull={setPulling}
-                      onChanged={refresh}
-                    />
-                  )
-                })}
-              </ul>
-
-              {/* The outer columns take the gutter from their own cell padding,
-                  so the first column starts in the title's column; the `-mx`
-                  bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 xl:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-full">Repository</TableHead>
-                      {/*
-                        Named for what it answers rather than "Version", which was
-                        carrying three unrelated ideas at once: which tag this is,
-                        whether the tag still points where it did, and whether the
-                        image has a name at all.
-                      */}
-                      <TableHead>Registry</TableHead>
-                      <TableHead className="text-right">Size</TableHead>
-                      <TableHead className="text-right">Used by</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead className="w-px text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visible.map((image) => {
-                      const tag = primaryTag(image)
-                      const update = tag ? updates.data?.[tag] : undefined
-                      return (
-                        <TableRow
-                          key={image.id}
-                          className="group"
-                          onActivate={() => setSelected(image.id)}
-                        >
-                          <TableCell>
-                            {/* The name is the row. The short id used to sit
-                                under it and doubled the row's height for a
-                                handle nobody reaches for here — the detail
-                                panel carries it. */}
-                            <div className="max-w-[26rem] min-w-0">
-                              <RowLink mono onClick={() => setSelected(image.id)}>
-                                {image.repoTags.length ? (
-                                  image.repoTags.join(", ")
-                                ) : (
-                                  <em>untagged</em>
-                                )}
-                              </RowLink>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <UpdateState status={update} dangling={image.dangling} />
-                          </TableCell>
-                          <TableCell className="numeric text-right font-mono">
-                            {bytes(image.size)}
-                          </TableCell>
-                          <TableCell className="numeric text-right">
-                            {image.containers > 0 ? (
-                              image.containers
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {relativeTime(image.created)}
-                          </TableCell>
-                          <TableCell>
-                            {/* Always drawn, never revealed on hover: a control
-                                a phone cannot hover is a control a phone cannot
-                                reach, and a column that is empty until the
-                                pointer arrives reads as unfinished. */}
-                            <span className="flex shrink-0 items-center justify-end gap-0.5">
-                              {can("service.control") && tag && (
-                                <IconAction
-                                  label={`Pull a fresh ${tag}`}
-                                  onClick={() => setPulling(tag)}
-                                >
-                                  <Download />
-                                </IconAction>
-                              )}
-                              {/*
-                                  An image a container was built from is not deletable
-                                  in any useful sense: Docker refuses, and forcing it
-                                  leaves a running container whose image is gone and
-                                  which cannot start again. The slot stays reserved
-                                  with a disabled control rather than collapsing,
-                                  so rows do not shift with state.
-                                */}
-                              {can("destructive") &&
-                                (image.containers > 0 ? (
-                                  <IconAction
-                                    label={`Used by ${image.containers} container${image.containers === 1 ? "" : "s"} — cannot be removed while in use`}
-                                    className="text-muted-foreground opacity-40"
-                                    onClick={() => setSelected(image.id)}
-                                  >
-                                    <Trash />
-                                  </IconAction>
-                                ) : (
-                                  <IconAction
-                                    label="Remove image"
-                                    className="text-destructive"
-                                    onClick={() =>
-                                      confirm({
-                                        title: "Delete image",
-                                        confirmLabel: "Delete",
-                                        description: (
-                                          <>
-                                            <p>
-                                              Deletes <b>{imagePhrase(image)}</b>.
-                                            </p>
-                                            <p>
-                                              No container is using it. Anything that needs it later
-                                              has to pull or rebuild it — which for an image built
-                                              here and never pushed means rebuilding from source.
-                                            </p>
-                                          </>
-                                        ),
-                                        action: async (c) => {
-                                          await del(
-                                            `/docker/images/${encodeURIComponent(image.id)}`,
-                                            {
-                                              confirm: c,
-                                            },
-                                          )
-                                          refresh()
-                                        },
-                                      })
-                                    }
-                                  >
-                                    <Trash />
-                                  </IconAction>
-                                ))}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
+            // One card per image at every width: each opens the image's own
+            // panel, so each is a choice (§16), and the six columns the table
+            // named are said by the card itself — the registry's verdict and
+            // the size beside the name, the id, age and use beneath it.
+            <ChoiceList aria-label="Images" className="animate-rise">
+              {visible.map((image) => {
+                const tag = primaryTag(image)
+                return (
+                  <ImageCard
+                    key={image.id}
+                    image={image}
+                    update={tag ? updates.data?.[tag] : undefined}
+                    confirm={confirm}
+                    onOpen={() => setSelected(image.id)}
+                    onPull={setPulling}
+                    onChanged={refresh}
+                  />
+                )
+              })}
+            </ChoiceList>
           )}
         </PanelBody>
       </Panel>
@@ -404,20 +255,19 @@ export function ImagesTab({
 }
 
 /**
- * One image on a screen too narrow for six columns.
+ * One image, as a card that opens its detail.
  *
- * A row and not a card, in the design system's sense: no frame of its own, a
- * hairline between it and the next, a wash under the pointer. The name is a
- * real `<button>` rather than a `role="button"` wrapper, because an ARIA
- * button takes its accessible name from its contents and the whole row would
- * otherwise be announced as one control.
+ * The mark is the product the image is — nginx, Postgres, Grafana — because a
+ * server's image list is a column of registry paths that all start the same
+ * way, and the logo is found before the path is read. An untagged layer is no
+ * product and keeps the plain glyph.
  *
- * Nothing the wide table carried is dropped. Size, the registry's verdict,
- * the id and the age all sit on one meta line, because "is this the old copy
- * and can I delete it" — the reason a phone reader is here — is answered by
- * that line and by the count beside it.
+ * Nothing the table carried is dropped. The registry's verdict and the size
+ * sit beside the name, because "is this the old copy and how much will
+ * deleting it give back" is why anybody is on this page; the id, the age and
+ * what is running from it are the second line.
  */
-function ImageListItem({
+function ImageCard({
   image,
   update,
   confirm,
@@ -435,28 +285,44 @@ function ImageListItem({
   const { can } = useAuth()
   const tag = primaryTag(image)
   const removable = can("destructive") && image.containers === 0
+  const name = image.repoTags.length ? image.repoTags.join(", ") : "untagged"
 
   return (
-    <li
-      className={cn(
-        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
-        ROW_BLEED,
-      )}
-    >
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="block max-w-full truncate rounded-sm text-left font-mono text-body focus-ring hover:text-primary"
-        >
-          {image.repoTags.length ? image.repoTags.join(", ") : <em>untagged</em>}
-        </button>
+    <ChoiceRow
+      verb={`Open ${name}`}
+      onSelect={onOpen}
+      leading={<ProductLogo id={tag ? imageProduct(tag) : undefined} fallback={Layers} size="sm" />}
+      title={<span className="font-mono">{image.repoTags.length ? name : <em>untagged</em>}</span>}
+      description={
+        <>
+          <span className="font-mono">{shortId(image.id)}</span> · {relativeTime(image.created)} ·{" "}
+          {image.containers > 0
+            ? `used by ${image.containers} container${image.containers === 1 ? "" : "s"}`
+            : "not in use"}
+        </>
+      }
+      trailing={
+        <>
+          <span className="hidden w-32 sm:block">
+            <UpdateState status={update} dangling={image.dangling} />
+          </span>
+          <span className="numeric w-20 text-right font-mono text-hint">{bytes(image.size)}</span>
+        </>
+      }
+      actions={
         <span className="flex shrink-0 items-center gap-0.5">
           {can("service.control") && tag && (
             <IconAction label={`Pull a fresh ${tag}`} onClick={() => onPull(tag)}>
               <Download />
             </IconAction>
           )}
+          {/*
+            An image a container was built from is not deletable in any useful
+            sense: Docker refuses, and forcing it leaves a running container
+            whose image is gone and which cannot start again. The slot stays
+            with a disabled control rather than collapsing, so cards do not
+            shift with state.
+          */}
           {can("destructive") &&
             (removable ? (
               <IconAction
@@ -497,17 +363,14 @@ function ImageListItem({
               </IconAction>
             ))}
         </span>
-      </div>
-
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        <UpdateState status={update} dangling={image.dangling} />
-        <span className="numeric font-mono text-hint text-muted-foreground">
-          {bytes(image.size)}
-        </span>
-        <span className="text-hint text-muted-foreground">{relativeTime(image.created)}</span>
-      </div>
-    </li>
+      }
+    />
   )
+}
+
+/** The handle `docker` prints, without the digest's algorithm in front of it. */
+function shortId(id: string) {
+  return id.replace(/^sha256:/, "").slice(0, 12)
 }
 
 /** The version column: what the registry says about this tag now. */ function UpdateState({

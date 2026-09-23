@@ -54,6 +54,7 @@ import {
   type ConfirmFn,
 } from "@/components/docker/shared"
 import { FileBrowser } from "@/components/files/inline-browser"
+import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Metric, MetricStrip, Page, PageHeader } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -190,6 +191,8 @@ function ContainerDetailPanel({
           }
           title={
             <span className="inline-flex max-w-full min-w-0 items-center gap-3">
+              {/* The product it runs, the mark the containers list found it by. */}
+              {detail && <ProductLogo id={imageProduct(detail.image)} />}
               <span className="truncate">{detail?.name ?? "Container"}</span>
               {detail && (
                 <Status
@@ -1126,7 +1129,7 @@ function MountRow({
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
         className={cn(
-          "flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left transition-colors focus-ring-inset hover:bg-row-hover",
+          "flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left focus-ring-inset transition-colors hover:bg-row-hover",
           ROW_BLEED,
         )}
       >

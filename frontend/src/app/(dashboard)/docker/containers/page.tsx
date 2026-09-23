@@ -8,7 +8,6 @@ import { Box, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { prune, pruneSummary, RECLAIM_SAFE } from "@/lib/docker-prune"
-import { percent, truncateMiddle } from "@/lib/format"
 import type {
   Container,
   ContainerSparkline,
@@ -20,39 +19,23 @@ import type {
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageHeader, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ChipCount, FilterChip } from "@/components/tabs"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { ChoiceList, GroupRule } from "@/components/flow"
 import { EmptyState, ErrorState } from "@/components/state"
 import { AttentionPanel, RuntimeHealthPanel } from "@/components/docker/attention"
 import { ExplainIcon } from "@/components/docker/explain"
-import { PortList } from "@/components/docker/exposure"
-import {
-  ContainerName,
-  ContainerStatus,
-  CpuCell,
-  IssuesCell,
-  MemoryCell,
-} from "@/components/docker/container-cells"
 import { ContainerCard } from "@/components/docker/container-card"
 import {
-  ContainerRowActions,
   useContainerControl,
   useContainerVerbs,
   type PendingMap,
 } from "@/components/docker/container-actions"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * What is running on this server, and is any of it unhappy.
@@ -60,10 +43,10 @@ import {
  * Two things changed in the 0.6.7 polish pass, and both were about the reader
  * rather than about the data:
  *
- *   The nine-column table is now the *wide* layout rather than the only one.
- *   Below `lg` the same containers are drawn down the row instead of across it
- *   — see `container-card.tsx` — because a table with five of its nine columns
- *   removed is a table somebody is reading the remains of.
+ *   The nine-column table is gone at every width: each container is a card
+ *   you open, its readings held to the right on a wide screen and beneath its
+ *   name on a narrow one — see `container-card.tsx` for why a list of places
+ *   to go is cards rather than cells.
  *
  *   The row's verbs are a word and a sentence rather than five glyphs. Start,
  *   restart and stop stay as icons because they are pressed constantly and
@@ -340,7 +323,34 @@ export default function ContainersPage() {
   const attention = health.data?.attention.total ?? 0
   const narrowed = filter.trim().length > 0 || state !== "all"
 
+  // What needs you first, as on the Git page: only while the list is whole,
+  // because once a filter is on, its name is the group, and a rule repeating
+  // it over one run of cards is a rule with nothing on either side of it.
+  const groups = narrowed
+    ? [{ key: "all", label: "", rows: visible }]
+    : [
+        {
+          key: "attention",
+          label: "Needs attention",
+          rows: visible.filter((c) => flagged.has(c.id)),
+        },
+        {
+          key: "running",
+          label: "Running",
+          rows: visible.filter((c) => !flagged.has(c.id) && c.state === "running"),
+        },
+        {
+          key: "stopped",
+          label: "Not running",
+          rows: visible.filter((c) => !flagged.has(c.id) && c.state !== "running"),
+        },
+      ].filter((group) => group.rows.length > 0)
+
+  // One answer for every card, rather than a listener per row.
+  const wide = useMediaQuery("(min-width: 1280px)")
+
   const shared = {
+    wide,
     stats,
     trendByName,
     diagnosis: health.data,
@@ -369,10 +379,10 @@ export default function ContainersPage() {
 
       {socketError && <ErrorState error={new Error(socketError)} />}
 
-      {/* Plain: the list is the whole of the page under the two readings above
-          it, and a title with a hairline marks it. A frame here was the one
-          box left on a page that had just stopped drawing them. */}
-      <Panel>
+      {/* Plain: every container is a card with its own edge now, and a frame
+          around framed cards is the nesting §12 refuses. A title and a hairline
+          mark where the list begins. */}
+      <Panel plain>
         <PanelHeader
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -444,57 +454,20 @@ export default function ContainersPage() {
               }
             />
           ) : (
-            <>
-              {/*
-                Below `xl` the table is replaced rather than squeezed. The
-                boundary is 1280 and not 1024 because of the sidebar: at 1024 a
-                nine-column table has about 750px to live in, so it appeared
-                already scrolling sideways inside its own panel with Issues and
-                the row's actions past the right edge — a table that arrives
-                broken. `CPU · 1h` waits for `2xl`, which is where the ninth
-                column stops being the one that pushes the rest out.
-              */}
-              <ul className="animate-rise divide-y divide-hairline xl:hidden">
-                {visible.map((container) => (
-                  <ContainerListItem key={container.id} container={container} {...shared} />
-                ))}
-              </ul>
-
-              {/* The outer columns take the gutter from their own cell padding,
-                  so the first column starts in the title's column; the `-mx`
-                  bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="hidden min-w-0 animate-rise group-data-[plain]/panel:-mx-4 xl:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-full">Container</TableHead>
-                      <TableHead>Image</TableHead>
-                      {/*
-                        Status is runtime and nothing else. It used to carry the
-                        worst finding about the container underneath the state,
-                        so a perfectly healthy container reading "Running" also
-                        read "publishes PostgreSQL on every interface" in the
-                        same cell — two different kinds of fact in one column.
-                        Diagnostics have their own column now.
-                      */}
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">CPU</TableHead>
-                      <TableHead className="text-right">Memory</TableHead>
-                      {/* Named, because a sparkline cannot say what it is charting. */}
-                      <TableHead className="hidden text-right 2xl:table-cell">CPU · 1h</TableHead>
-                      <TableHead>Ports</TableHead>
-                      <TableHead className="text-center">Issues</TableHead>
-                      <TableHead className="w-px text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visible.map((container) => (
-                      <ContainerTableRow key={container.id} container={container} {...shared} />
+            <div className="flex min-w-0 animate-rise flex-col gap-4">
+              {groups.map((group) => (
+                <section key={group.key} className="flex min-w-0 flex-col gap-2">
+                  {group.label && groups.length > 1 && (
+                    <GroupRule label={group.label} count={group.rows.length} />
+                  )}
+                  <ChoiceList aria-label={group.label || "Containers"}>
+                    {group.rows.map((container) => (
+                      <ContainerItem key={container.id} container={container} {...shared} />
                     ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
+                  </ChoiceList>
+                </section>
+              ))}
+            </div>
           )}
         </PanelBody>
       </Panel>
@@ -506,6 +479,7 @@ export default function ContainersPage() {
 
 /** Everything a row needs that does not come from the container itself. */
 type RowContext = {
+  wide: boolean
   stats: Record<string, ContainerStats>
   trendByName: Map<string, ContainerSparkline>
   diagnosis?: DockerDiagnosis
@@ -517,89 +491,13 @@ type RowContext = {
 }
 
 /**
- * One row of the wide table.
- *
- * A component rather than a closure in the page's `map`, because the verbs it
- * offers come from a hook and a hook cannot be called in a loop — and because
- * the two layouts genuinely are two components that happen to show the same
- * container.
+ * One container's card. A component rather than a closure in the page's
+ * `map`, because the verbs it offers come from a hook and a hook cannot be
+ * called in a loop.
  */
-function ContainerTableRow({
+function ContainerItem({
   container,
-  stats,
-  trendByName,
-  diagnosis,
-  confirm,
-  act,
-  pending,
-  open,
-  onChanged,
-}: RowContext & { container: Container }) {
-  const verbs = useContainerVerbs({
-    container,
-    confirm,
-    act,
-    onOpenTab: (tab) => open(container.id, tab),
-    onChanged,
-  })
-  const stat = stats[container.id]
-  const busy = pending[container.id]
-
-  return (
-    <TableRow
-      className={busy ? "group opacity-70" : "group"}
-      aria-busy={busy ? true : undefined}
-      onActivate={() => open(container.id)}
-    >
-      <TableCell>
-        <ContainerName container={container} onOpen={() => open(container.id)} />
-      </TableCell>
-      <TableCell className="font-mono text-hint text-muted-foreground">
-        {truncateMiddle(container.image, 34)}
-      </TableCell>
-      <TableCell>
-        <ContainerStatus container={container} pending={busy} />
-      </TableCell>
-      <TableCell className="text-right">
-        <CpuCell stat={stat} container={container} />
-      </TableCell>
-      <TableCell className="text-right">
-        <MemoryCell stat={stat} container={container} />
-      </TableCell>
-      <TableCell className="hidden text-right 2xl:table-cell">
-        <ContainerTrend trend={trendByName.get(container.name)} />
-      </TableCell>
-      {/* One row, always. See the note on `PortList`: a proxy publishing six
-          ports used to wrap this cell onto three lines and make its row half
-          again as tall as every other. */}
-      <TableCell className="max-w-40">
-        <PortList ports={container.exposure ?? []} max={1} />
-      </TableCell>
-      <TableCell>
-        <IssuesCell
-          diagnosis={diagnosis}
-          containerId={container.id}
-          onOpen={() => open(container.id, "overview")}
-        />
-      </TableCell>
-      {/*
-        Drawn at rest rather than revealed on hover. Reserving a column for
-        controls and then leaving it empty is a ninth column of nothing —
-        thirteen rows of blank space ending in one row that suddenly has
-        buttons in it, which is what made this table look unfinished. They are
-        dimmed until the pointer is on the row, which keeps a long list calm
-        without pretending the column is not there.
-      */}
-      <TableCell>
-        <ContainerRowActions verbs={verbs} reveal={false} dim />
-      </TableCell>
-    </TableRow>
-  )
-}
-
-/** The same container, on a screen too narrow for nine columns. */
-function ContainerListItem({
-  container,
+  wide,
   stats,
   trendByName,
   diagnosis,
@@ -624,32 +522,10 @@ function ContainerListItem({
       diagnosis={diagnosis}
       verbs={verbs}
       pending={pending[container.id]}
+      wide={wide}
       onOpen={() => open(container.id)}
+      onOpenIssues={() => open(container.id, "overview")}
     />
-  )
-}
-
-/**
- * One container's last hour, in a table cell. The peak is spelled out beside
- * the line because a sparkline cannot carry a scale: two rows whose lines look
- * identical may be a container that touched 4% and one that pinned two cores.
- */
-function ContainerTrend({ trend }: { trend?: ContainerSparkline }) {
-  if (!trend || trend.cpu.length === 0) {
-    return <span className="text-hint text-muted-foreground">—</span>
-  }
-  return (
-    <span className="flex items-center justify-end gap-2">
-      <Sparkline
-        values={trend.cpu}
-        label={`CPU over the last hour, peaking at ${percent(trend.cpuPeak)}`}
-        color="var(--chart-1)"
-        className="animate-rise"
-      />
-      <span className="numeric w-11 shrink-0 text-right font-mono text-hint text-muted-foreground">
-        {percent(trend.cpuPeak, 0)}
-      </span>
-    </span>
   )
 }
 

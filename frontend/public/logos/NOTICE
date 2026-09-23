@@ -7,14 +7,15 @@ Most files come from homarr-labs/dashboard-icons
 (https://github.com/homarr-labs/dashboard-icons), licensed under the Apache
 License 2.0 — see LICENSE in this directory. Some are renamed after the
 product they are used for (seerr.svg is the collection's jellyseerr.svg), the
-raster ones were resized to 96px WebP, and gotify.svg had an empty Illustrator
-extension element removed.
+raster ones — docker-compose.webp among them — were resized to 96px WebP, and
+gotify.svg had an empty Illustrator extension element removed.
 
 jupyter.svg is from Simple Icons (https://simpleicons.org), CC0 1.0.
 
 mysql.svg is devicon's mysql-original.svg (https://github.com/devicons/devicon),
-recoloured from #00618A to #57afe0 so it reads on a dark ground, used under the
-MIT License:
+recoloured from #00618A to #57afe0 so it reads on a dark ground; sqlite.svg is
+devicon's sqlite-original.svg and sqlserver.svg its microsoftsqlserver-plain.svg,
+both unchanged. All three are used under the MIT License:
 
   Copyright (c) 2015 konpa
 

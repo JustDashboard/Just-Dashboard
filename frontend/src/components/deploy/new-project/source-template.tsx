@@ -39,7 +39,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { ProductLogo } from "@/components/deploy/product-logo"
+import { ProductLogo } from "@/components/product-logo"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"

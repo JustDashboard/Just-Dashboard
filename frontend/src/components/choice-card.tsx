@@ -1,9 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Check } from "@/components/icons"
+import { ArrowRight, Check, Database } from "@/components/icons"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
+import { ProductLogo } from "@/components/product-logo"
+import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 
 /**
@@ -226,5 +228,73 @@ export function ChoiceCardTitle({ className, ...props }: React.ComponentProps<"s
 export function ChoiceCardHint({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span className={cn("text-hint leading-relaxed text-muted-foreground", className)} {...props} />
+  )
+}
+
+/** The three kinds `/databases/drivers` sorts every engine into. */
+export type EngineKind = "sql" | "document" | "keyvalue"
+
+const KIND_WORD: Record<EngineKind, string> = {
+  sql: "SQL",
+  document: "documents",
+  keyvalue: "key–value",
+}
+
+/**
+ * The kind of a driver, for the pickers that list engines to start rather than
+ * drivers to connect with — the provisioning options name a driver and nothing
+ * more, and the connection dialog's `DbDriverInfo` already carries the kind.
+ */
+export function driverKind(driver: string): EngineKind {
+  if (driver === "redis") return "keyvalue"
+  if (driver === "mongodb" || driver === "mongo") return "document"
+  return "sql"
+}
+
+/**
+ * One database engine, as every picker of one draws it: the engine's own logo,
+ * its name, the kind of store it is, and what exactly would run.
+ *
+ * Three pickers drew this — the deployment's quick setup, New database and the
+ * connection dialog — and they had already come apart: one with a generic
+ * database glyph, two with none, three different second lines. §4's rule about
+ * a component whose name already exists applies to a shape too.
+ */
+export function EngineCard({
+  engine,
+  label,
+  kind,
+  detail,
+  selected,
+  disabled,
+  onClick,
+}: {
+  /** The engine or driver key the logo is looked up by. */
+  engine: string
+  label: string
+  /** What kind of store it is, in the drivers' own vocabulary. */
+  kind?: EngineKind
+  /** A literal under the name: the image that would run. */
+  detail?: string
+  selected?: boolean
+  disabled?: boolean
+  onClick?: () => void
+}) {
+  return (
+    <ChoiceCard
+      selected={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className="min-h-0 flex-row items-center gap-3 px-2.5 py-2"
+    >
+      <ProductLogo id={engine} size="sm" fallback={Database} />
+      <span className="flex min-w-0 flex-col">
+        <ChoiceCardTitle className="truncate">{label}</ChoiceCardTitle>
+        {kind && <Tag>{KIND_WORD[kind]}</Tag>}
+        {detail && (
+          <span className="truncate font-mono text-micro text-muted-foreground">{detail}</span>
+        )}
+      </span>
+    </ChoiceCard>
   )
 }

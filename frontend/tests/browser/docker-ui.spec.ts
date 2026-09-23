@@ -604,12 +604,12 @@ test("a volume in use offers no delete button", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/volumes")
 
-  const inUse = page.getByRole("row").filter({ hasText: "app-data" })
+  const inUse = page.getByRole("listitem").filter({ hasText: "app-data" })
   await expect(inUse.getByText("1 container")).toBeVisible()
   await expect(inUse.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
 
   // The unattached one still can be removed — the gate is usage, not caution.
-  const free = page.getByRole("row").filter({ hasText: "orphaned" })
+  const free = page.getByRole("listitem").filter({ hasText: "orphaned" })
   await expect(free.getByRole("button", { name: "Remove", exact: true })).toHaveCount(1)
   // And an unmeasured size says which of the three things a dash used to mean.
   await expect(free.getByText("not measured")).toBeVisible()
@@ -623,8 +623,8 @@ test("published ports say what their binding means", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
-  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
+  const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
   await expect(web.getByText("443 → 443")).toBeVisible()
   await expect(db.getByText("5432 → 5432")).toBeVisible()
 
@@ -638,12 +638,13 @@ test("the containers table keeps status runtime-only and counts issues apart", a
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
+  const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
   // Status carries the runtime state and the health check's absence, and not
   // the security finding — that is a count in its own column.
   await expect(db.getByText("no health check")).toBeVisible()
   await expect(db.getByText("db publishes PostgreSQL on every interface")).toHaveCount(0)
-  await expect(page.getByRole("columnheader", { name: "Issues" })).toBeVisible()
+  // The finding is a count of its own, held apart from the status.
+  await expect(db.getByText("1", { exact: true })).toBeVisible()
 })
 
 /**
@@ -655,11 +656,11 @@ test("memory says no limit rather than inventing one", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
+  const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
   await expect(db.getByText(/no limit/)).toBeVisible()
 
   // A container that really is limited still shows the fraction.
-  const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
   await expect(web.getByText(/512\.0 MB/)).toBeVisible()
 })
 
@@ -854,7 +855,7 @@ test("the destructive verbs are words with a sentence, not glyphs", async ({ pag
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  const row = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
   await row.hover()
 
   // The constantly-pressed ones stay on the row itself, and are asserted first:
@@ -882,14 +883,14 @@ test("the state filters narrow the list and carry their own counts", async ({ pa
   await expect(running).toContainText("2")
   await running.click()
   await expect(running).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
+  await expect(page.getByRole("listitem").filter({ hasText: "nginx:alpine" })).toBeVisible()
 
   // Nothing is stopped on this host, so that chip is not offered at all —
   // a filter that can only ever return nothing is furniture.
   await expect(page.getByRole("button", { name: /^Not running/ })).toHaveCount(0)
 
   await page.getByRole("button", { name: /^Needs attention/ }).click()
-  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
+  await expect(page.getByRole("listitem").filter({ hasText: "nginx:alpine" })).toBeVisible()
 })
 
 /**
@@ -957,7 +958,7 @@ test("asking for a container's logs opens the logs", async ({ page }) => {
   await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
   await page.goto("/docker/containers")
 
-  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  const row = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
   await row.hover()
   await row.getByRole("button", { name: "More actions" }).click()
   await page.getByRole("menuitem", { name: /^Logs/ }).click()
@@ -1013,7 +1014,7 @@ test("a running container's dot says the reading is live", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  const row = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
   await expect(row.getByText("Running")).toBeVisible()
 
   const breathing = await row.evaluate((el) =>
@@ -1023,29 +1024,32 @@ test("a running container's dot says the reading is live", async ({ page }) => {
 })
 
 /**
- * Every column, on a screen with room for them.
+ * Every reading, on a screen with room for them.
  *
- * `CPU · 1h` waits for `2xl` rather than `xl`: it is the ninth column, and at
- * 1280 with the sidebar open it is the one that pushes Issues and the row's
- * actions past the panel's right edge.
+ * The nine-column table became cards; what it has to keep is what its columns
+ * said. Each reading names itself on the card now, because there is no header
+ * over the column to name it.
  */
-test("the containers table keeps every column on a wide desktop", async ({ page }) => {
+test("a container's card keeps every reading on a wide desktop", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto("/docker/containers")
 
-  for (const name of [
-    "Container",
-    "Image",
-    "Status",
-    "CPU",
-    "Memory",
-    "CPU · 1h",
-    "Ports",
-    "Issues",
-  ]) {
-    await expect(page.getByRole("columnheader", { name, exact: true })).toBeVisible()
-  }
+  const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  await expect(web.getByRole("button", { name: "web", exact: true })).toBeVisible()
+  await expect(web.getByText("nginx:alpine")).toBeVisible()
+  await expect(web.getByText("111111111111")).toBeVisible()
+  await expect(web.getByText("Running")).toBeVisible()
+  await expect(web.getByText("for 2h · healthy")).toBeVisible()
+  await expect(web.getByText("CPU", { exact: true })).toBeVisible()
+  await expect(web.getByText("12.0%")).toBeVisible()
+  await expect(web.getByText("Memory", { exact: true })).toBeVisible()
+  await expect(web.getByText(/100\.0 MB/)).toBeVisible()
+  await expect(web.getByText("443 → 443")).toBeVisible()
+  await expect(web.getByRole("button", { name: "Stop" })).toBeVisible()
+
+  // The mark is the image's product, served from this origin.
+  await expect(web.locator("img")).toHaveAttribute("src", "/logos/nginx.svg")
 })
 
 test("the inspect tab does not undo the masking the environment tab applies", async ({ page }) => {
@@ -1121,6 +1125,42 @@ test("a volume's contents are in the volume, not a page away", async ({ page }) 
   await expect(page.getByRole("heading", { name: "postgresql.conf" })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "app-data" })).toBeVisible()
   await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+})
+
+/**
+ * The storage browser is the file manager's listing, not a different one.
+ *
+ * It was a monospaced `ls` in a box: a crumb in 11px mono, bare glyphs, no
+ * column names and no way to tell a folder of pictures from a folder of
+ * config. It is the Files page's own shape now — named columns, the kind's
+ * coloured mark, a parent row, a count along the foot, and the grid view.
+ */
+test("the storage browser draws a directory the way the file manager does", async ({ page }) => {
+  await mockDocker(page)
+  await mockVolumeFiles(page)
+  await page.route("**/api/v1/docker/volumes/app-data", (route) => json(route, volumes[0]))
+  await page.goto("/docker/volumes")
+  await page.getByRole("button", { name: "app-data", exact: true }).first().click()
+
+  const panel = page.getByRole("dialog")
+  await expect(panel.getByRole("columnheader", { name: "Name" })).toBeVisible()
+  await expect(panel.getByRole("columnheader", { name: "Size" })).toBeVisible()
+  await expect(panel.getByText("1 folder, 1 file · 28.0 KB")).toBeVisible()
+  // The root has no level above it inside the volume, so no parent row.
+  await expect(panel.getByText("Parent folder")).toHaveCount(0)
+
+  await panel.getByRole("button", { name: "base" }).click()
+  const crumbs = panel.getByRole("navigation", { name: "Location inside this storage" })
+  await expect(crumbs.getByRole("button", { name: "base" })).toBeVisible()
+  await expect(panel.getByText("Parent folder")).toBeVisible()
+
+  await panel.getByRole("button", { name: "Grid view" }).click()
+  await expect(panel.getByRole("button", { name: "Grid view" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(panel.getByRole("columnheader")).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
 })
 
 /**

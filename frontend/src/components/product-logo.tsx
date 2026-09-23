@@ -1,14 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import { Box } from "@/components/icons"
+import { Box, type Icon } from "@/components/icons"
 import { cn } from "@/lib/utils"
 
 /**
  * The file in `public/logos/` for each product a reader picks by name: every
- * reviewed blueprint, keyed by its id; the five engines the database quick
- * setup offers, keyed the way `/databases/provision/options` names them; and
- * Docker itself, for an image on this server that is none of these.
+ * reviewed blueprint, keyed by its id; the database engines, keyed the way
+ * `/databases/provision/options` and a connection's `driver` name them; and
+ * Docker and Compose themselves, for an image or a stack that is none of these.
  *
  * A template catalogue of sixty-two names in one grey face is a wall of words:
  * n8n, Grafana and Redis are recognised by their marks long before their names
@@ -19,11 +19,12 @@ import { cn } from "@/lib/utils"
  * The files are bundled rather than fetched because the page's image policy
  * allows this origin only, and because the product runs on networks that
  * cannot reach a CDN (§8). Most come from homarr-labs/dashboard-icons
- * (Apache-2.0), picked in the variant that reads on a dark ground. Two do not,
- * because the collection draws them as a wordmark too small to read at 24px:
- * Jupyter is its Simple Icons mark (CC0), and MySQL is devicon's dolphin (MIT)
- * lifted to L 0.72 — its own #00618A is the navy §14 says disappears on this
- * ground. `public/logos/NOTICE` carries every source and licence.
+ * (Apache-2.0), picked in the variant that reads on a dark ground. A few do
+ * not, because the collection draws them as a wordmark too small to read at
+ * 24px or not at all: Jupyter is its Simple Icons mark (CC0), SQLite and SQL
+ * Server are devicon's (MIT), and MySQL is devicon's dolphin lifted to L 0.72 —
+ * its own #00618A is the navy §14 says disappears on this ground.
+ * `public/logos/NOTICE` carries every source and licence.
  *
  * Aliases say which product a blueprint *is*: Mongo Express is MongoDB's own
  * admin, whoami is Traefik's.
@@ -34,10 +35,12 @@ const LOGOS: Record<string, string> = {
   audiobookshelf: "audiobookshelf.svg",
   beszel: "beszel.svg",
   caddy: "caddy.svg",
+  clickhouse: "clickhouse.svg",
   "code-server": "code-server.webp",
   cyberchef: "cyberchef.svg",
   directus: "directus.svg",
   docker: "docker.svg",
+  "docker-compose": "docker-compose.webp",
   docuseal: "docuseal.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
@@ -73,6 +76,7 @@ const LOGOS: Record<string, string> = {
   ollama: "ollama.svg",
   "open-webui": "open-webui.svg",
   opengist: "opengist.svg",
+  oracle: "oracle.svg",
   pgadmin: "pgadmin.svg",
   phpmyadmin: "phpmyadmin.svg",
   portainer: "portainer.svg",
@@ -85,12 +89,15 @@ const LOGOS: Record<string, string> = {
   searxng: "searxng.svg",
   seerr: "seerr.svg",
   shlink: "shlink.svg",
+  sqlite: "sqlite.svg",
+  sqlserver: "sqlserver.svg",
   "stirling-pdf": "stirling-pdf.svg",
   syncthing: "syncthing.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
   typesense: "typesense.svg",
   "uptime-kuma": "uptime-kuma.svg",
+  valkey: "valkey.svg",
   vaultwarden: "vaultwarden.svg",
   wallabag: "wallabag.svg",
   whoami: "traefik.svg",
@@ -102,6 +109,8 @@ const IMAGE_ALIASES: Record<string, string> = {
   nginx: "nginx-static",
   "portainer-ce": "portainer",
   "actual-server": "actual",
+  "mssql-server": "sqlserver",
+  "clickhouse-server": "clickhouse",
 }
 
 /**
@@ -116,6 +125,23 @@ export function imageProduct(reference: string) {
 }
 
 /**
+ * The products a set of images is, most-named first and each once: a stack of
+ * three Postgres replicas and an API is Postgres and Docker, not four marks.
+ */
+export function imageProducts(references: string[]) {
+  const counts = new Map<string, number>()
+  for (const reference of references) {
+    const id = imageProduct(reference)
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  // Docker's whale says "an image", which every one of them is: it is only
+  // worth a place when nothing more specific is.
+  const named = [...counts.keys()].filter((id) => id !== "docker")
+  const ids = named.length > 0 ? named : [...counts.keys()]
+  return ids.sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))
+}
+
+/**
  * A product's logo on a recessed tile, the size of the mark a deployment card
  * carries (`ProjectMark`), so a template and the project it becomes are drawn
  * the same way.
@@ -127,17 +153,23 @@ export function imageProduct(reference: string) {
 export function ProductLogo({
   id,
   size = "md",
+  fallback: Fallback = Box,
   className,
 }: {
-  /** A blueprint id, or a quick-setup engine key. */
-  id: string
+  /** A blueprint id, an engine or driver key, or nothing for a thing with no product. */
+  id?: string
   size?: "sm" | "md"
+  /**
+   * The glyph for a thing that is no product — a volume, a network — so it
+   * still takes the tile and lines up with the rows that have a logo.
+   */
+  fallback?: Icon
   className?: string
 }) {
   // Which file failed, rather than whether one did: the settings panel's mark
   // changes product under the same component, and the next one may load.
   const [failed, setFailed] = useState<string>()
-  const file = LOGOS[id]
+  const file = id ? LOGOS[id] : undefined
   return (
     <span
       aria-hidden="true"
@@ -159,8 +191,32 @@ export function ProductLogo({
           onError={() => setFailed(file)}
         />
       ) : (
-        <Box className="size-4 text-muted-foreground" />
+        <Fallback className="size-4 text-muted-foreground" />
       )}
+    </span>
+  )
+}
+
+/**
+ * The products inside one thing — a stack's services — as tiles that overlap,
+ * the way a group of avatars does: the first is whole and each after it tucks
+ * under its neighbour, so three marks take the width of two. Past three it
+ * says how many more rather than drawing a wall.
+ */
+export function ProductLogos({ ids, size = "sm" }: { ids: string[]; size?: "sm" | "md" }) {
+  const shown = ids.slice(0, 3)
+  const more = ids.length - shown.length
+  return (
+    <span aria-hidden="true" className="flex shrink-0 items-center">
+      {shown.map((id, index) => (
+        <ProductLogo
+          key={id}
+          id={id}
+          size={size}
+          className={cn(index > 0 && (size === "sm" ? "-ml-3" : "-ml-4"), "ring-2 ring-card")}
+        />
+      ))}
+      {more > 0 && <span className="numeric ml-1 text-micro text-muted-foreground">+{more}</span>}
     </span>
   )
 }

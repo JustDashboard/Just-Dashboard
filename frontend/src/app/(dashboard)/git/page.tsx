@@ -11,6 +11,7 @@ import { useGitHubAccount } from "@/hooks/use-github"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { Page, PageHeader, SearchInput, Toolbar } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
+import { GroupRule } from "@/components/flow"
 import { CloneDialog } from "@/components/git/clone-dialog"
 import { GitHelp } from "@/components/git/help"
 import { GitHubAccountControl } from "@/components/git/github-account"
@@ -291,22 +292,5 @@ export default function GitPage() {
         }}
       />
     </Page>
-  )
-}
-
-/**
- * What the next run of cards is, and how many of them.
- *
- * A hairline running off to the right rather than a panel header: these are
- * two parts of one list, not two blocks, and a second framed title under the
- * page's own would rank them as sections they are not.
- */
-function GroupRule({ label, count }: { label: string; count: number }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2.5">
-      <p className="eyebrow shrink-0">{label}</p>
-      <span className="numeric shrink-0 text-micro text-muted-foreground">{count}</span>
-      <span aria-hidden className="h-px min-w-0 flex-1 bg-hairline" />
-    </div>
   )
 }

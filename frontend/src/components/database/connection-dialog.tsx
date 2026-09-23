@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Modal } from "@/components/modal"
-import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { EngineCard } from "@/components/choice-card"
 import { FilterChip } from "@/components/tabs"
 import { Notice, Spinner } from "@/components/state"
 import { Field, FieldRow, FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
@@ -205,21 +205,18 @@ export function ConnectionDialog({
             ) : (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {drivers.data.map((d) => (
-                  <ChoiceCard
+                  <EngineCard
                     key={d.id}
+                    engine={d.id}
+                    label={d.label}
+                    kind={d.kind}
                     selected={driver === d.id}
                     onClick={() => {
                       setDriver(d.id)
                       setMode(d.id === "sqlite" ? "string" : "fields")
                       set({ port: "" })
                     }}
-                    className="min-h-0 gap-0.5 px-2.5 py-2"
-                  >
-                    <ChoiceCardTitle className="truncate">{d.label}</ChoiceCardTitle>
-                    <ChoiceCardHint>
-                      {d.kind === "sql" ? "SQL" : d.kind === "document" ? "Documents" : "Key–value"}
-                    </ChoiceCardHint>
-                  </ChoiceCard>
+                  />
                 ))}
               </div>
             )}

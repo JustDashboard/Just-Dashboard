@@ -6,17 +6,18 @@ import { Servers, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import { bytes, truncateMiddle } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import type { VolumeDetail } from "@/lib/types"
+import type { Container, VolumeDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { Row, ROW_BLEED, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
+import { Detail, DetailList, SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import {
   DatabaseStorageWarning,
@@ -31,14 +32,6 @@ import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * Volumes, with the one fact that decides every action on them: what is using
@@ -76,6 +69,18 @@ export function VolumesTab({
     30000,
   )
   const volumes = useMemo(() => data ?? [], [data])
+  // Which image each container runs, so a volume can be drawn as the product
+  // that keeps its data in it: `pgdata` under a Postgres logo is found before
+  // its name is read. Joined here rather than on the server because the
+  // volume listing already names its users and nothing else needs the image.
+  const containers = usePoll(
+    (signal) => get<Container[]>("/docker/containers/", undefined, signal),
+    60_000,
+  )
+  const imageOf = useMemo(
+    () => new Map((containers.data ?? []).map((c) => [c.id, c.image])),
+    [containers.data],
+  )
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     return volumes.filter((v) => {
@@ -98,8 +103,9 @@ export function VolumesTab({
 
   return (
     <div className="space-y-4">
-      {/* Plain: the list is the page. */}
-      <Panel className="animate-rise">
+      {/* Plain: the list is the page, and each volume is a card with its own
+          edge — a frame around framed cards is the nesting §12 refuses. */}
+      <Panel plain className="animate-rise">
         <PanelHeader
           title="Volumes"
           actions={
@@ -196,105 +202,20 @@ export function VolumesTab({
               }
             />
           ) : (
-            <>
-              <ul className="divide-y divide-hairline lg:hidden">
-                {visible.map((volume) => (
-                  <VolumeListItem
-                    key={volume.name}
-                    volume={volume}
-                    confirm={confirm}
-                    onOpen={() => setSelected(volume.name)}
-                    onChanged={refresh}
-                  />
-                ))}
-              </ul>
-
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-full">Name</TableHead>
-                      <TableHead className="text-right">Size</TableHead>
-                      <TableHead>Used by</TableHead>
-                      <TableHead className="w-px text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visible.map((volume) => (
-                      <TableRow
-                        key={volume.name}
-                        className="group"
-                        onActivate={() => setSelected(volume.name)}
-                      >
-                        <TableCell>
-                          <RowLink mono onClick={() => setSelected(volume.name)}>
-                            {truncateMiddle(volume.name, 40)}
-                          </RowLink>
-                        </TableCell>
-                        <TableCell className="numeric text-right font-mono">
-                          <VolumeSize volume={volume} />
-                        </TableCell>
-                        <TableCell>
-                          <UsedByCell volume={volume} />
-                        </TableCell>
-                        <TableCell>
-                          <span className="flex w-10 justify-end">
-                            {can("destructive") &&
-                              (volume.usedBy.length > 0 ? (
-                                <IconAction
-                                  label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
-                                  className="text-muted-foreground opacity-40"
-                                  onClick={() => setSelected(volume.name)}
-                                >
-                                  <Trash />
-                                </IconAction>
-                              ) : (
-                                <IconAction
-                                  reveal
-                                  label="Remove"
-                                  className="text-destructive"
-                                  onClick={() =>
-                                    confirm({
-                                      title: "Delete volume",
-                                      phrase: volume.name,
-                                      confirmLabel: "Delete",
-                                      description: (
-                                        <>
-                                          <p className="text-destructive">
-                                            Everything stored in <b>{volume.name}</b> is destroyed
-                                            permanently.
-                                          </p>
-                                          <p>
-                                            Nothing mounts it right now. A volume outlives the
-                                            container that created it, so this is often the data
-                                            from something that was removed and rebuilt — check what
-                                            is in it first if you are not sure.
-                                          </p>
-                                        </>
-                                      ),
-                                      action: async (c) => {
-                                        await del(
-                                          `/docker/volumes/${encodeURIComponent(volume.name)}`,
-                                          {
-                                            confirm: c,
-                                          },
-                                        )
-                                        refresh()
-                                      },
-                                    })
-                                  }
-                                >
-                                  <Trash />
-                                </IconAction>
-                              ))}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
+            // One card per volume at every width: each opens the volume and
+            // what is in it, so each is a choice (§16).
+            <ChoiceList aria-label="Volumes" className="animate-rise">
+              {visible.map((volume) => (
+                <VolumeCard
+                  key={volume.name}
+                  volume={volume}
+                  product={volumeProduct(volume, imageOf)}
+                  confirm={confirm}
+                  onOpen={() => setSelected(volume.name)}
+                  onChanged={refresh}
+                />
+              ))}
+            </ChoiceList>
           )}
         </PanelBody>
       </Panel>
@@ -306,22 +227,38 @@ export function VolumesTab({
 }
 
 /**
- * One volume on a screen too narrow for the table.
- *
- * A row and not a card, mirroring `ContainerCard`: no frame of its own, a
- * hairline between it and the next, a wash under the pointer, and the name as
- * a real `<button>` so the row is announced as its name rather than as
- * everything inside it. The removal control is drawn at rest rather than
- * revealed, because a row whose controls appear only on hover is a row whose
- * controls a phone cannot reach.
+ * The product a volume holds the data of: the image of the first container
+ * that mounts it, when that image is one with a logo. A volume nothing mounts,
+ * or one mounted only by images with no product, is storage and nothing more.
  */
-function VolumeListItem({
+function volumeProduct(volume: VolumeDetail, imageOf: Map<string, string>) {
+  for (const user of volume.usedBy) {
+    const image = imageOf.get(user.id)
+    const product = image ? imageProduct(image) : undefined
+    if (product && product !== "docker") return product
+  }
+  return undefined
+}
+
+/**
+ * One volume, as a card that opens it.
+ *
+ * Who uses it is the second line at every width, not a column that a phone
+ * drops: "is anything still using this" is the question a volume is opened
+ * with, and the answer — including the stopped stack Docker's own prune would
+ * delete the data of — belongs under the name. The removal control is drawn
+ * at rest rather than revealed, because a control a phone cannot hover is a
+ * control a phone cannot reach.
+ */
+function VolumeCard({
   volume,
+  product,
   confirm,
   onOpen,
   onChanged,
 }: {
   volume: VolumeDetail
+  product?: string
   confirm: ConfirmFn
   onOpen: () => void
   onChanged: () => void
@@ -329,69 +266,65 @@ function VolumeListItem({
   const { can } = useAuth()
 
   return (
-    <li
-      className={cn(
-        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
-        ROW_BLEED,
-      )}
-    >
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="block max-w-full truncate rounded-sm text-left font-mono text-body focus-ring hover:text-primary"
-        >
-          {truncateMiddle(volume.name, 40)}
-        </button>
-        {can("destructive") &&
-          (volume.usedBy.length > 0 ? (
-            <IconAction
-              label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
-              className="text-muted-foreground opacity-40"
-              onClick={onOpen}
-            >
-              <Trash />
-            </IconAction>
-          ) : (
-            <IconAction
-              label="Remove"
-              className="text-destructive"
-              onClick={() =>
-                confirm({
-                  title: "Delete volume",
-                  phrase: volume.name,
-                  confirmLabel: "Delete",
-                  description: (
-                    <>
-                      <p className="text-destructive">
-                        Everything stored in <b>{volume.name}</b> is destroyed permanently.
-                      </p>
-                      <p>
-                        Nothing mounts it right now. A volume outlives the container that created
-                        it, so this is often the data from something that was removed and rebuilt —
-                        check what is in it first if you are not sure.
-                      </p>
-                    </>
-                  ),
-                  action: async (c) => {
-                    await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, { confirm: c })
-                    onChanged()
-                  },
-                })
-              }
-            >
-              <Trash />
-            </IconAction>
-          ))}
-      </div>
-
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        <UsedByCell volume={volume} />
-        <span className="numeric font-mono text-hint text-muted-foreground">
+    <ChoiceRow
+      verb={volume.name}
+      onSelect={onOpen}
+      leading={<ProductLogo id={product} fallback={Servers} size="sm" />}
+      title={<span className="font-mono">{truncateMiddle(volume.name, 48)}</span>}
+      description={
+        <span className="flex min-w-0 items-center gap-2">
+          <UsedByCell volume={volume} />
+          {volume.driver !== "local" && <span>· {volume.driver}</span>}
+        </span>
+      }
+      trailing={
+        <span className="numeric w-24 text-right font-mono text-hint">
           <VolumeSize volume={volume} />
         </span>
-      </div>
-    </li>
+      }
+      actions={
+        can("destructive") &&
+        (volume.usedBy.length > 0 ? (
+          <IconAction
+            label={`In use by ${volume.usedBy.length} container${volume.usedBy.length === 1 ? "" : "s"} — cannot be removed while mounted`}
+            className="text-muted-foreground opacity-40"
+            onClick={onOpen}
+          >
+            <Trash />
+          </IconAction>
+        ) : (
+          <IconAction
+            label="Remove"
+            className="text-destructive"
+            onClick={() =>
+              confirm({
+                title: "Delete volume",
+                phrase: volume.name,
+                confirmLabel: "Delete",
+                description: (
+                  <>
+                    <p className="text-destructive">
+                      Everything stored in <b>{volume.name}</b> is destroyed permanently.
+                    </p>
+                    <p>
+                      Nothing mounts it right now. A volume outlives the container that created it,
+                      so this is often the data from something that was removed and rebuilt — check
+                      what is in it first if you are not sure.
+                    </p>
+                  </>
+                ),
+                action: async (c) => {
+                  await del(`/docker/volumes/${encodeURIComponent(volume.name)}`, { confirm: c })
+                  onChanged()
+                },
+              })
+            }
+          >
+            <Trash />
+          </IconAction>
+        ))
+      }
+    />
   )
 }
 

@@ -5,7 +5,8 @@ import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Container, ContainerStats, DockerDiagnosis, DockerFinding } from "@/lib/types"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
-import { Meter } from "@/components/meter"
+import { Meter, utilisationTone } from "@/components/meter"
+import { Sparkline } from "@/components/metrics/sparkline"
 import { Status } from "@/components/status-dot"
 import { copyText } from "@/lib/clipboard"
 
@@ -29,46 +30,58 @@ import { copyText } from "@/lib/clipboard"
  */
 
 /**
+ * What a container is made of, as the second line under its name: the image,
+ * the stack and service it belongs to, and the id.
+ *
  * The name is the thing; the id is a handle. Never concatenated, and the id is
  * one click to copy — it is what every `docker` command wants and there was
  * nowhere in the product to get it.
  */
-export function ContainerName({ container, onOpen }: { container: Container; onOpen: () => void }) {
-  const copy = (event: React.MouseEvent) => {
-    event.stopPropagation()
-    void copyText(container.id, "Container id copied")
-  }
-
+export function ContainerIdentity({
+  container,
+  id = true,
+}: {
+  container: Container
+  /** Off where the line is too short to hold the image and the id both. */
+  id?: boolean
+}) {
   return (
-    <div className="max-w-[20rem] min-w-0">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="max-w-full truncate rounded-sm text-left text-body font-medium focus-ring hover:text-primary"
-      >
-        {container.name}
-      </button>
-      <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-        <button
-          type="button"
-          onClick={copy}
-          title="Copy the full container id"
-          className="inline-flex shrink-0 items-center gap-1 rounded-sm font-mono focus-ring hover:text-foreground"
-        >
-          {container.id.slice(0, 12)}
-          <Copy className="size-2.5" />
-        </button>
-        {container.composeStack && (
-          <span className="flex min-w-0 items-center gap-1 truncate">
-            <span aria-hidden>·</span>
-            <Layers className="size-3 shrink-0" />
-            <span className="truncate">
-              {container.composeStack}/{container.composeService}
-            </span>
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="min-w-0 truncate font-mono">{container.image}</span>
+      {container.composeStack && (
+        <span className="flex min-w-0 shrink items-center gap-1 truncate">
+          <span aria-hidden>·</span>
+          <Layers className="size-3 shrink-0" />
+          <span className="truncate">
+            {container.composeStack}/{container.composeService}
           </span>
-        )}
-      </p>
-    </div>
+        </span>
+      )}
+      {id && (
+        <>
+          <span aria-hidden>·</span>
+          <ContainerId container={container} />
+        </>
+      )}
+    </span>
+  )
+}
+
+/** The short id, one press from the clipboard as the full one. */
+export function ContainerId({ container }: { container: Container }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation()
+        void copyText(container.id, "Container id copied")
+      }}
+      title="Copy the full container id"
+      className="inline-flex shrink-0 items-center gap-1 rounded-sm font-mono focus-ring hover:text-foreground"
+    >
+      {container.id.slice(0, 12)}
+      <Copy className="size-2.5" />
+    </button>
   )
 }
 
@@ -175,6 +188,74 @@ export function ContainerStatus({
 }
 
 /**
+ * One live figure as a card draws it: the value on the first line, where the
+ * eye lands, and on the second what it is — its name, small, in front of the
+ * bar it is measured against, or in front of the sentence that says there is
+ * nothing to measure it against.
+ *
+ * The name is spelled out because a card has no column header to inherit one
+ * from, which is exactly the detail a table that became cards loses and nobody
+ * notices. It sits on the second line rather than beside the value so that
+ * `100 MB / 512 MB` keeps the width it needs.
+ */
+function Reading({
+  label,
+  value,
+  meter,
+  note,
+  tone,
+  trend,
+}: {
+  label: string
+  value: React.ReactNode
+  meter?: number
+  note?: string
+  tone?: "warning"
+  trend?: number[]
+}) {
+  return (
+    <span className="block w-full min-w-0 cursor-help text-left">
+      <span
+        className={cn(
+          "numeric block truncate font-mono text-hint",
+          tone === "warning" && "text-warning",
+        )}
+      >
+        {value}
+      </span>
+      <span className="mt-1 flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
+          {label}
+        </span>
+        {meter !== undefined ? (
+          <>
+            <Meter
+              value={meter}
+              tone={utilisationTone(meter)}
+              size="thin"
+              label={label}
+              className="min-w-0 flex-1"
+            />
+            {trend && trend.length > 0 && (
+              <Sparkline
+                values={trend}
+                width={36}
+                height={12}
+                label={`${label} over the last hour`}
+                color="var(--chart-1)"
+                className="shrink-0 animate-rise"
+              />
+            )}
+          </>
+        ) : (
+          <span className="min-w-0 truncate text-micro text-muted-foreground">{note}</span>
+        )}
+      </span>
+    </span>
+  )
+}
+
+/**
  * CPU, with the denominator said out loud.
  *
  * The bar is scaled against the container's own quota where it has one, and
@@ -182,8 +263,16 @@ export function ContainerStatus({
  * in. A container allowed two cores and using one and a half is at 75% of what
  * it may have and 150% of a core, and both readings belong on screen.
  */
-export function CpuCell({ stat, container }: { stat?: ContainerStats; container: Container }) {
-  if (!stat) return <Muted />
+export function CpuReading({
+  stat,
+  container,
+  trend,
+}: {
+  stat?: ContainerStats
+  container: Container
+  trend?: number[]
+}) {
+  if (!stat) return <Reading label="CPU" value="—" note={unread(container)} />
   const limit = container.cpuLimit ?? stat.cpuLimit ?? 0
   const cores = stat.hostCpus ?? 0
   const ofLimit = limit > 0 ? (stat.cpuPercent / (limit * 100)) * 100 : stat.cpuPercent
@@ -191,11 +280,8 @@ export function CpuCell({ stat, container }: { stat?: ContainerStats; container:
   return (
     <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
-        <button type="button" className="flex w-full cursor-help items-center justify-end gap-2">
-          <Meter value={ofLimit} size="thin" className="w-10" label="CPU of limit" />
-          <span className="numeric w-12 text-right font-mono text-hint">
-            {percent(stat.cpuPercent)}
-          </span>
+        <button type="button" className="block w-full min-w-0 rounded-sm focus-ring">
+          <Reading label="CPU" value={percent(stat.cpuPercent)} meter={ofLimit} trend={trend} />
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-72 space-y-1 text-xs leading-relaxed">
@@ -221,8 +307,14 @@ export function CpuCell({ stat, container }: { stat?: ContainerStats; container:
  * When nothing set one, the second line is "no limit" and the share of the
  * host — a fact that exists — rather than host RAM dressed up as a budget.
  */
-export function MemoryCell({ stat, container }: { stat?: ContainerStats; container: Container }) {
-  if (!stat) return <Muted />
+export function MemoryReading({
+  stat,
+  container,
+}: {
+  stat?: ContainerStats
+  container: Container
+}) {
+  if (!stat) return <Reading label="Memory" value="—" note={unread(container)} />
 
   // `memLimited` is the server's answer, computed by comparing the reported
   // limit against the machine's own memory. `memoryLimit` from the listing
@@ -234,18 +326,23 @@ export function MemoryCell({ stat, container }: { stat?: ContainerStats; contain
   return (
     <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
-        <button type="button" className="w-full cursor-help text-right">
-          <span className={cn("numeric block font-mono text-hint", nearLimit && "text-warning")}>
-            {bytes(stat.memUsage)}
-            {limited && <span className="text-muted-foreground"> / {bytes(limit)}</span>}
-          </span>
-          <span className="block text-micro text-muted-foreground">
-            {limited
-              ? percent(stat.memPercent)
-              : stat.memHostPercent
+        <button type="button" className="block w-full min-w-0 rounded-sm focus-ring">
+          <Reading
+            label="Memory"
+            tone={nearLimit ? "warning" : undefined}
+            value={
+              <>
+                {bytes(stat.memUsage)}
+                {limited && <span className="text-muted-foreground"> / {bytes(limit)}</span>}
+              </>
+            }
+            meter={limited ? stat.memPercent : undefined}
+            note={
+              stat.memHostPercent
                 ? `no limit · ${percent(stat.memHostPercent)} of host`
-                : "no limit"}
-          </span>
+                : "no limit"
+            }
+          />
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-72 space-y-1 text-xs leading-relaxed">
@@ -292,7 +389,7 @@ export function IssuesCell({
   const notes = mine.filter((f) => f.severity !== "critical" && f.severity !== "warning")
 
   if (mine.length === 0) {
-    return <span className="block text-center text-hint text-muted-foreground">—</span>
+    return <span className="block text-hint text-muted-foreground">—</span>
   }
 
   const worst = issues[0] ?? notes[0]
@@ -319,7 +416,7 @@ export function IssuesCell({
             onOpen()
           }}
           className={cn(
-            "mx-auto flex items-center gap-1 rounded-sm px-1 text-hint font-medium focus-ring",
+            "flex items-center gap-1 rounded-sm px-1 text-hint font-medium focus-ring",
             tone,
           )}
         >
@@ -332,8 +429,7 @@ export function IssuesCell({
         <p className="text-muted-foreground">{worst?.detail}</p>
         {mine.length > 1 && (
           <p className="text-hint text-muted-foreground">
-            {issues.length} issue{issues.length === 1 ? "" : "s"} and {notes.length}{" "}
-            recommendation
+            {issues.length} issue{issues.length === 1 ? "" : "s"} and {notes.length} recommendation
             {notes.length === 1 ? "" : "s"} — open the container for all of them.
           </p>
         )}
@@ -352,6 +448,7 @@ export function worstFinding(
   )
 }
 
-function Muted() {
-  return <span className="text-hint text-muted-foreground">—</span>
+/** Why a container has no reading: it is not running, or its first one is on the way. */
+function unread(container: Container) {
+  return container.state === "running" ? "waiting for a reading" : "not running"
 }

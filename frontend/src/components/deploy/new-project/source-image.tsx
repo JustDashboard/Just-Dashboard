@@ -15,7 +15,7 @@ import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { ProductLogo, imageProduct } from "@/components/deploy/product-logo"
+import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,

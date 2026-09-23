@@ -11,6 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -328,10 +329,13 @@ export default function DockerOverviewPage() {
                       key={stack.name}
                       href={`/docker/stacks/${encodeURIComponent(stack.name)}`}
                       verb={`Open ${stack.name}`}
-                      leading={
-                        <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
+                      leading={<StackMark stack={stack} />}
+                      title={
+                        <span className="flex min-w-0 items-center gap-2">
+                          <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
+                          <span className="truncate">{stack.name}</span>
+                        </span>
                       }
-                      title={stack.name}
                       description={<span className="font-mono">{stack.workingDir}</span>}
                       trailing={<StackStateBadge stack={stack} />}
                     />
@@ -430,6 +434,7 @@ function IdleRow({
     <ChoiceRow
       href={href}
       verb={`Open ${container.name}`}
+      leading={<ProductLogo id={imageProduct(container.image)} size="sm" />}
       title={container.name}
       description={<span className="font-mono">{container.image}</span>}
       trailing={
@@ -512,6 +517,12 @@ function Route({
       className="py-2.5"
     />
   )
+}
+
+/** What a project is made of: its services' products, or Compose itself. */
+function StackMark({ stack }: { stack: ComposeStack }) {
+  const images = stack.services.map((service) => service.image).filter(Boolean)
+  return <ProductLogos ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]} />
 }
 
 function stackTone(stack: ComposeStack) {

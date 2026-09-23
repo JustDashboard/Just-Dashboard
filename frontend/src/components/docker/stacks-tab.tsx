@@ -22,8 +22,9 @@ import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { RowLink, SearchInput } from "@/components/page"
-import { ROW_BLEED } from "@/components/row-list"
+import { SearchInput } from "@/components/page"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ProductLogos, imageProducts } from "@/components/product-logo"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { cn } from "@/lib/utils"
 import { PortLink } from "@/components/docker/shared"
@@ -223,7 +224,7 @@ export function StacksTab({
               }
             />
           ) : (
-            <ul className="animate-rise divide-y divide-hairline">
+            <ChoiceList aria-label="Stacks" className="animate-rise">
               {visible.map((stack) => (
                 <StackRow
                   key={stack.name}
@@ -232,7 +233,7 @@ export function StacksTab({
                   onChanged={refresh}
                 />
               ))}
-            </ul>
+            </ChoiceList>
           )}
           {/* The filters narrowed everything away to nothing rather than the
               server having nothing to show; the count is the difference. */}
@@ -256,21 +257,19 @@ export function StacksTab({
   )
 }
 
-/** Anything inside the row that owns its own press — mirrors the container card. */
-const INTERACTIVE = "a, button, input, select, textarea, label, [role='menuitem']"
-
 /**
- * One stack, drawn down the row rather than across it.
+ * One stack, as a card that opens it.
  *
- * The service list is the load-bearing part: a stack is an application made of
- * several containers, and "which of its parts is not running" is what the row
- * exists to answer. Each service keeps its dot, its name, its ports and its
- * health, and the ports are still links, so a phone can reach the thing without
- * opening anything.
+ * The mark is what the stack is made of: the products of its services' images,
+ * overlapping, so a stack of Postgres, Redis and an API reads as those three
+ * before its name does. A stack with no image anybody makes a logo for is drawn
+ * as Compose, which is at least true of every one of them.
  *
- * The row keeps the server-provided state sentence beside the service
- * inventory. The sentence distinguishes a stopped stack from one that has
- * never been deployed, while the service rows show which part needs attention.
+ * The service list under the name is the load-bearing part: a stack is an
+ * application made of several containers, and "which of its parts is not
+ * running" is what the card exists to answer. Each service keeps its dot, its
+ * name, its ports and its health, and the ports are still links, so a phone
+ * can reach the thing without opening anything.
  */
 function StackRow({
   stack,
@@ -286,10 +285,12 @@ function StackRow({
   const unhealthy = stack.services.filter((s) => s.health === "unhealthy").length
   const canDeploy =
     can("system.admin") && can("service.control") && stack.managed && stack.state !== "running"
+  const images = stack.services.map((service) => service.image).filter(Boolean)
+  const products = images.length > 0 ? imageProducts(images) : ["docker-compose"]
 
-  // The one action worth having on the row: an application that is down and
-  // should not be. Everything else needs the panel, where the output is — and
-  // where a deploy can be previewed before it runs.
+  // The one action worth having on the card: an application that is down and
+  // should not be. Everything else needs the stack's page, where the output
+  // is — and where a deploy can be previewed before it runs.
   const deploy = async () => {
     setBusy(true)
     try {
@@ -304,78 +305,60 @@ function StackRow({
   }
 
   return (
-    <li>
-      <div
-        aria-busy={busy ? true : undefined}
-        onClick={(event) => {
-          if ((event.target as HTMLElement).closest(INTERACTIVE)) return
-          onOpen()
-        }}
-        className={cn(
-          "group min-w-0 cursor-pointer space-y-2 px-4 py-2.5 transition-colors hover:bg-row-hover",
-          ROW_BLEED,
-          busy && "opacity-70",
-        )}
-      >
-        {/* One title line: the name and the actions share a baseline, so the
-            buttons read as part of the row rather than furniture parked beside
-            it. View is a quiet ghost next to the primary Deploy — the row
-            itself opens the panel, so it does not need to shout. */}
-        <div className="flex min-w-0 items-center justify-between gap-x-3 gap-y-1">
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <StatusDot tone={stackTone(stack.state)} live={stack.state === "running"} />
-              <RowLink onClick={onOpen}>{stack.name}</RowLink>
-              {unhealthy > 0 && <Status verdict="critical" label={`${unhealthy} unhealthy`} />}
-            </div>
-            <StackSummary stack={stack} className="mt-0.5 block" />
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1">
-            {canDeploy && (
-              <Button size="sm" onClick={deploy} pending={busy}>
-                <Play className="size-3.5" />
-                Deploy
-              </Button>
-            )}
-            {/* Hidden on a phone: the row itself opens the panel on tap and the
-                overflow menu carries "View" too, so the button is a third way
-                of doing the same thing — three controls wrapping onto a second
-                line on a 390px screen. It earns its place only where the row is
-                not itself an obvious press target. */}
-            <Button size="sm" variant="ghost" onClick={onOpen} className="hidden sm:inline-flex">
-              View
+    <ChoiceRow
+      verb={stack.name}
+      onSelect={onOpen}
+      className={cn(busy && "opacity-70")}
+      leading={<ProductLogos ids={products} />}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <StatusDot tone={stackTone(stack.state)} live={stack.state === "running"} />
+          <span className="truncate">{stack.name}</span>
+          {unhealthy > 0 && <Status verdict="critical" label={`${unhealthy} unhealthy`} />}
+        </span>
+      }
+      description={<StackSummary stack={stack} />}
+      actions={
+        <span className="flex shrink-0 items-center gap-1" aria-busy={busy ? true : undefined}>
+          {canDeploy && (
+            <Button size="sm" onClick={deploy} pending={busy}>
+              <Play className="size-3.5" />
+              Deploy
             </Button>
-            <StackRowMenu stack={stack} onOpen={onOpen} />
-          </div>
+          )}
+          <StackRowMenu stack={stack} onOpen={onOpen} />
+        </span>
+      }
+    >
+      {(stack.services.length > 0 || stack.orphans.length > 0 || !stack.managed) && (
+        <div className="min-w-0 space-y-1.5">
+          {stack.services.length > 0 && (
+            <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {stack.services.map((service) => (
+                <ServiceMarker key={service.container || service.name} service={service} />
+              ))}
+            </ul>
+          )}
+
+          {stack.orphans.length > 0 && (
+            <p className="flex items-start gap-1.5 text-hint text-warning">
+              <Warning className="mt-0.5 size-3 shrink-0" />
+              <span>
+                {stack.orphans.join(", ")} {stack.orphans.length === 1 ? "is" : "are"} running under
+                this project name and no longer in the compose file. A deploy removes{" "}
+                {stack.orphans.length === 1 ? "it" : "them"}.
+              </span>
+            </p>
+          )}
+
+          {!stack.managed && (
+            <p className="text-hint text-muted-foreground">
+              No compose file reachable from this dashboard, so this stack is read-only here.
+            </p>
+          )}
         </div>
-
-        {stack.services.length > 0 && (
-          <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {stack.services.map((service) => (
-              <ServiceMarker key={service.container || service.name} service={service} />
-            ))}
-          </ul>
-        )}
-
-        {stack.orphans.length > 0 && (
-          <p className="flex items-start gap-1.5 text-hint text-warning">
-            <Warning className="mt-0.5 size-3 shrink-0" />
-            <span>
-              {stack.orphans.join(", ")} {stack.orphans.length === 1 ? "is" : "are"} running under
-              this project name and no longer in the compose file. A deploy removes{" "}
-              {stack.orphans.length === 1 ? "it" : "them"}.
-            </span>
-          </p>
-        )}
-
-        {!stack.managed && (
-          <p className="text-hint text-muted-foreground">
-            No compose file reachable from this dashboard, so this stack is read-only here.
-          </p>
-        )}
-      </div>
-    </li>
+      )}
+    </ChoiceRow>
   )
 }
 
