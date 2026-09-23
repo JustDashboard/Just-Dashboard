@@ -15,6 +15,7 @@ import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { ProductLogo, imageProduct } from "@/components/deploy/product-logo"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,
@@ -89,13 +90,12 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
     // One measure, the page's own. Five of the six sources opened in a 672px
     // column centred under a full-width title and strip, so pressing a tab
     // moved the page's left edge and left a field of nothing on either side.
-    <div className="grid min-w-0 gap-x-10 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-      {failure && <ErrorState error={failure} className="xl:col-span-2" />}
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
       {/* The one surface on this screen that carries depth (§16): which image
           runs is what the reader opened this tab to decide, and the registry
           field beside it is the fallback for a tag this host has not pulled.
           Two surfaces with depth would be two foregrounds, which is none. */}
-      <FlowPanel className="min-w-0">
+      <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
         <FlowPanelHeader
           title="Choose an image"
           actions={
@@ -106,7 +106,8 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
             )
           }
         />
-        <FlowPanelBody className="space-y-4">
+        <FlowPanelBody className="flex min-h-0 flex-1 flex-col gap-4">
+          {failure && <ErrorState error={failure} />}
           {images.error && <ErrorState error={images.error} />}
           <SearchInput
             value={filter}
@@ -128,7 +129,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
               pads for the edges and pulls the padding back out, so the rows
               still start where the filter field above them does. */}
           <div
-            className="-mx-3 max-h-[min(60vh,40rem)] overflow-y-auto px-3"
+            className="-mx-3 max-h-[min(60vh,40rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1"
             key={images.loading ? "loading" : "listed"}
           >
             <ChoiceList aria-label="Images on this server" className="animate-rise">
@@ -137,6 +138,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
                   key={tag}
                   verb={`Use ${tag}`}
                   onSelect={() => void doInspect(tag)}
+                  leading={<ProductLogo id={imageProduct(tag)} size="sm" />}
                   // Mono because a tag is read character by character: which of
                   // `app:1.0.9` and `app:1.09` this is decides what runs.
                   title={<span className="font-mono">{tag}</span>}
@@ -162,7 +164,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
       {/* The registry field is a task of its own, not a footnote under the
           list: an image that is not on this server yet is the other half of
           the answer to "which image", and at this width it can sit beside it. */}
-      <Panel plain className="min-w-0 xl:sticky xl:top-6 xl:self-start">
+      <Panel plain className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
         <PanelHeader title="Pull from a registry" />
         <PanelBody className="space-y-3">
           <Field

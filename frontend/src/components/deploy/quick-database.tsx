@@ -7,11 +7,26 @@ import { errorMessage, get, post } from "@/lib/api"
 import type { DbConnection, DbProvisionOption } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
-import { ChoiceCard } from "@/components/choice-card"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Field } from "@/components/form"
+import { Tag } from "@/components/tag"
+import { ProductLogo } from "@/components/deploy/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCopy } from "@/hooks/use-copy"
+
+/**
+ * What kind of store each engine is — the one question that decides between
+ * five names for somebody who has not already decided, and the reason the
+ * three relational engines read as three of a kind rather than three picks.
+ */
+const ENGINE_KIND: Record<string, string> = {
+  postgres: "relational",
+  mysql: "relational",
+  mariadb: "relational",
+  redis: "key-value",
+  mongodb: "document",
+}
 
 export function DatabaseQuickDeploy({
   target = "host",
@@ -235,28 +250,36 @@ export function DatabaseQuickDeploy({
           </div>
         ) : (
           <>
-            <div className="grid gap-2 sm:grid-cols-3">
+            {/* The engine's own logo, as the template catalogue draws it: five
+                identical database glyphs in front of five names said
+                "database" five times and nothing about which. Every card is
+                one height, whatever its image tag's length. */}
+            <ChoiceGrid
+              columns="fill"
+              className="grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2"
+            >
               {options?.map((option) => (
                 <ChoiceCard
                   disabled={Boolean(startedContainer)}
                   key={option.engine}
                   selected={engine === option.engine}
                   onClick={() => setEngine(option.engine)}
-                  className="min-h-0 gap-0.5"
+                  className="min-h-0 flex-row items-center gap-3"
                 >
-                  <span className="flex items-center gap-1.5 text-body font-medium">
-                    <Database className="size-3.5 text-muted-foreground" />
-                    {option.label}
-                  </span>
-                  <span className="truncate font-mono text-micro text-muted-foreground">
-                    {option.image}
+                  <ProductLogo id={option.engine} />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-body font-medium">{option.label}</span>
+                    {ENGINE_KIND[option.engine] && <Tag>{ENGINE_KIND[option.engine]}</Tag>}
+                    <span className="truncate font-mono text-micro text-muted-foreground">
+                      {option.image}
+                    </span>
                   </span>
                 </ChoiceCard>
               ))}
               {!options && !failure && <Spinner />}
-            </div>
+            </ChoiceGrid>
             {selected && (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
                 <Field
                   label="Container name"
                   htmlFor="db-name"

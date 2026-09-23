@@ -727,6 +727,23 @@ does not extend to the marks a reader is choosing *between*: the five source kin
 stay muted with the current one in `--brand`, because there the colour is saying which one you are
 on (§3), and twenty hues in a row of five would be saying nothing.
 
+**A product is not a kind, and it is drawn as itself.** The template catalogue is sixty-two products
+the reader already knows by their marks — n8n, Grafana, Redis — and set as sixty-two names in one grey
+face it was a wall of words, with the language marks on the Git tab the only colour anywhere in the
+flow. `deploy/product-logo.tsx` draws each product's *own* logo, in its own colours, on the recessed
+tile `ProjectMark` uses for a deployment's favicon, so a template and the project it becomes are drawn
+the same way: every template card, the five database engines, the images on the Images tab (by the
+last segment of the reference, Docker's whale for the rest), and the settings panel's header. The
+colour lives in the artwork rather than in a token, which is the same argument as the language marks
+— the hue is not this product's to choose — taken one step further: the files are bundled in
+`public/logos/` (the page's `img-src` is its own origin, and §8's locked-down networks cannot reach a
+CDN), picked in the variant drawn for a dark ground, with their licences in `public/logos/NOTICE`. The
+one file whose own colour failed that ground, MySQL's navy dolphin, was lifted to the L 0.72 rung the
+`--language-*` tokens sit on. The tile is not an icon plate — it carries no tint of this product's and
+sits beside a card's words rather than in front of a header's title — and the source strip still
+stays muted, because five *kinds* are not five products. A repository row on the Git tab carries its
+owner's picture on the same reasoning: the face is the account, which a glyph could only guess at.
+
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
@@ -1009,10 +1026,26 @@ palette, and a reading page must not grow a use for them.
 5. **Find the command.** One brand-faced button in `FlowActions`, or choices whose edges light. If
    the screen has neither, the reader cannot tell what advances it.
 6. **Choices become choices.** Kinds → `ChoiceGrid` of `ChoiceCard`. Instances → `ChoiceList` of
-   `ChoiceRow`. A list of things you can pick is never a `RowList`.
+   `ChoiceRow`. A list of things you can pick is never a `RowList`. A run of kinds longer than a
+   screen is shelved the way the reader looks for one — `FilterChip`s with counts over the shelves,
+   the Git page's filter strip — and laid out as `ChoiceGrid columns="fill"`, whose rows are equal,
+   with the card's hint clamped to two lines beside a `logo`: sixty cards at three heights read as a
+   grid that failed to load.
 7. **Motion on the state change, not only on arrival.** §11's four still apply and no fifth is added:
    the spine's current segment, a `BorderBeam` on a card while its work is in flight, a
    `NumberTicker` on a figure that settled, `Confetti` once when the outcome lands in front of the
    reader.
-8. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser`, then screenshots at 1280 and
+8. **Hold it to the window.** A flow screen is decided in one view: `<Page fill="xl">` holds it to
+   the window at `xl`, the question, the spine and any strip stay put, and what scrolls is the one
+   list or form longer than the space left — inside its own surface, under its own toolbar and above
+   its own command. A surface with no inner scroll is a surface the page now clips, so each one is
+   capped (`max-h-full`) and scrolls itself. `/deploy/new` is the reference: every source is the same two columns (the
+   focused surface, capped at the window's height with `max-h-full self-start`, and a 22rem column
+   beside it), unfinished setups moved from a block above the strip into a counted button beside the
+   question, and a Configure step with more settings than fit scrolls its fields between the heading
+   and Continue; the Database tab, five engines and two fields, is the one source without a second
+   column. Below `xl` the columns stack and the page scrolls as every other page does — a phone is not
+   a window to hold. `deploy-new.spec.ts` asserts the shell does not scroll at 1280×800 on every source
+   and every Configure step.
+9. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser`, then screenshots at 1280 and
    1720 — and look at them. The failure this register exists to catch is one no assertion sees.

@@ -66,7 +66,7 @@ test("switching templates keeps the catalogue width and each template's input", 
   await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
   const domain = page.getByRole("textbox", { name: "Public domain" })
   await domain.fill("vault.example.test")
-  const catalogue = page.getByRole("group", { name: "Web applications" })
+  const catalogue = page.getByRole("group", { name: "Productivity" })
   const width = (await catalogue.boundingBox())!.width
 
   await page.getByRole("button", { name: "Use PostgreSQL", exact: true }).click()

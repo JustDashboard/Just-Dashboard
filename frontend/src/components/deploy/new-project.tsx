@@ -5,6 +5,7 @@ import Link from "next/link"
 import {
   ArrowLeft,
   Box,
+  Clock,
   Database,
   GitHubMark,
   GridMasonry,
@@ -19,11 +20,12 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { ChoiceList, ChoiceRow, FlowHeader, FlowSteps } from "@/components/flow"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { tabClasses } from "@/components/tabs"
+import { ChipCount, tabClasses } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CREATION_STEPS, humanize } from "@/components/deploy/vocabulary"
 import {
   creationStepIndex,
@@ -316,8 +318,15 @@ export function NewProject({
       </Page>
     )
 
+  const pending = drafts.data ?? []
+
   return (
-    <Page register="flow" className="animate-rise">
+    // The whole sequence is drawn in the window, at the width that can hold it
+    // side by side: the question, the spine and the source strip stay where
+    // they are, and what scrolls is the one list or form that is longer than
+    // the space left — never the page around it. Stacked, below that width,
+    // the page scrolls as every other page does.
+    <Page register="flow" fill="xl" className="animate-rise">
       {!flow || linkArrived ? (
         <>
           {/* The screen asks something, and the question is the page's own
@@ -326,73 +335,18 @@ export function NewProject({
           <FlowHeader
             eyebrow={Eyebrow}
             question="What are you deploying?"
+            // Unfinished work is a way back, not a step of this one: a button
+            // that says how much there is, beside the question, rather than a
+            // block pushing the sources down the screen.
+            actions={
+              pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />
+            }
             steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
           />
-          {(drafts.data?.length ?? 0) > 0 && (
-            <Panel plain className="animate-rise">
-              <PanelHeader
-                title="Unfinished setups"
-                // A count, not a caption (§4): how many there are is the one
-                // thing the title cannot say, and it is what decides whether
-                // this block is worth reading at all.
-                actions={
-                  <span className="numeric text-hint text-muted-foreground">
-                    {drafts.data!.length}
-                  </span>
-                }
-              />
-              <PanelBody flush className="pt-3">
-                <ChoiceList
-                  aria-label="Unfinished setups"
-                  className="max-h-72 overflow-y-auto pr-1"
-                >
-                  {drafts.data!.map((entry) => (
-                    <ChoiceRow
-                      key={entry.id}
-                      href={`/deploy/new?draft=${entry.id}`}
-                      // The same fallback the title uses: a control whose name
-                      // is "this setup" while the row reads "Untitled" is two
-                      // names for one row.
-                      verb={`Resume ${entry.name || "Untitled"}`}
-                      title={entry.name || "Untitled"}
-                      description={entry.source ?? "No source chosen yet"}
-                      trailing={
-                        <>
-                          {/* Only once it is nearly gone. Every draft expires,
-                              so "29 days from now" on all four is a column of
-                              the same word; the one about to lapse is the only
-                              one that changes what you do next. */}
-                          {expiringSoon(entry.expiresAt) && (
-                            <span className="numeric text-hint text-warning">
-                              expires {relativeTime(entry.expiresAt)}
-                            </span>
-                          )}
-                          <Tag>{humanize(entry.currentStep)}</Tag>
-                          <span className="numeric hidden text-hint text-muted-foreground sm:inline">
-                            {relativeTime(entry.updatedAt)}
-                          </span>
-                        </>
-                      }
-                      actions={
-                        <DimActions>
-                          <IconAction
-                            label={`Discard ${entry.name || "this setup"}`}
-                            onClick={() => void discard(entry.id)}
-                          >
-                            <Trash />
-                          </IconAction>
-                        </DimActions>
-                      }
-                    />
-                  ))}
-                </ChoiceList>
-              </PanelBody>
-            </Panel>
-          )}
           <div
             role="tablist"
             aria-label="Project source"
-            className="flex gap-1 overflow-x-auto border-b border-hairline"
+            className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline"
           >
             {TABS.map((option) => (
               <button
@@ -412,13 +366,15 @@ export function NewProject({
               </button>
             ))}
           </div>
-          {tab === "git" && (
-            <SourceGit key="git" onInspected={inspected} initialUrl={repo} initialRef={repoRef} />
-          )}
-          {tab === "image" && <SourceImage key="image" onInspected={inspected} />}
-          {tab === "template" && <SourceTemplate key="template" onInspected={inspected} />}
-          {tab === "database" && <SourceDatabase key="database" />}
-          {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
+          <div className="min-w-0 xl:min-h-0 xl:flex-1">
+            {tab === "git" && (
+              <SourceGit key="git" onInspected={inspected} initialUrl={repo} initialRef={repoRef} />
+            )}
+            {tab === "image" && <SourceImage key="image" onInspected={inspected} />}
+            {tab === "template" && <SourceTemplate key="template" onInspected={inspected} />}
+            {tab === "database" && <SourceDatabase key="database" />}
+            {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
+          </div>
         </>
       ) : (
         <>
@@ -432,16 +388,92 @@ export function NewProject({
             question={QUESTIONS[step]}
             steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
           />
-          <Configure
-            flow={flow}
-            onFlowChange={setFlow}
-            onChangeSource={changeSource}
-            initialAdvanced={mode === "advanced"}
-            step={step}
-            onStepChange={setStep}
-          />
+          <div className="min-w-0 xl:min-h-0 xl:flex-1">
+            <Configure
+              flow={flow}
+              onFlowChange={setFlow}
+              onChangeSource={changeSource}
+              initialAdvanced={mode === "advanced"}
+              step={step}
+              onStepChange={setStep}
+            />
+          </div>
         </>
       )}
     </Page>
+  )
+}
+
+/**
+ * Setups started and not finished, behind a button that says how many.
+ *
+ * They were a block above the source strip, which on a screen that has to fit
+ * the window put every source a hundred and fifty pixels further down to show
+ * a way back that most visits do not take. The count is what decides whether
+ * it is worth opening, and it is on the button.
+ */
+function UnfinishedSetups({
+  drafts,
+  onDiscard,
+}: {
+  drafts: DeploymentDraftSummary[]
+  onDiscard: (id: string) => Promise<void>
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Clock className="size-4" />
+          Unfinished setups
+          <ChipCount>{drafts.length}</ChipCount>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[30rem] max-w-[calc(100vw-2rem)] space-y-3 p-3">
+        <h2 className="px-1 text-title leading-tight font-medium tracking-tight">
+          Unfinished setups
+        </h2>
+        <ChoiceList aria-label="Unfinished setups" className="max-h-80 overflow-y-auto">
+          {drafts.map((entry) => (
+            <ChoiceRow
+              key={entry.id}
+              href={`/deploy/new?draft=${entry.id}`}
+              // The same fallback the title uses: a control whose name is
+              // "this setup" while the row reads "Untitled" is two names for
+              // one row.
+              verb={`Resume ${entry.name || "Untitled"}`}
+              title={entry.name || "Untitled"}
+              description={entry.source ?? "No source chosen yet"}
+              trailing={
+                <>
+                  {/* Only once it is nearly gone. Every draft expires, so "29
+                      days from now" on all four is a column of the same word;
+                      the one about to lapse is the only one that changes what
+                      you do next. */}
+                  {expiringSoon(entry.expiresAt) && (
+                    <span className="numeric text-hint text-warning">
+                      expires {relativeTime(entry.expiresAt)}
+                    </span>
+                  )}
+                  <Tag>{humanize(entry.currentStep)}</Tag>
+                  <span className="numeric hidden text-hint text-muted-foreground sm:inline">
+                    {relativeTime(entry.updatedAt)}
+                  </span>
+                </>
+              }
+              actions={
+                <DimActions>
+                  <IconAction
+                    label={`Discard ${entry.name || "this setup"}`}
+                    onClick={() => void onDiscard(entry.id)}
+                  >
+                    <Trash />
+                  </IconAction>
+                </DimActions>
+              }
+            />
+          ))}
+        </ChoiceList>
+      </PopoverContent>
+    </Popover>
   )
 }

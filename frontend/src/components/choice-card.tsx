@@ -45,6 +45,7 @@ export function ChoiceCard({
   description,
   trailing,
   mark,
+  logo,
   href,
   index = 0,
   ...props
@@ -62,6 +63,12 @@ export function ChoiceCard({
   trailing?: React.ReactNode
   /** Wayfinding: the glyph the reader is choosing a *kind* by (§14). */
   mark?: React.ComponentType<{ className?: string }>
+  /**
+   * The product's own logo — a `ProductLogo` — beside the whole card rather
+   * than in front of its title. `mark` is a glyph for a kind of thing; this is
+   * the thing itself, and a grid of sixty of them is scanned by it (§14).
+   */
+  logo?: React.ReactNode
   href?: string
   /** Position in a grid, for the arrival stagger. */
   index?: number
@@ -105,61 +112,74 @@ export function ChoiceCard({
           data-slot="choice-card"
           data-selected={selected || undefined}
           onClick={href ? undefined : choose}
-          className={cn(shape, "h-full", !disabled && "cursor-pointer")}
+          className={cn(shape, "h-full", logo && "flex-row gap-3", !disabled && "cursor-pointer")}
         >
-          <span className="flex w-full min-w-0 items-center gap-2">
-            {Mark && (
-              <Mark
-                aria-hidden
-                className={cn("size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")}
-              />
-            )}
-            {disabled ? (
-              // An option that cannot be taken carries no control at all — not
-              // a disabled one. A disabled button still answers `getByRole`,
-              // still announces itself as the way to use the thing, and makes
-              // the card say no twice. The card stays drawn and keeps its
-              // sentence, because the reader needs to know it exists and why
-              // they cannot have it.
-              <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
-            ) : href ? (
-              <Link
-                href={href}
-                aria-label={verb}
-                className="min-w-0 flex-1 truncate rounded-sm text-body font-medium focus-ring"
-              >
-                {title}
-              </Link>
-            ) : (
-              <button
-                type="button"
-                aria-label={verb}
-                aria-pressed={selected}
-                // The card's own handler already fires on the pointer; this one
-                // is for the keyboard and must not choose twice.
-                onClick={(event) => {
-                  event.stopPropagation()
-                  choose()
-                }}
-                className="min-w-0 flex-1 truncate rounded-sm text-left text-body font-medium focus-ring"
-              >
-                {title}
-              </button>
-            )}
-            {selected ? (
-              <Check aria-hidden className="size-4 shrink-0 text-brand" />
-            ) : (
-              !disabled && (
-                <ArrowRight
+          {logo}
+          {/* Beside a logo the words are one column, so every card's title
+              starts on the same line whatever its logo's shape. */}
+          <span className={cn("contents", logo && "flex min-w-0 flex-1 flex-col gap-1")}>
+            <span className="flex w-full min-w-0 items-center gap-2">
+              {Mark && (
+                <Mark
                   aria-hidden
-                  className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
+                  className={cn(
+                    "size-4 shrink-0",
+                    selected ? "text-brand" : "text-muted-foreground",
+                  )}
                 />
-              )
+              )}
+              {disabled ? (
+                // An option that cannot be taken carries no control at all — not
+                // a disabled one. A disabled button still answers `getByRole`,
+                // still announces itself as the way to use the thing, and makes
+                // the card say no twice. The card stays drawn and keeps its
+                // sentence, because the reader needs to know it exists and why
+                // they cannot have it.
+                <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
+              ) : href ? (
+                <Link
+                  href={href}
+                  aria-label={verb}
+                  className="min-w-0 flex-1 truncate rounded-sm text-body font-medium focus-ring"
+                >
+                  {title}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  aria-label={verb}
+                  aria-pressed={selected}
+                  // The card's own handler already fires on the pointer; this one
+                  // is for the keyboard and must not choose twice.
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    choose()
+                  }}
+                  className="min-w-0 flex-1 truncate rounded-sm text-left text-body font-medium focus-ring"
+                >
+                  {title}
+                </button>
+              )}
+              {selected ? (
+                <Check aria-hidden className="size-4 shrink-0 text-brand" />
+              ) : (
+                !disabled && (
+                  <ArrowRight
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
+                  />
+                )
+              )}
+            </span>
+            {description && (
+              // Clamped beside a logo: a grid of these is compared card against
+              // card, and one description running to five lines made its row
+              // twice the height of every other.
+              <ChoiceCardHint className={cn(logo && "line-clamp-2")}>{description}</ChoiceCardHint>
             )}
+            {trailing}
+            {children}
           </span>
-          {description && <ChoiceCardHint>{description}</ChoiceCardHint>}
-          {trailing}
-          {children}
         </div>
       </SpotlightBorder>
     </BlurFade>
@@ -171,13 +191,25 @@ export function ChoiceGrid({
   className,
   columns = 3,
   ...props
-}: React.ComponentProps<"div"> & { columns?: 2 | 3 }) {
+}: React.ComponentProps<"div"> & {
+  /**
+   * `fill` fits as many columns as the grid's own width holds, for a grid
+   * whose width depends on what is beside it rather than on the viewport — a
+   * catalogue that narrows when a chosen template's settings open next to it.
+   * Its rows are equal, so a card never outgrows its neighbours.
+   */
+  columns?: 2 | 3 | "fill"
+}) {
   return (
     <div
       data-slot="choice-grid"
       className={cn(
         "grid min-w-0 gap-3",
-        columns === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3",
+        columns === "fill"
+          ? "auto-rows-fr grid-cols-[repeat(auto-fill,minmax(16rem,1fr))]"
+          : columns === 2
+            ? "sm:grid-cols-2"
+            : "sm:grid-cols-2 lg:grid-cols-3",
         className,
       )}
       {...props}

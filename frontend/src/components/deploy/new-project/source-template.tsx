@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowUpRight, Warning } from "@/components/icons"
+import { ArrowUpRight, GridMasonry, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
@@ -23,7 +22,8 @@ import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/compon
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ChipCount, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -38,17 +38,100 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
-import { deploymentName, humanize } from "@/components/deploy/vocabulary"
+import { deploymentName } from "@/components/deploy/vocabulary"
+import { ProductLogo } from "@/components/deploy/product-logo"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"
 
-const CATEGORY_LABEL: Record<BlueprintSummary["category"], string> = {
-  http: "Web applications",
-  database: "Databases",
-  tool: "Tools",
-  automation: "Automation",
-  game: "Game servers",
+/**
+ * What a template is *for*, which is how somebody looking for one thinks.
+ *
+ * The server's own `category` says how a blueprint is deployed — behind the
+ * proxy, as a tool, as a game server — and grouped by it the catalogue opened
+ * on twenty-eight "Web applications" in one run: a film server beside a
+ * password manager beside a URL shortener. These are the shelves a reader
+ * scans instead, in the order they are reached for. A blueprint the server
+ * adds without a shelf here lands on the one its category implies, so a new
+ * template is never missing from the picker.
+ */
+const TOPICS = [
+  { key: "productivity", label: "Productivity" },
+  { key: "media", label: "Media" },
+  { key: "monitoring", label: "Monitoring" },
+  { key: "automation", label: "Automation" },
+  { key: "ai", label: "AI" },
+  { key: "developer", label: "Developer tools" },
+  { key: "databases", label: "Databases" },
+  { key: "web", label: "Web & files" },
+  { key: "games", label: "Game servers" },
+] as const
+
+type TopicKey = (typeof TOPICS)[number]["key"]
+
+const TOPIC_OF: Record<string, TopicKey> = {
+  actual: "productivity",
+  docuseal: "productivity",
+  drawio: "productivity",
+  freshrss: "productivity",
+  linkding: "productivity",
+  memos: "productivity",
+  nextcloud: "productivity",
+  nocodb: "productivity",
+  "stirling-pdf": "productivity",
+  trilium: "productivity",
+  vaultwarden: "productivity",
+  wallabag: "productivity",
+  audiobookshelf: "media",
+  jellyfin: "media",
+  kavita: "media",
+  navidrome: "media",
+  seerr: "media",
+  beszel: "monitoring",
+  dozzle: "monitoring",
+  grafana: "monitoring",
+  healthchecks: "monitoring",
+  metabase: "monitoring",
+  prometheus: "monitoring",
+  "uptime-kuma": "monitoring",
+  gotify: "automation",
+  n8n: "automation",
+  ntfy: "automation",
+  ollama: "ai",
+  "open-webui": "ai",
+  adminer: "developer",
+  "code-server": "developer",
+  cyberchef: "developer",
+  directus: "developer",
+  gitea: "developer",
+  "it-tools": "developer",
+  jupyter: "developer",
+  "mongo-express": "developer",
+  opengist: "developer",
+  pgadmin: "developer",
+  phpmyadmin: "developer",
+  portainer: "developer",
+  whoami: "developer",
+  caddy: "web",
+  filebrowser: "web",
+  homepage: "web",
+  minio: "web",
+  "nginx-static": "web",
+  searxng: "web",
+  shlink: "web",
+  syncthing: "web",
+}
+
+const CATEGORY_TOPIC: Record<BlueprintSummary["category"], TopicKey> = {
+  http: "web",
+  database: "databases",
+  tool: "developer",
+  automation: "automation",
+  game: "games",
+}
+
+function topicOf(entry: BlueprintSummary): TopicKey {
+  return TOPIC_OF[entry.id] ?? CATEGORY_TOPIC[entry.category] ?? "web"
 }
 
 function asError(error: unknown) {
@@ -58,8 +141,8 @@ function asError(error: unknown) {
 /**
  * The reviewed catalogue, and the chosen blueprint's own inputs — ported from
  * `blueprint-picker.tsx`, minus the profile pre-filter the old intent step
- * gave it: everything the server reviews is shown, grouped the way it groups
- * itself, and one "Use" inspects with whatever inputs are filled in.
+ * gave it: everything the server reviews is shown, on the shelves above, and
+ * one "Use" inspects with whatever inputs are filled in.
  */
 export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
   const catalogue = usePoll(
@@ -67,6 +150,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
     0,
   )
   const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
+  const [topic, setTopic] = useSessionState<TopicKey | "all">("deploy.new.template.topic", "all")
   const [selectedId, setSelectedId] = useSessionState("deploy.new.template.selected", "")
   const [inputs, setInputs] = useSessionState<Record<string, string>>(
     `deploy.new.template.inputs.${selectedId}`,
@@ -88,9 +172,12 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
   )
   const definition = detail.data?.id === selectedId ? detail.data : undefined
 
-  const grouped = useMemo(() => {
+  // Every shelf that has a match, in shelf order — the chips count what the
+  // search left on each, so a search that empties a shelf says so before the
+  // shelf is opened.
+  const shelves = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    const map = new Map<BlueprintSummary["category"], BlueprintSummary[]>()
+    const map = new Map<TopicKey, BlueprintSummary[]>()
     for (const entry of catalogue.data ?? []) {
       if (
         needle &&
@@ -98,10 +185,16 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
         !entry.description.toLowerCase().includes(needle)
       )
         continue
-      map.set(entry.category, [...(map.get(entry.category) ?? []), entry])
+      const key = topicOf(entry)
+      map.set(key, [...(map.get(key) ?? []), entry])
     }
-    return [...map.entries()]
+    return TOPICS.filter((shelf) => map.has(shelf.key)).map((shelf) => ({
+      ...shelf,
+      entries: map.get(shelf.key)!,
+    }))
   }, [catalogue.data, filter])
+  const shown = topic === "all" ? shelves : shelves.filter((shelf) => shelf.key === topic)
+  const matched = shelves.reduce((total, shelf) => total + shelf.entries.length, 0)
 
   const revealOnSmallScreen = (id: string) => {
     if (window.matchMedia("(min-width: 1280px)").matches) return
@@ -233,24 +326,17 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
   }
 
   const listed = (catalogue.data ?? []).length
+  const chosen = catalogue.data?.find((entry) => entry.id === selectedId)
 
   return (
-    // The catalogue and the chosen template's own inputs, side by side. They
-    // used to be stacked, so choosing one scrolled the catalogue off the
-    // screen and comparing two meant scrolling back up to find the first.
-    //
-    // The second column only exists once there is something to put in it: a
-    // reserved empty column reads as a layout bug rather than as a promise,
-    // which is the same reason a row's actions are revealed and not merely
-    // made transparent.
-    <div
-      className={cn(
-        "grid min-w-0 items-start gap-x-10 gap-y-6",
-        selectedId ? "xl:grid-cols-[minmax(0,1fr)_26rem]" : "max-w-4xl",
-      )}
-    >
-      {failure && <ErrorState error={failure} className="xl:col-span-2" />}
-      <Panel plain id="template-catalogue" tabIndex={-1} className="min-w-0 scroll-mt-4">
+    // The catalogue and the chosen template's own inputs, side by side, each
+    // the height of the window with its own scroll: choosing a template never
+    // scrolls the catalogue away, and comparing two never means scrolling back
+    // up to find the first. The second column is always there at this width —
+    // it says what will open in it until something does, so choosing the
+    // first template does not reflow every card in the grid.
+    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_24rem] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch">
+      <Panel plain id="template-catalogue" tabIndex={-1} className="min-w-0 scroll-mt-4 xl:min-h-0">
         <PanelHeader
           title="Application templates"
           actions={
@@ -261,7 +347,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
             )
           }
         />
-        <PanelBody className="space-y-4">
+        <PanelBody className="flex min-h-0 flex-1 flex-col gap-3">
           {catalogue.error && <ErrorState error={catalogue.error} />}
           <SearchInput
             value={filter}
@@ -270,33 +356,56 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
             aria-label="Search templates"
             containerClassName="sm:w-full"
           />
-          {catalogue.loading && !catalogue.data && <LoadingRows rows={4} />}
-          {catalogue.data && grouped.length === 0 && (
-            <EmptyNote>No template matches that search.</EmptyNote>
+          {catalogue.data && (
+            // The shelves, as the Git page's filters are drawn: a chip narrows
+            // the catalogue to one shelf and says how many are on it.
+            <div role="group" aria-label="Template topics" className="flex flex-wrap gap-1">
+              <FilterChip selected={topic === "all"} onClick={() => setTopic("all")}>
+                All <ChipCount>{matched}</ChipCount>
+              </FilterChip>
+              {TOPICS.map((shelf) => {
+                const count = shelves.find((one) => one.key === shelf.key)?.entries.length ?? 0
+                return (
+                  <FilterChip
+                    key={shelf.key}
+                    selected={topic === shelf.key}
+                    onClick={() => setTopic(topic === shelf.key ? "all" : shelf.key)}
+                  >
+                    {shelf.label} <ChipCount>{count}</ChipCount>
+                  </FilterChip>
+                )
+              })}
+            </div>
           )}
-          {grouped.map(([category, entries]) => {
-            const label = CATEGORY_LABEL[category] ?? humanize(category)
-            return (
+          {catalogue.loading && !catalogue.data && <LoadingRows rows={4} />}
+          {catalogue.data && shown.length === 0 && (
+            <EmptyNote>
+              {matched === 0
+                ? "No template matches that search."
+                : "Nothing on this shelf matches."}
+            </EmptyNote>
+          )}
+          {/* Padded by the cards' own lit edge, which would otherwise run
+              under the scrollbar, and pulled back out so the cards still start
+              where the search field does. */}
+          <div className="-mx-3 space-y-5 px-3 pt-1 pb-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+            {shown.map((shelf) => (
               // The cards arrive staggered by their own index, so the group
               // does not also rise: that is one block animating twice.
-              <div key={category} className="space-y-2">
-                <p className="eyebrow">{label}</p>
-                {/* Kinds, so cards (§16): a template is a different sort of
-                    thing from the one beside it, and what tells them apart is
-                    the sentence a row truncates to nothing. Two columns and
-                    not three, because at three that sentence wraps to four
-                    lines in the width the catalogue keeps once a chosen
-                    template's panel is beside it. The category is the grid's
+              <div key={shelf.key} className="space-y-2">
+                <p className="eyebrow">{shelf.label}</p>
+                {/* Kinds, so cards (§16). The shelf is the grid's
                     `role="group"` name — a bare `aria-label` on a div names
                     nothing, so the eyebrow would reach a reader and no one
                     else. */}
-                <ChoiceGrid columns={2} role="group" aria-label={label}>
-                  {entries.map((entry, index) => {
+                <ChoiceGrid columns="fill" role="group" aria-label={shelf.label}>
+                  {shelf.entries.map((entry, index) => {
                     const usable = entry.deploymentSupported !== false
                     return (
                       <ChoiceCard
                         key={entry.id}
                         index={index}
+                        logo={<ProductLogo id={entry.id} />}
                         title={entry.name}
                         // The control's name is the verb and the template, not
                         // the card's whole contents — see ChoiceCard (§12).
@@ -307,12 +416,16 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                             : entry.unavailableReason ||
                               "This blueprint cannot be deployed by this dashboard version."
                         }
+                        // How it is signed into stays on the card, where the
+                        // template is chosen (first-sign-in.tsx). The image
+                        // moved to the settings beside it: a registry path in
+                        // every card was the widest thing in the grid and what
+                        // made one card a line taller than its neighbour.
                         trailing={
-                          <span className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
                             <AccessTag access={entry.access} />
                             {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
                             {entry.privileged && <Tag tone="danger">privileged</Tag>}
-                            <Tag mono>{entry.image}</Tag>
                             {!usable && <Tag tone="warning">Preview only</Tag>}
                           </span>
                         }
@@ -329,12 +442,12 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                   })}
                 </ChoiceGrid>
               </div>
-            )
-          })}
+            ))}
+          </div>
         </PanelBody>
       </Panel>
 
-      {selectedId && (
+      {selectedId ? (
         // The one surface with depth on this screen (§16). Until a template is
         // chosen there is no foreground at all and the advance is the cards'
         // own lit edges; once one is chosen, what is being decided is its
@@ -345,31 +458,38 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
           id="template-settings"
           aria-label="Selected template settings"
           tabIndex={-1}
-          className="order-first min-w-0 scroll-mt-4 xl:sticky xl:top-6 xl:order-last"
+          className="order-first min-w-0 scroll-mt-4 xl:order-last xl:max-h-full xl:min-h-0 xl:self-start"
           aria-busy={detail.loading || busy}
         >
           <FlowPanelHeader
             title={
-              definition?.name ??
-              catalogue.data?.find((entry) => entry.id === selectedId)?.name ??
-              "Template"
+              <span className="flex min-w-0 items-center gap-2.5">
+                <ProductLogo id={selectedId} size="sm" />
+                <span className="truncate">{definition?.name ?? chosen?.name ?? "Template"}</span>
+              </span>
             }
             actions={definition && <Tag mono>v{definition.version}</Tag>}
           />
-          <FlowPanelBody className="space-y-4">
+          <FlowPanelBody className="space-y-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
             {detail.loading && (
               <div role="status" aria-label="Loading template settings">
                 <LoadingRows rows={6} />
               </div>
             )}
             {detail.error && <ErrorState error={detail.error} onRetry={detail.refresh} />}
+            {/* Beside the command that raised it: what "Use this template"
+                refused, or what the inspection it started ran into. */}
+            {failure && <ErrorState error={failure} />}
             {definition && (
               <fieldset disabled={busy} className="min-w-0 space-y-4">
                 {/* Facts, not a fenced block: inside the one framed surface a
                 hairline box is a frame drawn inside a frame. */}
                 <div className="min-w-0 space-y-1.5 text-xs text-muted-foreground">
-                  <p className="flex flex-wrap items-center gap-2">
+                  <p className="flex min-w-0 flex-wrap items-center gap-2">
                     <Tag>{definition.provenance.license}</Tag>
+                    <Tag mono className="max-w-full truncate">
+                      {definition.image}
+                    </Tag>
                   </p>
                   <p>
                     Reviewed {definition.provenance.reviewedAt} by{" "}
@@ -507,6 +627,15 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
             </Button>
           </FlowActions>
         </FlowPanel>
+      ) : (
+        // Only at the width that draws the two columns: stacked, a promise
+        // above the catalogue is a block of nothing between the reader and it.
+        <EmptyState
+          className="hidden xl:flex xl:self-start"
+          icon={GridMasonry}
+          title="Pick a template"
+          description="Its settings open here. Nothing is created until you deploy it."
+        />
       )}
     </div>
   )

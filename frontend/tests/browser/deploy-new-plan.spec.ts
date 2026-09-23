@@ -167,6 +167,7 @@ test("an unfinished setup can be discarded, and changing source discards the one
   )
   await page.goto("/deploy/new")
 
+  await page.getByRole("button", { name: /Unfinished setups/ }).click()
   const list = page.getByRole("list", { name: "Unfinished setups" })
   await expect(list.getByRole("link", { name: /lampino/ })).toBeVisible()
   listed = []

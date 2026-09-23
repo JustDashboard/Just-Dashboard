@@ -81,13 +81,12 @@ type PickableRepo = {
 }
 
 /**
- * An identity's own face on GitHub.
+ * An account's own face on GitHub — an identity's, and a repository owner's.
  *
- * Two rows that say "Wayy01" twice under one picture are the same account at a
- * glance, which is the question the panel exists to answer and which two grey
- * glyphs never answered. Where there is no account yet — no App installed,
- * nobody signed in — the kind's glyph stands in, because there is no face to
- * draw.
+ * Whose repositories these are is the question the identities answer, and a
+ * face answers it before a name is read; two grey glyphs never did. Where there
+ * is no account yet — no App installed, nobody signed in — the kind's glyph
+ * stands in, because there is no face to draw.
  */
 function IdentityMark({ account, fallback: Fallback }: { account?: string; fallback: Icon }) {
   // The glyph keeps the avatar's footprint, so the two titles start at the
@@ -101,7 +100,12 @@ function IdentityMark({ account, fallback: Fallback }: { account?: string; fallb
   return (
     <Avatar size="sm" className="border border-hairline">
       <AvatarImage src={githubAvatarUrl(account)} alt="" />
-      <AvatarFallback className="text-micro uppercase">{account.slice(0, 2)}</AvatarFallback>
+      {/* The kind's glyph rather than initials while the picture is on its
+          way: two letters in a filled circle is the pill §4 deleted, and a
+          column of twenty of them is a column of pills. */}
+      <AvatarFallback>
+        <Fallback className="size-3.5" />
+      </AvatarFallback>
     </Avatar>
   )
 }
@@ -289,294 +293,300 @@ export function SourceGit({
   const listing = (signedIn && repos.loading) || (appRepos.loading && !appRepos.data)
   const canBrowse = signedIn || stage === "import" || pickable.length > 0
 
-  return (
-    <div className="min-w-0 space-y-6">
-      {failure && <ErrorState error={failure} />}
+  // The two identities, as the accounts they are. When the App is installed on
+  // the account the CLI is signed in as — the ordinary install — that is one
+  // account reached two ways, and two rows with the same face and the same
+  // name read as two accounts.
+  const appAccount = installations.map((one) => one.account).join(", ")
+  const merged = sameAccount && stage === "import" && signedIn
 
-      {/* Said once, in one place: two identities reach GitHub from this
-          server, and "why are these the repositories I can see" used to have
-          no answer anywhere on the page. Each row is a face, a name and a
-          count — the account's own picture, because when both identities sit
-          on one account that is the fact the reader needs, and no sentence
-          said it as quickly as the same face twice. */}
-      <Panel plain className="animate-rise">
-        <PanelHeader
-          title="Where these repositories come from"
+  return (
+    // The list and the ways around it, each the height of the window: the
+    // rows scroll inside the panel that holds them and everything else stays
+    // put, which is what the Git page's list does for the checkouts on disk.
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
+      {/* The one surface on this screen that carries depth (§16): choosing a
+          repository is what the reader came here to do, and the paste field
+          beside it is the fallback for when this list has not got it. Two
+          surfaces with depth would be two foregrounds, which is none. */}
+      <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
+        <FlowPanelHeader
+          title="Import Git repository"
           actions={
-            app.data?.installUrl && (
-              <Button variant="outline" size="xs" asChild>
-                <a href={app.data.installUrl} target="_blank" rel="noreferrer noopener">
-                  <External className="size-3" />
-                  Adjust repository access
-                </a>
-              </Button>
+            canBrowse && (
+              <span className="numeric text-hint text-muted-foreground">
+                {needle || owner !== "all"
+                  ? `${visibleCount} of ${pickable.length}`
+                  : plural(pickable.length, "repository", "repositories")}
+              </span>
             )
           }
         />
-        <PanelBody flush>
-          <RowList aria-label="GitHub connections">
-            <Row
-              leading={<IdentityMark account={installations[0]?.account} fallback={GitHubMark} />}
-              // The account, not the App's generated name: "Just Dashboard
-              // e4e5" is this dashboard's own label for itself, and what the
-              // reader is checking is whose repositories these are.
-              title={
-                installations.length > 0
-                  ? `GitHub App · ${installations.map((one) => one.account).join(", ")}`
-                  : "GitHub App"
-              }
-              // Only where something is missing. A connected identity that
-              // explained itself in a second line was a caption under a title
-              // (§5) — the face, the account and the count say it.
-              subtitle={
-                stage === "install"
-                  ? "Created on GitHub, waiting for an account to install it"
-                  : stage === "create"
-                    ? "One App in place of a token and a webhook for every repository"
-                    : stage === undefined
-                      ? "Reading the App…"
-                      : undefined
-              }
-              trailing={
-                <>
-                  {stage === "import" && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {plural(fromApp.length, "repository", "repositories")}
-                    </span>
-                  )}
-                  <Status
-                    tone={
-                      stage === "import" ? "running" : stage === "install" ? "warning" : "unknown"
-                    }
-                    label={
-                      stage === "import"
-                        ? "Installed"
-                        : stage === "install"
-                          ? "Uninstalled"
-                          : "Disconnected"
-                    }
-                  />
-                  {stage === "create" && (
-                    <Link
-                      href="/deploy/credentials"
-                      className="rounded-sm text-hint underline underline-offset-2 focus-ring"
-                    >
-                      Connect
-                    </Link>
-                  )}
-                </>
-              }
-            />
-            <Row
-              leading={
-                <IdentityMark account={signedIn ? cliLogin : undefined} fallback={Terminal} />
-              }
-              title={signedIn ? `GitHub CLI · ${cliLogin}` : "GitHub CLI"}
-              subtitle={
-                signedIn
-                  ? undefined
-                  : status.data?.available === false
-                    ? "gh is not installed on this host, so signing in is not available here"
-                    : "Installed on this host, nobody signed in"
-              }
-              trailing={
-                <>
-                  {/* The App is installed on the same account, and it reaches
-                      every repository this one does: the count read "0
-                      repositories" beside the App's 22, which is true of the
-                      list below and false of the account. It only stays a
-                      count where the CLI reaches something the App does not —
-                      an App installed on a chosen few. */}
-                  {signedIn &&
-                    (sameAccount && fromCli.length === 0 ? (
-                      <span className="text-hint text-muted-foreground">
-                        Same account as the App
-                      </span>
-                    ) : (
-                      <span className="numeric text-hint text-muted-foreground">
-                        {plural(fromCli.length, "repository", "repositories")}
-                      </span>
+        <FlowPanelBody className="flex min-h-0 flex-1 flex-col gap-4">
+          {failure && <ErrorState error={failure} />}
+          {status.error && <ErrorState error={status.error} />}
+          {repos.error && <ErrorState error={repos.error} />}
+          {canBrowse && (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={owner} onValueChange={setOwner}>
+                  <SelectTrigger aria-label="Repository owner" className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All repositories</SelectItem>
+                    {owners.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
                     ))}
-                  <Status
-                    tone={signedIn ? "running" : "unknown"}
-                    label={
-                      signedIn
-                        ? "Signed in"
-                        : status.data?.available === false
-                          ? "Unavailable"
-                          : "Signed out"
-                    }
-                  />
-                  {!signedIn && status.data?.available !== false && (
-                    <Link
-                      href="/git"
-                      className="rounded-sm text-hint underline underline-offset-2 focus-ring"
-                    >
-                      Sign in
-                    </Link>
+                  </SelectContent>
+                </Select>
+                <SearchInput
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value)}
+                  placeholder="Filter repositories"
+                  aria-label="Filter repositories"
+                  containerClassName="min-w-0 flex-1 sm:w-auto"
+                />
+                <IconAction
+                  label="Refresh repositories"
+                  onClick={() => {
+                    repos.refresh()
+                    appRepos.refresh()
+                    app.refresh()
+                  }}
+                >
+                  <RefreshClockwise />
+                </IconAction>
+              </div>
+              {listing && <LoadingRows rows={6} />}
+              {!listing && visibleCount === 0 && (
+                // The repair for "my repository is not here" belongs where the
+                // absence is felt, not on a settings page two navigations
+                // away — which is where every platform that got this right
+                // ended up putting it.
+                <EmptyNote>
+                  {pickable.length === 0
+                    ? "Neither GitHub identity lists a repository yet."
+                    : "No repository matches that filter."}{" "}
+                  {app.data?.installUrl && (
+                    <>
+                      If the one you want is missing, the App has probably not been granted it —{" "}
+                      <a
+                        href={app.data.installUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="rounded-sm underline underline-offset-2 focus-ring"
+                      >
+                        adjust repository access
+                      </a>
+                      . A public clone URL works without either identity.
+                    </>
                   )}
-                </>
-              }
-            />
-          </RowList>
-          {/* An optional integration that cannot be read is information, not a
-              failure: the page used to paint a red error block across the
-              primary import path whenever GitHub was unreachable. */}
-          {app.error && (
-            <p className="px-5 pt-3 text-hint text-muted-foreground">
-              The GitHub App could not be read just now. Anything it grants is missing from the list
-              below.
-            </p>
+                </EmptyNote>
+              )}
+              {/* Padded by the rows' own bleed. A scroll container over rows
+                  that bleed grows a sideways scrollbar otherwise, which is
+                  what it had. */}
+              <div
+                className="-mx-3 max-h-[min(60vh,42rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1"
+                key={listing ? "loading" : "listed"}
+              >
+                {groups.map((group) => (
+                  <div key={group.key} className="animate-rise space-y-2 pt-3 first:pt-0">
+                    {groups.length > 1 && <p className="eyebrow">{group.label}</p>}
+                    <ChoiceList aria-label={group.label}>
+                      {group.repos.map((repo) => (
+                        <RepoRow
+                          key={repo.nameWithOwner}
+                          repo={repo}
+                          pending={busy === repo.nameWithOwner}
+                          onImport={() => importRepo(repo)}
+                        />
+                      ))}
+                    </ChoiceList>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
-        </PanelBody>
-      </Panel>
+        </FlowPanelBody>
+        {/* Under the rows they govern, not inside the paste panel: these apply
+            to whichever import fires — a row's press as much as the pasted
+            URL. They lived inside "Branch & authentication" once, which reads
+            as being about the field beside it, and a repository that needed
+            its submodules failed its build with no hint that the switch
+            existed. The qualifier is in the title, not in `facts`: `facts`
+            says what a fold holds and yields the row on a phone, and this is a
+            caveat about what the switches inside reach. */}
+        <div className="shrink-0 border-t border-hairline px-4 py-2">
+          <Disclosure quiet summary="Clone options · apply to every import here">
+            <OptionList>
+              <OptionRow
+                title="Clone the submodules listed in .gitmodules"
+                checked={includeSubmodules}
+                onCheckedChange={setIncludeSubmodules}
+              />
+              <OptionRow
+                title="Download Git LFS objects, not their pointer files"
+                checked={includeLfs}
+                onCheckedChange={setIncludeLfs}
+              />
+            </OptionList>
+          </Disclosure>
+        </div>
+      </FlowPanel>
 
-      <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        {/* The one surface on this screen that carries depth (§16): choosing a
-            repository is what the reader came here to do, and the paste field
-            beside it is the fallback for when this list has not got it. Two
-            surfaces with depth would be two foregrounds, which is none. */}
-        <FlowPanel className="min-w-0">
-          <FlowPanelHeader
-            title="Import Git repository"
+      {/* Beside the rows at this width, under them at every other. Who the
+          rows come from, then the fallback for a repository neither identity
+          lists — never the primary way in, and second in the DOM so a phone
+          reaches the rows first. */}
+      <div className="flex min-w-0 flex-col gap-6 xl:min-h-0 xl:overflow-y-auto">
+        {/* Said once, in one place: "why are these the repositories I can
+            see" used to have no answer anywhere on the page. Each identity is
+            a face, a name and a count — and one account reached through both
+            is one face, with the two ways it is reached as its second line. */}
+        <Panel plain className="animate-rise">
+          <PanelHeader
+            title="GitHub"
             actions={
-              canBrowse && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {needle || owner !== "all"
-                    ? `${visibleCount} of ${pickable.length}`
-                    : plural(pickable.length, "repository", "repositories")}
-                </span>
+              app.data?.installUrl && (
+                <Button variant="outline" size="xs" asChild>
+                  <a href={app.data.installUrl} target="_blank" rel="noreferrer noopener">
+                    <External className="size-3" />
+                    Adjust access
+                  </a>
+                </Button>
               )
             }
           />
-          <FlowPanelBody className="space-y-4">
-            {status.error && <ErrorState error={status.error} />}
-            {repos.error && <ErrorState error={repos.error} />}
-            {canBrowse && (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select value={owner} onValueChange={setOwner}>
-                    <SelectTrigger aria-label="Repository owner" className="w-44">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All repositories</SelectItem>
-                      {owners.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <SearchInput
-                    value={filter}
-                    onChange={(event) => setFilter(event.target.value)}
-                    placeholder="Filter repositories"
-                    aria-label="Filter repositories"
-                    containerClassName="min-w-0 flex-1 sm:w-auto"
-                  />
-                  <IconAction
-                    label="Refresh repositories"
-                    onClick={() => {
-                      repos.refresh()
-                      appRepos.refresh()
-                      app.refresh()
-                    }}
-                  >
-                    <RefreshClockwise />
-                  </IconAction>
-                </div>
-                {listing && <LoadingRows rows={6} />}
-                {!listing && visibleCount === 0 && (
-                  // The repair for "my repository is not here" belongs where the
-                  // absence is felt, not on a settings page two navigations
-                  // away — which is where every platform that got this right
-                  // ended up putting it.
-                  <EmptyNote>
-                    {pickable.length === 0
-                      ? "Neither identity above lists a repository yet."
-                      : "No repository matches that filter."}{" "}
-                    {app.data?.installUrl && (
+          <PanelBody flush>
+            <RowList aria-label="GitHub connections">
+              {merged ? (
+                <Row
+                  leading={<IdentityMark account={appAccount} fallback={GitHubMark} />}
+                  title={appAccount}
+                  subtitle="GitHub App · GitHub CLI"
+                  trailing={
+                    <>
+                      <span className="numeric text-hint text-muted-foreground">
+                        {plural(pickable.length, "repository", "repositories")}
+                      </span>
+                      <Status tone="running" label="Connected" />
+                    </>
+                  }
+                />
+              ) : (
+                <>
+                  <Row
+                    leading={
+                      <IdentityMark account={installations[0]?.account} fallback={GitHubMark} />
+                    }
+                    // The account, not the App's generated name: "Just
+                    // Dashboard e4e5" is this dashboard's own label for
+                    // itself, and what the reader is checking is whose
+                    // repositories these are.
+                    title={installations.length > 0 ? appAccount : "GitHub App"}
+                    subtitle={
+                      stage === "import"
+                        ? "GitHub App"
+                        : stage === "install"
+                          ? "Created on GitHub, waiting for an account to install it"
+                          : stage === "create"
+                            ? "One App in place of a token and a webhook for every repository"
+                            : "Reading the App…"
+                    }
+                    trailing={
                       <>
-                        If the one you want is missing, the App has probably not been granted it —{" "}
-                        <a
-                          href={app.data.installUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="rounded-sm underline underline-offset-2 focus-ring"
-                        >
-                          adjust repository access
-                        </a>
-                        . A public clone URL below works without either identity.
+                        {stage === "import" && (
+                          <span className="numeric text-hint text-muted-foreground">
+                            {plural(fromApp.length, "repository", "repositories")}
+                          </span>
+                        )}
+                        <Status
+                          tone={
+                            stage === "import"
+                              ? "running"
+                              : stage === "install"
+                                ? "warning"
+                                : "unknown"
+                          }
+                          label={
+                            stage === "import"
+                              ? "Installed"
+                              : stage === "install"
+                                ? "Uninstalled"
+                                : "Disconnected"
+                          }
+                        />
+                        {stage === "create" && (
+                          <Link
+                            href="/deploy/credentials"
+                            className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                          >
+                            Connect
+                          </Link>
+                        )}
                       </>
-                    )}
-                  </EmptyNote>
-                )}
-                {/* Padded by the rows' own bleed. A scroll container over rows
-                  that bleed grows a sideways scrollbar otherwise, which is
-                  what it had. */}
-                <div
-                  className="-mx-3 max-h-[min(60vh,42rem)] overflow-y-auto px-3"
-                  key={listing ? "loading" : "listed"}
-                >
-                  {groups.map((group) => (
-                    <div key={group.key} className="animate-rise space-y-2 pt-3 first:pt-0">
-                      {groups.length > 1 && <p className="eyebrow">{group.label}</p>}
-                      <ChoiceList aria-label={group.label}>
-                        {group.repos.map((repo) => (
-                          <RepoRow
-                            key={repo.nameWithOwner}
-                            repo={repo}
-                            pending={busy === repo.nameWithOwner}
-                            onImport={() => importRepo(repo)}
-                          />
-                        ))}
-                      </ChoiceList>
-                    </div>
-                  ))}
-                </div>
-              </>
+                    }
+                  />
+                  <Row
+                    leading={
+                      <IdentityMark account={signedIn ? cliLogin : undefined} fallback={Terminal} />
+                    }
+                    title={signedIn ? cliLogin : "GitHub CLI"}
+                    subtitle={
+                      signedIn
+                        ? "GitHub CLI"
+                        : status.data?.available === false
+                          ? "gh is not installed on this host, so signing in is not available here"
+                          : "Installed on this host, nobody signed in"
+                    }
+                    trailing={
+                      <>
+                        {signedIn && (
+                          <span className="numeric text-hint text-muted-foreground">
+                            {plural(fromCli.length, "repository", "repositories")}
+                          </span>
+                        )}
+                        <Status
+                          tone={signedIn ? "running" : "unknown"}
+                          label={
+                            signedIn
+                              ? "Signed in"
+                              : status.data?.available === false
+                                ? "Unavailable"
+                                : "Signed out"
+                          }
+                        />
+                        {!signedIn && status.data?.available !== false && (
+                          <Link
+                            href="/git"
+                            className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                          >
+                            Sign in
+                          </Link>
+                        )}
+                      </>
+                    }
+                  />
+                </>
+              )}
+            </RowList>
+            {/* An optional integration that cannot be read is information, not
+                a failure: the page used to paint a red error block across the
+                primary import path whenever GitHub was unreachable. */}
+            {app.error && (
+              <p className="pt-3 text-hint text-muted-foreground">
+                The GitHub App could not be read just now. Anything it grants is missing from the
+                list.
+              </p>
             )}
+          </PanelBody>
+        </Panel>
 
-            {/* Under the rows they govern, not inside the paste panel: these
-                apply to whichever import fires — a row's press as much as the
-                pasted URL. They lived inside "Branch & authentication" once,
-                which reads as being about the field beside it, and a
-                repository that needed its submodules failed its build with no
-                hint that the switch existed. */}
-            {/* The same fold the rest of the flow uses, rather than a bare
-                `<summary>` with the platform triangle: two spellings of
-                "there is more here" on one screen is the drift
-                `components/form.tsx` exists to stop. */}
-            <div className="border-t border-hairline pt-3">
-              {/* The qualifier is in the title, not in `facts`: `facts` says
-                  what a fold holds and yields the row on a phone, and this is
-                  a caveat about what the switches inside reach — a reader who
-                  never opens the fold still has to know the rows above obey
-                  it. */}
-              <Disclosure quiet summary="Clone options · apply to every import here">
-                <OptionList>
-                  <OptionRow
-                    title="Clone the submodules listed in .gitmodules"
-                    checked={includeSubmodules}
-                    onCheckedChange={setIncludeSubmodules}
-                  />
-                  <OptionRow
-                    title="Download Git LFS objects, not their pointer files"
-                    checked={includeLfs}
-                    onCheckedChange={setIncludeLfs}
-                  />
-                </OptionList>
-              </Disclosure>
-            </div>
-          </FlowPanelBody>
-        </FlowPanel>
-
-        {/* Beside the rows at this width, under them at every other — which is
-          what spec §5.4 asks for. It is the fallback for a repository neither
-          identity lists, never the primary way in, and it is second in the
-          DOM so a phone reaches the rows first. */}
-        <Panel plain className="min-w-0 xl:sticky xl:top-6">
+        <Panel plain>
           <PanelHeader title="Or paste a Git URL" />
           <PanelBody className="space-y-3">
             <Field label="Clone URL" htmlFor="manual-url">
@@ -642,12 +652,12 @@ export function SourceGit({
             </Button>
           </PanelBody>
         </Panel>
-      </div>
 
-      <FormNote>
-        New commits to the selected branch deploy automatically after your first deployment, unless
-        you turn that off on the next screen.
-      </FormNote>
+        <FormNote>
+          New commits to the selected branch deploy automatically after your first deployment,
+          unless you turn that off on the next screen.
+        </FormNote>
+      </div>
     </div>
   )
 }
@@ -675,18 +685,24 @@ function RepoRow({
     <ChoiceRow
       verb={`Import ${repo.nameWithOwner}`}
       onSelect={onImport}
-      title={repo.nameWithOwner}
-      description={repo.description}
-      leading={
-        repo.private && (
-          <LockClosed
-            className="size-3.5 shrink-0 text-muted-foreground"
-            aria-label="Private repository"
-          />
-        )
+      // The owner is the face beside the row, so in the title it steps back
+      // and the name — what tells forty rows apart — is the ink.
+      title={
+        <>
+          <span className="text-muted-foreground">{repo.owner}/</span>
+          {repo.name}
+        </>
       }
+      description={repo.description}
+      leading={<IdentityMark account={repo.owner} fallback={GitHubMark} />}
       trailing={
         <>
+          {repo.private && (
+            <LockClosed
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-label="Private repository"
+            />
+          )}
           {repo.archived && <Tag>archived</Tag>}
           {repo.fork && <Tag>fork</Tag>}
           {repo.language && (

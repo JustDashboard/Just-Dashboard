@@ -308,4 +308,5 @@ restore. The Backups page lists the dashboard itself under Coverage and writes t
 
 [AGPL-3.0](LICENSE). Run it, change it, distribute it, but if you run a modified version as a
 network service, publish your changes. Contributions are welcome under the terms in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). The product logos bundled in `frontend/public/logos/` are their
+owners' trademarks and keep their own licences, listed in that directory's `NOTICE`.

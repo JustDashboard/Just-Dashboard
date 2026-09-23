@@ -34,7 +34,12 @@ export function Page({
   register = "reading",
   ...props
 }: React.ComponentProps<"div"> & {
-  fill?: boolean
+  /**
+   * `"xl"` holds the page to the window only where its columns sit side by
+   * side — a flow page decided in one view (§17 pass 8) that stacks and
+   * scrolls like any other page below that width.
+   */
+  fill?: boolean | "xl"
   /**
    * Which register this page is drawn in (§16).
    *
@@ -57,7 +62,8 @@ export function Page({
       data-register={register}
       className={cn(
         "group/page mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
-        fill && "h-full min-h-0 overflow-hidden",
+        fill === true && "h-full min-h-0 overflow-hidden",
+        fill === "xl" && "xl:h-full xl:min-h-0 xl:overflow-hidden",
         className,
       )}
       {...props}

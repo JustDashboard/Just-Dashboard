@@ -24,7 +24,10 @@ export function SourceDatabase() {
     undefined,
   )
   return (
-    <FlowPanel className="w-full max-w-3xl min-w-0 p-4">
+    // Capped at the window with its own scroll, like every other source: the
+    // page around it no longer scrolls, and a failure, a notice and the fields
+    // together are taller than the engines alone.
+    <FlowPanel className="w-full min-w-0 p-4 xl:max-h-full xl:overflow-y-auto">
       <DatabaseQuickDeploy
         resume={started}
         onStarted={setStarted}

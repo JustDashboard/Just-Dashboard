@@ -1,21 +1,24 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowDown, ArrowUp, Plus, Trash } from "@/components/icons"
+import {
+  ArrowDown,
+  ArrowUp,
+  CloudUpload,
+  FileText,
+  GitBranch,
+  Plus,
+  Servers,
+  Trash,
+} from "@/components/icons"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 import { Field } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
-import { Group } from "@/components/panel"
+import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type { DeploymentComposeDocument, DeploymentDraftSource } from "@/lib/types"
@@ -29,6 +32,33 @@ import {
 } from "@/components/deploy/new-project/draft"
 
 type FilesMode = "compose_paste" | "compose_upload" | "compose_git" | "compose_local"
+
+/**
+ * Where a stack's files can live. Four kinds, so four cards (§16) rather than
+ * a select: a closed dropdown said "Paste" and hid the three answers a reader
+ * with the files in a repository was looking for.
+ */
+const MODES: {
+  key: FilesMode
+  label: string
+  hint: string
+  icon: React.ComponentType<{ className?: string }>
+}[] = [
+  { key: "compose_paste", label: "Paste", hint: "Type or paste the YAML here", icon: FileText },
+  { key: "compose_upload", label: "Upload", hint: "Files from this computer", icon: CloudUpload },
+  {
+    key: "compose_git",
+    label: "In a Git repository",
+    hint: "Cloned from a URL and branch",
+    icon: GitBranch,
+  },
+  {
+    key: "compose_local",
+    label: "On this server",
+    hint: "A directory already on the host",
+    icon: Servers,
+  },
+]
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
@@ -116,29 +146,18 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
   }
 
   return (
-    <div className="w-full max-w-3xl min-w-0 space-y-4">
-      {failure && <ErrorState error={failure} />}
+    // The same two columns as every other source: what is being decided, and
+    // beside it what it is decided from.
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
       {/* The one surface with depth on this tab (§16): which files the stack is
           made of, and where they live, is the whole decision here. The tab drew
           it as a `Panel plain` whose foot looked like every other panel foot in
           the product, so nothing said which thing on the screen was being
           decided. */}
-      <FlowPanel>
+      <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
         <FlowPanelHeader title="Compose stack" />
-        <FlowPanelBody className="space-y-4">
-          <Field label="Where are the files" htmlFor="compose-mode">
-            <Select value={mode} onValueChange={(value) => setMode(value as FilesMode)}>
-              <SelectTrigger id="compose-mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="compose_paste">Paste</SelectItem>
-                <SelectItem value="compose_upload">Upload</SelectItem>
-                <SelectItem value="compose_git">In a Git repository</SelectItem>
-                <SelectItem value="compose_local">On this server</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+        <FlowPanelBody className="space-y-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+          {failure && <ErrorState error={failure} />}
 
           {(mode === "compose_paste" || mode === "compose_upload") && (
             <ComposeFilesEditor
@@ -240,6 +259,35 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
           </Button>
         </FlowActions>
       </FlowPanel>
+
+      <Panel plain className="order-first min-w-0 xl:order-last xl:min-h-0 xl:overflow-y-auto">
+        <PanelHeader title="Where the files are" />
+        <PanelBody>
+          <div role="group" aria-label="Where the files are" className="grid gap-2">
+            {MODES.map((option) => (
+              <ChoiceCard
+                key={option.key}
+                selected={mode === option.key}
+                onClick={() => setMode(option.key)}
+                className="min-h-0 flex-row items-center gap-3"
+              >
+                <option.icon
+                  aria-hidden
+                  className={
+                    mode === option.key
+                      ? "size-4 shrink-0 text-brand"
+                      : "size-4 shrink-0 text-muted-foreground"
+                  }
+                />
+                <span className="flex min-w-0 flex-col">
+                  <ChoiceCardTitle>{option.label}</ChoiceCardTitle>
+                  <ChoiceCardHint>{option.hint}</ChoiceCardHint>
+                </span>
+              </ChoiceCard>
+            ))}
+          </div>
+        </PanelBody>
+      </Panel>
     </div>
   )
 }

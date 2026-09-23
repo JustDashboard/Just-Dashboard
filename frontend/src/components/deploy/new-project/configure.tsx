@@ -744,31 +744,34 @@ export function Configure({
        a build, a container, a name — is on screen while it is being decided
        rather than discovered afterwards on the overview. It is also how a
        four-step sequence stays one thing: the drawing does not change when
-       the step does, and each of its nodes goes to the step that decides it. */
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
+       the step does, and each of its nodes goes to the step that decides it.
+
+       Both are held to the window: the drawing stays beside the fields, and
+       when a step has more settings than the window has room for it is the
+       fields that scroll — between the question and the command, which stay
+       where the reader left them. */
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_17rem] xl:grid-rows-[minmax(0,1fr)]">
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
           silently reverted once the response handler lands (§14). */}
       <fieldset disabled={Boolean(busy) || branchBusy} className="contents">
-        <aside className="min-w-0 xl:col-start-2 xl:row-start-1">
-          <div className="xl:sticky xl:top-6">
-            <PlanWiring
-              profile={flow.profile}
-              source={flow.source}
-              sourceLabel={flow.sourceLabel}
-              branch={isGitSource ? branch : undefined}
-              framework={flow.candidate?.framework}
-              configuration={configuration}
-              onOpenSection={openSection}
-            />
-          </div>
+        <aside className="min-w-0 xl:col-start-2 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto">
+          <PlanWiring
+            profile={flow.profile}
+            source={flow.source}
+            sourceLabel={flow.sourceLabel}
+            branch={isGitSource ? branch : undefined}
+            framework={flow.candidate?.framework}
+            configuration={configuration}
+            onOpenSection={openSection}
+          />
         </aside>
 
         {/* The one surface on this screen that carries depth (§16): the fields
             are what the reader is deciding, and the drawing beside them is a
             reading of what they already say. Giving the drawing an edge too
             would be two foregrounds, which is none. */}
-        <FlowPanel className="relative min-w-0 xl:col-start-1 xl:row-start-1">
+        <FlowPanel className="relative min-w-0 xl:col-start-1 xl:row-start-1 xl:max-h-full xl:min-h-0 xl:self-start">
           {/* §17 pass 7: the surface says its own work is in flight. A save,
               a re-detect and a preflight all disable the fieldset, and a form
               that greys out with no other answer reads as one that stopped
@@ -776,7 +779,10 @@ export function Configure({
           {(busy || branchBusy) && <BorderBeam duration={3} />}
           {/* Keyed by step, so each screen rises the way a block that has just
               arrived does (§11) rather than swapping in place. */}
-          <FlowPanelBody key={current} className="animate-rise space-y-6">
+          <FlowPanelBody
+            key={current}
+            className="animate-rise space-y-6 xl:min-h-0 xl:overflow-y-auto"
+          >
             {failure && <ErrorState error={failure} />}
 
             {current === "project" && (

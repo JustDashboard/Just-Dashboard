@@ -322,3 +322,43 @@ production build (336 passed, 16 conditional skips), `go build ./... && go vet .
 were reviewed, and no tab scrolls sideways at any of those widths or at 768. Not verified live: a real
 GitHub App installation listing (the new `pushedAt`/`fork`/`archived` fields are exercised against the
 package's fake GitHub only), and a real `gh` sign-in.
+
+## Held to the window — 2026-09-23
+
+The operator's reading of the chooser after the second pass: it looked right and scrolled, the Git
+tab named one account twice, the only colour on the screen was the language marks, and the template
+catalogue was sixty-two cards of four different heights under five server categories, one of which
+held twenty-eight of them.
+
+- **No page scroll.** At `xl` the page is `<Page fill="xl">` and every source but Database is the same
+  two columns: the focused surface, capped at the window with `max-h-full self-start` so a short list
+  is not a tall empty panel, and a 22rem column beside it (the identities and the paste field, the
+  registry field, the chosen template's settings or a note that they open there, where a stack's files
+  live). Database — five engines and two fields — is one capped panel. The list inside each surface
+  scrolls under its own toolbar; the Configure steps scroll their fields between the question and
+  Continue. Unfinished setups left the page's flow for a counted button beside the question. Below
+  `xl` everything stacks and scrolls as before (`design-system.md` §17 pass 8).
+- **One account is one row.** Where the App is installed on the account the CLI is signed in as —
+  compared case-insensitively — the identity is one row: the face, the login, "GitHub App · GitHub
+  CLI", the repository count and "Connected". Two accounts are still two rows. Each repository row
+  carries its owner's picture, with the owner stepped back in the title; an avatar still loading
+  shows the GitHub glyph rather than initials in a circle (§4).
+- **Products are drawn as themselves.** `deploy/product-logo.tsx` maps every blueprint id, the five
+  quick-setup engines and image names to a bundled logo in `public/logos/` (homarr-labs
+  dashboard-icons under Apache-2.0, Jupyter from Simple Icons, MySQL from devicon lifted to L 0.72 —
+  `NOTICE` travels with them). §14 records why the colour is the artwork's and the strip's is not.
+- **Shelves, not categories.** The catalogue is shelved client-side by what a template is for —
+  Productivity, Media, Monitoring, Automation, AI, Developer tools, Databases, Web & files, Game
+  servers — with a blueprint the map does not name falling back to its server `category`, so a new
+  definition is never missing. `FilterChip`s narrow to one shelf and count what the search left on
+  each. Cards are one height: logo, name, a two-line description and the sign-in word; the image
+  reference moved to the settings panel, where it was the widest thing in every card.
+- **Compose's four sources are cards** beside the editor rather than options in a closed select, and
+  the database engines say what kind of store each is.
+
+Verified: `bun run lint`, `bunx tsc --noEmit`, `bun test src`, `bun run build`, and the deploy-new
+(all five files), deploy-project, deploy-credentials, database, navigation, git, docker and
+design-system browser specs against the production build — 163 tests, with new ones for the single
+identity, the topic shelves and a shell that does not scroll at 1280×800 on any source or Configure
+step. Screenshots at 1280 and 1720 were reviewed; 390 stacks and scrolls. Not verified live: the
+logos against a real catalogue response, and a real GitHub App installation.

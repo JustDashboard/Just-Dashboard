@@ -42,7 +42,73 @@ test("the source strip switches the active source and is the only way in", async
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
 })
 
-test("unfinished drafts appear above the source strip and link back to themselves", async ({
+test("every source and every configure step fits the window without the page scrolling", async ({
+  page,
+}) => {
+  // The flow is decided in one view (§17 pass 8): what scrolls is the list or
+  // form inside its own surface, never the page around the question.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockNewProject(page)
+  await page.goto("/deploy/new")
+  const overflow = () =>
+    page.locator("[data-slot='page']").evaluate((element) => {
+      const shell = element.parentElement!
+      return {
+        down: shell.scrollHeight - shell.clientHeight,
+        across: shell.scrollWidth - shell.clientWidth,
+      }
+    })
+
+  for (const source of ["Git repository", "Docker image", "Template", "Database", "Compose"]) {
+    await page.getByRole("button", { name: source, exact: true }).click()
+    await expect.poll(overflow, { message: source }).toEqual({ down: 0, across: 0 })
+  }
+  await page.getByRole("button", { name: "Template", exact: true }).click()
+  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Use this template" })).toBeEnabled()
+  await expect.poll(overflow, { message: "a chosen template" }).toEqual({ down: 0, across: 0 })
+
+  await page.getByRole("button", { name: "Git repository", exact: true }).click()
+  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  for (const step of ["project", "runtime", "variables", "review"] as const) {
+    await gotoStep(page, step)
+    await expect.poll(overflow, { message: step }).toEqual({ down: 0, across: 0 })
+  }
+})
+
+test("one GitHub account reached by both the App and the CLI is drawn once", async ({ page }) => {
+  await mockNewProject(page)
+  const installation = {
+    id: 1,
+    // GitHub logins are case-insensitive, and so is the comparison with the
+    // CLI's "Wayy01".
+    account: "wayy01",
+    accountType: "User",
+    htmlUrl: "https://github.com/settings/installations/1",
+    repositorySelection: "all",
+  }
+  let installations = [installation]
+  await page.route("**/api/v1/deploy/github-app/", (route) =>
+    json(route, { configured: true, installations }),
+  )
+  await page.goto("/deploy/new")
+
+  // The ordinary install: one operator, one account, reached two ways. Two
+  // rows with the same face and the same name read as two accounts.
+  const identities = page.getByRole("list", { name: "GitHub connections" })
+  await expect(identities.getByRole("listitem")).toHaveCount(1)
+  await expect(identities.getByText("GitHub App · GitHub CLI", { exact: true })).toBeVisible()
+  await expect(identities.getByText("Connected", { exact: true })).toBeVisible()
+
+  // An App on somebody else's account is a second identity, and keeps its row.
+  installations = [{ ...installation, account: "acme" }]
+  await page.reload()
+  await expect(identities.getByRole("listitem")).toHaveCount(2)
+  await expect(identities.getByText("acme", { exact: true })).toBeVisible()
+  await expect(identities.getByText("Signed in", { exact: true })).toBeVisible()
+})
+
+test("unfinished drafts sit behind a counted button beside the question and link back to themselves", async ({
   page,
 }) => {
   await mockNewProject(page)
@@ -68,6 +134,9 @@ test("unfinished drafts appear above the source strip and link back to themselve
   )
   await page.goto("/deploy/new")
 
+  // A way back, not a block pushing the sources down a screen that has to fit
+  // the window: the button says how many, and the list opens from it.
+  await page.getByRole("button", { name: /Unfinished setups\s*2/ }).click()
   await expect(page.getByRole("heading", { name: "Unfinished setups" })).toBeVisible()
   const list = page.getByRole("list", { name: "Unfinished setups" })
   await expect(list.getByRole("link", { name: /storefront-redo/ })).toHaveAttribute(
@@ -679,9 +748,12 @@ test("the catalogue says how each template is signed into before it is deployed"
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Template", exact: true }).click()
 
-  const kuma = page.getByRole("group", { name: "Web applications" })
-  await expect(kuma.getByText("you create the first account")).toBeVisible()
-  await expect(kuma.getByText("token generated here")).toBeVisible()
+  await expect(
+    page.getByRole("group", { name: "Monitoring" }).getByText("you create the first account"),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("group", { name: "Productivity" }).getByText("token generated here"),
+  ).toBeVisible()
   await expect(
     page.getByRole("group", { name: "Databases" }).getByText("no sign-in page"),
   ).toBeVisible()
@@ -689,6 +761,33 @@ test("the catalogue says how each template is signed into before it is deployed"
   await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
   await expect(page.getByText("Sign in with the token generated here")).toBeVisible()
   await expect(page.getByText(/invite your own account/)).toBeVisible()
+})
+
+test("a topic narrows the catalogue to its shelf and every card carries its product's logo", async ({
+  page,
+}) => {
+  await mockNewProject(page)
+  await page.goto("/deploy/new?source=template")
+  const topics = page.getByRole("group", { name: "Template topics" })
+  await expect(topics.getByRole("button", { name: "All 4" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  await topics.getByRole("button", { name: "Game servers 1" }).click()
+  await expect(page.getByRole("group", { name: "Game servers" })).toBeVisible()
+  await expect(page.getByRole("group", { name: "Monitoring" })).toHaveCount(0)
+
+  // Pressing the chosen shelf again puts every shelf back.
+  await topics.getByRole("button", { name: "Game servers 1" }).click()
+  await expect(page.getByRole("group", { name: "Monitoring" })).toBeVisible()
+
+  // The logo is the product's own file, served from this origin.
+  const kuma = page.getByRole("group", { name: "Monitoring" }).locator("img")
+  await expect(kuma).toHaveAttribute("src", "/logos/uptime-kuma.svg")
+  await expect
+    .poll(() => kuma.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(0)
 })
 
 test("an unavailable blueprint explains its status and offers no way to use it", async ({
@@ -752,11 +851,11 @@ test("a Minecraft blueprint accepts the EULA in the open, offers versions, and p
 
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Template", exact: true }).click()
-  // The reviewed catalogue is grouped by category, unfiltered: a game
-  // blueprint sits in "Game servers" beside "Web applications" and
+  // The reviewed catalogue is shelved by what a template is for, unfiltered: a
+  // game blueprint sits in "Game servers" beside "Monitoring" and
   // "Databases", not behind a prior "what are you deploying" choice.
-  await expect(page.getByText("Web applications", { exact: true })).toBeVisible()
-  await expect(page.getByText("Game servers", { exact: true })).toBeVisible()
+  await expect(page.getByRole("group", { name: "Monitoring" })).toBeVisible()
+  await expect(page.getByRole("group", { name: "Game servers" })).toBeVisible()
 
   await page.getByRole("button", { name: "Use Minecraft (Java Edition)", exact: true }).click()
   await expect(page.getByText("itzg/minecraft-server:2026.9.1-java21")).toBeVisible()

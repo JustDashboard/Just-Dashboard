@@ -52,10 +52,12 @@ only renderer/executor/validation authority for their feature.
   without pulling. Planning-time Compose validation uses private temporary files, an explicit empty env
   file and inert placeholders for detected variable names, so the backend environment and a checkout
   `.env` cannot influence the result.
-- `/deploy/new` is one page. Unfinished setups (`GET /deploy/drafts`) are offered for resumption at
-  the top; a source strip offers a Git repository (connected GitHub list or a pasted URL), a Docker
-  image (images already on the server or a reference), a reviewed template, a database, a Compose
-  stack (paste, upload, Git, local) and an existing workload (container, stack, checkout). Choosing a
+- `/deploy/new` is one page, held to the window at `xl`. Unfinished setups (`GET /deploy/drafts`) are
+  offered for resumption behind a counted button beside the question; a source strip offers a Git
+  repository (connected GitHub list or a pasted URL), a Docker image (images already on the server or
+  a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
+  fallback shelf for a blueprint the frontend does not name), a database and a Compose stack (paste,
+  upload, Git, local). Choosing a
   source creates a draft, saves the intent and source, and runs detection in one action; when
   detection is ambiguous the candidates are offered as a choice that re-runs detection with
   `selectedId`. The configure screen draws the plan beside the form — source → build → runtime →
