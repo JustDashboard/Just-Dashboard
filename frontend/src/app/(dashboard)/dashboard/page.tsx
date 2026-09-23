@@ -2,23 +2,25 @@
 
 import { useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { ClockRewind, Warning } from "@/components/icons"
+import { ArrowCircleUp, ClockRewind, External, RefreshClockwise, Warning } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { Release } from "@/lib/types"
+import type { Release, SelfUpdateReport } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ReleaseList } from "@/components/update/release-notes"
+import { LogoGlyph } from "@/components/logo"
+import { ProductGlyph } from "@/components/product-logo"
+import { ReleaseTimeline } from "@/components/update/release-timeline"
 import { UpdateProgress } from "@/components/update/update-progress"
 import { Page, PageHeader, PageState, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
  * The dashboard's own version, and everything it has ever been.
@@ -31,15 +33,22 @@ import { Skeleton } from "@/components/ui/skeleton"
  * upgrading a root-equivalent panel — had nowhere to live but a sheet over
  * the top of a package table.
  *
- * Laid out as the host Overview is the server: a header whose actions are the
- * two commands, a row of facts about the install, three readings, then the
- * history as a titled list. The update used to be a framed panel of its own
- * with a headline of the newest release inside it — a box repeating the first
- * entry of the list underneath. The button is in the header now, the newest
- * release is the first row of the history, and the block between them is only
- * drawn while an upgrade is running or has just finished. The check itself
- * needs no button: opening this page is what asks (see SelfUpdateProvider),
- * which is why "Checked" is usually seconds old.
+ * The page is its history. A header whose actions are the two commands, one
+ * line saying what this install is, the update while one is running, then the
+ * releases as a timeline. The check itself needs no button to happen: opening
+ * this page is what asks (see SelfUpdateProvider), which is why "checked" is
+ * usually seconds old.
+ *
+ * **Three readings used to sit between the header and the history** —
+ * Installed, Latest and Checked — and §15 pass 2 is dropped here the way
+ * `/git` drops it, by naming where each went. *Installed* is the figure in the
+ * identity line, beside the mark it is the version of, and the filled mark on
+ * the timeline. *Latest* is the identity line's status ("0.7.0 available",
+ * with how many releases ahead) and the first entry of the history, tagged.
+ * *Checked* is the hint under that status, and a failed check turns the
+ * status itself amber. What the tiles did beyond saying those numbers — put
+ * "there is an update" first — the brand-faced button in the header does, and
+ * did already.
  */
 export default function DashboardVersionPage() {
   const { can } = useAuth()
@@ -55,6 +64,7 @@ export default function DashboardVersionPage() {
     const seen = new Set(report.releases.map((r) => r.version))
     return [...report.releases, ...report.history.filter((r) => !seen.has(r.version))]
   }, [report])
+  const newer = useMemo(() => new Set(report?.releases.map((r) => r.version)), [report])
 
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -70,17 +80,13 @@ export default function DashboardVersionPage() {
   if (!report) {
     return (
       <PageState
-        eyebrow="System"
-        title="Settings"
+        eyebrow="Settings"
+        title="Version"
         error={error}
         skeleton={
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-24 rounded-xl" />
-              ))}
-            </div>
-            <Skeleton className="h-48 rounded-xl" />
+            <Skeleton className="h-14 rounded-xl" />
+            <Skeleton className="h-96 rounded-xl" />
           </>
         }
       />
@@ -90,7 +96,6 @@ export default function DashboardVersionPage() {
   const run = report.run
   const running = run?.status === "running" || run?.status === "pending"
   const target = report.latest
-  const behind = report.releases.length
   const canInstall = can("system.admin") && report.install.supported && !running
   const dirty = report.install.dirty ?? []
 
@@ -117,32 +122,30 @@ export default function DashboardVersionPage() {
     })
 
   const notices =
-    Boolean(report.check.error) ||
-    (report.breaking && !running) ||
-    (report.available && !running && dirty.length > 0) ||
-    !report.install.supported
+    (report.breaking && !running) || (report.available && !running && dirty.length > 0)
 
   return (
     <Page className="animate-rise">
       {dialog}
       <PageHeader
-        eyebrow="System"
-        title="Settings"
+        eyebrow="Settings"
+        title="Version"
         actions={
           <>
             <Button
               variant="outline"
-              size="sm"
               pending={checking}
               disabled={!report.check.enabled}
               onClick={() =>
                 check().catch((err) => notify.error("Check failed", errorMessage(err)))
               }
             >
+              {!checking && <RefreshClockwise />}
               Check now
             </Button>
             {report.available && canInstall && (
-              <Button size="sm" onClick={startInstall}>
+              <Button onClick={startInstall}>
+                <ArrowCircleUp />
                 Update to {target}
               </Button>
             )}
@@ -150,64 +153,7 @@ export default function DashboardVersionPage() {
         }
       />
 
-      {/* What this install is: the one place the version, the repository it
-          follows and the verdict are said in a sentence rather than a figure. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-        <span>
-          Just Dashboard <span className="numeric text-foreground">{report.version}</span>
-        </span>
-        <Dot />
-        <span className="min-w-0 truncate">
-          tracking <span className="font-mono text-foreground">{report.check.repo}</span> at{" "}
-          <span className="font-mono text-foreground">{report.check.ref}</span>
-        </span>
-        <Status
-          tone={report.available ? "notice" : report.check.enabled ? "running" : "unknown"}
-          label={
-            report.available
-              ? `${target} available`
-              : report.check.enabled
-                ? "up to date"
-                : "version checks off"
-          }
-        />
-      </div>
-
-      <StatGrid columns={3}>
-        <StatTile
-          label="Installed"
-          value={report.version}
-          hint={report.install.supported ? "updates in place" : "updated by hand"}
-        />
-        <StatTile
-          key={target ?? "none"}
-          label="Latest"
-          value={target ?? report.version}
-          tone={behind > 0 ? "warning" : report.check.enabled ? "success" : "default"}
-          hint={
-            behind > 0
-              ? `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`
-              : report.check.enabled
-                ? "the newest published version"
-                : "version checks are off"
-          }
-          className="animate-rise"
-        />
-        <StatTile
-          key={report.check.checkedAt ?? "never"}
-          label="Checked"
-          value={
-            report.check.checkedAt
-              ? relativeTime(report.check.checkedAt)
-              : report.check.enabled
-                ? "never"
-                : "off"
-          }
-          tone={report.check.error ? "warning" : "default"}
-          hint={report.check.error ? "the last check failed" : "asked again when this page opens"}
-          className="animate-rise"
-        />
-      </StatGrid>
+      <Identity report={report} />
 
       {error && <ErrorState error={error} />}
 
@@ -222,13 +168,6 @@ export default function DashboardVersionPage() {
 
       {notices && (
         <div className="space-y-3">
-          {report.check.error && (
-            <Notice title="The last version check failed" tone="warning">
-              {report.check.error} — the dashboard keeps running exactly as it is; only the check is
-              affected.
-            </Notice>
-          )}
-
           {report.breaking && !running && (
             <Notice title="This update needs something done by hand" tone="warning">
               Read the release notes before installing it.
@@ -254,13 +193,6 @@ export default function DashboardVersionPage() {
               </ul>
             </Notice>
           )}
-
-          {!report.install.supported && (
-            <Notice title="This install updates by hand">
-              {report.install.reason}. Everything else on this page still works; only the one-click
-              update does not.
-            </Notice>
-          )}
         </div>
       )}
 
@@ -275,13 +207,18 @@ export default function DashboardVersionPage() {
             />
           }
         />
-        <PanelBody>
+        <PanelBody className="pt-8">
           {visible.length > 0 ? (
-            <ReleaseList releases={visible} installed={report.version} />
+            <ReleaseTimeline
+              releases={visible}
+              installed={report.version}
+              newer={newer}
+              expanded={Boolean(filter.trim())}
+            />
           ) : filter ? (
             <EmptyNote>
-              Nothing matches that. The notes are searched by version, title and every line of
-              every change.
+              Nothing matches that. The notes are searched by version, title and every line of every
+              change.
             </EmptyNote>
           ) : (
             <EmptyState
@@ -296,6 +233,107 @@ export default function DashboardVersionPage() {
   )
 }
 
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
+/**
+ * What this install is, in one line: the mark and the version it is running,
+ * the repository it follows, and what the last check said about it.
+ *
+ * The repository is drawn as itself — GitHub's mark, linking to the branch —
+ * because it is the one place outside this machine the dashboard reaches, and
+ * a reader deciding whether to trust an update wants to know where from.
+ */
+function Identity({ report }: { report: SelfUpdateReport }) {
+  const behind = report.releases.length
+  const status = report.available
+    ? { tone: "notice" as const, label: `${report.latest} available` }
+    : report.check.error
+      ? { tone: "warning" as const, label: "the last check failed" }
+      : report.check.enabled
+        ? { tone: "running" as const, label: "Up to date" }
+        : { tone: "unknown" as const, label: "Version checks off" }
+  const checked = report.check.checkedAt ? `checked ${relativeTime(report.check.checkedAt)}` : ""
+  const hint = report.available
+    ? `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`
+    : report.check.enabled
+      ? [
+          checked,
+          report.latest && report.latest !== report.version && `newest published ${report.latest}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "turn them on in Configuration"
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-10 gap-y-4 border-b border-hairline pb-6">
+      <div className="flex min-w-0 items-center gap-4">
+        <span
+          aria-hidden
+          className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline bg-surface-sunken"
+        >
+          <LogoGlyph className="h-6 w-auto text-brand" />
+        </span>
+        <div className="min-w-0 space-y-1">
+          <p className="flex min-w-0 items-baseline gap-2">
+            <span className="text-title font-semibold tracking-tight">Just Dashboard</span>
+            <span className="numeric text-2xl leading-none font-semibold tracking-tight">
+              {report.version}
+            </span>
+          </p>
+          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <a
+              href={`https://github.com/${report.check.repo}/tree/${report.check.ref}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
+            >
+              <ProductGlyph id="github" />
+              <span className="truncate font-mono text-foreground">{report.check.repo}</span>
+              <External aria-hidden className="size-3 shrink-0" />
+            </a>
+            <span className="text-muted-foreground/40">·</span>
+            <span>
+              tracking <span className="font-mono text-foreground">{report.check.ref}</span>
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+            {report.install.supported ? (
+              <span>updates in place</span>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    tabIndex={0}
+                    className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
+                  >
+                    updated by hand
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  {report.install.reason}. Everything else on this page still works; only the
+                  one-click update does not.
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </p>
+        </div>
+      </div>
+
+      <div className="min-w-0 space-y-1 sm:text-right">
+        {report.check.error ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} className="inline-flex cursor-help rounded-sm focus-ring">
+                <Status tone={status.tone} label={status.label} className="text-body font-medium" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              {report.check.error} — the dashboard keeps running exactly as it is; only the check is
+              affected.
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <Status tone={status.tone} label={status.label} className="text-body font-medium" />
+        )}
+        {hint && <p className="text-hint text-muted-foreground">{hint}</p>}
+      </div>
+    </div>
+  )
 }

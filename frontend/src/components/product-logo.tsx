@@ -28,6 +28,11 @@ import { cn } from "@/lib/utils"
  *
  * Aliases say which product a blueprint *is*: Mongo Express is MongoDB's own
  * admin, whoami is Traefik's.
+ *
+ * The dashboard's own pages draw the products it is made of and reached
+ * through the same way: Caddy, Next.js and Go for the three services in its
+ * stack, Tailscale and Let's Encrypt for its certificate, GitHub for the
+ * repository it updates from.
  */
 const LOGOS: Record<string, string> = {
   actual: "actual-budget.svg",
@@ -46,7 +51,9 @@ const LOGOS: Record<string, string> = {
   drawio: "drawio.svg",
   filebrowser: "filebrowser.svg",
   freshrss: "freshrss.svg",
+  github: "github.svg",
   gitea: "gitea.svg",
+  go: "go.svg",
   gotify: "gotify.svg",
   grafana: "grafana.svg",
   healthchecks: "healthchecks.svg",
@@ -56,6 +63,7 @@ const LOGOS: Record<string, string> = {
   jellyfin: "jellyfin.svg",
   jupyter: "jupyter.svg",
   kavita: "kavita.svg",
+  "lets-encrypt": "lets-encrypt.svg",
   linkding: "linkding.svg",
   mariadb: "mariadb.svg",
   meilisearch: "meilisearch.svg",
@@ -70,6 +78,7 @@ const LOGOS: Record<string, string> = {
   n8n: "n8n.svg",
   navidrome: "navidrome.svg",
   nextcloud: "nextcloud.svg",
+  nextjs: "nextjs.svg",
   "nginx-static": "nginx.svg",
   nocodb: "nocodb.svg",
   ntfy: "ntfy.svg",
@@ -93,6 +102,7 @@ const LOGOS: Record<string, string> = {
   sqlserver: "sqlserver.svg",
   "stirling-pdf": "stirling-pdf.svg",
   syncthing: "syncthing.svg",
+  tailscale: "tailscale.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
   typesense: "typesense.svg",
@@ -194,6 +204,26 @@ export function ProductLogo({
         <Fallback className="size-4 text-muted-foreground" />
       )}
     </span>
+  )
+}
+
+/**
+ * A product's logo bare, inside a line of text: the host a repository lives on,
+ * the issuer beside a certificate's state. The tile is for a mark that stands
+ * beside a card's words; in a sentence it is a box in the middle of a line, so
+ * this is the artwork alone at the line's own height.
+ */
+export function ProductGlyph({ id, className }: { id: string; className?: string }) {
+  const file = LOGOS[id]
+  if (!file) return null
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/logos/${file}`}
+      alt=""
+      aria-hidden="true"
+      className={cn("size-3.5 shrink-0 object-contain", className)}
+    />
   )
 }
 

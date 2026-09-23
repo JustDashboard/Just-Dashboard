@@ -137,6 +137,24 @@ func TestOnlyAnAdminCanInstallAnUpdate(t *testing.T) {
 	}
 }
 
+// A transcript is readable by whoever can read the report that already
+// carries its end: every role for an upgrade, only system.admin for a restart,
+// whose output names the perimeter's ports and paths.
+func TestTranscriptsFollowTheirReports(t *testing.T) {
+	router := selfUpdateRouter(t, auth.RoleReadOnly)
+	rec := drive(t, router, http.MethodGet, "/dashboard/update/log", "", "")
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("a read-only operator cannot read the upgrade transcript (%d %s)",
+			rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("the transcript may be cached (%q); every run rewrites it", got)
+	}
+	if rec := drive(t, router, http.MethodGet, "/dashboard/config/log", "", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("a read-only operator reached the restart transcript (%d)", rec.Code)
+	}
+}
+
 // An install this cannot upgrade in place is a perfectly good install — a
 // binary on a systemd unit, say. It has to be told so, precisely, rather than
 // shown a button that fails.

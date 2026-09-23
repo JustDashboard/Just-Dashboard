@@ -105,6 +105,32 @@ func TestTailKeepsTheEnd(t *testing.T) {
 	}
 }
 
+// The console reads a rebuild from its first line, which the tail exists to
+// drop: the whole transcript is the other read, and it has to be whole.
+func TestTranscriptKeepsWhatTheTailTrims(t *testing.T) {
+	store := NewStore(t.TempDir())
+	f, err := store.OpenLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20000; i++ {
+		fmt.Fprintf(f, "step %d of the build\n", i)
+	}
+	fmt.Fprintln(f, "THE LAST LINE")
+	f.Close()
+
+	if strings.Contains(store.Tail(), "step 0 of the build\n") {
+		t.Fatal("the fixture is too small to be trimmed by the tail")
+	}
+	full := store.Transcript()
+	if !strings.HasPrefix(full, "step 0 of the build\n") || !strings.HasSuffix(full, "THE LAST LINE\n") {
+		t.Errorf("the transcript is not the whole file: starts %q", full[:min(len(full), 40)])
+	}
+	if strings.Contains(full, "earlier output trimmed") {
+		t.Error("a transcript under the cap says it was trimmed")
+	}
+}
+
 // OpenLog truncates and AppendLog does not: the backend writes the header, the
 // updater adds to it, and neither ever reads back the previous run's output as
 // if it were this one's.

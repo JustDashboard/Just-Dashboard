@@ -8,7 +8,10 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  *
  * Both pages ended the 0.6.7 redesign with no framed block on them. That is
  * asserted structurally — every `Panel` on the page carries `data-plain` — so
- * a box cannot come back by accident on either.
+ * a box cannot come back by accident on either. The 0.7.0 pass took the row of
+ * readings off the top of both (each figure moved beside the control or the
+ * release it describes) and the tinted banners out of the restart record, and
+ * both of those are asserted too.
  */
 
 const now = new Date().toISOString()
@@ -19,7 +22,14 @@ const user = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -125,8 +135,21 @@ const config = {
     updatedAt: now,
     finishedAt: now,
   },
-  log: "recreating jd-backend\nrecreating jd-frontend\nhealthy\n",
+  // The end of the file, as the report carries it; the console reads the
+  // whole of it from /dashboard/config/log.
+  log: "… earlier output trimmed …\n Container jd-backend-1 Recreated\n Container jd-backend-1 Healthy\n",
 }
+
+const wholeLog = [
+  "Applying Just Dashboard requested by operator",
+  "stack: /opt/just-dashboard (docker-compose.yml)",
+  "",
+  "$ docker compose -f docker-compose.yml up -d --remove-orphans --wait",
+  " Container jd-backend-1 Recreate",
+  " Container jd-backend-1 Recreated",
+  " Container jd-backend-1 Healthy",
+  "",
+].join("\n")
 
 async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
@@ -138,6 +161,9 @@ async function mockApi(page: Page) {
     if (path === "/auth/session") return json(route, user)
     if (path === "/dashboard/update") return json(route, update)
     if (path === "/dashboard/config") return json(route, config)
+    if (path === "/dashboard/config/log") {
+      return route.fulfill({ status: 200, contentType: "text/plain", body: wholeLog })
+    }
     return json(route, [])
   })
 }
@@ -160,7 +186,9 @@ async function scrollsSideways(page: Page) {
 test("the version page is the history, with the update in the header", async ({ page }) => {
   await mockApi(page)
   await page.goto("/dashboard")
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Version", exact: true })).toBeVisible()
+  // The readings are gone from the top; what they said is in the identity line.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await expect(page.getByRole("button", { name: "Update to 0.7.0" })).toBeVisible()
   await expect(page.getByText("0.7.0 available")).toBeVisible()
@@ -189,6 +217,20 @@ test("the configuration page edits in place and says where it lives", async ({ p
   await expect(page.getByText("docker-compose.yml", { exact: true })).toBeVisible()
   await expect(page.getByText("Last restart")).toBeVisible()
   await expect(page.getByText("Read-only")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+
+  // Restart and Rebuild are the two commands, drawn as the two ways to restart.
+  await expect(page.getByRole("button", { name: "Restart the dashboard" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Rebuild and restart" })).toBeVisible()
+
+  // The restart record says what happened without a tinted banner, and its
+  // transcript is the whole file rather than the tail the report carries.
+  const record = page.locator("section", { hasText: "Last restart" })
+  await expect(record.locator(".bg-wash-warning, .bg-wash-success")).toHaveCount(0)
+  await record.getByRole("button", { name: /Transcript/ }).click()
+  const transcript = record.getByRole("list", { name: "Apply transcript" })
+  await expect(transcript.getByText("Applying Just Dashboard requested by operator")).toBeVisible()
+  await expect(transcript.getByText("earlier output trimmed")).toHaveCount(0)
 
   await expect(page.getByText("unsaved change")).toHaveCount(0)
   await page.getByLabel("Port", { exact: true }).fill("9443")
@@ -205,7 +247,11 @@ for (const path of ["/dashboard", "/dashboard/configuration"] as const) {
       await mockApi(page)
       await page.setViewportSize({ width, height: 2200 })
       await page.goto(path)
-      await expect(page.locator("[data-slot=stat-tile]").first()).toBeVisible()
+      await expect(
+        path === "/dashboard"
+          ? page.getByRole("heading", { name: "0.7.0" })
+          : page.getByRole("button", { name: "Rebuild and restart" }),
+      ).toBeVisible()
       await expect(page.locator("[data-slot=page]")).toHaveClass(/animate-rise/)
       expect(await scrollsSideways(page)).toBe(false)
       const name = path === "/dashboard" ? "version" : "configuration"

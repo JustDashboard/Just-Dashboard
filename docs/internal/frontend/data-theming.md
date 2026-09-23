@@ -90,6 +90,14 @@
   did not come up and was undone — because showing that as either success or failure would misreport it.
   The form on `/dashboard/configuration` **derives** its draft from the poll rather than mirroring it into
   state: a copy refreshed every two seconds would wipe half-typed input during a restart.
+- Both runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`. The polled
+  report carries only the file's last 64 KB; when that tail starts with the server's trimmed marker the
+  console reads the whole file once (`getText` on `…/update/log` or `…/config/log`) and from then on
+  extends it with each tail, finding where the tail begins in the whole copy (`extendTranscript`) and
+  reading the file again only when the two stop overlapping. A read that fails during the restart leaves
+  the tail on screen. While a run is live and the reader is at the end, the lines a poll brought are let
+  out a few a frame rather than landing at once; scrolled up, searching or with reduced motion they are
+  drawn outright. `lib/transcript.test.js` covers the line shapes and the merge.
 - **There is one theme.** The light palette was removed: every tinted surface, status hue, chart colour
   and terminal ANSI slot had to be chosen twice and verified twice, and the second set was seen by almost
   nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —

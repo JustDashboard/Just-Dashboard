@@ -86,8 +86,12 @@ export function ReleasePipeline({
   )
 }
 
-/** One stage's length of the bar, coloured by what happened there. */
-function Segment({ state }: { state: ReleaseNodeState }) {
+/**
+ * One stage's length of the bar, coloured by what happened there. Exported for
+ * the dashboard's own restarts and upgrades, which are runs with stages too and
+ * are drawn with the same bar rather than a second spelling of it.
+ */
+export function Segment({ state }: { state: ReleaseNodeState }) {
   const reduced = useReducedMotion()
   const track = "relative block h-1.5 w-full overflow-hidden rounded-full"
   if (state === "running")

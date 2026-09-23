@@ -139,6 +139,11 @@
         },
         {
           "kind": "changed",
+          "text": "Restarts and rebuilds are read line by line, and the dashboard's own pages are about what they set",
+          "detail": "A restart's or an upgrade's transcript is the whole run in a console — every line numbered, each BuildKit step coloured by the service it builds, the line that failed washed where it sits — rather than the last 64 KB in a small box, and new lines arrive a few at a time instead of landing in one jump. Restart and Rebuild are the two cards beside the stack's three services, the run shows its stages, and the tinted banners around it are gone. Configuration is a form in five sections, each saying what it currently is; Version is one line about the install over the history, drawn as a timeline."
+        },
+        {
+          "kind": "changed",
           "text": "The rail's top level is twelve rows instead of seventeen",
           "detail": "Metrics, Processes and Logs sit behind Monitoring, and Proxy & TLS, Packages, System users and the Audit log behind Server configuration under a new Advanced heading. A group opens its panel over the page you are on, the breadcrumb names every level, and the command palette lists every nested page so they stay reachable with the rail collapsed."
         },
