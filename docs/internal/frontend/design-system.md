@@ -565,7 +565,8 @@ The deployment section brings in registry components — Magic UI's `ui/animated
 Primitives' `ui/text-shimmer` — each rewritten onto the tokens and each saying one of the four things
 above:
 
-- *arrived* — `BlurFade` staggers the fleet's cards by a beat each; `NumberTicker` counts a figure up
+- *arrived* — `BlurFade` staggers the fleet's cards by a beat each, and the first screen of the Git
+  branch graph's rows while its lanes draw down beside them; `NumberTicker` counts a figure up
   to its value on the Credentials readings, the delivery insights and the overview's live usage;
 - *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around a project card while a run
   is in progress, and `TextShimmer` lighting the name of the stage a release is at, are `breathe`

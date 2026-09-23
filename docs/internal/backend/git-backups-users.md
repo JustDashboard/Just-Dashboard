@@ -71,7 +71,11 @@ capability tiers. GitHub authentication, pull requests and workflow runs are det
 The expanded reads, mutation capabilities, consistency guards and operational limits are documented in
 [`git-workspace-expansion.md`](git-workspace-expansion.md). Message-only amend uses the existing commit
 endpoint. Branch comparisons now include changed files and frozen base/head SHAs; the diff endpoint uses
-those revisions. Graph search/ref filtering and `skip`/`hasMore` page through older history. Git commands
+those revisions. Graph search/ref filtering narrow the graph and `skip`/`hasMore` page through older
+history. Every page is laid out from the newest commit and then sliced, so a lane keeps its column
+across a page boundary and each edge carries the lane it travels (`parentLanes`); paging stops 5,000
+commits deep, and the first page carries `total` from `git rev-list --count`. A search result is one
+lane with no edges, because a `--grep` match's parents are mostly commits that did not match. Git commands
 receiving file pathspecs treat them literally; this is deliberately not a global environment setting,
 because `git stash` uses its own special pathspecs internally. Dashboard Git mutations are serialized
 per checkout, with Git's native locks still protecting against terminal clients.

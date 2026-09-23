@@ -1,15 +1,25 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { motion, useReducedMotion } from "motion/react"
 import { Cross } from "@/components/icons"
 import { get } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
+import {
+  GRAPH_PAD,
+  GRAPH_ROW,
+  graphEdges,
+  graphLanes,
+  graphLineage,
+  laneX,
+  rowY,
+  type GraphEdge,
+} from "@/lib/git-graph"
 import type { GitBranch, GitGraph, GitGraphCommit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { SourceFork } from "@/components/git/glyphs"
-import { RefTags } from "@/components/git/ref-tags"
-import { HistoryPaging } from "@/components/git/inspect-panels"
+import { parseRefs, RefTags } from "@/components/git/ref-tags"
 import { SearchInput } from "@/components/page"
 import {
   Select,
@@ -20,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { PaneHeader } from "@/components/panel"
+import { BlurFade } from "@/components/ui/blur-fade"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -30,14 +41,28 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * from `git log`.
  *
  * The lanes are assigned on the server (gitx.Graph) — the same rule the docker
- * and proxy renderers follow, one implementation of what the shape means. Here
- * we only draw: a lane is a coloured column, a commit is a dot on its lane, and
- * an edge runs from a commit down to each of its parents.
+ * and proxy renderers follow, one implementation of what the shape means — and
+ * how a line travels between two lanes is `lib/git-graph`. Here we only draw:
+ * a lane is a coloured column, a commit is a dot on its lane, and pointing at a
+ * row lights the line of history that commit is on and steps the rest back.
+ *
+ * The whole history is one scroll. Pages arrive as the reader nears the foot of
+ * what has loaded, down to the server's depth limit, and only the rows in view
+ * — with the dots and edges beside them — are rendered. The log consoles lean
+ * on `content-visibility` instead, but their rows wrap to any height and these
+ * are all one; and a canvas of five thousand dots re-rendered in full on every
+ * page that arrived was a second-long stall at a time the browser skipped none
+ * of it.
  */
 
-const ROW = 34 // px per commit row — matches the history list's rhythm
-const COL = 16 // px between lanes
-const PAD = 14 // px from the left edge to lane 0
+const PAGE = 500
+// Rows rendered past each edge of the viewport, so a flick of the wheel lands
+// on rows that are already there.
+const OVERSCAN = 12
+// Rows that stagger in when a graph first lands — about a screen of them. The
+// rest are below the fold and arrive without being seen to.
+const ARRIVE = 24
+const BEAT = 0.02
 
 // Enough hues to tell adjacent lanes apart, each legible on the near-black and
 // near-white surfaces this panel renders against. Lanes past the end wrap.
@@ -60,8 +85,14 @@ const LANES = [
 
 const laneColour = (col: number) => LANES[col % LANES.length]
 
-const x = (col: number) => PAD + col * COL
-const y = (row: number) => row * ROW + ROW / 2
+type Loaded = {
+  query: string
+  page?: GitGraph
+  rows: GitGraphCommit[]
+  lanes: number
+  total?: number
+  hasMore: boolean
+}
 
 export function GraphPanel({
   repoPath,
@@ -74,17 +105,16 @@ export function GraphPanel({
 }) {
   // A commit opens in the same column, replacing the graph — the same move
   // the history list makes, and the graph is one button away again.
-  const show = (c: GitGraphCommit) => onSelect({ kind: "commit", sha: c.sha, subject: c.subject })
+  const show = useCallback(
+    (c: GitGraphCommit) => onSelect({ kind: "commit", sha: c.sha, subject: c.subject }),
+    [onSelect],
+  )
 
   const [search, setSearch] = useState("")
   const [term, setTerm] = useState("")
   const [ref, setRef] = useState("all")
-  const [skip, setSkip] = useState(0)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setTerm(search.trim())
-      setSkip(0)
-    }, 300)
+    const timer = setTimeout(() => setTerm(search.trim()), 300)
     return () => clearTimeout(timer)
   }, [search])
   const branches = usePoll(
@@ -93,13 +123,19 @@ export function GraphPanel({
     [repoPath],
   )
 
-  const graph = usePoll(
+  // How far down the reader has asked for belongs to one query: a new search,
+  // branch or repository starts again from the top.
+  const query = [repoPath, term, ref].join("\0")
+  const [want, setWant] = useState({ query, skip: 0 })
+  const skip = want.query === query ? want.skip : 0
+
+  const page = usePoll(
     (signal) =>
       get<GitGraph>(
         "/git/graph",
         {
           path: repoPath,
-          limit: 250,
+          limit: PAGE,
           skip,
           search: term || undefined,
           ref: ref === "all" ? undefined : ref,
@@ -110,37 +146,84 @@ export function GraphPanel({
     [repoPath, skip, term, ref],
   )
 
-  const rows = useMemo(() => graph.data?.commits ?? [], [graph.data])
-  const index = useMemo(() => {
-    const m = new Map<string, number>()
-    rows.forEach((c, i) => m.set(c.sha, i))
-    return m
-  }, [rows])
+  // Each page is laid out on the server from the top of the history, so its
+  // lanes carry on from the page above and appending is all it takes to join
+  // them. Folded in during render rather than in an effect, so a page never
+  // paints once on its own before it is part of the graph.
+  const [loaded, setLoaded] = useState<Loaded>({ query, rows: [], lanes: 0, hasMore: false })
+  let view = loaded
+  if (view.query !== query) view = { query, rows: [], lanes: 0, hasMore: false }
+  if (page.data && page.data !== view.page && (page.data.skip ?? 0) === view.rows.length) {
+    view = {
+      query,
+      page: page.data,
+      rows: view.rows.concat(page.data.commits),
+      lanes: Math.max(view.lanes, page.data.lanes),
+      total: page.data.total ?? view.total,
+      hasMore: !!page.data.hasMore,
+    }
+  }
+  if (view !== loaded) setLoaded(view)
 
-  const gutter = x(Math.max(0, (graph.data?.lanes ?? 1) - 1)) + PAD
+  const rows = view.rows
+  const searching = term !== ""
+  const older = view.hasMore && !page.loading
+  const more = useCallback(() => setWant({ query, skip: rows.length }), [query, rows.length])
 
-  const edges = useMemo(() => {
-    const out: { d: string; colour: string; key: string }[] = []
-    rows.forEach((c, i) => {
-      for (const parent of c.parents ?? []) {
-        const pj = index.get(parent)
-        const px = pj === undefined ? x(c.col) : x(rows[pj].col)
-        const py = pj === undefined ? (i + 1.5) * ROW : y(pj)
-        // The edge takes the parent's colour: a line arriving in a lane belongs
-        // to that lane, which is what makes a branch read as one continuous
-        // colour from its tip down to where it forked.
-        const colour = laneColour(pj === undefined ? c.col : rows[pj].col)
-        const sx = x(c.col)
-        const sy = y(i)
-        const d =
-          sx === px
-            ? `M ${sx} ${sy} L ${px} ${py}`
-            : `M ${sx} ${sy} C ${sx} ${sy + ROW * 0.45}, ${px} ${sy + ROW * 0.55}, ${px} ${Math.min(py, sy + ROW)} L ${px} ${py}`
-        out.push({ d, colour, key: `${c.sha}-${parent}` })
-      }
-    })
-    return out
-  }, [rows, index])
+  const reduced = useReducedMotion()
+  const [drawnFor, setDrawnFor] = useState<string>()
+  const drawn = reduced || drawnFor === query
+  const onDrawn = useCallback(() => setDrawnFor(query), [query])
+
+  // The window is kept in rows, not pixels, so scrolling within a row renders
+  // nothing at all.
+  const scroller = useRef<HTMLDivElement>(null)
+  const sentinel = useRef<HTMLDivElement>(null)
+  const [scroll, setScroll] = useState({ query, first: 0 })
+  const [visible, setVisible] = useState(32)
+  const first = scroll.query === query ? scroll.first : 0
+  const start = Math.max(0, first - OVERSCAN)
+  const end = Math.min(rows.length, first + visible + OVERSCAN)
+  const hasRows = rows.length > 0
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const observer = new ResizeObserver(() => setVisible(Math.ceil(el.clientHeight / GRAPH_ROW)))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasRows])
+  useEffect(() => {
+    if (!older || !sentinel.current) return
+    const observer = new IntersectionObserver(
+      (entries) => entries.some((e) => e.isIntersecting) && more(),
+      { root: scroller.current, rootMargin: "0px 0px 1200px 0px" },
+    )
+    observer.observe(sentinel.current)
+    return () => observer.disconnect()
+  }, [older, more])
+
+  const [focus, setFocus] = useState<{ query: string; row: number }>()
+  const focused = focus?.query === query && focus.row < rows.length ? focus.row : undefined
+  const pointAt = useCallback((row: number) => setFocus({ query, row }), [query])
+  const line = useMemo(
+    () => (focused === undefined || searching ? undefined : graphLineage(rows, focused)),
+    [rows, focused, searching],
+  )
+
+  const lanes = searching ? 1 : graphLanes(rows, view.lanes)
+  const gutter = laneX(lanes - 1) + GRAPH_PAD
+  const height = rows.length * GRAPH_ROW
+  const edges = useMemo(() => graphEdges(rows, height), [rows, height])
+  const total = view.total ?? rows.length
+  const count = (n: number) => n.toLocaleString()
+  const noun = (n: number) => (searching ? plural(n, "match", "matches") : plural(n, "commit"))
+  const status = view.hasMore
+    ? page.loading
+      ? `Loading older commits… ${count(rows.length)} of ${count(total)}`
+      : `${count(rows.length)} of ${noun(total)}`
+    : rows.length < total
+      ? `The newest ${count(rows.length)} of ${noun(total)} — search or pick a branch to reach older ones`
+      : `All ${noun(total)}`
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -148,8 +231,7 @@ export function GraphPanel({
         <div className="min-w-0 flex-1">
           <p className="truncate text-body font-medium">Branch graph</p>
           <p className="truncate text-hint text-muted-foreground">
-            {rows.length} commit{rows.length === 1 ? "" : "s"} ·{" "}
-            {ref === "all" ? "all branches and tags" : ref}
+            {noun(total)} · {ref === "all" ? "all branches and tags" : ref}
           </p>
         </div>
         <Tooltip>
@@ -177,13 +259,7 @@ export function GraphPanel({
           placeholder="Search messages…"
           containerClassName="min-w-0 flex-1 sm:w-auto"
         />
-        <Select
-          value={ref}
-          onValueChange={(value) => {
-            setRef(value)
-            setSkip(0)
-          }}
-        >
+        <Select value={ref} onValueChange={setRef}>
           <SelectTrigger size="sm" aria-label="Graph branch" className="max-w-48">
             <SelectValue />
           </SelectTrigger>
@@ -197,79 +273,311 @@ export function GraphPanel({
           </SelectContent>
         </Select>
       </div>
-      {graph.error && <ErrorState error={graph.error} className="m-3" />}
-      {graph.loading && !graph.data && <LoadingRows className="p-3" rows={10} />}
+      {page.error && <ErrorState error={page.error} className="m-3" />}
 
       {rows.length === 0 ? (
-        <EmptyState className="m-3" icon={SourceFork} title="No commits yet" />
+        page.loading ? (
+          <LoadingRows className="p-3" rows={10} />
+        ) : (
+          !page.error && (
+            <EmptyState
+              className="m-3"
+              icon={SourceFork}
+              title={searching ? "No commit messages match" : "No commits yet"}
+            />
+          )
+        )
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="relative" style={{ minHeight: rows.length * ROW }}>
-            <svg
-              className="pointer-events-none absolute top-0 left-0"
-              width={gutter}
-              height={rows.length * ROW}
-              aria-hidden
-            >
-              {edges.map((e) => (
-                <path
-                  key={e.key}
-                  d={e.d}
-                  fill="none"
-                  stroke={e.colour}
-                  strokeWidth={1.5}
-                  opacity={0.8}
-                />
-              ))}
-              {rows.map((c, i) => (
-                <circle
-                  key={c.sha}
-                  cx={x(c.col)}
-                  cy={y(i)}
-                  r={c.isMerge ? 3 : 4}
-                  fill={c.isMerge ? "var(--surface-header)" : laneColour(c.col)}
-                  stroke={laneColour(c.col)}
-                  strokeWidth={1.5}
-                />
-              ))}
-            </svg>
-
-            <div style={{ paddingLeft: gutter }}>
-              {rows.map((c) => (
-                <GraphRow key={c.sha} commit={c} onClick={() => show(c)} />
-              ))}
-            </div>
+        <div
+          ref={scroller}
+          className="@container min-h-0 flex-1 overflow-auto"
+          onScroll={(e) => {
+            const top = Math.floor(e.currentTarget.scrollTop / GRAPH_ROW)
+            setScroll((p) => (p.query === query && p.first === top ? p : { query, first: top }))
+          }}
+        >
+          <div
+            className="group/graph relative"
+            data-focus={line ? "" : undefined}
+            style={{ height }}
+            onPointerLeave={() => setFocus(undefined)}
+          >
+            <GraphCanvas
+              key={query}
+              rows={rows}
+              edges={edges}
+              start={start}
+              end={end}
+              gutter={gutter}
+              height={height}
+              searching={searching}
+              drawn={drawn}
+              onDrawn={onDrawn}
+            />
+            {line && (
+              <LineOverlay
+                rows={rows}
+                edges={edges}
+                line={line}
+                start={start}
+                end={end}
+                gutter={gutter}
+                height={height}
+              />
+            )}
+            {rows.slice(start, end).map((c, k) => (
+              <GraphRow
+                key={c.sha}
+                commit={c}
+                row={start + k}
+                gutter={gutter}
+                arrive={!drawn && start + k < ARRIVE ? (start + k) * BEAT : undefined}
+                onOpen={show}
+                onPoint={pointAt}
+              />
+            ))}
+            <div ref={sentinel} className="absolute inset-x-0 bottom-0 h-px" aria-hidden />
           </div>
         </div>
       )}
-      <HistoryPaging
-        start={skip}
-        count={rows.length}
-        hasMore={!!graph.data?.hasMore}
-        busy={graph.loading}
-        unit="commits"
-        onPrevious={() => setSkip(Math.max(0, skip - 250))}
-        onNext={() => setSkip(skip + 250)}
-      />
+      {rows.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-hairline px-3 py-2">
+          <span className="numeric min-w-0 flex-1 truncate text-hint text-muted-foreground">
+            {status}
+          </span>
+          {view.hasMore && (
+            <Button size="xs" variant="outline" disabled={page.loading} onClick={more}>
+              Load older
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-function GraphRow({ commit, onClick }: { commit: GitGraphCommit; onClick: () => void }) {
+/**
+ * The lanes and the dots for the rows in the window, and every edge that passes
+ * through it. Memoised, so pointing at a row — which only changes the overlay
+ * above it — redraws nothing here.
+ */
+const GraphCanvas = memo(function GraphCanvas({
+  rows,
+  edges,
+  start,
+  end,
+  gutter,
+  height,
+  searching,
+  drawn,
+  onDrawn,
+}: {
+  rows: GitGraphCommit[]
+  edges: GraphEdge[]
+  start: number
+  end: number
+  gutter: number
+  height: number
+  searching: boolean
+  drawn: boolean
+  onDrawn: () => void
+}) {
+  // The first screen of lanes draws itself down the page in step with the rows
+  // arriving beside it, then the clip comes off for good.
+  const reveal = Math.min(height, ARRIVE * GRAPH_ROW)
+  const clip = useId()
+
   return (
+    <svg
+      className="pointer-events-none absolute top-0 left-0 z-[1] transition-opacity duration-200 group-data-[focus]/graph:opacity-30"
+      width={gutter}
+      height={height}
+      aria-hidden
+    >
+      {!drawn && (
+        <defs>
+          <clipPath id={clip}>
+            <motion.rect
+              x={0}
+              y={0}
+              width={gutter}
+              initial={{ height: 0 }}
+              animate={{ height: reveal }}
+              transition={{ duration: ARRIVE * BEAT + 0.34, ease: [0.16, 1, 0.3, 1] }}
+              onAnimationComplete={onDrawn}
+            />
+          </clipPath>
+        </defs>
+      )}
+      <g clipPath={drawn ? undefined : `url(#${clip})`}>
+        {searching ? (
+          <line
+            x1={laneX(0)}
+            y1={rowY(0)}
+            x2={laneX(0)}
+            y2={rowY(rows.length - 1)}
+            stroke={laneColour(0)}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeDasharray="0 6"
+          />
+        ) : (
+          edges
+            .filter(within(start, end))
+            .map((e) => (
+              <path
+                key={e.key}
+                d={e.d}
+                fill="none"
+                stroke={laneColour(e.lane)}
+                strokeWidth={2}
+                strokeLinecap="round"
+              />
+            ))
+        )}
+        {rows.slice(start, end).map((c, k) => (
+          <Dot key={c.sha} commit={c} row={start + k} gutter={searching ? undefined : gutter} />
+        ))}
+      </g>
+    </svg>
+  )
+})
+
+/** The pointed-at commit's line, drawn again at full strength over the dimmed canvas. */
+function LineOverlay({
+  rows,
+  edges,
+  line,
+  start,
+  end,
+  gutter,
+  height,
+}: {
+  rows: GitGraphCommit[]
+  edges: GraphEdge[]
+  line: Set<number>
+  start: number
+  end: number
+  gutter: number
+  height: number
+}) {
+  const near = within(start, end)
+  return (
+    <svg
+      className="pointer-events-none absolute top-0 left-0 z-[2]"
+      width={gutter}
+      height={height}
+      aria-hidden
+    >
+      {edges
+        .filter((e) => e.first && near(e) && line.has(e.from) && (e.to === -1 || line.has(e.to)))
+        .map((e) => (
+          <path
+            key={e.key}
+            d={e.d}
+            fill="none"
+            stroke={laneColour(e.lane)}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+          />
+        ))}
+      {[...line]
+        .filter((i) => i >= start && i < end)
+        .map((i) => (
+          <Dot key={rows[i].sha} commit={rows[i]} row={i} gutter={gutter} />
+        ))}
+    </svg>
+  )
+}
+
+/** Whether an edge passes through rows [start, end) — one still waiting on its parent always does. */
+const within = (start: number, end: number) => (e: GraphEdge) =>
+  e.from < end && (e.to === -1 || e.to >= start)
+
+/**
+ * A commit's mark. The checked-out commit is the one place the brand appears —
+ * `--brand` is "where you are" — ringed so it is found at a glance in a column
+ * of dots; a merge is hollow, because it joins lines rather than adding work;
+ * and a commit something points at is a step larger, with a thread out to the
+ * names beside it so a tip in lane 4 is not read as belonging to lane 0.
+ */
+function Dot({ commit, row, gutter }: { commit: GitGraphCommit; row: number; gutter?: number }) {
+  const cx = laneX(commit.col)
+  const cy = rowY(row)
+  const colour = laneColour(commit.col)
+  const refs = parseRefs(commit.refs)
+  const head = refs.some((r) => r.kind === "head")
+  return (
+    <g>
+      {gutter !== undefined && refs.length > 0 && gutter - cx > 16 && (
+        <line
+          x1={cx + 7}
+          y1={cy}
+          x2={gutter - 4}
+          y2={cy}
+          stroke={head ? "var(--brand)" : colour}
+          strokeOpacity={0.5}
+          strokeDasharray="2 3"
+        />
+      )}
+      {head ? (
+        <>
+          <circle cx={cx} cy={cy} r={8} fill="none" stroke="var(--brand)" strokeOpacity={0.4} />
+          <circle cx={cx} cy={cy} r={4.5} fill="var(--brand)" />
+        </>
+      ) : commit.isMerge ? (
+        <circle cx={cx} cy={cy} r={3.75} fill="var(--card)" stroke={colour} strokeWidth={2} />
+      ) : (
+        <circle cx={cx} cy={cy} r={refs.length > 0 ? 5 : 4} fill={colour} />
+      )}
+    </g>
+  )
+}
+
+const GraphRow = memo(function GraphRow({
+  commit,
+  row,
+  gutter,
+  arrive,
+  onOpen,
+  onPoint,
+}: {
+  commit: GitGraphCommit
+  row: number
+  gutter: number
+  arrive?: number
+  onOpen: (c: GitGraphCommit) => void
+  onPoint: (row: number) => void
+}) {
+  const button = (
     <button
-      onClick={onClick}
-      className="flex w-full items-center gap-2 pr-3 text-left focus-ring-inset transition-colors hover:bg-row-hover"
-      style={{ height: ROW }}
+      onClick={() => onOpen(commit)}
+      onPointerEnter={() => onPoint(row)}
+      onFocus={() => onPoint(row)}
+      className="flex w-full items-center gap-3 pr-3 text-left focus-ring-inset transition-colors hover:bg-row-hover"
+      style={{ height: GRAPH_ROW, paddingLeft: gutter }}
     >
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <RefTags refs={commit.refs} className="flex shrink-0 items-center gap-1" />
+        <RefTags refs={commit.refs} max={2} className="flex shrink-0 items-center gap-1" />
         <span className="truncate text-body">{commit.subject}</span>
       </span>
-      <span className="shrink-0 font-mono text-hint text-muted-foreground">{commit.short}</span>
-      <span className="hidden shrink-0 text-hint text-muted-foreground sm:block">
+      <span className="hidden w-28 shrink-0 truncate text-right text-hint text-muted-foreground @xl:block">
+        {commit.author}
+      </span>
+      <span className="w-16 shrink-0 text-right font-mono text-hint text-muted-foreground">
+        {commit.short}
+      </span>
+      <span
+        className="hidden w-20 shrink-0 text-right text-hint whitespace-nowrap text-muted-foreground @md:block"
+        title={timestamp(commit.at)}
+      >
         {relativeTime(commit.at)}
       </span>
     </button>
   )
-}
+  return (
+    <div className="absolute inset-x-0" style={{ top: row * GRAPH_ROW }}>
+      {arrive === undefined ? button : <BlurFade delay={arrive}>{button}</BlurFade>}
+    </div>
+  )
+})

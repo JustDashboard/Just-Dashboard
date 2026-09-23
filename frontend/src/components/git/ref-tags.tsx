@@ -34,12 +34,23 @@ export function parseRefs(refs?: string): Ref[] {
  * three of them in a row apart. The checked-out branch is green and a tag
  * amber, which is colour as a reading of what the name is, not decoration.
  */
-export function RefTags({ refs, className }: { refs?: string; className?: string }) {
+export function RefTags({
+  refs,
+  className,
+  max,
+}: {
+  refs?: string
+  className?: string
+  /** Names past this many are counted rather than drawn, so a row keeps room for its subject. */
+  max?: number
+}) {
   const parsed = parseRefs(refs)
   if (parsed.length === 0) return null
+  const shown = max === undefined ? parsed : parsed.slice(0, max)
+  const rest = parsed.slice(shown.length)
   return (
     <span className={className ?? "flex min-w-0 flex-wrap items-center gap-1"}>
-      {parsed.map((r) => (
+      {shown.map((r) => (
         <Tag
           key={r.label}
           mono
@@ -50,6 +61,14 @@ export function RefTags({ refs, className }: { refs?: string; className?: string
           {r.label}
         </Tag>
       ))}
+      {rest.length > 0 && (
+        <span
+          className="numeric text-hint text-muted-foreground"
+          title={rest.map((r) => r.label).join(", ")}
+        >
+          +{rest.length}
+        </span>
+      )}
     </span>
   )
 }

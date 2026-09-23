@@ -3805,7 +3805,11 @@ export type GitCommit = {
 }
 
 /** One node in the branch graph: a commit plus the lane its dot sits in. */
-export type GitGraphCommit = GitCommit & { col: number }
+export type GitGraphCommit = GitCommit & {
+  col: number
+  /** The lane each edge to a parent travels down, index for index with `parents`. */
+  parentLanes?: number[]
+}
 
 export type GitGraph = {
   commits: GitGraphCommit[]
@@ -3813,6 +3817,8 @@ export type GitGraph = {
   lanes: number
   hasMore?: boolean
   skip?: number
+  /** How many commits the query reaches in all — sent with the first page only. */
+  total?: number
 }
 
 export type GitBranch = {

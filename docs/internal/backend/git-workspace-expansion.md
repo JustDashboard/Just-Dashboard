@@ -70,8 +70,8 @@ No CI workflows, release changes, commits or pushes are part of this request.
   uses the destructive tier but no typed phrase; main/current/locked/dirty checkouts are refused.
 - Remote URL edits and set/unset upstream use validated explicit argv. Clone optionally selects a
   branch/tag, shallow depth (1–100,000) and up to 100 sparse directories. Sparse setup failure leaves
-  the new clone in place and reports its path. Graph pages contain up to 400 commits with literal search
-  and ref filtering. Comparison file lists and diffs use frozen base/head SHAs. Message-only amend is
+  the new clone in place and reports its path. Graph pages contain up to 500 commits and reach 5,000 deep, with
+  literal search and ref filtering; the Git page's graph loads them as one windowed scroll. Comparison file lists and diffs use frozen base/head SHAs. Message-only amend is
   supported without staging a file.
 
 ## Submodules, LFS and patches

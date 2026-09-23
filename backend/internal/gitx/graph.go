@@ -9,9 +9,16 @@ import (
 // GraphCommit is one node in the branch graph: a commit plus the column its dot
 // sits in once the lanes have been laid out. Parents carry the SHAs it connects
 // down to, so the client draws an edge to each without a second git call.
+//
+// ParentLanes is the lane each of those edges travels down, index for index
+// with Parents. It is not the parent's own column: a branch that rejoins its
+// fork point keeps to its lane until the row above the parent and only then
+// bends across, and an edge that bent at the top instead would run straight
+// through every other commit on the lane it bent into.
 type GraphCommit struct {
 	Commit
-	Col int `json:"col"`
+	Col         int   `json:"col"`
+	ParentLanes []int `json:"parentLanes,omitempty"`
 }
 
 // Graph is the whole branch topology the client renders: commits in topological
@@ -22,7 +29,16 @@ type Graph struct {
 	Lanes   int           `json:"lanes"`
 	HasMore bool          `json:"hasMore"`
 	Skip    int           `json:"skip"`
+	// Total is how many commits the query reaches, counted on the first page
+	// only, so the reader knows how much history the graph stopped short of.
+	Total int `json:"total,omitempty"`
 }
+
+// graphDepth is how far down the history the graph will page. Each page is
+// laid out from the newest commit, so reaching a deep one costs the layout of
+// everything above it — and past a few thousand commits the reader is looking
+// for something, which search and the branch filter find faster than a scroll.
+const graphDepth = 5000
 
 type GraphQuery struct {
 	Limit  int
@@ -44,24 +60,35 @@ func (s *Service) Graph(ctx context.Context, path string, limit int) (*Graph, er
 	return s.GraphPage(ctx, path, GraphQuery{Limit: limit})
 }
 
+// GraphPage returns one page of the graph. The lanes are laid out from the top
+// of the history on every call and the page sliced out afterwards, so a lane
+// keeps its column across a page boundary: laying out each page on its own
+// started every page with no lanes open, and a branch that was lane 2 at the
+// foot of one page came back as lane 0 at the head of the next.
 func (s *Service) GraphPage(ctx context.Context, path string, q GraphQuery) (*Graph, error) {
 	limit := q.Limit
-	if limit <= 0 || limit > 400 {
+	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	args := []string{"log", "--topo-order", "--max-count=" + strconv.Itoa(limit+1),
-		"--skip=" + strconv.Itoa(max(0, q.Skip)), "--pretty=format:" + commitFields}
+	skip := max(0, q.Skip)
+	if skip >= graphDepth {
+		return &Graph{Commits: []GraphCommit{}, Skip: skip}, nil
+	}
+	limit = min(limit, graphDepth-skip)
+	filter := []string{}
 	if q.Search != "" {
-		args = append(args, "--fixed-strings", "--regexp-ignore-case", "--grep="+q.Search)
+		filter = append(filter, "--fixed-strings", "--regexp-ignore-case", "--grep="+q.Search)
 	}
 	if q.Ref != "" {
 		if err := ValidateRef(q.Ref); err != nil {
 			return nil, err
 		}
-		args = append(args, q.Ref)
+		filter = append(filter, q.Ref)
 	} else {
-		args = append(args, "--branches", "--remotes", "--tags")
+		filter = append(filter, "--branches", "--remotes", "--tags")
 	}
+	args := append([]string{"log", "--topo-order", "--max-count=" + strconv.Itoa(skip+limit+1),
+		"--pretty=format:" + commitFields}, filter...)
 	out, err := s.run(ctx, path, append(args, "--")...)
 	if err != nil {
 		return nil, err
@@ -72,13 +99,38 @@ func (s *Service) GraphPage(ctx context.Context, path string, q GraphQuery) (*Gr
 			commits = append(commits, c)
 		}
 	}
-	more := len(commits) > limit
+	more := len(commits) > skip+limit
 	if more {
-		commits = commits[:limit]
+		commits = commits[:skip+limit]
 	}
-	graph := layoutGraph(commits)
-	graph.HasMore, graph.Skip = more, max(0, q.Skip)
+	var graph *Graph
+	if q.Search != "" {
+		graph = listGraph(commits)
+	} else {
+		graph = layoutGraph(commits)
+	}
+	graph.Commits = graph.Commits[min(skip, len(graph.Commits)):]
+	graph.HasMore, graph.Skip = more && skip+limit < graphDepth, skip
+	if skip == 0 {
+		count, err := s.run(ctx, path, append(append([]string{"rev-list", "--count"}, filter...), "--")...)
+		if err != nil {
+			return nil, err
+		}
+		graph.Total, _ = strconv.Atoi(strings.TrimSpace(count))
+	}
 	return graph, nil
+}
+
+// listGraph is a search result drawn as a graph: one lane, no edges. A --grep
+// match's parents are mostly commits that did not match, so laying the matches
+// out as a topology opened a lane for every gap between two of them and a
+// search of a busy repository came back dozens of lanes wide.
+func listGraph(commits []Commit) *Graph {
+	nodes := make([]GraphCommit, 0, len(commits))
+	for _, c := range commits {
+		nodes = append(nodes, GraphCommit{Commit: c})
+	}
+	return &Graph{Commits: nodes, Lanes: min(1, len(nodes))}
 }
 
 // layoutGraph assigns each commit a lane. It walks the commits newest-first, so
@@ -119,25 +171,26 @@ func layoutGraph(commits []Commit) *Graph {
 			}
 		}
 
+		var via []int
 		if len(c.Parents) == 0 {
 			lanes[col] = ""
 		} else {
 			lanes[col] = c.Parents[0]
+			via = append(via, col)
 			for _, p := range c.Parents[1:] {
-				claim(p)
+				via = append(via, claim(p))
 			}
 		}
 
 		// Trim trailing free lanes so a merge that has since rejoined does not
-		// leave the canvas permanently wide.
+		// leave the canvas permanently wide. A root commit has just freed its own
+		// lane, so its column counts even when the trim took it.
 		for len(lanes) > 0 && lanes[len(lanes)-1] == "" {
 			lanes = lanes[:len(lanes)-1]
 		}
-		if len(lanes) > maxLanes {
-			maxLanes = len(lanes)
-		}
+		maxLanes = max(maxLanes, len(lanes), col+1)
 
-		nodes = append(nodes, GraphCommit{Commit: c, Col: col})
+		nodes = append(nodes, GraphCommit{Commit: c, Col: col, ParentLanes: via})
 	}
 
 	if maxLanes == 0 && len(nodes) > 0 {

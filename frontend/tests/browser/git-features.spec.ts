@@ -408,14 +408,23 @@ async function fixture(
             diff: "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n",
           }
           break
-        case "/git/graph":
+        case "/git/graph": {
+          // Two commits, a page each: the tip on the first page with an edge
+          // running off its foot, and its parent arriving on the second.
+          const skip = Number(url.searchParams.get("skip"))
           response = {
-            commits: [{ ...commit, col: 0 }],
+            commits: [
+              skip === 0
+                ? { ...commit, parents: [previous], col: 0, parentLanes: [0] }
+                : { ...commit, sha: previous, short: previous.slice(0, 7), col: 0 },
+            ],
             lanes: 1,
-            skip: Number(url.searchParams.get("skip")),
-            hasMore: !url.searchParams.get("skip") || url.searchParams.get("skip") === "0",
+            skip,
+            hasMore: skip === 0,
+            total: skip === 0 ? 2 : undefined,
           }
           break
+        }
         case "/files/list":
           response = {
             path: "/srv/app",
@@ -760,18 +769,31 @@ test("clone options are sent through the Add repository dialog", async ({ page }
     .toMatchObject({ branch: "feature", depth: 10, sparse: ["src", "packages/shared"] })
 })
 
-test("graph searches and pages without moving the workspace", async ({ page }) => {
+test("graph loads the whole history as one scroll and searches it", async ({ page }) => {
   const seen = await fixture(page)
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("button", { name: "Branch graph", exact: true }).click()
+  // The foot of the first page is on screen, so the next one is fetched
+  // without a click and lands under it rather than replacing it.
+  await expect
+    .poll(() => seen.some((r) => r.path === "/git/graph" && r.query.get("skip") === "1"))
+    .toBe(true)
+  await expect(page.getByText("All 2 commits", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Initial version/ })).toHaveCount(2)
+  await expect(page.getByRole("button", { name: "Next", exact: true })).toHaveCount(0)
+
   await page.getByRole("textbox", { name: "Search graph commits" }).fill("version")
   await expect
-    .poll(() => seen.some((r) => r.path === "/git/graph" && r.query.get("search") === "version"))
+    .poll(() =>
+      seen.some(
+        (r) =>
+          r.path === "/git/graph" &&
+          r.query.get("search") === "version" &&
+          r.query.get("skip") === "1",
+      ),
+    )
     .toBe(true)
-  await page.getByRole("button", { name: "Next", exact: true }).click()
-  await expect
-    .poll(() => seen.some((r) => r.path === "/git/graph" && r.query.get("skip") === "250"))
-    .toBe(true)
+  await expect(page.getByText("All 2 matches", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Back to repositories" })).toBeVisible()
 })
 
