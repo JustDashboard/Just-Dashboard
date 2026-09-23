@@ -15,7 +15,6 @@ import {
   FolderOpen,
   FolderPlus,
   GridSquare,
-  Home,
   Linked,
   ListUnordered,
   MagnifyingGlass,
@@ -41,10 +40,18 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader } from "@/components/page"
+import { Page } from "@/components/page"
 import { PaneFooter, PaneHeader } from "@/components/panel"
 import { GitHubAccountControl } from "@/components/git/github-account"
 import { FileEditorSheet } from "@/components/files/file-editor"
+import {
+  defaultFolderColour,
+  folderColourOf,
+  FolderColourProvider,
+  FolderIcon,
+  type FolderColour,
+} from "@/components/files/file-icon"
+import { FolderColourMenu } from "@/components/files/folder-colour"
 import { COLUMN, FileRow } from "@/components/files/file-row"
 import { FilesSidebar } from "@/components/files/files-sidebar"
 import { GridView, type TileSize } from "@/components/files/grid-view"
@@ -58,6 +65,7 @@ import { PreviewPanel } from "@/components/files/preview-panel"
 import { QuickOpen } from "@/components/files/quick-open"
 import {
   archiveHref,
+  colourVerb,
   ListingContextMenu,
   type FileActions,
   type Verb,
@@ -262,6 +270,45 @@ export default function FilesPage() {
   const dimmed = useMemo(() => new Set(clip?.mode === "cut" ? clip.paths : []), [clip])
   const bookmarks = useMemo(() => places.data?.bookmarks ?? [], [places.data])
   const starred = path !== null && bookmarks.some((b) => b.path === path)
+  // A colour picked here is drawn at once rather than after the round trip;
+  // the edits are kept against the places they were made over, so the
+  // server's answer replaces them the moment it is read back.
+  const [colourEdits, setColourEdits] = useState<{
+    over?: FilePlaces
+    edits: Record<string, string>
+  }>({ edits: {} })
+  const colours = useMemo(() => {
+    const merged = { ...(places.data?.colours ?? {}) }
+    if (colourEdits.over === places.data) {
+      for (const [p, colour] of Object.entries(colourEdits.edits)) {
+        if (colour) merged[p] = colour
+        else delete merged[p]
+      }
+    }
+    return merged
+  }, [places.data, colourEdits])
+  // What is being browsed, as an entry: the inspector describes it while
+  // nothing in it is chosen, and the strip draws it in its colour.
+  const here = useMemo<FileEntry | null>(
+    () =>
+      path === null
+        ? null
+        : {
+            name: baseOf(path),
+            path,
+            isDir: true,
+            isSymlink: false,
+            size: 0,
+            mode: "",
+            modeOctal: "",
+            modified: "",
+            owner: "",
+            group: "",
+            uid: 0,
+            gid: 0,
+          },
+    [path],
+  )
   // The row above the listing that goes up a level — only where up is
   // somewhere the server will list. An install that narrowed JD_FILE_ROOTS
   // used to offer a parent that answered 403.
@@ -481,6 +528,7 @@ export default function FilesPage() {
       if (ok > 0) {
         const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
         notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
+        if (mode === "move") afterLabelledChange(targets)
       }
       clearSelection()
       reload()
@@ -516,6 +564,7 @@ export default function FilesPage() {
         notify.success(`Renamed to ${name}`)
         setActive(null)
         reload()
+        afterLabelledChange([entry.path])
       },
     })
 
@@ -565,6 +614,7 @@ export default function FilesPage() {
         })
         setActive(null)
         reload()
+        afterLabelledChange([entry.path])
       },
     })
 
@@ -603,6 +653,7 @@ export default function FilesPage() {
         clearSelection()
         setActive(null)
         reload()
+        afterLabelledChange(targets.map((e) => e.path))
         if (failed) notify.error(`${plural(failed, "item")} could not be deleted`)
       },
     })
@@ -655,6 +706,27 @@ export default function FilesPage() {
     )
   }
 
+  const setColour = async (target: Pick<FileEntry, "path" | "name">, colour: FolderColour) => {
+    // A folder's default is no label at all, so choosing it clears the one it
+    // had rather than storing blue against a folder that would be blue anyway.
+    const value = colour === defaultFolderColour(target.name, target.path) ? "" : colour
+    setColourEdits((prev) => ({
+      over: places.data,
+      edits: { ...(prev.over === places.data ? prev.edits : {}), [target.path]: value },
+    }))
+    try {
+      await put("/files/colours", { path: target.path, colour: value })
+    } catch (err) {
+      notify.error("Could not colour that folder", err)
+    }
+    places.refresh()
+  }
+  /** The server carries a label along with a move and drops it with a delete; this reads that back. */
+  const afterLabelledChange = (paths: string[]) => {
+    const labelled = Object.keys(colours)
+    if (paths.some((p) => labelled.some((k) => isWithin(k, p)))) places.refresh()
+  }
+
   const saveBookmarks = async (next: FileBookmark[]) => {
     try {
       await put("/files/bookmarks", { bookmarks: next })
@@ -685,6 +757,8 @@ export default function FilesPage() {
     onEditImage: () => setEditingImage(entry.path),
     onToggleStar: () => toggleStar(entry.path, entry.name),
     starred: bookmarks.some((b) => b.path === entry.path),
+    colour: folderColourOf(colours, entry.path, entry.name),
+    onColour: (colour) => void setColour(entry, colour),
   })
 
   /** What a right-click on the space between rows offers: the folder's verbs. */
@@ -722,14 +796,17 @@ export default function FilesPage() {
       },
       { id: "refresh", label: "Refresh", icon: RefreshClockwise, onSelect: reload },
     ],
-    canWrite && path
+    canWrite && here
       ? [
           {
             id: "star",
             label: starred ? "Unstar this folder" : "Star this folder",
             icon: starred ? StarFill : Star,
-            onSelect: () => toggleStar(path, baseOf(path)),
+            onSelect: () => toggleStar(here.path, here.name),
           },
+          colourVerb(folderColourOf(colours, here.path, here.name), (colour) => {
+            void setColour(here, colour)
+          }),
         ]
       : [],
   ]
@@ -904,108 +981,40 @@ export default function FilesPage() {
     ? (transfer: DataTransfer, dir: string) => void dropFiles(transfer, dir)
     : undefined
 
+  const hereColour = here ? folderColourOf(colours, here.path, here.name) : "blue"
+
   return (
-    <Page fill className="gap-4 md:gap-5">
-      <PageHeader
-        eyebrow="Workspace"
-        title="Files"
-        actions={
-          <>
-            {/* Edits made here are committed somewhere else, so the account
-                those commits will carry belongs on this page too. */}
-            <GitHubAccountControl />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={() => setQuickOpen(true)}>
-                  <MagnifyingGlass className="size-4" />
-                  Find
-                  <kbd className="ml-1 hidden rounded-sm border border-hairline px-1 text-micro text-muted-foreground sm:inline">
-                    ⌃P
-                  </kbd>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Fuzzy-find a file or folder under here</TooltipContent>
-            </Tooltip>
-            {canWrite && (
-              <>
-                <NewMenu
-                  onFolder={newFolder}
-                  onFile={newFile}
-                  onSymlink={() => setSymlinkOpen(true)}
-                />
-                <UploadMenu onFiles={openFileInput} onFolder={() => folderInput.current?.click()} />
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(e) => uploadFromInput(e.currentTarget)}
-                />
-                <input
-                  ref={folderInput}
-                  type="file"
-                  multiple
-                  hidden
-                  {...({ webkitdirectory: "" } as Record<string, string>)}
-                  onChange={(e) => uploadFromInput(e.currentTarget)}
-                />
-              </>
-            )}
-          </>
-        }
-      />
+    <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+      <FolderColourProvider colours={colours}>
+        {/* One frame around the whole workbench: a strip across the top, then
+            the sidebar, the listing and the inspector separated by a hairline
+            each rather than by a gutter and three borders — three framed
+            panels with gaps between them read as three boxes floating on the
+            page, and the screen is one working surface.
 
-      {/* One frame around the whole workbench. The sidebar, the listing and
-          the inspector are separated by a hairline each rather than by a
-          gutter and three borders: three framed panels with gaps between
-          them read as three boxes floating on the page, and the screen is
-          one working surface. */}
-      <div
-        style={
-          {
-            "--jd-files-rail": `${railPx}px`,
-            "--jd-files-inspector": `${inspectorPx}px`,
-          } as React.CSSProperties
-        }
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card lg:flex-row"
-      >
-        {showSidebar && (
-          <div className="relative hidden shrink-0 border-r border-hairline lg:flex lg:w-(--jd-files-rail)">
-            <FilesSidebar
-              places={places.data}
-              path={path ?? "/"}
-              recent={recent}
-              canWrite={canWrite}
-              onNavigate={navigate}
-              onBookmarksChange={(next) => void saveBookmarks(next)}
-              onDropPaths={(paths, dir, mode) => void movePaths(paths, dir, mode)}
-              onDropFiles={(transfer, dir) => void dropFiles(transfer, dir)}
-              onClose={() => setShowSidebar(false)}
-            />
-            <ResizeHandle
-              side="left"
-              label="Sidebar width"
-              value={railPx}
-              min={RAIL.min}
-              max={RAIL.max}
-              onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, RAIL.max), commit)}
-              onReset={resetRailWidth}
-              className="absolute inset-y-0 -right-1 z-20"
-            />
-          </div>
-        )}
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PaneHeader className="gap-1 pr-1.5 pl-1.5">
-            {!showSidebar && (
-              <IconAction
-                label="Show the sidebar"
-                className="hidden size-7 lg:inline-flex"
-                onClick={() => setShowSidebar(true)}
-              >
-                <SidebarLeft />
-              </IconAction>
-            )}
+            There is no page header above it, the way the terminal and a Git
+            working copy have none. "Workspace / Files" and a row of buttons
+            took a band of the screen to say what the sidebar already says,
+            and put the page's commands a hand's width from the folder they
+            act on. They are in the strip now, beside where you are. */}
+        <div
+          style={
+            {
+              "--jd-files-rail": `${railPx}px`,
+              "--jd-files-inspector": `${inspectorPx}px`,
+            } as React.CSSProperties
+          }
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
+        >
+          <PaneHeader className="flex-wrap gap-x-1 gap-y-1.5 px-2 py-1.5">
+            <IconAction
+              label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
+              aria-pressed={showSidebar}
+              className="hidden size-7 lg:inline-flex"
+              onClick={() => setShowSidebar(!showSidebar)}
+            >
+              <SidebarLeft />
+            </IconAction>
             {/* The sidebar lists the places; where it is not drawn, the same
                 list sits behind this button so a phone can still jump. */}
             <div className={cn(showSidebar && "lg:hidden")}>
@@ -1021,335 +1030,444 @@ export default function FilesPage() {
                   aria-label="Places"
                   className="size-7 text-muted-foreground"
                 >
-                  <Home className="size-3.5" />
+                  <SidebarLeft className="size-3.5" />
                 </Button>
               </PlacesMenu>
             </div>
-            <PathBar
-              path={path ?? "/"}
-              home={places.data?.home}
-              onNavigate={navigate}
-              onDropPaths={dropInto}
-              onDropFiles={dropFilesInto}
-              className="min-w-0 flex-1"
-            />
-            {canWrite && path && (
-              <IconAction
-                label={starred ? "Unstar this folder" : "Star this folder"}
-                className="size-7"
-                onClick={() => toggleStar(path, baseOf(path))}
-              >
-                {starred ? <StarFill className="text-warning" /> : <Star />}
+
+            {/* Where you are: the folder, drawn in its colour — which is also
+                where its colour is changed — and the path to it. */}
+            <div className="flex min-w-0 flex-1 basis-56 items-center gap-1">
+              {here &&
+                (canWrite ? (
+                  <FolderColourMenu value={hereColour} onPick={(c) => void setColour(here, c)}>
+                    <button
+                      type="button"
+                      aria-label="Colour this folder"
+                      className="shrink-0 rounded-md p-0.5 focus-ring transition-colors hover:bg-row-hover"
+                    >
+                      <FolderIcon name={here.name} path={here.path} className="size-6" />
+                    </button>
+                  </FolderColourMenu>
+                ) : (
+                  <FolderIcon name={here.name} path={here.path} className="size-6 p-0.5" />
+                ))}
+              <PathBar
+                path={path ?? "/"}
+                home={places.data?.home}
+                onNavigate={navigate}
+                onDropPaths={dropInto}
+                onDropFiles={dropFilesInto}
+                className="min-w-0 flex-1"
+              />
+              {canWrite && here && (
+                <IconAction
+                  label={starred ? "Unstar this folder" : "Star this folder"}
+                  className="size-7"
+                  onClick={() => toggleStar(here.path, here.name)}
+                >
+                  {starred ? <StarFill className="text-warning" /> : <Star />}
+                </IconAction>
+              )}
+            </div>
+
+            {/* What you can do here: find, look, arrange, then make. */}
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label="Find"
+                    className="text-muted-foreground hover:text-foreground md:w-40 md:justify-start"
+                    onClick={() => setQuickOpen(true)}
+                  >
+                    <MagnifyingGlass className="size-4" />
+                    <span className="hidden md:inline">Find</span>
+                    <kbd className="ml-auto hidden rounded-sm border border-hairline px-1 text-micro md:inline">
+                      ⌃P
+                    </kbd>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Fuzzy-find a file or folder under here</TooltipContent>
+              </Tooltip>
+              <SearchDialog
+                path={path ?? "/"}
+                onOpen={(p, isDir) => (isDir ? navigate(p) : setEditing(p))}
+              />
+              <IconAction label="Refresh" className="size-7" onClick={reload}>
+                <RefreshClockwise />
               </IconAction>
-            )}
-            <IconAction label="Refresh" className="size-7" onClick={reload}>
-              <RefreshClockwise />
-            </IconAction>
-            <SearchDialog
-              path={path ?? "/"}
-              onOpen={(p, isDir) => (isDir ? navigate(p) : setEditing(p))}
-            />
-            <ToggleGroup
-              type="single"
-              size="sm"
-              variant="outline"
-              value={view}
-              onValueChange={(v) => v && setView(v)}
-              aria-label="View"
-              className="h-7"
-            >
-              <ToggleGroupItem value="list" aria-label="Details" className="h-7 min-w-7 px-1.5">
-                <ListUnordered className="size-3.5" />
-              </ToggleGroupItem>
-              <ToggleGroupItem value="grid" aria-label="Tiles" className="h-7 min-w-7 px-1.5">
-                <GridSquare className="size-3.5" />
-              </ToggleGroupItem>
-            </ToggleGroup>
-            <ArrangeMenu
-              sort={sort}
-              setSort={setSort}
-              showHidden={showHidden}
-              setShowHidden={setShowHidden}
-              tile={tile}
-              setTile={setTile}
-              grid={view === "grid"}
-            />
-            {!showInspector && (
+              <ToggleGroup
+                type="single"
+                size="sm"
+                variant="outline"
+                value={view}
+                onValueChange={(v) => v && setView(v)}
+                aria-label="View"
+                className="h-7"
+              >
+                <ToggleGroupItem value="list" aria-label="Details" className="h-7 min-w-7 px-1.5">
+                  <ListUnordered className="size-3.5" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-7 min-w-7 px-1.5">
+                  <GridSquare className="size-3.5" />
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <ArrangeMenu
+                sort={sort}
+                setSort={setSort}
+                showHidden={showHidden}
+                setShowHidden={setShowHidden}
+                tile={tile}
+                setTile={setTile}
+                grid={view === "grid"}
+              />
+              <span aria-hidden className="mx-1 hidden h-5 w-px bg-hairline md:block" />
+              {/* Edits made here are committed somewhere else, so the account
+                  those commits will carry belongs on this page too. */}
+              <div className="hidden md:contents">
+                <GitHubAccountControl compact="avatar" />
+              </div>
+              {canWrite && (
+                <>
+                  <NewMenu
+                    onFolder={newFolder}
+                    onFile={newFile}
+                    onSymlink={() => setSymlinkOpen(true)}
+                  />
+                  <UploadMenu
+                    onFiles={openFileInput}
+                    onFolder={() => folderInput.current?.click()}
+                  />
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    multiple
+                    hidden
+                    onChange={(e) => uploadFromInput(e.currentTarget)}
+                  />
+                  <input
+                    ref={folderInput}
+                    type="file"
+                    multiple
+                    hidden
+                    {...({ webkitdirectory: "" } as Record<string, string>)}
+                    onChange={(e) => uploadFromInput(e.currentTarget)}
+                  />
+                </>
+              )}
               <IconAction
-                label="Show the details"
+                label={showInspector ? "Hide the details" : "Show the details"}
+                aria-pressed={showInspector}
                 className="hidden size-7 xl:inline-flex"
-                onClick={() => setShowInspector(true)}
+                onClick={() => setShowInspector(!showInspector)}
               >
                 <SidebarRight />
               </IconAction>
-            )}
+            </div>
           </PaneHeader>
 
-          {selected.size > 0 ? (
-            <SelectionBar
-              count={selected.size}
-              size={selectedBytes}
-              canWrite={canWrite}
-              canDestruct={canDestruct}
-              archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
-              onCopy={() => cutCopy("copy", [...selected])}
-              onCut={() => cutCopy("cut", [...selected])}
-              onDelete={bulkDelete}
-              onClear={clearSelection}
-            />
-          ) : (
-            clip && (
-              <div className="flex items-center gap-2 border-b border-hairline px-3 py-1.5 text-xs">
-                {clip.mode === "cut" ? (
-                  <ArrowMove className="size-3.5 text-muted-foreground" />
-                ) : (
-                  <Clipboard className="size-3.5 text-muted-foreground" />
-                )}
-                <span className="text-muted-foreground">
-                  {plural(clip.paths.length, "item")} ready to{" "}
-                  {clip.mode === "cut" ? "move" : "copy"}
-                </span>
-                <span className="flex-1" />
-                {canWrite && (
-                  <Button size="xs" onClick={() => void paste()}>
-                    <Clipboard className="size-3.5" />
-                    Paste here
-                  </Button>
-                )}
-                <IconAction
-                  label="Forget the clipboard"
-                  className="size-6"
-                  onClick={() => setClip(null)}
-                >
-                  <Cross />
-                </IconAction>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            {showSidebar && (
+              <div className="relative hidden shrink-0 border-r border-hairline lg:flex lg:w-(--jd-files-rail)">
+                <FilesSidebar
+                  places={places.data}
+                  path={path ?? "/"}
+                  recent={recent}
+                  canWrite={canWrite}
+                  onNavigate={navigate}
+                  onBookmarksChange={(next) => void saveBookmarks(next)}
+                  onDropPaths={(paths, dir, mode) => void movePaths(paths, dir, mode)}
+                  onDropFiles={(transfer, dir) => void dropFiles(transfer, dir)}
+                />
+                <ResizeHandle
+                  side="left"
+                  label="Sidebar width"
+                  value={railPx}
+                  min={RAIL.min}
+                  max={RAIL.max}
+                  onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, RAIL.max), commit)}
+                  onReset={resetRailWidth}
+                  className="absolute inset-y-0 -right-1 z-20"
+                />
               </div>
-            )
-          )}
+            )}
 
-          {/* The body does not scroll; whatever is inside it does. That is
-              what keeps the table's header stuck to the top of the list: a
-              sticky header sticks to its nearest scrolling ancestor. The
-              right-click menu is scoped to the body too, so the path field
-              in the strip above keeps the browser's own. */}
-          <ListingContextMenu
-            caps={caps}
-            resolve={(p) => byPath.get(p)}
-            actionsFor={actionsFor}
-            background={backgroundVerbs}
-            onTarget={(entry) => entry && setActive({ dir: path ?? "/", entry })}
-            className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-          >
-            <div
-              className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden"
-              {...dropZone.handlers}
-            >
-              {dropZone.over && (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-wash-brand">
-                  <span className="rounded-lg border border-dashed border-rule-brand bg-card px-4 py-2 text-body font-medium">
-                    Drop to upload to {truncateMiddle(path ?? "/", 40)}
-                  </span>
-                </div>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {selected.size > 0 ? (
+                <SelectionBar
+                  count={selected.size}
+                  size={selectedBytes}
+                  canWrite={canWrite}
+                  canDestruct={canDestruct}
+                  archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
+                  onCopy={() => cutCopy("copy", [...selected])}
+                  onCut={() => cutCopy("cut", [...selected])}
+                  onDelete={bulkDelete}
+                  onClear={clearSelection}
+                />
+              ) : (
+                clip && (
+                  <div className="flex items-center gap-2 border-b border-hairline px-3 py-1.5 text-xs">
+                    {clip.mode === "cut" ? (
+                      <ArrowMove className="size-3.5 text-muted-foreground" />
+                    ) : (
+                      <Clipboard className="size-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-muted-foreground">
+                      {plural(clip.paths.length, "item")} ready to{" "}
+                      {clip.mode === "cut" ? "move" : "copy"}
+                    </span>
+                    <span className="flex-1" />
+                    {canWrite && (
+                      <Button size="xs" onClick={() => void paste()}>
+                        <Clipboard className="size-3.5" />
+                        Paste here
+                      </Button>
+                    )}
+                    <IconAction
+                      label="Forget the clipboard"
+                      className="size-6"
+                      onClick={() => setClip(null)}
+                    >
+                      <Cross />
+                    </IconAction>
+                  </div>
+                )
               )}
-              {(listing.loading || path === null) && <LoadingRows className="p-4" />}
-              {listing.error && <ErrorState error={listing.error} className="m-4" />}
 
-              {listing.data && view === "grid" && (
-                <div key={path} className="min-h-0 flex-1 animate-rise overflow-auto">
-                  {entries.length === 0 ? (
-                    <EmptyFolder canWrite={canWrite} onUpload={openFileInput} />
-                  ) : (
-                    <GridView
-                      entries={entries}
-                      selected={selected}
-                      activePath={activeEntry?.path ?? null}
-                      dimmed={dimmed}
-                      caps={caps}
-                      size={tile}
-                      onToggle={toggleSelected}
-                      onSelect={selectRow}
-                      onOpen={openEntry}
-                      onDragStart={canWrite ? dragStart : undefined}
-                      onDropPaths={dropInto}
-                      onDropFiles={dropFilesInto}
-                      actions={actionsFor}
-                    />
+              {/* The body does not scroll; whatever is inside it does. That is
+                  what keeps the table's header stuck to the top of the list: a
+                  sticky header sticks to its nearest scrolling ancestor. The
+                  right-click menu is scoped to the body too, so the path field
+                  in the strip above keeps the browser's own. */}
+              <ListingContextMenu
+                caps={caps}
+                resolve={(p) => byPath.get(p)}
+                actionsFor={actionsFor}
+                background={backgroundVerbs}
+                onTarget={(entry) => entry && setActive({ dir: path ?? "/", entry })}
+                className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+              >
+                <div
+                  className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden"
+                  {...dropZone.handlers}
+                >
+                  {dropZone.over && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-wash-brand">
+                      <span className="rounded-lg border border-dashed border-rule-brand bg-card px-4 py-2 text-body font-medium">
+                        Drop to upload to {truncateMiddle(path ?? "/", 40)}
+                      </span>
+                    </div>
                   )}
-                </div>
-              )}
+                  {(listing.loading || path === null) && <LoadingRows className="p-4" />}
+                  {listing.error && <ErrorState error={listing.error} className="m-4" />}
 
-              {listing.data && view === "list" && (
-                <div key={path} className="relative min-h-0 flex-1 animate-rise overflow-hidden">
-                  <Table containerClassName="h-full">
-                    <TableHeader className={stickyTableHeader}>
-                      <TableRow>
-                        <TableHead className="w-8">
-                          <Checkbox
-                            aria-label="Select all"
-                            checked={
-                              entries.length > 0 && selected.size === entries.length
-                                ? true
-                                : selected.size > 0
-                                  ? "indeterminate"
-                                  : false
-                            }
-                            onCheckedChange={(v) =>
-                              setSelected(
-                                v === true ? new Set(entries.map((e) => e.path)) : new Set(),
-                              )
-                            }
-                          />
-                        </TableHead>
-                        <SortHead
-                          label="Name"
-                          k="name"
-                          sort={sort}
-                          setSort={setSort}
-                          className="w-full"
-                        />
-                        <SortHead
-                          label="Size"
-                          k="size"
-                          sort={sort}
-                          setSort={setSort}
-                          align="right"
-                        />
-                        <SortHead
-                          label="Modified"
-                          k="modified"
-                          sort={sort}
-                          setSort={setSort}
-                          className={COLUMN.modified}
-                        />
-                        <SortHead
-                          label="Owner"
-                          k="owner"
-                          sort={sort}
-                          setSort={setSort}
-                          className={COLUMN.owner}
-                        />
-                        <SortHead
-                          label="Mode"
-                          k="mode"
-                          sort={sort}
-                          setSort={setSort}
-                          className={cn("w-20", COLUMN.mode)}
-                        />
-                        <TableHead className="w-px" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {parentReachable && parent && (
-                        <TableRow className="select-none" onActivate={() => navigate(parent)}>
-                          <TableCell />
-                          <TableCell colSpan={6}>
-                            <span className="flex items-center gap-2 text-body text-muted-foreground">
-                              <ArrowUp className="size-3.5" />
-                              Parent folder
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {entries.map((entry) => (
-                        <FileRow
-                          key={entry.path}
-                          entry={entry}
-                          selected={selected.has(entry.path)}
-                          active={activeEntry?.path === entry.path}
-                          dimmed={dimmed.has(entry.path)}
+                  {listing.data && view === "grid" && (
+                    <div key={path} className="min-h-0 flex-1 animate-rise overflow-auto">
+                      {entries.length === 0 ? (
+                        <EmptyFolder canWrite={canWrite} onUpload={openFileInput} />
+                      ) : (
+                        <GridView
+                          entries={entries}
+                          selected={selected}
+                          activePath={activeEntry?.path ?? null}
+                          dimmed={dimmed}
                           caps={caps}
-                          onToggle={(checked) => toggleSelected(entry, checked)}
-                          onSelect={(event) => selectRow(entry, event)}
-                          onOpen={() => openEntry(entry)}
-                          onDragStart={canWrite ? (event) => dragStart(entry, event) : undefined}
+                          size={tile}
+                          onToggle={toggleSelected}
+                          onSelect={selectRow}
+                          onOpen={openEntry}
+                          onDragStart={canWrite ? dragStart : undefined}
                           onDropPaths={dropInto}
                           onDropFiles={dropFilesInto}
-                          actions={actionsFor(entry)}
+                          actions={actionsFor}
                         />
-                      ))}
-                      {entries.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={7} className="p-0">
-                            <EmptyFolder canWrite={canWrite} onUpload={openFileInput} />
-                          </TableCell>
-                        </TableRow>
                       )}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  )}
+
+                  {listing.data && view === "list" && (
+                    <div
+                      key={path}
+                      className="relative min-h-0 flex-1 animate-rise overflow-hidden"
+                    >
+                      <Table containerClassName="h-full">
+                        <TableHeader className={stickyTableHeader}>
+                          <TableRow>
+                            <TableHead className="w-8">
+                              <Checkbox
+                                aria-label="Select all"
+                                checked={
+                                  entries.length > 0 && selected.size === entries.length
+                                    ? true
+                                    : selected.size > 0
+                                      ? "indeterminate"
+                                      : false
+                                }
+                                onCheckedChange={(v) =>
+                                  setSelected(
+                                    v === true ? new Set(entries.map((e) => e.path)) : new Set(),
+                                  )
+                                }
+                              />
+                            </TableHead>
+                            <SortHead
+                              label="Name"
+                              k="name"
+                              sort={sort}
+                              setSort={setSort}
+                              className="w-full"
+                            />
+                            <SortHead
+                              label="Size"
+                              k="size"
+                              sort={sort}
+                              setSort={setSort}
+                              align="right"
+                            />
+                            <SortHead
+                              label="Modified"
+                              k="modified"
+                              sort={sort}
+                              setSort={setSort}
+                              className={COLUMN.modified}
+                            />
+                            <SortHead
+                              label="Owner"
+                              k="owner"
+                              sort={sort}
+                              setSort={setSort}
+                              className={COLUMN.owner}
+                            />
+                            <SortHead
+                              label="Mode"
+                              k="mode"
+                              sort={sort}
+                              setSort={setSort}
+                              className={cn("w-20", COLUMN.mode)}
+                            />
+                            <TableHead className="w-px" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {parentReachable && parent && (
+                            <TableRow className="select-none" onActivate={() => navigate(parent)}>
+                              <TableCell />
+                              <TableCell colSpan={6}>
+                                <span className="flex items-center gap-2 text-body text-muted-foreground">
+                                  <ArrowUp className="size-3.5" />
+                                  Parent folder
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {entries.map((entry) => (
+                            <FileRow
+                              key={entry.path}
+                              entry={entry}
+                              selected={selected.has(entry.path)}
+                              active={activeEntry?.path === entry.path}
+                              dimmed={dimmed.has(entry.path)}
+                              caps={caps}
+                              onToggle={(checked) => toggleSelected(entry, checked)}
+                              onSelect={(event) => selectRow(entry, event)}
+                              onOpen={() => openEntry(entry)}
+                              onDragStart={
+                                canWrite ? (event) => dragStart(entry, event) : undefined
+                              }
+                              onDropPaths={dropInto}
+                              onDropFiles={dropFilesInto}
+                              actions={actionsFor(entry)}
+                            />
+                          ))}
+                          {entries.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={7} className="p-0">
+                                <EmptyFolder canWrite={canWrite} onUpload={openFileInput} />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </ListingContextMenu>
+              </ListingContextMenu>
 
-          <UploadStrip
-            items={uploads.items}
-            currentDir={path ?? "/"}
-            onCancel={uploads.cancel}
-            onDismiss={uploads.dismiss}
-            onClear={uploads.clear}
-          />
+              <UploadStrip
+                items={uploads.items}
+                currentDir={path ?? "/"}
+                onCancel={uploads.cancel}
+                onDismiss={uploads.dismiss}
+                onClear={uploads.clear}
+              />
 
-          <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
-            <span className="numeric min-w-0 truncate">
-              {listing.data
-                ? selected.size > 0
-                  ? `${plural(selected.size, "item")} selected${
-                      selectedBytes > 0 ? ` · ${bytes(selectedBytes)}` : ""
-                    }`
-                  : entries.length === 0
-                    ? "Empty folder"
-                    : [
-                        folderCount > 0 && plural(folderCount, "folder"),
-                        fileCount > 0 && plural(fileCount, "file"),
-                      ]
-                        .filter(Boolean)
-                        .join(", ")
-                : ""}
-            </span>
-            {mount && (
-              <span className="flex min-w-0 shrink-0 items-center gap-2">
-                <Meter
-                  value={mount.usedPercent}
-                  tone={utilisationTone(mount.usedPercent)}
-                  size="thin"
-                  label={`Disk used on ${mount.mountpoint}`}
-                  className="w-20"
-                />
-                <span className="numeric truncate">
-                  {bytes(mount.free)} free on {mount.mountpoint}
+              <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
+                <span className="numeric min-w-0 truncate">
+                  {listing.data
+                    ? selected.size > 0
+                      ? `${plural(selected.size, "item")} selected${
+                          selectedBytes > 0 ? ` · ${bytes(selectedBytes)}` : ""
+                        }`
+                      : entries.length === 0
+                        ? "Empty folder"
+                        : [
+                            folderCount > 0 && plural(folderCount, "folder"),
+                            fileCount > 0 && plural(fileCount, "file"),
+                          ]
+                            .filter(Boolean)
+                            .join(", ")
+                    : ""}
                 </span>
-              </span>
-            )}
-          </PaneFooter>
-        </div>
+                {mount && (
+                  <span className="flex min-w-0 shrink-0 items-center gap-2">
+                    <Meter
+                      value={mount.usedPercent}
+                      tone={utilisationTone(mount.usedPercent)}
+                      size="thin"
+                      label={`Disk used on ${mount.mountpoint}`}
+                      className="w-20"
+                    />
+                    <span className="numeric truncate">
+                      {bytes(mount.free)} free on {mount.mountpoint}
+                    </span>
+                  </span>
+                )}
+              </PaneFooter>
+            </div>
 
-        {showInspector && (
-          <div className="relative hidden shrink-0 flex-col border-l border-hairline xl:flex xl:w-(--jd-files-inspector)">
-            <ResizeHandle
-              side="right"
-              label="Details width"
-              value={inspectorPx}
-              min={INSPECTOR.min}
-              max={INSPECTOR.max}
-              onChange={(px, commit) =>
-                setInspectorWidth(clamp(px, INSPECTOR.min, INSPECTOR.max), commit)
-              }
-              onReset={resetInspectorWidth}
-              className="absolute inset-y-0 -left-1 z-20"
-            />
-            <PreviewPanel
-              entry={activeEntry}
-              canWrite={canWrite}
-              onOpen={(p) => setEditing(p)}
-              onView={viewEntry}
-              onEditImage={(p) => setEditingImage(p)}
-              onNavigate={navigate}
-              onClose={() => setShowInspector(false)}
-              className="flex-1"
-            />
+            {showInspector && (
+              <div className="relative hidden shrink-0 flex-col border-l border-hairline xl:flex xl:w-(--jd-files-inspector)">
+                <ResizeHandle
+                  side="right"
+                  label="Details width"
+                  value={inspectorPx}
+                  min={INSPECTOR.min}
+                  max={INSPECTOR.max}
+                  onChange={(px, commit) =>
+                    setInspectorWidth(clamp(px, INSPECTOR.min, INSPECTOR.max), commit)
+                  }
+                  onReset={resetInspectorWidth}
+                  className="absolute inset-y-0 -left-1 z-20"
+                />
+                <PreviewPanel
+                  entry={activeEntry}
+                  folder={here}
+                  canWrite={canWrite}
+                  onColour={(entry, colour) => void setColour(entry, colour)}
+                  onOpen={(p) => setEditing(p)}
+                  onView={viewEntry}
+                  onEditImage={(p) => setEditingImage(p)}
+                  onNavigate={navigate}
+                  className="flex-1"
+                />
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      </FolderColourProvider>
 
       <QuickOpen
         open={quickOpen}
@@ -1639,9 +1757,9 @@ function NewMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" aria-label="New">
           <Plus className="size-4" />
-          New
+          <span className="hidden sm:inline">New</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
@@ -1671,9 +1789,9 @@ function UploadMenu({ onFiles, onFolder }: { onFiles: () => void; onFolder: () =
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm">
+        <Button size="sm" aria-label="Upload">
           <CloudUpload className="size-4" />
-          Upload
+          <span className="hidden sm:inline">Upload</span>
           <ChevronDown className="size-3 opacity-70" />
         </Button>
       </DropdownMenuTrigger>

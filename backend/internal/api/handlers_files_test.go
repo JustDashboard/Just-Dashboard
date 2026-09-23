@@ -216,6 +216,79 @@ func TestBookmarksAreAWriteAndAreStored(t *testing.T) {
 	}
 }
 
+// A folder's colour is stored against its resolved path, follows the folder
+// when it is renamed, is forgotten when it is deleted, and is a write.
+func TestFolderColoursFollowTheFolder(t *testing.T) {
+	c, s := newClient(t)
+	root := fileFixture(t, s)
+	colours := func() map[string]string {
+		t.Helper()
+		var places struct {
+			Colours map[string]string `json:"colours"`
+		}
+		w := c.do(http.MethodGet, "/api/v1/files/places", "", nil)
+		if err := json.Unmarshal(w.Body.Bytes(), &places); err != nil {
+			t.Fatal(err)
+		}
+		return places.Colours
+	}
+	label := func(path, colour string) *httptest.ResponseRecorder {
+		return c.do(http.MethodPut, "/api/v1/files/colours",
+			`{"path":"`+path+`","colour":"`+colour+`"}`, nil)
+	}
+
+	etc := filepath.Join(root, "etc")
+	nginx := filepath.Join(etc, "nginx")
+	if w := label(nginx, "red"); w.Code != http.StatusOK {
+		t.Fatalf("labelling a folder: %d %s", w.Code, w.Body.String())
+	}
+	if got := colours()[nginx]; got != "red" {
+		t.Fatalf("colours = %+v", colours())
+	}
+	if w := label(nginx, "chartreuse"); w.Code != http.StatusBadRequest {
+		t.Fatalf("a colour nothing can paint was accepted: %d", w.Code)
+	}
+	if w := label(t.TempDir(), "red"); w.Code != http.StatusForbidden {
+		t.Fatalf("a folder outside the roots was labelled: %d", w.Code)
+	}
+
+	// Renaming the parent carries the label on the folder inside it.
+	moved := filepath.Join(root, "config")
+	if w := c.do(http.MethodPost, "/api/v1/files/move",
+		`{"from":"`+etc+`","to":"`+moved+`"}`, nil); w.Code != http.StatusNoContent {
+		t.Fatalf("move: %d %s", w.Code, w.Body.String())
+	}
+	now := colours()
+	if _, stale := now[nginx]; stale || now[filepath.Join(moved, "nginx")] != "red" {
+		t.Fatalf("the label did not follow the folder: %+v", now)
+	}
+
+	// Deleting it forgets the label, so a new folder of that name starts blue.
+	target := filepath.Join(moved, "nginx")
+	if w := c.do(http.MethodDelete, query("/api/v1/files/delete",
+		map[string]string{"path": target, "recursive": "true"}),
+		"", map[string]string{httpx.ConfirmHeader: "nginx"}); w.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	if len(colours()) != 0 {
+		t.Fatalf("a deleted folder kept its label: %+v", colours())
+	}
+
+	// Clearing is an empty colour.
+	if w := label(root, "green"); w.Code != http.StatusOK {
+		t.Fatalf("labelling: %d", w.Code)
+	}
+	if w := label(root, ""); w.Code != http.StatusOK || len(colours()) != 0 {
+		t.Fatalf("clearing a label: %d %+v", w.Code, colours())
+	}
+
+	readonly := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	if w := readonly.do(http.MethodPut, "/api/v1/files/colours",
+		`{"path":"`+root+`","colour":"red"}`, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("a reader coloured a folder: %d %s", w.Code, w.Body.String())
+	}
+}
+
 // The write verbs refuse to clobber unless told to. An upload used to
 // overwrite by default and a move replaced the destination through rename(2),
 // so "upload logo.png" and "move a.txt here" both quietly ate whatever held
