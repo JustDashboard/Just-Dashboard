@@ -62,3 +62,34 @@ test("each session and window is drawn as the program it is running", async ({ p
   await expect(tabs.locator('img[src="/logos/neovim.svg"]')).toBeVisible()
   await expect(tabs.locator('img[src="/logos/terminal.svg"]')).toHaveCount(1)
 })
+
+test("the rail, emulator and companion strips end on one rule, and only the emulator's strip toggles the panels", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWorkbench(page, "files")
+  await page.goto("/terminal")
+  const hideRail = page.getByRole("button", { name: "Hide the sessions rail" })
+  const hideTools = page.getByRole("button", { name: "Hide files & git" })
+  await expect(hideRail).toBeVisible()
+  await expect(hideTools).toBeVisible()
+
+  const bottoms = await page.evaluate(() => {
+    const bottom = (el: Element | null | undefined) => el?.getBoundingClientRect().bottom
+    const rail = document.querySelector('[aria-label="Terminal sessions"] [data-slot=pane-header]')
+    const emulator = document
+      .querySelector('[aria-label="Hide the sessions rail"]')
+      ?.closest(".border-b")
+    const tools = [...document.querySelectorAll("[data-slot=pane-header]")].find((el) =>
+      el.textContent?.startsWith("Files"),
+    )
+    return [bottom(rail), bottom(emulator), bottom(tools)]
+  })
+  expect(bottoms[0]).toBeDefined()
+  expect(new Set(bottoms).size).toBe(1)
+
+  // The companion column carries no second copy of its own toggle.
+  await expect(page.getByRole("button", { name: "Hide this panel" })).toHaveCount(0)
+  await hideTools.click()
+  await expect(page.getByRole("button", { name: "Show files & git" })).toBeVisible()
+})

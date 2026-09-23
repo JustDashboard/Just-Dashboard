@@ -179,6 +179,11 @@
         },
         {
           "kind": "fixed",
+          "text": "Every panel toggle says which side it opens and which way",
+          "detail": "The toggles for the navigation rail, the terminal's sessions and Files/Diff, the Files sidebar and details, the log sources and the database diagram's inspector were one three-column glyph whichever panel they moved. Each now draws its panel on its own side, filled while it shows, with a chevron pointing the way a press moves it. The terminal's three top strips are one height, so their rules meet as one line, and Files/Diff no longer carries a second copy of the toggle already in the terminal's strip."
+        },
+        {
+          "kind": "fixed",
           "text": "Installing or updating no longer runs out of memory on a 2 GB server",
           "detail": "The image build ran the type-check in a second process alongside the compiler, which intermittently exceeded a small server's memory. The image build skips it; the application it emits is identical, and the developer's build still type-checks."
         }

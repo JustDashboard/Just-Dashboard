@@ -43,7 +43,8 @@ import {
   Notes,
   Plus,
   RotateCounterClockwise,
-  SidebarRight,
+  SidebarRightClose,
+  SidebarRightOpen,
   Table as TableIcon,
   Trash,
 } from "@/components/icons"
@@ -830,7 +831,11 @@ function Canvas({
             title="Inspector (i)"
             className="size-7 min-w-0 px-0"
           >
-            <SidebarRight className="size-3.5" />
+            {inspector ? (
+              <SidebarRightClose className="size-3.5" />
+            ) : (
+              <SidebarRightOpen className="size-3.5" />
+            )}
           </Toggle>
           <Button
             size="icon-sm"

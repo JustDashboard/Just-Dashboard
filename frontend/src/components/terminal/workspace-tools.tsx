@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Cross, FloppyDisk, FolderOpen, GitMerge, SidebarRight } from "@/components/icons"
+import { Cross, FloppyDisk, FolderOpen, GitMerge, SidebarRightClose } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -47,6 +47,8 @@ export function WorkspaceTools({
 }: {
   dir?: string
   onOpenInFiles: (path: string) => void
+  /** Given when the panel covers the emulator rather than sitting beside it,
+   *  and so covers the strip whose toggle would otherwise put it away. */
   onClose?: () => void
 }) {
   const { can } = useAuth()
@@ -118,7 +120,7 @@ export function WorkspaceTools({
           word — a folder in front of "Files" is the label twice — and the one
           fact worth carrying across is the count of changed files, which is
           what decides whether the git half needs a visit. */}
-      <PaneHeader className="gap-0 px-1 py-0">
+      <PaneHeader className="h-10 gap-0 px-1 py-0">
         <TabButton
           active={tab === "files"}
           onClick={() => showTab("files")}
@@ -134,7 +136,6 @@ export function WorkspaceTools({
           Diff
           {changed > 0 && <ChipCount>{changed}</ChipCount>}
         </TabButton>
-        <span className="flex-1" />
         {onClose && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -143,10 +144,10 @@ export function WorkspaceTools({
                 size="sm"
                 variant="ghost"
                 aria-label="Hide this panel"
-                className="mr-1 size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                className="mr-1 ml-auto size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
                 onClick={onClose}
               >
-                <SidebarRight className="size-3.5" />
+                <SidebarRightClose className="size-3.5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Hide files &amp; diff</TooltipContent>
@@ -236,7 +237,7 @@ function TabButton({
           type="button"
           aria-current={active ? "page" : undefined}
           onClick={onClick}
-          className={tabClasses(active, "h-9")}
+          className={tabClasses(active, "self-stretch")}
         >
           {children}
         </button>
