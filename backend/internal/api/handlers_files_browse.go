@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
@@ -32,10 +33,11 @@ type fileBookmark struct {
 }
 
 type filePlacesResponse struct {
-	Home      string         `json:"home"`
-	Roots     []string       `json:"roots"`
-	Places    []files.Place  `json:"places"`
-	Bookmarks []fileBookmark `json:"bookmarks"`
+	Home      string            `json:"home"`
+	Roots     []string          `json:"roots"`
+	Places    []files.Place     `json:"places"`
+	Bookmarks []fileBookmark    `json:"bookmarks"`
+	Colours   map[string]string `json:"colours"`
 }
 
 func (s *Server) fileBookmarks(ctx context.Context) []fileBookmark {
@@ -57,6 +59,7 @@ func (s *Server) handleFilePlaces(w http.ResponseWriter, r *http.Request) error 
 		Roots:     svc.Roots(),
 		Places:    svc.Places(),
 		Bookmarks: s.fileBookmarks(r.Context()),
+		Colours:   s.fileColours(r.Context()),
 	})
 	return nil
 }
@@ -101,6 +104,113 @@ func (s *Server) handleFileBookmarks(w http.ResponseWriter, r *http.Request) err
 	httpx.SetAudit(r, "file.bookmarks", "", map[string]any{"count": len(clean)})
 	httpx.JSON(w, http.StatusOK, map[string]any{"bookmarks": clean})
 	return nil
+}
+
+const filesColoursKey = "files.colours"
+
+// The labels a folder can carry. A closed set, because the frontend draws each
+// from a token of its own and a free-form value would be a colour nothing
+// knows how to paint.
+var folderColours = map[string]bool{
+	"blue": true, "teal": true, "green": true, "yellow": true, "orange": true,
+	"red": true, "pink": true, "purple": true, "graphite": true,
+}
+
+// A folder's colour is the dashboard's record for the reason a bookmark is:
+// "the red one is production" is a fact about this server, and it should be
+// red from a phone too.
+func (s *Server) fileColours(ctx context.Context) map[string]string {
+	out := map[string]string{}
+	raw, ok, err := s.Store.Setting(ctx, filesColoursKey)
+	if err != nil || !ok || raw == "" {
+		return out
+	}
+	if json.Unmarshal([]byte(raw), &out) != nil {
+		return map[string]string{}
+	}
+	return out
+}
+
+func (s *Server) saveFileColours(ctx context.Context, colours map[string]string) error {
+	encoded, err := json.Marshal(colours)
+	if err != nil {
+		return err
+	}
+	return s.Store.SetSetting(ctx, filesColoursKey, string(encoded))
+}
+
+// handleFileColour labels one folder, or clears its label with an empty
+// colour. One path per request rather than the whole map, unlike bookmarks:
+// the map has no order to keep, and two tabs labelling two folders should not
+// be able to undo each other.
+func (s *Server) handleFileColour(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Path   string `json:"path"`
+		Colour string `json:"colour"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Colour != "" && !folderColours[req.Colour] {
+		return httpx.BadRequest("colour must be one of blue, teal, green, yellow, orange, red, pink, purple or graphite")
+	}
+	// The entry, not what it points at: a link to a folder is labelled as the
+	// link, which is the row the operator coloured.
+	full, err := s.modules.files.ResolveEntry(req.Path)
+	if err != nil {
+		return mapFileError(err)
+	}
+	colours := s.fileColours(r.Context())
+	if req.Colour == "" {
+		delete(colours, full)
+	} else {
+		if _, labelled := colours[full]; !labelled && len(colours) >= 2000 {
+			return httpx.BadRequest("too many coloured folders; clear some first")
+		}
+		colours[full] = req.Colour
+	}
+	if err := s.saveFileColours(r.Context(), colours); err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "file.colour", full, map[string]any{"colour": req.Colour})
+	httpx.JSON(w, http.StatusOK, map[string]any{"colours": colours})
+	return nil
+}
+
+// moveFileColours carries the labels on a moved folder, and on every folder
+// under it, to where it landed. A rename is a move, and a folder that lost its
+// colour for being renamed would be a label nobody could trust.
+func (s *Server) moveFileColours(ctx context.Context, src, dst string) {
+	s.rewriteFileColours(ctx, src, func(path string) string {
+		return dst + strings.TrimPrefix(path, src)
+	})
+}
+
+// dropFileColours forgets the labels on a deleted folder and everything that
+// was under it, so a new folder made with the same name starts blue.
+func (s *Server) dropFileColours(ctx context.Context, path string) {
+	s.rewriteFileColours(ctx, path, func(string) string { return "" })
+}
+
+func (s *Server) rewriteFileColours(ctx context.Context, root string, to func(string) string) {
+	colours := s.fileColours(ctx)
+	changed := false
+	for path, colour := range colours {
+		if path != root && !strings.HasPrefix(path, root+string(filepath.Separator)) {
+			continue
+		}
+		delete(colours, path)
+		if next := to(path); next != "" {
+			colours[next] = colour
+		}
+		changed = true
+	}
+	if changed {
+		// Best effort: the move or the delete has already happened, and a
+		// label left behind is a cosmetic fault rather than a reason to report
+		// a filesystem operation that succeeded as a failure.
+		_ = s.saveFileColours(ctx, colours)
+	}
 }
 
 func (s *Server) handleFileComplete(w http.ResponseWriter, r *http.Request) error {

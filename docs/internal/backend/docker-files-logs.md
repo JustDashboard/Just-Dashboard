@@ -182,17 +182,39 @@ matters is a fact about the server and should be there from a phone. Recent fold
 stay in `useViewState`. The bookmark list is saved whole, so an add, a removal and a reorder cannot
 disagree about order; every path is resolved before storing.
 
-Frontend `components/files/`: the page is **one framed workbench** — a sidebar, the listing and an
+A folder's **colour** is the same kind of fact and lives beside them (`files.colours`, a map from the
+entry's resolved path to one of nine names — blue, teal, green, yellow, orange, red, pink, purple,
+graphite), returned with the places as `colours`. `PUT /files/colours` (`file.write`, audited as
+`file.colour`) sets one path per request, or clears it with an empty colour, so two tabs labelling two
+folders cannot undo each other; a name outside the closed set is refused, and so is a path the roots
+refuse. The label follows its folder: a move (a rename is one) re-keys it and everything labelled under
+it, using `files.MoveEnds` to learn where the entry actually landed, and a delete drops it, so a new
+folder of the same name starts blue. Both are best-effort after the filesystem operation has succeeded.
+
+Frontend `components/files/`: the page is **one framed workbench** with no page header above it — a
+strip across the top carrying where you are (the folder in its colour, which opens the colour menu, the
+path and its star) and every page command (Find, content search, refresh, the view, arrange, the GitHub
+account, New, Upload, and the toggles for the two side columns), then a sidebar, the listing and an
 inspector as three flush columns with a hairline between each, resizable through `panel-size.ts`. The
-sidebar (`files-sidebar.tsx`) is a fixed list the way a desktop file manager's is, not a folder tree:
+sidebar (`files-sidebar.tsx`) has no header of its own and is a fixed list the way a desktop file
+manager's is, not a folder tree:
 the server's places (home, the roots, the accounts, the notable directories), then the starred folders,
 then the recent ones, each a drop target, with the browsed folder marked when it is one of them. It does
 not change as the listing walks into folders — the walking happens in the listing. `destinations` in
-`places-menu.tsx` builds that list once for the sidebar and for the phone's menu alike. `file-icon.tsx` is the vocabulary (~200 extensions, the files with none —
-Dockerfile, authorized_keys, lockfiles — and the folders whose name says more than "folder") mapped to
-eight **categories** rather than languages, in the shared semantic `--tag-*` hues, drawn from Material
-Design Icons (`@mdi/js`); every other glyph in the product comes from the Heroicons vocabulary in
-`components/icons.tsx`. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
+`places-menu.tsx` builds that list once for the sidebar and for the phone's menu alike, and draws each
+place as what it is (`PlaceMark`: `/` as the host's distribution, a home as a folder with a house in it).
+`file-icon.tsx` is the vocabulary (~200 extensions, the files with none — Dockerfile, authorized_keys,
+lockfiles — and ~90 folders whose name says what they hold) and draws it itself rather than from an icon
+set: a folder is a two-tone folder in its colour (its label from `FolderColourProvider`, else graphite for
+build output and installed dependencies, else blue) with a product's Simple Icons mark
+(`public/logos/mono/`) or a Heroicons glyph pressed into its face; a file is a page with its corner
+folded, the format's own logo on it (`public/logos/`, devicon's language marks among them), and a band
+along its foot in the format's colour (`--language-*`, `--tag-*`) carrying the extension where the icon
+is large enough. `folder-colour.tsx` is the picker — swatches in the inspector, a menu behind the strip's
+folder — and `file-actions.tsx` offers the same choice as a submenu on every folder's menu and on the
+background menu for the folder being browsed. The inspector (`preview-panel.tsx`) opens on the thing
+large — the picture, the video, or its folder or page — with its name, kind and colour under it, and
+describes the folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
 row and a tile alike (images lazily, a video only once it scrolls into view, and playing muted under the
 pointer on a tile). `file-actions.tsx` declares every verb **once, as data**, and renders it into the
 row's overflow button, the tile's, and the right-click menu (`ui/context-menu.tsx`, one root over the

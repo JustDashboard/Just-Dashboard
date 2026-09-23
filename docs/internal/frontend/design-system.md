@@ -310,7 +310,7 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 | --- | --- | --- |
 | `Panel` | A block of content *on* the page: framed, header, hairline, body — or `plain`, the same anatomy with no frame | Not a working region |
 | `RowList` / `Row` | A list of rows with hairlines between them: a leading mark, a title, a second line, a trailing state | Not a table — nothing lines up in columns |
-| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, and the files page's sidebar, listing and inspector) | Not a block in a page's flow |
+| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, and the files page's sidebar, listing and inspector under the strip that holds the page's commands) | Not a block in a page's flow |
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
@@ -831,9 +831,8 @@ describes a thing the same way.
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
-the drawing. `components/git/glyphs.tsx` takes six from Material Design Icons, which is already the
-dependency `files/file-icon.tsx` reaches for wherever Heroicons has nothing to draw. Nothing else is
-imported from MDI there: a glyph that exists in both sets stays Heroicons, or the git pages grow a
+the drawing. `components/git/glyphs.tsx` takes six from Material Design Icons, which is already a
+dependency for the language marks (`language-icon.tsx`). Nothing else is imported from MDI there: a glyph that exists in both sets stays Heroicons, or the git pages grow a
 second icon weight. `AuthorMark` in `git/marks.tsx` is the coloured-wayfinding rule again — a column
 of commits where mine and the bot's are two hues is scanned, one where they are the same grey is read
 — on the eight fixed `--tag-*` hues the branch graph gives its lanes, and drawn as a square with a
@@ -859,6 +858,32 @@ way the build console washes a failing step, a warning row in amber; the level c
 word at the line's size. A structured line is drawn as its message and fields in the logfmt shape the
 tokenizer reads, most telling field first. The "Colour" toggle beside Wrap and Time turns all of it
 off and shows each line exactly as it was written.
+
+**A file is drawn as what it is, and a folder in the colour it was given.** The file manager drew
+Material Design Icons' file family, a stencil per category in one flat tone: it told a config from a
+certificate, but a directory of forty files was forty stencils and the format's own mark — the thing it
+is recognised by — was nowhere. `files/file-icon.tsx` now draws its own two shapes, the ones every
+desktop file manager has trained the eye on. A **folder** is two-toned, its tab behind its face, with
+what it holds pressed into the face a step darker — a product's Simple Icons mark for `.git`, `.docker`
+or `node_modules` (single-shape drawings, so a mask of one reads as the mark), a glyph from this
+product's Heroicons vocabulary for `.ssh`, `etc` or `logs`. A **file** is a page with its corner folded,
+the format's own logo on it in its own colours (devicon's language marks beside the product logos), and a
+band along its foot in the format's colour carrying the extension where the icon is large enough to set
+a word. The page is light — `--doc-page` stops short of white — because those logos were drawn for paper
+and Rust's black gear or Markdown's ink is invisible on this ground; it is the one light surface in the
+product and it is artwork, not a surface anything sits on. The band's hue is the format's (`--language-*`
+where GitHub colours it, `--tag-*` otherwise), by the argument `LanguageMark` makes: a colour the reader
+already knows the format by is a legend they do not have to learn.
+
+A folder's colour is a **label**, and §3's tag argument is why it is the operator's: "the red one is
+production" is a fact about this server, so it is stored there (`files.colours`) and drawn wherever the
+folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's tree.
+Nine names (`--folder-*`, one value each; the tab and the pressed mark are mixed from the face in
+`[data-folder]`), blue until somebody says otherwise, graphite for build output and installed
+dependencies because nothing in them is yours to edit. The picker is the folder drawn in each colour,
+the chosen one `bg-accent` like every selection. The Files page is a workbench and, like the terminal
+and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
+the folder they act on.
 
 A `Pane`'s chrome strip is the one place a small inline glyph still sits beside a name (the git tools
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip

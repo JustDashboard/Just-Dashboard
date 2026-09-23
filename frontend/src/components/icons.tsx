@@ -175,11 +175,11 @@ import {
  * colour around it is, which means it inherits `text-muted-foreground` on a
  * near-white card and on a near-black one without either being a special case.
  *
- * File-type glyphs do not live here. The file browser's per-extension
- * vocabulary is Material Design Icons in `files/file-icon.tsx` — a general UI
- * set has no `JSON` or `JPG` to draw, and MDI's file boxes do. The `File`,
- * `Folder*` and `Acronym*` names below are only the generic chrome (a new
- * folder button, an empty-state sheet, a JSON badge outside the file browser).
+ * File-type drawings do not live here. The file browser draws its own folders
+ * and pages in `files/file-icon.tsx`, with a format's logo on the page and a
+ * few of the glyphs below pressed into a folder's face. The `File`, `Folder*`
+ * and `Acronym*` names below are only the generic chrome (a new folder button,
+ * an empty-state sheet, a JSON badge outside the file browser).
  */
 
 export type IconProps = SVGProps<SVGSVGElement> & {

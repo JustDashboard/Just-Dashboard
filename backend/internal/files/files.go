@@ -540,21 +540,33 @@ func (s *Service) Delete(path string, recursive bool) error {
 // names one. The destination has to be free unless overwrite says otherwise:
 // rename(2) replaces a file silently, which is how "move a.txt here" used to
 // eat the a.txt that was already there without a word.
-func (s *Service) Move(from, to string, overwrite bool) error {
-	src, err := s.ResolveEntry(from)
+// MoveEnds is where a move from one path to another starts and lands: onto
+// `to` itself, or inside it when `to` is an existing directory. The API reads
+// it to carry what it keeps about a path — a folder's colour — along with the
+// entry.
+func (s *Service) MoveEnds(from, to string) (src, dst string, err error) {
+	src, err = s.ResolveEntry(from)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	dst, err := s.ResolveEntry(to)
+	dst, err = s.ResolveEntry(to)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if st, err := os.Stat(dst); err == nil && st.IsDir() && dst != src {
 		dst, err = s.Resolve(dst)
 		if err != nil {
-			return err
+			return "", "", err
 		}
 		dst = filepath.Join(dst, filepath.Base(src))
+	}
+	return src, dst, nil
+}
+
+func (s *Service) Move(from, to string, overwrite bool) error {
+	src, dst, err := s.MoveEnds(from, to)
+	if err != nil {
+		return err
 	}
 	if dst == src {
 		return nil
