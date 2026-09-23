@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react"
 import { Cross, Pencil, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalWindow as Window } from "@/lib/types"
-import { useFinished, windowActivity, windowLabel } from "@/lib/terminal-activity"
+import { useFinished, windowActivity, windowLabel, windowProgram } from "@/lib/terminal-activity"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { ActivityMark } from "@/components/terminal/activity-mark"
+import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 
 /** Compact direct-PTY windows for the terminal title bar. */
 export function WindowStrip({
@@ -161,6 +161,7 @@ function WindowTab({
         onDoubleClick={onRename}
       >
         <ActivityMark working={working} finished={finished} />
+        <ProgramMark process={windowProgram(window, live)} />
         <span className="truncate text-xs font-medium">{label}</span>
       </button>
       {/* Rename and close sit on the tab itself rather than in a menu — but

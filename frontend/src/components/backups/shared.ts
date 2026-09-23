@@ -22,7 +22,8 @@ export function scheduleLabel(schedule: string): string {
 
 /** What a job captures, in one line under its name. */
 export function contentsLabel(job: BackupJob): string {
-  const parts = [plural(job.sources.length, "path")]
+  // A job that only dumps databases has no paths, and "0 paths" led its line.
+  const parts = job.sources.length > 0 ? [plural(job.sources.length, "path")] : []
   if (job.databaseDumps?.length) parts.push(plural(job.databaseDumps.length, "database dump"))
   if (job.sqlitePaths?.length) parts.push(plural(job.sqlitePaths.length, "SQLite snapshot"))
   if (job.pauseContainers?.length) parts.push(`pauses ${plural(job.pauseContainers.length, "container")}`)

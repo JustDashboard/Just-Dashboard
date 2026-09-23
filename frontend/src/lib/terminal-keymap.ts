@@ -143,7 +143,7 @@ export const SHORTCUTS: ShortcutSpec[] = [
     action: "workspace.tools",
     scope: "navigation",
     group: "Workspace",
-    label: "Files & git panel",
+    label: "Files & diff panel",
     chord: "Ctrl+Alt+KeyJ",
   },
 

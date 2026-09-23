@@ -15,10 +15,10 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalFolder, TerminalWorkspace } from "@/lib/types"
-import { sessionActivity, sessionLabel, useFinished } from "@/lib/terminal-activity"
+import { sessionActivity, sessionLabel, sessionProgram, useFinished } from "@/lib/terminal-activity"
 import { useViewState } from "@/lib/view-state"
 import { SearchInput } from "@/components/page"
-import { ActivityMark } from "@/components/terminal/activity-mark"
+import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -347,12 +347,14 @@ function SessionRow({
       )}
     >
       {/* No terminal glyph on the row: every row in this list is a terminal,
-          so the icon said nothing the column had not already said. */}
+          so the icon said nothing the column had not already said. What the
+          row does carry is what it is running, as that program's own mark. */}
       <button
         onClick={() => onSelect(session)}
         title={session.cwd}
         className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-ring-inset"
       >
+        <ProgramMark process={sessionProgram(session, activity)} slot />
         {session.favourite && <Pin className="size-2.5 shrink-0 text-muted-foreground" />}
         <span
           className={cn("min-w-0 flex-1 truncate text-body leading-tight", active && "font-medium")}

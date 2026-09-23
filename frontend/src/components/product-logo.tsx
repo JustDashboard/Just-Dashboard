@@ -43,13 +43,17 @@ const LOGOS: Record<string, string> = {
   arch: "arch.svg",
   arm: "arm.svg",
   audiobookshelf: "audiobookshelf.svg",
+  backblaze: "backblaze.svg",
   beszel: "beszel.svg",
+  bun: "bun.svg",
   caddy: "caddy.svg",
   centos: "centos.svg",
+  claude: "claude.svg",
   clickhouse: "clickhouse.svg",
   "code-server": "code-server.webp",
   cyberchef: "cyberchef.svg",
   debian: "debian.svg",
+  deno: "deno.svg",
   directus: "directus.svg",
   docker: "docker.svg",
   "docker-compose": "docker-compose.webp",
@@ -59,6 +63,7 @@ const LOGOS: Record<string, string> = {
   fedora: "fedora.svg",
   filebrowser: "filebrowser.svg",
   freshrss: "freshrss.svg",
+  git: "git.svg",
   gitea: "gitea.svg",
   github: "github.svg",
   go: "go.svg",
@@ -72,6 +77,7 @@ const LOGOS: Record<string, string> = {
   jellyfin: "jellyfin.svg",
   jupyter: "jupyter.svg",
   kavita: "kavita.svg",
+  kubernetes: "kubernetes.svg",
   "lets-encrypt": "lets-encrypt.svg",
   linkding: "linkding.svg",
   linuxmint: "linuxmint.svg",
@@ -87,10 +93,13 @@ const LOGOS: Record<string, string> = {
   mysql: "mysql.svg",
   n8n: "n8n.svg",
   navidrome: "navidrome.svg",
+  neovim: "neovim.svg",
   nextcloud: "nextcloud.svg",
   nextjs: "nextjs.svg",
   "nginx-static": "nginx.svg",
   nocodb: "nocodb.svg",
+  nodejs: "nodejs.svg",
+  npm: "npm.svg",
   ntfy: "ntfy.svg",
   ollama: "ollama.svg",
   "open-webui": "open-webui.svg",
@@ -104,6 +113,7 @@ const LOGOS: Record<string, string> = {
   postgres: "postgresql.svg",
   postgresql: "postgresql.svg",
   prometheus: "prometheus.svg",
+  python: "python.svg",
   qdrant: "qdrant.svg",
   qemu: "qemu.svg",
   rabbitmq: "rabbitmq.svg",
@@ -117,6 +127,7 @@ const LOGOS: Record<string, string> = {
   "stirling-pdf": "stirling-pdf.svg",
   syncthing: "syncthing.svg",
   tailscale: "tailscale.svg",
+  terraform: "terraform.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
   typesense: "typesense.svg",
@@ -124,6 +135,7 @@ const LOGOS: Record<string, string> = {
   "uptime-kuma": "uptime-kuma.svg",
   valkey: "valkey.svg",
   vaultwarden: "vaultwarden.svg",
+  vim: "vim.svg",
   wallabag: "wallabag.svg",
   whoami: "traefik.svg",
 }
@@ -198,6 +210,61 @@ export function processProduct(name: string) {
   const bare = name.toLowerCase().replace(/[:\s].*$/, "")
   const id = PROCESS_ALIASES[name.toLowerCase()] ?? PROCESS_ALIASES[bare] ?? bare
   return id in LOGOS && id !== "docker-compose" ? id : undefined
+}
+
+/**
+ * The program in a terminal's foreground, as the product it is — the command
+ * name the backend reads off the PTY. Editors, runtimes, package managers and
+ * database shells are the ones a session spends its time in and the ones worth
+ * telling apart in a rail of tabs; a shell at its prompt, `htop` or `tail` has
+ * no mark and keeps the rail's glyph.
+ */
+const PROGRAMS: Record<string, string> = {
+  node: "nodejs",
+  nodejs: "nodejs",
+  npm: "npm",
+  npx: "npm",
+  bun: "bun",
+  bunx: "bun",
+  deno: "deno",
+  python: "python",
+  python3: "python",
+  pip: "python",
+  pip3: "python",
+  uv: "python",
+  go: "go",
+  git: "git",
+  lazygit: "git",
+  vim: "vim",
+  vi: "vim",
+  nvim: "neovim",
+  docker: "docker",
+  "docker-compose": "docker-compose",
+  lazydocker: "docker",
+  psql: "postgresql",
+  pg_dump: "postgresql",
+  "redis-cli": "redis",
+  "valkey-cli": "valkey",
+  mysql: "mysql",
+  mariadb: "mariadb",
+  mongosh: "mongodb",
+  mongo: "mongodb",
+  sqlite3: "sqlite",
+  claude: "claude",
+  kubectl: "kubernetes",
+  k9s: "kubernetes",
+  helm: "kubernetes",
+  terraform: "terraform",
+  tofu: "terraform",
+  caddy: "caddy",
+  nginx: "nginx-static",
+  tailscale: "tailscale",
+  pm2: "pm2",
+}
+
+export function programProduct(command: string | undefined) {
+  const name = (command ?? "").trim().split(/\s+/)[0]?.split("/").pop()?.toLowerCase() ?? ""
+  return PROGRAMS[name]
 }
 
 /**

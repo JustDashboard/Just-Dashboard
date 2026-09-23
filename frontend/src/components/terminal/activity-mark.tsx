@@ -3,6 +3,7 @@
 import { Check } from "@/components/icons"
 import { StatusDot } from "@/components/status-dot"
 import { cn } from "@/lib/utils"
+import { ProductGlyph, programProduct } from "@/components/product-logo"
 
 /**
  * The mark beside a window tab or a session row that says what is happening
@@ -42,4 +43,17 @@ export function ActivityMark({
     )
   }
   return <span aria-hidden className={box} />
+}
+
+/**
+ * The program a terminal is running, as the product it is — Claude, Neovim,
+ * Node, psql — in a slot the width of the line's height, so a column of tabs
+ * and rows says what each is doing before any of them is read. A shell at its
+ * prompt, or a program with no mark (`htop`, `tail`), leaves the slot empty
+ * rather than drawing a terminal glyph on a list where everything is one.
+ */
+export function ProgramMark({ process, slot }: { process?: string; slot?: boolean }) {
+  const product = programProduct(process)
+  if (!product) return slot ? <span aria-hidden className="size-3.5 shrink-0" /> : null
+  return <ProductGlyph id={product} />
 }

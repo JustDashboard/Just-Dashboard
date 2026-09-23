@@ -7,37 +7,42 @@ import { useSearchParams } from "next/navigation"
 import { Archive, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
-import type { BackupJob, BackupResource, BackupResourceReport } from "@/lib/types"
+import type { BackupJob, BackupResource, BackupResourceReport, Container } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader, RowLink } from "@/components/page"
+import { Page, PageHeader } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ROW_BLEED } from "@/components/row-list"
+import { ChoiceList } from "@/components/flow"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
 import { CoveragePanel } from "@/components/backups/coverage"
-import { contentsLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
+import { JobCard } from "@/components/backups/job-card"
+import { resourceProducts } from "@/components/backups/marks"
+import { scheduleLabel } from "@/components/backups/shared"
 import { runJobNow, useJobVerbs } from "@/components/backups/job-verbs"
 
 /**
- * Backups, drawn the way the host Overview is: four readings, what needs
- * attention, the jobs as a plain table, and what on this server is and is
- * not covered. A job is its own page; a new one starts from the form, or
- * from a thing on the server that has no backup yet.
+ * Backups: what needs doing, the jobs, and what on this server is and is not
+ * covered. A job is its own page; a new one starts from the form, or from a
+ * thing on the server that has no backup yet.
+ *
+ * **Four readings used to open the page** — Jobs, Last backup, Next backup,
+ * Stored — and took the top third of it to say what every job's own row says
+ * again, so §15 pass 2 is dropped here the way `/git` drops it, by naming
+ * where each went. The job count and the total stored are the Jobs header's.
+ * The last backup is on each job's card beside its name, in the colour of how
+ * it went, and the run before it and the thirteen before that are its strip.
+ * The next backup and what a job keeps are under its name. What the tiles did
+ * beyond the numbers — put a failure first — the Attention list does, and the
+ * cards are ordered worst first under it.
+ *
+ * The things on the server are drawn as the products they are, and so are the
+ * jobs (by what they cover) and where they write, which is why the page polls
+ * the container list: a volume's coverage names the containers that mount it,
+ * and it is their images that say what it holds.
  */
 export default function BackupsPage() {
   const { can } = useAuth()
@@ -83,6 +88,13 @@ export default function BackupsPage() {
     (signal) => get<BackupResourceReport>("/backups/resources", undefined, signal),
     60000,
   )
+  // Only for the marks: without Docker the volumes and stacks keep a glyph.
+  const docker = usePoll(
+    (signal) => get<Container[]>("/docker/containers/", undefined, signal),
+    60000,
+  )
+  const containers = useMemo(() => docker.data ?? [], [docker.data])
+  const resources = useMemo(() => coverage.data?.resources ?? [], [coverage.data])
   const admin = can("system.admin")
   const list = useMemo(() => jobs.data ?? [], [jobs.data])
 
@@ -122,12 +134,27 @@ export default function BackupsPage() {
     onDeleted: refresh,
   })
 
-  const readings = useMemo(() => summarise(list), [list])
   const findings = useMemo(
-    () => attention(list, coverage.data, open, (job) => runJobNow(job, refresh)),
+    () => attention(list, open, (job) => runJobNow(job, refresh)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [list, coverage.data],
+    [list],
   )
+  const ordered = useMemo(() => [...list].sort((a, b) => rank(a) - rank(b)), [list])
+  // What each job covers, as products: the resources whose coverage names it,
+  // and the saved databases it dumps — a dump covers a connection, not a path.
+  const productsFor = (job: BackupJob) => [
+    ...new Set(
+      resources
+        .filter(
+          (r) =>
+            r.coveredBy.some((c) => c.jobId === job.id) ||
+            (r.connectionId !== undefined && job.databaseDumps?.includes(r.connectionId)),
+        )
+        .flatMap((r) => resourceProducts(r, containers, resources)),
+    ),
+  ]
+  const stored = list.reduce((sum, j) => sum + j.stored.bytes, 0)
+  const archives = list.reduce((sum, j) => sum + j.stored.runs, 0)
 
   return (
     <Page className="animate-rise">
@@ -144,73 +171,14 @@ export default function BackupsPage() {
         }
       />
 
-      <StatGrid columns={4}>
-        <StatTile
-          label="Jobs"
-          value={jobs.data ? String(list.length) : "—"}
-          hint={
-            list.length === 0
-              ? "None yet"
-              : `${readings.scheduled} on a schedule · ${readings.paused} paused`
-          }
-        />
-        <StatTile
-          label="Last backup"
-          value={
-            readings.latest
-              ? readings.latest.status === "running"
-                ? "Running"
-                : relativeTime(readings.latest.startedAt)
-              : jobs.data
-                ? "Never"
-                : "—"
-          }
-          tone={
-            readings.latest?.status === "failed"
-              ? "danger"
-              : readings.latest?.status === "success"
-                ? "success"
-                : "default"
-          }
-          hint={
-            readings.latest
-              ? `${readings.latestJob?.name ?? ""} · ${readings.latest.status}`
-              : undefined
-          }
-        />
-        <StatTile
-          label="Next backup"
-          value={readings.next ? relativeTime(readings.next.nextRun!) : jobs.data ? "None" : "—"}
-          tone={readings.overdue > 0 ? "warning" : "default"}
-          hint={
-            readings.overdue > 0
-              ? `${plural(readings.overdue, "job")} overdue`
-              : readings.next
-                ? `${readings.next.name} · ${scheduleLabel(readings.next.schedule).toLowerCase()}`
-                : list.length > 0
-                  ? "Nothing scheduled"
-                  : undefined
-          }
-        />
-        <StatTile
-          label="Stored"
-          value={jobs.data ? bytes(readings.storedBytes) : "—"}
-          hint={
-            readings.storedRuns > 0
-              ? `${plural(readings.storedRuns, "archive")} across ${plural(readings.destinations, "destination")}`
-              : "No archives yet"
-          }
-        />
-      </StatGrid>
-
-      {(findings.length > 0 || list.length > 0) && (
+      {/* Only what somebody has to act on: a run that failed, a job that has
+          gone quiet. What is not covered is the Coverage list's to say — a
+          finding repeating its count was the same sentence twice. */}
+      {findings.length > 0 && (
         <Panel plain>
           <PanelHeader title="Attention" />
           <PanelBody className="py-0">
-            <FindingList
-              findings={findings}
-              emptyLabel="Every job's last run succeeded, nothing is overdue, and everything the dashboard knows about is covered"
-            />
+            <FindingList findings={findings} emptyLabel="" />
           </PanelBody>
         </Panel>
       )}
@@ -233,112 +201,22 @@ export default function BackupsPage() {
       )}
 
       {list.length > 0 && (
-        <Panel>
+        <Panel plain>
           <PanelHeader
             title="Jobs"
             actions={
               <span className="numeric text-hint text-muted-foreground">
                 {plural(list.length, "job")}
+                {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
               </span>
             }
           />
-          <PanelBody flush>
-            {/* Six columns keep three on a phone, which is the remains of a
-                table rather than a table — so below 2xl the same rows are
-                drawn down the row instead of across it. 2xl, not xl: with
-                the sidebar taking 256px, at 1280 the Stored column and the
-                verbs were already past the right edge. */}
-            <ul className="animate-rise divide-y divide-hairline 2xl:hidden">
-              {list.map((job) => (
-                <li
-                  key={job.id}
-                  className={`group flex min-w-0 items-center gap-3 py-3 ${ROW_BLEED}`}
-                >
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <RowLink onClick={() => open(job)}>{job.name}</RowLink>
-                      {!job.enabled && job.schedule && <Status state="stopped" label="paused" />}
-                    </div>
-                    <p className="truncate text-hint text-muted-foreground">
-                      {contentsLabel(job)} · {targetLabel(job)}
-                    </p>
-                    <p className="flex min-w-0 flex-wrap items-center gap-x-2 text-hint text-muted-foreground">
-                      <LastRun job={job} />
-                      <span aria-hidden>·</span>
-                      <span className="truncate">{nextLabel(job)}</span>
-                    </p>
-                  </div>
-                  <VerbActions
-                    dim
-                    verbs={verbsFor(job)}
-                    menuLabel={`More actions for ${job.name}`}
-                  />
-                </li>
+          <PanelBody flush className="pt-3">
+            <ChoiceList className="animate-rise">
+              {ordered.map((job) => (
+                <JobCard key={job.id} job={job} products={productsFor(job)} verbs={verbsFor(job)} />
               ))}
-            </ul>
-            <div className="hidden 2xl:block">
-              <Table containerClassName="group-data-[plain]/panel:-mx-4 w-auto">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-full">Job</TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>Schedule</TableHead>
-                    <TableHead>Last run</TableHead>
-                    <TableHead>Next</TableHead>
-                    <TableHead className="text-right">Stored</TableHead>
-                    <TableHead className="w-px" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody className="animate-rise">
-                  {list.map((job) => (
-                    <TableRow key={job.id} onActivate={() => open(job)}>
-                      <TableCell>
-                        <div className="flex min-w-0 items-center gap-2">
-                          <RowLink onClick={() => open(job)}>{job.name}</RowLink>
-                          {!job.enabled && job.schedule && (
-                            <Status state="stopped" label="paused" />
-                          )}
-                        </div>
-                        <p className="truncate text-hint text-muted-foreground">
-                          {contentsLabel(job)}
-                        </p>
-                      </TableCell>
-                      <TableCell className="max-w-56 truncate font-mono text-xs">
-                        {targetLabel(job)}
-                      </TableCell>
-                      <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
-                        {scheduleLabel(job.schedule)}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <LastRun job={job} />
-                      </TableCell>
-                      <TableCell
-                        className={`text-xs whitespace-nowrap ${job.overdue ? "text-warning" : "text-muted-foreground"}`}
-                      >
-                        {nextLabel(job)}
-                      </TableCell>
-                      <TableCell className="numeric text-right text-xs whitespace-nowrap">
-                        {job.stored.runs > 0 ? (
-                          <>
-                            {bytes(job.stored.bytes)}
-                            <span className="text-muted-foreground"> · {job.stored.runs}</span>
-                          </>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <VerbActions
-                          dim
-                          verbs={verbsFor(job)}
-                          menuLabel={`More actions for ${job.name}`}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            </ChoiceList>
           </PanelBody>
         </Panel>
       )}
@@ -346,6 +224,7 @@ export default function BackupsPage() {
 
       <CoveragePanel
         report={coverage.data}
+        containers={containers}
         loading={coverage.loading}
         canCreate={admin}
         onProtect={(res) => openFor(prefillFor(res))}
@@ -370,27 +249,6 @@ export default function BackupsPage() {
   )
 }
 
-function LastRun({ job }: { job: BackupJob }) {
-  if (!job.lastRun) return <span className="text-xs text-muted-foreground">never run</span>
-  return (
-    <Status
-      state={job.lastRun.status}
-      label={
-        job.lastRun.status === "running"
-          ? "running"
-          : `${job.lastRun.status} ${relativeTime(job.lastRun.startedAt)}`
-      }
-    />
-  )
-}
-
-function nextLabel(job: BackupJob): string {
-  if (!job.schedule) return "manual only"
-  if (!job.enabled) return "paused"
-  if (job.overdue) return `overdue · next ${job.nextRun ? relativeTime(job.nextRun) : "unknown"}`
-  return job.nextRun ? `next ${relativeTime(job.nextRun)}` : "not scheduled"
-}
-
 function prefillFor(res: BackupResource): JobPrefill {
   return {
     name: res.suggest.name,
@@ -402,37 +260,20 @@ function prefillFor(res: BackupResource): JobPrefill {
   }
 }
 
-/** The four figures at the top, from the list alone. */
-function summarise(list: BackupJob[]) {
-  const withRuns = list.filter((j) => j.lastRun)
-  const latestJob = withRuns.sort((a, b) =>
-    b.lastRun!.startedAt.localeCompare(a.lastRun!.startedAt),
-  )[0]
-  const next = list
-    .filter((j) => j.enabled && j.nextRun)
-    .sort((a, b) => a.nextRun!.localeCompare(b.nextRun!))[0]
-  const destinations = new Set(list.map((j) => `${j.targetKind}:${targetLabel(j)}`))
-  return {
-    scheduled: list.filter((j) => j.enabled && j.schedule).length,
-    paused: list.filter((j) => !j.enabled).length,
-    overdue: list.filter((j) => j.overdue).length,
-    latest: latestJob?.lastRun,
-    latestJob,
-    next,
-    storedBytes: list.reduce((sum, j) => sum + j.stored.bytes, 0),
-    storedRuns: list.reduce((sum, j) => sum + j.stored.runs, 0),
-    destinations: destinations.size,
-  }
+/** The order the cards are read in: a failure, then a job gone quiet, then the rest by what runs next, paused last. */
+function rank(job: BackupJob) {
+  if (job.lastRun?.status === "failed") return 0
+  if (job.overdue) return 1
+  if (!job.enabled && job.schedule) return 3
+  return 2
 }
 
 /**
  * What needs acting on, as findings rather than as a row of coloured boxes:
- * a job whose last run failed, a job that has gone quiet, and the things on
- * this server no job covers.
+ * a job whose last run failed and a job that has gone quiet.
  */
 function attention(
   list: BackupJob[],
-  coverage: BackupResourceReport | undefined,
   open: (job: BackupJob) => void,
   runNow: (job: BackupJob) => void,
 ): Finding[] {
@@ -466,21 +307,6 @@ function attention(
         action: { label: "Run now", onClick: () => runNow(job) },
       })
     }
-  }
-  const unprotected = coverage?.resources?.filter((r) => !r.protected) ?? []
-  if (unprotected.length > 0) {
-    const names = unprotected.slice(0, 4).map((r) => r.name)
-    out.push({
-      id: "unprotected",
-      level: "notice",
-      title:
-        unprotected.length === 1
-          ? `${names[0]} has no backup`
-          : `${unprotected.length} things on this server have no backup`,
-      detail: `${names.join(", ")}${unprotected.length > 4 ? ` and ${unprotected.length - 4} more` : ""}`,
-      advice: "Each one under Coverage carries a Back up button that writes a job for it.",
-      meta: "coverage",
-    })
   }
   return out
 }

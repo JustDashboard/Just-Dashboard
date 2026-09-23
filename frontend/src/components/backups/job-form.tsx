@@ -217,7 +217,9 @@ export function JobDialog({
     if (res.suggest.databaseDumps?.length) {
       return res.suggest.databaseDumps.every((id) => databaseDumps.includes(id))
     }
-    return res.suggest.sources.length > 0 && res.suggest.sources.every((s) => sourceList.includes(s))
+    return (
+      res.suggest.sources.length > 0 && res.suggest.sources.every((s) => sourceList.includes(s))
+    )
   }
   const togglePick = (res: BackupResource, on: boolean) => {
     const merge = (current: string[], extra: string[] | undefined) =>
@@ -451,9 +453,13 @@ export function JobDialog({
               deployment linked to the database accepts this as its backup coverage.
             </FormNote>
             {connections.error && <ErrorState error={connections.error} />}
-            {(connections.data?.length ?? 0) === 0 && !connections.loading && !connections.error && (
-              <FormNote>No saved database connections yet. Add one on the Databases page first.</FormNote>
-            )}
+            {(connections.data?.length ?? 0) === 0 &&
+              !connections.loading &&
+              !connections.error && (
+                <FormNote>
+                  No saved database connections yet. Add one on the Databases page first.
+                </FormNote>
+              )}
             <div className="grid gap-1.5 sm:grid-cols-2">
               {connections.data?.map((connection) => (
                 <Label
@@ -584,7 +590,9 @@ export function JobDialog({
                       value={expectedOutput}
                       onChange={(e) => setExpectedOutput(e.target.value)}
                       placeholder={
-                        job?.recovery ? "Blank keeps the saved fingerprint" : "schema-v1:canary-present"
+                        job?.recovery
+                          ? "Blank keeps the saved fingerprint"
+                          : "schema-v1:canary-present"
                       }
                     />
                   </Field>
@@ -639,22 +647,15 @@ function ResourcePicker({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button
-          size="xs"
-          variant="outline"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
+        <Button size="xs" variant="outline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           {open ? "Hide what this server has" : "Pick from what this server has"}
         </Button>
         {count > 0 && (
-          <span className="numeric text-hint text-muted-foreground">
-            {count} picked
-          </span>
+          <span className="numeric text-hint text-muted-foreground">{count} picked</span>
         )}
       </div>
       {open && (
-        <Group className="space-y-2 animate-rise">
+        <Group className="animate-rise space-y-2">
           <SearchInput
             dense
             value={filter}
@@ -682,7 +683,9 @@ function ResourcePicker({
                     </span>
                   </span>
                   {res.protected && (
-                    <span className="shrink-0 text-hint text-muted-foreground">already backed up</span>
+                    <span className="shrink-0 text-hint text-muted-foreground">
+                      already backed up
+                    </span>
                   )}
                 </Label>
               </li>
@@ -715,15 +718,13 @@ function ScheduleBuilder({
   preview: Date[]
 }) {
   const set = (patch: Partial<typeof fields>) => onChange({ ...fields, ...patch })
-  const timed = fields.preset === "daily" || fields.preset === "weekly" || fields.preset === "monthly"
+  const timed =
+    fields.preset === "daily" || fields.preset === "weekly" || fields.preset === "monthly"
   return (
     <div className="space-y-3">
       <FieldRow columns={3}>
         <Field label="Runs" htmlFor="job-preset">
-          <Select
-            value={fields.preset}
-            onValueChange={(v) => set({ preset: v as SchedulePreset })}
-          >
+          <Select value={fields.preset} onValueChange={(v) => set({ preset: v as SchedulePreset })}>
             <SelectTrigger id="job-preset" size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>
@@ -818,7 +819,9 @@ function ScheduleBuilder({
             {preview.length > 0 && (
               <span className="text-muted-foreground/80">
                 {" · next "}
-                {preview.map((d) => `${calendarDate(d.toISOString())} ${clock(d.toISOString())}`).join(", ")}
+                {preview
+                  .map((d) => `${calendarDate(d.toISOString())} ${clock(d.toISOString())}`)
+                  .join(", ")}
               </span>
             )}
           </>

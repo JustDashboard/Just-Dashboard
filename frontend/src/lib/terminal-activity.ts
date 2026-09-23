@@ -37,6 +37,20 @@ export function plainTitle(title: string | undefined): string {
   return title.replace(/^(?:[\p{So}\u00B7\u2022\u2219\u22C5]\s*)+/u, "") || title
 }
 
+/** The program a window is running, while one holds it; nothing at the prompt. */
+export function windowProgram(window: Partial<TerminalActivity>, live?: TerminalActivity) {
+  const state = live ?? window
+  return state.busy ? state.process : undefined
+}
+
+/** The program a session's current window is running, as its row names it. */
+export function sessionProgram(
+  session: TerminalWorkspace,
+  activity: Record<string, TerminalActivity>,
+) {
+  return session.current ? windowProgram(session.current, activity[session.current.id]) : undefined
+}
+
 /** The window's state, from its socket when it has one here and the poll otherwise. */
 export function windowActivity(
   window: Partial<TerminalActivity>,
