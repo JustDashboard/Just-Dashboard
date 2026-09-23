@@ -16,6 +16,7 @@ export function WindowStrip({
   windows,
   activeId,
   activity,
+  disconnected,
   onSelect,
   onRename,
   onNew,
@@ -28,6 +29,8 @@ export function WindowStrip({
   activeId: string | null
   /** The state each window's own socket last pushed, keyed by window id. */
   activity: Record<string, TerminalActivity>
+  /** The windows whose socket in this browser has dropped, by window id. */
+  disconnected: ReadonlySet<string>
   onSelect: (id: string) => void
   onRename: (id: string, name: string) => void
   onNew: () => void
@@ -58,6 +61,7 @@ export function WindowStrip({
             sessionId={sessionId}
             window={window}
             live={activity[window.id]}
+            disconnected={disconnected.has(window.id)}
             active={window.id === activeId}
             inserting={dropAt === position}
             onSelect={() => onSelect(window.id)}
@@ -88,6 +92,7 @@ function WindowTab({
   sessionId,
   window,
   live,
+  disconnected,
   active,
   inserting,
   onSelect,
@@ -100,6 +105,7 @@ function WindowTab({
   sessionId: string
   window: Window
   live?: TerminalActivity
+  disconnected: boolean
   active: boolean
   inserting: boolean
   onSelect: () => void
@@ -115,20 +121,22 @@ function WindowTab({
   }, [active])
   // The tab reads like a desktop terminal's title bar: the program's own
   // title while one runs, the directory at the prompt, and a name the operator
-  // typed over both. The mark in front says whether anything is happening in
-  // it right now, or has just stopped — the reason to glance at a tab you are
-  // not in.
+  // typed over both. The dot in front says whether it is working, has just
+  // finished, is idle or has lost its connection — the reason to glance at a
+  // tab you are not in.
   const label = windowLabel(window, live)
   const state = windowActivity(window, live)
   const working = Boolean(state.working)
   const finished = useFinished(`${sessionId}/${window.id}`, active, state.finishedAt)
-  const hint = working
-    ? `${label} — working`
-    : finished
-      ? `${label} — finished`
-      : state.busy && state.process
-        ? `${label} — running ${state.process}`
-        : label
+  const hint = disconnected
+    ? `${label} — disconnected`
+    : working
+      ? `${label} — working`
+      : finished
+        ? `${label} — finished`
+        : state.busy && state.process
+          ? `${label} — running ${state.process}`
+          : label
   return (
     <div
       ref={ref}
@@ -138,6 +146,7 @@ function WindowTab({
       data-busy={state.busy || undefined}
       data-working={working || undefined}
       data-finished={finished || undefined}
+      data-disconnected={disconnected || undefined}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move"
         event.dataTransfer.setData("application/x-jd-terminal-window", window.id)
@@ -160,7 +169,7 @@ function WindowTab({
         onClick={onSelect}
         onDoubleClick={onRename}
       >
-        <ActivityMark working={working} finished={finished} />
+        <ActivityMark working={working} finished={finished} disconnected={disconnected} />
         <ProgramMark process={windowProgram(window, live)} />
         <span className="truncate text-xs font-medium">{label}</span>
       </button>

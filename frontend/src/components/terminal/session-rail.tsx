@@ -39,6 +39,8 @@ type RowHandlers = {
   folders: TerminalFolder[]
   /** What each visited window's socket last said it was doing, by window id. */
   activity: Record<string, TerminalActivity>
+  /** The sessions with a window whose socket in this browser has dropped. */
+  disconnected: ReadonlySet<string>
   onSelect: (session: TerminalWorkspace) => void
   onRename: (session: TerminalWorkspace, title: string) => void
   onTogglePinned: (session: TerminalWorkspace) => void
@@ -52,6 +54,7 @@ export function SessionRail({
   folders,
   activeId,
   activity,
+  disconnected,
   onSelect,
   onRename,
   onTogglePinned,
@@ -68,6 +71,7 @@ export function SessionRail({
   folders: TerminalFolder[]
   activeId: string | null
   activity: Record<string, TerminalActivity>
+  disconnected: ReadonlySet<string>
   onSelect: (session: TerminalWorkspace) => void
   onRename: (session: TerminalWorkspace, title: string) => void
   onTogglePinned: (session: TerminalWorkspace) => void
@@ -117,6 +121,7 @@ export function SessionRail({
     activeId,
     folders,
     activity,
+    disconnected,
     onSelect,
     onRename,
     onTogglePinned,
@@ -305,6 +310,7 @@ function SessionRow({
   activeId,
   folders,
   activity,
+  disconnected,
   onSelect,
   onRename,
   onTogglePinned,
@@ -316,12 +322,13 @@ function SessionRow({
   // One line: what the session is called, which — unless somebody named it —
   // is what its current window is doing. The directory used to sit under the
   // title, but the title now carries it while the shell is at a prompt, and
-  // while a program runs its name is the more useful line. The mark at the
-  // end says a window in here is still working, or has just stopped — the
-  // reason to look at a row you are not in.
+  // while a program runs its name is the more useful line. The dot at the end
+  // says whether a window in here is working, has just finished, is idle or
+  // has lost its connection — the reason to look at a row you are not in.
   const label = sessionLabel(session, activity)
   const { working, finishedAt } = sessionActivity(session, activity)
   const finished = useFinished(session.id, active, finishedAt)
+  const dropped = disconnected.has(session.id)
   if (renaming)
     return (
       <InlineEdit
@@ -341,6 +348,7 @@ function SessionRow({
       data-active={active || undefined}
       data-working={working || undefined}
       data-finished={finished || undefined}
+      data-disconnected={dropped || undefined}
       className={cn(
         "group flex min-w-0 items-center gap-1 rounded-md py-2 pr-1 pl-3 transition-colors",
         active ? "bg-accent" : "hover:bg-row-hover",
@@ -358,7 +366,12 @@ function SessionRow({
         >
           {label}
         </span>
-        <ActivityMark working={working} finished={finished} className="pr-1" />
+        <ActivityMark
+          working={working}
+          finished={finished}
+          disconnected={dropped}
+          className="pr-1"
+        />
       </button>
       {/* Closing is the one thing done often enough to earn its own control,
           so it sits on the card rather than two clicks into the menu. The

@@ -211,8 +211,9 @@ the Heroicons vocabulary in `components/icons.tsx` — compose rather than
 edit. Every side-panel toggle — the navigation rail's trigger, the terminal's rail and Files/Diff, the
 Files sidebar and details, the logs sources, the ER diagram's inspector — draws its panel's side and
 state with `SidebarLeftOpen`/`Close` or `SidebarRightOpen`/`Close` (drawn inline in `icons.tsx`,
-since Heroicons has no sidebar): the strip filled while the panel shows, and a chevron pointing the
-way a press moves it. They mean a panel toggle and nothing else, which is why the Files page's
+since Heroicons has no sidebar): a one-pixel outline of a window with a rule marking off the
+panel's side, and a chevron pointing the way a press moves it. They are drawn on a 16px grid and
+render at 16px, where every line lands on a pixel. They mean a panel toggle and nothing else, which is why the Files page's
 Places menu is a map pin. `ui/context-menu.tsx` is the right-click menu, drawn with the dropdown's classes so the two
 read as one menu; a feature that needs both (the file listing) renders one verb list into whichever
 opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `files/`, `git/`, `logs/`,
