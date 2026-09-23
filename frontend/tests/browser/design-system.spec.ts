@@ -95,6 +95,11 @@ const SURFACES = [
   "/deploy/notifications",
   "/deploy/credentials",
   "/deploy/new",
+  "/account",
+  "/account/security",
+  "/account/sessions",
+  "/account/keys",
+  "/account/users",
 ] as const
 
 /**
@@ -335,6 +340,9 @@ test("reduced motion is honoured globally", async ({ page }) => {
 test("every page declares one register, and only a flow page has a foreground", async ({
   page,
 }) => {
+  // One test walks every surface, so its budget grows with the list: at the
+  // default thirty seconds, thirteen pages under a parallel run timed out.
+  test.setTimeout(SURFACES.length * 5_000)
   await mockShell(page)
 
   for (const path of SURFACES) {

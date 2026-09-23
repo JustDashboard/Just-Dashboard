@@ -139,6 +139,11 @@
         },
         {
           "kind": "changed",
+          "text": "The account pages draw who is signed in, and with what",
+          "detail": "Profile opens on one identity line — your picture, your role, the browser and network this session came in through drawn as themselves, and the second factor's verdict — and each reading names what it counts: sessions by their browsers, keys by what holds them, users by their faces. Sessions draws this device as its own line and every other session as its browser with its system in the corner, the network it came from (Tailscale by its mark) and whether it passed a code. API keys opens on what is in use, used this week, never used and expiring soon, over keys drawn as the service their name says holds them and, for an administrator, whose each one is. Users is four readings over the accounts as cards that open their editor, and a role is handed out as a card saying what it allows. Security is a form with its state in a rail, where the password rule lights as it is met. An account without a picture has its initials in its own colour wherever it is drawn."
+        },
+        {
+          "kind": "changed",
           "text": "Backups is its jobs and what they cover, and the terminal's second tab is the diff of your work",
           "detail": "The four figures across the top of Backups are gone; each job is a card drawn as what it protects, with its last run in the colour of how it went, where it writes, its last fourteen runs as a strip and when it runs next, and the jobs that failed come first. Everything on the server is drawn as its product under a meter of how much is covered. Beside the terminal, the Git tab is now Diff: every changed file with its status and line counts and its diff under it, and a link to the Git page for the rest. Each terminal session and tab shows the program it is running by its logo, and a terminal where it has none."
         },

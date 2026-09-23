@@ -1,38 +1,34 @@
 "use client"
 
-import { Key } from "@/components/icons"
+import { useAuth } from "@/hooks/use-auth"
 import { Page, PageHeader } from "@/components/page"
-import { Well } from "@/components/panel"
-import { Notice } from "@/components/state"
-import {
-  ApiKeysTable,
-  CreateApiKeyDialog,
-  curlExample,
-  useApiKeys,
-  useApiOrigin,
-} from "@/components/account/api-keys"
+import { ApiKeysView, CreateApiKeyDialog, useApiKeys } from "@/components/account/api-keys"
+import { useDashboardUsers } from "@/components/account/dashboard-users"
 
 /**
- * Keys, opened by what they are for — because the page used to be a table of
- * prefixes and roles with no sentence saying why anybody would want one.
+ * Keys, read as the credentials they are: four readings an operator asks of
+ * any list of them — how many open a door, which are used, which never were,
+ * which are about to stop — then the keys drawn as what holds them, and the
+ * command that uses one.
+ *
+ * It opened on a paragraph saying why anybody would want a key, over a framed
+ * table of prefixes and roles. The paragraph is now the empty state, which is
+ * the one time it is news; the command it carried is the page's last block.
+ * An administrator reads everyone's keys, so the page asks for the accounts
+ * too, to put a face on each key that is not theirs.
  */
 export default function AccountKeysPage() {
+  const { can } = useAuth()
   const keys = useApiKeys()
-  const origin = useApiOrigin()
+  const users = useDashboardUsers(can("system.admin"))
   return (
     <Page className="animate-rise">
       <PageHeader
         eyebrow="Account"
         title="API keys"
-        actions={<CreateApiKeyDialog onDone={keys.refresh} />}
+        actions={keys.data?.length ? <CreateApiKeyDialog onDone={keys.refresh} /> : undefined}
       />
-      <Notice icon={Key} title="For scripts and other machines">
-        A key lets a CI pipeline, a cron job or a tool on your laptop call this dashboard the way
-        you do — restart a container, pull a metrics window, trigger a deployment — without a
-        browser or your password. Every request carries it as a bearer token:
-        <Well className="mt-2">{curlExample(origin)}</Well>
-      </Notice>
-      <ApiKeysTable keys={keys} />
+      <ApiKeysView keys={keys} users={users.data ?? undefined} />
     </Page>
   )
 }

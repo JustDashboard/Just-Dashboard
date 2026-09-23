@@ -3,10 +3,16 @@
 import { Page, PageHeader } from "@/components/page"
 import {
   CreateDashboardUserDialog,
-  DashboardUsersTable,
+  DashboardUsersView,
   useDashboardUsers,
 } from "@/components/account/dashboard-users"
 
+/**
+ * The people who can sign in to this dashboard. Four readings — how many,
+ * who holds everything, how many a password alone would open, who has been
+ * here this week — over the accounts as cards, each drawn by its face and
+ * opening its editor. It was a framed table of names and switches.
+ */
 export default function AccountUsersPage() {
   const users = useDashboardUsers()
   return (
@@ -16,7 +22,7 @@ export default function AccountUsersPage() {
         title="Users"
         actions={<CreateDashboardUserDialog onDone={users.refresh} />}
       />
-      <DashboardUsersTable users={users} />
+      <DashboardUsersView users={users} />
     </Page>
   )
 }

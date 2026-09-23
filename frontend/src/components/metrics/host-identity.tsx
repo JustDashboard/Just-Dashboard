@@ -37,9 +37,14 @@ export function platformName(host: HostInfo) {
  * processor on Metrics. Inside the facts the hypervisor and the processor are
  * drawn bare at the line's height. A host this cannot name keeps a glyph on
  * the tile, never a guessed logo.
+ *
+ * An account's profile opens on the same line, with its own picture where the
+ * tile would be: the fourth page that describes a thing describes it the same
+ * way too.
  */
 export function HostIdentity({
   mark,
+  logo,
   fallback = Cpu,
   title,
   facts,
@@ -48,6 +53,8 @@ export function HostIdentity({
 }: {
   /** A `product-logo` id; nothing names the host when it is undefined. */
   mark?: string
+  /** A picture that is no product — an account's own — in place of the tile. */
+  logo?: React.ReactNode
   fallback?: Icon
   title: React.ReactNode
   facts: React.ReactNode
@@ -63,7 +70,13 @@ export function HostIdentity({
       )}
     >
       <div className="flex min-w-0 items-center gap-4">
-        <ProductLogo id={mark} fallback={fallback} className="size-12 rounded-xl [&_img]:size-7" />
+        {logo ?? (
+          <ProductLogo
+            id={mark}
+            fallback={fallback}
+            className="size-12 rounded-xl [&_img]:size-7"
+          />
+        )}
         <div className="min-w-0 space-y-1">
           <p className="min-w-0 truncate text-title font-semibold tracking-tight">{title}</p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">

@@ -1,19 +1,22 @@
 "use client"
 
 import { useState } from "react"
-import { Pencil, Trash, UserPlus } from "@/components/icons"
+import { Fingerprint, Pencil, Trash, UserPlus, Users } from "@/components/icons"
 import { del, get, patch, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import type { DashboardUser, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FieldRow, FormNote } from "@/components/form"
-import { RowActions } from "@/components/icon-action"
+import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
-import { Panel, PanelBody } from "@/components/panel"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -26,15 +29,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { ROLE_SUMMARY } from "@/components/account/capabilities"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { ROLE_MARK } from "@/components/account/capabilities"
+import { RoleChoice } from "@/components/account/role-choice"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
 
 export function useDashboardUsers(enabled = true) {
@@ -48,24 +45,35 @@ export function useDashboardUsers(enabled = true) {
 
 const ROLES: Role[] = ["admin", "limited", "readonly"]
 
+function neverSignedIn(user: DashboardUser) {
+  return user.lastLoginAt.startsWith("0001")
+}
+
+function signedInThisWeek(user: DashboardUser) {
+  return !neverSignedIn(user) && Date.now() - new Date(user.lastLoginAt).getTime() < 7 * 86_400_000
+}
+
+/** The role, changed where it is read: each option drawn with its mark. */
 function RolePicker({
+  label,
   value,
   onChange,
-  size,
 }: {
+  label: string
   value: Role
   onChange: (role: Role) => void
-  size?: "sm"
 }) {
+  const Mark = ROLE_MARK[value]
   return (
     <Select value={value} onValueChange={(v) => onChange(v as Role)}>
-      <SelectTrigger size={size} className={size ? "w-28 text-xs" : "w-full"}>
+      <SelectTrigger size="sm" className="w-32 text-xs" aria-label={label}>
+        <Mark aria-hidden className="size-3.5 text-muted-foreground" />
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {ROLES.map((r) => (
           <SelectItem key={r} value={r}>
-            {size ? r : `${r} — ${ROLE_SUMMARY[r]}`}
+            {r}
           </SelectItem>
         ))}
       </SelectContent>
@@ -74,16 +82,186 @@ function RolePicker({
 }
 
 /**
- * Every dashboard account, with the two things an admin changes daily — the
- * role and whether it can sign in — inline, and everything rarer behind the
- * row's actions: a rename or password reset in a dialog, a 2FA reset, deletion
- * with the name typed.
+ * The accounts in four readings: how many there are and how many of them can
+ * get in, who holds everything, how many of them a stolen password alone
+ * would open — amber while an administrator is one of those — and who has
+ * been here this week.
  */
-export function DashboardUsersTable({
-  users,
+function UserReadings({ users }: { users: DashboardUser[] }) {
+  const active = users.filter((u) => !u.disabled)
+  const admins = active.filter((u) => u.role === "admin")
+  const enrolled = active.filter((u) => u.totpEnabled)
+  const bareAdmins = admins.filter((u) => !u.totpEnabled)
+  const week = users
+    .filter(signedInThisWeek)
+    .sort((a, b) => b.lastLoginAt.localeCompare(a.lastLoginAt))
+
+  return (
+    <StatGrid columns={4}>
+      <StatTile
+        label="Accounts"
+        value={users.length}
+        hint={
+          users.length === active.length
+            ? "every one can sign in"
+            : `${active.length} can sign in · ${users.length - active.length} disabled`
+        }
+      />
+      <StatTile
+        label="Administrators"
+        value={admins.length}
+        hint={
+          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+            <AvatarRun users={admins} />
+            <span className="truncate">
+              {admins.length === 1 ? displayNameOf(admins[0]) : "hold every capability"}
+            </span>
+          </span>
+        }
+      />
+      <StatTile
+        label="Two-factor"
+        value={`${enrolled.length} of ${active.length}`}
+        tone={
+          bareAdmins.length > 0
+            ? "warning"
+            : enrolled.length === active.length
+              ? "success"
+              : "default"
+        }
+        hint={
+          bareAdmins.length > 0
+            ? `${plural(bareAdmins.length, "administrator")} on a password alone`
+            : enrolled.length === active.length
+              ? "every account asks for a code"
+              : `${active.length - enrolled.length} on a password alone`
+        }
+      />
+      <StatTile
+        label="Signed in this week"
+        value={week.length}
+        hint={
+          week.length > 0
+            ? `${displayNameOf(week[0])} ${relativeTime(week[0].lastLoginAt)}`
+            : "nobody yet"
+        }
+      />
+    </StatGrid>
+  )
+}
+
+/** Who a reading counts, drawn as them: a few faces in a row, then how many more. */
+export function AvatarRun({ users, max = 4 }: { users: DashboardUser[]; max?: number }) {
+  if (users.length === 0) return null
+  return (
+    <span aria-hidden className="flex shrink-0 items-center gap-0.5">
+      {users.slice(0, max).map((user) => (
+        <UserAvatar key={user.id} user={user} scope="admin" size="xs" />
+      ))}
+      {users.length > max && (
+        <span className="numeric ml-0.5 text-micro text-muted-foreground">
+          +{users.length - max}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * One account, as the person it is: their picture (or their initials in
+ * their own hue), their name, and the three readings an administrator
+ * compares down the list — what they may do, whether a code guards them, and
+ * when they were last here. The role and whether they can sign in are
+ * changed where they are read; the card opens the account's editor, and the
+ * rarer verbs are in its menu.
+ *
+ * A card rather than a table row because each one is a destination — the
+ * editor — and the Docker lists and the backup jobs draw theirs the same way
+ * (§12, §16). From `lg` the readings sit beside the name; below it they go
+ * beneath it at the card's full width, chosen once rather than drawn twice.
+ */
+function UserCard({
+  user,
+  me,
+  onEdit,
+  onUpdate,
+  verbs,
 }: {
-  users: ReturnType<typeof useDashboardUsers>
+  user: DashboardUser
+  me: boolean
+  onEdit: () => void
+  onUpdate: (body: Record<string, unknown>) => void
+  verbs: Verb[]
 }) {
+  const wide = useMediaQuery("(min-width: 1024px)")
+  const name = displayNameOf(user)
+  const readings = (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
+      {/* The options open in a portal, and React carries a press on one back
+          up through the card, which would open the editor behind the menu. */}
+      <span onClick={(event) => event.stopPropagation()}>
+        <RolePicker
+          label={`Role of ${name}`}
+          value={user.role}
+          onChange={(role) => onUpdate({ role })}
+        />
+      </span>
+      <span className="flex w-28">
+        <Status
+          tone={user.totpEnabled ? "running" : user.role === "admin" ? "warning" : "notice"}
+          label={user.totpEnabled ? "two-factor on" : "password only"}
+        />
+      </span>
+      <span className="w-36 truncate text-xs text-muted-foreground">
+        {neverSignedIn(user) ? "never signed in" : `signed in ${relativeTime(user.lastLoginAt)}`}
+      </span>
+    </span>
+  )
+
+  return (
+    <ChoiceRow
+      verb={`Edit ${name}`}
+      onSelect={onEdit}
+      className={user.disabled ? "opacity-60" : undefined}
+      leading={<UserAvatar user={user} scope="admin" size="md" />}
+      title={
+        <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+          <span className="truncate">{name}</span>
+          {me && <Tag>you</Tag>}
+        </span>
+      }
+      description={
+        <>
+          @{user.username}
+          {user.disabled && " · cannot sign in"}
+          {user.mustChangePassword && " · chooses a new password at next sign-in"}
+        </>
+      }
+      trailing={wide ? readings : undefined}
+      actions={
+        <DimActions className="gap-2">
+          <Switch
+            checked={!user.disabled}
+            disabled={me}
+            aria-label={`${name} can sign in`}
+            onCheckedChange={(v) => onUpdate({ disabled: !v })}
+          />
+          <VerbMenu verbs={verbs} label={`More actions for ${name}`} />
+        </DimActions>
+      }
+    >
+      {!wide && <div className="pl-12">{readings}</div>}
+    </ChoiceRow>
+  )
+}
+
+/**
+ * Every dashboard account, with the two things an admin changes daily — the
+ * role and whether it can sign in — on each card, and everything rarer
+ * behind the card's menu: a rename or password reset in the editor, a 2FA
+ * reset, deletion with the name typed.
+ */
+export function DashboardUsersView({ users }: { users: ReturnType<typeof useDashboardUsers> }) {
   const { status, refresh: refreshAuth } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<DashboardUser | null>(null)
@@ -100,140 +278,114 @@ export function DashboardUsersTable({
     }
   }
 
-  if (loading && !data) return <LoadingPanel rows={3} />
-  if (error) return <ErrorState error={error} />
+  const verbsFor = (user: DashboardUser): Verb[] => {
+    const me = user.id === status?.user?.id
+    const name = displayNameOf(user)
+    return [
+      {
+        key: "edit",
+        label: "Edit",
+        detail: "Rename the account or give it a new password.",
+        icon: Pencil,
+        run: () => setEditing(user),
+      },
+      ...(user.totpEnabled
+        ? [
+            {
+              key: "reset-totp",
+              label: "Reset two-factor",
+              detail:
+                "For a lost authenticator: they sign in with a password until they enrol again.",
+              icon: Fingerprint,
+              run: () =>
+                confirm({
+                  title: "Reset two-factor",
+                  confirmLabel: "Reset",
+                  description: (
+                    <p>
+                      <b>{name}</b> signs in with a password alone until they enrol an authenticator
+                      again. Do this when they have lost theirs and their recovery codes.
+                    </p>
+                  ),
+                  action: async () => {
+                    await post(`/dashboard-users/${user.id}/reset-totp`)
+                    notify.success(`Two-factor reset for ${name}`)
+                    refresh()
+                  },
+                }),
+            },
+          ]
+        : []),
+      ...(me
+        ? []
+        : [
+            {
+              key: "delete",
+              label: "Delete",
+              detail: "They lose access at once, with every session and API key they hold.",
+              icon: Trash,
+              danger: true,
+              run: () =>
+                confirm({
+                  title: "Delete dashboard user",
+                  phrase: user.username,
+                  confirmLabel: "Delete",
+                  description: (
+                    <p>
+                      <b>{name}</b> loses access immediately, along with every session and API key
+                      they hold.
+                    </p>
+                  ),
+                  action: async (c) => {
+                    await del(`/dashboard-users/${user.id}`, { confirm: c })
+                    refresh()
+                  },
+                }),
+            },
+          ]),
+    ]
+  }
+
+  if (loading && !data) return <LoadingRows rows={3} />
+  if (error && !data) return <ErrorState error={error} onRetry={refresh} />
+  if (!data) return null
+  if (data.length === 0) {
+    return <EmptyState icon={Users} title="No dashboard users" />
+  }
+
+  // Administrators first, then the rest by name: the accounts that can do
+  // the most are the ones an administrator reads this list for.
+  const ordered = [...data].sort(
+    (a, b) =>
+      ROLES.indexOf(a.role) - ROLES.indexOf(b.role) ||
+      displayNameOf(a).localeCompare(displayNameOf(b)),
+  )
 
   return (
     <>
-      <Panel>
-        <PanelBody flush>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-full">User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Two-factor</TableHead>
-                <TableHead>Last sign-in</TableHead>
-                <TableHead className="w-24">Can sign in</TableHead>
-                <TableHead className="w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.map((user) => {
-                const me = user.id === status?.user?.id
-                return (
-                  <TableRow key={user.id} className="group">
-                    <TableCell>
-                      <span className="flex min-w-0 items-center gap-3">
-                        <UserAvatar user={user} scope="admin" size="md" />
-                        <span className="min-w-0">
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-body font-medium">
-                              {displayNameOf(user)}
-                            </span>
-                            {me && <Tag>you</Tag>}
-                          </span>
-                          <span className="block truncate text-hint text-muted-foreground">
-                            @{user.username}
-                            {user.mustChangePassword && " · must change password at next sign-in"}
-                          </span>
-                        </span>
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <RolePicker
-                        size="sm"
-                        value={user.role}
-                        onChange={(role) => update(user, { role })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Status
-                        tone={user.totpEnabled ? "running" : "notice"}
-                        label={user.totpEnabled ? "on" : "off"}
-                      />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {user.lastLoginAt.startsWith("0001") ? "never" : relativeTime(user.lastLoginAt)}
-                    </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={!user.disabled}
-                        disabled={me}
-                        aria-label={`${displayNameOf(user)} can sign in`}
-                        onCheckedChange={(v) => update(user, { disabled: !v })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <RowActions className="gap-1">
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label={`Edit ${displayNameOf(user)}`}
-                          onClick={() => setEditing(user)}
-                        >
-                          <Pencil />
-                        </Button>
-                        {user.totpEnabled && (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            onClick={() =>
-                              confirm({
-                                title: "Reset two-factor",
-                                confirmLabel: "Reset",
-                                description: (
-                                  <p>
-                                    <b>{displayNameOf(user)}</b> signs in with a password alone until
-                                    they enrol an authenticator again. Do this when they have lost
-                                    theirs and their recovery codes.
-                                  </p>
-                                ),
-                                action: async () => {
-                                  await post(`/dashboard-users/${user.id}/reset-totp`)
-                                  notify.success(`Two-factor reset for ${displayNameOf(user)}`)
-                                  refresh()
-                                },
-                              })
-                            }
-                          >
-                            Reset 2FA
-                          </Button>
-                        )}
-                        {!me && (
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label={`Delete ${displayNameOf(user)}`}
-                            className="text-destructive"
-                            onClick={() =>
-                              confirm({
-                                title: "Delete dashboard user",
-                                phrase: user.username,
-                                confirmLabel: "Delete",
-                                description: (
-                                  <p>
-                                    <b>{displayNameOf(user)}</b> loses access immediately, along with
-                                    every session and API key they hold.
-                                  </p>
-                                ),
-                                action: async (c) => {
-                                  await del(`/dashboard-users/${user.id}`, { confirm: c })
-                                  refresh()
-                                },
-                              })
-                            }
-                          >
-                            <Trash />
-                          </Button>
-                        )}
-                      </RowActions>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+      <UserReadings users={data} />
+      <Panel plain>
+        <PanelHeader
+          title="Accounts"
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {plural(data.length, "account")}
+            </span>
+          }
+        />
+        <PanelBody flush className="pt-3">
+          <ChoiceList className="animate-rise">
+            {ordered.map((user) => (
+              <UserCard
+                key={user.id}
+                user={user}
+                me={user.id === status?.user?.id}
+                onEdit={() => setEditing(user)}
+                onUpdate={(body) => update(user, body)}
+                verbs={verbsFor(user)}
+              />
+            ))}
+          </ChoiceList>
         </PanelBody>
       </Panel>
       {editing && (
@@ -295,12 +447,25 @@ function EditUserDialog({
       title={`Edit ${displayNameOf(user)}`}
       description="Rename the account or give it a new password."
       footer={
-        <Button onClick={save} disabled={busy || !displayName.trim() || !username.trim()} pending={busy}>
+        <Button
+          onClick={save}
+          disabled={busy || !displayName.trim() || !username.trim()}
+          pending={busy}
+        >
           Save
         </Button>
       }
     >
       <div className="space-y-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <UserAvatar user={user} scope="admin" size="lg" />
+          <div className="min-w-0">
+            <p className="truncate text-body font-medium">{displayNameOf(user)}</p>
+            <p className="truncate text-hint text-muted-foreground">
+              @{user.username} · {user.role}
+            </p>
+          </div>
+        </div>
         <Field label="Name" htmlFor="edit-name">
           <Input
             id="edit-name"
@@ -391,7 +556,6 @@ export function CreateDashboardUserDialog({ onDone }: { onDone: () => void }) {
           setOpen(o)
           if (!o) reset()
         }}
-        size="sm"
         title="New dashboard user"
         description="An account for somebody else to sign in to this dashboard."
         footer={
@@ -400,9 +564,13 @@ export function CreateDashboardUserDialog({ onDone }: { onDone: () => void }) {
           </Button>
         }
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
           <FieldRow>
-            <Field label="Name" htmlFor="du-display" hint="How they appear. Defaults to the username.">
+            <Field
+              label="Name"
+              htmlFor="du-display"
+              hint="How they appear. Defaults to the username."
+            >
               <Input
                 id="du-display"
                 value={displayName}
@@ -435,9 +603,7 @@ export function CreateDashboardUserDialog({ onDone }: { onDone: () => void }) {
               onChange={(e) => setPassword(e.target.value)}
             />
           </Field>
-          <Field label="Role" hint={ROLE_SUMMARY[role]}>
-            <RolePicker value={role} onChange={setRole} />
-          </Field>
+          <RoleChoice label="Role" value={role} onChange={setRole} />
           <FormNote>
             Whether they must also enrol an authenticator is decided by this install&apos;s
             two-factor policy, under Settings → Configuration.

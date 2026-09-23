@@ -99,7 +99,9 @@ taking a frame:
   `ChoiceList`, each drawn as the products it covers, with its destination's mark and its last
   fourteen runs as a strip) and the coverage list under its filter chips and a meter of how much is
   covered, every thing on it drawn as its product, with a job's own page built from a fact list and
-  plain panels; and the three views on
+  plain panels; the five account pages — the profile's identity line, readings and capability rows,
+  sessions and keys as rows under plain panels where a framed table used to be, the users as cards
+  in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the three views on
   Packages — the installed and updates tables and the software search, under one underlined strip
   (`tabClasses`) rather than a filled tab list — each a toolbar, a hairline and rows on the page's own
   edge, with what needs acting on (security updates waiting, a reboot owed, a stale index) said as a
@@ -813,6 +815,19 @@ Let's Encrypt, and the repository it updates from as GitHub. Inside a line of te
 in the middle of a sentence, so `ProductGlyph` draws the artwork bare at the line's height — the
 GitHub mark before the repository's name, Let's Encrypt's before "through Tailscale".
 
+**What signs in is a product too, and a person is drawn as their face.** The account pages draw a
+session as its browser's own mark with the system it runs on as a badge in the tile's corner — the
+browser is what the reader recognises, so it is not a `ProductLogos` pair in which the second tile
+covers the first — and a program that signed in (curl, Go, Python) as itself; its address as the
+network it is on, with Tailscale's ranges drawn by Tailscale's mark (`lib/clients.ts`: `parseAgent`,
+`networkOf`). A key is drawn as the service its name says holds it: minting one asks where it will
+live, so `github-actions` is GitHub's, and `backup-cron`, whose name says nothing, keeps the key glyph
+(`keyProduct`). An account is its picture, and without one its initials take a hue by the username
+from `LANES` — `AuthorMark`'s argument: a users list of eight brand-blue squares was a texture, and
+the same person now keeps one colour in the rail, the list and their own profile. The profile opens on
+`HostIdentity` with that picture where the tile would be, which makes it the fourth page that
+describes a thing the same way.
+
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
@@ -906,6 +921,9 @@ The passes, in order. Each one is a diff you can review on its own.
    Latest and Checked became one identity line and the timeline's marks; Configuration's Answers
    at, Certificate, Port and Two-factor went to the rail heads of the sections that set them and to
    the proxy's row in the stack. Both pages' doc comments name where each went.
+   The account's Security page took it for the same reason — the second factor's state and how many
+   sessions are signed in are the rail heads of the sections that change them — and Sessions opens on
+   the session it is read through, with the count of the rest on their header.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
