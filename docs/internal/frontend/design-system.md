@@ -55,7 +55,7 @@ taking a frame:
   drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
-  activity and the last-hour sparklines on the Overview, every chart, list and hardware reading on the
+  activity on the Overview, every chart, list and hardware reading on the
   metrics page, every block on the Docker pages (the
   overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
   volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
@@ -66,7 +66,7 @@ taking a frame:
   certificate expiry; the sites, certificates, streams and ports tables with their toolbars; the
   TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
   and DNS provider lists),
-  health findings, the runtime-health bar, the Overview's last-hour sparklines, and the
+  health findings, the runtime-health bar, and the
   deployment pages' lists, overview facts, run summary and create flow are plain (the framed
   blocks in the deployment section are its two *pictures*: the GitHub App on Credentials — the
   accounts that installed it, the App and this server — and where an outcome goes on
@@ -783,6 +783,16 @@ database connection as its engine — in the section title's switcher and in eve
 which are one `EngineCard` (`choice-card.tsx`) rather than three shapes that had already drifted.
 Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
 
+**The host is a product too.** The Overview, Metrics and the logs rail draw the machine as what it
+reports itself to be — its distribution (`platformProduct`, from `/etc/os-release`'s id), its processor
+(`cpuProduct`, from the model string: AMD, Intel, Arm), its hypervisor (`virtualizationProduct`: QEMU for
+a KVM guest) — and a running process as the product it is (`processProduct`: `postgres` is Postgres,
+`dockerd` is Docker) in the Metrics page's top processes. Each returns nothing for a name it does not
+know, and the tile keeps a glyph: a Tux on an unrecognised distribution, or a guessed logo on `bash`,
+would be the drawing lying about the row. A reading that counts products carries them after its words
+(`ProductGlyphs`): the Overview's Docker tile draws the images its running containers are, Databases
+the engines its connections speak.
+
 And the dashboard's own two pages draw what it is made of and reached through: the stack's three
 services as Caddy, Next.js and Go, its checkout as Compose, the certificate modes as Tailscale and
 Caddy (and a lock glyph for plain HTTP, which is no product), the trusted certificate's issuer as
@@ -801,6 +811,26 @@ of commits where mine and the bot's are two hues is scanned, one where they are 
 — on the eight fixed `--tag-*` hues the branch graph gives its lanes, and drawn as a square with a
 3px radius rather than a circle, because a filled 16px round mark with a character in it is the pill
 §4 deleted.
+
+**A log line is read by its shapes, and coloured by the same rules as the rest of the product.**
+The logs console used to draw every line as one grey-white string with a 10px level tag in front of it,
+so a failed password, the address it came from and a 502 were found only by reading every line.
+`lib/log-tokens.ts` cuts a line into its shapes — syslog's `time host proc[pid]:`, the common log
+format, logfmt pairs, a JSON object, bracketed and shouted levels, addresses, request lines, statuses,
+paths, ids — as spans over the original text, so the search's match ranges still land; and
+`components/logs/log-text.tsx` colours them from one map. The **status hues** go only to what is a
+reading of state: a level, an HTTP status by its class (2xx success, 4xx warning, 5xx destructive), a
+word that says something failed or succeeded. Every other kind takes a `--tag-*` hue, which sit at one
+lightness so no kind outshouts another, and what the eye should skip goes muted — the line's own
+timestamp (not drawn at all while the time column shows it), this host's name on a syslog line (not
+drawn either), the pid, the punctuation, the keys. The message stays in the foreground. A program's
+name takes a hue by name from `LANES` (`lib/hue.ts`: the tag hues without red and amber, which on this
+console would read as a process that failed), so one process can be followed down a busy page — the
+same argument as `AuthorMark`, whose hash now lives there too. An error or a critical row is washed the
+way the build console washes a failing step, a warning row in amber; the level column is the level's
+word at the line's size. A structured line is drawn as its message and fields in the logfmt shape the
+tokenizer reads, most telling field first. The "Colour" toggle beside Wrap and Time turns all of it
+off and shows each line exactly as it was written.
 
 A `Pane`'s chrome strip is the one place a small inline glyph still sits beside a name (the git tools
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip
@@ -900,10 +930,19 @@ The passes, in order. Each one is a diff you can review on its own.
     line lower than its neighbours, a figure at the wrong size, are things the checks do not catch.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: a page
-header with an eyebrow, a 24px title and a `MetricStrip` of figures on the right; a row of facts under
-it; a five-tile `StatGrid` of readings; a plain `Health` list; a plain sparkline block beside a plain
-activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module. No
-frame anywhere on the page. Everything that arrived, rose.
+header with an eyebrow and a 24px title; the machine's identity line under it (`HostIdentity` — its
+distribution drawn as itself, the processor and hypervisor as bare marks among its facts, the verdict
+at the right end); a five-tile `StatGrid` of readings, the four that move carrying their last hour in
+the tile's `trend` slot where a meter would be and the one that fills keeping its meter; a plain
+`Health` list beside a plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink`
+tiles, one per module, each naming what it counts with the products themselves. No frame anywhere on
+the page. Everything that arrived, rose.
+
+The 0.7.0 pass took two things off it that had been saying the same figure twice: a `MetricStrip`
+of uptime, processes and cores in the header's corner (facts about the machine, now in its identity
+line; the cores were on the CPU tile as well) and a "Last hour" panel of four sparklines whose every
+value repeated the tile above it (the sparklines are in the tiles now). The Metrics page opens on the
+same identity line with the processor as its mark.
 
 ## 16. Two registers
 

@@ -12,6 +12,7 @@ import { BorderBeam } from "@/components/ui/border-beam"
 import { getText } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { downloadText } from "@/lib/metrics-export"
+import { LANES, hueFor } from "@/lib/hue"
 import { extendTranscript, isTrimmed, transcriptLines, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
 
@@ -271,24 +272,12 @@ export function RunTranscript({
 }
 
 /**
- * The hue a service's steps are drawn in: the eight `--tag-*` lanes the branch
- * graph uses, picked by name, so `frontend` is one colour down the whole braid.
+ * The hue a service's steps are drawn in, picked by name so `frontend` is one
+ * colour down the whole braid — and never red or amber, which on this console
+ * mean a line that failed or warned.
  */
-const LANES = [
-  "var(--tag-blue)",
-  "var(--tag-green)",
-  "var(--tag-violet)",
-  "var(--tag-amber)",
-  "var(--tag-cyan)",
-  "var(--tag-pink)",
-  "var(--tag-slate)",
-]
-
 function laneFor(service: string | undefined) {
-  if (!service) return undefined
-  let hash = 0
-  for (const char of service) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return LANES[hash % LANES.length]
+  return service ? hueFor(service, LANES) : undefined
 }
 
 const SETTLED = /^(Built|Created|Recreated|Started|Healthy|Running|Pulled|Removed|Stopped)$/

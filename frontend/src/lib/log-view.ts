@@ -15,11 +15,18 @@ export type LogViewSettings = {
   wrap: boolean
   /** Show the timestamp each line was parsed out of. */
   timestamps: boolean
+  /**
+   * Draw each line by its shapes (`components/logs/log-text.tsx`) and a
+   * structured line as its message and fields. Off is the line exactly as it
+   * was written, which is one click away for the moment the colouring guessed
+   * wrong or the JSON itself is the question.
+   */
+  highlight: boolean
 }
 
 const KEY = "jd.logs.view"
 
-const DEFAULTS: LogViewSettings = { wrap: false, timestamps: true }
+const DEFAULTS: LogViewSettings = { wrap: false, timestamps: true, highlight: true }
 
 let current: LogViewSettings | null = null
 const listeners = new Set<() => void>()

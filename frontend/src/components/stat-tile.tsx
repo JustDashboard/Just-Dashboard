@@ -24,6 +24,7 @@ export function StatTile({
   value,
   hint,
   meter,
+  trend,
   tone = "default",
   trailing,
   className,
@@ -34,6 +35,13 @@ export function StatTile({
   hint?: React.ReactNode
   /** 0–100. Draws the utilisation bar under the figure. */
   meter?: number
+  /**
+   * The figure's recent shape, drawn where the meter would be — for a reading
+   * that moves rather than one that fills. The Overview's tiles carry their
+   * last hour here; it was a panel of four sparklines under them, each
+   * repeating the figure of the tile above it.
+   */
+  trend?: React.ReactNode
   tone?: Tone
   /** The figure's unit or a delta, set beside it rather than under it. */
   trailing?: React.ReactNode
@@ -76,6 +84,8 @@ export function StatTile({
           label={typeof label === "string" ? label : undefined}
         />
       )}
+
+      {trend && <div className="-mb-0.5 h-9 min-w-0">{trend}</div>}
 
       {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
     </div>

@@ -37,34 +37,44 @@ import { cn } from "@/lib/utils"
 const LOGOS: Record<string, string> = {
   actual: "actual-budget.svg",
   adminer: "adminer.svg",
+  almalinux: "almalinux.svg",
+  alpine: "alpine.svg",
+  amd: "amd.svg",
+  arch: "arch.svg",
+  arm: "arm.svg",
   audiobookshelf: "audiobookshelf.svg",
   beszel: "beszel.svg",
   caddy: "caddy.svg",
+  centos: "centos.svg",
   clickhouse: "clickhouse.svg",
   "code-server": "code-server.webp",
   cyberchef: "cyberchef.svg",
+  debian: "debian.svg",
   directus: "directus.svg",
   docker: "docker.svg",
   "docker-compose": "docker-compose.webp",
   docuseal: "docuseal.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
+  fedora: "fedora.svg",
   filebrowser: "filebrowser.svg",
   freshrss: "freshrss.svg",
-  github: "github.svg",
   gitea: "gitea.svg",
+  github: "github.svg",
   go: "go.svg",
   gotify: "gotify.svg",
   grafana: "grafana.svg",
   healthchecks: "healthchecks.svg",
   homepage: "homepage.webp",
   influxdb: "influxdb.svg",
+  intel: "intel.svg",
   "it-tools": "it-tools.svg",
   jellyfin: "jellyfin.svg",
   jupyter: "jupyter.svg",
   kavita: "kavita.svg",
   "lets-encrypt": "lets-encrypt.svg",
   linkding: "linkding.svg",
+  linuxmint: "linuxmint.svg",
   mariadb: "mariadb.svg",
   meilisearch: "meilisearch.svg",
   memos: "memos.webp",
@@ -85,16 +95,20 @@ const LOGOS: Record<string, string> = {
   ollama: "ollama.svg",
   "open-webui": "open-webui.svg",
   opengist: "opengist.svg",
+  opensuse: "opensuse.svg",
   oracle: "oracle.svg",
   pgadmin: "pgadmin.svg",
   phpmyadmin: "phpmyadmin.svg",
+  pm2: "pm2.svg",
   portainer: "portainer.svg",
   postgres: "postgresql.svg",
   postgresql: "postgresql.svg",
   prometheus: "prometheus.svg",
   qdrant: "qdrant.svg",
+  qemu: "qemu.svg",
   rabbitmq: "rabbitmq.svg",
   redis: "redis.svg",
+  rocky: "rocky.svg",
   searxng: "searxng.svg",
   seerr: "seerr.svg",
   shlink: "shlink.svg",
@@ -106,6 +120,7 @@ const LOGOS: Record<string, string> = {
   traefik: "traefik.svg",
   trilium: "trilium.svg",
   typesense: "typesense.svg",
+  ubuntu: "ubuntu.svg",
   "uptime-kuma": "uptime-kuma.svg",
   valkey: "valkey.svg",
   vaultwarden: "vaultwarden.svg",
@@ -149,6 +164,81 @@ export function imageProducts(references: string[]) {
   const named = [...counts.keys()].filter((id) => id !== "docker")
   const ids = named.length > 0 ? named : [...counts.keys()]
   return ids.sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))
+}
+
+/** Process names that are not their product's own key. */
+const PROCESS_ALIASES: Record<string, string> = {
+  postgres: "postgresql",
+  postmaster: "postgresql",
+  mysqld: "mysql",
+  mariadbd: "mariadb",
+  "redis-server": "redis",
+  "valkey-server": "valkey",
+  nginx: "nginx-static",
+  dockerd: "docker",
+  containerd: "docker",
+  "containerd-shim": "docker",
+  "containerd-shim-runc-v2": "docker",
+  "docker-proxy": "docker",
+  mongod: "mongodb",
+  "clickhouse-server": "clickhouse",
+  "grafana-server": "grafana",
+  tailscaled: "tailscale",
+  "pm2 v5": "pm2",
+  "pm2 v6": "pm2",
+}
+
+/**
+ * Which product a running process is, by its name — `postgres` is Postgres,
+ * `dockerd` is Docker. Nothing for a name this does not know: most of a
+ * process table is `bash` and `kworker`, and a guessed logo on those would be
+ * the drawing lying about the row.
+ */
+export function processProduct(name: string) {
+  const bare = name.toLowerCase().replace(/[:\s].*$/, "")
+  const id = PROCESS_ALIASES[name.toLowerCase()] ?? PROCESS_ALIASES[bare] ?? bare
+  return id in LOGOS && id !== "docker-compose" ? id : undefined
+}
+
+/**
+ * The host's own marks: the distribution it runs, the processor it runs on and
+ * the hypervisor under it, from what the host reports about itself — the
+ * platform id `/etc/os-release` gives, the CPU's model string, the
+ * virtualisation role. Anything this cannot name has no mark, rather than a
+ * guess: a Tux on an unrecognised distribution says less than nothing.
+ */
+const PLATFORMS: Record<string, string> = {
+  ubuntu: "ubuntu",
+  debian: "debian",
+  raspbian: "debian",
+  fedora: "fedora",
+  arch: "arch",
+  archarm: "arch",
+  alpine: "alpine",
+  centos: "centos",
+  rocky: "rocky",
+  almalinux: "almalinux",
+  linuxmint: "linuxmint",
+  opensuse: "opensuse",
+  "opensuse-leap": "opensuse",
+  "opensuse-tumbleweed": "opensuse",
+}
+
+export function platformProduct(platform: string | undefined) {
+  return PLATFORMS[(platform ?? "").toLowerCase()]
+}
+
+export function cpuProduct(model: string | undefined, arch?: string) {
+  if (/\b(amd|epyc|ryzen|opteron|threadripper)\b/i.test(model ?? "")) return "amd"
+  if (/\b(intel|xeon|core\(tm\)|pentium|celeron|atom)\b/i.test(model ?? "")) return "intel"
+  if (/^(arm|aarch64)/i.test(arch ?? "") || /\b(arm|cortex|neoverse)\b/i.test(model ?? "")) {
+    return "arm"
+  }
+  return undefined
+}
+
+export function virtualizationProduct(virtualization: string | undefined) {
+  return /\b(kvm|qemu)\b/i.test(virtualization ?? "") ? "qemu" : undefined
 }
 
 /**
@@ -224,6 +314,26 @@ export function ProductGlyph({ id, className }: { id: string; className?: string
       aria-hidden="true"
       className={cn("size-3.5 shrink-0 object-contain", className)}
     />
+  )
+}
+
+/**
+ * The products a reading counts, bare and in a row after its words — the
+ * images the running containers are, the engines the connections speak — so
+ * "8 running" says eight *of what*. Past `max` it says how many more rather
+ * than drawing a strip that outgrows its line.
+ */
+export function ProductGlyphs({ ids, max = 5 }: { ids: string[]; max?: number }) {
+  const shown = ids.filter((id) => id in LOGOS).slice(0, max)
+  if (shown.length === 0) return null
+  const more = ids.length - shown.length
+  return (
+    <span aria-hidden="true" className="inline-flex shrink-0 items-center gap-1 align-[-2px]">
+      {shown.map((id) => (
+        <ProductGlyph key={id} id={id} />
+      ))}
+      {more > 0 && <span className="numeric text-micro text-muted-foreground">+{more}</span>}
+    </span>
   )
 }
 

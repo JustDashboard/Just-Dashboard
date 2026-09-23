@@ -268,9 +268,19 @@ notes and the retention verdict. One filter, because "these errors are scrolling
 start" is one thought. Live applies as you type (debounced; the socket restarts, which is what makes the
 prefill meaningful); History runs on Enter, because a keystroke-triggered full scan would queue a pass
 over gigabytes per character. `log-console.tsx` draws each line as columns — a level edge, the line
-number, the clock, a small-caps level mark coloured by tone (`LEVEL_MARK`/`LEVEL_TONE` in
-`lib/log-filter.ts`), the journal unit, then the message in ink with only critical red and debug muted —
-and uses `content-visibility` rather than a virtualiser: off-screen rows skip layout while the scrollbar
+number, the clock, the level's word in its colour (`LEVEL_MARK` in `lib/log-filter.ts`, `LEVEL_WORD` in
+`log-text.tsx`), the journal unit in its lane's hue, then the message drawn by its shapes: `lib/log-tokens.ts`
+cuts the text into spans (time, host, program, pid, level, key, string, number, address, URL, path,
+method, status, id, failure and success words) over the original string, so the server's match ranges
+still intersect them, and `log-text.tsx` colours them from one map (design-system §14). While the time
+column is on, the line's own leading timestamp is not drawn, and neither is a syslog hostname that is
+this host's. Error and critical rows are washed, warnings too. A line the server parsed as structured
+(`message` and `fields` on the wire) is drawn as its message and fields in logfmt order, most telling
+field first — except in a History result, whose match ranges are over the raw JSON. Tokens are cached by
+text, because a server's log repeats itself, and each row is memoised, because the live tail appends. A
+"Colour" toggle, persisted with Wrap and Time in `lib/log-view.ts`, shows every line exactly as written.
+The source rail draws each source as its product (a container as its image, nginx, PM2, the system files
+as the host's distribution). The console uses `content-visibility` rather than a virtualiser: off-screen rows skip layout while the scrollbar
 stays honest, wrapped rows keep real heights, and the browser's own find still works. The level chips on
 the strip above the lines carry the on-screen counts and share their swatches (`LEVEL_DOT`) with the
 level column and the histogram. **Pausing holds incoming lines instead of dropping them.**

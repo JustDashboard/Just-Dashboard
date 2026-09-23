@@ -6,6 +6,7 @@ import type { GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { SourceBranch, SourceCommit } from "@/components/git/glyphs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { hueFor } from "@/lib/hue"
 
 /**
  * The four marks a git surface repeats everywhere, drawn once.
@@ -148,27 +149,6 @@ export function ShortSha({ sha, className }: { sha?: string; className?: string 
       {sha.length > 12 ? sha.slice(0, 7) : sha}
     </span>
   )
-}
-
-// Eight hues at one lightness, the same set the branch graph gives its lanes
-// (`graph-panel.tsx`) and the terminal rail its folders. A person's mark is an
-// identity, so it must not move with the palette.
-const HUES = [
-  "var(--tag-blue)",
-  "var(--tag-green)",
-  "var(--tag-amber)",
-  "var(--tag-violet)",
-  "var(--tag-red)",
-  "var(--tag-cyan)",
-  "var(--tag-pink)",
-  "var(--tag-slate)",
-]
-
-/** Stable per name, so the same author keeps the same colour across the page. */
-function hueFor(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  return HUES[hash % HUES.length]
 }
 
 /**

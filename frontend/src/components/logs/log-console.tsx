@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   Backspace,
+  BlendMode,
   Check,
   ChevronDoubleDown,
   CodeWrap,
@@ -23,7 +24,9 @@ import {
   segmentLine,
   type LogLevel,
 } from "@/lib/log-filter"
+import { LEVEL_WORD, LogText, laneStyle, structuredText } from "@/components/logs/log-text"
 import { setLogView, useLogView } from "@/lib/log-view"
+import { useMetrics } from "@/hooks/use-metrics"
 import type { LogFilterState } from "@/components/logs/types"
 import { PaneFooter } from "@/components/panel"
 import { Tag } from "@/components/tag"
@@ -107,7 +110,9 @@ export function LogConsole({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
   const [pinned, setPinned] = useState<number | null>(null)
-  const { wrap, timestamps: showTime } = useLogView()
+  const { wrap, timestamps: showTime, highlight } = useLogView()
+  const pin = useCallback((i: number) => setPinned((p) => (p === i ? null : i)), [])
+  const hostname = useMetrics().host?.hostname
 
   const toBottom = useCallback(() => {
     const el = scrollRef.current
@@ -178,6 +183,13 @@ export function LogConsole({
           hint="Show the timestamp this line was parsed out of"
         />
         <ToolbarToggle
+          active={highlight}
+          onClick={() => setLogView({ highlight: !highlight })}
+          icon={BlendMode}
+          label="Colour"
+          hint="Colour each line by what is in it, and show structured lines as their message and fields. Off shows every line exactly as written."
+        />
+        <ToolbarToggle
           onClick={copyAll}
           icon={Copy}
           label="Copy"
@@ -199,99 +211,23 @@ export function LogConsole({
           // Keyed on arrival so the block rises once when the first lines
           // land and then holds still while the tail appends to it.
           <div key="lines" className={cn("animate-rise py-1.5", !wrap && "w-max min-w-full")}>
-            {lines.map((line, i) => {
-              const ranges = line.match?.length
-                ? line.match
-                : needsClientHighlight
-                  ? highlightRanges(line.text, filter)
-                  : undefined
-              const level = (line.level ?? "") as LogLevel
-              return (
-                <div
-                  key={i}
-                  onClick={() => setPinned((p) => (p === i ? null : i))}
-                  onDoubleClick={() => {
-                    void copyText(lineToText(line, showTime), "Line copied")
-                  }}
-                  className={cn(
-                    "flex cursor-default items-start gap-3 py-px pr-4 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto] hover:bg-row-hover",
-                    // The marked line is a selection, and takes the fill every
-                    // selection in the product takes.
-                    pinned === i && "bg-accent hover:bg-accent",
-                    line.context && "opacity-60",
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "w-0.5 shrink-0 self-stretch",
-                      line.level ? LEVEL_EDGE[line.level] : "bg-transparent",
-                    )}
-                  />
-                  {showLineNumbers && (
-                    <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none">
-                      {line.no ?? ""}
-                    </span>
-                  )}
-                  {showTime && (
-                    <span
-                      title={line.timestamp ? timestamp(line.timestamp) : undefined}
-                      className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
-                    >
-                      {line.timestamp ? clock(line.timestamp) : "—"}
-                    </span>
-                  )}
-                  {/* The level has a column of its own so a page of lines can
-                      be read down for the red ones, rather than each line
-                      being read across to find out. */}
-                  <span className="flex w-9 shrink-0 select-none">
-                    {LEVEL_MARK[level] && (
-                      <Tag tone={LEVEL_TONE[level]} className="leading-[inherit]">
-                        {LEVEL_MARK[level]}
-                      </Tag>
-                    )}
-                  </span>
-                  {showFile && line.file && (
-                    <span
-                      className="w-28 shrink-0 truncate text-muted-foreground/70"
-                      title={line.file}
-                    >
-                      {line.file}
-                    </span>
-                  )}
-                  {showSource && line.source && (
-                    <span
-                      className="max-w-40 shrink-0 truncate font-medium text-muted-foreground"
-                      title={line.source}
-                    >
-                      {line.source}
-                    </span>
-                  )}
-                  {line.stream === "stderr" && (
-                    <Tag tone="danger" className="leading-[inherit]">
-                      stderr
-                    </Tag>
-                  )}
-                  <span
-                    className={cn(
-                      "min-w-0",
-                      wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
-                      line.level && LEVEL_TEXT[line.level],
-                    )}
-                  >
-                    {segmentLine(line.text, ranges).map((part, k) =>
-                      part.hit ? (
-                        <mark key={k} className="rounded-sm bg-mark px-px text-foreground">
-                          {part.text}
-                        </mark>
-                      ) : (
-                        <span key={k}>{part.text}</span>
-                      ),
-                    )}
-                  </span>
-                </div>
-              )
-            })}
+            {lines.map((line, i) => (
+              <Line
+                key={i}
+                index={i}
+                line={line}
+                pinned={pinned === i}
+                onPin={pin}
+                showTime={showTime}
+                showLineNumbers={showLineNumbers}
+                showFile={showFile}
+                showSource={showSource}
+                wrap={wrap}
+                highlight={highlight}
+                hostname={hostname}
+                filter={needsClientHighlight ? filter : undefined}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -320,6 +256,164 @@ export function LogConsole({
     </div>
   )
 }
+
+/**
+ * One line of the pane.
+ *
+ * Memoised on its own props because the live tail appends: without it every
+ * arriving line redrew the four thousand above it, and a coloured line is a
+ * dozen spans rather than one text node.
+ *
+ * Coloured (`highlight`), a line is its shapes: a level in its own colour in a
+ * column of its own, an error or a warning washed across the row the way the
+ * build console washes a failing step — found by scrolling, not by reading —
+ * and a structured line drawn as its message and fields rather than as JSON.
+ * Uncoloured it is exactly the text that was written, with the level's tint on
+ * it as before.
+ */
+const Line = memo(function Line({
+  index,
+  line,
+  pinned,
+  onPin,
+  showTime,
+  showLineNumbers,
+  showFile,
+  showSource,
+  wrap,
+  highlight,
+  hostname,
+  filter,
+}: {
+  index: number
+  line: LogLine
+  pinned: boolean
+  onPin: (index: number) => void
+  showTime: boolean
+  showLineNumbers?: boolean
+  showFile?: boolean
+  showSource?: boolean
+  wrap: boolean
+  highlight: boolean
+  hostname?: string
+  /** Set when the hits have to be found here rather than sent by the server. */
+  filter?: LogFilterState
+}) {
+  const level = (line.level ?? "") as LogLevel
+  const structured = highlight ? structuredText(line) : null
+  const shown = structured ?? line.text
+  const ranges =
+    line.match?.length && !structured
+      ? line.match
+      : filter
+        ? highlightRanges(shown, filter)
+        : undefined
+  const loud = highlight && (level === "critical" || level === "error")
+  const warned = highlight && level === "warn"
+  return (
+    <div
+      onClick={() => onPin(index)}
+      onDoubleClick={() => {
+        void copyText(lineToText(line, showTime), "Line copied")
+      }}
+      className={cn(
+        "flex cursor-default items-start gap-3 py-px pr-4 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto] hover:bg-row-hover",
+        loud && "bg-wash-danger",
+        warned && "bg-wash-warning",
+        // The marked line is a selection, and takes the fill every
+        // selection in the product takes.
+        pinned && "bg-accent hover:bg-accent",
+        line.context && "opacity-60",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "w-0.5 shrink-0 self-stretch",
+          line.level ? LEVEL_EDGE[line.level] : "bg-transparent",
+        )}
+      />
+      {showLineNumbers && (
+        <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none">
+          {line.no ?? ""}
+        </span>
+      )}
+      {showTime && (
+        <span
+          title={line.timestamp ? timestamp(line.timestamp) : undefined}
+          className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
+        >
+          {line.timestamp ? clock(line.timestamp) : "—"}
+        </span>
+      )}
+      {/* The level has a column of its own so a page of lines can be read
+          down for the red ones, rather than each line being read across to
+          find out. Coloured, it is the level's word at the line's own size —
+          a 10px tag beside 12px text was the quietest thing on the row. */}
+      <span className="flex w-10 shrink-0 select-none">
+        {LEVEL_MARK[level] &&
+          (highlight ? (
+            <span className={cn("uppercase", LEVEL_WORD[level])}>{LEVEL_MARK[level]}</span>
+          ) : (
+            <Tag tone={LEVEL_TONE[level]} className="leading-[inherit]">
+              {LEVEL_MARK[level]}
+            </Tag>
+          ))}
+      </span>
+      {showFile && line.file && (
+        <span className="w-28 shrink-0 truncate text-muted-foreground/70" title={line.file}>
+          {line.file}
+        </span>
+      )}
+      {showSource && line.source && (
+        <span
+          className="max-w-40 shrink-0 truncate font-medium text-muted-foreground"
+          style={highlight ? laneStyle(line.source) : undefined}
+          title={line.source}
+        >
+          {line.source}
+        </span>
+      )}
+      {line.stream === "stderr" && (
+        <Tag tone="danger" className="leading-[inherit]">
+          stderr
+        </Tag>
+      )}
+      {highlight ? (
+        <LogText
+          text={shown}
+          hits={ranges}
+          // A file's own timestamp repeats the column beside it on every
+          // line, which on syslog was a third of the width.
+          skipTime={showTime && Boolean(line.timestamp) && !structured}
+          hostname={hostname}
+          className={cn(
+            "min-w-0 text-foreground",
+            wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
+          )}
+        />
+      ) : (
+        <span
+          className={cn(
+            "min-w-0",
+            wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
+            line.level && LEVEL_TEXT[line.level],
+          )}
+        >
+          {segmentLine(line.text, ranges).map((part, k) =>
+            part.hit ? (
+              <mark key={k} className="rounded-sm bg-mark px-px text-foreground">
+                {part.text}
+              </mark>
+            ) : (
+              <span key={k}>{part.text}</span>
+            ),
+          )}
+        </span>
+      )}
+    </div>
+  )
+})
 
 /**
  * A view toggle on the strip above the lines. The word appears only on the

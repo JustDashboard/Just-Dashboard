@@ -11,6 +11,7 @@ import { ErrorState, LoadingRows } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { ChipCount } from "@/components/tabs"
+import { ProductLogo, imageProduct, platformProduct } from "@/components/product-logo"
 
 /**
  * The groups, in the order somebody actually looks. The raw kind strings are
@@ -55,9 +56,12 @@ export function SourceRail({
   selectedId,
   onSelect,
   onRescan,
+  platform,
   className,
 }: {
   index: LogSourceIndex | undefined
+  /** The host's distribution, whose mark the system logs carry. */
+  platform?: string
   loading: boolean
   error: Error | undefined
   selectedId: string | null
@@ -144,6 +148,7 @@ export function SourceRail({
                       <SourceRow
                         key={source.id}
                         source={source}
+                        platform={platform}
                         selected={selectedId === source.id}
                         onSelect={() => onSelect(source)}
                       />
@@ -164,15 +169,41 @@ export function SourceRail({
   )
 }
 
+/**
+ * What wrote a source, as the product it is: a container as its image, the
+ * web server as nginx, a PM2 process as PM2, and the system's own files as
+ * the distribution that writes them (§14). The journal and a stray
+ * application log are no product and keep their group's glyph on the same
+ * tile, so every name in the rail starts on one line.
+ */
+function sourceProduct(source: LogSource, platform: string | undefined) {
+  switch (source.kind) {
+    case "docker":
+      // A compose service's detail is "stack · image"; the image is the product.
+      return imageProduct(source.detail?.split(" · ").pop() || source.label)
+    case "nginx":
+      return "nginx-static"
+    case "pm2":
+      return "pm2"
+    case "system":
+      return platformProduct(platform)
+    default:
+      return undefined
+  }
+}
+
 function SourceRow({
   source,
+  platform,
   selected,
   onSelect,
 }: {
   source: LogSource
+  platform?: string
   selected: boolean
   onSelect: () => void
 }) {
+  const group = GROUPS.find((g) => g.kind === source.kind)
   return (
     <button
       type="button"
@@ -183,29 +214,32 @@ function SourceRow({
       // takes — the terminal's active session, a table's chosen row — so
       // "you are here" reads the same way on every rail.
       className={cn(
-        "flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
+        "flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
         selected ? "bg-accent text-foreground" : "hover:bg-row-hover",
       )}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        {source.status && <StatusDot state={source.status} />}
-        <span className={cn("truncate text-body leading-tight", selected && "font-medium")}>
-          {source.label}
-        </span>
-        {(source.archives ?? 0) > 0 && (
-          <span
-            className="numeric ml-auto flex shrink-0 items-center gap-0.5 text-micro text-muted-foreground"
-            title={`${source.archives} rotated archives, ${bytes(source.archiveBytes)} — searchable`}
-          >
-            <Archive className="size-2.5" />
-            {source.archives}
+      <ProductLogo id={sourceProduct(source, platform)} size="sm" fallback={group?.icon} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className={cn("truncate text-body leading-tight", selected && "font-medium")}>
+            {source.label}
           </span>
-        )}
-      </span>
-      <span className="truncate text-hint text-muted-foreground">
-        {source.size !== undefined && source.size > 0
-          ? `${bytes(source.size)} · ${relativeTime(source.modified)}`
-          : (source.detail ?? source.status)}
+          {source.status && <StatusDot state={source.status} className="shrink-0" />}
+          {(source.archives ?? 0) > 0 && (
+            <span
+              className="numeric ml-auto flex shrink-0 items-center gap-0.5 text-micro text-muted-foreground"
+              title={`${source.archives} rotated archives, ${bytes(source.archiveBytes)} — searchable`}
+            >
+              <Archive className="size-2.5" />
+              {source.archives}
+            </span>
+          )}
+        </span>
+        <span className="truncate text-hint text-muted-foreground">
+          {source.size !== undefined && source.size > 0
+            ? `${bytes(source.size)} · ${relativeTime(source.modified)}`
+            : (source.detail ?? source.status)}
+        </span>
       </span>
     </button>
   )
