@@ -76,6 +76,56 @@ test("every source and every configure step fits the window without the page scr
   }
 })
 
+test("the repository list is drawn once, after both GitHub identities have answered", async ({
+  page,
+}) => {
+  // The App answers from the dashboard's own token and the CLI through a `gh`
+  // round trip, so the App's rows used to land first under placeholders for
+  // the CLI's, and the list redrew itself when the second answer arrived.
+  await mockNewProject(page)
+  let answer!: () => void
+  const cliAnswered = new Promise<void>((resolve) => (answer = resolve))
+  await page.route("**/api/v1/deploy/github-app/", (route) =>
+    json(route, {
+      configured: true,
+      installations: [
+        { id: 1, account: "Wayy01", accountType: "User", htmlUrl: "", repositorySelection: "all" },
+      ],
+    }),
+  )
+  await page.route("**/api/v1/deploy/github-app/repositories", (route) =>
+    json(route, [
+      {
+        installationId: 1,
+        account: "Wayy01",
+        nameWithOwner: "Wayy01/granted",
+        name: "granted",
+        private: false,
+        defaultBranch: "main",
+        cloneUrl: "https://github.com/Wayy01/granted.git",
+        htmlUrl: "https://github.com/Wayy01/granted",
+        pushedAt: now,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/git/github/repos", async (route) => {
+    await cliAnswered
+    return route.fallback()
+  })
+
+  const appListed = page.waitForResponse("**/api/v1/deploy/github-app/repositories")
+  await page.goto("/deploy/new")
+  await appListed
+  const skeletons = page.locator("[data-slot='flow-panel'] [data-slot='skeleton']")
+  await expect(skeletons.first()).toBeVisible()
+  await expect(page.getByRole("button", { name: "Import Wayy01/granted" })).toHaveCount(0)
+
+  answer()
+  await expect(page.getByRole("button", { name: "Import Wayy01/granted" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Import Wayy01/wesmokefish" })).toBeVisible()
+  await expect(skeletons).toHaveCount(0)
+})
+
 test("one GitHub account reached by both the App and the CLI is drawn once", async ({ page }) => {
   await mockNewProject(page)
   const installation = {

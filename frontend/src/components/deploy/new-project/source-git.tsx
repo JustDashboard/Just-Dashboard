@@ -290,8 +290,14 @@ export function SourceGit({
     { key: "cli", label: "From the GitHub CLI", repos: fromCli.filter(matches).sort(byRecency) },
   ].filter((group) => group.repos.length > 0)
   const visibleCount = groups.reduce((total, group) => total + group.repos.length, 0)
-  const listing = (signedIn && repos.loading) || (appRepos.loading && !appRepos.data)
-  const canBrowse = signedIn || stage === "import" || pickable.length > 0
+  // The list is drawn once, when every identity that can add to it has
+  // answered. The App's rows arrive first and the CLI's a `gh` round trip
+  // later, and drawing the first batch under placeholders for the second —
+  // then dropping the placeholders and remounting the list when it landed —
+  // is a list that visibly loaded twice. Only the first answer counts: a
+  // refresh keeps the rows on screen while it asks again.
+  const listing = status.loading || (signedIn && repos.loading) || appRepos.loading || app.loading
+  const canBrowse = listing || signedIn || stage === "import" || pickable.length > 0
 
   // The two identities, as the accounts they are. When the App is installed on
   // the account the CLI is signed in as — the ordinary install — that is one
@@ -389,25 +395,23 @@ export function SourceGit({
               {/* Padded by the rows' own bleed. A scroll container over rows
                   that bleed grows a sideways scrollbar otherwise, which is
                   what it had. */}
-              <div
-                className="-mx-3 max-h-[min(60vh,42rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1"
-                key={listing ? "loading" : "listed"}
-              >
-                {groups.map((group) => (
-                  <div key={group.key} className="animate-rise space-y-2 pt-3 first:pt-0">
-                    {groups.length > 1 && <p className="eyebrow">{group.label}</p>}
-                    <ChoiceList aria-label={group.label}>
-                      {group.repos.map((repo) => (
-                        <RepoRow
-                          key={repo.nameWithOwner}
-                          repo={repo}
-                          pending={busy === repo.nameWithOwner}
-                          onImport={() => importRepo(repo)}
-                        />
-                      ))}
-                    </ChoiceList>
-                  </div>
-                ))}
+              <div className="-mx-3 max-h-[min(60vh,42rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1">
+                {!listing &&
+                  groups.map((group) => (
+                    <div key={group.key} className="animate-rise space-y-2 pt-3 first:pt-0">
+                      {groups.length > 1 && <p className="eyebrow">{group.label}</p>}
+                      <ChoiceList aria-label={group.label}>
+                        {group.repos.map((repo) => (
+                          <RepoRow
+                            key={repo.nameWithOwner}
+                            repo={repo}
+                            pending={busy === repo.nameWithOwner}
+                            onImport={() => importRepo(repo)}
+                          />
+                        ))}
+                      </ChoiceList>
+                    </div>
+                  ))}
               </div>
             </>
           )}
@@ -462,118 +466,128 @@ export function SourceGit({
             }
           />
           <PanelBody flush>
-            <RowList aria-label="GitHub connections">
-              {merged ? (
-                <Row
-                  leading={<IdentityMark account={appAccount} fallback={GitHubMark} />}
-                  title={appAccount}
-                  subtitle="GitHub App · GitHub CLI"
-                  trailing={
-                    <>
-                      <span className="numeric text-hint text-muted-foreground">
-                        {plural(pickable.length, "repository", "repositories")}
-                      </span>
-                      <Status tone="running" label="Connected" />
-                    </>
-                  }
-                />
-              ) : (
-                <>
+            {/* Held until both identities have answered: drawn as two rows and then
+                folded into one when the second arrived, the one account read as two
+                for a moment and then changed its mind. */}
+            {status.loading || app.loading ? (
+              <LoadingRows rows={1} className="pt-1" />
+            ) : (
+              <RowList aria-label="GitHub connections">
+                {merged ? (
                   <Row
-                    leading={
-                      <IdentityMark account={installations[0]?.account} fallback={GitHubMark} />
-                    }
-                    // The account, not the App's generated name: "Just
-                    // Dashboard e4e5" is this dashboard's own label for
-                    // itself, and what the reader is checking is whose
-                    // repositories these are.
-                    title={installations.length > 0 ? appAccount : "GitHub App"}
-                    subtitle={
-                      stage === "import"
-                        ? "GitHub App"
-                        : stage === "install"
-                          ? "Created on GitHub, waiting for an account to install it"
-                          : stage === "create"
-                            ? "One App in place of a token and a webhook for every repository"
-                            : "Reading the App…"
-                    }
+                    leading={<IdentityMark account={appAccount} fallback={GitHubMark} />}
+                    title={appAccount}
+                    subtitle="GitHub App · GitHub CLI"
                     trailing={
                       <>
-                        {stage === "import" && (
-                          <span className="numeric text-hint text-muted-foreground">
-                            {plural(fromApp.length, "repository", "repositories")}
-                          </span>
-                        )}
-                        <Status
-                          tone={
-                            stage === "import"
-                              ? "running"
-                              : stage === "install"
-                                ? "warning"
-                                : "unknown"
-                          }
-                          label={
-                            stage === "import"
-                              ? "Installed"
-                              : stage === "install"
-                                ? "Uninstalled"
-                                : "Disconnected"
-                          }
-                        />
-                        {stage === "create" && (
-                          <Link
-                            href="/deploy/credentials"
-                            className="rounded-sm text-hint underline underline-offset-2 focus-ring"
-                          >
-                            Connect
-                          </Link>
-                        )}
+                        <span className="numeric text-hint text-muted-foreground">
+                          {plural(pickable.length, "repository", "repositories")}
+                        </span>
+                        <Status tone="running" label="Connected" />
                       </>
                     }
                   />
-                  <Row
-                    leading={
-                      <IdentityMark account={signedIn ? cliLogin : undefined} fallback={Terminal} />
-                    }
-                    title={signedIn ? cliLogin : "GitHub CLI"}
-                    subtitle={
-                      signedIn
-                        ? "GitHub CLI"
-                        : status.data?.available === false
-                          ? "gh is not installed on this host, so signing in is not available here"
-                          : "Installed on this host, nobody signed in"
-                    }
-                    trailing={
-                      <>
-                        {signedIn && (
-                          <span className="numeric text-hint text-muted-foreground">
-                            {plural(fromCli.length, "repository", "repositories")}
-                          </span>
-                        )}
-                        <Status
-                          tone={signedIn ? "running" : "unknown"}
-                          label={
-                            signedIn
-                              ? "Signed in"
-                              : status.data?.available === false
-                                ? "Unavailable"
-                                : "Signed out"
-                          }
+                ) : (
+                  <>
+                    <Row
+                      leading={
+                        <IdentityMark account={installations[0]?.account} fallback={GitHubMark} />
+                      }
+                      // The account, not the App's generated name: "Just
+                      // Dashboard e4e5" is this dashboard's own label for
+                      // itself, and what the reader is checking is whose
+                      // repositories these are.
+                      title={installations.length > 0 ? appAccount : "GitHub App"}
+                      subtitle={
+                        stage === "import"
+                          ? "GitHub App"
+                          : stage === "install"
+                            ? "Created on GitHub, waiting for an account to install it"
+                            : stage === "create"
+                              ? "One App in place of a token and a webhook for every repository"
+                              : "Reading the App…"
+                      }
+                      trailing={
+                        <>
+                          {stage === "import" && (
+                            <span className="numeric text-hint text-muted-foreground">
+                              {plural(fromApp.length, "repository", "repositories")}
+                            </span>
+                          )}
+                          <Status
+                            tone={
+                              stage === "import"
+                                ? "running"
+                                : stage === "install"
+                                  ? "warning"
+                                  : "unknown"
+                            }
+                            label={
+                              stage === "import"
+                                ? "Installed"
+                                : stage === "install"
+                                  ? "Uninstalled"
+                                  : "Disconnected"
+                            }
+                          />
+                          {stage === "create" && (
+                            <Link
+                              href="/deploy/credentials"
+                              className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                            >
+                              Connect
+                            </Link>
+                          )}
+                        </>
+                      }
+                    />
+                    <Row
+                      leading={
+                        <IdentityMark
+                          account={signedIn ? cliLogin : undefined}
+                          fallback={Terminal}
                         />
-                        {!signedIn && status.data?.available !== false && (
-                          <Link
-                            href="/git"
-                            className="rounded-sm text-hint underline underline-offset-2 focus-ring"
-                          >
-                            Sign in
-                          </Link>
-                        )}
-                      </>
-                    }
-                  />
-                </>
-              )}
-            </RowList>
+                      }
+                      title={signedIn ? cliLogin : "GitHub CLI"}
+                      subtitle={
+                        signedIn
+                          ? "GitHub CLI"
+                          : status.data?.available === false
+                            ? "gh is not installed on this host, so signing in is not available here"
+                            : "Installed on this host, nobody signed in"
+                      }
+                      trailing={
+                        <>
+                          {signedIn && (
+                            <span className="numeric text-hint text-muted-foreground">
+                              {plural(fromCli.length, "repository", "repositories")}
+                            </span>
+                          )}
+                          <Status
+                            tone={signedIn ? "running" : "unknown"}
+                            label={
+                              signedIn
+                                ? "Signed in"
+                                : status.data?.available === false
+                                  ? "Unavailable"
+                                  : "Signed out"
+                            }
+                          />
+                          {!signedIn && status.data?.available !== false && (
+                            <Link
+                              href="/git"
+                              className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                            >
+                              Sign in
+                            </Link>
+                          )}
+                        </>
+                      }
+                    />
+                  </>
+                )}
+              </RowList>
+            )}
             {/* An optional integration that cannot be read is information, not
                 a failure: the page used to paint a red error block across the
                 primary import path whenever GitHub was unreachable. */}
