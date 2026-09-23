@@ -2484,8 +2484,29 @@ export type BlueprintAutomation = {
   default?: boolean
 }
 
-export type BlueprintDetail = BlueprintSummary & {
+/**
+ * The detail endpoint answers with the definition itself, not the listing
+ * row: `image` is the pinned runtime object, and the fields the summary
+ * flattens out of provenance and resources are not repeated at the top level.
+ */
+export type BlueprintDetail = Omit<
+  BlueprintSummary,
+  | "image"
+  | "memoryMb"
+  | "license"
+  | "maintainer"
+  | "reviewedAt"
+  | "requiresAcceptance"
+  | "privileged"
+> & {
   retired?: string
+  image: {
+    reference: string
+    tagPolicy: string
+    platforms?: string[]
+    pullPolicy?: string
+    command?: string[]
+  }
   provenance: {
     maintainer: string
     license: string

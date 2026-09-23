@@ -402,6 +402,7 @@ export const blueprintCatalogue = [
 
 export const postgresBlueprint = {
   ...blueprintCatalogue[3],
+  image: { reference: "postgres:16-alpine", tagPolicy: "pinned", pullPolicy: "missing" },
   provenance: {
     maintainer: "Just Dashboard",
     license: "PostgreSQL",
@@ -442,6 +443,11 @@ export const postgresBlueprint = {
  */
 export const vaultwardenBlueprint = {
   ...blueprintCatalogue[2],
+  image: {
+    reference: "vaultwarden/server:1.32.7-alpine",
+    tagPolicy: "pinned",
+    pullPolicy: "missing",
+  },
   provenance: {
     maintainer: "Just Dashboard",
     license: "AGPL-3.0",
@@ -521,6 +527,11 @@ export const postgresRenderedConfiguration = {
 
 export const minecraftBlueprint = {
   ...blueprintCatalogue[0],
+  image: {
+    reference: "itzg/minecraft-server:2026.9.1-java21",
+    tagPolicy: "pinned",
+    pullPolicy: "missing",
+  },
   provenance: {
     maintainer: "Just Dashboard",
     license: "Apache-2.0",
@@ -1261,6 +1272,7 @@ export async function mockDraftJourney(page: Page) {
     if (path === "/deploy/blueprints/uptime-kuma") {
       return json(route, {
         ...blueprintCatalogue[1],
+        image: { reference: "louislam/uptime-kuma:1.23.16", tagPolicy: "pinned" },
         provenance: postgresBlueprint.provenance,
         resources: { memoryMb: 512, minMemoryMb: 256 },
         update: { detector: "registry", notes: "" },

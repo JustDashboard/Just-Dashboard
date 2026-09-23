@@ -488,7 +488,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                   <p className="flex min-w-0 flex-wrap items-center gap-2">
                     <Tag>{definition.provenance.license}</Tag>
                     <Tag mono className="max-w-full truncate">
-                      {definition.image}
+                      {definition.image.reference}
                     </Tag>
                   </p>
                   <p>
