@@ -33,6 +33,17 @@ its deno-light variant.
 terminal.svg is no product's mark and comes from nowhere: it is drawn for
 this project, as the mark of a terminal window whose program has none.
 
+The marks for what signs in to the account pages come from the same
+collection: chrome.svg, firefox.svg, safari.svg, opera.svg, brave.svg,
+vivaldi.svg, android.svg, gitlab.svg, jenkins.svg, ansible.svg,
+home-assistant.svg and postman.svg keep their names; edge.svg is its
+microsoft-edge.svg, windows.svg its windows-11.svg, apple.svg its apple-light
+variant, drawn for a dark ground, and linux.svg its tux.svg.
+
+curl.svg is from Simple Icons (CC0 1.0), filled with curl's #073551 lifted to
+#7eaacc, the same hue at the L 0.72 rung, because Simple Icons ships the path
+alone and the navy disappears on a dark ground.
+
 bun.svg is from Simple Icons (CC0 1.0), filled with Bun's cream #fbf0df
 because Simple Icons ships the path alone and its brand hex is black.
 

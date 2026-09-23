@@ -74,8 +74,10 @@ panel the rail drills into once you are inside `/account`; the palette's Account
 the rail's foot. That menu opens with the account's picture,
 display name, sign-in name and role, then the five pages (Security carries a `Status` for two-factor)
 and Sign out. The picture is `components/account/user-avatar.tsx`: the stored image when there is
-one, otherwise the display name's initials on the brand plot, square with the control radius rather
-than a circle, because a filled circle holding two letters is the pill §4 forbids.
+one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s `LANES`,
+so the same person keeps one colour in the rail, the users list and their profile), square with the
+control radius rather than a circle, because a filled circle holding two letters is the pill §4
+forbids.
 
 ## The design system
 
