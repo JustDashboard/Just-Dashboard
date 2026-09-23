@@ -10,7 +10,7 @@ import {
   Pencil,
   Pin,
   Plus,
-  SidebarLeft,
+  SidebarLeftClose,
   Trash,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -127,7 +127,7 @@ export function SessionRail({
 
   return (
     <Pane flush aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
-      <PaneHeader className="gap-1 pl-3">
+      <PaneHeader className="h-10 gap-1 py-0 pl-3">
         <span className="text-body font-medium">Sessions</span>
         <span className="flex-1" />
         <IconAction label="New folder" className="size-7" onClick={() => setCreatingFolder(true)}>
@@ -138,7 +138,7 @@ export function SessionRail({
         </IconAction>
         {onHide && (
           <IconAction label="Hide this panel" className="size-7" onClick={onHide}>
-            <SidebarLeft />
+            <SidebarLeftClose />
           </IconAction>
         )}
       </PaneHeader>

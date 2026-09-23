@@ -198,11 +198,14 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - The page is **one framed workbench**. The rail, the emulator and the Files/Diff column are `Pane flush`
   inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
   edge and the tools column's left edge). Three framed panes with a gutter between them read as three
-  boxes floating on the page; the screen is one working surface. Immersive mode drops the wrapper's
+  boxes floating on the page; the screen is one working surface. The three columns' top strips are all
+  40px (the rail's and the tools column's `PaneHeader` are pinned to `h-10`, the emulator's strip is
+  `min-h-10`), so their hairlines meet as one rule across the frame. Immersive mode drops the wrapper's
   frame along with the page. Below `lg` the rail and the tools column **cover the emulator** inside the
   frame instead of sitting beside it — stacked over and under it they left a phone's terminal one line
   tall — so only one of the two is up at a time (`useMediaQuery` in `page.tsx` decides), picking a
-  session puts the rail away, and each carries its own hide button while it is an overlay.
+  session puts the rail away, and each carries its own hide button while it is an overlay — and only
+  then: beside the emulator, the strip's two toggles are the one way to hide either panel.
 - `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. A row
   is one line — the session's label and, at the end, the activity mark (below). Rows carry no terminal
   glyph (every row is a terminal) and no directory line under the title (the label carries the
@@ -249,8 +252,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   tab you had open, which is furniture. Entries for sessions that have ended are dropped as the
   listing arrives.
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
-  toggles: sessions on the left and Files/Diff on the right. The strip is embedded in the emulator's own
-  title bar; there is no separate workspace bar or working-directory/shell title.
+  toggles: sessions on the left and Files/Diff on the right. Each draws the side its panel is on and
+  the way pressing it moves the panel (`SidebarLeftOpen`/`Close`, `SidebarRightOpen`/`Close`). The strip
+  is embedded in the emulator's own title bar; there is no separate workspace bar or
+  working-directory/shell title.
   A tab is its label with the activity mark's slot in front of it, lit while the window is working or
   has just finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
   way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,

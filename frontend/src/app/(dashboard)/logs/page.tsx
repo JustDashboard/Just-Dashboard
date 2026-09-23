@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Logs, SidebarLeft } from "@/components/icons"
+import { Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
@@ -143,7 +143,7 @@ export default function LogsPage() {
       className="size-7 shrink-0"
       onClick={() => setShowRail((value) => !value)}
     >
-      <SidebarLeft />
+      {showRail ? <SidebarLeftClose /> : <SidebarLeftOpen />}
     </IconAction>
   )
 

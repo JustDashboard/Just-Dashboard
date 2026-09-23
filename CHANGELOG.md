@@ -84,6 +84,8 @@ The Git workspace could commit, branch, merge and push, and everything past that
   - Export takes the filters and order it was launched from, and states its row cap. A table with no row estimate no longer claims to be empty, and ClickHouse connections, which answered every catalogue read with an error, work again. Each row offers the tables that reference it, paging has First, Last, a page you can type and Refresh, and selecting rows to copy no longer needs write access.
 - The terminal stays usable at narrow widths and on a phone
   - The git panel's commit row and repository strip no longer run past the column's edge, and below the large breakpoint the session rail and tools cover the terminal one at a time instead of squeezing it to one line.
+- Every panel toggle says which side it opens and which way
+  - The toggles for the navigation rail, the terminal's sessions and Files/Diff, the Files sidebar and details, the log sources and the database diagram's inspector were one three-column glyph whichever panel they moved. Each now draws its panel on its own side, filled while it shows, with a chevron pointing the way a press moves it. The terminal's three top strips are one height, so their rules meet as one line, and Files/Diff no longer carries a second copy of the toggle already in the terminal's strip.
 - Installing or updating no longer runs out of memory on a 2 GB server
   - The image build ran the type-check in a second process alongside the compiler, which intermittently exceeded a small server's memory. The image build skips it; the application it emits is identical, and the developer's build still type-checks.
 

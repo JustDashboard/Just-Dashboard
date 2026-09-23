@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Plus, ShieldOff, SidebarLeft, SidebarRight, TerminalWindow } from "@/components/icons"
+import {
+  Plus,
+  ShieldOff,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  SidebarRightClose,
+  SidebarRightOpen,
+  TerminalWindow,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
 import type {
@@ -452,7 +460,7 @@ export default function TerminalPage() {
         onClick={toggleRail}
         label={showRail ? "Hide the sessions rail" : "Show the sessions rail"}
         action="workspace.rail"
-        icon={SidebarLeft}
+        icon={showRail ? SidebarLeftClose : SidebarLeftOpen}
       />
       {active ? (
         <WindowStrip
@@ -479,7 +487,7 @@ export default function TerminalPage() {
         onClick={toggleTools}
         label={showTools ? "Hide files & git" : "Show files & git"}
         action="workspace.tools"
-        icon={SidebarRight}
+        icon={showTools ? SidebarRightClose : SidebarRightOpen}
       />
     </>
   )
@@ -496,7 +504,11 @@ export default function TerminalPage() {
           tools column are separated by a hairline each rather than by a gutter
           and three borders: three framed panes with gaps between them read as
           three boxes floating on the page, and the screen is one working
-          surface. */}
+          surface. The three columns' top strips are all 40px, so their
+          hairlines run across the frame as one rule. The panel toggles live
+          only in the emulator's strip; a second copy inside each panel said
+          the same thing twice. Below `lg` a panel covers that strip, so there
+          it carries its own way out. */}
       <div
         ref={workspaceRef}
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
@@ -574,7 +586,7 @@ export default function TerminalPage() {
           {!activeWindow && active && <LoadingPanel rows={4} />}
           {!activeWindow && !active && (
             <Pane flush className="flex-1">
-              <PaneHeader className="gap-1">{terminalHeader}</PaneHeader>
+              <PaneHeader className="h-10 gap-1 py-0">{terminalHeader}</PaneHeader>
               <EmptyState
                 className="flex-1"
                 icon={TerminalWindow}
@@ -606,7 +618,7 @@ export default function TerminalPage() {
             <WorkspaceTools
               dir={currentDir}
               onOpenInFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
-              onClose={() => setShowTools(false)}
+              onClose={overlay ? () => setShowTools(false) : undefined}
             />
           </div>
         )}

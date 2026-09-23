@@ -1178,7 +1178,9 @@ export function XtermPane({
         !active && "hidden",
       )}
     >
-      <div className="flex shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-1.5">
+      {/* 40px, the height of the terminal page's rail and tools strips, so the
+          three hairlines meet as one line across the workbench. */}
+      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-0.5">
         {headerContent ? (
           <div className="flex min-w-0 flex-1 items-center gap-1">{headerContent}</div>
         ) : (

@@ -137,7 +137,6 @@ import {
   UserMinusIcon,
   UserPlusIcon,
   UsersIcon,
-  ViewColumnsIcon,
   ViewfinderCircleIcon,
   WifiIcon,
   WindowIcon,
@@ -165,9 +164,10 @@ import {
  * Where Heroicons draws one thing for several of our words — `Clock` and
  * `Stopwatch`, `Link` and `Linked`, `Shield` and `ShieldCheck` — they share
  * the glyph, because that is what they always were. Where Heroicons has no
- * drawing at all — there is no floppy disk, no git branch, no sidebar — the
- * mapping picks the nearest true thing (`DocumentArrowDown` for save,
- * `Share` for a branch, `ViewColumns` for a sidebar) and says so next to it.
+ * drawing at all — there is no floppy disk, no git branch — the mapping picks
+ * the nearest true thing (`DocumentArrowDown` for save, `Share` for a branch)
+ * and says so next to it. The side-panel toggles are the exception: there was
+ * no near-enough drawing, so they are drawn here (`sidebarGlyph`).
  *
  * **Both themes come free, and that is a property to protect.** Every glyph
  * here paints with `fill="currentColor"` and nothing else — no hard-coded hex,
@@ -336,6 +336,58 @@ export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
   )
 })
 
+/* The side-panel toggles, drawn inline. They were Heroicons' `ViewColumns`,
+   three equal columns: the same glyph for a left panel and a right one, shown
+   or hidden, so a toggle at either end of a strip said nothing about which
+   panel it moved or which way. Each of these is a window with the panel's
+   strip on its own side — filled while the panel is there, an empty rule where
+   it would be — and a chevron pointing the way pressing it moves the panel:
+   into the edge to put it away, out of it to bring it back. A caller picks
+   `Open` or `Close` from whether its panel is showing. */
+function sidebarGlyph(side: "left" | "right", showing: boolean, name: string): Icon {
+  function SidebarGlyph({ size = 16, title, ...props }: IconProps, ref: Ref<SVGSVGElement>) {
+    return (
+      <svg
+        ref={ref}
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        {...props}
+      >
+        {title ? <title>{title}</title> : null}
+        {/* Drawn for the left and mirrored for the right, so the pair cannot
+            drift apart. */}
+        <g transform={side === "right" ? "matrix(-1 0 0 1 24 0)" : undefined}>
+          <rect x="3" y="4" width="18" height="16" rx="2.5" />
+          {showing ? (
+            <path
+              d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9v16H5.5A2.5 2.5 0 0 1 3 17.5Z"
+              fill="currentColor"
+            />
+          ) : (
+            <path d="M9 4v16" />
+          )}
+          <path d={showing ? "m17 8-4 4 4 4" : "m13 8 4 4-4 4"} />
+        </g>
+      </svg>
+    )
+  }
+  const Forwarded = forwardRef<SVGSVGElement, Omit<IconProps, "ref">>(SidebarGlyph)
+  Forwarded.displayName = name
+  return Forwarded
+}
+
+export const SidebarLeftOpen: Icon = sidebarGlyph("left", false, "SidebarLeftOpen")
+export const SidebarLeftClose: Icon = sidebarGlyph("left", true, "SidebarLeftClose")
+export const SidebarRightOpen: Icon = sidebarGlyph("right", false, "SidebarRightOpen")
+export const SidebarRightClose: Icon = sidebarGlyph("right", true, "SidebarRightClose")
+
 export const CheckCircle: Icon = adapt(CheckCircleIcon, "CheckCircle")
 export const CrossCircle: Icon = adapt(XCircleIcon, "CrossCircle")
 export const DotMark: Icon = adapt(MinusSmallIcon, "DotMark")
@@ -376,8 +428,6 @@ export const Globe: Icon = adapt(GlobeAltIcon, "Globe")
 export const Database: Icon = adapt(CircleStackIcon, "Database")
 export const Layout: Icon = adapt(RectangleGroupIcon, "Layout")
 export const Table: Icon = adapt(TableCellsIcon, "Table")
-export const SidebarLeft: Icon = adapt(ViewColumnsIcon, "SidebarLeft")
-export const SidebarRight: Icon = adapt(ViewColumnsIcon, "SidebarRight")
 export const Footer: Icon = adapt(Bars3Icon, "Footer")
 export const ListOrdered: Icon = adapt(NumberedListIcon, "ListOrdered")
 export const ListUnordered: Icon = adapt(ListBulletIcon, "ListUnordered")

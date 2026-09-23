@@ -17,14 +17,17 @@ import {
   GridSquare,
   Linked,
   ListUnordered,
+  Location,
   MagnifyingGlass,
   Plus,
   PlusSquareSmall,
   PreviewDocument,
   RefreshClockwise,
   SettingsSliders,
-  SidebarLeft,
-  SidebarRight,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  SidebarRightClose,
+  SidebarRightOpen,
   Star,
   StarFill,
   Trash,
@@ -1013,7 +1016,7 @@ export default function FilesPage() {
               className="hidden size-7 lg:inline-flex"
               onClick={() => setShowSidebar(!showSidebar)}
             >
-              <SidebarLeft />
+              {showSidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
             </IconAction>
             {/* The sidebar lists the places; where it is not drawn, the same
                 list sits behind this button so a phone can still jump. */}
@@ -1030,7 +1033,7 @@ export default function FilesPage() {
                   aria-label="Places"
                   className="size-7 text-muted-foreground"
                 >
-                  <SidebarLeft className="size-3.5" />
+                  <Location className="size-3.5" />
                 </Button>
               </PlacesMenu>
             </div>
@@ -1163,7 +1166,7 @@ export default function FilesPage() {
                 className="hidden size-7 xl:inline-flex"
                 onClick={() => setShowInspector(!showInspector)}
               >
-                <SidebarRight />
+                {showInspector ? <SidebarRightClose /> : <SidebarRightOpen />}
               </IconAction>
             </div>
           </PaneHeader>
