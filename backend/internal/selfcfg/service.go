@@ -345,6 +345,10 @@ func (s *Service) Restart(ctx context.Context, rebuild bool, actor string) (*Run
 	})
 }
 
+// Transcript is the last run's whole output, for the console that reads it
+// back line by line; the report carries only its end.
+func (s *Service) Transcript() string { return s.store.Transcript() }
+
 // Dismiss forgets a finished run. One still in flight is left alone.
 func (s *Service) Dismiss() error {
 	release, err := selfupdate.LockLifecycle(s.dataDir)

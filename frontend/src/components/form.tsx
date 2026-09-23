@@ -148,6 +148,7 @@ export function FormSection({
   title,
   hint,
   actions,
+  aside,
   className,
   children,
 }: {
@@ -156,9 +157,41 @@ export function FormSection({
   title: React.ReactNode
   hint?: React.ReactNode
   actions?: React.ReactNode
+  /**
+   * The title in a column of its own beside the fields, from `lg` — for a
+   * page that *is* a form, where the sections are the page's structure
+   * rather than parts of a dialog. Stacked in a `FormSections`.
+   *
+   * A settings page of five sections with their heads over their fields read
+   * as one long column in which every head was the same distance from the
+   * fields above it as from its own. With the heads in a rail the page is a
+   * table of contents down the left and the inputs down the right, and the
+   * `hint` under a head has room to carry what the section currently *is* —
+   * the address it answers at, the certificate on disk — which is data under
+   * a title rather than a caption for it (§5).
+   */
+  aside?: boolean
   className?: string
   children: React.ReactNode
 }) {
+  if (aside) {
+    return (
+      <section
+        id={id}
+        className={cn(
+          "grid min-w-0 scroll-mt-6 gap-x-12 gap-y-4 py-8 first:pt-0 last:pb-0 lg:grid-cols-[15rem_minmax(0,1fr)]",
+          className,
+        )}
+      >
+        <div className="min-w-0 space-y-1.5">
+          <h3 className="text-title font-semibold tracking-tight">{title}</h3>
+          {hint && <div className="text-hint leading-relaxed text-muted-foreground">{hint}</div>}
+          {actions && <div className="flex flex-wrap items-center gap-1.5 pt-1">{actions}</div>}
+        </div>
+        <div className="max-w-3xl min-w-0 space-y-5">{children}</div>
+      </section>
+    )
+  }
   return (
     <section id={id} className={cn("min-w-0 space-y-3", className)}>
       <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-hairline pb-2">
@@ -171,6 +204,11 @@ export function FormSection({
       {children}
     </section>
   )
+}
+
+/** A run of `FormSection aside`s, a hairline between each. */
+export function FormSections({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("min-w-0 divide-y divide-hairline", className)} {...props} />
 }
 
 /**

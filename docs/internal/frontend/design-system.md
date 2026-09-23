@@ -89,9 +89,12 @@ taking a frame:
   (accounts, who can sign in, who is locked, the last sign-in), with its SSH-keys sheet a plain list
   of rows and a plain form, and the audit log's table under its filters, where a request's outcome
   is a `Status` dot and the code rather than a wash across the row; and
-  both of the dashboard's own pages — the update in flight and the version history on Settings,
-  and the two forms, the restart record and the switches (an `OptionList`) on Configuration, whose
-  install paths moved out of a framed drawer into a row of facts under the title; the Backups page —
+  both of the dashboard's own pages — on Version the identity line, the update in flight and the
+  history (a timeline: the version in a sticky column, a rail with a mark per release, the notes at
+  a readable measure), and on Configuration the stack (its checkout and three services as a
+  `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
+  as `FormSection aside`s whose heads sit in a rail — the framed things on those two pages are the
+  transcript console, which is a `Pane`, and the cards you pick; the Backups page —
   four readings, an attention list, the jobs as a plain table under a hairline and the coverage list
   under its filter chips, with a job's sheet built from a fact list and plain panels; and the three views on
   Packages — the installed and updates tables and the software search, under one underlined strip
@@ -326,6 +329,13 @@ schema-editing form is about to run, nearest the button that runs it.
 The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
 `space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
 beside the field that caused it.
+
+**A page that is a form puts its section heads in a rail.** `FormSection aside`, stacked in
+`FormSections`, sets the title (and the section's current state, as data — the address it answers
+at, the certificate on disk) in a 15rem column beside the fields from `lg`, with a hairline between
+sections. It exists for `/dashboard/configuration`, whose five sections with their heads over their
+fields read as one column in which a head was as far from the fields above it as from its own; a
+dialog's form keeps the stacked head.
 
 **A field and the controls that belong to it are one box.** `ui/input-group.tsx` — shadcn's
 `InputGroup`, re-sized onto this product's control ladder — holds an `InputGroupInput` with
@@ -573,6 +583,15 @@ above:
   for a link, a frame and a word: a reading that is happening now;
 - *once* — `Confetti` fires only when a release goes live in front of the reader, never on arrival.
 
+The dashboard's own restarts and upgrades use the same three and nothing new: `BorderBeam` runs
+around the transcript console and around the Restart or Rebuild card while that run is in flight,
+`TextShimmer` lights the stage it is at (`components/run-phases.tsx`, drawn with the release path's
+own `Segment`), and the transcript's new lines *arrive* — a poll's forty lines are let out a few a
+frame, each taking `animate-rise` once, so a live log reads line by line instead of jumping; scrolled
+up, searching or with reduced motion they are simply drawn. The version history's timeline took its
+layout from Aceternity's and Magic UI's timelines — the sticky label, the rail — and not their
+scroll-driven gradient beam, which is a motion this section does not have.
+
 Magic UI's `animated-circular-progress-bar` was tried beside the release path and removed: a ring
 saying "100%" next to a header saying "Ready" was the same fact twice, and the timeline now shows how
 far a run is by how much of the bar has coloured. Its `safari` device mock was evaluated for the
@@ -693,7 +712,11 @@ step, beside `Group`, which is what it is — rather than the block step beside 
 not. **And a `Notice` is for what the reader has to act on.** `/deploy/new`'s public address drew
 three: one saying HTTPS was ready, which repeated the field's own hint word for word; one saying a
 certificate would be issued, which nobody has to do anything about; and one saying automatic HTTPS
-needed attention, which is the only one of the three that asks for a decision. A state is a `Status`
+needed attention, which is the only one of the three that asks for a decision. The restart record on
+`/dashboard/configuration` had four more — amber "do not reload" while it ran, green "the dashboard
+has moved", amber "worth knowing", red "what went wrong" — and none asked for a decision either: the
+state is now the mark beside the headline, the guidance one line of hint, and the error the line of
+the transcript that failed, washed where it sits. A state is a `Status`
 beside the thing it is a state of; what will happen by itself is a line of hint; a tinted box is for
 the third case.
 
@@ -760,6 +783,13 @@ database connection as its engine — in the section title's switcher and in eve
 which are one `EngineCard` (`choice-card.tsx`) rather than three shapes that had already drifted.
 Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
 
+And the dashboard's own two pages draw what it is made of and reached through: the stack's three
+services as Caddy, Next.js and Go, its checkout as Compose, the certificate modes as Tailscale and
+Caddy (and a lock glyph for plain HTTP, which is no product), the trusted certificate's issuer as
+Let's Encrypt, and the repository it updates from as GitHub. Inside a line of text a tile is a box
+in the middle of a sentence, so `ProductGlyph` draws the artwork bare at the line's height — the
+GitHub mark before the repository's name, Let's Encrypt's before "through Tailscale".
+
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
@@ -823,6 +853,12 @@ The passes, in order. Each one is a diff you can review on its own.
    worst-first under a *Needs attention* rule. A page may drop this pass when it can name where each
    figure went and what now does the job the figures were doing; `app/(dashboard)/git/page.tsx`
    carries that in its doc comment, the way a surviving frame carries its sentence in pass 1.
+
+   The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
+   on a page you configure is best drawn beside the control that sets it. Version's Installed,
+   Latest and Checked became one identity line and the timeline's marks; Configuration's Answers
+   at, Certificate, Port and Two-factor went to the rail heads of the sections that set them and to
+   the proxy's row in the stack. Both pages' doc comments name where each went.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

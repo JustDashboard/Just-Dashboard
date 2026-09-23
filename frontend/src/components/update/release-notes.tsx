@@ -21,7 +21,7 @@ import type { ChangeKind, Release } from "@/lib/types"
  * fails the Go test suite before it can render as an unstyled grey row.
  */
 
-const KIND_STYLE: Record<ChangeKind, { label: string; className: string }> = {
+export const KIND_STYLE: Record<ChangeKind, { label: string; className: string }> = {
   added: { label: "New", className: "text-[var(--tag-green)]" },
   changed: { label: "Changed", className: "text-[var(--tag-blue)]" },
   fixed: { label: "Fixed", className: "text-[var(--tag-cyan)]" },
@@ -30,7 +30,7 @@ const KIND_STYLE: Record<ChangeKind, { label: string; className: string }> = {
   deprecated: { label: "Ageing", className: "text-[var(--tag-amber)]" },
 }
 
-function ChangeLabel({ kind }: { kind: ChangeKind }) {
+export function ChangeLabel({ kind }: { kind: ChangeKind }) {
   const style = KIND_STYLE[kind] ?? { label: kind, className: "text-muted-foreground" }
   return (
     <span
@@ -42,7 +42,7 @@ function ChangeLabel({ kind }: { kind: ChangeKind }) {
 }
 
 /** A calendar day as a person writes one. The value is YYYY-MM-DD, not a time. */
-function releaseDay(date: string): string {
+export function releaseDay(date: string): string {
   const parsed = new Date(`${date}T00:00:00Z`)
   if (Number.isNaN(parsed.getTime())) return date
   return parsed.toLocaleDateString(undefined, {

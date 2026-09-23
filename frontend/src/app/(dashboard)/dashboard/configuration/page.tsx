@@ -2,34 +2,41 @@
 
 import { useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { ChevronDown, Warning } from "@/components/icons"
+import { External, LockOpen, RotateClockwise, Warning, Wrench, type Icon } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
+import { calendarDate } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { DashboardSettings, TailscaleIdentity } from "@/lib/types"
+import type { DashboardConfigReport, DashboardSettings, TailscaleIdentity } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { useSelfConfig } from "@/hooks/use-self-config"
+import { configPhaseLabel, useSelfConfig } from "@/hooks/use-self-config"
 import { useConfirm } from "@/components/confirm-dialog"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { RestartProgress } from "@/components/config/restart-progress"
-import { Field, FieldRow, OptionList, OptionRow } from "@/components/form"
+import {
+  Disclosure,
+  Field,
+  FieldRow,
+  FormSection,
+  FormSections,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
 import { Page, PageHeader, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ProductGlyph, ProductLogo } from "@/components/product-logo"
+import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 
 /**
  * The dashboard's own configuration: where it listens, how it is trusted, who
- * may reach it, and the buttons that restart it.
+ * may reach it, and the two commands that restart it.
  *
  * Every setting here used to be an ssh session and a hand-edited .env, which is
  * fine until the thing you need to change is the port you would have to reach
@@ -37,34 +44,33 @@ import {
  * broken somewhere.
  *
  * Its first draft explained itself to death: every field carried a paragraph,
- * every state carried a banner, and the page that resulted was unreadable — you
- * could not tell at a glance what was configurable, what was merely being
- * described, or which of six boxes of prose applied to you. So the rule now is
- * that **the page shows state and controls; the prose is one line each, and the
- * reasoning lives behind the ⓘ next to the label**. Nothing was removed, it was
- * moved to where somebody who wants it can ask for it.
+ * every state carried a banner, and the page that resulted was unreadable. So
+ * the rule is that **the page shows state and controls; the prose is one line
+ * each, and the reasoning lives behind the ⓘ next to the label**.
  *
- * Its second draft then framed everything it had kept: two boxed panels, a
- * boxed run record, a boxed row of switches and two boxed drawers, on a page
- * whose neighbours had just stopped drawing boxes. The forms are plain now and
- * the two titles and the gap between them are the structure; the switches are
- * `OptionRow`s; the paths the install lives at are a row of facts under the
- * title, because they are what the page is rather than a setting on it.
+ * It is drawn in two parts. **The stack** is what the dashboard runs as — its
+ * three services, each as the product it is, and the checkout they are built
+ * from — beside the two commands that recreate it, which are the heaviest
+ * things on the page and are drawn as the two things you pick between rather
+ * than as two outline buttons in the header. The restart they start is watched
+ * under them. **The settings** are a form in five sections, each head in a
+ * rail with what the section currently is under it.
+ *
+ * **Four readings used to sit under the title** — Answers at, Certificate,
+ * Port, Two-factor — and §15 pass 2 is dropped here the way `/git` drops it,
+ * by naming where each went. The address and the URL it implies are the
+ * Address section's head, beside the field that sets them. The certificate's
+ * state is the Certificate section's head, with its issuer's mark, and the
+ * card of the mode that produced it is selected. The port is on the proxy's
+ * row in the stack, with the two loopback ports on the rows of the services
+ * that listen on them. Two-factor is the Access section's head and the switch
+ * under it. Each figure is now beside the control that changes it, which is
+ * what the tiles could not be.
  */
 export default function DashboardConfigurationPage() {
   const { can } = useAuth()
-  const {
-    report,
-    loading,
-    error,
-    restarting,
-    running,
-    apply,
-    restart,
-    issueCertificate,
-    dismiss,
-    refresh,
-  } = useSelfConfig()
+  const { report, loading, error, restarting, running, apply, restart, issueCertificate, dismiss } =
+    useSelfConfig()
   const { confirm, dialog } = useConfirm()
   // The unsaved changes are kept for the tab: the page lists them as a diff
   // with Apply beside it, so what was typed before a walk to another page is
@@ -87,7 +93,7 @@ export default function DashboardConfigurationPage() {
   const editable = Boolean(report?.supported) && admin && !running
 
   if ((loading && !report) || error) {
-    return <PageState eyebrow="System" title="Configuration" error={error ?? undefined} />
+    return <PageState eyebrow="Settings" title="Configuration" error={error ?? undefined} />
   }
   if (!report || !draft) return null
 
@@ -99,7 +105,6 @@ export default function DashboardConfigurationPage() {
   // the mode — the address is the useful half and it works either way — only on
   // what the option is allowed to promise.
   const tailnetIssues = tailnet.running && Boolean(tailnet.hostname) && tailnet.httpsEnabled
-  const onTailnetAddress = draft.tls === "tailscale" && draft.site === tailnet.hostname
   // Where this browser is talking to the dashboard, which is what decides
   // whether a change to loopback-only takes the page's own route away.
   const currentHost = typeof window === "undefined" ? "your-server" : window.location.hostname
@@ -225,106 +230,91 @@ export default function DashboardConfigurationPage() {
       },
     })
 
-  const notices = !report.supported || (report.drift?.length ?? 0) > 0
+  const commands = admin && report.supported
+  const cidrs = draft.allowedCidrs
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const features = [draft.terminalEnabled, draft.updateCheck].filter(Boolean).length
 
   return (
     <Page className="animate-rise">
       {dialog}
       <PageHeader
-        eyebrow="System"
+        eyebrow="Settings"
         title="Configuration"
-        actions={
-          <>
-            <Button variant="outline" size="sm" onClick={refresh}>
-              Refresh
-            </Button>
-            {admin && report.supported && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={running}
-                  onClick={() => startRestart(false)}
-                >
-                  Restart
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={running}
-                  onClick={() => startRestart(true)}
-                >
-                  Rebuild
-                </Button>
-              </>
-            )}
-          </>
-        }
+        actions={<ReadOnlyNote supported={report.supported} admin={admin} running={running} />}
       />
 
-      {/* Where this install lives. It was a drawer of four facts at the foot of
-          the page; the checkout, its compose file and its settings file are
-          what the page is about, so they are its first row — and the reason
-          the fields below are read-only, when they are, sits beside them. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-        {report.supported ? (
-          <>
-            <span className="min-w-0 truncate font-mono text-foreground">{report.dir}</span>
-            {report.compose && (
-              <>
-                <Dot />
-                <span className="min-w-0 truncate">
-                  compose{" "}
-                  <span className="font-mono text-foreground">
-                    {within(report.dir, report.compose)}
-                  </span>
-                </span>
-              </>
-            )}
-            {report.envPath && (
-              <>
-                <Dot />
-                <span className="min-w-0 truncate">
-                  settings{" "}
-                  <span className="font-mono text-foreground">
-                    {within(report.dir, report.envPath)}
-                  </span>
-                </span>
-              </>
-            )}
-          </>
-        ) : (
-          <span className="min-w-0 truncate">
-            settings read from <span className="font-mono text-foreground">.env</span>
-          </span>
-        )}
-        <ReadOnlyNote supported={report.supported} admin={admin} running={running} />
-      </div>
+      <Panel plain>
+        <PanelHeader
+          title="Stack"
+          actions={
+            running ? (
+              <Status tone="running" label={restarting ? "Restarting" : "Working"} />
+            ) : (
+              <Status tone="running" label="Running" />
+            )
+          }
+        />
+        <PanelBody className="space-y-5">
+          <div className="grid min-w-0 items-start gap-x-10 gap-y-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,34rem)]">
+            <Stack report={report} />
 
-      {/* What is true right now, in four figures. The certificate tile reads
-          the certificate on disk rather than the mode in the file: JD_TLS
-          =tailscale with nothing issued yet is served by Caddy's internal CA,
-          and calling that "trusted" would be the one word the padlock
-          disagrees with. */}
-      <StatGrid columns={4}>
-        <StatTile label="Answers at" value={report.settings.site} hint={report.endpoint} />
-        <StatTile
-          label="Certificate"
-          value={certLabel(report.settings.tls, report.certificate.issued)}
-          tone={certTone(report.settings.tls, report.certificate.issued)}
-          hint={certHint(report.settings.tls, report.certificate.issued)}
-        />
-        <StatTile
-          label="Port"
-          value={String(report.settings.port)}
-          hint={`frontend ${report.settings.frontendPort} · backend ${report.settings.backendPort}`}
-        />
-        <StatTile
-          label="Two-factor"
-          value={report.settings.require2fa ? "Required" : "Optional"}
-          hint={`session ${report.settings.sessionTtl} · idle ${report.settings.idleTtl}`}
-        />
-      </StatGrid>
+            {commands ? (
+              <ChoiceGrid columns={2} className="xl:grid-cols-1">
+                <Command
+                  title="Restart"
+                  verb="Restart the dashboard"
+                  description="Recreates every container on the settings already on disk."
+                  cost="seconds · sessions survive"
+                  mark={RotateClockwise}
+                  run={report.run}
+                  action="restart"
+                  running={running}
+                  onClick={() => startRestart(false)}
+                />
+                <Command
+                  title="Rebuild"
+                  verb="Rebuild and restart"
+                  description="Rebuilds every image from the checkout, then recreates the containers."
+                  cost="minutes · after editing the code"
+                  mark={Wrench}
+                  run={report.run}
+                  action="rebuild"
+                  running={running}
+                  onClick={() => startRestart(true)}
+                />
+              </ChoiceGrid>
+            ) : (
+              !report.supported && (
+                <Notice title="This install is configured by hand" icon={Warning}>
+                  {report.reason ?? "No compose project was found for this install."} The settings
+                  below are read from disk; change them in <code className="font-mono">.env</code>{" "}
+                  over ssh.
+                </Notice>
+              )
+            )}
+          </div>
+
+          {/* The file disagreeing with the running process — somebody edited
+              .env over ssh and never restarted. Said beside the command that
+              adopts it, as a reading, rather than in an amber box of its own. */}
+          {report.drift && report.drift.length > 0 && (
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+              <Status tone="warning" label=".env differs from what is running" />
+              {report.drift.map((change) => (
+                <span key={change.key} className="text-muted-foreground">
+                  {change.label}{" "}
+                  <span className="font-mono text-hint line-through">{change.from || "—"}</span> →{" "}
+                  <span className="font-mono text-hint text-foreground">{change.to || "—"}</span>
+                </span>
+              ))}
+              <span className="text-muted-foreground">Restart adopts these.</span>
+            </div>
+          )}
+        </PanelBody>
+      </Panel>
 
       {report.run && (
         <Panel plain className="animate-rise">
@@ -346,93 +336,68 @@ export default function DashboardConfigurationPage() {
         </Panel>
       )}
 
-      {notices && (
-        <div className="space-y-3">
-          {!report.supported && (
-            <Notice title="This install is configured by hand" icon={Warning}>
-              {report.reason ?? "No compose project was found for this install."} The settings
-              below are read from disk; change them in{" "}
-              <code className="font-mono">.env</code> over ssh.
-            </Notice>
-          )}
-
-          {report.drift && report.drift.length > 0 && (
-            <Notice title=".env has been edited since this dashboard started" tone="warning">
-              <p className="mb-1">Restarting adopts these. Nothing is lost by leaving them.</p>
-              <ul className="space-y-0.5">
-                {report.drift.map((change) => (
-                  <li key={change.key} className="font-mono text-hint">
-                    {change.label}: {change.from || "—"} → {change.to || "—"}
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          )}
-        </div>
-      )}
-
-      <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
-        <Panel plain>
-          <PanelHeader title="How it is reached" />
-          <PanelBody className="space-y-4">
-            <FieldRow>
-              <Field
-                label="Address"
-                htmlFor="cfg-site"
-                hint="What you type into the browser."
-                info="It is also the name on the certificate, so the address and the certificate can never drift apart."
-              >
-                <Input
-                  id="cfg-site"
-                  value={draft.site}
-                  disabled={!editable}
-                  onChange={(e) => set("site", e.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="Port"
-                htmlFor="cfg-port"
-                hint="The only port to remember."
-                info="Everything else in the stack listens on loopback behind the proxy, so this is the single number that has to be reachable."
-              >
-                <Input
-                  id="cfg-port"
-                  type="number"
-                  inputMode="numeric"
-                  value={draft.port}
-                  disabled={!editable}
-                  onChange={(e) => set("port", Number(e.target.value))}
-                />
-              </Field>
-
-              <Field
-                label="Certificate"
-                hint={certHint(draft.tls, tailnetIssues)}
-                info="Tailscale gets a real Let's Encrypt certificate for your MagicDNS name. Self-signed is Caddy's own CA — encrypted, but no browser knows the issuer. Plain HTTP is allowed only on localhost, where an SSH tunnel is the encryption."
-              >
-                <Select
-                  value={draft.tls}
-                  disabled={!editable}
-                  onValueChange={(value) => selectMode(value as DashboardSettings["tls"])}
+      <Panel plain>
+        <PanelHeader
+          title="Settings"
+          actions={report.envPath && <Tag mono>{within(report.dir, report.envPath)}</Tag>}
+        />
+        <PanelBody className="pt-8">
+          <FormSections>
+            <FormSection
+              aside
+              title="Address"
+              hint={
+                // The host is the field beside it, so it may truncate here;
+                // what the rail adds is that it answers, and on which port.
+                <span className="block space-y-1">
+                  <a
+                    href={report.endpoint}
+                    title={report.endpoint}
+                    className="flex min-w-0 items-center gap-1 rounded-sm font-mono text-foreground focus-ring transition-colors hover:text-brand"
+                  >
+                    <span className="truncate">{report.settings.site}</span>
+                    <External aria-hidden className="size-3 shrink-0" />
+                  </a>
+                  <span className="block">
+                    port {report.settings.port} over{" "}
+                    {report.settings.tls === "off" ? "plain HTTP" : "HTTPS"}
+                  </span>
+                </span>
+              }
+            >
+              <FieldRow>
+                <Field
+                  label="Address"
+                  htmlFor="cfg-site"
+                  hint="What you type into the browser."
+                  info="It is also the name on the certificate, so the address and the certificate can never drift apart."
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Disabled only with no tailnet to speak of. A tailnet that
-                        will not issue certificates yet is not a reason to refuse
-                        the address: the dashboard answers at the MagicDNS name
-                        with a self-signed certificate until the switch is
-                        flipped, and upgrades itself when it is. */}
-                    <SelectItem value="tailscale" disabled={!tailnet.running || !tailnet.hostname}>
-                      {tailnetIssues ? "Tailscale — trusted" : "Tailscale — self-signed for now"}
-                    </SelectItem>
-                    <SelectItem value="internal">Self-signed</SelectItem>
-                    <SelectItem value="off">Plain HTTP — localhost only</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+                  <Input
+                    id="cfg-site"
+                    value={draft.site}
+                    disabled={!editable}
+                    onChange={(e) => set("site", e.target.value)}
+                    className="font-mono text-body"
+                  />
+                </Field>
+
+                <Field
+                  label="Port"
+                  htmlFor="cfg-port"
+                  hint="The only port to remember."
+                  info="Everything else in the stack listens on loopback behind the proxy, so this is the single number that has to be reachable."
+                >
+                  <Input
+                    id="cfg-port"
+                    type="number"
+                    inputMode="numeric"
+                    value={draft.port}
+                    disabled={!editable}
+                    onChange={(e) => set("port", Number(e.target.value))}
+                    className="font-mono text-body"
+                  />
+                </Field>
+              </FieldRow>
 
               <Field
                 label="Listening interface"
@@ -446,115 +411,192 @@ export default function DashboardConfigurationPage() {
                   placeholder={draft.site}
                   disabled={!editable}
                   onChange={(e) => set("bind", e.target.value)}
+                  className="font-mono text-body"
                 />
               </Field>
-            </FieldRow>
 
-            {editable && (
-              <TailscaleNotice
-                tailnet={tailnet}
-                saved={saved!}
-                issued={report.certificate.issued}
-                onTailnetAddress={onTailnetAddress}
-                onUseTailnet={() => selectMode("tailscale")}
-                onIssue={issueCertificate}
-              />
-            )}
+              <Disclosure
+                quiet
+                summary="Internal ports"
+                facts={`frontend ${draft.frontendPort} · backend ${draft.backendPort}`}
+              >
+                <FieldRow>
+                  <Field label="Frontend port" htmlFor="cfg-frontend" hint="Next.js, on 127.0.0.1.">
+                    <Input
+                      id="cfg-frontend"
+                      type="number"
+                      inputMode="numeric"
+                      value={draft.frontendPort}
+                      disabled={!editable}
+                      onChange={(e) => set("frontendPort", Number(e.target.value))}
+                      className="font-mono text-body"
+                    />
+                  </Field>
+                  <Field
+                    label="Backend port"
+                    htmlFor="cfg-backend"
+                    hint="The Go API, on 127.0.0.1."
+                  >
+                    <Input
+                      id="cfg-backend"
+                      type="number"
+                      inputMode="numeric"
+                      value={draft.backendPort}
+                      disabled={!editable}
+                      onChange={(e) => set("backendPort", Number(e.target.value))}
+                      className="font-mono text-body"
+                    />
+                  </Field>
+                </FieldRow>
+              </Disclosure>
+            </FormSection>
 
-            <Disclosure label="Internal ports" hint="loopback only, reached by the proxy">
+            <FormSection aside title="Certificate" hint={<CertificateState report={report} />}>
+              <ChoiceGrid columns={3}>
+                {/* Disabled only with no tailnet to speak of. A tailnet that
+                    will not issue certificates yet is not a reason to refuse
+                    the address: the dashboard answers at the MagicDNS name
+                    with a self-signed certificate until the switch is flipped,
+                    and upgrades itself when it is. */}
+                <ChoiceCard
+                  verb="Use a Tailscale certificate"
+                  title="Tailscale"
+                  logo={<ProductLogo id="tailscale" size="sm" />}
+                  description={
+                    tailnetIssues
+                      ? "A real Let's Encrypt certificate for your MagicDNS name."
+                      : tailnet.running && tailnet.hostname
+                        ? "Self-signed until your tailnet issues certificates."
+                        : (tailnet.detail ?? "This machine is not on a tailnet.")
+                  }
+                  trailing={<TailnetReading tailnet={tailnet} />}
+                  selected={draft.tls === "tailscale"}
+                  disabled={!editable || !tailnet.running || !tailnet.hostname}
+                  onClick={() => selectMode("tailscale")}
+                />
+                <ChoiceCard
+                  verb="Use a self-signed certificate"
+                  title="Self-signed"
+                  logo={<ProductLogo id="caddy" size="sm" />}
+                  description="Caddy's own CA — encrypted, and browsers warn once."
+                  selected={draft.tls === "internal"}
+                  disabled={!editable}
+                  onClick={() => selectMode("internal")}
+                />
+                <ChoiceCard
+                  verb="Serve plain HTTP on localhost"
+                  title="Plain HTTP"
+                  logo={<ProductLogo size="sm" fallback={LockOpen} />}
+                  description="Localhost only — an SSH tunnel is the encryption."
+                  selected={draft.tls === "off"}
+                  disabled={!editable}
+                  onClick={() => selectMode("off")}
+                />
+              </ChoiceGrid>
+
+              {editable && (
+                <TailnetAction
+                  tailnet={tailnet}
+                  saved={saved!}
+                  mode={draft.tls}
+                  issued={report.certificate.issued}
+                  onIssue={issueCertificate}
+                />
+              )}
+            </FormSection>
+
+            <FormSection
+              aside
+              title="Access"
+              hint={
+                <>
+                  {cidrs.length} {cidrs.length === 1 ? "network" : "networks"} allowed · two-factor{" "}
+                  {draft.require2fa ? "required" : "optional"}
+                </>
+              }
+            >
+              <Field
+                label="Network allowlist"
+                htmlFor="cfg-cidrs"
+                hint="Checked before the login page. Keep 127.0.0.1/32."
+                info="The allowlist is enforced before authentication, so removing your own network does not give you an error page — it makes the dashboard stop existing for you. Loopback is the way back in over an SSH tunnel."
+              >
+                <Input
+                  id="cfg-cidrs"
+                  value={draft.allowedCidrs}
+                  disabled={!editable}
+                  onChange={(e) => set("allowedCidrs", e.target.value)}
+                  className="font-mono text-body"
+                />
+              </Field>
+
+              <OptionList>
+                <OptionRow
+                  title="Require two-factor"
+                  hint="Every account must enrol. An enrolled account is asked for its code either way."
+                  checked={draft.require2fa}
+                  disabled={!editable}
+                  onCheckedChange={(value) => set("require2fa", value)}
+                />
+              </OptionList>
+            </FormSection>
+
+            <FormSection
+              aside
+              title="Sessions"
+              hint={`a sign-in lasts ${draft.sessionTtl}, idle ones end after ${draft.idleTtl}`}
+            >
               <FieldRow>
-                <Field label="Frontend port" htmlFor="cfg-frontend" hint="Next.js, on 127.0.0.1.">
+                <Field
+                  label="Session lifetime"
+                  htmlFor="cfg-session"
+                  hint="How long a sign-in lasts, e.g. 12h."
+                >
                   <Input
-                    id="cfg-frontend"
-                    type="number"
-                    inputMode="numeric"
-                    value={draft.frontendPort}
+                    id="cfg-session"
+                    value={draft.sessionTtl}
                     disabled={!editable}
-                    onChange={(e) => set("frontendPort", Number(e.target.value))}
+                    onChange={(e) => set("sessionTtl", e.target.value)}
+                    className="font-mono text-body"
                   />
                 </Field>
-                <Field label="Backend port" htmlFor="cfg-backend" hint="The Go API, on 127.0.0.1.">
+                <Field
+                  label="Idle timeout"
+                  htmlFor="cfg-idle"
+                  hint="Unused sessions expire, e.g. 60m."
+                >
                   <Input
-                    id="cfg-backend"
-                    type="number"
-                    inputMode="numeric"
-                    value={draft.backendPort}
+                    id="cfg-idle"
+                    value={draft.idleTtl}
                     disabled={!editable}
-                    onChange={(e) => set("backendPort", Number(e.target.value))}
+                    onChange={(e) => set("idleTtl", e.target.value)}
+                    className="font-mono text-body"
                   />
                 </Field>
               </FieldRow>
-            </Disclosure>
-          </PanelBody>
-        </Panel>
+            </FormSection>
 
-        <Panel plain>
-          <PanelHeader title="Who may reach it" />
-          <PanelBody className="space-y-4">
-            <Field
-              label="Network allowlist"
-              htmlFor="cfg-cidrs"
-              hint="Checked before the login page. Keep 127.0.0.1/32."
-              info="The allowlist is enforced before authentication, so removing your own network does not give you an error page — it makes the dashboard stop existing for you. Loopback is the way back in over an SSH tunnel."
-            >
-              <Input
-                id="cfg-cidrs"
-                value={draft.allowedCidrs}
-                disabled={!editable}
-                onChange={(e) => set("allowedCidrs", e.target.value)}
-                className="font-mono text-body"
-              />
-            </Field>
-
-            <OptionList>
-              <OptionRow
-                title="Require two-factor"
-                hint="Every account must enrol. An enrolled account is asked for its code either way."
-                checked={draft.require2fa}
-                disabled={!editable}
-                onCheckedChange={(value) => set("require2fa", value)}
-              />
-              <OptionRow
-                title="Web terminal"
-                hint="A root shell in the browser. Off removes the routes, not just the page."
-                checked={draft.terminalEnabled}
-                disabled={!editable}
-                onCheckedChange={(value) => set("terminalEnabled", value)}
-              />
-              <OptionRow
-                title="Check for new versions"
-                hint="The only outbound request it makes."
-                checked={draft.updateCheck}
-                disabled={!editable}
-                onCheckedChange={(value) => set("updateCheck", value)}
-              />
-            </OptionList>
-
-            <FieldRow>
-              <Field
-                label="Session lifetime"
-                htmlFor="cfg-session"
-                hint="How long a sign-in lasts, e.g. 12h."
-              >
-                <Input
-                  id="cfg-session"
-                  value={draft.sessionTtl}
+            <FormSection aside title="Features" hint={`${features} of 2 on`}>
+              <OptionList>
+                <OptionRow
+                  title="Web terminal"
+                  hint="A root shell in the browser. Off removes the routes, not just the page."
+                  checked={draft.terminalEnabled}
                   disabled={!editable}
-                  onChange={(e) => set("sessionTtl", e.target.value)}
+                  onCheckedChange={(value) => set("terminalEnabled", value)}
                 />
-              </Field>
-              <Field label="Idle timeout" htmlFor="cfg-idle" hint="Unused sessions expire, e.g. 60m.">
-                <Input
-                  id="cfg-idle"
-                  value={draft.idleTtl}
+                <OptionRow
+                  title="Check for new versions"
+                  hint="The only outbound request it makes."
+                  checked={draft.updateCheck}
                   disabled={!editable}
-                  onChange={(e) => set("idleTtl", e.target.value)}
+                  onCheckedChange={(value) => set("updateCheck", value)}
                 />
-              </Field>
-            </FieldRow>
-          </PanelBody>
-        </Panel>
-      </div>
+              </OptionList>
+            </FormSection>
+          </FormSections>
+        </PanelBody>
+      </Panel>
 
       {/*
         The apply bar follows the reader instead of sitting at the bottom of one
@@ -586,8 +628,266 @@ export default function DashboardConfigurationPage() {
   )
 }
 
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
+/**
+ * What the dashboard runs as: the checkout and its compose file, then the
+ * three services, each drawn as the product it is and with the address it
+ * listens on. The proxy is the only one with a routable address; the other two
+ * are loopback, reached through it, which is why their ports are the fold
+ * under Address rather than fields beside the port that matters.
+ */
+function Stack({ report }: { report: DashboardConfigReport }) {
+  const s = report.settings
+  return (
+    <RowList>
+      <Row
+        leading={<ProductLogo id="docker-compose" size="sm" />}
+        title={
+          report.dir ? (
+            <span className="font-mono">{report.dir}</span>
+          ) : (
+            <span className="text-muted-foreground">No compose project</span>
+          )
+        }
+        subtitle={
+          report.supported ? (
+            <span className="flex min-w-0 flex-wrap gap-x-2 font-mono">
+              {report.compose && <span>{within(report.dir, report.compose)}</span>}
+              {report.envPath && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <span>{within(report.dir, report.envPath)}</span>
+                </>
+              )}
+            </span>
+          ) : (
+            <>
+              settings read from <span className="font-mono">.env</span>
+            </>
+          )
+        }
+      />
+      <Row
+        leading={<ProductLogo id="caddy" size="sm" />}
+        title={
+          <>
+            Proxy <span className="font-normal text-muted-foreground">· Caddy</span>
+          </>
+        }
+        subtitle={s.bind ? `listens on ${s.bind}` : `listens on ${s.site}`}
+        trailing={<Port value={`:${s.port}`} />}
+      />
+      <Row
+        leading={<ProductLogo id="nextjs" size="sm" />}
+        title={
+          <>
+            Frontend <span className="font-normal text-muted-foreground">· Next.js</span>
+          </>
+        }
+        subtitle="loopback, reached through the proxy"
+        trailing={<Port value={`127.0.0.1:${s.frontendPort}`} />}
+      />
+      <Row
+        leading={<ProductLogo id="go" size="sm" />}
+        title={
+          <>
+            Backend <span className="font-normal text-muted-foreground">· Go</span>
+          </>
+        }
+        subtitle="loopback, reached through the proxy"
+        trailing={<Port value={`127.0.0.1:${s.backendPort}`} />}
+      />
+    </RowList>
+  )
+}
+
+function Port({ value }: { value: string }) {
+  return <span className="numeric font-mono text-xs text-foreground">{value}</span>
+}
+
+/**
+ * One of the two commands, drawn as a choice between two ways of restarting —
+ * which is what the pair is — so each carries its consequence and its cost
+ * where two outline buttons in the header carried only a word each.
+ *
+ * While a restart is in flight both stop being pressable, and the one that is
+ * running says so: its edge carries the beam §11 gives work in progress, and
+ * its reading becomes the phase it is at.
+ */
+function Command({
+  title,
+  verb,
+  description,
+  cost,
+  mark,
+  run,
+  action,
+  running,
+  onClick,
+}: {
+  title: string
+  verb: string
+  description: string
+  cost: string
+  mark: Icon
+  run?: DashboardConfigReport["run"]
+  action: "restart" | "rebuild"
+  running: boolean
+  onClick: () => void
+}) {
+  // An apply is a restart too, and is drawn on the restart card.
+  const mine =
+    running && run && (run.action === action || (action === "restart" && run.action === "apply"))
+  return (
+    <ChoiceCard
+      verb={verb}
+      title={<span className="text-sm font-semibold tracking-tight">{title}</span>}
+      logo={
+        <ProductLogo size="sm" fallback={mark} className="[&_svg]:size-4.5 [&_svg]:text-brand" />
+      }
+      description={description}
+      trailing={
+        <span className="pt-1 text-hint text-muted-foreground">
+          {mine && run ? <TextShimmer>{configPhaseLabel(run)}</TextShimmer> : cost}
+        </span>
+      }
+      disabled={running}
+      className={mine ? "opacity-100" : undefined}
+      onClick={onClick}
+    >
+      {mine && (
+        <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
+          <BorderBeam size={80} duration={4} />
+        </span>
+      )}
+    </ChoiceCard>
+  )
+}
+
+/** The certificate on disk, as the Certificate section's head reads it. */
+function CertificateState({ report }: { report: DashboardConfigReport }) {
+  const { tls } = report.settings
+  const issued = report.certificate.issued
+  const expires = report.certificate.expires
+  if (tls === "tailscale" && issued) {
+    return (
+      <span className="block space-y-1">
+        <Status tone="running" label="Trusted" className="text-body" />
+        <span className="flex items-center gap-1.5">
+          <ProductGlyph id="lets-encrypt" />
+          Let&rsquo;s Encrypt, through Tailscale
+        </span>
+        <span className="block">
+          renews automatically{expires ? ` · expires ${calendarDate(expires)}` : ""}
+        </span>
+      </span>
+    )
+  }
+  return (
+    <span className="block space-y-1">
+      <Status
+        tone={tls === "off" ? "unknown" : "warning"}
+        label={certLabel(tls, issued)}
+        className="text-body"
+      />
+      <span className="block">{certHint(tls, issued)}</span>
+    </span>
+  )
+}
+
+/** What the tailnet can do for this machine, on the Tailscale card. */
+function TailnetReading({ tailnet }: { tailnet: TailscaleIdentity }) {
+  if (!tailnet.running || !tailnet.hostname) return null
+  return (
+    <span className="flex min-w-0 flex-col gap-1 pt-1">
+      <span className="truncate font-mono text-hint text-foreground">{tailnet.hostname}</span>
+      <Status
+        tone={tailnet.httpsEnabled ? "running" : "warning"}
+        label={tailnet.httpsEnabled ? "issues certificates" : "HTTPS off in your tailnet"}
+        className="text-hint"
+      />
+    </span>
+  )
+}
+
+/**
+ * The one thing about the tailnet the reader can act on from here, as a line
+ * and a button rather than a tinted banner: fetch a certificate the tailnet
+ * will now issue, or go and switch HTTPS on where only the tailnet's own admin
+ * page can.
+ */
+function TailnetAction({
+  tailnet,
+  saved,
+  mode,
+  issued,
+  onIssue,
+}: {
+  tailnet: TailscaleIdentity
+  saved: DashboardSettings
+  /** The mode the form is set to, which may not be saved yet. */
+  mode: DashboardSettings["tls"]
+  issued: boolean
+  onIssue: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  if (mode !== "tailscale" || !tailnet.running || !tailnet.hostname) return null
+
+  // The state this whole feature exists for, and the one that used to leave
+  // somebody staring at a browser warning: the tailnet issues certificates now,
+  // the dashboard is already configured for one, and it simply has not been
+  // fetched yet. The keeper would get there within a minute or two — but the
+  // person who just flipped the switch is here, so give them the button.
+  // Only for the saved mode: the backend issues for the configuration it is
+  // running, and refuses in any other.
+  if (tailnet.httpsEnabled && !issued && saved.tls === "tailscale") {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <ProductGlyph id="tailscale" />
+          Your tailnet issues certificates now; the dashboard fetches one every few minutes on its
+          own.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          pending={busy}
+          onClick={() => {
+            setBusy(true)
+            onIssue()
+              .then(() =>
+                notify.success("Certificate issued", {
+                  description: "Reload this page to see the padlock.",
+                }),
+              )
+              .catch((err) => notify.error("Could not issue the certificate", err))
+              .finally(() => setBusy(false))
+          }}
+        >
+          Get the certificate now
+        </Button>
+      </div>
+    )
+  }
+
+  if (!tailnet.httpsEnabled) {
+    return (
+      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <ProductGlyph id="tailscale" />
+        Turn HTTPS on at
+        <a
+          href="https://login.tailscale.com/admin/dns"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-sm text-foreground underline underline-offset-2 focus-ring"
+        >
+          login.tailscale.com/admin/dns
+          <External aria-hidden className="size-3" />
+        </a>
+        and the padlock arrives within ten minutes.
+      </p>
+    )
+  }
+  return null
 }
 
 /** A path inside the checkout, said relative to it; anywhere else, in full. */
@@ -596,7 +896,7 @@ function within(dir: string | undefined, path: string) {
   return path
 }
 
-/** Says why the fields are read-only, once, in the row of facts about the install. */
+/** Says why the fields are read-only, once, in the header. */
 function ReadOnlyNote({
   supported,
   admin,
@@ -622,120 +922,6 @@ function ReadOnlyNote({
   )
 }
 
-/**
- * What this machine's tailnet can do for it, in one sentence and one button.
- *
- * Three states are worth saying: no tailnet, a tailnet that will not issue
- * certificates yet (the common one, and the only fix is not on this machine),
- * and a tailnet that will while the dashboard is still on localhost.
- */
-function TailscaleNotice({
-  tailnet,
-  saved,
-  issued,
-  onTailnetAddress,
-  onUseTailnet,
-  onIssue,
-}: {
-  tailnet: TailscaleIdentity
-  saved: DashboardSettings
-  issued: boolean
-  onTailnetAddress: boolean
-  onUseTailnet: () => void
-  onIssue: () => Promise<void>
-}) {
-  // The state this whole feature exists for, and the one that used to leave
-  // somebody staring at a browser warning: the tailnet issues certificates now,
-  // the dashboard is already configured for one, and it simply has not been
-  // fetched yet. The keeper would get there within a minute or two — but the
-  // person who just flipped the switch is here, so give them the button.
-  if (tailnet.httpsEnabled && saved.tls === "tailscale" && !issued) {
-    return <PendingCertificate onIssue={onIssue} />
-  }
-
-  if (!tailnet.running || !tailnet.hostname) {
-    // Only worth saying where somebody might have expected it to work.
-    if (!tailnet.available) return null
-    return (
-      <Notice title="Tailscale is installed but not usable yet" icon={Warning}>
-        {tailnet.detail}
-      </Notice>
-    )
-  }
-
-  if (!tailnet.httpsEnabled) {
-    return (
-      <Notice title="Your tailnet does not issue certificates yet" tone="warning">
-        <p>
-          Turn HTTPS on at{" "}
-          <a
-            href="https://login.tailscale.com/admin/dns"
-            target="_blank"
-            rel="noreferrer"
-            className="underline underline-offset-2"
-          >
-            login.tailscale.com/admin/dns
-          </a>{" "}
-          and the padlock appears here within ten minutes. Until then this address works from every
-          device on your tailnet, with one browser warning.
-        </p>
-        {!onTailnetAddress && (
-          <Button className="mt-2" size="sm" variant="outline" onClick={onUseTailnet}>
-            Move the dashboard to {tailnet.hostname}
-          </Button>
-        )}
-      </Notice>
-    )
-  }
-
-  if (!onTailnetAddress) {
-    return (
-      <Notice title="A trusted certificate is available" tone="success">
-        <p>
-          Your tailnet issues certificates, so this dashboard can answer at{" "}
-          <code className="font-mono">{tailnet.hostname}</code> with no browser warning.
-        </p>
-        <Button className="mt-2" size="sm" variant="outline" onClick={onUseTailnet}>
-          Use it
-        </Button>
-      </Notice>
-    )
-  }
-  return null
-}
-
-function PendingCertificate({ onIssue }: { onIssue: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false)
-  return (
-    <Notice title="The trusted certificate has not been fetched yet" tone="warning">
-      <p>
-        Your tailnet issues certificates now, so this address can lose its browser warning. The
-        dashboard checks on its own every minute or two — or get it now, which takes a few seconds
-        and blips the proxy while it reloads.
-      </p>
-      <Button
-        className="mt-2"
-        size="sm"
-        variant="outline"
-        pending={busy}
-        onClick={() => {
-          setBusy(true)
-          onIssue()
-            .then(() =>
-              notify.success("Certificate issued", {
-                description: "Reload this page to see the padlock.",
-              }),
-            )
-            .catch((err) => notify.error("Could not issue the certificate", err))
-            .finally(() => setBusy(false))
-        }}
-      >
-        Get the certificate now
-      </Button>
-    </Notice>
-  )
-}
-
 /** The allowlist with the tailnet range added, unless it is already covered. */
 function withTailnet(list: string) {
   const entries = list
@@ -746,47 +932,15 @@ function withTailnet(list: string) {
   return ["100.64.0.0/10", ...entries].join(",")
 }
 
-/**
- * A line that opens onto the settings most operators never touch. No frame and
- * no ground: the same chevron-and-word a finished restart uses for its
- * transcript, so "there is more here" is one mark across the page.
- */
-function Disclosure({
-  label,
-  hint,
-  children,
-}: {
-  label: string
-  hint?: string
-  children: React.ReactNode
-}) {
-  return (
-    <details className="group min-w-0">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-        <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-        <span className="font-medium">{label}</span>
-        {hint && <span className="truncate text-hint">· {hint}</span>}
-      </summary>
-      <div className="pt-3">{children}</div>
-    </details>
-  )
-}
-
 function certLabel(tls: DashboardSettings["tls"], trusted: boolean) {
   switch (tls) {
     case "tailscale":
-      return trusted ? "Trusted" : "Self-signed"
+      return trusted ? "Trusted" : "Self-signed for now"
     case "off":
-      return "None"
+      return "No certificate"
     default:
       return "Self-signed"
   }
-}
-
-/** `trusted` is whether the Tailscale certificate is real yet — issued and on disk. */
-function certTone(tls: DashboardSettings["tls"], trusted: boolean) {
-  if (tls === "internal" || (tls === "tailscale" && !trusted)) return "warning" as const
-  return "success" as const
 }
 
 function certHint(tls: DashboardSettings["tls"], trusted: boolean) {

@@ -227,8 +227,20 @@ func (s *Store) AppendLog() (*os.File, error) {
 // the part that says what went wrong is the end of it.
 const maxLogTail = 64 * 1024
 
+// maxTranscript bounds what the log route hands back for a whole run. A
+// rebuild prints a few hundred kilobytes; the cap is there so a runaway build
+// cannot turn one request into a download of the data directory's disk.
+const maxTranscript = 8 << 20
+
 // Tail returns the last of the transcript, or "" when there is none.
-func (s *Store) Tail() string {
+func (s *Store) Tail() string { return s.tail(maxLogTail) }
+
+// Transcript returns the whole transcript, up to maxTranscript from the end.
+// The report carries only the Tail because it is polled every two seconds;
+// this is read when somebody asks to see the earlier output.
+func (s *Store) Transcript() string { return s.tail(maxTranscript) }
+
+func (s *Store) tail(limit int64) string {
 	f, err := os.Open(s.LogPath())
 	if err != nil {
 		return ""
@@ -239,8 +251,8 @@ func (s *Store) Tail() string {
 		return ""
 	}
 	var prefix string
-	if fi.Size() > maxLogTail {
-		if _, err := f.Seek(fi.Size()-maxLogTail, io.SeekStart); err != nil {
+	if fi.Size() > limit {
+		if _, err := f.Seek(fi.Size()-limit, io.SeekStart); err != nil {
 			return ""
 		}
 		prefix = "… earlier output trimmed …\n"

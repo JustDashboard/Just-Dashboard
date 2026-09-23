@@ -8,7 +8,11 @@ Most files come from homarr-labs/dashboard-icons
 License 2.0 — see LICENSE in this directory. Some are renamed after the
 product they are used for (seerr.svg is the collection's jellyseerr.svg), the
 raster ones — docker-compose.webp among them — were resized to 96px WebP, and
-gotify.svg had an empty Illustrator extension element removed.
+gotify.svg had an empty Illustrator extension element removed. github.svg,
+nextjs.svg and tailscale.svg are the collection's -light variants, drawn for a
+dark ground; lets-encrypt.svg is the collection's file with its navy #003a70
+lifted to #73a8e7, the same hue at the L 0.72 rung, so the padlock's body reads
+on a dark ground.
 
 jupyter.svg is from Simple Icons (https://simpleicons.org), CC0 1.0.
 

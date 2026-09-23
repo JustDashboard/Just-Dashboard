@@ -257,6 +257,13 @@ export const patch = <T>(
 export const del = <T>(path: string, opts: Omit<RequestOptions, "method"> = {}) =>
   api<T>(path, { ...opts, method: "DELETE" })
 
+/** A plain-text read — a transcript — through the same authenticated fetch and errors. */
+export async function getText(path: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(buildUrl(path), { credentials: "include", signal })
+  if (!res.ok) return readResponse<string>(res)
+  return res.text()
+}
+
 /** Absolute URL for a download or archive link the browser follows directly. */
 export function downloadUrl(path: string, query?: RequestOptions["query"]) {
   return buildUrl(path, query)

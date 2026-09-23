@@ -411,6 +411,13 @@ done by hand, and the UI refuses to fold it away.
   edited compose file is normal, so a local change survives unless it genuinely collides. And it **waits
   for the health URL to answer** before calling itself finished, since `compose up -d` returns as soon as
   containers start and a backend that starts then dies looks identical from there.
+- **The transcript is read two ways.** The report carries `Store.Tail()` — the last 64 KB, with a
+  `… earlier output trimmed …` marker when there is more — because it is polled every two seconds during a
+  run and a rebuild prints a few hundred kilobytes. `GET /api/v1/dashboard/update/log` answers
+  `Store.Transcript()`, the whole file up to 8 MiB from the end, as `text/plain` with `no-store`; it is
+  readable by the same every-role audience as the report that already carries its end. The console on
+  `/dashboard` reads it once when the tail says it was trimmed and extends it with each polled tail
+  (`frontend/src/lib/transcript.ts`).
 
 ### The dashboard's own settings
 
@@ -477,7 +484,9 @@ requests from overwriting the configuration needed for rollback.
   `JD_TLS` into the scheme and the `tls` directive: a Caddyfile cannot branch, and an installer that
   edited a tracked one would make every later `git pull` a merge conflict.
 - Routes: `GET/PUT /api/v1/dashboard/config`, `POST /api/v1/dashboard/restart`,
-  `DELETE /api/v1/dashboard/config/run`, all `system.admin`, the two mutations inside `s.destructive`.
+  `DELETE /api/v1/dashboard/config/run` and `GET /api/v1/dashboard/config/log` (the whole restart
+  transcript as `text/plain`, the same two reads the update transcript has), all `system.admin`, the two
+  mutations inside `s.destructive`.
 
 Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.
