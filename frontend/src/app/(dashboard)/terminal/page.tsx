@@ -71,9 +71,6 @@ export default function TerminalPage() {
     "terminal.windows",
     {},
   )
-  // Which finishes have been seen, keyed by session or `session/window` (see
-  // `useFinished`); held here only to be pruned with the sessions.
-  const [viewed, setViewed] = useViewState<Record<string, number>>("terminal.viewed", {})
   // What each visited window's socket last said it was doing — newer than any
   // poll, and dropped when the socket closes so the polled fields take over.
   const [activity, setActivity] = useState<Record<string, TerminalActivity>>({})
@@ -114,12 +111,6 @@ export default function TerminalPage() {
       if (Object.keys(rememberedWindows).some((id) => !live.has(id))) {
         setRememberedWindows((windows) =>
           Object.fromEntries(Object.entries(windows).filter(([id]) => live.has(id))),
-        )
-      }
-      const owner = (key: string) => key.split("/")[0]
-      if (Object.keys(viewed).some((key) => !live.has(owner(key)))) {
-        setViewed((seen) =>
-          Object.fromEntries(Object.entries(seen).filter(([key]) => live.has(owner(key)))),
         )
       }
     }
@@ -472,7 +463,6 @@ export default function TerminalPage() {
       />
       {active ? (
         <WindowStrip
-          sessionId={active}
           windows={windowList}
           activeId={activeWindow?.id ?? null}
           activity={activity}

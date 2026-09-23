@@ -40,10 +40,10 @@ import (
 // prompt, holds the terminal for hours while doing nothing; `ls` holds it for
 // three milliseconds. So a job is announced only once it has lasted a second,
 // and it is *working* only while something is actually happening — output
-// arriving for a second or more and still arriving, or CPU being burned by a
-// job that prints nothing — which is exactly when an agent animates its own
-// title glyph. When that stops, the window is marked finished until somebody
-// looks at it.
+// arriving steadily for a second or more and still arriving, or CPU being
+// burned by a job that prints nothing, for longer than a spike — which is
+// exactly when an agent animates its own title glyph. An agent at its prompt
+// still repaints now and then, and one burst is not a run.
 
 // Activity is the answer, as sent to browsers and listed by the API.
 type Activity struct {
@@ -58,12 +58,11 @@ type Activity struct {
 	// typed, as far as its argument vector reveals it.
 	Process string `json:"process,omitempty"`
 	// Working is true while the job is doing something: output has been
-	// arriving for sustain and is still arriving, or the job is using CPU.
+	// arriving steadily for sustain and is still arriving, or the job has used
+	// CPU across two readings running.
 	Working bool `json:"working"`
 	// FinishedAt is when the last stretch of work ended, in milliseconds since
-	// the epoch, kept until work starts again. The browser decides how long to
-	// show it — a moment for the window on screen, until it is looked at for
-	// one that is not.
+	// the epoch, kept until work starts again.
 	FinishedAt int64 `json:"finishedAt,omitempty"`
 }
 
@@ -82,11 +81,15 @@ const (
 	// takes the terminal for a few milliseconds; a tab that switched its name
 	// for every one of those would flicker all day.
 	holdOff = time.Second
-	// sustain is how long output must have been arriving before it counts as
-	// work, and quietAfter how long a pause ends it. The first is longer than
-	// anything a keystroke provokes; the second is shorter than a person's
-	// patience but longer than the gaps in a build's log.
+	// sustain is how long output must keep arriving before it counts as work,
+	// with no pause in it longer than runGap, and quietAfter how long a pause
+	// ends work once it has begun. The first is longer than anything a
+	// keystroke provokes; runGap is shorter than the pause between an idle
+	// agent's odd redraws — a focus change, a resize — and longer than the
+	// frames of its spinner; quietAfter is shorter than a person's patience but
+	// longer than the gaps in a build's log.
 	sustain    = time.Second
+	runGap     = time.Second
 	quietAfter = 2500 * time.Millisecond
 	// echoWindow is how long after a keystroke output is taken to be its echo.
 	// An editor, or an agent redrawing its input line as you type, produces a
@@ -110,11 +113,14 @@ type jobState struct {
 }
 
 // cpuSample is the job's CPU time at one look, so the next look can take the
-// difference; working is what that difference last said.
+// difference. over is whether that difference crossed cpuWorking, and working
+// whether it did twice running: one reading over is a spike — a garbage
+// collection, a status-line script, an idle agent's timer — and two is a job.
 type cpuSample struct {
 	group   int
 	at      time.Time
 	ticks   int64
+	over    bool
 	working bool
 }
 
@@ -130,7 +136,10 @@ func (s *Session) noteOutput(chunk []byte) {
 	now := time.Now()
 	s.mu.Lock()
 	if now.Sub(s.lastInput) > echoWindow {
-		if now.Sub(s.lastOutput) > quietAfter {
+		// A run of output starts over after any pause longer than runGap
+		// until it has become work; once it has, only quietAfter ends it.
+		gap := now.Sub(s.lastOutput)
+		if gap > quietAfter || (!s.activity.Working && gap > runGap) {
 			s.activeSince = now
 		}
 		s.lastOutput = now
@@ -198,11 +207,15 @@ func (s *Session) Activity() Activity {
 		cpu = s.cpu.working
 	default:
 		elapsed := now.Sub(s.cpu.at).Seconds()
-		cpu = float64(ticks-s.cpu.ticks)/userHZ/elapsed >= cpuWorking
-		s.cpu = cpuSample{group: fg, at: now, ticks: ticks, working: cpu}
+		over := float64(ticks-s.cpu.ticks)/userHZ/elapsed >= cpuWorking
+		cpu = over && s.cpu.over
+		s.cpu = cpuSample{group: fg, at: now, ticks: ticks, over: over, working: cpu}
 	}
+	// The run has to have lasted, not merely to have begun a second ago: one
+	// burst followed by silence is a redraw, and measuring from now counted
+	// it as a second and a half of work.
 	output := busy && !s.lastOutput.IsZero() &&
-		now.Sub(s.lastOutput) <= quietAfter && now.Sub(s.activeSince) >= sustain
+		now.Sub(s.lastOutput) <= quietAfter && s.lastOutput.Sub(s.activeSince) >= sustain
 	working := busy && (output || cpu)
 
 	next := Activity{Title: title, Busy: busy, Process: process, Working: working}

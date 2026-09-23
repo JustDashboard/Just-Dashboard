@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Cross, Pencil, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalWindow as Window } from "@/lib/types"
-import { useFinished, windowActivity, windowLabel, windowProgram } from "@/lib/terminal-activity"
+import { windowActivity, windowLabel, windowProgram } from "@/lib/terminal-activity"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { IconAction, rowReveal } from "@/components/icon-action"
@@ -12,7 +12,6 @@ import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 
 /** Compact direct-PTY windows for the terminal title bar. */
 export function WindowStrip({
-  sessionId,
   windows,
   activeId,
   activity,
@@ -23,8 +22,6 @@ export function WindowStrip({
   onClose,
   onReorder,
 }: {
-  /** The session the windows belong to, which keys what has been seen. */
-  sessionId: string
   windows: Window[]
   activeId: string | null
   /** The state each window's own socket last pushed, keyed by window id. */
@@ -58,7 +55,6 @@ export function WindowStrip({
         ) : (
           <WindowTab
             key={window.id}
-            sessionId={sessionId}
             window={window}
             live={activity[window.id]}
             disconnected={disconnected.has(window.id)}
@@ -89,7 +85,6 @@ export function WindowStrip({
 }
 
 function WindowTab({
-  sessionId,
   window,
   live,
   disconnected,
@@ -102,7 +97,6 @@ function WindowTab({
   onDrop,
   onDragEnd,
 }: {
-  sessionId: string
   window: Window
   live?: TerminalActivity
   disconnected: boolean
@@ -121,22 +115,18 @@ function WindowTab({
   }, [active])
   // The tab reads like a desktop terminal's title bar: the program's own
   // title while one runs, the directory at the prompt, and a name the operator
-  // typed over both. The dot in front says whether it is working, has just
-  // finished, is idle or has lost its connection — the reason to glance at a
-  // tab you are not in.
+  // typed over both. The dot in front says whether it is working, idle or has
+  // lost its connection — the reason to glance at a tab you are not in.
   const label = windowLabel(window, live)
   const state = windowActivity(window, live)
   const working = Boolean(state.working)
-  const finished = useFinished(`${sessionId}/${window.id}`, active, state.finishedAt)
   const hint = disconnected
     ? `${label} — disconnected`
     : working
       ? `${label} — working`
-      : finished
-        ? `${label} — finished`
-        : state.busy && state.process
-          ? `${label} — running ${state.process}`
-          : label
+      : state.busy && state.process
+        ? `${label} — running ${state.process}`
+        : label
   return (
     <div
       ref={ref}
@@ -145,7 +135,6 @@ function WindowTab({
       data-active={active}
       data-busy={state.busy || undefined}
       data-working={working || undefined}
-      data-finished={finished || undefined}
       data-disconnected={disconnected || undefined}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move"
@@ -169,7 +158,7 @@ function WindowTab({
         onClick={onSelect}
         onDoubleClick={onRename}
       >
-        <ActivityMark working={working} finished={finished} disconnected={disconnected} />
+        <ActivityMark working={working} disconnected={disconnected} />
         <ProgramMark process={windowProgram(window, live)} />
         <span className="truncate text-xs font-medium">{label}</span>
       </button>

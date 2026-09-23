@@ -180,12 +180,12 @@
         {
           "kind": "fixed",
           "text": "Every panel toggle says which side it opens and which way",
-          "detail": "The toggles for the navigation rail, the terminal's sessions and Files/Diff, the Files sidebar and details, the log sources and the database diagram's inspector were one three-column glyph whichever panel they moved. Each now draws a window with its panel marked off on its own side and a chevron pointing the way a press moves it. The terminal's three top strips are one height, so their rules meet as one line, and Files/Diff no longer carries a second copy of the toggle already in the terminal's strip."
+          "detail": "The toggles for the navigation rail, the terminal's sessions and Files/Diff, the Files sidebar and details, the log sources and the database diagram's inspector were one three-column glyph whichever panel they moved. Each now draws a window with a bar on its panel's side: solid while the panel is open, an empty outline while it is closed. The terminal's three top strips are one height, so their rules meet as one line, and Files/Diff no longer carries a second copy of the toggle already in the terminal's strip."
         },
         {
           "kind": "changed",
-          "text": "A terminal tab and session is one dot: working, finished, idle or disconnected",
-          "detail": "Window tabs and session rows carried a breathing dot while something worked and a check once it finished, with nothing otherwise. They now carry one dot whose colour is the state: green and breathing while working, green once finished until you have seen it, yellow when idle, and red when this browser's connection to the window dropped, until it reconnects."
+          "text": "A terminal tab and session is one steady dot: green working, orange idle, red disconnected",
+          "detail": "Window tabs and session rows carried a breathing dot while something worked and a check once it finished, with nothing otherwise. They now carry one dot that does not move: green while working, orange when idle, and red when this browser's connection to the window dropped, until it reconnects. An agent at its prompt no longer flickers between the two: a single redraw, on a focus change or a resize, and a single spike of CPU no longer count as work."
         },
         {
           "kind": "fixed",

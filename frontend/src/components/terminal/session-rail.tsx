@@ -15,7 +15,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalFolder, TerminalWorkspace } from "@/lib/types"
-import { sessionActivity, sessionLabel, sessionProgram, useFinished } from "@/lib/terminal-activity"
+import { sessionLabel, sessionProgram, sessionWorking } from "@/lib/terminal-activity"
 import { useViewState } from "@/lib/view-state"
 import { SearchInput } from "@/components/page"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
@@ -323,11 +323,10 @@ function SessionRow({
   // is what its current window is doing. The directory used to sit under the
   // title, but the title now carries it while the shell is at a prompt, and
   // while a program runs its name is the more useful line. The dot at the end
-  // says whether a window in here is working, has just finished, is idle or
-  // has lost its connection — the reason to look at a row you are not in.
+  // says whether a window in here is working, is idle or has lost its
+  // connection — the reason to look at a row you are not in.
   const label = sessionLabel(session, activity)
-  const { working, finishedAt } = sessionActivity(session, activity)
-  const finished = useFinished(session.id, active, finishedAt)
+  const working = sessionWorking(session, activity)
   const dropped = disconnected.has(session.id)
   if (renaming)
     return (
@@ -347,7 +346,6 @@ function SessionRow({
       data-session={session.id}
       data-active={active || undefined}
       data-working={working || undefined}
-      data-finished={finished || undefined}
       data-disconnected={dropped || undefined}
       className={cn(
         "group flex min-w-0 items-center gap-1 rounded-md py-2 pr-1 pl-3 transition-colors",
@@ -366,12 +364,7 @@ function SessionRow({
         >
           {label}
         </span>
-        <ActivityMark
-          working={working}
-          finished={finished}
-          disconnected={dropped}
-          className="pr-1"
-        />
+        <ActivityMark working={working} disconnected={dropped} className="pr-1" />
       </button>
       {/* Closing is the one thing done often enough to earn its own control,
           so it sits on the card rather than two clicks into the menu. The

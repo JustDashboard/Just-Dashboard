@@ -231,11 +231,12 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   `state` frame the moment it changes, which is what makes a tab's mark and title move with the
   shell rather than with the poll. The server side is in
   [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).
-- **The activity mark** (`activity-mark.tsx`) is one `StatusDot` whose colour is the window's state,
-  in this order: **red** when this browser's socket to the window has dropped, **green and
-  breathing** while it is *working*, **green and still** once that has finished, and **yellow** when
-  it is idle. There is no check: a dot for working and a check for finished were two marks, and a row
-  and a tab could show the two for the same moment. It is drawn on every window tab and, for the
+- **The activity mark** (`activity-mark.tsx`) is one still `StatusDot` whose colour is the window's
+  state, in this order: **red** when this browser's socket to the window has dropped, **green** while
+  it is *working*, and **orange** when it is idle. Nothing on it moves and there is no "finished"
+  state: a breathing dot while working and a green finish held for a while after made an agent at its
+  prompt, whose odd redraw the server used to read as work, cycle orange, green and back all day. It
+  is drawn on every window tab and, for the
   session, on its row in the rail; a row is red when any window of it that this browser attached has
   dropped. The mark's box is one fixed size, so a tab does not change width as its state changes.
   Working is the server's word for "output has been arriving for a second and still is, or the job is
@@ -243,13 +244,12 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   editor, Claude Code or Codex waiting for the next message — holds the terminal and is idle, because
   nothing is happening; that is exactly when an agent's own title glyph goes still, and the tab
   follows the same signal. Nothing is announced for a command over in a blink (`ls`), so the label
-  never flickers. Finished is a notification: `useFinished` keeps it on a tab or row you are not
-  looking at until you go there, and shows it for four seconds on the one you are, after which that
-  finish counts as seen and the dot turns idle (`terminal.viewed` in `view-state`, keyed by session
-  or `session/window`, pruned with the sessions). Disconnected is known only in the browser — to the
+  never flickers, and one redraw is not a run of work (see
+  [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal)).
+  Disconnected is known only in the browser — to the
   server the PTY is alive — so `page.tsx` sets it when a window's socket closes and clears it on the
   first `state` frame a reattached socket receives, which the server sends on every attach. Idle is
-  the resting state and is hidden from screen readers; the other three are named (`role="img"`), and
+  the resting state and is hidden from screen readers; the other two are named (`role="img"`), and
   the mark carries its state as `data-activity`.
 - **The page remembers where you were.** Which session was open, and within each session which
   window, live in `view-state` (`terminal.session`, `terminal.windows`) rather than in component
