@@ -6,24 +6,21 @@ import { ProductGlyph, programProduct } from "@/components/product-logo"
 
 /**
  * The mark beside a window tab or a session row: one dot, whose colour is the
- * state it is in. Red when this browser's connection to it has dropped, green
- * and breathing while something in it is working, green and still once that
- * has finished — until the finish has been seen — and yellow when it is idle,
- * which includes a program that is merely open: an editor, or an agent waiting
- * for its next message, holds the terminal and does nothing.
+ * state it is in. Green while something in it is working, orange while it is
+ * idle — which includes a program that is merely open: an editor, or an agent
+ * waiting for its next message, holds the terminal and does nothing — and red
+ * when this browser's connection to it has dropped.
  *
- * It used to be a breathing dot for working and a check for finished, with
- * nothing at all otherwise, so a tab said something only while it was busy —
- * and a row and a tab could carry the two different marks for the same moment.
+ * Nothing on it moves. It used to breathe while working and hold a green
+ * "finished" for a while after, and an agent sitting at its prompt, whose odd
+ * redraw read as a moment of work, cycled orange, green and back all day.
  */
 export function ActivityMark({
   working,
-  finished,
   disconnected,
   className,
 }: {
   working: boolean
-  finished: boolean
   disconnected: boolean
   className?: string
 }) {
@@ -31,11 +28,9 @@ export function ActivityMark({
     ? ["disconnected", "danger", "Disconnected"]
     : working
       ? ["working", "running", "Working"]
-      : finished
-        ? ["finished", "running", "Finished"]
-        : // Idle is the resting state, so a screen reader is not told it on
-          // every tab: the three that are news are named, as before.
-          ["idle", "warning", undefined]
+      : // Idle is the resting state, so a screen reader is not told it on
+        // every tab: the two that are news are named.
+        ["idle", "warning", undefined]
   return (
     <span
       role={label ? "img" : undefined}
@@ -44,7 +39,7 @@ export function ActivityMark({
       data-activity={state}
       className={cn("flex size-3 shrink-0 items-center justify-center", className)}
     >
-      <StatusDot tone={tone} live={working && !disconnected} />
+      <StatusDot tone={tone} />
     </span>
   )
 }

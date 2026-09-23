@@ -137,14 +137,19 @@ title, and what was last published stands until the shell is back.
 Holding the terminal is not working, and the difference is what the marks are for. A job is announced
 (`busy`) only once it has lasted a second (`holdOff`): `ls` holds the terminal for milliseconds, and a
 tab that switched its name for every one of those would flicker all day. `working` is true only while
-something is actually happening — output has been arriving for a second (`sustain`) and the last of it
-is less than 2.5 s old (`quietAfter`), or the job is using at least 5% of a core over a tick (its leader,
-its reaped children and its live descendants, from `/proc/<pid>/stat`). Output within 150 ms of a
+something is actually happening — output has kept arriving for a second (`sustain`), with no pause in
+it longer than a second (`runGap`) until it counts, and the last of it is less than 2.5 s old
+(`quietAfter`); or the job has used at least 5% of a core over two ticks running (its leader, its reaped
+children and its live descendants, from `/proc/<pid>/stat`). The run is measured from its first output
+to its last, not to now: measured to now, a single redraw from an agent at its prompt — on a focus
+change or a resize — counted as a second and a half of work, and one reading over the threshold (a
+garbage collection, a status-line script) as a tick of it, so an idle Claude Code flickered between
+idle and working all day. Output within 150 ms of a
 keystroke (`echoWindow`) is its echo, or an editor redrawing its input line, and does not count. An
 editor or an agent waiting at its prompt is therefore busy and not working; an agent streaming an
 answer, a build or a test run is working, and a compiler that prints nothing is caught by its CPU.
-`finishedAt` stamps the end of a stretch of work and is kept until work starts again; the browser
-decides how long to show it. The read loop observes at most every 100 ms during output and once more
+`finishedAt` stamps the end of a stretch of work and is kept until work starts again; the terminal page
+no longer draws it. The read loop observes at most every 100 ms during output and once more
 350 ms after it stops, because the echo of the Enter that starts a command arrives before the shell has
 handed over the terminal; while a job is in the foreground, or output has just gone quiet, a 500 ms tick
 keeps looking, so a silent job's CPU and the end of a run are noticed without output; the listing and

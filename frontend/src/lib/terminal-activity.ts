@@ -1,8 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
 import type { TerminalActivity, TerminalWindowSummary, TerminalWorkspace } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
 
 /**
  * What to call a window.
@@ -72,43 +70,13 @@ export function sessionLabel(
 }
 
 /**
- * Whether something in the session is working, and when the last thing in it
- * finished: the listing's answer for every window, made fresher by the
- * current window's own socket.
+ * Whether something in the session is working: the listing's answer for every
+ * window, made fresher by the current window's own socket.
  */
-export function sessionActivity(
+export function sessionWorking(
   session: TerminalWorkspace,
   activity: Record<string, TerminalActivity>,
-): { working: boolean; finishedAt: number } {
+): boolean {
   const live = session.current ? activity[session.current.id] : undefined
-  return {
-    working: Boolean(session.working) || Boolean(live?.working),
-    finishedAt: Math.max(session.finishedAt ?? 0, live?.finishedAt ?? 0),
-  }
-}
-
-/** How long the finished mark stays on the tab or row you are looking at. */
-export const FINISHED_CUE_MS = 4000
-
-/**
- * Whether to show that a window or session has finished working.
- *
- * The mark is a notification, and a notification is for the person who has
- * not seen it yet: on a tab you are not in it stays until you go there, the
- * way a browser tab keeps its badge. On the one you are looking at it shows for
- * a moment and then counts as seen, so the same finish is not announced again
- * on your next visit. "Seen" is kept in the browser with the rest of the
- * page's arrangement, keyed by session or `session/window`, and pruned with
- * the sessions it belongs to.
- */
-export function useFinished(key: string, active: boolean, finishedAt: number | undefined): boolean {
-  const [viewed, setViewed] = useViewState<Record<string, number>>("terminal.viewed", {})
-  const at = finishedAt ?? 0
-  const fresh = at > 0 && at > (viewed[key] ?? 0)
-  useEffect(() => {
-    if (!active || !fresh) return
-    const timer = setTimeout(() => setViewed((seen) => ({ ...seen, [key]: at })), FINISHED_CUE_MS)
-    return () => clearTimeout(timer)
-  }, [active, fresh, at, key, setViewed])
-  return fresh
+  return Boolean(session.working) || Boolean(live?.working)
 }

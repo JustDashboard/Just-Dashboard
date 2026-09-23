@@ -69,8 +69,8 @@ The Git workspace could commit, branch, merge and push, and everything past that
   - A restart's or an upgrade's transcript is the whole run in a console — every line numbered, each BuildKit step coloured by the service it builds, the line that failed washed where it sits — rather than the last 64 KB in a small box, and new lines arrive a few at a time instead of landing in one jump. Restart and Rebuild are the two cards beside the stack's three services, the run shows its stages, and the tinted banners around it are gone. Configuration is a form in five sections, each saying what it currently is; Version is one line about the install over the history, drawn as a timeline.
 - The rail's top level is twelve rows instead of seventeen
   - Metrics, Processes and Logs sit behind Monitoring, and Proxy & TLS, Packages, System users and the Audit log behind Server configuration under a new Advanced heading. A group opens its panel over the page you are on, the breadcrumb names every level, and the command palette lists every nested page so they stay reachable with the rail collapsed.
-- A terminal tab and session is one dot: working, finished, idle or disconnected
-  - Window tabs and session rows carried a breathing dot while something worked and a check once it finished, with nothing otherwise. They now carry one dot whose colour is the state: green and breathing while working, green once finished until you have seen it, yellow when idle, and red when this browser's connection to the window dropped, until it reconnects.
+- A terminal tab and session is one steady dot: green working, orange idle, red disconnected
+  - Window tabs and session rows carried a breathing dot while something worked and a check once it finished, with nothing otherwise. They now carry one dot that does not move: green while working, orange when idle, and red when this browser's connection to the window dropped, until it reconnects. An agent at its prompt no longer flickers between the two: a single redraw, on a focus change or a resize, and a single spike of CPU no longer count as work.
 
 ### Fixed
 
@@ -87,7 +87,7 @@ The Git workspace could commit, branch, merge and push, and everything past that
 - The terminal stays usable at narrow widths and on a phone
   - The git panel's commit row and repository strip no longer run past the column's edge, and below the large breakpoint the session rail and tools cover the terminal one at a time instead of squeezing it to one line.
 - Every panel toggle says which side it opens and which way
-  - The toggles for the navigation rail, the terminal's sessions and Files/Diff, the Files sidebar and details, the log sources and the database diagram's inspector were one three-column glyph whichever panel they moved. Each now draws a window with its panel marked off on its own side and a chevron pointing the way a press moves it. The terminal's three top strips are one height, so their rules meet as one line, and Files/Diff no longer carries a second copy of the toggle already in the terminal's strip.
+  - The toggles for the navigation rail, the terminal's sessions and Files/Diff, the Files sidebar and details, the log sources and the database diagram's inspector were one three-column glyph whichever panel they moved. Each now draws a window with a bar on its panel's side: solid while the panel is open, an empty outline while it is closed. The terminal's three top strips are one height, so their rules meet as one line, and Files/Diff no longer carries a second copy of the toggle already in the terminal's strip.
 - Installing or updating no longer runs out of memory on a 2 GB server
   - The image build ran the type-check in a second process alongside the compiler, which intermittently exceeded a small server's memory. The image build skips it; the application it emits is identical, and the developer's build still type-checks.
 

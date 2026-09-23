@@ -340,15 +340,16 @@ export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
 /* The side-panel toggles, drawn inline. They were Heroicons' `ViewColumns`,
    three equal columns: the same glyph for a left panel and a right one, shown
    or hidden, so a toggle at either end of a strip said nothing about which
-   panel it moved or which way. Each of these is a window with a rule marking
-   off the panel's side, and a chevron pointing the way pressing it moves the
-   panel: into the edge to put it away, out of it to bring it back. A caller
-   picks `Open` or `Close` from whether its panel is showing.
+   panel it moved. Each of these is a window with a bar inset on the panel's
+   side: solid while the panel shows, an empty outline of the same bar while
+   it is hidden. A caller picks `Close` (showing) or `Open` (hidden) from its
+   panel's state.
 
-   They are outlines, one pixel wide on a 16px grid, and render at 16px unless
-   a caller says otherwise: drawn on the 24-unit grid and shrunk to the 14px a
-   toolbar glyph usually is, every line fell between two pixels and the
-   chevron blurred into a smudge. */
+   A filled strip running the window's full height read as a heavy block, and
+   a chevron beside it as clutter, so the bar sits inside the frame and the
+   state is the fill alone. They are one pixel wide on a 16px grid and render
+   at 16px unless a caller says otherwise: shrunk from a 24-unit grid to 14px,
+   every line fell between two pixels. */
 function sidebarGlyph(side: "left" | "right", showing: boolean, name: string): Icon {
   function SidebarGlyph(
     { size = 16, title, className, ...props }: IconProps,
@@ -373,9 +374,12 @@ function sidebarGlyph(side: "left" | "right", showing: boolean, name: string): I
         {/* Drawn for the left and mirrored for the right, so the pair cannot
             drift apart. */}
         <g transform={side === "right" ? "matrix(-1 0 0 1 16 0)" : undefined}>
-          <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
-          <path d="M5.5 2.5v11" />
-          <path d={showing ? "M11 5.5 8.5 8 11 10.5" : "M9 5.5 11.5 8 9 10.5"} />
+          <rect x="1.5" y="2.5" width="13" height="11" rx="2.5" />
+          {showing ? (
+            <rect x="3" y="4" width="3" height="8" rx="1" fill="currentColor" stroke="none" />
+          ) : (
+            <rect x="3.5" y="4.5" width="2" height="7" rx="0.5" />
+          )}
         </g>
       </svg>
     )

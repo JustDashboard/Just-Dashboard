@@ -242,15 +242,17 @@ test("names windows after their work and remembers where you were", async ({ pag
   await expect(tabA).toHaveAttribute("data-working", "true")
   await expect(rowA).toHaveAttribute("data-working", "true")
   await expect(tabA.getByRole("img", { name: "Working" })).toBeVisible()
-  // It stops: the finish is marked on the tab and the row as a still green
-  // dot rather than a check, and the tab does not change width.
+  // Working is a still green dot: nothing on the mark moves.
+  await expect(tabA.locator("[data-activity=working] > span")).toHaveClass(/bg-success/)
+  await expect(tabA.locator("[data-activity] .animate-breathe")).toHaveCount(0)
+  // It stops: the tab and the row go straight back to idle — there is no
+  // "finished" state lingering in green — and the tab does not change width.
   const workingWidth = (await tabA.boundingBox())!.width
   state({ busy: true, process: "claude", title: "✳ Claude Code", finishedAt: Date.now() })
   await expect(tabA).not.toHaveAttribute("data-working", "true")
-  await expect(tabA).toHaveAttribute("data-finished", "true")
-  await expect(rowA).toHaveAttribute("data-finished", "true")
-  await expect(tabA.getByRole("img", { name: "Finished" })).toBeVisible()
-  await expect(tabA.locator("[data-activity=finished] > span")).toHaveClass(/bg-success/)
+  await expect(rowA).not.toHaveAttribute("data-working", "true")
+  await expect(tabA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
+  await expect(rowA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
   await expect(tabA.locator("[data-activity] svg")).toHaveCount(0)
   expect((await tabA.boundingBox())!.width).toBe(workingWidth)
   // Back at the prompt, which titles the window after its directory.

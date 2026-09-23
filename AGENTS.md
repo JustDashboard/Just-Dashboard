@@ -25,8 +25,13 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 - Match project style: Go uses standard formatting; TS/TSX uses Prettier with no semicolons, double
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.
 - Commit messages are imperative sentences describing intent, without conventional-commit prefixes.
-  Do not change repository or global Git configuration or user identity. Do not commit or push unless
-  the user asks.
+  Do not change repository or global Git configuration or user identity.
+- **Every change, however small, goes through its own branch and pull request.** Start a new branch
+  from the branch that is currently checked out (the active branch — a release branch such as
+  `patch/0.7.0`, not `main`, unless `main` is what is checked out), commit the change there, push it,
+  and open a pull request back into that active branch. This needs no separate go-ahead. **Merging the
+  pull request and deleting the branch do**: ask the operator every time, unless they said to merge in
+  the same request.
 - **Before every push, documentation review is mandatory.** Compare the complete diff with
   `docs/internal/`, `AGENTS.md`, `README.md`, and `CONTRIBUTING.md`. Update every document affected by
   changes to behavior, architecture, security, configuration, commands, tests, or workflow in the same
