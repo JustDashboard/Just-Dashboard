@@ -30,6 +30,9 @@ nodejs.svg, python.svg, vim.svg, neovim.svg, npm.svg, kubernetes.svg and
 terraform.svg keep their names; claude.svg is its claude-ai.svg and deno.svg
 its deno-light variant.
 
+terminal.svg is no product's mark and comes from nowhere: it is drawn for
+this project, as the mark of a terminal window whose program has none.
+
 bun.svg is from Simple Icons (CC0 1.0), filled with Bun's cream #fbf0df
 because Simple Icons ships the path alone and its brand hex is black.
 

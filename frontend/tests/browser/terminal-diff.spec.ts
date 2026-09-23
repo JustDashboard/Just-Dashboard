@@ -54,8 +54,11 @@ test("each session and window is drawn as the program it is running", async ({ p
   await expect(
     rail.filter({ hasText: "psql" }).locator('img[src="/logos/postgresql.svg"]'),
   ).toBeVisible()
-  // A shell at its prompt has no mark.
-  await expect(rail.filter({ hasText: "bash" }).locator("img")).toHaveCount(0)
+  // A shell at its prompt is drawn as a terminal, as is a program with no mark of its own.
+  await expect(
+    rail.filter({ hasText: "bash" }).locator('img[src="/logos/terminal.svg"]'),
+  ).toBeVisible()
   const tabs = page.getByLabel("Terminal windows")
   await expect(tabs.locator('img[src="/logos/neovim.svg"]')).toBeVisible()
+  await expect(tabs.locator('img[src="/logos/terminal.svg"]')).toHaveCount(1)
 })

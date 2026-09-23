@@ -217,7 +217,7 @@ export function processProduct(name: string) {
  * name the backend reads off the PTY. Editors, runtimes, package managers and
  * database shells are the ones a session spends its time in and the ones worth
  * telling apart in a rail of tabs; a shell at its prompt, `htop` or `tail` has
- * no mark and keeps the rail's glyph.
+ * none, and `ProgramMark` draws it as a terminal.
  */
 const PROGRAMS: Record<string, string> = {
   node: "nodejs",

@@ -280,8 +280,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   mark (`ProgramMark` in `activity-mark.tsx`, `programProduct` in `product-logo.tsx`: Claude, Neovim,
   Vim, Node, Bun, Python, Go, git, Docker, psql, redis-cli, kubectl and the rest), read off the
   foreground process the backend reports while a window is busy. A shell at its prompt, or a program
-  with no mark, leaves the slot empty: every row is a terminal, and a terminal glyph on each said
-  nothing.
+  with no mark of its own (`htop`, Codex, OpenCode), is drawn as a terminal
+  (`public/logos/terminal.svg`, drawn for this product): left empty, an agent with no logo read as a
+  window with nothing in it.
   The emulator toolbar keeps search, snippets, appearance and fullscreen visible, with copy, export,
   folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ececef"/>
+      <stop offset="1" stop-color="#9d9da6"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#303036"/>
+      <stop offset="1" stop-color="#0d0d10"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="7.5" fill="url(#bezel)"/>
+  <rect x="3.25" y="3.25" width="25.5" height="25.5" rx="5.25" fill="url(#screen)"/>
+  <g fill="none" stroke="#f5f5f7" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.75 11.25l5 4.5-5 4.5"/>
+    <path d="M16.25 20.25h7"/>
+  </g>
+</svg>
