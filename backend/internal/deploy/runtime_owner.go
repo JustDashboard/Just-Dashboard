@@ -80,6 +80,9 @@ type ContainerDiagnostics struct {
 	Error        string           `json:"error,omitempty"`
 	Lines        []RuntimeLogLine `json:"-"`
 	Truncated    bool             `json:"truncated,omitempty"`
+	// Listening is what a running container listens on, read from its own
+	// /proc/net/tcp.
+	Listening []ListeningSocket `json:"-"`
 }
 
 type RuntimeLogLine struct {
@@ -164,6 +167,9 @@ func (o *DockerRuntimeOwner) DiagnoseRuntime(ctx context.Context, runtime Releas
 			OOMKilled: detail.OOMKilled, RestartCount: detail.RestartNum, Error: detail.Error,
 		}
 		item.Lines, item.Truncated = o.tailContainerLogs(ctx, id)
+		if item.State == "running" {
+			item.Listening = o.listeningSockets(ctx, id)
+		}
 		result.Containers = append(result.Containers, item)
 	}
 	if len(result.Containers) == 0 && firstErr != nil {

@@ -1274,7 +1274,7 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	if evidence.Lines == 0 {
 		_ = stepLog(execution, "status", "The application printed no output before the check failed.")
 	}
-	if cause := applicationOutputCause(result.Containers); cause != nil {
+	if cause := runtimeOutputCause(result.Containers); cause != nil {
 		cause.Table = redact.sanitize(cause.Table)
 		evidence.Cause = cause
 		_ = stepLog(execution, "status", "Diagnosis: "+cause.sentence())
