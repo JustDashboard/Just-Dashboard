@@ -68,6 +68,9 @@ const TOPICS = [
 
 type TopicKey = (typeof TOPICS)[number]["key"]
 
+/** The backend's blueprint identifier: lowercase, digits and inner dashes. */
+const BLUEPRINT_ID = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/
+
 const TOPIC_OF: Record<string, TopicKey> = {
   actual: "productivity",
   docuseal: "productivity",
@@ -157,10 +160,12 @@ export function SourceTemplate({
   )
   const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
   const [topic, setTopic] = useSessionState<TopicKey | "all">("deploy.new.template.topic", "all")
+  // The id comes from the address and becomes a request path, so only a
+  // blueprint identifier's shape is taken from it.
   const [selectedId, setSelectedId] = useSessionState(
     "deploy.new.template.selected",
     "",
-    initialTemplate,
+    initialTemplate && BLUEPRINT_ID.test(initialTemplate) ? initialTemplate : undefined,
   )
   const [inputs, setInputs] = useSessionState<Record<string, string>>(
     `deploy.new.template.inputs.${selectedId}`,
