@@ -29,10 +29,13 @@ import {
   frameworkLabel,
   humanize,
 } from "@/components/deploy/vocabulary"
-import { withPackageManagerRunner } from "@/components/deploy/deployment-defaults"
+import {
+  goMainPackageList,
+  withPackageManagerRunner,
+} from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
-import { candidateAtRoot } from "@/components/deploy/new-project/draft"
+import { rootEditCandidate } from "@/components/deploy/new-project/draft"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 
@@ -99,22 +102,23 @@ export function StepProject({
   // A root typed after detection is judged by what detection found there: the
   // candidate at that root, building the plan's way, is picked the way one is
   // picked from the list, so its facts — not another directory's — are what
-  // preflight reads. Settled on a pause in the typing, not every keystroke.
-  const rootCandidateId = candidateAtRoot(
-    flow.detection,
-    configuration.build.rootDirectory,
-    configuration.build.method,
-  )?.id
+  // preflight reads. Settled on a pause in the typing, not every keystroke,
+  // and tried once per candidate: a pick that fails is not retried in a loop.
+  const rootPickId = rootEditCandidate(flow.detection, flow.candidate, configuration.build)?.id
   const pickCandidate = useRef(onPickCandidate)
   useEffect(() => {
     pickCandidate.current = onPickCandidate
   })
-  const pickedId = flow.candidate?.id
+  const rootPickTried = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (!rootCandidateId || rootCandidateId === pickedId || busy) return
-    const timer = setTimeout(() => pickCandidate.current(rootCandidateId), 600)
+    if (!rootPickId) rootPickTried.current = undefined
+    if (!rootPickId || rootPickTried.current === rootPickId || busy) return
+    const timer = setTimeout(() => {
+      rootPickTried.current = rootPickId
+      pickCandidate.current(rootPickId)
+    }, 600)
     return () => clearTimeout(timer)
-  }, [rootCandidateId, pickedId, busy])
+  }, [rootPickId, busy])
 
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const isImageSource = flow.source.kind === "image"
@@ -497,9 +501,7 @@ export function StepProject({
                   htmlFor="go-package"
                   hint={
                     (flow.candidate?.goMainPackages?.length ?? 0) > 1
-                      ? `This module has several commands: ${flow.candidate?.goMainPackages
-                          ?.map((main) => (main === "." ? "." : `./${main}`))
-                          .join(", ")}. Choose the one to build.`
+                      ? `This module has several commands: ${goMainPackageList(flow.candidate)}. Choose the one to build.`
                       : "Leave empty to build the module's only command."
                   }
                 >

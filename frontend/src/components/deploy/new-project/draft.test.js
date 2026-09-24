@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test"
 import { defaultConfiguration } from "../deployment-defaults"
 import {
-  candidateAtRoot,
   configurationForSave,
   firstDeployRevision,
   landingStep,
   mergeDetectedConfiguration,
   persistableFlow,
+  rootEditCandidate,
   withSuggestedHostname,
 } from "./draft"
 
@@ -262,32 +262,81 @@ test("persisting a flow excludes credentials from both live and server draft sna
 test("the first deployment builds the commit Review checked, for a remote repository only", () => {
   const revision = "c".repeat(40)
   const detection = { source: { kind: "git", revision }, candidates: [] }
+  const passed = [{ code: "source_moved", severity: "warning" }]
   expect(
-    firstDeployRevision({ kind: "git", mode: "git_url", url: "https://x/y.git" }, detection),
+    firstDeployRevision(
+      { kind: "git", mode: "git_url", url: "https://x/y.git" },
+      detection,
+      passed,
+    ),
   ).toBe(revision)
-  expect(firstDeployRevision({ kind: "git", mode: "connected_repository" }, detection)).toBe(
+  expect(firstDeployRevision({ kind: "git", mode: "connected_repository" }, detection, [])).toBe(
     revision,
   )
   // A local checkout, a Compose repository or an image cannot be pinned by
   // the run request, and a missing or partial revision is not a commit.
-  expect(firstDeployRevision({ kind: "local", mode: "local_checkout" }, detection)).toBeUndefined()
-  expect(firstDeployRevision({ kind: "compose", mode: "compose_git" }, detection)).toBeUndefined()
-  expect(firstDeployRevision({ kind: "git", mode: "git_url" }, undefined)).toBeUndefined()
+  expect(
+    firstDeployRevision({ kind: "local", mode: "local_checkout" }, detection, []),
+  ).toBeUndefined()
+  expect(
+    firstDeployRevision({ kind: "compose", mode: "compose_git" }, detection, []),
+  ).toBeUndefined()
+  expect(firstDeployRevision({ kind: "git", mode: "git_url" }, undefined, [])).toBeUndefined()
   expect(
     firstDeployRevision(
       { kind: "git", mode: "git_url" },
       { ...detection, source: { revision: "abc123" } },
+      [],
     ),
+  ).toBeUndefined()
+  // A check that could not read the commit passed nothing about it: the
+  // deployment follows the branch, as it did before anything was pinned.
+  expect(
+    firstDeployRevision({ kind: "git", mode: "git_url" }, detection, [
+      { code: "source_inspection_unavailable", severity: "unavailable" },
+    ]),
   ).toBeUndefined()
 })
 
-test("a root typed after detection finds the candidate detected there", () => {
-  const web = { id: "web", root: "apps/web", buildMethod: "recipe" }
+test("a root typed after detection picks the candidate detected there", () => {
+  const web = { id: "web", root: "apps/web", buildMethod: "recipe", recipe: "node" }
+  const api = { id: "api", root: "apps/api", buildMethod: "recipe", recipe: "python" }
   const docs = { id: "docs", root: "apps/docs", buildMethod: "static" }
-  const detection = { source: { kind: "git" }, candidates: [web, docs] }
-  expect(candidateAtRoot(detection, "apps/web", "recipe")).toBe(web)
-  expect(candidateAtRoot(detection, "/apps/web/", "recipe")).toBe(web)
-  expect(candidateAtRoot(detection, "apps/docs", "recipe")).toBeUndefined()
-  expect(candidateAtRoot(detection, "apps/api", "recipe")).toBeUndefined()
-  expect(candidateAtRoot(undefined, "apps/web", "recipe")).toBeUndefined()
+  const detection = { source: { kind: "git" }, candidates: [web, api, docs], selectedId: "web" }
+  const build = (rootDirectory, method = "recipe", recipe = "node") => ({
+    rootDirectory,
+    method,
+    recipe,
+  })
+  expect(rootEditCandidate(detection, web, build("apps/api"))).toBe(api)
+  expect(rootEditCandidate(detection, api, build("/apps/web/"))).toBe(web)
+  expect(rootEditCandidate(detection, web, build("apps/docs"))).toBeUndefined()
+  expect(rootEditCandidate(detection, web, build("apps/missing"))).toBeUndefined()
+  expect(rootEditCandidate(undefined, web, build("apps/api"))).toBeUndefined()
+  // Nothing picked means nothing was edited away from; the list decides.
+  expect(rootEditCandidate(detection, undefined, build("apps/web"))).toBeUndefined()
+})
+
+test("a candidate picked at its own root is never swapped for another sharing it", () => {
+  // A Django project whose asset package.json is a second candidate at the
+  // same root: detection selected Django, and reaching the screen, or the
+  // reader picking either one, must not flip the pick to the other.
+  const assets = { id: "assets", root: "", buildMethod: "recipe", recipe: "node" }
+  const django = { id: "django", root: "", buildMethod: "recipe", recipe: "python" }
+  const detection = { source: { kind: "git" }, candidates: [assets, django], selectedId: "django" }
+  expect(
+    rootEditCandidate(detection, django, { rootDirectory: "", method: "recipe", recipe: "python" }),
+  ).toBeUndefined()
+  expect(
+    rootEditCandidate(detection, assets, { rootDirectory: "", method: "recipe", recipe: "node" }),
+  ).toBeUndefined()
+  // Edited away and back, the plan's own recipe is preferred at that root.
+  const moved = { id: "cli", root: "cli", buildMethod: "recipe", recipe: "go" }
+  expect(
+    rootEditCandidate({ ...detection, candidates: [assets, django, moved] }, moved, {
+      rootDirectory: "",
+      method: "recipe",
+      recipe: "python",
+    }),
+  ).toBe(django)
 })

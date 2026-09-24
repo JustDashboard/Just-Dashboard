@@ -656,7 +656,12 @@ export function Configure({
         const run = await enqueueDeploy(
           commit.projectId,
           commit.environmentId,
-          firstDeployRevision(flow.source, flow.detection),
+          // The commit the check above read, which is the one it passed.
+          firstDeployRevision(
+            flow.source,
+            checkedDraft.draft.data.detection,
+            checkedDraft.preflight.findings,
+          ),
         )
         router.push(`/deploy/${commit.projectId}/runs/${run.id}`)
         return

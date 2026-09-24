@@ -338,8 +338,15 @@ only renderer/executor/validation authority for their feature.
   recipe prepares that directory; the configure form picks the candidate detection found at a typed
   root on its own), and a remote branch that has moved past the reviewed commit is `source_moved`
   (warning, "Inspect again" reads the newer commit keeping the chosen candidate). The first deployment
-  of a new remote Git project is pinned to the reviewed commit (`sourceRevision`); later ones follow the
-  branch.
+  of a new remote Git project is pinned to the commit the check before it read (`sourceRevision`) —
+  not when that check could not read it (`source_inspection_unavailable`), which leaves the branch
+  head as before; later ones follow the branch. Materializing a pinned commit the branch has moved past
+  takes it from the branch fetch, behind the new head, or by its id when the branch no longer contains
+  it, and names it with its own release ref in the mirror; the workspace is verified against that
+  commit, so a moved branch never stands in for it. The configure form's pick of the candidate at a
+  typed root happens only when the root or builder was edited away from the picked candidate (the
+  plan's recipe first at that root); a candidate picked at its own root is never swapped for another
+  sharing it.
 - Detection is refreshed for a project that exists. A source change (`PUT …/source`) saves what the
   inspection read — candidates, Compose analysis and Git requirements — as the new revision's
   evidence, rather than copying the old source's forward (a Compose-from-Git source moved to another
