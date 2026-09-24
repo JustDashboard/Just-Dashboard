@@ -8,6 +8,12 @@ func signature(code, detail, needle, pattern string) buildSignature {
 	return buildSignature{code: code, detail: detail, needle: needle, pattern: regexp.MustCompile(pattern)}
 }
 
+// exitSignature is a failure the exit code alone proves. It names no line,
+// since no line is the cause: the step's first is only where it began.
+func exitSignature(code string, exit int) buildSignature {
+	return buildSignature{code: code, exit: exit}
+}
+
 func (s buildSignature) exitCode(code int) buildSignature { s.exit = code; return s }
 
 func (s buildSignature) requiring(pattern string) buildSignature {
@@ -22,14 +28,31 @@ func (s buildSignature) collecting(pattern string) buildSignature {
 
 func (s buildSignature) naming(subject string) buildSignature { s.subject = subject; return s }
 
+func (s buildSignature) unlessLine(pattern string) buildSignature {
+	s.unless = regexp.MustCompile(pattern)
+	return s
+}
+
 // databaseErrorPattern is a database the build could not reach, in the words
 // of the drivers and ORMs that print it.
 const databaseErrorPattern = `ECONNREFUSED|P1001|Can't reach database server|getaddrinfo (?:ENOTFOUND|EAI_AGAIN)|Connection terminated unexpectedly|could not translate host name|connection to server at|Access denied for user|password authentication failed`
 
+// A shell's "X: not found" is printed for a command a script only probed for,
+// too — a config that runs `git rev-parse` inside a try — and the build carries
+// on. What says the missing command is why the step failed is the status a
+// shell gives it, 127, which npm and Yarn pass on, or a line reporting that
+// status from a wrapper that exits with a status of its own.
+const (
+	shellNotFoundPattern     = `(?:^|[\s/])(?:sh|bash|dash|ash)(?:: (?:line )?\d+)?: ([\w.+@-]+): (?:command )?not found`
+	toolchainNotFoundPattern = `(?:^|[\s/])(?:sh|bash|dash|ash)(?:: (?:line )?\d+)?: (make|g\+\+|gcc|cc|c\+\+|clang|cmake|python3?): (?:command )?not found`
+	exit127ReportPattern     = `(?:exit code|exited with code|error code)[: ]+127\b|exited \(127\)`
+)
+
 // buildSignatures is every build failure the dashboard can name, most
 // specific first: the first one to match a line wins. The failed step's own
-// lines are read first and the whole stream after them, so a signature here
-// must not match what an unrelated step prints on success.
+// lines are read first, then what the steps still unfinished and BuildKit's
+// closing replay printed, so a signature here must not match what a step
+// prints on its way to succeeding.
 var buildSignatures = []buildSignature{
 	// The builder itself, and the host under it.
 	signature("builder_missing", "", "docker", `'buildx' is not a docker command|unknown command:? "?(?:docker )?buildx|buildx component is missing`),
@@ -37,7 +60,7 @@ var buildSignatures = []buildSignature{
 	signature("build_out_of_memory", "node", "heap", `JavaScript heap out of memory|Reached heap limit|Ineffective mark-compacts near heap limit`),
 	signature("build_out_of_memory", "java", "OutOfMemoryError", `java\.lang\.OutOfMemoryError`),
 	signature("build_out_of_memory", "", "", `^Killed$|signal: killed|Cannot allocate memory|fatal error: runtime: out of memory|out of memory allocating`),
-	signature("build_out_of_memory", "", "", `.`).exitCode(137),
+	exitSignature("build_out_of_memory", 137),
 	signature("build_registry_rate_limited", "", "", `toomanyrequests|pull rate limit|429 Too Many Requests|rate limit exceeded|ERR_PNPM_FETCH_429|E429`),
 
 	// Lockfiles that no longer describe their manifest.
@@ -137,7 +160,8 @@ var buildSignatures = []buildSignature{
 	signature("build_system_library_missing", "", "OpenSSL", `Could not find (?:directory of )?OpenSSL installation`).naming("openssl"),
 	signature("build_native_toolchain_missing", "node-gyp", "gyp ERR!", `gyp ERR! find (Python)`),
 	signature("build_native_toolchain_missing", "node-gyp", "gyp ERR!", `gyp ERR! (?:stack Error|build error|configure error|not ok)`).naming("node-gyp"),
-	signature("build_native_toolchain_missing", "", "not found", `(?:^|[\s/])(?:sh|bash|dash|ash)(?:: (?:line )?\d+)?: (make|g\+\+|gcc|cc|c\+\+|clang|cmake|python3?): (?:command )?not found`),
+	signature("build_native_toolchain_missing", "", "not found", toolchainNotFoundPattern).exitCode(127),
+	signature("build_native_toolchain_missing", "", "not found", toolchainNotFoundPattern).requiring(exit127ReportPattern),
 	signature("build_native_toolchain_missing", "python", "command", `error: command '([\w./+-]*(?:gcc|g\+\+|cc|clang))' failed`),
 	signature("build_native_toolchain_missing", "python", "Rust", `(?i)can't find Rust compiler`).naming("rust"),
 	signature("build_native_toolchain_missing", "python", "wheel", `Failed building wheel for ([\w.-]+)|Failed to build installable wheels for some pyproject\.toml based projects \(([^)]+)\)|Failed to build `+"`"+`([\w.-]+)`),
@@ -193,6 +217,10 @@ var buildSignatures = []buildSignature{
 	signature("build_embed_source_missing", "go", "no matching files found", `pattern ([^:\s]+): no matching files found`),
 	signature("build_dev_dependency_in_production", "symfony", "Attempted to load class", `Attempted to load class "(\w+Bundle)"`),
 	signature("build_dev_dependency_in_production", "laravel", "Telescope", `Class "Laravel\\+Telescope`).naming("laravel/telescope"),
+	// Laravel's Wayfinder Vite plugin runs artisan while the assets build, and
+	// fails the build with it; Vite exits 1 whatever the shell said.
+	signature("build_command_not_found", "laravel", "wayfinder:generate", `php artisan wayfinder:generate`).
+		requiring(`\bphp: (?:command )?not found`).naming("php"),
 	signature("build_bundle_platform_missing", "ruby", "Your bundle only supports platforms", `Your bundle only supports platforms`).collecting(`"([\w.-]+)"`),
 	signature("build_wrong_root", "", "", "Couldn't find any `pages` or `app` directory|go: cannot find main module|no Go files in (\\S+)|could not find `Cargo\\.toml`|there is no POM in this directory|Could not read package\\.json|ENOENT: no such file or directory, open '(/[\\w./-]*package\\.json)'|MSB1003|failed to find a workspace root|error inheriting `[\\w-]+` from workspace root|Config file '([\\w./-]+)' does not exist|does not contain a Gradle build|Could not open input file: (artisan)"),
 
@@ -211,9 +239,11 @@ var buildSignatures = []buildSignature{
 	signature("build_compile_error", "", "", `Failed to compile\.|\[(vite:[\w-]+)\] |SyntaxError: |PHP (?:Parse|Fatal) error:`),
 
 	// Commands the image does not have.
+	// pip names the git a VCS requirement needs as it gives up on the install.
 	signature("build_command_not_found", "", "Cannot find command", `Cannot find command '(git)'`),
-	signature("build_command_not_found", "", "not found",
-		`(?:^|[\s/])(?:sh|bash|dash|ash)(?:: (?:line )?\d+)?: ([\w.+@-]+): (?:command )?not found|exec: "([\w./+-]+)": executable file not found in \$PATH|could not determine executable to run`),
+	signature("build_command_not_found", "", "not found", shellNotFoundPattern).exitCode(127),
+	signature("build_command_not_found", "", "not found", shellNotFoundPattern).requiring(exit127ReportPattern),
+	signature("build_command_not_found", "", "", `exec: "([\w./+-]+)": executable file not found in \$PATH|could not determine executable to run`),
 
 	// What the build was meant to produce and did not.
 	signature("build_output_missing", "", "", `must produce ([\w./\[\]-]+);|must write (?:an executable to )?([\w./-]+?)(?:;|$)|build produced no executable jar in ([\w./-]+?)/?$|failed to compute cache key: .*"(/[^"]+)": not found|failed to calculate checksum of ref [^"]*"(/[^"]+)": not found`),

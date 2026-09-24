@@ -26,7 +26,9 @@ type buildCase struct {
 	prepared    PreparedBuild
 	candidate   *causeCandidate
 	variables   []ReleaseVariableSnapshot
-	want        BuildCause
+	// lineless is a cause the exit code alone proves, which points at no line.
+	lineless bool
+	want     BuildCause
 }
 
 var (
@@ -173,7 +175,7 @@ func buildCases() []buildCase {
 				Fix: &CauseFix{Kind: fixAddVariable, Field: "variables.NODE_OPTIONS", Value: "--max-old-space-size=3072", Scope: "build"}},
 		},
 		{
-			name: "killed by the kernel", command: "cargo build --release --locked", exit: 137, build: rustBuild,
+			name: "killed by the kernel", command: "cargo build --release --locked", exit: 137, build: rustBuild, lineless: true,
 			lines: []string{"   Compiling serde v1.0.210"},
 			want:  BuildCause{Code: "build_out_of_memory", Phase: phaseBuild, Command: "cargo build --release --locked", ExitCode: 137},
 		},
@@ -452,6 +454,39 @@ func buildCases() []buildCase {
 			lines: []string{"sh: 1: bundle: not found"},
 			want:  BuildCause{Code: "build_command_not_found", Phase: phaseBuild, Command: "npm run build", ExitCode: 127, Subjects: []string{"bundle"}},
 		},
+		{
+			// next.config reads the commit with git inside a try and carries
+			// on; the build fails later for a reason of its own.
+			name: "a caught probe for git", command: "npm run build", exit: 1, build: nodeBuild,
+			lines: []string{"> app@1.0.0 build", "/bin/sh: git: not found", "it did not work"},
+			want:  BuildCause{Code: "build_failed", Phase: phaseBuild, Command: "npm run build", ExitCode: 1},
+		},
+		{
+			name: "a missing command reported by Turborepo", command: "npx turbo run build", exit: 1,
+			build: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npx turbo run build"},
+			lines: []string{"web:build: sh: 1: next: not found", "web:build:  ELIFECYCLE  Command failed with exit code 127.", "web#build: command (/app/apps/web) /usr/local/bin/pnpm run build exited (127)"},
+			want:  BuildCause{Code: "build_command_not_found", Phase: phaseBuild, Command: "npx turbo run build", ExitCode: 1, Subjects: []string{"next"}},
+		},
+		{
+			name: "make missing for a dependency's install script", command: "npm ci", exit: 127, build: nodeBuild,
+			lines: []string{"npm error path /app/node_modules/native-addon", "npm error command sh -c make", "npm error sh: make: not found", "npm error code 127"},
+			want:  BuildCause{Code: "build_native_toolchain_missing", Phase: phaseInstall, Command: "npm ci", ExitCode: 127, Subjects: []string{"make"}},
+		},
+		{
+			name: "Laravel Wayfinder without PHP", command: "npm run build", exit: 1,
+			build: BuildPlanConfig{Method: BuildRecipe, Recipe: "php", BuildCommand: "npm run build"},
+			lines: []string{
+				"error during build:",
+				"[@laravel/vite-plugin-wayfinder] Error generating types: Error: Command failed: php artisan wayfinder:generate --with-form",
+				"/bin/sh: php: not found",
+			},
+			want: BuildCause{Code: "build_command_not_found", Phase: phaseBuild, Command: "npm run build", ExitCode: 1, Detail: "laravel", Subjects: []string{"php"}},
+		},
+		{
+			name: "pip needs git for a VCS requirement", command: "pip install --no-cache-dir -r requirements.txt", exit: 1, build: pythonBuild,
+			lines: []string{"Collecting mylib@ git+https://github.com/org/mylib.git@v1.2", "  ERROR: Error [Errno 2] No such file or directory: 'git' while executing command git version", "ERROR: Cannot find command 'git' - do you have 'git' installed and in your PATH?"},
+			want:  BuildCause{Code: "build_command_not_found", Phase: phaseInstall, Command: "pip install --no-cache-dir -r requirements.txt", ExitCode: 1, Subjects: []string{"git"}},
+		},
 
 		// The network and the host.
 		{
@@ -546,8 +581,11 @@ func TestBuildFailureCauseNamesEveryKnownFailure(t *testing.T) {
 			if cause == nil {
 				t.Fatal("no cause")
 			}
-			if cause.LineSeq == 0 && test.want.Code != "build_failed" && test.want.Code != "build_dockerfile_invalid" && test.reason == "" {
+			if cause.LineSeq == 0 && !test.lineless && test.want.Code != "build_failed" && test.want.Code != "build_dockerfile_invalid" && test.reason == "" {
 				t.Fatalf("cause has no line: %+v", cause)
+			}
+			if cause.LineSeq != 0 && test.lineless {
+				t.Fatalf("an exit code points at line %d", cause.LineSeq)
 			}
 			got := *cause
 			got.LineSeq = 0
@@ -611,6 +649,63 @@ func TestBuildFailureCauseReadsOnlyWhatTheBuildPrinted(t *testing.T) {
 	}
 }
 
+// A step that finished printed nothing that explains a later step's failure,
+// however alarming it read: npm retries a request that hung up, a config probes
+// for git. Only the failed step, the steps still running and BuildKit's closing
+// replay are read when the failed step's own lines name nothing.
+func TestBuildFailureCauseIgnoresWhatAFinishedStepPrinted(t *testing.T) {
+	t.Parallel()
+	for name, passing := range map[string]string{
+		"a network retry":                 "npm warn network request to https://registry.npmjs.org/next failed, reason: socket hang up",
+		"a probe for git":                 "sh: git: not found",
+		"a cleanup warning naming ENOSPC": "npm warn cleanup Failed to remove some directories: ENOSPC",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, step := range []int{9, 0} {
+				collector := newBuildOutputCollector(nil)
+				for _, line := range []string{
+					"#8 [3/5] RUN npm ci",
+					"#8 4.2 " + passing,
+					"#8 9.9 added 312 packages in 9s",
+					"#8 DONE 10.1s",
+					"#9 [4/5] RUN npm run build",
+					"#9 0.4 > app@1.0.0 build",
+					"#9 1.2 it did not work",
+					`#9 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1`,
+					"------",
+					" > [4/5] RUN npm run build:",
+					"1.2 it did not work",
+					"------",
+				} {
+					collector.observe(BuildLog{Stream: "stderr", Text: line})
+				}
+				cause := buildFailureCause(&dockerx.BuildError{Step: step, Command: "npm run build", ExitCode: 1},
+					collector, causeContext{build: nodeBuild}, nil)
+				if cause.Code != "build_failed" {
+					t.Fatalf("step %d: a finished step's %q named the failure: %+v", step, passing, cause)
+				}
+			}
+		})
+	}
+	// A step still running when another failed stays readable.
+	collector := newBuildOutputCollector(nil)
+	for _, line := range []string{
+		"#8 [deps 2/3] RUN npm ci",
+		"#8 3.0 npm error code E401",
+		"#9 [web 3/4] RUN npm run build",
+		"#9 0.3 it did not work",
+		`#9 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1`,
+		"#8 CANCELED",
+	} {
+		collector.observe(BuildLog{Stream: "stderr", Text: line})
+	}
+	cause := buildFailureCause(&dockerx.BuildError{Step: 0, Command: "npm run build", ExitCode: 1}, collector, causeContext{build: nodeBuild}, nil)
+	if cause.Code != "build_registry_auth" {
+		t.Fatalf("an unfinished step's output was dropped: %+v", cause)
+	}
+}
+
 func TestBuildFailureCauseRedactsTheCommand(t *testing.T) {
 	t.Parallel()
 	collector := newBuildOutputCollector(nil)
@@ -650,6 +745,13 @@ func TestBuildFailureCauseNamesTimeoutsPullsAndComposeServices(t *testing.T) {
 		newBuildOutputCollector(nil), causeContext{build: BuildPlanConfig{Method: BuildImage}}, nil)
 	if pull == nil || pull.Code != "build_registry_rate_limited" || pull.Phase != phasePull {
 		t.Fatalf("pull = %+v", pull)
+	}
+	// The daemon's answer before any stream: dockerx names it a pull too.
+	refused := buildFailureCause(fmt.Errorf("pull image: %w", errors.New(`Error response from daemon: Head "https://registry.example.test/v2/team/app/manifests/sha256:1": unauthorized: authentication required`)),
+		newBuildOutputCollector(nil), causeContext{build: BuildPlanConfig{Method: BuildImage}}, nil)
+	if refused == nil || refused.Code != "build_registry_auth" || refused.Phase != phasePull ||
+		!strings.Contains(refused.sentence(), "source's registry credential") || strings.Contains(refused.sentence(), "NPM_TOKEN") {
+		t.Fatalf("refused pull = %+v: %q", refused, refused.sentence())
 	}
 	if cause := buildFailureCause(fmt.Errorf("%w: build variable X is unavailable", ErrArtifactMissing),
 		newBuildOutputCollector(nil), causeContext{build: nodeBuild}, nil); cause != nil {
@@ -702,6 +804,16 @@ func TestBuildOutputCollectorStaysBounded(t *testing.T) {
 	collector.observe(BuildLog{Stream: "stderr", Text: "#96 DONE 1.0s"})
 	if collector.vertices[96] != nil {
 		t.Fatal("a finished step's lines are still held")
+	}
+	bytes := 0
+	for _, line := range collector.stream.lines {
+		bytes += len(line.text)
+		if line.vertex == 96 {
+			t.Fatalf("the stream still holds the finished step's %q", line.text)
+		}
+	}
+	if bytes != collector.stream.bytes || len(collector.stream.held) > len(collector.stream.lines) {
+		t.Fatalf("stream accounting drifted: %d bytes counted, %d recorded", bytes, collector.stream.bytes)
 	}
 }
 

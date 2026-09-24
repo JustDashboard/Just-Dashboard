@@ -82,8 +82,8 @@ func (e *ComposeServiceError) Error() string {
 func (e *ComposeServiceError) Unwrap() error { return e.Err }
 
 // Bounds on what the collector keeps. A vertex ring holds the step that will
-// be diagnosed; the stream ring holds what surrounds it, including BuildKit's
-// closing replay, which carries no step number.
+// be diagnosed; the stream ring holds what surrounds it — every step not yet
+// finished and BuildKit's closing replay, which carries no step number.
 const (
 	collectedLineBytes  = 2048
 	vertexRingLines     = 400
@@ -102,6 +102,9 @@ const (
 type collectedLine struct {
 	text string
 	seq  int64
+	// vertex is the BuildKit step that printed the line, 0 for the closing
+	// replay and anything else printed outside a step.
+	vertex int
 }
 
 // lineRing keeps the newest lines within a line and byte budget and refuses a
@@ -139,6 +142,23 @@ func (r *lineRing) add(line collectedLine) {
 	}
 }
 
+// drop forgets what one step printed.
+func (r *lineRing) drop(vertex int) {
+	kept := r.lines[:0]
+	for _, line := range r.lines {
+		if line.vertex != vertex {
+			kept = append(kept, line)
+			continue
+		}
+		r.bytes -= len(line.text)
+		if r.held[line.text]--; r.held[line.text] <= 0 {
+			delete(r.held, line.text)
+		}
+	}
+	clear(r.lines[len(kept):])
+	r.lines = kept
+}
+
 var (
 	// "#10 1.303 npm error code EUSAGE": a step's own output.
 	buildKitOutputRE = regexp.MustCompile(`^#(\d+) \d+\.\d+ (.*)$`)
@@ -159,7 +179,8 @@ var (
 
 // buildOutputCollector reads a build's transcript as it is persisted, after
 // redaction, and keeps just enough of it to name a failure: a ring per open
-// BuildKit step and one over the whole stream. It is fed by one goroutine.
+// BuildKit step and one over the stream, less the steps that finished. It is
+// fed by one goroutine.
 type buildOutputCollector struct {
 	seq      func() int64
 	service  string
@@ -211,7 +232,7 @@ func (c *buildOutputCollector) observe(line BuildLog) {
 	if match := buildKitOutputRE.FindStringSubmatch(text); match != nil {
 		vertex, _ := strconv.Atoi(match[1])
 		c.vertex(vertex).add(collectedLine{text: match[2], seq: seq})
-		c.stream.add(collectedLine{text: match[2], seq: seq})
+		c.stream.add(collectedLine{text: match[2], seq: seq, vertex: vertex})
 		return
 	}
 	if match := buildKitErrorRE.FindStringSubmatch(text); match != nil {
@@ -221,7 +242,7 @@ func (c *buildOutputCollector) observe(line BuildLog) {
 		}
 		vertex, _ := strconv.Atoi(match[1])
 		c.vertex(vertex).add(collectedLine{text: match[2], seq: seq})
-		c.stream.add(collectedLine{text: match[2], seq: seq})
+		c.stream.add(collectedLine{text: match[2], seq: seq, vertex: vertex})
 		return
 	}
 	if buildKitVertexRE.MatchString(text) {
@@ -261,9 +282,13 @@ func (c *buildOutputCollector) vertex(vertex int) *lineRing {
 	return ring
 }
 
+// close forgets a step that finished, from the stream too: what a passing
+// step printed on its way — npm retrying a request, a caught probe for git —
+// is not why a later step failed.
 func (c *buildOutputCollector) close(vertex int) {
 	delete(c.vertices, vertex)
 	delete(c.names, vertex)
+	c.stream.drop(vertex)
 	for index, open := range c.order {
 		if open == vertex {
 			c.order = append(c.order[:index], c.order[index+1:]...)
@@ -302,7 +327,8 @@ type buildSignature struct {
 	detail string
 	// needle is a literal every matching line contains, checked before the
 	// pattern so a long transcript is not run through every expression.
-	needle  string
+	needle string
+	// pattern, when nil, leaves the exit code alone to decide.
 	pattern *regexp.Regexp
 	// exit, when set, is the exit code the failed step must have ended with.
 	exit int
@@ -313,6 +339,9 @@ type buildSignature struct {
 	subjects *regexp.Regexp
 	// subject, when set, is the fixed subject a match names.
 	subject string
+	// unless, when set, is what a line says to show it is no failure — a
+	// warning the program carried on after — and such a line never matches.
+	unless *regexp.Regexp
 }
 
 type buildMatch struct {
@@ -325,10 +354,16 @@ func (s buildSignature) match(lines []collectedLine, exitCode int) *buildMatch {
 	if s.exit != 0 && exitCode != s.exit {
 		return nil
 	}
+	if s.pattern == nil {
+		return &buildMatch{code: s.code, detail: s.detail}
+	}
 	first := -1
 	var subjects []string
 	for index, line := range lines {
 		if s.needle != "" && !strings.Contains(line.text, s.needle) {
+			continue
+		}
+		if s.unless != nil && s.unless.MatchString(line.text) {
 			continue
 		}
 		groups := s.pattern.FindStringSubmatch(line.text)

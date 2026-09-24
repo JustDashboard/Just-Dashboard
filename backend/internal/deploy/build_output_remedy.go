@@ -505,6 +505,12 @@ func (c *BuildCause) explain() (string, string) {
 		return orDefault(subjects, "a dependency") + " could not be found in its registry",
 			"check the name and version; a private package needs its registry token as a build variable scoped to install"
 	case "build_registry_auth":
+		if c.Phase == phasePull {
+			// A registry answers a private image it will not serve and an image
+			// that does not exist alike, so the sentence names both.
+			return "the registry refused it: the image does not exist, or it is private and no valid credential was given",
+				"check the image reference and, for a private image, the source's registry credential"
+		}
 		return "the package registry refused the build's credentials",
 			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
 	case "build_registry_rate_limited", "registry_rate_limited":
@@ -665,6 +671,9 @@ func (c *BuildCause) nativeToolchain(subject string) (string, string) {
 func (c *BuildCause) commandNotFound(subject string) (string, string) {
 	fix := c.Fix
 	switch {
+	case c.Detail == "laravel":
+		return "Laravel's Wayfinder Vite plugin runs `php artisan wayfinder:generate` while the assets build, and the image that builds them has no PHP",
+			"build with a Dockerfile whose asset stage has PHP and the Composer dependencies"
 	case fix != nil:
 		return "`" + subject + "` is not installed in the image this build runs on",
 			"run the command with the build's package manager: `" + fix.Value + "`"
