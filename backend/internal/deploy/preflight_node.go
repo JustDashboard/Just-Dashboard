@@ -38,9 +38,10 @@ func nodeInstallFindings(candidate *DetectedCandidate, configuration PlanConfigu
 		return findings
 	}
 	if candidate.Recipe == "php" {
-		return append(findings, finding("build_commands", PreflightPass,
+		findings = append(findings, finding("build_commands", PreflightPass,
 			"Front-end assets build commands", install.Install+" · "+install.BuildCommand,
 			"The PHP recipe's asset stage runs these before copying public/build into the image.", "", "deploy", "configuration.build.packageManager"))
+		return append(findings, registryCredentialFindings(candidate, configuration)...)
 	}
 	commands := []struct{ label, field, saved string }{
 		{"build", "configuration.build.buildCommand", build.BuildCommand},

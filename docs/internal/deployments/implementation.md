@@ -332,9 +332,9 @@ only renderer/executor/validation authority for their feature.
   closed because their layer history cannot be guaranteed.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
-  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is
-  mapped to the install step when a draft supplies it, and `registry_token_missing` names one that cannot
-  reach the install. Preparation logs its install decisions (an unfrozen install, a moved runner, a
+  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
+  alone and mapped to the install step when a draft supplies it (`Draft.withEnvironmentMetadata`), and
+  `registry_token_missing` names one that cannot reach the install, for the PHP asset stage too. Preparation logs its install decisions (an unfrozen install, a moved runner, a
   `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter
   selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
   behavior are defined in [the recipe contract](recipes.md), including the exact limits of live

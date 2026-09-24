@@ -180,11 +180,21 @@ func TestRegistryCredentialsReachTheInstall(t *testing.T) {
 		t.Fatalf("registry findings = %+v", findings)
 	}
 
-	// A value supplied with the draft is mapped to the install step.
-	draft.environment = map[string]string{"NODE_AUTH_TOKEN": "ghp_example", "NPM_TOKEN": "npm_example"}
+	// A value supplied with the draft is mapped to the install step, and
+	// only the build has it: the running application never reads it.
+	draft.environment = map[string]string{"NODE_AUTH_TOKEN": "ghp_example", "NPM_TOKEN": "npm_example", "DATABASE_URL": "postgres://db/app"}
 	mapped := draft.withEnvironmentMetadata(configuration)
 	if err := mapped.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	for _, planned := range mapped.Variables {
+		want := []string{"build"}
+		if planned.Name == "DATABASE_URL" {
+			want = []string{"build", "runtime"}
+		}
+		if got := slices.Sorted(slices.Values(planned.Scopes)); !slices.Equal(got, want) {
+			t.Fatalf("%s scopes = %v, want %v", planned.Name, planned.Scopes, want)
+		}
 	}
 	if !slices.Contains(mapped.Build.Secrets, BuildSecretConfig{Variable: "NODE_AUTH_TOKEN", Step: "install"}) ||
 		!slices.Contains(mapped.Build.Secrets, BuildSecretConfig{Variable: "NPM_TOKEN", Step: "install"}) {
@@ -196,7 +206,7 @@ func TestRegistryCredentialsReachTheInstall(t *testing.T) {
 	// And the install RUN, not the build RUN, mounts it.
 	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), writeNodeTree(t, map[string]string{
 		"package.json": `{"name":"app","scripts":{"start":"node index.js"},"dependencies":{"left-pad":"^1.3.0"}}`,
-	}), mapped.Build, false, "t:1", "NODE_AUTH_TOKEN", "NPM_TOKEN")
+	}), mapped.Build, false, "t:1", "NODE_AUTH_TOKEN", "NPM_TOKEN", "DATABASE_URL")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,4 +287,22 @@ func TestPHPAssetStageSharesTheNodeInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertDockerfile(t, prepared.DockerfilePreview, []string{"FROM node:22-alpine@sha256:", " AS assets\n", "RUN npm install --no-audit --no-fund\n", nodeBuildRun("npm run build\n")}, nil)
+
+	// The asset install authenticates a private registry the same way.
+	private := map[string]string{
+		"package.json":      `{"private":true,"scripts":{"build":"vite build"},"devDependencies":{"vite":"^7","@acme/ui":"^1.0.0"}}`,
+		"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"devDependencies":{"vite":"^7","@acme/ui":"^1.0.0"}}}}`,
+		".npmrc":            "@acme:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n",
+	}
+	for name, content := range laravel {
+		if name != "package.json" {
+			private[name] = content
+		}
+	}
+	result, candidate = detectNodeTree(t, private)
+	configuration = nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: "php", StartCommand: candidate.StartCommand})
+	if missing := findingByCode(preflightFindings(nodeDraft(result), configuration, dockerHost, false), "registry_token_missing"); candidate.Recipe != "php" ||
+		missing == nil || missing.Severity != PreflightBlocked || missing.Measured != "NODE_AUTH_TOKEN" {
+		t.Fatalf("asset stage registry credential = %+v", missing)
+	}
 }

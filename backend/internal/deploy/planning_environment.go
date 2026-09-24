@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"path"
 	"slices"
 	"sort"
 )
@@ -29,12 +30,37 @@ func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanCon
 		}
 	}
 	sort.Strings(names)
+	installOnly := d.installOnlyCredentials()
 	for _, name := range names {
+		scopes := []string{"runtime", "build"}
+		if installOnly[name] {
+			// Only the install reads a registry token, so the running
+			// application never receives it.
+			scopes = []string{"build"}
+		}
 		configuration.Variables = append(configuration.Variables, PlannedVariable{
-			Name: name, Sensitivity: "secret", Scopes: []string{"runtime", "build"},
+			Name: name, Sensitivity: "secret", Scopes: scopes,
 		})
 	}
 	return canonicalConfiguration(d.withInstallCredentials(configuration))
+}
+
+// installOnlyCredentials are the registry credentials detection found in a
+// package manager's configuration and nowhere the source reads at run time.
+func (d *Draft) installOnlyCredentials() map[string]bool {
+	names := map[string]bool{}
+	candidate := selectedDetectionCandidate(d.Data.Detection)
+	if candidate == nil {
+		return names
+	}
+	for _, detected := range candidate.Variables {
+		if detected.Step == "install" && len(detected.Sources) > 0 && !slices.ContainsFunc(detected.Sources, func(source string) bool {
+			return !slices.Contains(nodeRegistryConfigFiles, path.Base(source))
+		}) {
+			names[detected.Name] = true
+		}
+	}
+	return names
 }
 
 // withInstallCredentials maps each registry credential detection found in a

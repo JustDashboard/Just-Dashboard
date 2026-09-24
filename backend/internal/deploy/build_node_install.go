@@ -379,6 +379,10 @@ func readPNPMPolicy(workspace []byte, field map[string]json.RawMessage) nodePNPM
 	return policy
 }
 
+// nodeRegistryConfigFiles are the package-manager configurations a registry
+// credential is detected in; only the install reads them.
+var nodeRegistryConfigFiles = []string{".npmrc", ".yarnrc.yml", "bunfig.toml"}
+
 // nodeRegistryVariableRE finds ${NAME} (npm, Yarn) and $NAME (Bun) in a
 // package-manager configuration value.
 var (

@@ -241,10 +241,12 @@ lockfile's `resolved` is read as a Git source only when it is a URL (`git+…`, 
 `bunfig.toml` (`$NAME`) are read as data for the variables their credentials name. Each becomes a detected
 variable marked for the install step (`step: "install"`), required when a dependency's scope installs from
 that registry, or when Yarn would abort without it (Berry fails every install on an unset variable with no
-default). A value given in the draft is mapped to the install step automatically; preflight's
-`registry_token_missing` is blocked when a required credential cannot reach the install and a warning
-otherwise, and a literal token committed to a configuration file is `registry_token_committed` (the value
-is never echoed).
+default). A value given in the draft for a variable detected only in those files is declared with build
+scope alone — the running application never receives the token — and mapped to the install step
+automatically; preflight's `registry_token_missing` is blocked when a required credential cannot reach
+the install and a warning otherwise, for the Node recipe and the PHP recipe's asset stage alike, and a
+literal token committed to a configuration file is `registry_token_committed` (the value is never
+echoed).
 
 **Workspaces.** A package with no lockfile of its own installs from the nearest ancestor whose lockfile
 and `workspaces` (or `pnpm-workspace.yaml` `packages`) include it; a `pnpm-workspace.yaml` of settings
