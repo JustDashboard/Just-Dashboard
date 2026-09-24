@@ -22,6 +22,15 @@ type deploymentDependencyObserver struct {
 	backups *backups.Store
 	docker  *dockerx.Client
 	now     func() time.Time
+	// extensions reads which schema extensions a linked PostgreSQL offers,
+	// so preflight can refuse a pgvector schema on a server without it
+	// before the first migration fails.
+	extensions func(context.Context, int64) ([]string, error)
+}
+
+func (o *deploymentDependencyObserver) withExtensionProbe(probe func(context.Context, int64) ([]string, error)) *deploymentDependencyObserver {
+	o.extensions = probe
+	return o
 }
 
 func newDeploymentDependencyObserver(
@@ -92,6 +101,13 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 			}
 			observed.DeepLink = "/databases/connection?conn=" + strconv.FormatInt(id, 10)
 			observed.Available, observed.Status = true, name
+			if o.extensions != nil {
+				// Unknown is not a refusal: a server that cannot be asked
+				// leaves the finding to the first migration.
+				if available, err := o.extensions(ctx, id); err == nil {
+					observed.Extensions = available
+				}
+			}
 		case "docker_volume":
 			observed.DeepLink = "/docker/volumes/" + dependency.ResourceID
 			if o.docker == nil {

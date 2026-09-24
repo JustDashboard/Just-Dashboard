@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -335,18 +337,46 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return httpx.BadRequest("target must be host, container or public")
 	}
+	// A consumer that parses JDBC, ADO.NET or Rails' mysql2:// form gets the
+	// same connection in that shape, and Rails' further databases on the same
+	// server get their own names; the typed reference records both so the
+	// release resolves the same shape.
+	format, database := r.URL.Query().Get("format"), r.URL.Query().Get("database")
+	if !databaseURLFormatRE.MatchString(format) || (database != "" && !dbNameRe.MatchString(database)) {
+		return httpx.BadRequest("format must be url, jdbc, adonet or mysql2, and database a plain name")
+	}
+	if format != "" && format != "url" || database != "" {
+		dsn, err = deploy.ConnectionStringForFormat(dsn, format, database)
+		if err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.SetAudit(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver), "target": target})
+		map[string]any{"driver": string(conn.Driver), "target": target, "format": format})
 	reference := ""
 	if target == "container" {
 		reference = fmt.Sprintf("${{database.%d}}", conn.ID)
+		if format != "" && format != "url" || database != "" {
+			suffix := format
+			if suffix == "" {
+				suffix = "url"
+			}
+			if database != "" {
+				suffix += "." + database
+			}
+			reference = fmt.Sprintf("${{database.%d.%s}}", conn.ID, suffix)
+		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"id": conn.ID, "name": conn.Name, "driver": conn.Driver, "url": dsn, "reference": reference,
 	})
 	return nil
 }
+
+// databaseURLFormatRE is the closed set of connection shapes the URL route
+// renders; empty means the engine's own URL.
+var databaseURLFormatRE = regexp.MustCompile(`^(?:|url|jdbc|adonet|mysql2)$`)
 
 func (s *Server) publicDatabaseURL(conn *dbConnection, dsn string) (string, error) {
 	info, err := dbx.ParseDSN(conn.Driver, dsn)

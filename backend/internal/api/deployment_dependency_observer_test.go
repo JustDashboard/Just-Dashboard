@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -46,6 +49,43 @@ func TestDependencyDeepLinksOpenTheOwningPage(t *testing.T) {
 	}
 	if !observed[0].Available || observed[1].Available || !observed[2].Available || observed[3].Available {
 		t.Fatalf("availability = %#v", observed)
+	}
+}
+
+// A linked PostgreSQL reports the schema extensions it offers, so preflight
+// can refuse a pgvector schema before its first migration; a server that
+// cannot be asked reports nothing rather than an empty list.
+func TestDependencyObserverReportsDatabaseExtensions(t *testing.T) {
+	s := testServer(t)
+	sealed, err := s.Sealer.Seal("postgres://app:private@127.0.0.1:5432/orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Store.DB.Exec(`INSERT INTO db_connections(name,driver,dsn_enc,created_at) VALUES('vectors','postgres',?,1)`, sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionID, _ := res.LastInsertId()
+	answers := map[int64][]string{connectionID: {"postgis"}}
+	observer := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, nil).withExtensionProbe(
+		func(_ context.Context, id int64) ([]string, error) {
+			if available, ok := answers[id]; ok {
+				return available, nil
+			}
+			return nil, errors.New("unreachable")
+		})
+	observed, err := observer.ObserveDependencies(t.Context(), []deploy.PlannedDependency{
+		{Kind: "database", ResourceKind: "database_connection", ResourceID: fmt.Sprint(connectionID)},
+	})
+	if err != nil || len(observed) != 1 || !reflect.DeepEqual(observed[0].Extensions, []string{"postgis"}) {
+		t.Fatalf("observed = %#v, %v", observed, err)
+	}
+	delete(answers, connectionID)
+	observed, _ = observer.ObserveDependencies(t.Context(), []deploy.PlannedDependency{
+		{Kind: "database", ResourceKind: "database_connection", ResourceID: fmt.Sprint(connectionID)},
+	})
+	if observed[0].Extensions != nil || !observed[0].Available {
+		t.Fatalf("an unreachable probe = %#v", observed[0])
 	}
 }
 
