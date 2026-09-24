@@ -15,14 +15,14 @@ import (
 // variable's value, and each gives way to a value the build supplies.
 
 // nodeHeapProbe sizes V8's heap to the build host when the build starts:
-// three quarters of the memory then available, at most 4 GiB — V8's own
+// three quarters of the memory and swap then free, at most 4 GiB — V8's own
 // ceiling on a large host — and nothing below 256 MiB. V8's default is a
 // quarter of physical memory, which a Next.js build on a 2 GiB server
-// exhausts while memory is still free; below what is available, a build
-// that would outgrow the host stops with "JavaScript heap out of memory"
+// exhausts while memory is still free; below what the host can give, a
+// build that would outgrow it stops with "JavaScript heap out of memory"
 // instead of being killed by the kernel. It is computed inside the RUN, so
 // the Dockerfile is the same on every host.
-const nodeHeapProbe = `jd_heap=$(awk '/^MemAvailable:/ { m = int($2 * 3 / 4096); if (m > 4096) m = 4096; if (m >= 256) printf "--max-old-space-size=%d", m }' /proc/meminfo)`
+const nodeHeapProbe = `jd_heap=$(awk '/^(MemAvailable|SwapFree):/ { kb += $2 } END { m = int(kb * 3 / 4096); if (m > 4096) m = 4096; if (m >= 256) printf "--max-old-space-size=%d", m }' /proc/meminfo)`
 
 // nodeLegacyWebpack are toolchains that hash with MD4 through webpack 4,
 // which OpenSSL 3 — Node 17 and later — refuses with "error:0308010C:digital

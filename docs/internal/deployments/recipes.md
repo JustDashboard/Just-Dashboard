@@ -337,10 +337,10 @@ value is never widened to the install on its own — the install also runs every
 script — unless the variable is mapped to `install_and_build` (`prisma_config_env`).
 
 **The build command's RUN** (`build_node_build.go`) starts by sizing V8's heap to the build host:
-`jd_heap=$(awk … /proc/meminfo)` takes three quarters of `MemAvailable` when the build starts, at most
-4 GiB and nothing below 256 MiB, and the build runs with `NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}"`. V8's
+`jd_heap=$(awk … /proc/meminfo)` takes three quarters of `MemAvailable` plus `SwapFree` when the build
+starts, at most 4 GiB and nothing below 256 MiB, and the build runs with `NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}"`. V8's
 own default is a quarter of physical memory, which a Next.js build on a 2 GiB server exhausts while memory
-is still free; a limit under what is available makes a build that outgrows the host stop with
+is still free; a limit under what the host can give makes a build that outgrows it stop with
 "JavaScript heap out of memory" instead of being killed by the kernel. It is computed inside the RUN, so
 the Dockerfile is the same on every host, and a `NODE_OPTIONS` the build supplies — a build variable, or
 an assignment in the package's own script — replaces it. The PHP recipe's asset stage builds the same
