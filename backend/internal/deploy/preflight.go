@@ -408,6 +408,19 @@ func PreflightDraft(
 	observer PreflightObserver,
 	advancedAllowed bool,
 ) (*PreflightResult, error) {
+	return PreflightDraftWithSource(ctx, draft, observer, nil, advancedAllowed)
+}
+
+// PreflightDraftWithSource is PreflightDraft that also reads the commit the
+// draft's detection reviewed — asking the recipe whether it would prepare the
+// plan from it — and says when the branch has moved past that commit.
+func PreflightDraftWithSource(
+	ctx context.Context,
+	draft *Draft,
+	observer PreflightObserver,
+	inspector SourceInspector,
+	advancedAllowed bool,
+) (*PreflightResult, error) {
 	if draft == nil || draft.Data.Intent == nil || draft.Data.Source == nil ||
 		draft.Data.Detection == nil || draft.Data.Configuration == nil {
 		return nil, ErrDraftIncomplete
@@ -435,6 +448,7 @@ func PreflightDraft(
 		}
 	}
 	findings := preflightFindings(draft, configuration, observation, advancedAllowed)
+	findings = withDraftSourceChecks(ctx, draft, configuration, inspector, findings)
 	plan := exactPlan(draft, configuration)
 	preview, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
@@ -550,38 +564,37 @@ func preflightFindings(
 		}
 	}
 	selected := selectedDetectionCandidate(detection)
-	if selected != nil && selected.Recipe == "go" && configuration.Build.Method == BuildRecipe && configuration.Build.GoVersion != "" {
-		if _, err := chooseGoRecipeVersion(configuration.Build.GoVersion, "", []byte("go "+selected.GoMinimumVersion)); err != nil {
-			findings = append(findings, finding("go_version_unsupported", PreflightBlocked,
-				"Selected Go version cannot build this source", err.Error(),
-				"The toolchain must satisfy the module's declared language requirement.",
-				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
-		}
+	// The recipe checks read the candidate at the plan's own root and method,
+	// which is the selected one until the root is edited after detection.
+	planned := plannedDetectionCandidate(detection, configuration.Build)
+	if mismatch, ok := detectionRootMismatchFinding(detection, configuration.Build, planned); ok {
+		findings = append(findings, mismatch)
 	}
-	if selected != nil && selected.Recipe == "node" && configuration.Build.Method == BuildRecipe {
+	findings = append(findings, plannedRecipeFindings(planned, configuration.Build)...)
+	if planned != nil && planned.Recipe == "node" && configuration.Build.Method == BuildRecipe {
 		switch chosen := configuration.Build.PackageManager; {
-		case chosen != "" && len(selected.PackageManagers) > 0 && !slices.Contains(selected.PackageManagers, chosen):
+		case chosen != "" && len(planned.PackageManagers) > 0 && !slices.Contains(planned.PackageManagers, chosen):
 			findings = append(findings, finding("package_manager_lockfile_missing", PreflightBlocked,
-				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(selected.PackageManagers, ", "),
+				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(planned.PackageManagers, ", "),
 				"A frozen install needs the selected manager's own lockfile.",
 				"Choose a package manager whose lockfile is committed, or commit its lockfile.", "deploy", "configuration.build.packageManager"))
-		case chosen == "" && selected.PackageManager == "" && len(selected.PackageManagers) > 1:
+		case chosen == "" && planned.PackageManager == "" && len(planned.PackageManagers) > 1:
 			findings = append(findings, finding("package_manager_ambiguous", PreflightBlocked,
-				"Competing lockfiles need a package manager", strings.Join(selected.PackageManagers, ", "),
+				"Competing lockfiles need a package manager", strings.Join(planned.PackageManagers, ", "),
 				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
 				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
 		}
 	}
-	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
 			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
 			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
 			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
 			"deploy", "configuration.build"))
 	}
-	if selected != nil && selected.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
+	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
-			"Source needs a different build plan", selected.RecipeIssue,
+			"Source needs a different build plan", planned.RecipeIssue,
 			"The automatic recipe cannot satisfy the detected source requirements.",
 			"Use a Dockerfile or correct the source adapter/toolchain and run detection again.", "deploy", "configuration.build"))
 	}
@@ -912,9 +925,12 @@ func preflightFindings(
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
 	}
-	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
+	if planned != nil && planned.SchemaTool != "" &&
 		configuration.Build.Method == BuildRecipe && hasDatabaseDependency(configuration.Dependencies) {
-		findings = append(findings, schemaStepFinding(selected, configuration.Build))
+		findings = append(findings, schemaStepFinding(planned, configuration.Build))
+	}
+	if configuration.Build.Method != BuildCompose && configuration.Build.Method != BuildLegacyCompose {
+		findings = append(findings, detectedVariableFindings(planned, configuredVariableNames(configuration, draft.environment))...)
 	}
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,

@@ -155,8 +155,8 @@ func (s *Server) handleDeploymentDraftPreflight(w http.ResponseWriter, r *http.R
 		return mapDeploymentPlanningError(deploy.ErrDraftRevision)
 	}
 	principal := httpx.MustPrincipal(r)
-	preflight, err := deploy.PreflightDraft(
-		r.Context(), draft, s.modules.deployPreflight, principal.Can(auth.CapSystemAdmin),
+	preflight, err := deploy.PreflightDraftWithSource(
+		r.Context(), draft, s.modules.deployPreflight, s.deploymentSourceInspector(), principal.Can(auth.CapSystemAdmin),
 	)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -300,6 +300,15 @@ func sameStringSet(expected, actual []string) bool {
 		seen[value]--
 	}
 	return true
+}
+
+// deploymentSourceInspector is the analyzer as a SourceInspector, or none: a
+// typed nil pointer would read as an inspector and fail on first use.
+func (s *Server) deploymentSourceInspector() deploy.SourceInspector {
+	if s.modules.deploySources == nil {
+		return nil
+	}
+	return s.modules.deploySources
 }
 
 func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, error) {

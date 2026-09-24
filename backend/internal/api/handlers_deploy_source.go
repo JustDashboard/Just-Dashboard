@@ -25,6 +25,9 @@ type deploymentSourceUpdateResult struct {
 	*deploy.EnvironmentConfiguration
 	Source   deploy.DraftSourceConfig `json:"source"`
 	Identity deploy.SourceIdentity    `json:"identity"`
+	// Proposal compares the plan with what detection read at the new source,
+	// so the page can offer the fields detection now answers differently.
+	Proposal *deploy.DetectionProposal `json:"proposal,omitempty"`
 }
 
 // handleDeploymentSourceUpdate changes a committed project's source. It
@@ -32,9 +35,10 @@ type deploymentSourceUpdateResult struct {
 // inspection a draft's detect step runs (resolving the Git ref or the
 // registry digest) so an unreachable branch or image is refused with the
 // adapter's own message before anything is written, then persists a fresh
-// source revision. The source kind itself cannot change — SaveEnvironmentSource
-// refuses that — because the build and runtime rows it clones forward were
-// built for the kind that is already live.
+// source revision whose detection evidence is what that inspection read. The
+// source kind itself cannot change — SaveEnvironmentSource refuses that —
+// because the build and runtime rows it clones forward were built for the
+// kind that is already live.
 func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Request) error {
 	projectID, environmentID, err := deploymentEnvironmentIDs(r)
 	if err != nil {
@@ -52,8 +56,8 @@ func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
-	configuration, err := s.modules.deployPlanning.SaveEnvironmentSource(
-		r.Context(), projectID, environmentID, request.Revision, source, detection.Source,
+	configuration, proposal, err := s.modules.deployPlanning.SaveEnvironmentSourceDetection(
+		r.Context(), projectID, environmentID, request.Revision, source, detection,
 	)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -63,7 +67,7 @@ func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Req
 		"revision": configuration.Revision, "kind": source.Kind,
 	})
 	httpx.JSON(w, http.StatusOK, deploymentSourceUpdateResult{
-		EnvironmentConfiguration: configuration, Source: source, Identity: detection.Source,
+		EnvironmentConfiguration: configuration, Source: source, Identity: detection.Source, Proposal: proposal,
 	})
 	return nil
 }

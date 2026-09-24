@@ -313,6 +313,11 @@ func notificationEventSelected(events []string, want string) bool {
 	return false
 }
 
+// analyzePlan is preflight at the last moment before a build: the saved plan
+// against a fresh, data-only detection of the commit acquire_source
+// materialized, with the recipe asked whether it would prepare it. Every
+// trigger passes through here, so a blocked finding stops the run before a
+// build slot is spent, whether or not anyone saw the advisory check.
 func (e *NormalizedStepExecutor) analyzePlan(
 	ctx context.Context,
 	execution StepExecution,
@@ -329,47 +334,50 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	candidate := newDetectedCandidate(plan.Build.RootDirectory, plan.Build.Method, DetectedCandidate{
-		Name: "recorded-plan", Profile: profile, Confidence: ConfidenceHigh,
-		Evidence: []DetectionEvidence{}, NeedsDecision: []string{},
-	})
-	source := plan.SourceConfig
-	draft := &Draft{Data: DraftData{
-		Intent: &DraftIntentConfig{Name: "recorded-plan", Profile: profile},
-		Source: &source,
-		Detection: &DetectionResult{
-			Source: plan.SourceIdentity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
-			Compose: plan.BuildEvidence.Compose, GitRequirements: plan.BuildEvidence.GitRequirements,
-		},
-		Configuration: &configuration,
-	}}
-	request := preflightObservationRequest(draft, configuration)
-	request.ExistingProxySite = deploymentRouteName(execution.Run.EnvironmentID)
+	deployment := deploymentPlan{
+		Source: plan.SourceConfig, Identity: plan.SourceIdentity, Profile: profile,
+		Configuration: configuration, Evidence: plan.BuildEvidence,
+		BuildVariables: buildScopedNames(plan.Variables),
+		ProxySite:      deploymentRouteName(execution.Run.EnvironmentID),
+	}
 	live, liveErr := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
 	if liveErr == nil {
 		runtime, runtimeErr := e.store.RuntimeForRelease(ctx, live.Release.ID)
 		if runtimeErr != nil {
 			return normalizedStepFailure(runtimeErr)
 		}
-		request.ExistingRuntimeID, request.ExistingRuntimeKind = runtime.RuntimeID, runtime.Kind
+		deployment.RuntimeID, deployment.RuntimeKind = runtime.RuntimeID, runtime.Kind
 	} else if !errors.Is(liveErr, ErrArtifactMissing) {
 		return normalizedStepFailure(liveErr)
 	}
-	observation, err := e.preflight.Observe(ctx, request)
+	reading := sourceReading{}
+	if sourceHasTree(plan.SourceConfig) {
+		// acquire_source has already materialized this exact commit; the
+		// workspace's marker makes this a lookup, not a second checkout. A
+		// workspace that cannot be read is prepare_context's to fail on;
+		// preflight judges what it can from the stored evidence meanwhile.
+		reading.unavailable = "the materialized commit could not be read"
+		if e.sources != nil {
+			if source, err := e.sources.Materialize(ctx, plan.SourceConfig, plan.SourceIdentity, execution.Run.ID, e.workspaceRoot); err == nil {
+				reading = readDeploymentSource(ctx, source.Root, deployment)
+			}
+		}
+	}
+	evaluation, err := evaluateDeployment(ctx, deployment, reading, e.preflight)
 	if err != nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "preflight_unavailable", ErrorMessage: "deployment host evidence could not be refreshed"}
 	}
-	findings := preflightFindings(draft, configuration, observation, true)
 	evidence := mustJSON(map[string]any{
 		"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,
 		"runtimeDigest": plan.RuntimeDigest, "planRevision": execution.Run.PlanRevision,
-		"findings": findings,
+		"candidate": evaluation.Candidate, "candidateSource": evaluation.CandidateSource,
+		"findings": evaluation.Findings,
 	})
 	state := StepPassed
-	for _, finding := range findings {
+	for _, finding := range evaluation.Findings {
 		if finding.Severity == PreflightBlocked ||
 			(finding.Severity == PreflightDecision && executionDecisionMustBlock(finding.Code)) {
-			return StepResult{State: StepFailed, ErrorCode: finding.Code, ErrorMessage: finding.Title, Evidence: evidence}
+			return StepResult{State: StepFailed, ErrorCode: finding.Code, ErrorMessage: findingSentence(finding), Evidence: evidence}
 		}
 		if finding.Severity != PreflightPass {
 			state = StepWarning
@@ -378,8 +386,11 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	return StepResult{State: state, Evidence: evidence}
 }
 
+// executionDecisionMustBlock names the decisions a run cannot go past: the
+// plan left them open, and the release — or, for the Go main package, the
+// recipe — has nothing to proceed with until someone makes them.
 func executionDecisionMustBlock(code string) bool {
-	return code == "domain_link_missing" || code == "readiness_missing"
+	return code == "domain_link_missing" || code == "readiness_missing" || code == "go_main_ambiguous"
 }
 
 func (e *NormalizedStepExecutor) prepareContext(

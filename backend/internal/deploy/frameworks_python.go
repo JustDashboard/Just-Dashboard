@@ -379,6 +379,7 @@ func pythonCandidate(marker *detectedMarkers, entries []pythonEntry, rootLabel s
 		candidate.Evidence[0].Reason = "locked Python dependency input"
 	}
 	candidate.UnpinnedDependencies = deps.unpinned
+	candidate.PythonRequires, candidate.PythonInstall = pythonDeclaredRange(marker.pythonFiles), pythonInstallKind(marker.pythonFiles)
 	version, err := choosePythonRecipeVersion("", string(marker.pythonVersionFile), string(marker.runtimeTxt), string(marker.pythonFiles["pyproject.toml"]))
 	if err != nil {
 		candidate.RecipeIssue = err.Error()

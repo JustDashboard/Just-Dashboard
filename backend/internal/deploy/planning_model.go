@@ -214,6 +214,26 @@ type DetectedCandidate struct {
 	Databases            []DetectedDatabase  `json:"databases,omitempty"`
 	Evidence             []DetectionEvidence `json:"evidence"`
 	NeedsDecision        []string            `json:"needsDecision"`
+	// GoToolchain and GoVersionFile are the go.mod toolchain line and the
+	// .go-version pin, kept as facts rather than folded into RecipeIssue: which
+	// toolchain builds the module is an operator setting, so preflight decides
+	// it against the plan's Go version instead of against detection's default.
+	GoToolchain   string `json:"goToolchain,omitempty"`
+	GoVersionFile string `json:"goVersionFile,omitempty"`
+	// GoMainPackages are the module's buildable main packages, relative to
+	// the candidate root ("." for the root itself); GoPackage is the one the
+	// ranking chose, empty when the ranking tied or there is none.
+	GoMainPackages []string `json:"goMainPackages,omitempty"`
+	GoPackage      string   `json:"goPackage,omitempty"`
+	// GoLibrary says the module has no buildable main package at all, which
+	// no Go setting can fix: the recipe builds a command, not a library.
+	GoLibrary bool `json:"goLibrary,omitempty"`
+	// PythonRequires is the interpreter range the source declares
+	// (requires-python, or Poetry's python constraint), and PythonInstall the
+	// manifest the recipe installs from; together they say whether a chosen
+	// family can run the project and how loudly the install would refuse it.
+	PythonRequires string `json:"pythonRequires,omitempty"`
+	PythonInstall  string `json:"pythonInstall,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -224,6 +244,10 @@ type DetectedVariable struct {
 	Name    string   `json:"name"`
 	Example string   `json:"example,omitempty"`
 	Sources []string `json:"sources"`
+	// Required is set only from reads that fail without a value — a subscript
+	// or fetch with no default, a non-null assertion, a schema field with no
+	// default — so an optional read never asks the operator for a value.
+	Required bool `json:"required,omitempty"`
 }
 
 // DetectedDatabase is a database engine the source's dependencies or example
@@ -277,6 +301,9 @@ type BuildPlanConfig struct {
 	// forward only while the build still describes that candidate, and it is
 	// left out of the plan's digest because it is a name, not a build input.
 	Framework string `json:"framework,omitempty"`
+	// GoPackage is the main package a Go recipe builds, relative to the root
+	// directory; empty lets the recipe choose when the module has only one.
+	GoPackage string `json:"goPackage,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the single reviewed recipe stage in
@@ -918,6 +945,9 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.GoVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !goRecipeVersionRE.MatchString(c.Build.GoVersion)) {
 		return fmt.Errorf("Go version must select stable Go 1.25 or 1.26 in a Go recipe; use a Dockerfile for other toolchains")
 	}
+	if c.Build.GoPackage != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !validGoPackagePath(c.Build.GoPackage)) {
+		return fmt.Errorf("Go main package must be a directory inside the root, such as cmd/api, in a Go recipe")
+	}
 	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !validNodePackageManager(c.Build.PackageManager)) {
 		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript recipe")
 	}
@@ -1475,6 +1505,12 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			len(candidate.Dockerfile) > 4096 || (candidate.Dockerfile != "" && !safeRelativePath(candidate.Dockerfile)) ||
 			len(candidate.GoVersion) > 32 || (candidate.GoVersion != "" && !goRecipeVersionRE.MatchString(candidate.GoVersion)) || len(candidate.RecipeIssue) > 512 ||
 			len(candidate.GoMinimumVersion) > 32 || (candidate.GoMinimumVersion != "" && !stableGoVersionRE.MatchString(candidate.GoMinimumVersion)) ||
+			len(candidate.GoToolchain) > 32 || strings.ContainsAny(candidate.GoToolchain, "\x00\r\n ") ||
+			len(candidate.GoVersionFile) > 32 || strings.ContainsAny(candidate.GoVersionFile, "\x00\r\n") ||
+			len(candidate.GoMainPackages) > 64 || slices.ContainsFunc(candidate.GoMainPackages, func(pkg string) bool { return !validGoPackagePath(pkg) }) ||
+			(candidate.GoPackage != "" && !validGoPackagePath(candidate.GoPackage)) ||
+			len(candidate.PythonRequires) > 128 || strings.ContainsAny(candidate.PythonRequires, "\x00\r\n") ||
+			(candidate.PythonInstall != "" && !validPythonInstallKind(candidate.PythonInstall)) ||
 			(candidate.PackageManager != "" && !validNodePackageManager(candidate.PackageManager)) || len(candidate.PackageManagers) > 4 ||
 			slices.ContainsFunc(candidate.PackageManagers, func(manager string) bool { return !validNodePackageManager(manager) }) ||
 			(candidate.OutputDirectory != "" && !safeRelativePath(candidate.OutputDirectory)) ||
@@ -1537,6 +1573,20 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 }
 
 var contentDigestRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+._-]{0,31}:[0-9a-f]{32,128}$`)
+
+// validGoPackagePath accepts a main package as the recipe names it: "." for
+// the root, or a relative directory that stays inside it.
+func validGoPackagePath(pkg string) bool {
+	return pkg == "." || (len(pkg) <= 512 && safeRelativePath(pkg) && !strings.Contains(pkg, "\\"))
+}
+
+func validPythonInstallKind(kind string) bool {
+	switch kind {
+	case "uv.lock", "poetry.lock", "requirements.txt", "pyproject.toml":
+		return true
+	}
+	return false
+}
 
 func validDetectionConfidence(confidence DetectionConfidence) bool {
 	return confidence == ConfidenceHigh || confidence == ConfidenceMedium || confidence == ConfidenceLow

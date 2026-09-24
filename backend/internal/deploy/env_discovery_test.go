@@ -39,7 +39,7 @@ func TestEnvironmentDiscoveryReadsTemplatesAndCode(t *testing.T) {
 		{Name: "GO_FLAG", Sources: []string{"tools/main.go"}},
 		{Name: "MAIL_FROM", Sources: []string{"src/lib/mail.ts"}},
 		{Name: "RESEND_API_KEY", Sources: []string{"src/lib/mail.ts"}},
-		{Name: "SEED_TOKEN", Sources: []string{"scripts/seed.py"}},
+		{Name: "SEED_TOKEN", Sources: []string{"scripts/seed.py"}, Required: true},
 		{Name: "VITE_ANALYTICS_ID", Sources: []string{"src/lib/mail.ts"}},
 	}
 	if !reflect.DeepEqual(got, want) {

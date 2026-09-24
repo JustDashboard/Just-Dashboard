@@ -134,7 +134,12 @@ type ResolvedComposeService struct {
 	Source       string             `json:"source"`
 }
 
-type ArtifactBuilder struct{ backend BuildBackend }
+type ArtifactBuilder struct {
+	backend BuildBackend
+	// dryRun prepares without writing the generated Dockerfile, for preflight
+	// to learn what the recipe would refuse from the same code that refuses it.
+	dryRun bool
+}
 
 func NewArtifactBuilder(backend BuildBackend) *ArtifactBuilder {
 	return &ArtifactBuilder{backend: backend}
@@ -225,7 +230,7 @@ func (b *ArtifactBuilder) Prepare(
 			return PreparedBuild{}, err
 		}
 		prepared.SecretLayerGuarantee = "buildkit_ephemeral_mount"
-		if err := writeGeneratedDockerfile(root, content); err != nil {
+		if err := b.writeDockerfile(root, content); err != nil {
 			return PreparedBuild{}, err
 		}
 		prepared.Dockerfile = ".just-dashboard/Dockerfile"
@@ -244,7 +249,7 @@ func (b *ArtifactBuilder) Prepare(
 		if err != nil {
 			return PreparedBuild{}, err
 		}
-		if err := writeGeneratedDockerfile(root, content); err != nil {
+		if err := b.writeDockerfile(root, content); err != nil {
 			return PreparedBuild{}, err
 		}
 		prepared.Dockerfile = ".just-dashboard/Dockerfile"
@@ -536,16 +541,17 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if cgoEnabledCommandRE.MatchString(config.BuildCommand) {
 			return selectedRecipe{}, fmt.Errorf("%w: CGO requires a Dockerfile with a C toolchain", ErrUnsupportedBuilder)
 		}
-		mains, err := findGoMainPackages(root, 10_000)
+		packages, err := scanGoModule(root)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		if len(mains) != 1 && (strings.TrimSpace(config.BuildCommand) == "" || config.BuildCommand == "go build ./...") {
-			return selectedRecipe{}, fmt.Errorf("%w: Go recipe requires exactly one detected main package; found %d", ErrUnsupportedBuilder, len(mains))
+		if len(packages.cgo) > 0 {
+			return selectedRecipe{}, fmt.Errorf("%w: CGO source requires a Dockerfile with the required C toolchain (%s imports \"C\")",
+				ErrUnsupportedBuilder, goPackageArgument(packages.cgo[0]))
 		}
-		main := "."
-		if len(mains) == 1 {
-			main = mains[0]
+		main, err := selectGoMainPackage(packages, config, goModulePath(module))
+		if err != nil {
+			return selectedRecipe{}, err
 		}
 		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion}, nil
 	case "python":
@@ -917,6 +923,13 @@ func redactBuildEmitter(values map[string]string, emit func(BuildLog) error) fun
 	}
 }
 
+func (b *ArtifactBuilder) writeDockerfile(root, content string) error {
+	if b.dryRun {
+		return nil
+	}
+	return writeGeneratedDockerfile(root, content)
+}
+
 func writeGeneratedDockerfile(root, content string) error {
 	directory, err := os.OpenRoot(root)
 	if err != nil {
@@ -996,56 +1009,6 @@ func validateCustomDockerfile(content []byte) error {
 func regularExists(root, relative string) bool {
 	info, err := os.Lstat(filepath.Join(root, filepath.Clean(relative)))
 	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
-}
-
-func findGoMainPackages(root string, maxFiles int) ([]string, error) {
-	seen := map[string]bool{}
-	count := 0
-	errStop := errors.New("Go source scan exceeded its bound")
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && rel != "." {
-			name := entry.Name()
-			if name == ".git" || name == "vendor" || name == "node_modules" || name == ".just-dashboard" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			return nil
-		}
-		count++
-		if count > maxFiles {
-			return errStop
-		}
-		content, err := readContainedRegular(root, rel, 1<<20)
-		if err != nil {
-			return err
-		}
-		if sourceUsesCGO(content) {
-			return fmt.Errorf("CGO source requires a Dockerfile with the required C toolchain")
-		}
-		if strings.Contains(string(content), "package main") {
-			directory := filepath.ToSlash(filepath.Dir(rel))
-			seen[directory] = true
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnsupportedBuilder, err)
-	}
-	result := make([]string, 0, len(seen))
-	for directory := range seen {
-		result = append(result, directory)
-	}
-	sort.Strings(result)
-	return result, nil
 }
 
 func digestText(value string) string {

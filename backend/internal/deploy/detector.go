@@ -132,7 +132,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	markers := map[string]*detectedMarkers{}
 	gitModulesPath := ""
 	lfsAttributesPath := ""
-	cgoPaths := []string{}
+	goFiles := []goSourceFacts{}
 	schemaPaths := []string{}
 	schemaPathCounts := map[string]int{}
 	pythonEntries := []pythonEntry{}
@@ -193,6 +193,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 					if provider := prismaProvider(content); provider != "" {
 						prismaProviders[filepath.ToSlash(rel)] = provider
 					}
+					scanner.scanPrismaSchema(filepath.ToSlash(rel), content)
 				}
 			}
 			return nil
@@ -232,8 +233,8 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
 				return stop
 			}
-			if err == nil && sourceUsesCGO(content) {
-				cgoPaths = append(cgoPaths, rel)
+			if facts, ok := readGoSourceFacts(filepath.ToSlash(rel), content); err == nil && ok {
+				goFiles = append(goFiles, facts)
 			}
 			if err == nil && scanner.scannable(filepath.ToSlash(rel), name) && scanner.budget(n) {
 				scanner.scanSource(filepath.ToSlash(rel), content)
@@ -516,24 +517,17 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		result.Candidates = append(result.Candidates, candidates...)
 	}
-	sort.Slice(result.Candidates, func(i, j int) bool {
-		if result.Candidates[i].Root != result.Candidates[j].Root {
-			return result.Candidates[i].Root < result.Candidates[j].Root
+	sortDetectedCandidates(result.Candidates)
+	goModuleRoots := []string{}
+	for candidateRoot, marker := range markers {
+		if marker.goMod != "" {
+			goModuleRoots = append(goModuleRoots, filepath.ToSlash(candidateRoot))
 		}
-		if result.Candidates[i].BuildMethod != result.Candidates[j].BuildMethod {
-			return result.Candidates[i].BuildMethod < result.Candidates[j].BuildMethod
-		}
-		return result.Candidates[i].ID < result.Candidates[j].ID
-	})
+	}
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
-			for _, path := range cgoPaths {
-				if candidate.Root == "" || strings.HasPrefix(path, candidate.Root+string(filepath.Separator)) {
-					candidate.RecipeIssue = "CGO source requires a Dockerfile with the required C toolchain"
-					break
-				}
-			}
+			applyGoModulePackages(candidate, goFiles, goModuleRoots, markers[filepath.FromSlash(candidate.Root)])
 		}
 		if gitModulesPath != "" {
 			result.Candidates[index].Evidence = append(result.Candidates[index].Evidence,
@@ -552,8 +546,22 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		Submodules: gitModulesPath != "",
 		LFS:        lfsAttributesPath != "",
 	}
+	applyDetectedRecipeIssues(detectCtx, root, result.Candidates)
+	sortDetectedCandidates(result.Candidates)
 	result.SelectedID = selectedCandidate(result.Candidates)
 	return result, nil
+}
+
+func sortDetectedCandidates(candidates []DetectedCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Root != candidates[j].Root {
+			return candidates[i].Root < candidates[j].Root
+		}
+		if candidates[i].BuildMethod != candidates[j].BuildMethod {
+			return candidates[i].BuildMethod < candidates[j].BuildMethod
+		}
+		return candidates[i].ID < candidates[j].ID
+	})
 }
 
 func readDetectionFile(path string, max int64) ([]byte, int64, error) {
@@ -652,11 +660,13 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 			// screen that has the field.
 			NeedsDecision: []string{},
 		}
-		version, err := chooseGoRecipeVersion("", string(marker.goVersionFile), marker.goModContent)
+		// Which toolchain builds the module is a setting, so a version the
+		// automatic choice cannot satisfy is left to preflight, which judges
+		// it against the plan's own Go version rather than this default.
 		candidate.GoMinimumVersion = goModuleMinimum(marker.goModContent)
-		if err != nil {
-			candidate.RecipeIssue = err.Error()
-		} else {
+		candidate.GoToolchain = goModuleToolchain(marker.goModContent)
+		candidate.GoVersionFile = goVersionFileValue(marker.goVersionFile)
+		if version, err := chooseGoRecipeVersion("", string(marker.goVersionFile), marker.goModContent); err == nil {
 			candidate.GoVersion = version
 		}
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, candidate))
@@ -811,9 +821,15 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		}
 	} else {
 		candidate.Framework = framework.Name
+		lockfileConfidence := candidate.Confidence
 		candidate.Confidence = ConfidenceHigh
 		if resolution.Confidence != "" {
 			candidate.Confidence = resolution.Confidence
+		}
+		// A framework says what the package is, not that it installs: the
+		// doubt a missing or competing lockfile raised stays.
+		if lockfileConfidence == ConfidenceLow {
+			candidate.Confidence = ConfidenceLow
 		}
 		for _, dependency := range framework.Dependencies {
 			if manifest.has(dependency) {

@@ -2,8 +2,6 @@ package deploy
 
 import (
 	"fmt"
-	"go/parser"
-	"go/token"
 	"go/version"
 	"regexp"
 	"strings"
@@ -71,17 +69,4 @@ func chooseGoRecipeVersion(explicit, versionFile string, module []byte) (string,
 		return "", fmt.Errorf("%w: selected Go toolchain is older than go.mod requires", ErrUnsupportedBuilder)
 	}
 	return selected, nil
-}
-
-func sourceUsesCGO(content []byte) bool {
-	file, err := parser.ParseFile(token.NewFileSet(), "source.go", content, parser.ImportsOnly)
-	if err != nil {
-		return false
-	}
-	for _, imported := range file.Imports {
-		if imported.Path.Value == `"C"` || imported.Path.Value == "`C`" {
-			return true
-		}
-	}
-	return false
 }

@@ -59,6 +59,29 @@ var (
 		regexp.MustCompile(`\$_ENV\[['"]([A-Z][A-Z0-9_]+)['"]\]`),
 		regexp.MustCompile(`\bENV(?:\.fetch\(|\[)\s*['"]([A-Z][A-Z0-9_]+)['"]`),
 	}
+	// envRequiredREs are the reads that fail without a value: a subscript or
+	// fetch with no default, a non-null assertion, a throw-if-missing guard,
+	// a build-time import. Each captures the name in group 1; group 2, when an
+	// expression has one, is what follows the read, which can still turn it
+	// into an assignment or a read with a default.
+	envRequiredREs = []*regexp.Regexp{
+		regexp.MustCompile(`os\.environ\[['"]([A-Z][A-Z0-9_]+)['"]\]\s*(==|=)?`),
+		regexp.MustCompile(`ENV\.fetch\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*(\)\s*(?:\{|do\b)|,|\))`),
+		regexp.MustCompile(`process\.env\.([A-Z][A-Z0-9_]+)!(=)?`),
+		regexp.MustCompile(`process\.env\[['"]([A-Z][A-Z0-9_]+)['"]\]!(=)?`),
+		regexp.MustCompile(`if\s*\(\s*!\s*process\.env\.([A-Z][A-Z0-9_]+)\s*\)\s*\{?\s*(throw)`),
+	}
+	// envStaticImportRE is SvelteKit's build-time environment import: a name
+	// imported from $env/static is inlined at build and fails it when unset.
+	envStaticImportRE = regexp.MustCompile(`import\s*\{([^}]*)\}\s*from\s*['"]\$env/static/(?:private|public)['"]`)
+	// envSchemaFieldRE is a key of a t3-env or zod environment schema.
+	envSchemaFieldRE = regexp.MustCompile(`^\s*([A-Z][A-Z0-9_]+)\s*:\s*z\.(.*)$`)
+	// envPrismaRE is Prisma's env("X"), which the schema and Prisma 7's
+	// prisma.config.ts resolve without a default.
+	envPrismaRE = regexp.MustCompile(`\benv\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\)`)
+	// pydantic settings: a BaseSettings class and its annotated fields.
+	pydanticSettingsClassRE = regexp.MustCompile(`^class\s+\w+\s*\([^)]*\bBaseSettings\b[^)]*\)\s*:`)
+	pydanticFieldRE         = regexp.MustCompile(`^\s+([a-z_][a-z0-9_]*)\s*:\s*([^=#]+?)\s*(#.*)?$`)
 	// envProvidedNames are set by the platform, the runtime or the shell;
 	// listing them would ask the operator for values the deployment supplies.
 	envProvidedNames = map[string]bool{
@@ -212,6 +235,125 @@ func (s *envScanner) scanSource(rel string, content []byte) {
 			s.record(string(match[1]), rel, "")
 		}
 	}
+	for _, name := range requiredEnvReads(path.Base(rel), content) {
+		s.record(name, rel, "")
+		s.require(name)
+	}
+}
+
+// scanPrismaSchema records the variables a Prisma schema's datasource reads.
+func (s *envScanner) scanPrismaSchema(rel string, content []byte) {
+	for _, match := range envPrismaRE.FindAllSubmatch(content, -1) {
+		s.record(string(match[1]), rel, "")
+		s.require(string(match[1]))
+	}
+}
+
+func (s *envScanner) require(name string) {
+	if variable := s.found[name]; variable != nil {
+		variable.Required = true
+	}
+}
+
+// requiredEnvReads names the variables a source file reads in a form that
+// fails without a value. The forms are deliberately few and unambiguous: a
+// guess here asks the operator for a value the application does not need.
+func requiredEnvReads(name string, content []byte) []string {
+	names := []string{}
+	for _, expression := range envRequiredREs {
+		for _, match := range expression.FindAllSubmatch(content, -1) {
+			tail := ""
+			if len(match) > 2 {
+				tail = strings.TrimSpace(string(match[2]))
+			}
+			switch {
+			case tail == "=":
+				// An assignment, not a read.
+				continue
+			case tail == ",", strings.HasSuffix(tail, "{"), strings.HasSuffix(tail, "do"):
+				// ENV.fetch with a default argument or block.
+				continue
+			}
+			names = append(names, string(match[1]))
+		}
+	}
+	for _, match := range envStaticImportRE.FindAllSubmatch(content, -1) {
+		for _, imported := range strings.Split(string(match[1]), ",") {
+			imported, _, _ = strings.Cut(strings.TrimSpace(imported), " as ")
+			if imported = strings.TrimSpace(imported); envNameRE.MatchString(imported) {
+				names = append(names, imported)
+			}
+		}
+	}
+	text := string(content)
+	if strings.Contains(text, "createEnv(") || strings.Contains(text, "@t3-oss/env") {
+		names = append(names, requiredSchemaFields(text)...)
+	}
+	if strings.HasPrefix(name, "prisma.config.") {
+		for _, match := range envPrismaRE.FindAllSubmatch(content, -1) {
+			names = append(names, string(match[1]))
+		}
+	}
+	if strings.HasSuffix(name, ".py") && strings.Contains(text, "BaseSettings") && !strings.Contains(text, "env_prefix") {
+		names = append(names, requiredSettingsFields(text)...)
+	}
+	return names
+}
+
+// requiredSchemaFields reads a t3-env or zod schema's keys, following a
+// chain continued on the next lines, and keeps those with no optional,
+// default or nullable modifier.
+func requiredSchemaFields(text string) []string {
+	lines := strings.Split(text, "\n")
+	names := []string{}
+	for index, line := range lines {
+		match := envSchemaFieldRE.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		chain := match[2]
+		for next := index + 1; next < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[next]), "."); next++ {
+			chain += strings.TrimSpace(lines[next])
+		}
+		if strings.Contains(chain, ".optional(") || strings.Contains(chain, ".default(") ||
+			strings.Contains(chain, ".nullish(") || strings.Contains(chain, ".nullable(") {
+			continue
+		}
+		names = append(names, match[1])
+	}
+	return names
+}
+
+// requiredSettingsFields reads pydantic BaseSettings classes: an annotated
+// field with no default is required, and without an env_prefix pydantic
+// reads it from the variable of the same name.
+func requiredSettingsFields(text string) []string {
+	names := []string{}
+	inside := false
+	for _, line := range strings.Split(text, "\n") {
+		if pydanticSettingsClassRE.MatchString(line) {
+			inside = true
+			continue
+		}
+		if !inside {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			inside = false
+			continue
+		}
+		match := pydanticFieldRE.FindStringSubmatch(line)
+		if match == nil || strings.HasPrefix(strings.TrimSpace(match[2]), "ClassVar") || match[1] == "model_config" {
+			continue
+		}
+		if name := strings.ToUpper(match[1]); envNameRE.MatchString(name) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // variables returns the discovered variables that belong to a root: those
