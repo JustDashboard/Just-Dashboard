@@ -216,9 +216,11 @@ const (
 	StepLegacyPipeline       StepKey = "legacy_pipeline"
 )
 
+// The backup gate runs before release tasks: a migration must never change a
+// database whose required backup has not been verified.
 var DefaultStepKeys = []StepKey{
 	StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext,
-	StepBuildArtifact, StepRenderRuntime, StepReleaseTask, StepBackupGate,
+	StepBuildArtifact, StepRenderRuntime, StepBackupGate, StepReleaseTask,
 	StepProvisionCertificate, StepStartCandidate, StepVerifyReadiness, StepVerifySmoke,
 	StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
 }

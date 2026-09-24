@@ -543,22 +543,39 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	image, imageRunner, err := e.releaseTaskImageRequest(ctx, execution, plan)
+	if err != nil {
+		_, _ = source.Cleanup()
+		return normalizedStepFailure(err)
+	}
 	evidence := []ReleaseTaskEvidence{}
 	var cleanupResults []any
-	for _, task := range plan.Build.ReleaseTasks {
+	for index, task := range plan.Build.ReleaseTasks {
 		if err := stepLog(execution, "status", "Running release task "+task.Name); err != nil {
 			return normalizedStepFailure(err)
 		}
-		taskEvidence, group, taskErr := runStoredReleaseTask(
-			ctx, source.Root, task, values,
-			func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) },
-		)
+		emit := func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) }
+		var taskEvidence ReleaseTaskEvidence
+		var taskErr error
+		if task.Runner == ReleaseTaskRunnerImage {
+			request := image
+			request.Task, request.Index = task, index
+			taskEvidence, taskErr = runImageReleaseTask(ctx, imageRunner, request, values, emit)
+			cleanupResults = append(cleanupResults, map[string]any{"container": "removed"})
+		} else {
+			var group any
+			taskEvidence, group, taskErr = runStoredReleaseTask(ctx, source.Root, task, values, emit)
+			cleanupResults = append(cleanupResults, group)
+		}
 		evidence = append(evidence, taskEvidence)
-		cleanupResults = append(cleanupResults, group)
 		if taskErr != nil {
 			cleaned, cleanupErr := source.Cleanup()
 			state := StepFailed
 			code := "release_task_failed"
+			if taskEvidence.ExitCode == 127 {
+				// `sh: npx: not found`: the program is not where the task ran.
+				code = "release_task_tool_missing"
+			}
 			if ctx.Err() != nil {
 				state, code = StepCancelled, "cancelled"
 			}
