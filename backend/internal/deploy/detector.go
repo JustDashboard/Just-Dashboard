@@ -734,7 +734,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	facts := install.facts
 	candidate.PackageManagers = facts.lockfileManagers()
 	candidate.Lockfiles = facts.detectedLockfiles()
-	candidate.NodeVersion = nodeRecipeNodeVersion
+	candidate.NodeVersion = nodeReleaseFor(facts).label()
 	// Whether the manager is settled caps the confidence the framework
 	// reading may claim: a Next.js match does not make competing lockfiles
 	// any less of a question.

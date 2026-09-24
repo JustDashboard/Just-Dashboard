@@ -250,14 +250,16 @@ only renderer/executor/validation authority for their feature.
   under their own budget (`build_node_lockfile.go`). Detection records each committed lockfile compared
   with `package.json` (`lockfiles`: `in_sync`/`stale`/`unknown` with the drift named), the plan under each
   of the four managers with that manager's build and start commands and its preflight findings
-  (`nodeInstalls`), and the Node release (`nodeVersion`); competing lockfiles resolve through the build
+  (`nodeInstalls`), and the Node release (`nodeVersion`: the nearest version file or the `package.json`
+  volta/devEngines/engines field, on the digest-pinned `node:20`/`22`/`24` catalogue, 22 by default —
+  `build_node_runtime.go`); competing lockfiles resolve through the build
   setting, the manifest's declaration, the one lockfile a frozen install accepts, the one in sync, then
   manager-exclusive files, and only a tie is `package_manager_ambiguous`. Preflight
   (`preflight_node.go`) judges `configuration.build.packageManager` — or the resolved manager when it is
   empty — from that record, so a stale chosen lockfile is `lockfile_out_of_sync` before Deploy, and the
   recipe installs unfrozen instead of failing a frozen install. pnpm and Yarn Berry releases are pinned
   (declaration, or `nodeManagerReleases` keyed by lockfile format) into a `toolchain` stage the server's
-  runtime stage shares, Bun is copied beside Node 22 rather than replacing it, and a workspace member
+  runtime stage shares, Bun is copied beside Node rather than replacing it, and a workspace member
   prepares from its workspace root (`ArtifactBuilder.PrepareWithin`, `prepared.contextDirectory`). The
   UI swaps whole commands between managers from `nodeInstalls`, "From the lockfile" follows the resolved
   manager, and at build time a saved command whose plain runner names another manager runs through the

@@ -238,19 +238,22 @@ func checkoutPath(boundary, root string) string {
 }
 
 // settleBunImage keeps a declared Bun release only when its image exists:
-// oven/bun publishes an alpine image for almost every 1.x release, and one
-// that is missing falls back to the newest 1.x image with a logged note
-// instead of failing the build on a registry lookup.
+// oven/bun publishes an alpine and a slim image for almost every 1.x
+// release, and one that is missing falls back to the newest 1.x image with a
+// logged note instead of failing the build on a registry lookup.
 func (b *ArtifactBuilder) settleBunImage(ctx context.Context, plan *nodeInstallPlan) {
-	if plan.bun == "" || plan.bun == nodeBunImage {
+	fallback := bunImage("", plan.family)
+	if plan.bun == "" || plan.bun == fallback {
 		return
 	}
 	if _, err := b.backend.ResolveImage(ctx, plan.bun, ""); err == nil {
 		return
 	}
-	plan.notes = append(plan.notes, "packageManager names a Bun release without an "+plan.bun+" image; installing with "+nodeBunImage)
-	plan.bun = nodeBunImage
-	plan.toolchain = "bun 1 (the newest 1.x image; the declared release has no alpine image)"
+	plan.notes = append(plan.notes, "the declared Bun release has no "+plan.bun+" image; installing with "+fallback)
+	plan.bun = fallback
+	if plan.manager == "bun" {
+		plan.toolchain = "bun 1 (the newest 1.x image; the declared release has no image)"
+	}
 }
 
 // installInputs are the files the install reads from the build context, by
@@ -412,9 +415,6 @@ func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []Resolved
 	}
 	return append(lines, "RUN "+installSecrets+plan.installLine()), base, nil
 }
-
-// nodeRecipeNodeVersion is the Node major every Node build runs on.
-const nodeRecipeNodeVersion = "22 (recipe default)"
 
 // readNodeInstalls reads the install inputs of every package detection
 // found, after the walk and under a budget of its own: comparing lockfiles

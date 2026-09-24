@@ -7,8 +7,9 @@ redirect output outside the build context. Detection ignores this generated dire
 
 Detection reads manifests as data — `package.json`, `angular.json`, `requirements.txt`, `pyproject.toml`,
 `uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
-`Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml` and
-`pnpm-workspace.yaml` — and names a candidate per root with the framework, the build and start commands, the port,
+`Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
+`pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
+`.bun-version`) — and names a candidate per root with the framework, the build and start commands, the port,
 static output, the interpreter or toolchain release, and the environment variables and databases the
 source reads. Every default is a plan field the configure form and the Build settings can change. A
 detected framework that the recipe cannot serve automatically (a provider adapter, a workspace without a
@@ -185,7 +186,8 @@ under a digest-pinned image and rejects older lockfiles. A Berry lock in no know
 4.18.0 unfrozen (`yarn_version_inferred`), and a declared pnpm whose major cannot read the lockfile is
 refused (`package_manager_lockfile_incompatible`). Yarn 1 is the Node image's own 1.22. Bun follows a
 `packageManager` of `bun@x.y.z` (`oven/bun:x.y.z-alpine`), falling back to `oven/bun:1-alpine` with a
-logged note when that release has no image. `package_manager_version` (a pass) and the build evidence's
+logged note when that release has no image (other Bun declarations:
+[JavaScript runtime and toolchain](#javascript-runtime-and-toolchain)). `package_manager_version` (a pass) and the build evidence's
 `toolchain` name the release and what chose it.
 
 **One toolchain for the build and the server.** The pinned releases are installed through Corepack into a
@@ -193,7 +195,7 @@ logged note when that release has no image. `package_manager_version` (a pass) a
 start from it, with `COREPACK_ENABLE_NETWORK=0` at run time: a start command that runs `pnpm`, `yarn` or
 `bunx` finds the exact release offline, where the runtime stage used to have no pnpm at all. The runtime
 and build stages put `node_modules/.bin` on `PATH`. Bun is copied from its digest-pinned image beside
-Node 22, with `bunx` linked to it: Bun installs and runs `bun` and `bunx` commands, and anything started
+Node, with `bunx` linked to it: Bun installs and runs `bun` and `bunx` commands, and anything started
 through `node` runs on Node — the Bun image's own `node` is Bun, which made Bun the production runtime of
 every `bun.lock` project (`runtime_selected`). A command or package script the build runs that calls a
 manager other than the chosen one — `bunx` in an npm project, `pnpm` in a Bun one — gets that tool added
@@ -256,6 +258,36 @@ commands the Dockerfile runs (`build_commands`).
 Detection preserves an actual Dockerfile/Containerfile filename relative to its build root. A single
 literal TCP `EXPOSE` in the final stage supplies the suggested port; dynamic/multiple ports still need
 an operator's explicit choice. A Dockerfile inherited base's unrecorded exposed port is not guessed.
+
+## JavaScript runtime and toolchain
+
+`deploy/build_node_runtime.go` decides the image a JavaScript build runs on inside the same install plan,
+from the same files read as data, so detection (`nodeVersion` on the candidate, the plan's findings under
+`nodeInstalls`), preflight and the recipe agree on it.
+
+**Which Node.** The catalogue builds on Node 20, 22 and 24 (`node:<major>-alpine`, digest-pinned like every
+base). The first declaration that can be read decides: the nearest version file, looking from the
+package's directory up to the top of the checkout the way nvm, fnm and asdf do (`.nvmrc`, then
+`.node-version`, then `.tool-versions`' `nodejs`/`node` line, in one directory), then `volta.node`,
+`devEngines.runtime` and `engines.node` in `package.json` (the package's, then its workspace root's).
+A version file names a major (`22`, `v22.11.0`, `lts/jod`; `lts/*` and `node` are 24). A `package.json`
+range keeps the default 22 when it allows it — most `engines` fields are a floor — and otherwise takes the
+newest major it allows. Without a declaration the build runs on 22, which stays the default until a
+recipe version bump re-verifies the live fixtures on 24. A declaration outside the catalogue (`18`,
+`18.x`) runs on the nearest major with `node_version_unsupported` (a warning); it is refused only where
+the install is certain to stop on it — Yarn 1, or npm and pnpm with `engine-strict=true` in `.npmrc`,
+check the root package's `engines.node` against the Node they run on. Node 20 is past end of life
+(`node_version_eol`). `node-sass` has no binary for Node 22 and later and does not compile against them,
+so a package that installs it and declares nothing newer builds on Node 20; one that pins a newer Node
+keeps it with `node_sass_unsupported`. `node_version_selected` (a pass) names the release and its
+source, the candidate records it as `nodeVersion` (`"22 (.nvmrc)"`), and the build evidence as
+`prepared.nodeVersion`. Node 25 and later images ship without Corepack, which installs the pinned pnpm
+and Yarn releases, so they are not in the catalogue.
+
+**Which Bun.** Bun is copied beside Node from `oven/bun:<release>-alpine`: the release `packageManager`
+names, else `.bun-version` or `.tool-versions`' `bun` line (an exact release or a `major.minor` line),
+else an `engines.bun` range the newest 1.x does not satisfy (its minor line), else the newest 1.x image.
+A release without an image falls back to the newest 1.x with a logged note.
 
 ## Python
 

@@ -234,6 +234,7 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 			facts := marker.node.facts
 			candidate.PackageManagers = facts.lockfileManagers()
 			candidate.Lockfiles = facts.detectedLockfiles()
+			candidate.NodeVersion = nodeReleaseFor(facts).label()
 			chosen, err := resolveNodeManager(facts, "")
 			if err == nil {
 				candidate.PackageManager = chosen.manager

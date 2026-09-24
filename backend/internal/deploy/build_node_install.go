@@ -31,6 +31,11 @@ type nodeInstallManifest struct {
 	DevEngines           json.RawMessage            `json:"devEngines"`
 	TrustedDependencies  []string                   `json:"trustedDependencies"`
 	Pnpm                 map[string]json.RawMessage `json:"pnpm"`
+	// Engines, Volta and Prisma are read by the runtime planner; raw, so a
+	// malformed value cannot cost the fields above.
+	Engines json.RawMessage `json:"engines"`
+	Volta   json.RawMessage `json:"volta"`
+	Prisma  json.RawMessage `json:"prisma"`
 }
 
 func (m nodeInstallManifest) version(name string) string {
@@ -137,6 +142,9 @@ type nodeInstallFacts struct {
 	dockerignore []byte
 	// workspaceTurbo says the workspace root builds with Turborepo.
 	workspaceTurbo bool
+	// runtime is what the image depends on: the Node and Bun releases the
+	// repository declares.
+	runtime nodeRuntimeFacts
 }
 
 // detectedLockfiles are the readings as the candidate records them.
@@ -261,6 +269,7 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 		signal("yarn", "package scripts run yarn")
 	}
 	scopes := nodeManifestScopes(facts.manifest)
+	engineStrict := false
 	npmrcs := []nodeFiles{files}
 	if member != "" {
 		npmrcs = append(npmrcs, files.sub(member))
@@ -276,6 +285,7 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 		}
 		config := readNPMRC(content, source, scopes)
 		facts.legacyPeers = facts.legacyPeers || config.legacyPeers
+		engineStrict = engineStrict || config.engineStrict
 		facts.registry = append(facts.registry, config.variables...)
 		if config.literal {
 			facts.literal = append(facts.literal, source)
@@ -285,6 +295,7 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 		facts.registry = append(facts.registry, readBunfigRegistry(content, scopes)...)
 	}
 	facts.registry = mergeDetectedVariables(facts.registry)
+	facts.runtime = readNodeRuntimeFacts(files, member, facts.manifest, facts.settings, engineStrict)
 	return facts
 }
 
@@ -363,8 +374,11 @@ var (
 
 type nodeNPMRC struct {
 	legacyPeers bool
-	literal     bool
-	variables   []DetectedVariable
+	// engineStrict makes npm and pnpm refuse a Node release the root
+	// package's engines field excludes.
+	engineStrict bool
+	literal      bool
+	variables    []DetectedVariable
 }
 
 // readNPMRC reads .npmrc as key=value data: the scoped registries, the
@@ -388,6 +402,8 @@ func readNPMRC(content []byte, source string, scopes map[string]bool) nodeNPMRC 
 		switch {
 		case (key == "legacy-peer-deps" || key == "force") && value == "true":
 			result.legacyPeers = true
+		case key == "engine-strict" && value == "true":
+			result.engineStrict = true
 		case key == "registry":
 			defaultHost = npmrcHost(value)
 		case strings.HasSuffix(key, ":registry") && strings.HasPrefix(key, "@"):
@@ -692,7 +708,6 @@ var nodeManagerReleases = map[string]map[string]string{
 const (
 	nodeDefaultPNPM  = "10.34.5"
 	nodeDefaultBerry = "4.18.0"
-	nodeBunImage     = "oven/bun:1-alpine"
 )
 
 // nodeRuntimeNeedsScripts are packages whose own install script produces
@@ -762,6 +777,10 @@ type nodeInstallPlan struct {
 	strict   bool
 	// bun is the image Bun is copied from, when the image needs it.
 	bun string
+	// node is the Node release the build and the server run on, and family
+	// the image family: Alpine, or Debian slim for glibc-only packages.
+	node   nodeRelease
+	family string
 	// berry keeps Yarn's cache inside the build so a Plug'n'Play install
 	// is copied with the application.
 	berry     bool
@@ -782,7 +801,7 @@ func (p nodeInstallPlan) blockedError() error {
 // Dockerfile names them: Node, then Bun when it is copied in, then nginx for
 // static output.
 func (p nodeInstallPlan) baseImages(static bool) []string {
-	images := []string{recipeBaseCatalogue["node:npm"][0]}
+	images := []string{p.nodeImage()}
 	if p.bun != "" {
 		images = append(images, p.bun)
 	}
@@ -790,6 +809,15 @@ func (p nodeInstallPlan) baseImages(static bool) []string {
 		images = append(images, recipeBaseCatalogue["static"]...)
 	}
 	return images
+}
+
+// nodeImage is the catalogue Node image the plan builds on.
+func (p nodeInstallPlan) nodeImage() string {
+	major := p.node.major
+	if major == 0 {
+		major = nodeDefaultMajor
+	}
+	return nodeImage(major, p.family)
 }
 
 // nodeInstallChoice is what the plan is asked for.
@@ -837,6 +865,7 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	if plan.reading != nil {
 		plan.lockfile = plan.reading.Path
 	}
+	plan.node, plan.family = nodeReleaseFor(facts), nodeFamilyAlpine
 	// A saved command still naming another manager's runner — detected when
 	// a different lockfile resolved, or left behind by a later commit that
 	// switched managers — would run a program the image may not have.
@@ -885,7 +914,7 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	}
 	tools := nodeCommandTools(facts.manifest.Scripts, []string{plan.build, plan.start})
 	if (tools["bun"] || tools["bunx"]) && plan.bun == "" {
-		plan.bun = nodeBunImage
+		plan.bun = bunImage(nodeBunRelease(facts.runtime.bun), plan.family)
 		plan.findings = append(plan.findings, nodeFinding("script_runtime_added", PreflightPass,
 			"Bun is added for the scripts that call it", "bun or bunx in the commands and package scripts the build runs",
 			"The image installs with "+nodeManagerLabel(plan.manager)+"; Bun is copied beside Node so those scripts find it.", "", "configuration.build.buildCommand"))
@@ -964,6 +993,7 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	plan.findings = append(plan.findings, nodeFinding("package_manager_version", PreflightPass,
 		"Package manager release", plan.toolchain,
 		"The release that installs, and what chose it: a declaration, the lockfile's format, or the reviewed default.", "", field))
+	planNodeRelease(facts, &plan)
 	return plan
 }
 
@@ -985,7 +1015,7 @@ func planNPMInstall(facts nodeInstallFacts, plan *nodeInstallPlan) {
 	if plan.frozen {
 		plan.command = "npm ci"
 	}
-	plan.toolchain = "npm (bundled with Node 22)"
+	plan.toolchain = "npm (bundled with Node " + strconv.Itoa(plan.node.major) + ")"
 	reading := plan.reading
 	if reading == nil {
 		return
@@ -1171,11 +1201,14 @@ func planYarnInstall(facts nodeInstallFacts, plan *nodeInstallPlan, choice nodeI
 }
 
 func planBunInstall(facts nodeInstallFacts, plan *nodeInstallPlan, assets bool) {
-	plan.bun = nodeBunImage
+	plan.bun = bunImage("", plan.family)
 	plan.toolchain = "bun 1 (the newest 1.x image)"
 	if facts.declared.name == "bun" && facts.declared.version != "" && !strings.Contains(facts.declared.version, "-") {
-		plan.bun = "oven/bun:" + facts.declared.version + "-alpine"
+		plan.bun = bunImage(facts.declared.version, plan.family)
 		plan.toolchain = "bun " + facts.declared.version + " (" + facts.declared.source + ")"
+	} else if release := nodeBunRelease(facts.runtime.bun); release != "" {
+		plan.bun = bunImage(release, plan.family)
+		plan.toolchain = "bun " + release + " (" + facts.runtime.bun.source + ")"
 	}
 	plan.command = "bun install"
 	if plan.frozen {
@@ -1200,7 +1233,7 @@ func planBunInstall(facts nodeInstallFacts, plan *nodeInstallPlan, assets bool) 
 		return
 	}
 	plan.findings = append(plan.findings, nodeFinding("runtime_selected", PreflightPass,
-		"Bun installs; Node runs", "Node 22 with Bun "+strings.TrimSuffix(strings.TrimPrefix(plan.bun, "oven/bun:"), "-alpine"),
+		"Bun installs; Node runs", "Node "+strconv.Itoa(plan.node.major)+" with Bun "+bunReleaseOf(plan.bun),
 		"Bun installs the dependencies and runs bun and bunx commands; tools started through node run on Node, as on a machine with both installed.",
 		"", "configuration.build.packageManager"))
 }

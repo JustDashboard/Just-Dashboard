@@ -29,22 +29,32 @@ const AutomaticRecipeVersion = "just-dashboard-recipes-v2"
 // into a release Dockerfile: the backend resolves each to a digest first.
 // A Bun project builds and runs on the Node image with Bun's binary copied
 // in: the Bun image's node is Bun itself, which silently made Bun the
-// production runtime of every bun.lock project.
+// production runtime of every bun.lock project. The Node majors a
+// repository can declare are node:<major> (Alpine) and node:<major>-glibc
+// (Debian slim, for packages that ship only glibc binaries); a declared Bun
+// release is copied from oven/bun:<release>-alpine or -slim the same way.
 var recipeBaseCatalogue = map[string][]string{
-	"node:npm":     {"node:22-alpine"},
-	"node:pnpm":    {"node:22-alpine"},
-	"node:yarn":    {"node:22-alpine"},
-	"node:bun":     {"node:22-alpine", "oven/bun:1-alpine"},
-	"go":           {"golang:1.26-alpine", "alpine:3.22"},
-	"python":       {"python:3.13-slim"},
-	"static":       {"nginx:1.29-alpine"},
-	"rust":         {"rust:1-alpine", "alpine:3.22"},
-	"java:maven":   {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
-	"java:gradle":  {"gradle:8-jdk21", "eclipse-temurin:21-jre-alpine"},
-	"dotnet":       {"mcr.microsoft.com/dotnet/sdk:8.0", "mcr.microsoft.com/dotnet/aspnet:8.0"},
-	"deno":         {"denoland/deno:alpine"},
-	"php":          {"dunglas/frankenphp:1-php8.3-alpine"},
-	"php:composer": {"composer:2"},
+	"node:npm":      {"node:22-alpine"},
+	"node:pnpm":     {"node:22-alpine"},
+	"node:yarn":     {"node:22-alpine"},
+	"node:bun":      {"node:22-alpine", "oven/bun:1-alpine"},
+	"node:20":       {"node:20-alpine"},
+	"node:22":       {"node:22-alpine"},
+	"node:24":       {"node:24-alpine"},
+	"node:20-glibc": {"node:20-bookworm-slim"},
+	"node:22-glibc": {"node:22-bookworm-slim"},
+	"node:24-glibc": {"node:24-bookworm-slim"},
+	"bun:glibc":     {"oven/bun:1-slim"},
+	"go":            {"golang:1.26-alpine", "alpine:3.22"},
+	"python":        {"python:3.13-slim"},
+	"static":        {"nginx:1.29-alpine"},
+	"rust":          {"rust:1-alpine", "alpine:3.22"},
+	"java:maven":    {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
+	"java:gradle":   {"gradle:8-jdk21", "eclipse-temurin:21-jre-alpine"},
+	"dotnet":        {"mcr.microsoft.com/dotnet/sdk:8.0", "mcr.microsoft.com/dotnet/aspnet:8.0"},
+	"deno":          {"denoland/deno:alpine"},
+	"php":           {"dunglas/frankenphp:1-php8.3-alpine"},
+	"php:composer":  {"composer:2"},
 }
 
 type ResolvedImage struct {
@@ -92,6 +102,9 @@ type PreparedBuild struct {
 	RecipeVersion string      `json:"recipeVersion,omitempty"`
 	GoVersion     string      `json:"goVersion,omitempty"`
 	PythonVersion string      `json:"pythonVersion,omitempty"`
+	// NodeVersion is the Node major a JavaScript build (or a PHP recipe's
+	// asset stage) ran on and what chose it: "22 (.nvmrc)".
+	NodeVersion string `json:"nodeVersion,omitempty"`
 	// Toolchain names the language release the other recipes built with,
 	// for the build evidence: "rust 1.85", "java 21 (maven)", "dotnet 8.0",
 	// and for Node the package manager release: "pnpm 10.34.5 (lockfileVersion 9.0)".
@@ -254,6 +267,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			if recipe.php.assets != "" {
 				b.settleBunImage(ctx, &recipe.php.node)
 				prepared.Toolchain += " · assets: " + recipe.php.node.toolchain
+				prepared.NodeVersion = recipe.php.node.node.label()
 				prepared.Install = recipe.php.node.installLine()
 				prepared.Notes = append(prepared.Notes, recipe.php.node.notes...)
 			}
@@ -261,6 +275,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 		case "node":
 			b.settleBunImage(ctx, &recipe.nodeInstall)
 			prepared.Toolchain = recipe.nodeInstall.toolchain
+			prepared.NodeVersion = recipe.nodeInstall.node.label()
 			prepared.Install = recipe.nodeInstall.installLine()
 			prepared.Notes = append(prepared.Notes, recipe.nodeInstall.notes...)
 			baseRefs = recipe.nodeInstall.baseImages(config.OutputDirectory != "")
