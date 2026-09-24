@@ -289,6 +289,28 @@ names, else `.bun-version` or `.tool-versions`' `bun` line (an exact release or 
 else an `engines.bun` range the newest 1.x does not satisfy (its minor line), else the newest 1.x image.
 A release without an image falls back to the newest 1.x with a logged note.
 
+**What the dependencies need from the image.** The image stays Alpine unless a package the application
+loads ships glibc binaries only — `onnxruntime-node` (and `@huggingface/transformers` or
+`@xenova/transformers`, which depend on it), `@tensorflow/tfjs-node`, or `playwright` as a runtime
+dependency — which install on musl and then fail to load; those build and run on the same major's
+`node:<major>-bookworm-slim` (`glibc_image_selected`), with Bun copied from `oven/bun:<release>-slim`.
+System packages go where they are needed, installed before the source is copied so they are cached apart
+from it (`apk add --no-cache`, or `apt-get install --no-install-recommends` on Debian), and each has a
+finding:
+
+| Dependency | Build stage | Runtime stage | Finding |
+| --- | --- | --- | --- |
+| A native addon that compiles when no prebuilt binary matches the platform, Node release and C library (`better-sqlite3`, `sqlite3`, `bcrypt`, `argon2`, `canvas`, `node-sass`, `re2`, `isolated-vm`, `node-pty`, …, from `package.json` or the lockfile) | `python3 make g++` | — | `native_addon_toolchain` |
+| `canvas` on Alpine, which publishes no musl binary | cairo, pango, jpeg, gif, rsvg and pixman headers, `pkgconf` | their libraries | `native_addon_toolchain` |
+| A Git dependency (`github:`, `owner/repo`, `git+https:`, a `.git` URL, or a lockfile entry resolved from Git) | `git` (`openssh-client` for SSH) | — | `git_dependencies`; `git_dependency_credentials` (warning) over SSH, which has no key |
+| Prisma (`prisma` or `@prisma/client`) | `openssl` | `openssl` | — (logged) |
+| `puppeteer`/`puppeteer-core` in `dependencies` | install skips the Chrome download (`PUPPETEER_SKIP_DOWNLOAD`) | Chromium, fonts, `PUPPETEER_EXECUTABLE_PATH` | `headless_browser` (warning) |
+| `playwright`/`playwright-core` in `dependencies` (Debian) | `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`, `<runner> playwright install chromium` | the same path, `<runner> playwright install-deps chromium` | `headless_browser` (warning) |
+
+Compilers never reach the runtime image. Puppeteer's and Playwright's own downloads land in the build
+stage's home directory, which the runtime stage never copied, so the recipe keeps them out of it or
+inside the application. A test runner's Playwright in `devDependencies` changes nothing.
+
 ## Python
 
 The recipe reads `requirements.txt`, a PEP 621 `pyproject.toml`, a Poetry `pyproject.toml`, `uv.lock`

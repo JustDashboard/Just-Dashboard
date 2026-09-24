@@ -202,6 +202,10 @@ type nodeLockfileReading struct {
 	peers    []nodePeerConflict
 	optional []nodeOptionalBinary
 	hosts    []string
+	// git lists packages the lock resolves from a Git repository, which the
+	// install clones; gitSSH says one of them is fetched over SSH.
+	git    []string
+	gitSSH bool
 	// names are the packages the lock installs, when the format lists them.
 	names map[string]string
 }
@@ -440,6 +444,8 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 	optional := []nodeOptionalBinary{}
 	present := map[string]bool{}
 	hosts := map[string]bool{}
+	git := map[string]bool{}
+	gitSSH := false
 	fail := func() nodeLockfileReading {
 		return nodeUnreadLockfile(lockfile, "npm", lockfile+" is not valid JSON")
 	}
@@ -483,6 +489,10 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 				if host := npmResolvedHost(entry.Resolved); host != "" {
 					hosts[host] = true
 				}
+				if cloned, ssh := nodeGitSource(entry.Resolved); cloned {
+					git[name] = true
+					gitSSH = gitSSH || ssh
+				}
 				if len(entry.PeerDependencies) > 0 {
 					required := map[string]string{}
 					for peer, spec := range entry.PeerDependencies {
@@ -517,6 +527,12 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 			}
 			for name, entry := range tree {
 				v1[name] = entry.Version
+				// A version 1 lock records a Git dependency's source as its
+				// version.
+				if cloned, ssh := nodeGitSource(entry.Version); cloned {
+					git[name] = true
+					gitSSH = gitSSH || ssh
+				}
 			}
 		default:
 			var skipped json.RawMessage
@@ -539,6 +555,7 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 		comparison.compareV1(manifest, v1)
 		reading := comparison.reading(lockfile, "npm", "npm", version)
 		reading.names = v1
+		reading.git, reading.gitSSH = sortedNames(git), gitSSH
 		return reading
 	}
 	importers := make([]string, 0, len(workspaces))
@@ -613,7 +630,17 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 		reading.hosts = append(reading.hosts, host)
 	}
 	sort.Strings(reading.hosts)
+	reading.git, reading.gitSSH = sortedNames(git), gitSSH
 	return reading
+}
+
+func sortedNames(set map[string]bool) []string {
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // compareV1 judges a version 1 lock, which records no ranges: a name it

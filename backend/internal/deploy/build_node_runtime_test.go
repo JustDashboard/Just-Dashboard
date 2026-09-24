@@ -198,3 +198,97 @@ func TestNodeReleaseDeclarationsAreReadAsData(t *testing.T) {
 		}
 	}
 }
+
+// Each dependency that needs something the Node image lacks gets it, in the
+// stage that needs it: compilers and git only where the install runs,
+// libraries and browsers where the server runs, and Debian instead of Alpine
+// only for packages that ship no musl binary.
+func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
+	t.Parallel()
+	server := BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"}
+	manifest := func(dependencies string) string {
+		return `{"name":"svc","scripts":{"build":"tsc","start":"node dist/index.js"},` + dependencies + `}`
+	}
+	for _, test := range []struct {
+		name     string
+		files    map[string]string
+		config   BuildPlanConfig
+		want     []string
+		absent   []string
+		findings []string
+	}{
+		{name: "bcrypt gets compilers in the build stage only", files: map[string]string{"package.json": manifest(`"dependencies":{"bcrypt":"^5.1.1"}`)},
+			config: server, findings: []string{"native_addon_toolchain"},
+			want:   []string{" AS build\nRUN apk add --no-cache g++ make python3\nWORKDIR /app\nCOPY . .\n", "\nFROM node:22-alpine@sha256:"},
+			absent: []string{"cairo"}},
+		{name: "a lockfile's native addon counts", files: map[string]string{"package.json": manifest(`"dependencies":{"auth":"^1.0.0"}`),
+			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"auth":"^1.0.0"}},"node_modules/auth":{"version":"1.0.0"},"node_modules/better-sqlite3":{"version":"8.7.0"}}}`},
+			config: server, want: []string{"RUN apk add --no-cache g++ make python3\n"}, findings: []string{"native_addon_toolchain"}},
+		{name: "canvas compiles against cairo and runs with its libraries", files: map[string]string{"package.json": manifest(`"dependencies":{"canvas":"^3.1.0"}`)},
+			config: server, findings: []string{"native_addon_toolchain"},
+			want: []string{
+				"RUN apk add --no-cache cairo-dev g++ giflib-dev jpeg-dev librsvg-dev make pango-dev pixman-dev pkgconf python3\n",
+				"\nFROM node:22-alpine@sha256:" + fakeContentDigest("node:22-alpine")[len("sha256:"):] + "\nRUN apk add --no-cache cairo giflib jpeg librsvg pango pixman\nWORKDIR /app\n"}},
+		{name: "a glibc-only package moves the image to Debian slim", files: map[string]string{"package.json": manifest(`"dependencies":{"onnxruntime-node":"^1.20.0"}`), "package-lock.json": npmLock},
+			config: server, findings: []string{"glibc_image_selected"},
+			want: []string{"FROM node:22-bookworm-slim@sha256:"}, absent: []string{"alpine"}},
+		{name: "transformers.js needs glibc through onnxruntime-node", files: map[string]string{"package.json": manifest(`"dependencies":{"@huggingface/transformers":"^3.0.0","bcrypt":"^5.1.1"}`)},
+			config: server, findings: []string{"glibc_image_selected", "native_addon_toolchain"},
+			want: []string{"FROM node:22-bookworm-slim@sha256:", "RUN apt-get update && apt-get install -y --no-install-recommends g++ make python3 && rm -rf /var/lib/apt/lists/*\n"}},
+		{name: "Bun is copied from its Debian build on Debian", files: map[string]string{"package.json": manifest(`"dependencies":{"onnxruntime-node":"^1.20.0"}`), "bun.lock": `{"lockfileVersion":1,"workspaces":{"":{"dependencies":{"onnxruntime-node":"^1.20.0"}}},"packages":{"onnxruntime-node":["onnxruntime-node@1.20.1","",{},"x"]}}`},
+			config: BuildPlanConfig{BuildCommand: "bun run build", StartCommand: "bun run start"},
+			want:   []string{"FROM node:22-bookworm-slim@sha256:", "COPY --from=oven/bun:1-slim@sha256:"}, absent: []string{"alpine"}},
+		{name: "a Git dependency gets git", files: map[string]string{"package.json": manifest(`"dependencies":{"lib":"github:owner/lib#v1.2.0"}`)},
+			config: server, findings: []string{"git_dependencies"}, want: []string{"RUN apk add --no-cache git\n"}, absent: []string{"openssh"}},
+		{name: "an SSH Git dependency gets ssh and a warning", files: map[string]string{"package.json": manifest(`"dependencies":{"lib":"git+ssh://git@git.example.com/team/lib.git#main"}`)},
+			config: server, findings: []string{"git_dependencies", "git_dependency_credentials"}, want: []string{"RUN apk add --no-cache git openssh-client\n"}},
+		{name: "npm's lockfile names a transitive Git dependency", files: map[string]string{"package.json": manifest(`"dependencies":{"left-pad":"^1.3.0"}`),
+			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"left-pad":"^1.3.0"}},"node_modules/left-pad":{"version":"1.3.0"},"node_modules/patched":{"version":"1.0.0","resolved":"git+https://github.com/owner/patched.git#0123456789abcdef0123456789abcdef01234567"}}}`},
+			config: server, findings: []string{"git_dependencies"}, want: []string{"RUN apk add --no-cache git\n"}},
+		{name: "Prisma gets OpenSSL where it generates and where it runs", files: map[string]string{"package.json": manifest(`"dependencies":{"@prisma/client":"^6.2.0"},"devDependencies":{"prisma":"^6.2.0"}`)},
+			config: server, want: []string{" AS build\nRUN apk add --no-cache openssl\n", "\nRUN apk add --no-cache openssl\nWORKDIR /app\n"}},
+		{name: "puppeteer uses the image's Chromium", files: map[string]string{"package.json": manifest(`"dependencies":{"puppeteer":"^23.0.0"}`), "package-lock.json": npmLock},
+			config: server, findings: []string{"headless_browser"},
+			want: []string{
+				`RUN export PUPPETEER_SKIP_DOWNLOAD="${PUPPETEER_SKIP_DOWNLOAD:-true}" PUPPETEER_SKIP_CHROMIUM_DOWNLOAD="${PUPPETEER_SKIP_CHROMIUM_DOWNLOAD:-true}" && npm install --no-audit --no-fund` + "\n",
+				"RUN apk add --no-cache ca-certificates chromium font-freefont freetype harfbuzz nss\n",
+				"ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser\n"}},
+		{name: "Playwright downloads Chromium into the application on Debian", files: map[string]string{"package.json": manifest(`"dependencies":{"playwright":"^1.48.0"}`), "package-lock.json": npmLock},
+			config: server, findings: []string{"headless_browser", "glibc_image_selected"},
+			want: []string{"FROM node:22-bookworm-slim@sha256:", "ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright\nWORKDIR /app\n",
+				"RUN npx playwright install chromium\nRUN npm run build\n", "COPY --from=build /app /app\nRUN npx playwright install-deps chromium\nCMD"}},
+		{name: "Playwright for tests changes nothing", files: map[string]string{"package.json": manifest(`"devDependencies":{"@playwright/test":"^1.48.0","playwright":"^1.48.0"}`), "package-lock.json": npmLock},
+			config: server, absent: []string{"bookworm", "playwright", "apk add"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			prepared := prepareNode(t, test.files, test.config)
+			assertDockerfile(t, prepared.DockerfilePreview, test.want, test.absent)
+			plan := planNodeInstall(readNodeTree(t, test.files, "").facts, nodeInstallChoice{build: test.config.BuildCommand, start: test.config.StartCommand})
+			for _, code := range test.findings {
+				if findingByCode(plan.findings, code) == nil {
+					t.Fatalf("findings %+v lack %s", plan.findings, code)
+				}
+			}
+		})
+	}
+}
+
+func TestNodeGitSourcesAreReadFromTheSpecification(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		spec        string
+		cloned, ssh bool
+	}{
+		{"github:owner/repo#v1", true, false}, {"owner/repo", true, false}, {"owner/repo#semver:^1.0", true, false},
+		{"git+https://github.com/owner/repo.git", true, false}, {"git://github.com/owner/repo.git", true, false},
+		{"https://github.com/owner/repo.git#main", true, false}, {"git+ssh://git@github.com/owner/repo.git", true, true},
+		{"git@github.com:owner/repo.git", true, true}, {"gitlab:group/repo", true, false},
+		{"^1.2.3", false, false}, {"npm:other@^1", false, false}, {"workspace:*", false, false}, {"file:../lib", false, false},
+		{"https://codeload.github.com/owner/repo/tar.gz/main", false, false}, {"@scope/pkg", false, false}, {"latest", false, false},
+	} {
+		if cloned, ssh := nodeGitSource(test.spec); cloned != test.cloned || ssh != test.ssh {
+			t.Fatalf("nodeGitSource(%q) = %t, %t", test.spec, cloned, ssh)
+		}
+	}
+}

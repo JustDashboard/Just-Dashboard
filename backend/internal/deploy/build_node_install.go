@@ -781,6 +781,8 @@ type nodeInstallPlan struct {
 	// the image family: Alpine, or Debian slim for glibc-only packages.
 	node   nodeRelease
 	family string
+	// image is what the dependencies need from the image beyond the install.
+	image nodeImagePlan
 	// berry keeps Yarn's cache inside the build so a Plug'n'Play install
 	// is copied with the application.
 	berry     bool
@@ -865,7 +867,9 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	if plan.reading != nil {
 		plan.lockfile = plan.reading.Path
 	}
-	plan.node, plan.family = nodeReleaseFor(facts), nodeFamilyAlpine
+	var glibc []string
+	plan.family, glibc = nodeImageFamily(facts, choice.assets)
+	plan.node = nodeReleaseFor(facts)
 	// A saved command still naming another manager's runner — detected when
 	// a different lockfile resolved, or left behind by a later commit that
 	// switched managers — would run a program the image may not have.
@@ -993,6 +997,7 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	plan.findings = append(plan.findings, nodeFinding("package_manager_version", PreflightPass,
 		"Package manager release", plan.toolchain,
 		"The release that installs, and what chose it: a declaration, the lockfile's format, or the reviewed default.", "", field))
+	planNodeImage(facts, &plan, glibc, choice.assets)
 	planNodeRelease(facts, &plan)
 	return plan
 }

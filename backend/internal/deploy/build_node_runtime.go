@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -553,4 +554,286 @@ func planNodeRelease(facts nodeInstallFacts, plan *nodeInstallPlan) {
 			"The image is still built and served, but vulnerabilities found in this release are not fixed upstream.",
 			action, "configuration.build"))
 	}
+}
+
+// nodePackageSet names system packages in each image family.
+type nodePackageSet struct{ alpine, debian []string }
+
+func (s nodePackageSet) in(family string) []string {
+	if family == nodeFamilyGlibc {
+		return s.debian
+	}
+	return s.alpine
+}
+
+var (
+	// nodeCompilers are what node-gyp needs to build a binding from source.
+	nodeCompilers = nodePackageSet{alpine: []string{"python3", "make", "g++"}, debian: []string{"python3", "make", "g++"}}
+	nodeGit       = nodePackageSet{alpine: []string{"git"}, debian: []string{"git", "ca-certificates"}}
+	nodeSSH       = nodePackageSet{alpine: []string{"openssh-client"}, debian: []string{"openssh-client"}}
+	// nodeOpenSSL lets Prisma's engines find the TLS library they load and
+	// name the right binary for it.
+	nodeOpenSSL = nodePackageSet{alpine: []string{"openssl"}, debian: []string{"openssl", "ca-certificates"}}
+	// node-canvas publishes glibc binaries with cairo bundled, and none for
+	// musl, where it compiles against the system's cairo and pango.
+	nodeCanvasHeaders   = nodePackageSet{alpine: []string{"pkgconf", "cairo-dev", "pango-dev", "jpeg-dev", "giflib-dev", "librsvg-dev", "pixman-dev"}}
+	nodeCanvasLibraries = nodePackageSet{alpine: []string{"cairo", "pango", "jpeg", "giflib", "librsvg", "pixman"}}
+	nodeChromium        = nodePackageSet{
+		alpine: []string{"chromium", "nss", "freetype", "harfbuzz", "ca-certificates", "font-freefont"},
+		debian: []string{"chromium", "fonts-freefont-ttf"},
+	}
+)
+
+// nodeNativeAddons compile a native binding with node-gyp when no prebuilt
+// binary matches the platform, the Node release and the C library — an old
+// release on a newer Node, an arm64 host, musl — and fail the install with
+// "gyp ERR! find Python" on an image without compilers.
+var nodeNativeAddons = []string{
+	"better-sqlite3", "sqlite3", "bcrypt", "argon2", "canvas", "node-sass", "re2", "isolated-vm", "cpu-features",
+	"libxmljs", "libxmljs2", "node-pty", "@serialport/bindings-cpp", "leveldown", "microtime", "farmhash",
+	"kerberos", "deasync", "node-expat", "@discordjs/opus", "ffi-napi", "ref-napi",
+}
+
+// nodeGlibcOnly ship binaries linked against glibc and none for musl: they
+// install on Alpine and fail to load ("Error loading shared library
+// ld-linux-x86-64.so.2"). nodeGlibcImplied are packages that depend on one,
+// for lockfiles that do not list what they install.
+var (
+	nodeGlibcOnly    = []string{"onnxruntime-node", "@tensorflow/tfjs-node", "@tensorflow/tfjs-node-gpu"}
+	nodeGlibcImplied = map[string]string{"@xenova/transformers": "onnxruntime-node", "@huggingface/transformers": "onnxruntime-node"}
+)
+
+var (
+	nodeGitPrefixRE    = regexp.MustCompile(`^(?:git\+[a-z]+://|git://|github:|gitlab:|bitbucket:|gist:)`)
+	nodeGitShorthandRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(?:#\S*)?$`)
+)
+
+// nodeGitSource says whether a dependency specification or a lockfile's
+// resolved source is a Git repository the install clones, and whether it is
+// reached over SSH. A tarball URL, a registry range and a local path are not.
+func nodeGitSource(spec string) (cloned, ssh bool) {
+	spec = strings.TrimSpace(spec)
+	switch {
+	case strings.HasPrefix(spec, "git+ssh://"), strings.HasPrefix(spec, "ssh://"), strings.HasPrefix(spec, "git@"):
+		return true, true
+	case nodeGitPrefixRE.MatchString(spec):
+		return true, false
+	case strings.HasPrefix(spec, "https://") || strings.HasPrefix(spec, "http://"):
+		address, _, _ := strings.Cut(spec, "#")
+		return strings.HasSuffix(address, ".git"), false
+	case nodeGitShorthandRE.MatchString(spec):
+		// npm reads owner/repo as a GitHub repository.
+		return true, false
+	}
+	return false, false
+}
+
+// gitDependencies lists the packages the install clones, from the package's
+// and its workspace root's manifests and from npm's lockfile.
+func (f nodeInstallFacts) gitDependencies() (names []string, ssh bool) {
+	set := map[string]bool{}
+	for _, manifest := range []nodeInstallManifest{f.manifest, f.settings} {
+		for _, kind := range []map[string]string{manifest.Dependencies, manifest.DevDependencies, manifest.OptionalDependencies} {
+			for name, spec := range kind {
+				if cloned, overSSH := nodeGitSource(spec); cloned {
+					set[name] = true
+					ssh = ssh || overSSH
+				}
+			}
+		}
+	}
+	for _, reading := range f.readings {
+		for _, name := range reading.git {
+			set[name] = true
+		}
+		ssh = ssh || reading.gitSSH
+	}
+	return sortedNames(set), ssh
+}
+
+// nodeImagePlan is what the image adds to the install: the family, the
+// system packages each stage installs, and what the browsers a runtime
+// dependency drives need.
+type nodeImagePlan struct {
+	// buildPackages are installed in the build stage before the source is
+	// copied, so they are cached apart from it; runtimePackages in a
+	// server's runtime stage.
+	buildPackages, runtimePackages []string
+	// installEnv is set on the install RUN when the variable has no value of
+	// its own; buildEnv and runtimeEnv are ENV lines of the build and
+	// runtime stages; runtimeRuns run after the application is copied.
+	installEnv             []nodeEnvDefault
+	buildEnv, runtimeEnv   []string
+	buildRuns, runtimeRuns []string
+}
+
+// nodeEnvDefault is a value a RUN gives a variable only when the build
+// supplies none, so an operator's own build variable of the same name wins.
+type nodeEnvDefault struct{ name, value string }
+
+// nodeImageFamily chooses Debian slim when a package the application loads
+// ships glibc binaries only; everything else stays on Alpine.
+func nodeImageFamily(facts nodeInstallFacts, assets bool) (string, []string) {
+	if assets {
+		return nodeFamilyAlpine, nil
+	}
+	reasons := []string{}
+	for _, name := range nodeGlibcOnly {
+		if facts.present(name) {
+			reasons = append(reasons, name)
+		}
+	}
+	for name, needs := range nodeGlibcImplied {
+		if facts.present(name) && !facts.present(needs) {
+			reasons = append(reasons, name+" (through "+needs+")")
+		}
+	}
+	for _, name := range []string{"playwright", "playwright-core"} {
+		if facts.manifest.Dependencies[name] != "" {
+			reasons = append(reasons, name)
+		}
+	}
+	if len(reasons) == 0 {
+		return nodeFamilyAlpine, nil
+	}
+	slices.Sort(reasons)
+	return nodeFamilyGlibc, reasons
+}
+
+// planNodeImage adds the system packages and settings the application's
+// dependencies need, with a finding for each.
+func planNodeImage(facts nodeInstallFacts, plan *nodeInstallPlan, glibc []string, assets bool) {
+	image := &plan.image
+	family := plan.family
+	build := map[string]bool{}
+	runtime := map[string]bool{}
+	add := func(set map[string]bool, packages nodePackageSet) {
+		for _, name := range packages.in(family) {
+			set[name] = true
+		}
+	}
+	if len(glibc) > 0 {
+		plan.findings = append(plan.findings, nodeFinding("glibc_image_selected", PreflightPass,
+			"The image is Debian, for packages built for glibc only", strings.Join(glibc, ", "),
+			"They ship binaries linked against glibc and none for Alpine's musl, which install and then fail to load; the build and the server run on "+plan.nodeImage()+".",
+			"", "configuration.build"))
+	}
+	addons := []string{}
+	for _, name := range nodeNativeAddons {
+		if facts.present(name) {
+			addons = append(addons, name)
+		}
+	}
+	if len(addons) > 0 {
+		add(build, nodeCompilers)
+		means := "These compile their native binding when no prebuilt binary matches the platform, Node release and C library; the build stage installs python3, make and g++ for that."
+		if slices.Contains(addons, "canvas") && family == nodeFamilyAlpine {
+			add(build, nodeCanvasHeaders)
+			add(runtime, nodeCanvasLibraries)
+			means = "These compile their native binding when no prebuilt binary matches the platform, Node release and C library; the build stage installs python3, make and g++, canvas also cairo, pango and image headers, and the runtime image the libraries canvas links."
+		}
+		plan.findings = append(plan.findings, nodeFinding("native_addon_toolchain", PreflightPass,
+			"Native addons can compile", strings.Join(addons, ", "), means, "", "configuration.build"))
+	}
+	if names, ssh := facts.gitDependencies(); len(names) > 0 {
+		add(build, nodeGit)
+		plan.findings = append(plan.findings, nodeFinding("git_dependencies", PreflightPass,
+			"Git dependencies are cloned", strings.Join(boundedNames(names), ", "),
+			"The package manager clones these from Git, which the Node image lacks; the build stage installs git.", "", "configuration.build"))
+		if ssh {
+			add(build, nodeSSH)
+			plan.findings = append(plan.findings, nodeFinding("git_dependency_credentials", PreflightWarning,
+				"A Git dependency is fetched over SSH", strings.Join(boundedNames(names), ", "),
+				"The build has no SSH key or known host, so cloning a repository over SSH fails unless the package manager fetches it over HTTPS instead.",
+				"Use an https:// URL — for a private repository with a token variable mapped to the install step — or publish the package to a registry.", "configuration.build"))
+		}
+	}
+	if facts.present("prisma") || facts.present("@prisma/client") {
+		add(build, nodeOpenSSL)
+		if !assets {
+			add(runtime, nodeOpenSSL)
+		}
+		plan.notes = append(plan.notes, "Prisma: openssl is installed so its engines find the TLS library they load")
+	}
+	if puppeteer := nodePuppeteerPackage(facts.manifest); puppeteer != "" && !assets {
+		add(runtime, nodeChromium)
+		chromium := "/usr/bin/chromium-browser"
+		if family == nodeFamilyGlibc {
+			chromium = "/usr/bin/chromium"
+		}
+		// Puppeteer 19 and later read the first name, older releases the second.
+		image.installEnv = append(image.installEnv, nodeEnvDefault{"PUPPETEER_SKIP_DOWNLOAD", "true"}, nodeEnvDefault{"PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", "true"})
+		image.runtimeEnv = append(image.runtimeEnv, "PUPPETEER_EXECUTABLE_PATH="+chromium)
+		means := "Puppeteer's own Chrome download lands outside the application and never reaches the server image, so the install skips it and the server uses the system Chromium: the image grows by about 300 MB and each browser needs a few hundred MB of memory."
+		if puppeteer == "puppeteer-core" {
+			means = "puppeteer-core launches the browser the code names; the image installs Chromium and names it in PUPPETEER_EXECUTABLE_PATH for the code to pass as executablePath. The image grows by about 300 MB and each browser needs a few hundred MB of memory."
+		}
+		plan.findings = append(plan.findings, nodeFinding("headless_browser", PreflightWarning,
+			"The server drives a headless browser", puppeteer+" with the image's Chromium ("+chromium+")", means,
+			"Launch with args: ['--no-sandbox'], since the container runs as root, and give the service a memory limit with room for the browser.", "configuration.build"))
+	}
+	if playwright := nodePlaywrightPackage(facts.manifest); playwright != "" && !assets {
+		runner := nodeExecRunner(plan.manager)
+		image.buildEnv = append(image.buildEnv, "PLAYWRIGHT_BROWSERS_PATH="+nodePlaywrightBrowsers)
+		image.runtimeEnv = append(image.runtimeEnv, "PLAYWRIGHT_BROWSERS_PATH="+nodePlaywrightBrowsers)
+		image.buildRuns = append(image.buildRuns, runner+" "+playwright+" install chromium")
+		image.runtimeRuns = append(image.runtimeRuns, runner+" "+playwright+" install-deps chromium")
+		plan.findings = append(plan.findings, nodeFinding("headless_browser", PreflightWarning,
+			"The server drives a headless browser", playwright+" with Chromium in "+nodePlaywrightBrowsers,
+			"The build downloads Chromium inside the application so it reaches the server, whose image installs Chromium's system libraries: several hundred MB more image and a few hundred MB of memory per browser. Only Chromium is installed.",
+			"Launch Chromium (chromium.launch), with chromiumSandbox off since the container runs as root, and give the service a memory limit with room for the browser.", "configuration.build"))
+	}
+	image.buildPackages, image.runtimePackages = sortedNames(build), sortedNames(runtime)
+}
+
+// nodePlaywrightBrowsers keeps Playwright's browsers inside the application
+// directory, which is what the runtime stage copies.
+const nodePlaywrightBrowsers = "/app/.cache/ms-playwright"
+
+func nodePuppeteerPackage(manifest nodeInstallManifest) string {
+	for _, name := range []string{"puppeteer", "puppeteer-core"} {
+		if manifest.Dependencies[name] != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func nodePlaywrightPackage(manifest nodeInstallManifest) string {
+	for _, name := range []string{"playwright", "playwright-core"} {
+		if manifest.Dependencies[name] != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// nodePackagesLine installs system packages in the family's own way.
+func nodePackagesLine(family string, packages []string) string {
+	if family == nodeFamilyGlibc {
+		return "RUN apt-get update && apt-get install -y --no-install-recommends " + strings.Join(packages, " ") + " && rm -rf /var/lib/apt/lists/*"
+	}
+	return "RUN apk add --no-cache " + strings.Join(packages, " ")
+}
+
+// nodeRunWith renders a RUN that gives each default to the commands that
+// follow, unless the build supplied the variable: "${NAME:-value}" is
+// expanded by the RUN's shell, never by the Dockerfile parser, and only
+// recipe constants are ever written this way.
+func nodeRunWith(mounts string, defaults []nodeEnvDefault, command string) string {
+	if len(defaults) == 0 {
+		return "RUN " + mounts + command
+	}
+	assignments := make([]string, 0, len(defaults))
+	for _, value := range defaults {
+		assignments = append(assignments, value.name+`="${`+value.name+`:-`+value.value+`}"`)
+	}
+	return "RUN " + mounts + "export " + strings.Join(assignments, " ") + " && " + command
+}
+
+func boundedNames(names []string) []string {
+	if len(names) > nodeListedNames {
+		return append(append([]string(nil), names[:nodeListedNames]...), fmt.Sprintf("and %d more", len(names)-nodeListedNames))
+	}
+	return names
 }

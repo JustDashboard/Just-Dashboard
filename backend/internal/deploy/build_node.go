@@ -354,6 +354,9 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 		lines = append(lines, "WORKDIR "+workdir)
 	}
 	lines = append(lines, "ENV PATH="+binPath+":$PATH")
+	for _, run := range plan.image.buildRuns {
+		lines = append(lines, "RUN "+run)
+	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		lines = append(lines, "RUN "+buildSecrets+command)
 	}
@@ -376,16 +379,24 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	if strings.TrimSpace(config.StartCommand) == "" {
 		return nil, fmt.Errorf("%w: Node service recipe requires a start command", ErrUnsupportedBuilder)
 	}
-	lines = append(lines, "FROM "+base, "WORKDIR "+workdir, "ENV NODE_ENV=production")
+	lines = append(lines, "FROM "+base)
+	if packages := plan.image.runtimePackages; len(packages) > 0 {
+		lines = append(lines, nodePackagesLine(plan.family, packages))
+	}
+	lines = append(lines, "WORKDIR "+workdir, "ENV NODE_ENV=production")
 	if len(plan.corepack) > 0 {
 		// The releases are installed; a start must never download one.
 		lines = append(lines, "ENV COREPACK_ENABLE_NETWORK=0")
 	}
 	lines = append(lines, "ENV PATH="+binPath+":$PATH")
-	for _, env := range defaults.Env {
+	for _, env := range append(append([]string(nil), plan.image.runtimeEnv...), defaults.Env...) {
 		lines = append(lines, "ENV "+env)
 	}
-	return append(lines, "COPY --from=build /app /app", shellCMD(config.StartCommand)), nil
+	lines = append(lines, "COPY --from=build /app /app")
+	for _, run := range plan.image.runtimeRuns {
+		lines = append(lines, "RUN "+run)
+	}
+	return append(lines, shellCMD(config.StartCommand)), nil
 }
 
 // nodeInstallStage renders what the Node recipe and the PHP recipe's asset
@@ -409,11 +420,18 @@ func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []Resolved
 		lines = append(lines, toolchain...)
 		base = toolchainStage
 	}
-	lines = append(lines, "FROM "+base+" AS "+stage, "WORKDIR /app", "COPY . .")
+	lines = append(lines, "FROM "+base+" AS "+stage)
+	if packages := plan.image.buildPackages; len(packages) > 0 {
+		lines = append(lines, nodePackagesLine(plan.family, packages))
+	}
+	for _, env := range plan.image.buildEnv {
+		lines = append(lines, "ENV "+env)
+	}
+	lines = append(lines, "WORKDIR /app", "COPY . .")
 	if plan.berry {
 		lines = append(lines, "ENV YARN_ENABLE_GLOBAL_CACHE=false")
 	}
-	return append(lines, "RUN "+installSecrets+plan.installLine()), base, nil
+	return append(lines, nodeRunWith(installSecrets, plan.image.installEnv, plan.installLine())), base, nil
 }
 
 // readNodeInstalls reads the install inputs of every package detection
