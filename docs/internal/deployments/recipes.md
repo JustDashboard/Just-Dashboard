@@ -197,7 +197,8 @@ service reads at runtime are copied there, owned by that user: `templates`, `vie
 `assets`, `migrations`, `locales`, `i18n`, `config` and `config*.{yaml,yml,toml,json}` when they exist,
 plus the directory named by any literal path the sources hand to `LoadHTMLGlob`, `ParseGlob`,
 `http.Dir`, `Static`/`StaticFile`, `os.DirFS` or a `file://` migration source (read as text under a
-fixed budget; symlinks are never copied). `/home/app/data` is created and owned by `app`, so a volume
+fixed budget; symlinks are never copied, nor is a name the repository's `.dockerignore` keeps out of
+the build context, because copying a file the context lacks would fail the build). `/home/app/data` is created and owned by `app`, so a volume
 mounted there starts writable. Rust uses the same stage, reading `ServeDir`, `ServeFile`, `Tera::new`,
 `NamedFile` and actix `Files` literals.
 
