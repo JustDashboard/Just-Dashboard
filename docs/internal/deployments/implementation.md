@@ -176,7 +176,14 @@ only renderer/executor/validation authority for their feature.
   `#2`, `#3`, … counter and is recomputed until a free one is found. `covered` is whether a certificate
   already covers the name — the only thing activation accepts — and `certificateMethod` is the HTTP-01
   challenge this host could issue one with. Both are reported so the screen can say what the run will do,
-  not so the operator has to do it.
+  not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
+  answers `address`, this server's public IPv4, which is the A record the name needs, and — for
+  `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
+  proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
+  a pointer for the reason `nameTaken` is: a host with no public address cannot make the comparison,
+  and a lookup the request ran out of time for is no answer, so absent is not false. It stays with
+  administrators because resolving a name the caller chose is traffic the caller directs, which the
+  proxy page's own check already keeps at `system.admin`.
   Address selection excludes private, loopback, link-local and CGNAT (`100.64.0.0/10`) addresses,
   including Tailscale addresses. Go's `IsGlobalUnicast` and `IsPrivate` alone do not exclude CGNAT.
   A host without a public interface address gets no generated fallback; hosts behind provider NAT
@@ -260,7 +267,16 @@ only renderer/executor/validation authority for their feature.
   documented URLs name, each with the variable the connection belongs in). The closed recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
-  The contract per language is [the recipe guide](recipes.md).
+  The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
+  recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
+  the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
+  a fleet card or the Build settings, names it without detecting again. The server owns it: a value
+  the browser sends in a draft or a configuration save is never kept. A save carries it forward only
+  while the method, recipe and root directory stay the same, and a source change that moves the code
+  — another repository, directory or image, though not a new branch or credential — drops it,
+  because detection named the code that used to be there. It is left out of the plan's digest
+  (`buildPlanDigest`, which every path that writes a build plan uses), so recording or dropping a
+  name never shows as a pending build change. Projects created before it was kept have none.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's
@@ -402,6 +418,20 @@ only renderer/executor/validation authority for their feature.
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
   their owning stores; missing or ambiguous targets fail closed instead of reaching a workload as literal
   reference text. Run-scoped domain and Compose references use the frozen run plan/dependency snapshots.
+  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session) takes the
+  import's body and writes nothing: it answers one verdict per name, in the order the names were
+  written, with the line — `added`, `changed` (the value, sensitivity or scopes differ), `unchanged`,
+  or `refused` with `invalid_name`, `duplicate` or `invalid_value` — so the import sheet can say what
+  pressing Import will do before it is pressed. Values meet the stored ones only as digests, on the
+  server, and the answer carries neither a value nor a digest. It is audited under an action of its
+  own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
+  import it did not perform. What the import refuses as a whole — a
+  line the parser cannot read past, a bad sensitivity or scope, a reference that would not resolve —
+  is refused with the import's own error; a refusal that belongs to one name is that name's verdict,
+  so every other line can still be read. `dryRun` must parse as a boolean, because a preview that
+  failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and
+  `components/deploy/settings/dotenv.ts` is that parser written again line for line, so the sheet
+  can draw a preview while the server's is in flight, and the server's verdicts replace it.
 - Domains, persistent storage, backup jobs and database entries remain resources of Proxy, Docker,
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
@@ -449,7 +479,8 @@ only renderer/executor/validation authority for their feature.
   `git ls-remote`. This works behind the dashboard's private network allowlist without public ingress
   or GitHub hook registration. Outages and slow Git reads can delay detection; it is polling, not an
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
-  are excluded. Monitoring status and access failures appear in the project header's facts row and on Settings → General.
+  are excluded. Monitoring status and access failures appear in the project header's identity line
+  and on Settings → General's Automatic deployment section.
   `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
   a later branch change (including a force-push back to an older commit) remains eligible. Watching
@@ -479,7 +510,10 @@ only renderer/executor/validation authority for their feature.
   a local checkout — and folds a `commit` object (`sha`, `subject` capped at 200 characters, `author`,
   `authoredAt`) into the run's metadata through `OrchestrationStore.MergeRunMetadata`, the one path that
   mutates `deploy_runs.metadata_json` after enqueue. An unreadable history logs a transcript line and
-  leaves the field absent rather than failing the step; a retry's wholesale metadata copy, plus every
+  leaves the field absent rather than failing the step. That line goes to `stderr`: the transcript
+  accepts only `stdout`, `stderr` and `status`, and the `warning` stream it was first written on was
+  refused, which failed the append and silenced every line the step logged after it. A retry's
+  wholesale metadata copy, plus every
   run independently re-deriving the same commit from the same frozen revision, is what carries it
   forward through a retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy
   project's local checkout only; a normalized Git-URL project's private release mirror keeps only
@@ -490,9 +524,15 @@ only renderer/executor/validation authority for their feature.
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
   path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
   `GET …/triggers/{trigger}/deliveries` (`system.admin`, session) reads the last 50 `deploy_webhook_deliveries`
-  rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — and
+  rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — or `?limit=` of
+  them, 1 to 200 (anything else reads 50), and
   `POST …/triggers/{trigger}/rotate-secret` (same tier, audited `deploy.trigger.rotate_secret`) issues a new
-  HMAC secret shown once, mirroring the legacy project's own secret rotation.
+  HMAC secret shown once, mirroring the legacy project's own secret rotation. The trigger list carries a
+  summary of that log — each trigger's `lastDelivery` and `recent`, its last fourteen decisions oldest
+  first, read for every trigger in one windowed statement (`AttachTriggerDeliveries`) — but only for a
+  session holding `system.admin`, the caller who could read the log itself; the list is readable by any
+  account, and a read-only one still sees `lastStatus` alone. Absent means not allowed or never
+  delivered, and the page then draws no strip rather than an error.
   A new *automatic* run only supersedes an older queued one in the same environment when its own
   `changedPaths` cover the older run's — an empty set can only cover another empty set — so the git
   watcher and provider webhook handlers record `run.metadata.changedPaths` only from the watcher's own
@@ -504,8 +544,18 @@ only renderer/executor/validation authority for their feature.
   know changed paths, so its `[]` reads as "unscoped": a routine scheduled action queued behind a real
   push no longer supersedes it, while a real push still supersedes a stale unscoped schedule ahead of it.
 - The scheduler advances a persisted next-run claim atomically and executes a bounded, ordered action
-  chain. Chain history stores only action/status/error-code/duration evidence. Preview environments require
-  session administrator approval of each exact PR revision before creation or execution.
+  chain. Chain history stores only action/status/error-code/duration evidence. A listed schedule carries
+  `nextRuns`, its next five firings: the stored `nextRunAt` first, because that is the dispatcher's own
+  answer, then four more walked from it in the schedule's time zone (`NextCronRuns`), so a
+  daylight-saving change lands on the page where the dispatcher will put it. A paused schedule has
+  none, and an expression that no longer walks — a zone gone from the host's tzdata — is left to the
+  dispatcher to disable. `POST …/schedules/test` (audited `deploy.schedule.test`) answers the same five
+  beside `nextRunAt`, which is what the schedule sheet's check shows before a schedule is saved.
+  Preview environments require
+  session administrator approval of each exact PR revision before creation or execution. An approval
+  carries `headRef`, the branch the pull request proposes, kept apart from the ref the build fetches
+  (the provider's own `refs/pull/N/head` on GitHub and `refs/merge-requests/N/head` on GitLab, names
+  nobody chose); approvals recorded before it was kept have none.
   `POST …/previews/approvals/{approval}/reject` (`system.admin`) moves a `pending` or `approved` row to a
   new closed state, `rejected`: `ApprovePreview`'s own `WHERE state IN ('pending','approved')` already
   refuses it afterward without any extra check, and the trigger's next delivery for that pull request
@@ -520,21 +570,31 @@ only renderer/executor/validation authority for their feature.
   start, through Discord, Slack, Telegram, e-mail or a signed webhook; a failed or cancelled run reaches
   the same channels as a successful one. Credentials are sealed and never listed, deliveries record only
   a status class and are deduplicated per run and event, and a delivery failure never changes a run's
-  outcome. GitHub commit statuses ride the same hook. See [notifications](notifications.md).
+  outcome. GitHub commit statuses ride the same hook. The channel list carries each channel's newest
+  attempt and last fourteen outcomes, and each delivery the project and run it announced, so the
+  page reads whether messages arrive without a request per channel. See
+  [notifications](notifications.md).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching running containers once each.
-  The five-second bounded read returns container/release/Compose identities, state, health and start
+  The five-second bounded read returns container/release/Compose identities, the image reference the
+  container was created from as Docker reports it (`image`, so a service is drawn as the product it
+  runs without a join to the container list), state, health and start
   time, without command text, environment values or arbitrary labels. `liveRelease` identifies the
   persisted live release, not a current health verdict. Failed or missing Docker is `unavailable` with
   a fixed recovery hint; a successful empty inventory is `available`. Missing health inspection evidence
   remains `unavailable`. The overview renders these services with live/other-release labels and links to
   the exact Docker container or Compose stack panel. Empty managed inventory, unavailable evidence and
   unassessed diagnosis have distinct wording.
-  Runtime rows also link to the exact container source in Logs. Logs preserves explicit time-window
+  A Runtime service's Logs verb (and the game console's) opens the project's Logs page, which reads
+  only `view` and `moment`, so the `?service=` it carries selects nothing there; the exact container's
+  output is reached through Open in Docker, and a run's runtime-log sources link to the host Logs
+  page's `source=docker:<id>` (see [verification findings](../reference/verification-findings.md)).
+  Logs preserves explicit time-window
   links and refuses to substitute another source when the requested container is no longer discoverable;
   `GET /deploy/{id}/runs/{run}/logs` checks project membership and filters Docker by the run's own
-  environment and candidate/release id, including preview environments. It provides live source links
-  and a ten-minute history window around the latest successful activation step's completion only when
+  environment and candidate/release id, including preview environments. It provides live source links,
+  each source with its container's image, and a ten-minute history window around the latest
+  successful activation step's completion only when
   its persisted evidence identifies that release and contains no recovery. It never uses the current
   live release's activation timestamp to describe an older run. Missing/failed activation has no history
   link; removed runtimes point the operator to the transcript or an external log archive. The run page embeds application runtime logs separately from the orchestrator transcript, and the
@@ -546,7 +606,15 @@ only renderer/executor/validation authority for their feature.
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
   batched call. Every section carries its own availability, so a host without nginx or Backups renders
-  named unavailable evidence rather than an empty success. `deploy.Diagnose` is a pure function over those
+  named unavailable evidence rather than an empty success. A domain row names who issued its
+  certificate (`certificateIssuer`, the issuer's common name — `R10`, `E6` for Let's Encrypt — read
+  from the same certificate as its name and days left), so the issuer is observed rather than
+  inferred from how the domain is owned. A dependency's `deepLink` is the page that owns it: a backup
+  job's own page (`/backups/<id>`) and Databases with the connection selected
+  (`/databases/connection?conn=<id>`), each only once the resource is known to exist and the list page
+  until then. The connection link used to be `/databases/<id>`, which is not a route, because the
+  Databases pages select a connection by query rather than by path, and the job link was always the
+  list. `deploy.Diagnose` is a pure function over those
   observations returning findings and explicit *silences*: an owner that could not be read is never a
   claim and never a clean result. Release comparison (`.../releases/{release}/comparison`) names source,
   image, command, ports, runtime plan, storage, dependencies, checks and domains, compares variables by
@@ -559,11 +627,36 @@ only renderer/executor/validation authority for their feature.
   for health: the live release's `runtime_config` snapshot names its Compose service count directly, or
   1 for any release that is not a Compose build, and the count is read from the snapshot regardless of
   whether the runtime is currently live or stopped — no per-project query added.
+  The summary, on the fleet and on `GET /deploy/{id}` alike, also says what each project is and how its
+  last runs went, which is what a card draws without a request of its own: `sourceRepository`
+  (owner/name for Git; the image reference itself for an image source, whose `sourceRef` is empty; the
+  image a template renders for a blueprint source, whose `sourceRef` is the template's `id@version`),
+  `sourceRemote` (the fetch URL reduced to scheme, host and path, or the
+  SCP-style `git@host:path`, with any userinfo dropped — a remote recorded before credentials were
+  refused in URLs can carry a token there — and left out when it does not parse), the desired build
+  plan's `recipe` and `framework`, `images` (the distinct references the live release's runtime
+  snapshot runs, read from the same snapshot as the service count) and `recentRuns` (the newest
+  fourteen, newest first, ordered the way `latestProjectRuns` picks the last run, so `recentRuns[0]`
+  is `lastRun`). The strip is one more batched statement over every card, which makes a fleet read
+  eleven fixed statements where it was ten, and twelve while anything is in flight (the step read
+  below), beside the active-work list's own reads of each run and its project; the counting tests
+  measure a fleet at rest, allow eleven and say why. A run that
+  has not ended carries `currentStep` — the step it is running, else the one blocking it, else a
+  failed one, else the next one waiting, with the name the release path gives it (`Fetch source`,
+  `Readiness checks`, `Switch traffic`) — on the fleet's active work, on a summary's `lastRun` and
+  `activeRun`, and on `GET /deploy/{id}/runs?view=engine`, so a row can say where a run stands without
+  loading its snapshot. It is one windowed statement over the runs in flight, where the active-work
+  list used to ask once per run. `GET /deploy/?view=archived` returns each archived project's record
+  with the facts its plan recorded beside it — `sourceKind`, `sourceRef`, `sourceRepository`,
+  `buildMethod`, `recipe`, `framework` — read for every archived project in one statement
+  (`ArchivedDeploymentFacts`), so the archive can draw each as what it deployed without a read per
+  row; a legacy project with no production environment has none.
   `GET /deploy/{id}/runs?view=engine` additionally accepts `environment=<id>`, `operation=<op>`,
   `state=<state|terminal|active>` (a literal `RunState`, or the closed keywords for "any non-terminal
   state" and "any of the five terminal states"; anything else is `400`), `limit` (≤ 200) and a
   `before=<runId>` cursor; the response gains `nextBefore` only when another page remains, so the
-  unfiltered default response stays byte-identical to before these were added.
+  unfiltered default response stays byte-identical to before these were added, apart from
+  `currentStep` on a run that has not ended, which every read of the list now carries.
 - A blueprint deploys as an image release with reviewed defaults. `blueprint.DeploymentSupport`
   decides per definition: game profiles, blueprints that ship configuration files, blueprints that
   download an install-time artifact and UDP ports stay preview-only with a specific reason, exposed as
@@ -721,8 +814,12 @@ only renderer/executor/validation authority for their feature.
   volume is named from the deployment, not the release, which is what makes rollback restore the previous
   server build against the same world.
 - `deploy_credentials` rows are managed under `/deploy/credentials` (`system.admin`, session, every mutation
-  audited): `GET` lists `{id, name, kind, target, username?, createdAt, updatedAt, lastUsedAt?, usedBy}`
-  without the secret; `POST`/`PUT` seal the secret with the same `auth.Sealer` the variables use and validate
+  audited): `GET` lists `{id, name, kind, target, username?, createdAt, updatedAt, lastUsedAt?, usedBy,
+  usedByProjectIds?}` without the secret — `usedByProjectIds` names, sorted, the projects behind
+  `usedBy`, read from the same join so the two can never describe different sets, and since `usedBy`
+  counts environments a project with two on one credential is one id and two in the count; an
+  archived project drops out of both. `POST`/`PUT` seal the secret with the same `auth.Sealer` the
+  variables use and validate
   its shape per kind — a PEM private key for `git_ssh`, a bounded token for `git_bearer`/`provider_token`, a
   non-empty opaque value plus a required target host and username for `registry` (`registryAuth` already
   required both); an omitted `secret` on `PUT` keeps the sealed one. `DELETE` answers `409 credential_in_use`
@@ -857,40 +954,75 @@ names** — remove a mount and the file manager silently browses the container's
 
 ## Deployment workspace
 
-`/deploy` opens as a grid of project cards (rows on a phone) under the in-progress runs, a search
-field and state chips; a card carries the workload mark, the address, the branch and commit
-subject (or the Compose service count), and one status word. `/deploy?view=archived` lists archived
-projects with Restore (`POST /deploy/{id}/unarchive`) and permanent deletion. `/deploy/notifications`
-holds the fleet-level channels; `/deploy/credentials` holds saved credentials (Git tokens, SSH keys,
-registry logins, provider tokens) with add, edit, test, and a removal that is refused while a project
-uses the credential. Projects are also reachable from the command palette.
+`/deploy` opens on four readings the chips under them cannot say — how many projects are live,
+requests a minute across the fleet with its hour as a line, the share of them failing (weighted by
+traffic; amber from 1%, red from 5%) and the build slots in use — then the runs in progress as rows
+that open the run, an attention list, and the projects under a search field and counted state
+chips, ordered worst first: failed, unhealthy, deploying, ready with pending changes, ready,
+stopped, not deployed. What needs attention is decided apart from how it is drawn
+(`components/deploy/fleet.ts`, `fleetAttention`): a failed deploy with the engine's own terminal
+reason, a live release failing its health check, and a site failing 5% or more of its requests; a
+health reading of *unavailable* is not a finding. A card carries the project drawn as itself
+(`ProjectMark`), its address, its source as its forge, repository and branch, its last commit, its
+hour of traffic from `GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started
+the last one, and the verbs the project header offers (`useProjectVerbs`); the list view carries
+the same readings in fixed columns from 1280. The fleet is read every five seconds and the traffic
+every thirty; the archive is read once, for the count beside its link, and again when a card
+archives its project, because each archived row costs the server a history read.
+`/deploy?view=archived` lists archived projects drawn as what they deployed (`ArchivedDeployment`),
+with Restore (`POST /deploy/{id}/unarchive`) and permanent deletion. `/deploy/notifications` holds
+the fleet-level channels: it reads the list, which carries each channel's recent history, every ten
+seconds, and each channel's log (`?limit=200`) every thirty only for the two counts over a day.
+`/deploy/credentials` holds saved credentials (Git tokens, SSH keys, registry logins, provider
+tokens) with add, edit, test, and a removal that is refused while a project uses the credential,
+and reads the fleet to draw the projects each one serves. Projects are also reachable from the
+command palette.
 
 The project pages under `/deploy/[id]` share one read of the project through a layout-level provider
-(`detail`, runs, releases and the slower operational evidence), so moving between a project's pages
-never refetches the project. The shell draws the name and a status word (deploying, ready, failed,
-unhealthy, stopped, not deployed, archived — derived from the summary and the runtime observation),
-Visit, the one command (Deploy, Deploy changes, Redeploy, Start, or View deployment while a run is
-active), a verbs menu (Restart, Stop/Start, Redeploy live release, Rebuild without cache, Deploy a
-specific version, Duplicate project, Open in Docker, Archive) and a facts row (address, branch and
-commit, live release, automatic-deployment status).
+(`detail`, runs, releases and the slower operational evidence, plus the environment's configuration
+read once, the Git watch every fifteen seconds for a normalized Git source — one poll the header and
+the Overview share — and a template's definition), so moving between a project's pages never
+refetches the project, and a configuration save on any page is re-read there when the desired
+revision moves. The shell draws the name, then the identity line the host Overview opens on
+(`HostIdentity`): the project drawn as itself, its address with the certificate's state in the
+lock's colour, its source, commit, runtime, live release and automatic-deployment status as facts
+on their own marks, and its state — deploying, ready, failed, unhealthy, stopped, not deployed,
+derived from the summary and the runtime observation — with the diagnosis verdict or the stage in
+flight under it. Its actions are Visit, the one command (`projectCommand`: View deployment while a
+run is active, else Start, Deploy, Deploy changes or Redeploy) and a verbs menu grouped Running,
+Building and Project — Restart and Stop; Redeploy live release, Retry, Rebuild without cache and
+Deploy a specific version; Duplicate project and Open in Docker — with Archive and Delete
+permanently under the danger rule. Starting a run goes through `useProjectStart`, the fleet card's
+own.
 
 **The project's pages are on the sidebar, not in a strip above them.** `ProjectShell` publishes them
 through `useNavScope` (`components/nav-scope.tsx`) and the rail draws a third level inside Deployments:
 Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, then a
-Settings group of the nine settings pages carrying the pending-changes mark. The strip of eight tabs and
+Settings group of the nine settings pages, each marked while it holds a saved change that is not live
+yet (`PENDING_KIND_PAGE` maps a pending change's kind to its page). The panel's head is the project's
+favicon or product and its name as written, and a run page keeps the project's panel with Deployments
+marked current, because that is where a run is opened from. The strip of eight tabs and
 the settings rail beside them are both gone; the lists themselves live in `components/nav.ts` as
 `PROJECT_NAV` and `PROJECT_SETTINGS_NAV`, which is also what the rail draws from the route alone until
 the project's read lands. Stop and Restart need the destructive capability, as the Docker container
-verbs do; the menu hides them otherwise. Legacy `?tab=` links
+verbs do, and each asks first, since either is one press from a fleet card's menu; the menu hides
+them otherwise. Legacy `?tab=` links
 redirect to these routes. Operation failures are titled by the operation and re-read the project at
 once so the header and the Danger zone never disagree about a stopped service.
 
-Overview centres on the production block: the site preview — the website laid out at desktop width
-and shrunk into one tile that is a link to it — beside the way a request reaches the project (source
+The Overview is, in order: the run in flight, as the runs list's own row with its stage and a light
+round its edge (and confetti, once, if the reader watched it go live); the production block — the
+site preview, the website laid out at desktop width (or a phone's, from a switch in its strip) and
+shrunk into one tile that is a link to it, beside the way a request reaches the project (source
 with automatic deployments, the live release with who deployed it, the runtime's containers and
-health, domains with certificate status), with Build logs and Roll back. Findings from the
-operations diagnosis are a plain list under it; the delivery insights, recent deployments and live
-usage with the last hour's shape follow. `GET /deploy/{id}/preview-frame` is an
+health, domains with their certificates), each drawn as its product, over four readings (requests
+a minute, the failing share, processor and memory, each carrying its last hour and each a way to
+the page that has the rest); first sign-in, for a template that declares one; the findings from
+the operations diagnosis (`#attention`, which the header's verdict links to); the delivery
+insights; and the recent deployments beside the preview environments from `2xl`. A service with no
+public address draws its product and where it answers inside Docker in the preview's place. Deploy
+a specific version picks from the commits the project's runs recorded, with no remote call, and
+Connect a database takes a saved connection by its row. `GET /deploy/{id}/preview-frame` is an
 authenticated, non-cacheable static HTML wrapper with no scripts. Its CSP permits a child frame only
 from the recorded endpoint's origin and allows the wrapper itself to be framed only by this dashboard.
 This is a deliberate exception to the API's default frame denial; the dashboard document's CSP stays
@@ -902,60 +1034,118 @@ or use an insecure URL under an HTTPS dashboard may require the direct website l
 not a deployment health check and does not bypass the site's own framing policy.
 
 `GET /deploy/{id}/favicon` is the one request the backend makes to a deployed website, so a project
-card and the project header can carry the site's own icon (the dashboard's image policy allows only
-its own origin). It reads the recorded endpoint's page for `<link rel="icon">` (then
+card, the project header, the rail's scope head and the source end of the Notifications picture can
+carry the site's own icon (the dashboard's image policy allows only its own origin). It reads the recorded endpoint's page for `<link rel="icon">` (then
 `apple-touch-icon`), falling back to `/favicon.ico`, `/favicon.png` and `/apple-touch-icon.png`.
 Every request stays on the recorded scheme and host, port included: a declared icon or a redirect
 anywhere else is refused, not followed. It reads at most 512 KB of page and 1 MB of icon within five
 seconds, accepts only a response that is an image, and remembers each project's answer for an hour
 (an absence for ten minutes). The icon is served with `nosniff`, a sandboxing CSP and private
 caching, so an SVG opened directly is a picture and not a document; `404 favicon_unavailable` means
-the card keeps its workload glyph.
+`ProjectMark` draws the product the project is instead (`projectProduct`: its template, its image's
+product, Compose, its framework, its recipe's language, Docker or nginx), and only a project no
+product names keeps its workload glyph.
 
-Deployments carries the delivery insights, filter chips and the run rows — status, duration, title,
-commit subject, then branch (or the requested tag or commit) · sha · trigger · time. A row's menu
-offers Redeploy (live), Roll back to this release (a retained release, through a two-step dialog that
-names the domains and what a rollback does not restore), Compare with live (a sheet), Pin or Unpin,
-Retry (only a `failed` or `cancelled` run) and Cancel (never during activation or a rollback). Older
-runs load on request through the `before` cursor. Runtime lists the managed services with live usage
-and the recorded charts, then the routes, storage, backup and dependency evidence with every owner's
-own availability. Logs and Console keep their contracts; Logs offers the activation window of the
-live run when the run's log handoff names one.
+Deployments carries the delivery insights — a failure reason among them narrows the list to the
+failed runs — then the runs under a strip of the last twenty outcomes and the environment picker,
+grouped under In progress and then by day, narrowed by counted chips. A run is one shared row
+(`run-row.tsx`): who started it as a face or a product, `#N Deploy` and the commit subject, then
+branch (or the requested tag or commit) · sha · author · trigger, and its state, duration and time in
+fixed columns, the duration with a bar that turns amber past twice the median of at least five
+finished runs listed. Its verbs are declared once in `run-verbs.tsx` and shared with the run page's
+header: Redeploy (live), Retry (only a `failed` or `cancelled` run), Cancel (never during activation
+or a rollback) and, under the release's own name, What changed in this release (a comparison with
+the release before it), Compare with live (a sheet), Roll back to this release (a retained release,
+through a two-step dialog that names the domains, draws the swap and says what a rollback does not
+restore) and Pin or Unpin. Older runs load on request through the `before` cursor. Runtime draws the
+managed services as cards of their image's product, joined with Docker's container list, its stats
+every ten seconds and an hour of history, the volumes every five minutes (for sizes and which
+container uses one), the saved connections and the policy's backup job with its runs — every join
+failing silently — then the live usage, the domains, storage beside backups, the dependency evidence
+and the recorded charts, each block saying in its header when its owner could not be read. Logs and
+Console keep their contracts ([request observability](request-observability.md) has the Logs page);
+Logs offers the activation window of the live run when the run's log handoff names one.
 
-Settings are nine sections of setting cards — General, Build, Runtime, Environment variables,
-Domains, Storage, Databases & backups, Automation, Danger zone — each saving the whole configuration
-with the revision it read; a pending-changes notice at the top of every section names what the next
-deployment applies, and a refusal that names a field lands on that control (a refused row is marked
-in place). General holds the name, the Git policy with the GitHub commit-status toggle, and the
-Source card that changes a repository, branch, root directory, credential, submodule and LFS choice
-or an image reference and platform in place (`PUT …/environments/{env}/source`, checked before it is
-saved). Runtime holds the limits, the restart policy and the health-check editor; Environment
-variables is an inline form over a list with reveal, rotate and remove, and editing an existing
-variable asks for its value again (an administrator can reveal the current one into the form) so a
-scope change can never blank a secret; Domains checks a new hostname through `GET /deploy/hostname`;
-Databases & backups links databases through the same sheet the creation flow uses and never commits
-a half-filled sibling row when a database is connected or removed. It opens on four readings — linked
-count, connection, backup policy and native-dump coverage — and draws each link as a row carrying its
-engine, database, managed hostname, observed status and the reason reconciliation recorded when it
-could not repair one. Because runtime activation attaches a database by reading the variable that
+Settings are nine pages — General, Build, Runtime, Environment variables, Domains, Storage, Databases
+& backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
+but not live yet at the top, as a strip that names each change and links to its page but carries no
+command (the header's is the one), then the page's readings, then its forms with their heads in a rail
+from `xl`. Each form saves the whole configuration with the revision it read, keeps its draft keyed on
+a digest of its own saved value (`useSettingDraft`) so a save of the form beside it no longer throws
+the draft away, and ends in a foot with when the change applies, Discard and Save; a refusal that
+names a field lands on that control (a refused row is marked in place), and one that names none
+lands on the form. General holds the name, the Source (a repository, branch, root directory,
+credential — read through the App's installation for a connected GitHub repository — submodule and
+LFS choice, or an image reference and platform, changed in place through
+`PUT …/environments/{env}/source` and checked before it is saved) and Automatic deployment: the Git
+policy with a picture of what a push does, the last decision and the GitHub commit-status switch.
+Build opens on what it builds with, the last build (read from the live release's own Build step), the
+release tasks and the build variables, over the builder — every recipe, a Dockerfile or a static site
+— the package manager, the commands, the image and the build variables as one form and the release
+tasks, reorderable and
+each with its last run, as another; choosing a builder that is not a recipe clears the recipe's
+versions, secrets and package manager, which the plan would otherwise refuse. Runtime opens on where
+it listens, the memory limit against the live release's last-hour peak, how a release is replaced —
+naming a blue/green plan the executor would refuse, before it is deployed — and container access,
+over the runtime, where it listens, resources, the release strategy and container access as one form
+and the health checks, grouped by phase, as another. Environment variables is the list, its counts on
+filter chips, each variable drawn as the service its name names and a reference as its database, with
+Reveal, Copy value (the audited reveal route; the value is never drawn), Rotate and Remove, and a
+removed name still live as a struck-through row; the editor is a sheet, and editing an existing
+variable asks for its value again (an administrator can reveal the current one into it) so a scope
+change can never blank a secret; the `.env` import is a sheet that previews every name through the
+dry run before anything is written, and cannot import while any name is refused. Domains opens on four
+readings and checks a new hostname in its Add domain sheet through `GET /deploy/hostname`, showing the
+A record to create and, for an administrator, whether it already resolves here. Storage opens on four
+readings joined from Docker's volume sizes and the backup coverage report, each refused read leaving
+its reading out, and draws each host path as the Files page's folder in its colour, over the mount
+editor and the live release's mounts as cards, with a card to back up any volume nothing copies. Databases & backups links databases
+through the same sheet the creation flow uses — in a section of its own, since linking is its own write
+— and never commits a half-filled sibling row when a database is connected or removed. It opens on
+four readings — linked count, connection, backup policy and native-dump coverage — and draws each link
+as a card carrying its engine, database, managed hostname, observed status, the variables that carry
+it and the reason reconciliation recorded when it could not repair one, under a picture of how the
+application reaches them. Because runtime activation attaches a database by reading the variable that
 holds its address rather than the dependency row, removing a link offers to delete the variables that
-reference it, and says so plainly when it is bound by a value it cannot name. A declared backup job
-shows its schedule, last success, next run and stored size with the live release's observation folded
-onto the same row, runs on demand, and warns when it takes no native dump of a linked database —
-which the gate would otherwise refuse mid-deployment — with one press to add the dump; Automation holds webhooks (with
-their delivery log and secret rotation, the hook URL shown absolute), schedules (with their run
-history) and previews (approve, reject, variables, deploy); Danger zone holds Stop or Start, Archive,
-managed-resource removal and permanent deletion.
+reference it, and says so plainly when it is bound by a value it cannot name. The backup job a release
+gates on is drawn as the Backups page draws it — its products, last run, destination, last fourteen
+runs, next run and stored size — with the live release's observation folded onto the same card, runs
+on demand, and warns when it takes no native dump of a linked database — which the gate would
+otherwise refuse mid-deployment — with one press to add the dump; Automation opens on four readings
+and a picture of what deploys the project, and holds webhooks (each with its deliveries in a sheet,
+the hook URL shown absolute, and a signed hook's secret shown once when it is made and when it is
+rotated), schedules (a builder in the schedule's own time zone, the server's check before saving,
+and each schedule's past firings and next five runs), previews (approve with a fork warning, reject,
+variables, deploy) and traffic alerts (the rule form in a sheet it shares with the Logs page,
+removal confirmed), every block reading one set of polls (`useAutomation`); Danger zone holds Stop
+or Start, Archive or Restore, managed-resource removal — whose plan loads as soon as the project is
+archived — and permanent deletion, which asks for the project's name.
 
 The deployment page (`/deploy/[id]/runs/[run]`) keeps the sequence-based stream, resync and the
-5,000-event cap; the build console numbers lines, strips terminal escapes, filters by stage and
-errors, wraps, follows and copies, and stays mounted while Details, Runtime logs or Metrics are
-open so its search and scroll position survive the switch; the release path shows each group's
-duration; Details lists every step attempt with its evidence; Runtime logs and Metrics keep their
-server-provided windows. A successful run shows Visit only when its recorded release is the project's
-current live release; the success block waits for the project read so it never flashes Superseded
-first.
+5,000-event cap. It opens on an identity line — the source as its forge, the commit, who or what
+started the run and where, and how long it has taken — then, on a project's first deploy, the
+creation spine with *Deploy* as its last step, the release path (a stage the run did not include
+drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
+the failing step, the live address, or which release is live now. The build console paints its lines
+through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`), numbers
+them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage and
+errors (with a count), shows the time since the run began, wraps, follows, copies and downloads
+`deployment-N.log`, and stays mounted while Details, Runtime logs or Metrics are open so its search and
+scroll position survive the switch; the release path shows each group's duration; Details lists every
+step attempt with its evidence and where in the run it ran; Runtime logs draws each source as its
+image's product and keeps its server-provided windows, the one around activation offered as an
+*Around activation* chip that opens the history there rather than as a second Live beside the
+workspace's own. Metrics reads each figure as before → after, amber once a reading is half again
+what it was (the traffic panel's rule for "slower"), over one strip per measure: the ten minutes
+before and the ten after at equal widths on one scale, with a brand rule at the instant the release
+went live. Its windows name a single-container release's series by container (`sources`; a Compose
+release's stay unnamed, because its recorded runtime lists container ids without the service each
+ran). A successful run shows Visit
+only when its recorded release is the project's current live release; the success block waits for the
+project read so it never flashes Superseded first.
 
-Archived deployments are searchable at `/deploy?view=archived`. They offer Restore and a separate
-permanent record deletion with explicit confirmation, preserving host resources and the audit log. See
-the [permanent-deletion decision](permanent-deletion.md) for the API and transaction contract.
+Archived deployments are searchable at `/deploy?view=archived`, each drawn as what it deployed. They
+offer Restore, which says that automatic deployments and schedules stay off, and a separate permanent
+record deletion that asks for the project's name and lists what is deleted and what stays on the
+server, preserving host resources and the audit log. See the
+[permanent-deletion decision](permanent-deletion.md) for the API and transaction contract.

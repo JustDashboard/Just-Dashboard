@@ -51,9 +51,9 @@ const SIZES = {
  * Square with the control radius rather than a circle: there is no pill in
  * this product (§4), and a filled circle holding two letters is one.
  *
- * The initials take a hue by the username, the way `AuthorMark` gives a
- * commit's author one: a list of eight people in eight brand-blue squares was
- * a texture the eye read past, and the same person now keeps the same colour
+ * The initials take a hue by the username, as a commit's author and a run's
+ * actor take one by theirs: a list of eight people in eight brand-blue squares
+ * was a texture the eye read past, and the same person now keeps the same colour
  * in the rail, the users list and their own profile. The hues are `LANES`,
  * without red and amber, because these sit beside readings that use those to
  * say something failed.
@@ -84,7 +84,54 @@ export function UserAvatar({
       />
     )
   }
-  const hue = hueFor(user.username, LANES)
+  return (
+    <Initials
+      name={name}
+      hue={hueFor(user.username.toLowerCase(), LANES)}
+      size={size}
+      className={className}
+    />
+  )
+}
+
+/**
+ * A person drawn from a name alone: a run's actor, a commit's author, a
+ * variable's author, a game's player — places that hold a username rather than
+ * an account. It is `UserAvatar`'s face without a picture, hued by the same
+ * name, so the person keeps the colour they have in the rail and the users
+ * list. The name is hued without its case, because a forge writes "Mira"
+ * where the dashboard account is "mira", and they are one person.
+ */
+export function InitialsMark({
+  name,
+  size = "sm",
+  className,
+}: {
+  name: string
+  size?: keyof typeof SIZES
+  className?: string
+}) {
+  return (
+    <Initials
+      name={name}
+      hue={hueFor(name.toLowerCase(), LANES)}
+      size={size}
+      className={className}
+    />
+  )
+}
+
+function Initials({
+  name,
+  hue,
+  size,
+  className,
+}: {
+  name: string
+  hue: string
+  size: keyof typeof SIZES
+  className?: string
+}) {
   return (
     <span
       aria-hidden

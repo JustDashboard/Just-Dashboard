@@ -17,13 +17,13 @@ import type {
   GameVersionList,
   WorkloadProfile,
 } from "@/lib/types"
-import { Field } from "@/components/form"
+import { Disclosure, Field, FormNote, OptionRow } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -36,10 +36,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { ProductLogo } from "@/components/product-logo"
+import { ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"
@@ -326,6 +325,10 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
   }
 
   const listed = (catalogue.data ?? []).length
+  const featured = shown
+    .flatMap((shelf) => shelf.entries.map((entry) => entry.id))
+    .filter(hasProductLogo)
+    .slice(0, 3)
   const chosen = catalogue.data?.find((entry) => entry.id === selectedId)
 
   return (
@@ -359,7 +362,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
           {catalogue.data && (
             // The shelves, as the Git page's filters are drawn: a chip narrows
             // the catalogue to one shelf and says how many are on it.
-            <div role="group" aria-label="Template topics" className="flex flex-wrap gap-1">
+            <ChipStrip role="group" aria-label="Template topics">
               <FilterChip selected={topic === "all"} onClick={() => setTopic("all")}>
                 All <ChipCount>{matched}</ChipCount>
               </FilterChip>
@@ -375,7 +378,7 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                   </FilterChip>
                 )
               })}
-            </div>
+            </ChipStrip>
           )}
           {catalogue.loading && !catalogue.data && <LoadingRows rows={4} />}
           {catalogue.data && shown.length === 0 && (
@@ -565,41 +568,55 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
                   />
                 ))}
 
+                {/* A fold inside the settings, drawn as the other folds on these
+                    screens are (§7) — it was an underlined 12px text button.
+                    Controlled, so a failed validation on a field in here can
+                    open it; the fields mount only while it is open. */}
                 {advanced.length > 0 && (
-                  <button
-                    type="button"
-                    aria-expanded={showAdvanced}
-                    onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="inline-flex min-h-9 items-center text-xs underline underline-offset-4 focus-ring"
+                  <Disclosure
+                    quiet
+                    summary="Advanced blueprint settings"
+                    open={showAdvanced}
+                    onOpenChange={setShowAdvanced}
                   >
-                    {showAdvanced ? "Hide" : "Show"} advanced blueprint settings
-                  </button>
+                    {showAdvanced && (
+                      <div className="space-y-4">
+                        {advanced.map((input) => (
+                          <BlueprintField
+                            key={input.name}
+                            input={input}
+                            value={inputs[input.name] ?? input.default ?? ""}
+                            error={attempted ? errors[input.name] : undefined}
+                            onChange={(value) =>
+                              setInputs((current) => ({ ...current, [input.name]: value }))
+                            }
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </Disclosure>
                 )}
-                {showAdvanced &&
-                  advanced.map((input) => (
-                    <BlueprintField
-                      key={input.name}
-                      input={input}
-                      value={inputs[input.name] ?? input.default ?? ""}
-                      error={attempted ? errors[input.name] : undefined}
-                      onChange={(value) =>
-                        setInputs((current) => ({ ...current, [input.name]: value }))
-                      }
-                    />
-                  ))}
 
+                {/* What will happen by itself is a line of hint, not a notice
+                    (§14): nobody has anything to decide about these. */}
                 {(definition.secrets?.length ?? 0) > 0 && (
-                  <Notice title="Secrets are generated on this server" icon={Warning}>
-                    <ul className="list-disc space-y-1 pl-4">
+                  <div className="space-y-1.5">
+                    <FormNote>
+                      Generated on this server when the plan is saved, and never shipped with the
+                      blueprint:
+                    </FormNote>
+                    <ul className="min-w-0 space-y-1 text-hint leading-relaxed">
                       {definition.secrets?.map((secret) => (
-                        <li key={secret.name}>
-                          <b>{secret.label}</b> —{" "}
-                          {secret.description ?? `${secret.length} characters`}. It is created when
-                          this plan is saved and never shipped with the blueprint.
+                        <li key={secret.name} className="min-w-0">
+                          <span className="text-foreground">{secret.label}</span>
+                          <span className="text-muted-foreground">
+                            {" — "}
+                            {secret.description ?? `${secret.length} characters`}
+                          </span>
                         </li>
                       ))}
                     </ul>
-                  </Notice>
+                  </div>
                 )}
               </fieldset>
             )}
@@ -633,6 +650,9 @@ export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureF
         <EmptyState
           className="hidden xl:flex xl:self-start"
           icon={GridMasonry}
+          // What opens here is one of these, so the promise is drawn as three
+          // of them rather than as a grid glyph on a plate.
+          mark={featured.length > 0 ? <ProductLogos ids={featured} size="md" /> : undefined}
           title="Pick a template"
           description="Its settings open here. Nothing is created until you deploy it."
         />
@@ -667,7 +687,10 @@ function BlueprintField({
   }
   if (input.kind === "accept") {
     return (
-      <Label htmlFor={id} className="flex min-h-11 items-start gap-2 text-xs text-foreground">
+      <Label
+        htmlFor={id}
+        className="flex min-h-11 items-start gap-2 text-body leading-snug text-foreground"
+      >
         <Checkbox
           id={id}
           checked={value === "true"}
@@ -676,25 +699,51 @@ function BlueprintField({
         <span className="space-y-1">
           <span className="block font-medium">{input.label}</span>
           {input.description && (
-            <span className="block text-muted-foreground">{input.description}</span>
+            <span className="block text-hint font-normal text-muted-foreground">
+              {input.description}
+            </span>
           )}
           {input.acceptUrl && (
             <Link
               href={input.acceptUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex items-center gap-1 underline underline-offset-4"
+              className="inline-flex items-center gap-1 text-hint font-normal underline underline-offset-4"
             >
               Read the agreement <ArrowUpRight className="size-3" />
             </Link>
           )}
           {error && (
-            <span role="alert" className="block text-destructive">
+            <span role="alert" className="block text-hint font-normal text-destructive">
               {error}
             </span>
           )}
         </span>
       </Label>
+    )
+  }
+  // A yes-or-no answer is an option, not a field: its label is the sentence
+  // and the switch answers it (§7). It was a switch under a label with "On"
+  // or "Off" written beside it — the state said twice, once in a word 12px
+  // high.
+  if (input.kind === "boolean") {
+    // The error stays with it: a required yes-or-no with no default is
+    // "Required." until answered, and without the line Use this template was
+    // refused with nothing on screen saying why.
+    return (
+      <div className="space-y-1.5">
+        <OptionRow
+          title={input.label}
+          hint={input.description}
+          checked={value === "true"}
+          onCheckedChange={(checked) => onChange(checked ? "true" : "false")}
+        />
+        {error && (
+          <p role="alert" className="text-hint leading-relaxed text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
     )
   }
   return (
@@ -709,18 +758,9 @@ function BlueprintField({
       error={error}
       trailing={input.required && <span className="text-hint text-muted-foreground">Required</span>}
     >
-      {input.kind === "boolean" ? (
-        <div className="flex min-h-9 items-center gap-2">
-          <Switch
-            id={id}
-            checked={value === "true"}
-            onCheckedChange={(checked) => onChange(checked ? "true" : "false")}
-          />
-          <span className="text-xs text-muted-foreground">{value === "true" ? "On" : "Off"}</span>
-        </div>
-      ) : input.kind === "choice" ? (
+      {input.kind === "choice" ? (
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id}>
+          <SelectTrigger id={id} className="w-full">
             <SelectValue placeholder="Choose" />
           </SelectTrigger>
           <SelectContent>
@@ -788,7 +828,7 @@ function GameVersionField({
     >
       {usable ? (
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id="blueprint-version">
+          <SelectTrigger id="blueprint-version" className="w-full">
             <SelectValue placeholder="Choose a version" />
           </SelectTrigger>
           <SelectContent>

@@ -16,6 +16,11 @@ import { cn } from "@/lib/utils"
  * container resizes, so the ends can be laid out by CSS and the line follows.
  * Reduced motion draws the still line: the root `prefers-reduced-motion` rule
  * only reaches CSS animations, and this one is driven from JavaScript.
+ *
+ * `once` sends a single pulse and then draws the line still — §11's *once*,
+ * for the picture of one thing that just happened (a test message leaving for
+ * its channel) rather than of a link that carries all the time. Re-key the
+ * beam to send another.
  */
 export function AnimatedBeam({
   className,
@@ -25,6 +30,7 @@ export function AnimatedBeam({
   curvature = 0,
   reverse = false,
   still = false,
+  once = false,
   dashed = false,
   tone = "default",
   duration = 3,
@@ -46,10 +52,15 @@ export function AnimatedBeam({
   reverse?: boolean
   /** A line with nothing moving on it. */
   still?: boolean
+  /** One pulse, then the still line. */
+  once?: boolean
   /** A link that is not there yet. */
   dashed?: boolean
-  /** What a still line says: nothing, that it carried, or that it broke. */
-  tone?: "default" | "success" | "danger"
+  /**
+   * What a still line says: nothing, that it carried, that it broke — or that
+   * it works but should not be relied on, a route around the proxy.
+   */
+  tone?: "default" | "success" | "warning" | "danger"
   duration?: number
   delay?: number
   pathWidth?: number
@@ -63,6 +74,7 @@ export function AnimatedBeam({
   const reduced = useReducedMotion()
   const [pathD, setPathD] = useState("")
   const [size, setSize] = useState({ width: 0, height: 0 })
+  const [spent, setSpent] = useState(false)
 
   const gradient = reverse
     ? { x1: ["90%", "-10%"], x2: ["100%", "0%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
@@ -91,7 +103,7 @@ export function AnimatedBeam({
     return () => observer.disconnect()
   }, [containerRef, fromRef, toRef, curvature, startXOffset, startYOffset, endXOffset, endYOffset])
 
-  const quiet = still || reduced
+  const quiet = still || reduced || spent
 
   return (
     <svg
@@ -110,6 +122,7 @@ export function AnimatedBeam({
         strokeDasharray={dashed ? "2 6" : undefined}
         className={cn(
           tone === "success" && "stroke-success",
+          tone === "warning" && "stroke-warning",
           tone === "danger" && "stroke-destructive",
           tone === "default" && (quiet ? "stroke-border-strong" : "stroke-border"),
         )}
@@ -128,9 +141,10 @@ export function AnimatedBeam({
                 delay,
                 duration,
                 ease: [0.16, 1, 0.3, 1],
-                repeat: Infinity,
+                repeat: once ? 0 : Infinity,
                 repeatDelay,
               }}
+              onAnimationComplete={once ? () => setSpent(true) : undefined}
             >
               <stop style={{ stopColor: "var(--brand)" }} stopOpacity="0" />
               <stop style={{ stopColor: "var(--brand)" }} />

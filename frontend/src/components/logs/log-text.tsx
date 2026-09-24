@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils"
 import { LANES, hueFor } from "@/lib/hue"
 import type { LogLevel } from "@/lib/log-filter"
+import { CLASS_TEXT } from "@/lib/requests"
 import {
   leadingTime,
   pieces,
@@ -59,17 +60,34 @@ export const LEVEL_WORD: Record<LogLevel, string> = {
   unknown: "text-muted-foreground",
 }
 
+/**
+ * A token's class, for a surface that draws the same shapes outside a log
+ * line — a request's path and query, a client's address — so they read the
+ * same as they do inside one. A level and a status depend on the token's
+ * value rather than its kind, and take theirs from `LEVEL_WORD` and
+ * `CLASS_TEXT`.
+ */
+export function tokenClass(kind: TokenKind): string {
+  return KIND[kind]
+}
+
+/**
+ * A status inside a line, in the request log's colours (`lib/requests.ts`),
+ * so the host's console and a deployment's request console cannot drift
+ * apart. Bold here, because inside a sentence the code has no column of its
+ * own to set it apart.
+ */
 const STATUS: Record<ReturnType<typeof statusClass>, string> = {
-  ok: "font-semibold text-success",
-  redirect: "font-semibold text-[var(--tag-cyan)]",
-  client: "font-semibold text-warning",
-  server: "font-semibold text-destructive",
+  ok: `font-semibold ${CLASS_TEXT["2xx"]}`,
+  redirect: `font-semibold ${CLASS_TEXT["3xx"]}`,
+  client: `font-semibold ${CLASS_TEXT["4xx"]}`,
+  server: `font-semibold ${CLASS_TEXT["5xx"]}`,
 }
 
 function classFor(span: Span) {
   if (span.kind === "level") return LEVEL_WORD[span.level ?? "unknown"]
   if (span.kind === "status") return STATUS[statusClass(span.status)]
-  return KIND[span.kind]
+  return tokenClass(span.kind)
 }
 
 /** A program's name in its lane, so one process can be followed down a busy page. */

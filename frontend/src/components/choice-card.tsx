@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Check, Database } from "@/components/icons"
+import { ArrowRight, Check, Database, type Icon } from "@/components/icons"
 import { BlurFade } from "@/components/ui/blur-fade"
+import { BorderBeam } from "@/components/ui/border-beam"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { ProductLogo } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
@@ -78,7 +79,10 @@ export function ChoiceCard({
   const shape = cn(
     "group/choice flex min-h-20 min-w-0 flex-col items-start gap-1.5 rounded-xl p-3 text-left transition-colors",
     selected && "bg-accent",
-    disabled && "opacity-50",
+    // The chosen card is never faded, disabled or not: to a reader who may
+    // not change it, or on a choice that can no longer be taken again, it is
+    // still the fact the grid is there to show.
+    disabled && !selected && "opacity-50",
     className,
   )
   const edge = selected ? "brand" : "border"
@@ -199,8 +203,13 @@ export function ChoiceGrid({
    * whose width depends on what is beside it rather than on the viewport — a
    * catalogue that narrows when a chosen template's settings open next to it.
    * Its rows are equal, so a card never outgrows its neighbours.
+   *
+   * `compact` is for a run of `ProductCard`s — ten builders, five package
+   * managers — which are a logo and a word each: two to a row on a phone,
+   * where one to a row made a picker of ten a screen and a half tall, and
+   * five across at `xl`.
    */
-  columns?: 2 | 3 | "fill"
+  columns?: 2 | 3 | "fill" | "compact"
 }) {
   return (
     <div
@@ -209,9 +218,11 @@ export function ChoiceGrid({
         "grid min-w-0 gap-3",
         columns === "fill"
           ? "auto-rows-fr grid-cols-[repeat(auto-fill,minmax(16rem,1fr))]"
-          : columns === 2
-            ? "sm:grid-cols-2"
-            : "sm:grid-cols-2 lg:grid-cols-3",
+          : columns === "compact"
+            ? "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
+            : columns === 2
+              ? "sm:grid-cols-2"
+              : "sm:grid-cols-2 lg:grid-cols-3",
         className,
       )}
       {...props}
@@ -232,7 +243,7 @@ export function ChoiceCardHint({ className, ...props }: React.ComponentProps<"sp
 }
 
 /** The three kinds `/databases/drivers` sorts every engine into. */
-export type EngineKind = "sql" | "document" | "keyvalue"
+type EngineKind = "sql" | "document" | "keyvalue"
 
 const KIND_WORD: Record<EngineKind, string> = {
   sql: "SQL",
@@ -252,13 +263,87 @@ export function driverKind(driver: string): EngineKind {
 }
 
 /**
+ * One product, as a picker of products draws it: its own logo, its name, and
+ * one line of what exactly would be used — the image an engine would run, the
+ * versions a builder covers, the lockfile a package manager reads.
+ *
+ * This is the compact shape of `ChoiceCard` — the card is the button and its
+ * two short lines are its name — with the logo in front, because a run of
+ * builders or engines is scanned by their marks before their words (§14). It
+ * began as the database engine picker's card and the build settings needed
+ * the same card for ten builders and five package managers; §4's rule about a
+ * name that already exists applies to a shape too.
+ *
+ * `working` runs a light around the card while the thing picked is being
+ * made — a database being provisioned (§11 *live*). The selection stays drawn
+ * under it: the beam says it is happening, the edge still says which one.
+ */
+export function ProductCard({
+  product,
+  label,
+  detail,
+  mono,
+  fallback,
+  selected,
+  disabled,
+  working,
+  onClick,
+  children,
+}: {
+  /** The key `ProductLogo` looks the logo up by. */
+  product?: string
+  label: string
+  /** One line under the name. */
+  detail?: React.ReactNode
+  /** The detail is a literal from the host — an image reference, a path. */
+  mono?: boolean
+  /** The glyph on the tile when the product has no logo of its own. */
+  fallback?: Icon
+  selected?: boolean
+  disabled?: boolean
+  working?: boolean
+  onClick?: () => void
+  /** A reading between the name and the detail: the kind of store it is. */
+  children?: React.ReactNode
+}) {
+  return (
+    <ChoiceCard
+      selected={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className="min-h-0 flex-row items-center gap-3 px-2.5 py-2"
+    >
+      <ProductLogo id={product} size="sm" fallback={fallback} />
+      {/* The rest of the card's width, not its title's: sized to its own
+          content, a detail wider than the name ("1.25 · 1.26" under "Go")
+          was clipped mid-glyph rather than given the room beside it. */}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <ChoiceCardTitle className="truncate">{label}</ChoiceCardTitle>
+        {children}
+        {detail && (
+          <span className={cn("truncate text-micro text-muted-foreground", mono && "font-mono")}>
+            {detail}
+          </span>
+        )}
+      </span>
+      {working && (
+        <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
+          <BorderBeam size={60} duration={4} />
+        </span>
+      )}
+    </ChoiceCard>
+  )
+}
+
+/**
  * One database engine, as every picker of one draws it: the engine's own logo,
  * its name, the kind of store it is, and what exactly would run.
  *
  * Three pickers drew this — the deployment's quick setup, New database and the
  * connection dialog — and they had already come apart: one with a generic
  * database glyph, two with none, three different second lines. §4's rule about
- * a component whose name already exists applies to a shape too.
+ * a component whose name already exists applies to a shape too, which is why
+ * it is now a `ProductCard` with the kind between the name and the image.
  */
 export function EngineCard({
   engine,
@@ -267,6 +352,7 @@ export function EngineCard({
   detail,
   selected,
   disabled,
+  working,
   onClick,
 }: {
   /** The engine or driver key the logo is looked up by. */
@@ -278,23 +364,23 @@ export function EngineCard({
   detail?: string
   selected?: boolean
   disabled?: boolean
+  /** The engine is being started — the quick setup's provisioning. */
+  working?: boolean
   onClick?: () => void
 }) {
   return (
-    <ChoiceCard
+    <ProductCard
+      product={engine}
+      label={label}
+      detail={detail}
+      mono
+      fallback={Database}
       selected={selected}
       disabled={disabled}
+      working={working}
       onClick={onClick}
-      className="min-h-0 flex-row items-center gap-3 px-2.5 py-2"
     >
-      <ProductLogo id={engine} size="sm" fallback={Database} />
-      <span className="flex min-w-0 flex-col">
-        <ChoiceCardTitle className="truncate">{label}</ChoiceCardTitle>
-        {kind && <Tag>{KIND_WORD[kind]}</Tag>}
-        {detail && (
-          <span className="truncate font-mono text-micro text-muted-foreground">{detail}</span>
-        )}
-      </span>
-    </ChoiceCard>
+      {kind && <Tag>{KIND_WORD[kind]}</Tag>}
+    </ProductCard>
   )
 }

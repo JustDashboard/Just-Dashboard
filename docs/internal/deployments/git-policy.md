@@ -6,7 +6,8 @@ decided where the project is created: a Git source's draft commit may carry a `g
 (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's row at
 revision 1 inside the same transaction. A commit that carries no decision writes no row, so every
 other caller keeps the defaults described here exactly. Afterwards administrators edit
-the policy from the project overview or Automations page, or through the session-only, audited
+the policy in Settings → General's Automatic deployment section — which the project header's
+automatic-deployment fact and the overview's source link to — or through the session-only, audited
 `PUT /api/v1/deploy/{project}/environments/{environment}/git-policy`. The request contains `automatic`,
 `watchInclude`, `watchExclude` and the last observed integer `revision` (initially zero). Concurrent edits
 return HTTP 409. `GET .../git-watch` exposes the effective policy and the latest polling decision.

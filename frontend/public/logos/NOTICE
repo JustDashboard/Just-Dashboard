@@ -40,6 +40,29 @@ home-assistant.svg and postman.svg keep their names; edge.svg is its
 microsoft-edge.svg, windows.svg its windows-11.svg, apple.svg its apple-light
 variant, drawn for a dark ground, and linux.svg its tux.svg.
 
+The marks the deploy pages draw for where a project's source, image and
+notifications live come from the same collection: discord.svg, slack.svg,
+telegram.svg, webhook.svg, bitbucket.svg, codeberg.svg, forgejo.svg, quay.svg
+and harbor.svg keep their names; aws.svg is its aws-light variant, drawn for a
+dark ground, and google-cloud.svg its google-cloud-platform.svg; azure.svg had
+its #0072c6 lifted to #52a9ff, the same hue at the L 0.72 rung.
+
+So do the sites a request arrives from and the services a variable's name says
+hold it: google.svg, bing.svg, duckduckgo.svg, reddit.svg, linkedin.svg,
+facebook.svg, ycombinator.svg, stripe.svg, cloudflare.svg, supabase.svg,
+mailgun.svg and sendgrid.svg keep their names; x.svg, sentry.svg, openai.svg
+and posthog.svg are its x-light, sentry-light, openai-light and posthog-light
+variants, drawn for a dark ground.
+
+So do the frameworks it draws: astro.svg, angular.svg, fastapi.svg, gatsby.svg
+and docusaurus.svg keep their names; eleventy.svg is its eleventy-light
+variant; django.svg and dotnet.svg had their colour lifted to the L 0.72 rung
+(#092E20 to #89af9c, #512BD4 to #9897ff). rust-light.svg is its rust-dark.svg,
+the white gear it draws for a dark theme, kept beside devicon's rust.svg, which
+is black and which the file manager draws on its paper page. valkey.svg and
+freshrss.svg, from the same collection, had their blue lifted to the L 0.72
+rung (#123678 to #79a4f0, #0062be to #60a7ff) so they read on a dark ground.
+
 curl.svg is from Simple Icons (CC0 1.0), filled with curl's #073551 lifted to
 #7eaacc, the same hue at the L 0.72 rung, because Simple Icons ships the path
 alone and the navy disappears on a dark ground.
@@ -51,6 +74,16 @@ jupyter.svg is from Simple Icons (https://simpleicons.org), CC0 1.0, and so
 are intel.svg and pm2.svg, filled with their brand colour lifted to the L 0.72
 rung (#0071C5 to #4fa9ff, #2B037A to #9a93ff) because Simple Icons ships the
 path alone.
+
+The frameworks that collection does not draw, or draws only as a wordmark too
+small to read on a tile, are from Simple Icons 16.32.0 (https://simpleicons.org),
+CC0 1.0, filled because Simple Icons ships the path alone: nuxt.svg,
+nestjs.svg, hono.svg, flask.svg, streamlit.svg, gradio.svg, quarkus.svg,
+tanstack.svg, vitepress.svg, laravel.svg, spring-boot.svg (its springboot.svg),
+react-router.svg (its reactrouter.svg) and ember.svg (its emberdotjs.svg) in
+their brand colour; express.svg, fastify.svg, remix.svg, symfony.svg and
+koa.svg, whose brand colour is black or all but, in #ffffff as github.svg is
+drawn; and solid.svg in its #2C4F7C lifted to #81a7da, the L 0.72 rung.
 
 mysql.svg is devicon's mysql-original.svg (https://github.com/devicons/devicon),
 recoloured from #00618A to #57afe0 so it reads on a dark ground; sqlite.svg is
@@ -87,6 +120,11 @@ typescript.svg, vitejs.svg, vuejs.svg, xml.svg, yaml.svg, yarn.svg and zig.svg
 are its <name>-original.svg and graphql.svg its graphql-plain.svg, unchanged;
 c.svg is c-original.svg as of devicon v2.15.1, whose hexagon reads on a page
 where the later letterform's pale grey does not.
+
+pnpm-light.svg is devicon's pnpm-original.svg, as pnpm.svg is, with its
+charcoal #4c4c4c lifted to #a4a4a4, the same grey at the L 0.72 rung, for the
+tile a package manager is drawn on; pnpm.svg stays as it was for the file
+manager's paper page.
 
 mono/ holds the single-colour marks pressed into a folder's face. Every file
 there is from Simple Icons (https://simpleicons.org), CC0 1.0, unchanged, renamed

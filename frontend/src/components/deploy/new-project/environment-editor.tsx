@@ -15,6 +15,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import type { DbConnection, DeploymentDetectedDatabase } from "@/lib/types"
 import { ProjectDatabase } from "@/components/deploy/project-database"
+import { ProductGlyph } from "@/components/product-logo"
 import { DATABASE_ENGINE_LABELS } from "@/components/deploy/vocabulary"
 import { canGenerateSecret, generateSecretValue } from "@/components/deploy/deployment-defaults"
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
@@ -166,7 +167,12 @@ export function EnvironmentEditor({
                 key={database.engine}
                 className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-hint text-muted-foreground"
               >
-                <Tag>{DATABASE_ENGINE_LABELS[database.engine] ?? database.engine}</Tag>
+                {/* The engine as itself, the mark it carries in the sheet that
+                    connects it and on the Databases page it lands on. */}
+                <span className="inline-flex items-center gap-1.5">
+                  <ProductGlyph id={database.engine} />
+                  <Tag>{DATABASE_ENGINE_LABELS[database.engine] ?? database.engine}</Tag>
+                </span>
                 <span className="min-w-0 truncate">
                   <span className="font-mono">{database.variable}</span> · {database.evidence}
                 </span>
@@ -206,7 +212,7 @@ export function EnvironmentEditor({
             onChange={(event) => onDotenvChange(event.target.value)}
             rows={4}
             placeholder={"API_KEY=…\nNEXT_PUBLIC_SITE_URL=https://…"}
-            className="font-mono text-xs"
+            className="font-mono sm:text-xs"
           />
         </Disclosure>
         <FormNote>

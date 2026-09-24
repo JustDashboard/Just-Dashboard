@@ -270,6 +270,64 @@ func TestHistogramCoversTheRequestedWindow(t *testing.T) {
 	}
 }
 
+func TestHistogramColumnsCarryTheirBytesAndTheirWidth(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	hour := NewCollector(Filter{Since: base, Until: base.Add(time.Hour), Limit: 10})
+	for i := 0; i < 3; i++ {
+		hour.Feed(entry(base.Add(time.Duration(i)*time.Second), "GET", "/", 200, 1))
+	}
+	result := hour.Result()
+	if result.Summary.BucketSeconds != 60 {
+		t.Fatalf("an hour's columns are %ds wide, want 60", result.Summary.BucketSeconds)
+	}
+	if result.Summary.Buckets[0].Bytes != 300 {
+		t.Fatalf("the first column sent %d bytes, want the three answers' 300", result.Summary.Buckets[0].Bytes)
+	}
+
+	// A day on the same sixty columns is 24 minutes a column, and the summary
+	// has to say so or the chart labels every point "1 min".
+	day := NewCollector(Filter{Since: base, Until: base.Add(24 * time.Hour), Limit: 10})
+	day.Feed(entry(base, "GET", "/", 200, 1))
+	if got := day.Result().Summary.BucketSeconds; got != 24*60 {
+		t.Fatalf("a day's columns are %ds wide, want %d", got, 24*60)
+	}
+}
+
+func TestHistogramKeepsTheNewestMinute(t *testing.T) {
+	// "The last hour", asked partway into a minute with nothing asked for an
+	// end: the page's readings poll exactly this. The hour spans 61 clock
+	// minutes, and the one that goes has to be the oldest — the newest holds
+	// the 5xx that just happened.
+	now := time.Date(2026, 9, 19, 12, 0, 40, 0, time.UTC)
+	c := NewCollector(Filter{Since: now.Add(-time.Hour), Limit: 1})
+	c.Feed(entry(now.Add(-50*time.Minute), "GET", "/", 200, 1))
+	c.Feed(entry(now.Add(-5*time.Second), "GET", "/", 500, 1))
+	result := c.Result()
+	columns := result.Summary.Buckets
+	if len(columns) != buckets {
+		t.Fatalf("%d columns, want %d", len(columns), buckets)
+	}
+	if last := columns[len(columns)-1].Start[:16]; last != "2026-09-19T12:00" {
+		t.Fatalf("the last column starts at %s, want the current minute 12:00", last)
+	}
+	failed, total := 0, 0
+	for _, column := range columns {
+		failed += column.Counts["5xx"]
+		total += column.Total
+	}
+	if failed != 1 || total != 2 {
+		t.Fatalf("columns hold %d requests and %d × 5xx, want both requests and the one 5xx", total, failed)
+	}
+
+	// The same window asked with an end on the minute keeps its own start.
+	start := time.Date(2026, 9, 19, 11, 0, 0, 0, time.UTC)
+	whole := NewCollector(Filter{Since: start, Until: start.Add(time.Hour), Limit: 1})
+	whole.Feed(entry(start, "GET", "/", 200, 1))
+	if first := whole.Result().Summary.Buckets[0].Start[:16]; first != "2026-09-19T11:00" {
+		t.Fatalf("a whole-minute window's first column starts at %s, want 11:00", first)
+	}
+}
+
 func TestHistogramSurvivesASingleRequest(t *testing.T) {
 	at := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	c := NewCollector(Filter{Limit: 10})

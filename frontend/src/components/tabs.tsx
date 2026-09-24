@@ -38,12 +38,10 @@ import { cn } from "@/lib/utils"
  */
 export function tabClasses(selected: boolean | undefined, height: string) {
   return cn(
-    // 12px, not 13. A strip of views is chrome — it names them and then gets
-    // out of the way — and at body size it was competing with the page title
-    // above it and with the panel titles below, three ranks of text set within
-    // two pixels of each other. Dropping a step puts the strip where it belongs
-    // in the ladder: quieter than the content it switches between, still
-    // comfortably above the 11px hint row.
+    // 13px, the body size (§8). It was 12 while the page title was 20 and
+    // the strip sat within two pixels of the title above it and the panel
+    // titles below; with the title at 24 the strip has a rank of its own
+    // again, and 12px chrome under a 24px title read as an afterthought.
     "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap transition-colors",
     height,
     "focus-ring-inset",
@@ -83,7 +81,32 @@ export function FilterChip({
         "focus-ring",
         selected
           ? "border-hairline bg-accent text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          : "border-transparent text-muted-foreground hover:bg-row-hover hover:text-foreground",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/**
+ * A run of `FilterChip`s.
+ *
+ * On a phone the run scrolls sideways instead of wrapping: wrapped, a strip of
+ * five chips broke into ragged lines with "Pending changes" alone on the last,
+ * and three lines of filters pushed the list they filter down a screen. It
+ * bleeds to the edges of the page's gutter so the chip cut off at the edge is
+ * the affordance, as `ui/tabs` does, with no scrollbar to eat the strip's
+ * height. The vertical step is room for the focus ring, which the scroller
+ * would otherwise clip. From `sm` it wraps as a row of chips always has.
+ */
+export function ChipStrip({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 [scrollbar-width:none] items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden",
+        "max-sm:-mx-5 max-sm:-my-1 max-sm:px-5 max-sm:py-1",
+        "sm:flex-wrap sm:overflow-visible",
         className,
       )}
       {...props}
@@ -96,7 +119,17 @@ export function FilterChip({
  * and inherited inside a selected one, so the number never competes with the
  * word — and plain tabular text rather than a second small container, because
  * a chip with a chip inside it is exactly the stacking this pass removed.
+ * A chip that is a legend — the request log's status families — passes its
+ * colour for the chosen state, so "5xx 13" says which thirteen.
  */
-export function ChipCount({ children }: { children: React.ReactNode }) {
-  return <span className="numeric text-micro tabular-nums opacity-60">{children}</span>
+export function ChipCount({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <span className={cn("numeric text-micro tabular-nums opacity-60", className)}>{children}</span>
+  )
 }

@@ -54,10 +54,21 @@ draws one panel per link of it; the breadcrumb names every link (`navLocation().
 `useNavScope(...)` and the rail draws what it publishes: the databases layout, because which pages exist
 depends on whether the connection is SQL and because every one of them carries `?conn=` (`replaces: true`
 — it stands in place of the static Databases panel); and `deploy/project-shell.tsx`, because a project's
-name, its game-only pages and its pending-changes mark are not in the URL (a level *below* Deployments).
+name and its mark (its favicon or product), its game-only pages and which of its settings pages hold a
+saved change that is not live yet (`PENDING_KIND_PAGE`) are not in the URL (a level *below* Deployments).
 The rail draws a project's rows from the route alone until that registration lands, so the panel does not
 reflow — only the name fills in. The alternative was the rail polling the driver catalogue and a project
-on every page in the product to draw a list the page beneath it already holds.
+on every page in the product to draw a list the page beneath it already holds. A project's run page
+keeps the project's panel, with Deployments marked as where you are, because a run is opened from there.
+
+A scope's head is not a section's. A section's name is one of this product's words and is drawn as an
+eyebrow, the rail's label voice; a project or a connection is a name somebody typed, and small caps
+turned `api-production` into API-PRODUCTION, so a scope's head (`named` in `app-sidebar.tsx`) is printed
+as written at `text-hint` semibold, after the scope's `mark` — the thing drawn as itself at the line's
+height, a project's favicon or product (`ProjectMark size="xs"`), a connection's engine
+(`ProductGlyph`). The mark rides along with the rest of the scope but is not what decides a republish,
+so it is derived from the same data as the title and caption. A scope carries no `icon`: a glyph in a
+row's slot made the heading read as one more row to press.
 
 The groups run in the order a day on the server runs, and a page's header eyebrow is its group's
 label: **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
@@ -86,7 +97,8 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
 
 - `components/page.tsx` — `Page` (one measure, gutter and rhythm; `fill` for terminal and logs, whose
   content *is* the viewport), `PageHeader`, `PageState`, `Section`, `Toolbar`, `SearchInput`,
-  `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink`. **None of the heading primitives takes a
+  `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink` (`SearchInput` is 40px and a line of its
+  own below `sm`; `MetricStrip` is two-up on a phone — §8). **None of the heading primitives takes a
   `description`** — see rule 5 in [`design-system.md`](design-system.md).
 - `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`; `Pane`,
   `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a header
@@ -115,8 +127,11 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
   destination with a breadcrumb back, built the way `deploy/run-page.tsx` is: `PageHeader` with the
   parent as an `eyebrow` link, the name and a `Status` as the title, the verbs in `actions`, and what
-  the thing *is* as a `MetricStrip` under it. A container, a compose stack and a backup job went that
-  way on 2026-09-21; every other detail in the product is a `SidePanel` and should stay one.
+  the thing *is* under it — a `MetricStrip` on a container's and a stack's page, and on the run page,
+  since the 2026-09-24 pass, the `HostIdentity` line the host Overview opens on (the source as its
+  forge, the commit, who or what started the run, how long it has taken), because a run is one thing
+  described the way the product describes every thing. A container, a compose stack and a backup job
+  went that way on 2026-09-21; every other detail in the product is a `SidePanel` and should stay one.
 
   Their tabs stay **in** the page — they are views of one thing, which is what `tabClasses` is for.
   Do not reintroduce a route-level strip for them (see the `SectionNav` note below), and do not give
@@ -133,12 +148,16 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   components** — a page or a feature panel never opens one itself.
 - `components/tabs.tsx` — the switchers that remain, all of which switch between *views of one page*:
   `tabClasses` (the underlined tab, for the log console's live feed against its search, the packages
-  page's installed against its updates, the deploy wizard's source kinds), `FilterChip` and `ChipCount`.
+  page's installed against its updates, the deploy wizard's source kinds), `FilterChip`, `ChipCount` and
+  `ChipStrip`, the run every set of chips sits in (sideways-scrolling on a phone, wrapping from `sm`).
   `SectionNav` and `TabLink` — the route-level strips — were deleted in 0.6.7 when the rail started
   drilling into sections; do not reintroduce a strip that changes the URL.
 - `components/form.tsx` — what goes inside a task surface: `Field` (a label, a control, one line under
   it — a hint, or the error while there is one), `FieldRow`, `FormSection` (an eyebrow and a hairline
-  opening part of a longer form), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
+  opening part of a longer form), `FormSections` (a run of `FormSection aside`s; `railFrom="xl"`
+  moves the rail up for a form inside a shell that already spends a column, said once and inherited),
+  `FieldCheck` (one rule a value has to meet, lit as it is met — a run of them in an
+  `aria-live="polite"` wrapper), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
   (what the form operates on, as data under the title), `Statement` (the SQL a schema-editing form is
   about to run, with a copy) and `FormNote`. The databases section's dialogs are built from these and
   nothing else.
@@ -146,7 +165,12 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
   around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
   tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
-  overview — with the revealed arrow that says so on touch.
+  overview — with the revealed arrow that says so on touch. `dense` sets the tiles two to a row on a
+  phone.
+- `components/outcome-strip.tsx` — `OutcomeStrip`, the last few attempts at something as a square per
+  attempt in the colour of how it ended, oldest first: a backup job's runs, a project's runs, a
+  channel's messages, a webhook's deliveries, a schedule's firings. One drawing, so a strip means the
+  same thing on every page it appears on.
 - `components/status-dot.tsx` — `Status`, the one live-state indicator: a coloured dot and a word.
   `components/tag.tsx` — `Tag`, small-caps text marking a *fixed property* of a row. No chip, no border.
   **There is no badge and no pill in this product**; `ui/badge.tsx` was deleted so the decision cannot
@@ -165,7 +189,9 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
 feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`
 does the same for the non-happy paths (`Spinner`, `LoadingRows`, `LoadingPanel`, `EmptyState`,
-`EmptyNote`, `ErrorState`, `Notice`). `min-w-0` on the frame and its children is load-bearing: a wide
+`EmptyNote`, `ErrorState`, `Notice`); `LoadingPanel plain` is the same silhouette unframed, for a page
+whose blocks arrive plain, and `EmptyState`'s `mark` draws what the list would hold (`ProductLogos`) in
+place of the glyph. `min-w-0` on the frame and its children is load-bearing: a wide
 table's intrinsic width would otherwise widen the flex column and take the whole shell sideways instead
 of scrolling inside its panel.
 
@@ -269,7 +295,11 @@ series.
   legend shows the value its series held at that instant. Max reads the peak column where a series has
   one, since the maximum of the *means* is exactly what a downsampled window hides.
 - `sparkline.tsx` — a bare SVG path for a table cell, not recharts: forty containers would otherwise mount
-  forty responsive containers and resize observers.
+  forty responsive containers and resize observers. It also exports `TileTrend`, the one shape a
+  reading's last hour takes in a `StatTile`'s `trend` slot on the deployment pages: the tile's full
+  width, 36px, rising once. It draws nothing below two points, or for a series that never moves on a
+  scale of its own, and the tile then leaves no band. Its colour is a series colour, never a status
+  one, so a failing share is `--chart-3`.
 - `range-picker.tsx`, `health-panel.tsx` — the window control (pan and zoom-out appear only once a window
   has been dragged) and the verdict.
 

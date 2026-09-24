@@ -36,7 +36,14 @@ export type NavScope = {
   title: string
   /** One line of fact under it: the engine, the address, the state. */
   caption?: string
-  icon?: React.ComponentType<{ className?: string }>
+  /**
+   * The thing drawn as itself before its name, bare at 14px: a project's
+   * favicon or product, a connection's engine. Not a row's icon slot — in that
+   * slot the heading read as one more row to press. It rides along with the
+   * rest of the scope and is not what decides a republish, so its inputs
+   * should be the ones the title and caption are read from.
+   */
+  mark?: React.ReactNode
   /**
    * Whether this stands *in place of* the section panel the route would
    * otherwise open (databases) or a level below it (one deployment inside

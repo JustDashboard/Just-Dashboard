@@ -18,7 +18,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMetricEvents } from "@/hooks/use-metrics-history"
 import { useMetricsWindow } from "@/hooks/use-metrics-window"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Metric, MetricStrip } from "@/components/page"
+import { Metric, MetricStrip, Section } from "@/components/page"
 import { ErrorState, Notice } from "@/components/state"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
@@ -42,6 +42,16 @@ const blockSeries: Series[] = [
   { key: "blockRead", label: "Read", color: "var(--chart-2)", kind: "area" },
   { key: "blockWrite", label: "Write", color: "var(--chart-5)", kind: "area" },
 ]
+
+// Module constants rather than inline arrows: `ChartPanel` is memoised on its
+// props, and a formatter made fresh on every render redraws every chart on
+// every poll of the page around it.
+const formatBytes = (v: number) => bytes(v)
+const axisBytes = (v: number) => bytes(v, 0)
+const formatRate = (v: number) => rate(v)
+// Not capped at 100: a container using two cores is at 200%, and clipping
+// that would hide the thing worth seeing.
+const formatPercent = (v: number) => percent(v)
 
 /**
  * What this container was doing before you opened the panel.
@@ -98,7 +108,22 @@ function ContainerAnomalies({ containerId }: { containerId: string }) {
   )
 }
 
-export function ContainerUsage({ containerId, name }: { containerId: string; name: string }) {
+/**
+ * `plain` is for a page where these charts are a block of their own rather
+ * than a tab's whole content — a deployment's runtime. The charts lose their
+ * frames, the one range switch moves to the section's head so it plainly
+ * governs all four, and Processor and Memory sit side by side on a wide
+ * screen.
+ */
+export function ContainerUsage({
+  containerId,
+  name,
+  plain,
+}: {
+  containerId: string
+  name: string
+  plain?: boolean
+}) {
   const controls = useMetricsWindow()
   const win = controls.window
   // The host's shared range preference starts on "1h", but a container has no
@@ -149,13 +174,36 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
   )
   const disabled = error instanceof ApiError && error.code === "metrics_history_disabled"
   const peaks = useMemo(() => summarise(rows), [rows])
+  // Scaled to the limit rather than to the data. A container sitting at a
+  // quarter of its ceiling draws a short line, which is the useful picture:
+  // an axis fitted to the series makes every container look equally close to
+  // being killed, and pushes the limit line off the top of the chart where
+  // recharts silently discards it. The ticks are the limit's quarters, so the
+  // top one names the limit and none is an unround step of the headroom.
+  // Memoised because `ChartPanel` is.
+  const memoryScale = useMemo(
+    () =>
+      limit > 0
+        ? {
+            domain: [0, Math.round(limit * 1.04)] as [number, number],
+            ticks: [0, limit / 4, limit / 2, (limit * 3) / 4, limit],
+            // The limit is the line that explains an OOM kill, so it is drawn
+            // even when the series never gets near it.
+            thresholds: [{ value: limit, label: "limit", tone: "danger" as const }],
+          }
+        : undefined,
+    [limit],
+  )
 
   if (disabled) {
     return (
-      <Panel>
+      <Panel plain={plain}>
         <PanelHeader title="Usage history" />
         <PanelBody>
-          <ChartPlaceholder note="History is not being recorded on this server. Set JD_METRICS_RETENTION to keep it." />
+          <ChartPlaceholder
+            plain={plain}
+            note="History is not being recorded on this server. Set JD_METRICS_RETENTION to keep it."
+          />
         </PanelBody>
       </Panel>
     )
@@ -167,94 +215,124 @@ export function ContainerUsage({ containerId, name }: { containerId: string; nam
     ? "Loading history…"
     : `Nothing recorded for ${name} in this window yet — the server samples every ${data?.sampleIntervalSeconds ?? 15}s.`
 
-  return (
-    <div className="space-y-3">
-      {/*
-        Rate of change, above the charts that show it.
-        "Writable layer: 38.7 GB" is a number nobody can act on; "+6.4 GB
-        today" is. The same is true of memory — a container at 400 MB is a
-        fact, a container whose floor has doubled in a day is a leak — and the
-        history to say either has been recorded all along with nothing reading
-        it for this purpose.
-      */}
-      <ContainerAnomalies containerId={containerId} />
-      <ChartPanel
-        title="Processor"
-        actions={<RangePicker controls={controls} ranges={HISTORY_RANGES} />}
-        rows={rows}
-        series={cpuSeries}
-        unit="%"
-        // Not capped at 100: a container using two cores is at 200%, and
-        // clipping that would hide the thing worth seeing.
-        format={(v) => percent(v)}
-        events={events}
-        onZoom={controls.zoomTo}
-        note={note}
-        height={170}
-        footer={
+  const range = <RangePicker controls={controls} ranges={HISTORY_RANGES} />
+  const processor = (
+    <ChartPanel
+      title="Processor"
+      actions={plain ? undefined : range}
+      rows={rows}
+      series={cpuSeries}
+      unit="%"
+      format={formatPercent}
+      events={events}
+      onZoom={controls.zoomTo}
+      note={note}
+      height={170}
+      plain={plain}
+      // Beside Memory the strip only said again what the two charts' Max
+      // columns and the limit line say, and made Processor the taller of the
+      // pair so their axes no longer lined up.
+      footer={
+        plain ? undefined : (
           <MetricStrip className="[&>*]:flex-1">
             <Metric label="Peak CPU" value={peaks.cpu === null ? "—" : percent(peaks.cpu)} />
             <Metric label="Peak memory" value={peaks.mem === null ? "—" : bytes(peaks.mem)} />
             <Metric label="Limit" value={limit > 0 ? bytes(limit) : "none"} />
           </MetricStrip>
-        }
-      />
-
-      <ChartPanel
-        title="Memory"
-        rows={rows}
-        series={memSeries}
-        format={(v) => bytes(v)}
-        axisFormat={(v) => bytes(v, 0)}
-        events={events}
-        onZoom={controls.zoomTo}
-        note={note}
-        height={170}
-        // Scaled to the limit rather than to the data. A container sitting at
-        // a quarter of its ceiling draws a short line, which is the useful
-        // picture: an axis fitted to the series makes every container look
-        // equally close to being killed, and pushes the limit line off the top
-        // of the chart where recharts silently discards it.
-        domain={limit > 0 ? [0, Math.round(limit * 1.04)] : undefined}
-        // The limit is the line that explains an OOM kill, so it is drawn even
-        // when the series never gets near it.
-        thresholds={limit > 0 ? [{ value: limit, label: "limit", tone: "danger" }] : undefined}
-      />
-
-      {/*
-        Network and block throughput were being sampled for this container all
-        along and thrown away at the end of every request. They are the two
-        series that answer "is this the container saturating the host", which
-        the CPU and memory charts on their own cannot.
-      */}
-      <div className={cn("grid gap-3 [&>*]:min-w-0", hasNetwork && "lg:grid-cols-2")}>
-        {hasNetwork && (
-          <ChartPanel
-            title="Network"
-            rows={rows}
-            series={netSeries}
-            format={(v) => rate(v)}
-            axisFormat={(v) => bytes(v, 0)}
-            events={events}
-            onZoom={controls.zoomTo}
-            showPeaks={false}
-            note={note}
-            height={150}
-          />
-        )}
+        )
+      }
+    />
+  )
+  const memory = (
+    <ChartPanel
+      title="Memory"
+      rows={rows}
+      series={memSeries}
+      format={formatBytes}
+      axisFormat={axisBytes}
+      events={events}
+      onZoom={controls.zoomTo}
+      note={note}
+      height={170}
+      plain={plain}
+      domain={memoryScale?.domain}
+      yTicks={memoryScale?.ticks}
+      thresholds={memoryScale?.thresholds}
+    />
+  )
+  /*
+    Network and block throughput were being sampled for this container all
+    along and thrown away at the end of every request. They are the two
+    series that answer "is this the container saturating the host", which
+    the CPU and memory charts on their own cannot.
+  */
+  const throughput = (
+    <div
+      className={cn(
+        "grid [&>*]:min-w-0",
+        plain ? "gap-6" : "gap-3",
+        hasNetwork && "lg:grid-cols-2",
+      )}
+    >
+      {hasNetwork && (
         <ChartPanel
-          title="Block I/O"
+          title="Network"
           rows={rows}
-          series={blockSeries}
-          format={(v) => rate(v)}
-          axisFormat={(v) => bytes(v, 0)}
+          series={netSeries}
+          format={formatRate}
+          axisFormat={axisBytes}
           events={events}
           onZoom={controls.zoomTo}
           showPeaks={false}
           note={note}
           height={150}
+          plain={plain}
         />
-      </div>
+      )}
+      <ChartPanel
+        title="Block I/O"
+        rows={rows}
+        series={blockSeries}
+        format={formatRate}
+        axisFormat={axisBytes}
+        events={events}
+        onZoom={controls.zoomTo}
+        showPeaks={false}
+        note={note}
+        height={150}
+        plain={plain}
+      />
+    </div>
+  )
+
+  /*
+    Rate of change, above the charts that show it.
+    "Writable layer: 38.7 GB" is a number nobody can act on; "+6.4 GB
+    today" is. The same is true of memory — a container at 400 MB is a
+    fact, a container whose floor has doubled in a day is a leak — and the
+    history to say either has been recorded all along with nothing reading
+    it for this purpose.
+  */
+  const anomalies = <ContainerAnomalies containerId={containerId} />
+
+  if (plain) {
+    return (
+      <Section title="Usage history" actions={range}>
+        {anomalies}
+        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          {processor}
+          {memory}
+        </div>
+        {throughput}
+      </Section>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      {anomalies}
+      {processor}
+      {memory}
+      {throughput}
     </div>
   )
 }

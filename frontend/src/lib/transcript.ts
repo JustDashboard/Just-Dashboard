@@ -153,6 +153,17 @@ function tone(text: string): "error" | "warning" | undefined {
   return undefined
 }
 
+/**
+ * One line, numbered and classified. `note` is for a caller that knows the
+ * line is the runner's own voice — the deploy engine's status stream says
+ * "Resolved main to 3f2c1a9" — where the shapes above would only see output.
+ * A blank line stays blank whoever wrote it.
+ */
+export function transcriptLine(number: number, text: string, note = false): TranscriptLine {
+  const shape = note && text.trim() !== "" ? { kind: "note" as const } : classify(text)
+  return { number, text, ...shape }
+}
+
 /** The transcript as numbered, classified lines. Terminal escapes are presentation. */
 export function transcriptLines(text: string): TranscriptLine[] {
   const clean = text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n")
@@ -162,9 +173,25 @@ export function transcriptLines(text: string): TranscriptLine[] {
   const lines: TranscriptLine[] = []
   for (const line of raw) {
     if (line.trim() === "" && lines.at(-1)?.kind === "blank") continue
-    lines.push({ number: lines.length + 1, text: line, ...classify(line) })
+    lines.push(transcriptLine(lines.length + 1, line))
   }
   return lines
+}
+
+/**
+ * Where a search finds `needle` in a line, as `[start, end)` ranges, without
+ * overlaps and ignoring case: the shape the log console's `LogText` marks
+ * hits by, so a transcript line drawn through it is marked the same way. The
+ * needle is expected lowercased, as the consoles keep it.
+ */
+export function hitRanges(text: string, needle: string): [number, number][] {
+  if (!needle) return []
+  const lower = text.toLowerCase()
+  const out: [number, number][] = []
+  for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, at + needle.length)) {
+    out.push([at, at + needle.length])
+  }
+  return out
 }
 
 export function isTrimmed(text: string | undefined): boolean {

@@ -2,7 +2,15 @@
 
 import { useRef } from "react"
 import Link from "next/link"
-import { ArrowRight, Box, External, GitBranch, Globe, Layers, Puzzle } from "@/components/icons"
+import {
+  ArrowRight,
+  Box,
+  External,
+  FolderClosed,
+  Globe,
+  GridMasonry,
+  Layers,
+} from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import type {
   DeploymentDomainRoute,
@@ -13,19 +21,27 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Status, type DotTone } from "@/components/status-dot"
+import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { CertificateStatus } from "@/components/deploy/project-runtime"
+import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { BranchChip } from "@/components/git/marks"
+import { SourceBranch } from "@/components/git/glyphs"
+import { RunStrip } from "@/components/deploy/run-marks"
 import {
+  CertificateReading,
   HealthStatus,
+  autoDeployReading,
   formatDuration,
   hostOf,
   runDurationSeconds,
   type ProjectState,
-  type SourceLine,
 } from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { serviceProduct } from "@/components/deploy/service-product"
+
+/** How many of the environment's runs the release node's strip draws. */
+const STRIP = 14
 
 /**
  * How a request reaches this project, drawn as the four things it passes
@@ -35,17 +51,34 @@ import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
  * line where it is unhealthy, a still line while it is stopped, and a dotted
  * one ahead of anything that does not exist yet.
  *
- * These are the same facts the overview used to list under the preview; they
- * are drawn in the order they happen so the column reads as a path rather
- * than a form.
+ * Each mark is the thing itself (§14): the forge the repository lives on, the
+ * image or the template the project is, and what the containers run, on a
+ * product's tile with their state as a dot in its corner — where a GitHub
+ * repository used to be three connected nodes and every runtime the same box.
+ * The release is its number on a neutral disc: the brand is this dashboard,
+ * and a reading drawn in it would spend the brand on a number.
+ *
+ * Beside each goes only what the identity line over every project page does
+ * not already say — it names the commit, its author, who shipped the release
+ * and whether the branch deploys itself, and this said all of it again a
+ * hand's width lower. So the source carries the branch and how often it is
+ * checked, the release how long it took and how its last runs went, the
+ * containers the products their images are, and each address its
+ * certificate's issuer, state and the days it has left.
  */
 export function ProjectWiring({
   projectId,
   deployment,
   state,
-  source,
+  branch,
+  title,
+  sourceMark,
+  sourceDetail,
+  runtimeProduct,
+  product,
   liveRelease,
   liveRun,
+  runs,
   runtime,
   domains,
   url,
@@ -54,9 +87,22 @@ export function ProjectWiring({
   projectId: number
   deployment: DeploymentSummary
   state: ProjectState
-  source: SourceLine
+  /** The branch a repository follows, as the project records it. */
+  branch: string
+  /** What the source is called: the repository, the image, the template. */
+  title: React.ReactNode
+  /** Where the source lives, as a `product-logo` id. */
+  sourceMark?: string
+  /** What a source without a commit resolved to: a template's version and image, a digest. */
+  sourceDetail?: string
+  /** What the containers run, as a `product-logo` id. */
+  runtimeProduct?: string
+  /** What the project is, which a container of its own build is drawn as (`serviceProduct`). */
+  product?: string
   liveRelease?: DeploymentRelease
   liveRun?: DeploymentEngineRun
+  /** This environment's runs, newest first. */
+  runs: DeploymentEngineRun[]
   runtime?: DeploymentRuntimeServices
   /** The routes the operations owner reports, when it could read them. */
   domains?: DeploymentDomainRoute[]
@@ -64,10 +110,10 @@ export function ProjectWiring({
   watch?: DeploymentGitWatch
 }) {
   const container = useRef<HTMLDivElement>(null)
-  const sourceMark = useRef<HTMLDivElement>(null)
-  const releaseMark = useRef<HTMLDivElement>(null)
-  const runtimeMark = useRef<HTMLDivElement>(null)
-  const domainMark = useRef<HTMLDivElement>(null)
+  const sourceNode = useRef<HTMLDivElement>(null)
+  const releaseNode = useRef<HTMLDivElement>(null)
+  const runtimeNode = useRef<HTMLDivElement>(null)
+  const domainNode = useRef<HTMLDivElement>(null)
 
   const up = state === "ready" || state === "deploying"
   const broken = state === "failed" || state === "unhealthy"
@@ -77,21 +123,34 @@ export function ProjectWiring({
       : undefined
   const running = services?.filter((service) => service.state === "running") ?? []
   const host = url && hostOf(url)
-  const SourceIcon =
-    source.kind === "compose"
+  const git = deployment.sourceKind === "git" || deployment.sourceKind === "local"
+  const reading = watch && autoDeployReading(watch)
+  // The containers' own reading, not the project's: a release being
+  // replaced is still serving from containers that are all up.
+  const runtimeTone: DotTone = broken
+    ? "danger"
+    : running.length === 0
+      ? "stopped"
+      : running.length === services?.length
+        ? "running"
+        : "warning"
+  const SourceGlyph =
+    deployment.sourceKind === "compose"
       ? Layers
-      : source.kind === "blueprint"
-        ? Puzzle
-        : source.kind === "image" || source.kind === "import"
-          ? Box
-          : GitBranch
+      : deployment.sourceKind === "blueprint"
+        ? GridMasonry
+        : deployment.sourceKind === "local"
+          ? FolderClosed
+          : git
+            ? SourceBranch
+            : Box
 
   return (
     <div ref={container} className="relative">
       <AnimatedBeam
         containerRef={container}
-        fromRef={sourceMark}
-        toRef={releaseMark}
+        fromRef={sourceNode}
+        toRef={releaseNode}
         still={!up}
         dashed={!liveRelease}
         tone={liveRelease && !up ? "success" : "default"}
@@ -99,8 +158,8 @@ export function ProjectWiring({
       />
       <AnimatedBeam
         containerRef={container}
-        fromRef={releaseMark}
-        toRef={runtimeMark}
+        fromRef={releaseNode}
+        toRef={runtimeNode}
         still={!up}
         dashed={!liveRelease}
         tone={broken ? "danger" : liveRelease && !up ? "success" : "default"}
@@ -109,8 +168,8 @@ export function ProjectWiring({
       />
       <AnimatedBeam
         containerRef={container}
-        fromRef={runtimeMark}
-        toRef={domainMark}
+        fromRef={runtimeNode}
+        toRef={domainNode}
         still={!up || !host}
         dashed={!host}
         tone={broken ? "danger" : host && liveRelease && !up ? "success" : "default"}
@@ -121,43 +180,46 @@ export function ProjectWiring({
       <ol className="flex flex-col gap-5" aria-label="How the project is wired">
         <li>
           <WireNode
-            nodeRef={sourceMark}
+            nodeRef={sourceNode}
             mark={
-              <WireMark size="md">
-                <SourceIcon />
+              <WireMark tone="logo" size="md">
+                {hasProductLogo(sourceMark) ? (
+                  <ProductGlyph id={sourceMark} />
+                ) : (
+                  <SourceGlyph aria-hidden />
+                )}
               </WireMark>
             }
             eyebrow="Source"
-            title={<span className="truncate">{source.primary}</span>}
+            title={<span className={cn("block truncate", git && "font-mono")}>{title}</span>}
             hint={
-              <>
-                {source.secondary && (
-                  <span className={cn("block truncate", source.mono && "font-mono")}>
-                    {source.secondary}
-                  </span>
-                )}
-                {deployment.sourceKind === "git" && (
-                  <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {watch ? <AutoDeploy watch={watch} /> : <span>Auto-deploy —</span>}
+              git ? (
+                <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  <BranchChip branch={branch} className="max-w-40 shrink-0" />
+                  {reading?.interval ? <span>checked every {reading.interval}s</span> : null}
+                  {deployment.sourceKind === "git" && (
                     <Link
-                      href={`/deploy/${projectId}/settings/general`}
+                      href={`/deploy/${projectId}/settings/general#automatic-deployment`}
+                      aria-label="Manage automatic deployment"
                       className="inline-flex items-center gap-1 rounded-sm focus-ring hover:text-foreground"
                     >
                       Manage <ArrowRight className="size-3" />
                     </Link>
-                  </span>
-                )}
-              </>
+                  )}
+                </span>
+              ) : (
+                sourceDetail && <span className="block truncate font-mono">{sourceDetail}</span>
+              )
             }
           />
         </li>
 
         <li>
           <WireNode
-            nodeRef={releaseMark}
+            nodeRef={releaseNode}
             mark={
               liveRelease ? (
-                <WireMark size="md" tone="brand">
+                <WireMark size="md">
                   <span className="numeric text-xs font-semibold">#{liveRelease.number}</span>
                 </WireMark>
               ) : (
@@ -171,43 +233,60 @@ export function ProjectWiring({
               liveRelease ? (
                 <span className="numeric">Release #{liveRelease.number}</span>
               ) : (
-                <span className="text-muted-foreground">Not deployed yet</span>
+                <span className="text-muted-foreground">No release yet</span>
               )
             }
+            // The strip is the release's reading, so it sits after the words
+            // that describe the release rather than at the column's far end.
             hint={
-              liveRelease && liveRun ? (
-                <>
-                  {liveRun.operation === "rollback" ? "rolled back" : "deployed"}{" "}
-                  {relativeTime(liveRun.endedAt ?? liveRun.requestedAt)}
-                  {liveRun.actor && ` by ${liveRun.actor}`}
-                  {" · "}
-                  {formatDuration(runDurationSeconds(liveRun))}
-                </>
-              ) : liveRelease ? undefined : (
-                "The first deployment records it here"
-              )
+              <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+                {!liveRelease ? (
+                  <span>The first deployment records it here</span>
+                ) : liveRun ? (
+                  <span className="numeric">
+                    {liveRun.operation === "rollback" ? "rolled back" : "released"} in{" "}
+                    {formatDuration(runDurationSeconds(liveRun))}
+                  </span>
+                ) : (
+                  liveRelease.activatedAt && (
+                    <span>live {relativeTime(liveRelease.activatedAt)}</span>
+                  )
+                )}
+                {runs.length > 0 && (
+                  <Link
+                    href={`/deploy/${projectId}/deployments`}
+                    className="inline-flex rounded-sm py-1 focus-ring"
+                  >
+                    <RunStrip runs={runs.slice(0, STRIP)} />
+                  </Link>
+                )}
+              </span>
             }
           />
         </li>
 
         <li>
           <WireNode
-            nodeRef={runtimeMark}
+            nodeRef={runtimeNode}
             mark={
               services ? (
-                <WireMark
-                  size="md"
-                  tone={
-                    broken
-                      ? "danger"
-                      : running.length > 0 && state === "ready"
-                        ? "success"
-                        : "neutral"
-                  }
-                >
-                  <Box />
-                </WireMark>
+                <span className="relative flex">
+                  <WireMark tone="logo" size="md">
+                    {hasProductLogo(runtimeProduct) ? (
+                      <ProductGlyph id={runtimeProduct} />
+                    ) : (
+                      <Box aria-hidden />
+                    )}
+                  </WireMark>
+                  {/* The containers' state in the tile's corner, the way a
+                      session's system sits on its browser's mark. */}
+                  <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+                    <StatusDot tone={runtimeTone} />
+                  </span>
+                </span>
               ) : (
+                // Nothing observed is not something to add: no product, so no
+                // "+" in the ring's corner.
                 <WirePlaceholder size="md">
                   <Box />
                 </WirePlaceholder>
@@ -229,22 +308,33 @@ export function ProjectWiring({
               )
             }
             hint={
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <HealthStatus health={deployment.health} />
-                {services && services.length > 0 && (
-                  <span className="truncate font-mono">
-                    {services.map((service) => service.name).join(", ")}
-                  </span>
-                )}
-                {!services && runtime?.reason && <span className="truncate">{runtime.reason}</span>}
-              </span>
+              services ? (
+                <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  {/* A check that passed before the containers stopped is not
+                      a reading of containers that are not running. */}
+                  {running.length > 0 && <HealthStatus health={deployment.health} />}
+                  {services.map((service) => (
+                    <span
+                      key={service.containerId}
+                      className="inline-flex min-w-0 items-center gap-1 font-mono"
+                    >
+                      <ProductGlyph
+                        id={serviceProduct(service.image, deployment.sourceKind, product)}
+                      />
+                      <span className="truncate">{service.name}</span>
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                runtime?.reason || "Docker has not reported this release yet"
+              )
             }
           />
         </li>
 
         <li>
           <WireNode
-            nodeRef={domainMark}
+            nodeRef={domainNode}
             mark={
               host ? (
                 <WireMark size="md">
@@ -262,11 +352,14 @@ export function ProjectWiring({
                 domains.length === 0 ? (
                   <span className="text-muted-foreground">No public domain</span>
                 ) : (
-                  <ul className="space-y-1">
+                  // From `sm` the names are one column and their certificates
+                  // another, so every domain is one line of the same shape
+                  // rather than wrapping where its name happens to be long.
+                  <ul className="grid grid-cols-1 gap-y-1 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)] sm:gap-x-3">
                     {domains.map((domain) => (
                       <li
                         key={domain.hostname}
-                        className="flex min-w-0 flex-wrap items-center gap-2"
+                        className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 sm:col-span-2 sm:grid sm:grid-cols-subgrid"
                       >
                         <a
                           href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
@@ -274,11 +367,13 @@ export function ProjectWiring({
                           rel="noopener noreferrer"
                           className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
                         >
-                          <span className="truncate">{domain.hostname}</span>
+                          <span className="truncate font-mono">{domain.hostname}</span>
                           <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
                         </a>
-                        <CertificateStatus domain={domain} />
-                        {domain.protected && <Tag>Password</Tag>}
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-normal">
+                          <CertificateReading domain={domain} />
+                          {domain.protected && <Tag>Password</Tag>}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -290,13 +385,13 @@ export function ProjectWiring({
                   rel="noopener noreferrer"
                   className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
                 >
-                  <span className="truncate">{host}</span>
+                  <span className="truncate font-mono">{host}</span>
                   <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
                 </a>
               ) : (
                 <span className="text-muted-foreground">
                   {deployment.liveReleaseId
-                    ? "Private service"
+                    ? "No public address"
                     : "Appears after your first deployment"}
                 </span>
               )
@@ -306,21 +401,4 @@ export function ProjectWiring({
       </ol>
     </div>
   )
-}
-
-function autoDeployReading(watch: DeploymentGitWatch): { tone: DotTone; label: string } {
-  const automatic = watch.policy?.automatic ?? watch.automatic
-  if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
-    return { tone: "warning", label: "Auto-deploy needs attention" }
-  }
-  if (!automatic) return { tone: "stopped", label: "Manual deployments" }
-  if (watch.status === "awaiting_first_deployment") {
-    return { tone: "stopped", label: "Auto-deploy after first deployment" }
-  }
-  return { tone: "running", label: `Auto-deploy on · every ${watch.intervalSeconds}s` }
-}
-
-function AutoDeploy({ watch }: { watch: DeploymentGitWatch }) {
-  const reading = autoDeployReading(watch)
-  return <Status tone={reading.tone} label={reading.label} />
 }

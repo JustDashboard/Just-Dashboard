@@ -22,6 +22,16 @@ routes instead use `gitx.Resolve`, which independently cleans, resolves symlinks
 validate sources/local targets through `files.Resolve`; artifact reads and retention validate their
 stored paths under current roots as well. Git's parallel resolver remains a design-convergence item.
 
+## A deployment's Logs verb names a container the Logs page does not read
+
+Found in the 2026-09-24 deployment pass. A Runtime service's Logs verb (`project-runtime.tsx`) and the
+game console's Logs button (`game/console.tsx`) open `/deploy/{id}/logs?service=<container>`, but the
+project Logs page reads only `view` and `moment`, so the parameter selects nothing: the reader lands on
+the project's requests, not on that container's output. The container's own output is one press further,
+through Open in Docker, and a run's runtime-log sources reach it directly through the host Logs page's
+`source=docker:<id>`. Either the Logs page learns to open a named container or the verbs stop carrying
+a parameter that promises it; the documentation describes the behaviour as it is until then.
+
 ## Verified inventory drift corrected in this documentation change
 
 - The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes.

@@ -20,6 +20,7 @@ type PreviewApproval struct {
 	Revision       string        `json:"revision"`
 	Repository     string        `json:"repository"`
 	HeadRepository string        `json:"headRepository"`
+	HeadRef        string        `json:"headRef,omitempty"` // absent where the delivery predates recording it
 	Author         string        `json:"author"`
 	State          string        `json:"state"`
 	ApprovedBy     string        `json:"approvedBy,omitempty"`
@@ -78,6 +79,7 @@ func scanPreviewApproval(row interface{ Scan(...any) error }) (*PreviewApproval,
 		return nil, ErrInvalidPlan
 	}
 	approval.Repository, approval.HeadRepository, approval.Author = approval.Event.Repository, approval.Event.HeadRepository, approval.Event.Author
+	approval.HeadRef = approval.Event.HeadRef
 	approval.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &approval, nil
 }
@@ -193,7 +195,7 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 		runtime.Strategy = StrategyBlueGreen
 	}
 	buildJSON, runtimeJSON := mustJSON(build), mustJSON(runtime)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) VALUES(?,?,?,?,?,?,?,?)`, environmentID, revision, method, string(buildJSON), evidence, renderBuildPreview(build), digestBytes(buildJSON), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) VALUES(?,?,?,?,?,?,?,?)`, environmentID, revision, method, string(buildJSON), evidence, renderBuildPreview(build), buildPlanDigest(build), now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_runtime_plans(environment_id,revision,config_json,preview,digest,created_at) VALUES(?,?,?,?,?,?)`, environmentID, revision, string(runtimeJSON), renderRuntimePreview(runtime), digestBytes(runtimeJSON), now); err != nil {

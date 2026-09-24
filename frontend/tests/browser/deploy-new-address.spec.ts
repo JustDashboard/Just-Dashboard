@@ -68,16 +68,18 @@ test("closing the database sheet ignores its delayed connection response", async
   await gotoStep(page, "variables")
   await page.getByRole("button", { name: "Add database", exact: true }).click()
   await page.getByRole("button", { name: "Use existing", exact: true }).click()
-  await page.getByRole("combobox", { name: "Existing database" }).click()
-  await page.getByRole("option", { name: "orders-db · postgres" }).click()
-  await page.getByRole("button", { name: "Connect database", exact: true }).click()
+  // A saved connection is a row you take, drawn as its engine; taking it is the advance.
+  await page.getByRole("button", { name: "Connect orders-db", exact: true }).click()
   await expect.poll(() => requested).toBe(true)
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toBeHidden()
   release?.()
   await page.getByRole("button", { name: "Add database", exact: true }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Connect database", exact: true })).toBeEnabled()
+  // The key field is disabled only while a connection is being fetched, so it
+  // is what says the closed sheet's request no longer holds this one busy.
+  await expect(page.getByRole("textbox", { name: "Environment variable" })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Connect orders-db", exact: true })).toBeEnabled()
   await expect(page.locator('input[value="${{database.9}}"]')).toHaveCount(0)
 })
 
@@ -126,19 +128,24 @@ test("standalone database setup resumes its container after switching sources", 
 
 test("database engine loading can be retried after an API failure", async ({ page }) => {
   await mockNewProject(page)
-  let attempts = 0
-  await page.route("**/api/v1/databases/provision/options", (route) => {
-    attempts++
-    return attempts === 1
-      ? route.fulfill({
+  // Failing until the retry is on screen, not for exactly one request: the dev
+  // server's strict mode runs the loading effect twice and aborts the first,
+  // so "the first request fails" was a request nobody saw fail.
+  let recovered = false
+  await page.route("**/api/v1/databases/provision/options", (route) =>
+    recovered
+      ? json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
+      : route.fulfill({
           status: 503,
           contentType: "application/json",
           body: JSON.stringify({ error: { code: "unavailable", message: "Docker unavailable" } }),
-        })
-      : json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
-  })
+        }),
+  )
   await page.goto("/deploy/new?source=database")
-  await page.getByRole("button", { name: "Retry loading database engines" }).click()
+  const retry = page.getByRole("button", { name: "Retry loading database engines" })
+  await expect(retry).toBeVisible()
+  recovered = true
+  await retry.click()
   await expect(page.getByText("PostgreSQL", { exact: true })).toBeVisible()
   await expect(page.getByText("Docker unavailable", { exact: true })).toBeHidden()
 })

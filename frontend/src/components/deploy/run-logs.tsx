@@ -14,10 +14,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ProductGlyph } from "@/components/product-logo"
+import { serviceProduct } from "@/components/deploy/service-product"
 import { get } from "@/lib/api"
+import { clockMinute, minuteSpan } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
+import type { DeploymentSourceKind } from "@/lib/types"
 
-type RunLogSource = { containerId: string; name: string; liveUrl: string; activationUrl?: string }
+type RunLogSource = {
+  containerId: string
+  name: string
+  image?: string
+  liveUrl: string
+  activationUrl?: string
+}
 
 type RunLogHandoff = {
   status: "available" | "unavailable"
@@ -30,8 +40,31 @@ type RunLogHandoff = {
 /**
  * The application's own runtime logs for this run's containers — separate
  * from the build transcript, which is the engine's own narration.
+ *
+ * No title and no caption: the view strip already says "Runtime logs". The
+ * workspace's own strip names the container, drawn as the product its image
+ * is, and switches it between the live tail and its history; a picker above
+ * it appears only when the run has more than one container to choose. The
+ * window the server computed around the release going live is one more way
+ * to read the same container — a chip that opens the history there, with the
+ * window's times as the strip's facts while it is open — rather than a
+ * second Live beside the workspace's own.
  */
-export function RunLogs({ projectId, runId }: { projectId: number; runId: number }) {
+export function RunLogs({
+  projectId,
+  runId,
+  kind,
+  product,
+}: {
+  projectId: number
+  runId: number
+  /**
+   * Where the project's source comes from and what the project is, so a
+   * container of its own build is drawn as the project, as Runtime draws it.
+   */
+  kind?: DeploymentSourceKind
+  product?: string
+}) {
   const result = usePoll(
     (signal) => get<RunLogHandoff>(`/deploy/${projectId}/runs/${runId}/logs`, undefined, signal),
     5000,
@@ -41,70 +74,89 @@ export function RunLogs({ projectId, runId }: { projectId: number; runId: number
   const [activation, setActivation] = useState(false)
   const sources = result.data?.sources ?? []
   const selected = picked ? sources.find((source) => source.containerId === picked) : sources[0]
+  const around =
+    activation && selected?.activationUrl
+      ? new URL(selected.activationUrl, "http://localhost").searchParams
+      : undefined
+  const since = around?.get("since")
+  const until = around?.get("until")
+  const wentLive = result.data?.activationCompletedAt
 
   return (
     <Panel plain>
-      {/* No title: the tab already says "Runtime logs". What a reader needs
-          told is what these are — the application's own output, not the
-          build's — and where the two views of it look. */}
-      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
-        <p className="max-w-prose text-hint text-muted-foreground">
-          {selected
-            ? `What ${selected.name || selected.containerId.slice(0, 12)} prints while it runs — the container this release started, separate from the build transcript. Live follows it now; Around activation shows the five minutes either side of the release going live.`
-            : "The application's own output from the containers this release started, separate from the build transcript."}
-        </p>
-        {sources.length > 0 && (
-          <Select
-            value={selected?.containerId ?? ""}
-            onValueChange={(value) => {
-              setPicked(value)
-              setActivation(false)
-            }}
-          >
-            <SelectTrigger size="sm" aria-label="Runtime log source" className="w-56">
-              <SelectValue placeholder="Choose a service" />
-            </SelectTrigger>
-            <SelectContent>
-              {sources.map((source) => (
-                <SelectItem key={source.containerId} value={source.containerId}>
-                  {source.name || source.containerId}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
+      {(sources.length > 1 || selected?.activationUrl) && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {sources.length > 1 && (
+            <Select
+              value={selected?.containerId ?? ""}
+              onValueChange={(value) => {
+                setPicked(value)
+                setActivation(false)
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                aria-label="Runtime log source"
+                className="w-full max-sm:basis-full sm:w-56"
+              >
+                <SelectValue placeholder="Choose a service" />
+              </SelectTrigger>
+              <SelectContent>
+                {sources.map((source) => (
+                  <SelectItem key={source.containerId} value={source.containerId}>
+                    <ProductGlyph id={serviceProduct(source.image, kind, product)} />
+                    {source.name || source.containerId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {selected?.activationUrl && (
+            <FilterChip selected={activation} onClick={() => setActivation(!activation)}>
+              Around activation
+            </FilterChip>
+          )}
+        </div>
+      )}
       <PanelBody flush className="space-y-3 pt-3">
         {result.error ? (
           <ErrorState error={result.error} />
         ) : !result.data ? (
           <LoadingRows />
         ) : result.data.status === "unavailable" ? (
-          <EmptyNote>{result.data.reason}</EmptyNote>
+          <EmptyNote className="px-0 text-left">{result.data.reason}</EmptyNote>
         ) : (
           <>
             {result.data.windowReason && (
               <p className="text-hint text-muted-foreground">{result.data.windowReason}</p>
             )}
             {!selected ? (
-              <EmptyNote>
+              <EmptyNote className="px-0 text-left">
                 {picked
                   ? "This service is no longer available. Choose another service to view its logs."
                   : "No managed runtime logs yet. Logs appear here when a container is created."}
               </EmptyNote>
             ) : (
-              <>
-                {selected.activationUrl && (
-                  <FilterChip selected={activation} onClick={() => setActivation(!activation)}>
-                    {activation ? "Return to live logs" : "Around activation"}
-                  </FilterChip>
-                )}
-                <ScopedLogWorkspace
-                  key={`${selected.containerId}:${activation}`}
-                  source={selected}
-                  activation={activation}
-                />
-              </>
+              <ScopedLogWorkspace
+                key={`${selected.containerId}:${activation}`}
+                source={selected}
+                product={serviceProduct(selected.image, kind, product)}
+                activation={activation}
+                // Live is the workspace's own tab; pressed from the window,
+                // it leaves the window.
+                onLive={() => setActivation(false)}
+                facts={
+                  since &&
+                  until && (
+                    <span className="numeric shrink-0 text-hint text-muted-foreground">
+                      {minuteSpan(since, until)}
+                      {wentLive && (
+                        <span className="max-sm:hidden"> · went live {clockMinute(wentLive)}</span>
+                      )}
+                    </span>
+                  )
+                }
+              />
             )}
           </>
         )}
@@ -118,7 +170,19 @@ export function RunLogs({ projectId, runId }: { projectId: number; runId: number
  * around this run's activation — ported from the old `deployment-logs.tsx` so
  * this file owns every behaviour of a run's own log handoff.
  */
-function ScopedLogWorkspace({ source, activation }: { source: RunLogSource; activation: boolean }) {
+function ScopedLogWorkspace({
+  source,
+  product,
+  activation,
+  onLive,
+  facts,
+}: {
+  source: RunLogSource
+  product: string
+  activation: boolean
+  onLive: () => void
+  facts?: React.ReactNode
+}) {
   const activationParams = new URL(source.activationUrl || "/", "http://localhost").searchParams
   const [mode, setMode] = useState<LogMode>(activation ? "search" : "live")
   const [filter, setFilter] = useState<LogFilterState>(EMPTY_FILTER)
@@ -132,12 +196,17 @@ function ScopedLogWorkspace({ source, activation }: { source: RunLogSource; acti
   const sourceId = `docker:${source.containerId}`
   return (
     <LogWorkspace
-      className="h-[40rem]"
+      className="h-[min(75vh,40rem)] min-h-80"
       source={{ id: sourceId, label: source.name, kind: "docker", rotated: false }}
       sourceId={sourceId}
       units={[]}
+      leading={<ProductGlyph id={product} />}
+      facts={facts}
       mode={mode}
-      onModeChange={setMode}
+      onModeChange={(next) => {
+        if (activation && next === "live") onLive()
+        else setMode(next)
+      }}
       filter={filter}
       onFilterChange={setFilter}
       unit={unit}

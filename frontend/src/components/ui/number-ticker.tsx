@@ -54,7 +54,9 @@ export function NumberTicker({
 
   return (
     <span ref={ref} className={cn("numeric inline-block", className)} {...props}>
-      {reduced ? value : startValue}
+      {/* With reduced motion the spring never moves, so this is the figure
+          the reader sees: at the precision asked for, never the raw double. */}
+      {reduced ? value.toFixed(decimalPlaces) : startValue}
     </span>
   )
 }

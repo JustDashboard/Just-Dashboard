@@ -4,8 +4,10 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import type { Icon } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Toggle } from "@/components/ui/toggle"
 
 /**
  * A field and the controls that belong to it, inside one edge.
@@ -149,6 +151,56 @@ function InputGroupButton({
   )
 }
 
+/**
+ * A binary that belongs to the field — serve this hostname over HTTPS, mount
+ * this path read-only, take this value from a stored one.
+ *
+ * The height of the field and inside its edge, never a `Switch` beside it (§7):
+ * a switch is the control for an option in a list of options, and a 14px one
+ * standing next to a 36px field was the defect this file was written for. It
+ * began as `/deploy/new`'s HTTPS toggle and the settings pages needed the same
+ * control for three other fields.
+ *
+ * Pressed is `bg-accent` with the mark in the brand — §3's selection. The
+ * ground alone is a step a reader has to compare with the field beside it to
+ * see; the tinted mark says it without the comparison. The word goes on a
+ * phone, where 390px of field had become 140px of field and 250px of labels;
+ * the mark stays, and `aria-label` names the control either way.
+ *
+ * Goes in an `InputGroupAddon align="inline-end" className="gap-0 p-0"`, whose
+ * own rule separates it from its neighbours.
+ */
+function InputGroupToggle({
+  icon: Mark,
+  label,
+  pressed,
+  onPressedChange,
+  "aria-label": ariaLabel,
+  disabled,
+}: {
+  icon: Icon
+  /** The word beside the mark, from `sm`. */
+  label: string
+  pressed: boolean
+  onPressedChange: (pressed: boolean) => void
+  /** What pressing it does, in full: "Serve this hostname over HTTPS". */
+  "aria-label": string
+  disabled?: boolean
+}) {
+  return (
+    <Toggle
+      aria-label={ariaLabel}
+      pressed={pressed}
+      onPressedChange={onPressedChange}
+      disabled={disabled}
+      className="h-full gap-1.5 rounded-none px-3 text-xs font-medium focus-ring-inset data-[state=off]:text-muted-foreground"
+    >
+      <Mark className={cn("size-3.5", pressed ? "text-brand" : "text-muted-foreground")} />
+      <span className="max-sm:hidden">{label}</span>
+    </Toggle>
+  )
+}
+
 /** A fixed word in the group: a scheme, a unit, a suffix. */
 function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   return (
@@ -156,4 +208,11 @@ function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   )
 }
 
-export { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText }
+export {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+  InputGroupText,
+  InputGroupToggle,
+}

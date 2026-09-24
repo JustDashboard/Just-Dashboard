@@ -32,6 +32,7 @@ export function Meter({
   value,
   tone = "default",
   size = "default",
+  mark,
   label,
   className,
 }: {
@@ -40,6 +41,12 @@ export function Meter({
   tone?: Tone
   /** `thin` for a bar under a figure in a tile; `default` inside a table row. */
   size?: "thin" | "default"
+  /**
+   * 0–100: a line across the track where the reading would matter — the
+   * threshold an alert fires at, drawn against the reading it watches, so
+   * "how close" is seen rather than worked out from two numbers.
+   */
+  mark?: number
   /**
    * What the figure measures. A bar with no accessible name is a decoration to a
    * screen reader; with one it is the same reading everyone else gets.
@@ -56,7 +63,7 @@ export function Meter({
       aria-valuemax={100}
       aria-label={label}
       className={cn(
-        "w-full overflow-hidden rounded-full bg-meter-track",
+        "relative w-full overflow-hidden rounded-full bg-meter-track",
         size === "thin" ? "h-1" : "h-1.5",
         className,
       )}
@@ -65,6 +72,15 @@ export function Meter({
         className={cn("h-full rounded-full transition-[width]", FILL[tone])}
         style={{ width: `${pct}%` }}
       />
+      {mark !== undefined && (
+        <span
+          aria-hidden
+          className="absolute inset-y-0 w-px bg-foreground/60"
+          // Held inside the track at 100, where `left: 100%` would put the
+          // line just past the edge that clips it.
+          style={{ left: `min(${Math.max(0, mark)}%, calc(100% - 1px))` }}
+        />
+      )}
     </div>
   )
 }

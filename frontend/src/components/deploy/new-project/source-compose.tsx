@@ -1,16 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import {
-  ArrowDown,
-  ArrowUp,
-  CloudUpload,
-  FileText,
-  GitBranch,
-  Plus,
-  Servers,
-  Trash,
-} from "@/components/icons"
+import { ArrowDown, ArrowUp, CloudUpload, FileText, Plus, Servers, Trash } from "@/components/icons"
+import { SourceRepository } from "@/components/git/glyphs"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 import { Field } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
@@ -19,7 +11,10 @@ import { ErrorState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Textarea } from "@/components/ui/textarea"
+import { CredentialSelect } from "@/components/deploy/credentials-page"
+import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type { DeploymentComposeDocument, DeploymentDraftSource } from "@/lib/types"
 import { deploymentName } from "@/components/deploy/vocabulary"
@@ -50,7 +45,9 @@ const MODES: {
     key: "compose_git",
     label: "In a Git repository",
     hint: "Cloned from a URL and branch",
-    icon: GitBranch,
+    // Not `GitBranch`, which is Heroicons' share arrow standing in for a
+    // branch (§14): here the reader picks the kind by its drawing.
+    icon: SourceRepository,
   },
   {
     key: "compose_local",
@@ -170,19 +167,27 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
 
           {mode === "compose_git" && (
             <div className="grid gap-4 sm:grid-cols-2">
+              {/* The Git tab's Clone URL, drawn the same way: the host read as
+                  it is typed and shown at the field's head. */}
               <Field
                 label="Git URL"
                 htmlFor="compose-git-url"
                 className="sm:col-span-2"
                 error={errors.url}
               >
-                <Input
-                  id="compose-git-url"
-                  value={gitUrl}
-                  onChange={(event) => setGitUrl(event.target.value)}
-                  placeholder="https://github.com/owner/repository.git"
-                  className="font-mono"
-                />
+                <InputGroup>
+                  <InputGroupAddon aria-hidden className="px-3">
+                    <ProductGlyph id={hostProduct(gitUrl) ?? "git"} />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    id="compose-git-url"
+                    value={gitUrl}
+                    aria-invalid={Boolean(errors.url)}
+                    onChange={(event) => setGitUrl(event.target.value)}
+                    placeholder="https://github.com/you/app.git"
+                    className="font-mono"
+                  />
+                </InputGroup>
               </Field>
               <Field label="Branch or tag" htmlFor="compose-git-ref">
                 <Input
@@ -192,18 +197,15 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
                   className="font-mono"
                 />
               </Field>
-              <Field
-                label="Credential id"
-                htmlFor="compose-git-credential"
-                hint="Leave 0 for a public source."
-              >
-                <Input
+              {/* The saved credentials by name and host, as the Git tab offers
+                  them: this was a number field asking for a credential's id,
+                  which nothing on the page told the reader. */}
+              <Field label="Credential" htmlFor="compose-git-credential">
+                <CredentialSelect
                   id="compose-git-credential"
-                  type="number"
-                  min={0}
-                  value={credentialId || ""}
-                  onChange={(event) => setCredentialId(Number(event.target.value) || 0)}
-                  className="font-mono"
+                  kind="git"
+                  value={credentialId || undefined}
+                  onChange={(next) => setCredentialId(next ?? 0)}
                 />
               </Field>
             </div>
@@ -352,7 +354,7 @@ function ComposeFilesEditor({
         />
       )}
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-hint leading-relaxed text-destructive">
           {error}
         </p>
       )}
@@ -363,7 +365,7 @@ function ComposeFilesEditor({
               value={document.path}
               onChange={(event) => update(index, "path", event.target.value)}
               aria-label={`Compose file ${index + 1} path`}
-              className="h-9 font-mono text-xs"
+              className="font-mono sm:text-xs"
             />
             <IconAction
               label={`Remove ${document.path}`}
@@ -378,7 +380,7 @@ function ComposeFilesEditor({
             onChange={(event) => update(index, "content", event.target.value)}
             aria-label={`${document.path} content`}
             rows={10}
-            className="min-h-48 resize-y font-mono text-xs"
+            className="min-h-48 resize-y font-mono sm:text-xs"
             placeholder={"services:\n  web:\n    image: nginx:alpine"}
           />
         </Group>
@@ -405,7 +407,9 @@ function ComposeSelectorEditor({
     onChange(next)
   }
   return (
-    <div className="space-y-2 rounded-xl border border-hairline p-3">
+    // Unframed: inside the one surface with depth, a hairline box around a
+    // part of the form is a frame drawn inside a frame.
+    <div className="space-y-2">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="text-body font-medium">Compose file order</p>
@@ -425,7 +429,7 @@ function ComposeSelectorEditor({
         </Button>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-hint leading-relaxed text-destructive">
           {error}
         </p>
       )}
@@ -440,7 +444,7 @@ function ComposeSelectorEditor({
               onChange(paths.map((item, i) => (i === index ? event.target.value : item)))
             }
             aria-label={`Compose file ${index + 1} path`}
-            className="min-w-0 font-mono text-xs"
+            className="min-w-0 font-mono sm:text-xs"
           />
           <IconAction
             label={`Move ${path} earlier`}

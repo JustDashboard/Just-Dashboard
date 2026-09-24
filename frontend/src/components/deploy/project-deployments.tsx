@@ -1,20 +1,11 @@
 "use client"
 
-import { Fragment, useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import {
-  CloudUpload,
-  External,
-  Eye,
-  Pin,
-  Play,
-  RotateCounterClockwise,
-  StopCircle,
-} from "@/components/icons"
+import { GitPullRequest, Globe, Pin, RotateCounterClockwise } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
-import { relativeTime, timestamp } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -23,17 +14,27 @@ import type {
   DeploymentEngineRun,
   DeploymentPreview,
   DeploymentRelease,
+  DeploymentRunState,
   DeploymentRunsPage,
 } from "@/lib/types"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
+import { ChoiceList, GroupRule } from "@/components/flow"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Status } from "@/components/status-dot"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbActions } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
+import {
+  ProductGlyph,
+  ProductLogo,
+  gitProviderProduct,
+  hostProduct,
+} from "@/components/product-logo"
+import { AuthorMark, ShortSha } from "@/components/git/marks"
 import { Button } from "@/components/ui/button"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   Select,
   SelectContent,
@@ -43,23 +44,21 @@ import {
 } from "@/components/ui/select"
 import { useProject } from "@/components/deploy/project-context"
 import {
-  RunStatus,
   deploymentURL,
-  formatDuration,
   hostOf,
-  isCancellable,
-  isRetryable,
+  isActiveRun,
   runDurationSeconds,
   runFailed,
-  runRef,
-  runSubject,
   runTitle,
-  runTriggerLine,
-  shortRevision,
+  useNow,
 } from "@/components/deploy/vocabulary"
 import { Insights } from "@/components/deploy/insights"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
+import { ProjectMark } from "@/components/deploy/project-mark"
+import { RunRow } from "@/components/deploy/run-row"
+import { RunStrip } from "@/components/deploy/run-marks"
+import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
 
 type StatusFilter = "all" | "ready" | "failed" | "cancelled"
 
@@ -70,6 +69,21 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "cancelled", label: "Cancelled" },
 ]
 
+/**
+ * A verb pressed on a row: its participle, and what the row read when it was
+ * pressed, so the participle holds until the poll brings the change rather
+ * than only until the request returns.
+ */
+type Working = {
+  verb: RunVerbKey
+  word: string
+  state: DeploymentRunState
+  cancelRequested: boolean
+  pinned?: boolean
+  /** The request has been answered; now waiting on the poll. */
+  sent?: boolean
+}
+
 function matchesFilter(run: DeploymentEngineRun, filter: StatusFilter) {
   if (filter === "all") return true
   if (filter === "ready") return run.state === "succeeded"
@@ -77,45 +91,90 @@ function matchesFilter(run: DeploymentEngineRun, filter: StatusFilter) {
   return run.state === "cancelled" || run.state === "superseded"
 }
 
-/** "main · a1b2c3d · by operator · 3h ago" — a run's provenance, one line. */
-function RunSubtitle({ run }: { run: DeploymentEngineRun }) {
-  const project = useProject()
-  const { deployment, project: record } = project.detail
-  const parts: React.ReactNode[] = []
-  if (deployment.sourceKind === "git" || deployment.sourceKind === "local") {
-    parts.push(runRef(run, deployment.sourceRef || record.branch))
-    const sha = shortRevision(run.sourceRevision || deployment.sourceRevision)
-    if (sha)
-      parts.push(
-        <span key="sha" className="font-mono">
-          {sha}
-        </span>,
-      )
+/** "Today", "Yesterday", "Sep 2" — the day a run was asked for, as a rule over its group. */
+function dayLabel(iso: string, now: number) {
+  const day = new Date(iso)
+  const today = new Date(now)
+  const start = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const days = Math.round((start(today) - start(day)) / 86_400_000)
+  if (days === 0) return "Today"
+  if (days === 1) return "Yesterday"
+  return day.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: day.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  })
+}
+
+/**
+ * The runs still going, then the rest under the day each was asked for. Each
+ * group knows where it starts in the whole list, for the arrival stagger.
+ */
+function groupRuns(runs: DeploymentEngineRun[], now: number) {
+  const groups: { label: string; start: number; runs: DeploymentEngineRun[] }[] = []
+  const active = runs.filter((run) => isActiveRun(run.state))
+  if (active.length > 0) groups.push({ label: "In progress", start: 0, runs: active })
+  let position = active.length
+  for (const run of runs) {
+    if (isActiveRun(run.state)) continue
+    const label = dayLabel(run.requestedAt, now)
+    const last = groups.at(-1)
+    if (last && last.label === label) last.runs.push(run)
+    else groups.push({ label, start: position, runs: [run] })
+    position += 1
   }
-  parts.push(runTriggerLine(run))
-  parts.push(
-    <time key="time" dateTime={run.requestedAt} title={timestamp(run.requestedAt)}>
-      {relativeTime(run.requestedAt)}
-    </time>,
-  )
-  return (
-    <>
-      {parts.map((part, index) => (
-        <Fragment key={index}>
-          {index > 0 && " · "}
-          {part}
-        </Fragment>
-      ))}
-    </>
-  )
+  return groups
+}
+
+/**
+ * How long each finished run took against the others listed: its share of the
+ * longest, and whether it took more than twice the middle one — which is when
+ * a build is worth a second look, where "longer than the p95" of a dozen runs
+ * would only ever name the longest.
+ */
+function durationScale(runs: DeploymentEngineRun[]) {
+  const finished = runs
+    .filter((run) => run.endedAt)
+    .map((run) => runDurationSeconds(run) ?? 0)
+    .sort((a, b) => a - b)
+  const longest = finished.at(-1) ?? 0
+  const median = finished.length ? finished[Math.floor(finished.length / 2)] : 0
+  return (run: DeploymentEngineRun) => {
+    if (!run.endedAt || longest <= 0) return undefined
+    const seconds = runDurationSeconds(run) ?? 0
+    return {
+      share: (seconds / longest) * 100,
+      slow: finished.length >= 5 && median > 0 && seconds > median * 2,
+    }
+  }
 }
 
 /**
  * The project's release history: delivery figures over the run history, then
- * every run as a row — Vercel's anatomy (status, title, provenance, trailing
- * state) rather than the pre-rebuild split between a run list, an immutable
- * releases panel and an inline comparison. Rollback and comparison move to
- * the row menu and their own surfaces (`RollbackDialog`, `ReleaseComparisonSheet`).
+ * every run as a card you open.
+ *
+ * Each run is drawn as itself (`RunRow`): who or what started it as their face
+ * or their product, the run's name with its commit's subject, where it came
+ * from as a branch, a commit and an author, and how it went, in fixed measures
+ * so a column of runs is a column — with a light running round the one in
+ * flight, and the release path's own bar beside it with the stage at work
+ * lit. They were reading rows with a status word jammed in front of the
+ * name, so every title started somewhere else and nothing said the row led
+ * anywhere (§15 pass 3). The live release is a state, and it is the run's:
+ * its row reads "Live" where the others read "Ready", since a live release is
+ * ready by definition; a pinned one is a tag.
+ *
+ * They are grouped the way a history is read: what is in flight, then day by
+ * day. The header carries the loaded runs' outcomes as a strip, and the
+ * status chips count what they would show. A reason in the delivery figures
+ * narrows the list to the failed runs.
+ *
+ * Each run's verbs are declared once (`run-verbs.tsx`) and drawn behind its
+ * menu; rolling back and comparing open their own surfaces
+ * (`RollbackDialog`, `ReleaseComparisonSheet`), and a verb in flight is said
+ * on its row in the present participle until the poll shows what it changed
+ * (§13).
  */
 export function ProjectDeployments() {
   const project = useProject()
@@ -131,8 +190,14 @@ export function ProjectDeployments() {
     undefined,
   )
   const [rollback, setRollback] = useState<{ open: boolean; releaseId?: number }>({ open: false })
-  const [compare, setCompare] = useState<{ open: boolean; releaseId?: number }>({ open: false })
-  const [pinningReleaseId, setPinningReleaseId] = useState<number>()
+  const [compare, setCompare] = useState<{
+    open: boolean
+    releaseId?: number
+    fromReleaseId?: number
+  }>({ open: false })
+  // Keyed by run, so a verb on one row neither replaces nor clears another's.
+  const [working, setWorking] = useState<Record<number, Working>>({})
+  const list = useRef<HTMLDivElement>(null)
 
   const previews = usePoll(
     (signal) =>
@@ -156,6 +221,8 @@ export function ProjectDeployments() {
     }
     return [...labels.entries()].map(([id, label]) => ({ id, label }))
   }, [project.environmentId, previews.data, project.runs])
+  // A pull request's preview came through the forge that holds the repository.
+  const forge = gitProviderProduct(hostProduct(deployment.sourceRemote))
 
   // A remembered preview environment may have been closed since; production
   // is the answer then, not an empty list under a name nobody can pick.
@@ -185,6 +252,15 @@ export function ProjectDeployments() {
 
   const environmentRuns = allRuns.filter((run) => run.environmentId === selectedEnv)
   const runs = environmentRuns.filter((run) => matchesFilter(run, filter))
+  const counts = Object.fromEntries(
+    STATUS_FILTERS.map((entry) => [
+      entry.key,
+      environmentRuns.filter((run) => matchesFilter(run, entry.key)).length,
+    ]),
+  ) as Record<StatusFilter, number>
+  const now = useNow(60_000)
+  const groups = groupRuns(runs, now)
+  const meter = durationScale(environmentRuns)
   // Before the first click the newest page's own cursor says whether older
   // runs exist at all, so a project with one run never offers to load more.
   const exhausted = older ? older.nextBefore === undefined : !project.hasOlderRuns
@@ -218,20 +294,47 @@ export function ProjectDeployments() {
     }
   }
 
-  const togglePin = async (release: DeploymentRelease) => {
+  const press = (run: DeploymentEngineRun, entry: Pick<Working, "verb" | "word" | "pinned">) =>
+    setWorking((current) => ({
+      ...current,
+      [run.id]: { ...entry, state: run.state, cancelRequested: run.cancelRequested },
+    }))
+  const answered = (id: number) =>
+    setWorking((current) =>
+      current[id] ? { ...current, [id]: { ...current[id], sent: true } } : current,
+    )
+  const settle = (id: number) =>
+    setWorking((current) => {
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
+  // A pressed verb's participle, until the request fails or the poll shows
+  // what it changed.
+  const pendingOf = (run: DeploymentEngineRun, release?: DeploymentRelease) => {
+    const entry = working[run.id]
+    if (!entry || !entry.sent) return entry
+    const moved =
+      entry.verb === "pin"
+        ? release?.pinned !== entry.pinned
+        : run.state !== entry.state || run.cancelRequested !== entry.cancelRequested
+    return moved ? undefined : entry
+  }
+
+  const togglePin = async (run: DeploymentEngineRun, release: DeploymentRelease) => {
     const pinned = !release.pinned
-    setPinningReleaseId(release.id)
+    press(run, { verb: "pin", word: pinned ? "Pinning…" : "Unpinning…", pinned: release.pinned })
     try {
       await put(
         `/deploy/${project.projectId}/environments/${project.environmentId}/releases/${release.id}/pin`,
         { pinned },
       )
       notify.success(pinned ? "Release pinned" : "Release unpinned")
+      answered(run.id)
       project.refresh()
     } catch (error) {
       notify.error(pinned ? "Could not pin release" : "Could not unpin release", error)
-    } finally {
-      setPinningReleaseId(undefined)
+      settle(run.id)
     }
   }
 
@@ -244,10 +347,12 @@ export function ProjectDeployments() {
   }, [project.operations, deployment.endpoint])
 
   const act = async (run: DeploymentEngineRun, verb: "cancel" | "retry") => {
+    press(run, { verb, word: verb === "cancel" ? "Cancelling…" : "Starting…" })
     try {
       const result = await post<DeploymentEngineRun>(
         `/deploy/${project.projectId}/runs/${run.id}/${verb}`,
       )
+      answered(run.id)
       if (verb === "retry") router.push(`/deploy/${project.projectId}/runs/${result.id}`)
       else project.refresh()
     } catch (error) {
@@ -255,228 +360,210 @@ export function ProjectDeployments() {
         verb === "cancel" ? "Could not cancel deployment" : "Could not retry deployment",
         error,
       )
+      settle(run.id)
     }
   }
 
-  const rowVerbs = (run: DeploymentEngineRun): Verb[] => {
-    const release = project.releases.find((candidate) => candidate.id === run.releaseId)
-    const isLive = Boolean(release) && release!.id === deployment.liveReleaseId
-    const url = deploymentURL(deployment.endpoint)
-    const verbs: Verb[] = [
-      {
-        key: "open",
-        label: "Open deployment",
-        detail: "The build log and release status for this run.",
-        icon: External,
-        run: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
+  const url = deploymentURL(deployment.endpoint)
+  const releaseOf = (run: DeploymentEngineRun) =>
+    project.releases.find((candidate) => candidate.id === run.releaseId)
+  const verbsFor = (run: DeploymentEngineRun, busy?: RunVerbKey) => [
+    ...runVerbs({
+      run,
+      release: releaseOf(run),
+      liveReleaseId: deployment.liveReleaseId,
+      url,
+      can,
+      working: busy,
+      on: {
+        open: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
+        visit: () => window.open(url, "_blank", "noopener,noreferrer"),
+        redeploy: () => void project.start("redeploy"),
+        retry: () => void act(run, "retry"),
+        cancel: () => void act(run, "cancel"),
       },
-    ]
-    if (isLive && url) {
-      verbs.push({
-        key: "visit",
-        label: "Visit",
-        detail: "Open the live site in a new tab.",
-        icon: External,
-        run: () => window.open(url, "_blank", "noopener,noreferrer"),
-      })
-    }
-    if (isLive && can("service.control")) {
-      verbs.push({
-        key: "redeploy",
-        label: "Redeploy",
-        detail: "Run this release again, unchanged.",
-        icon: Play,
-        run: () => void project.start("redeploy"),
-      })
-    }
-    if (release && can("system.admin")) {
-      verbs.push({
-        key: "pin",
-        label: release.pinned ? "Unpin release" : "Pin release",
-        detail: release.pinned
-          ? "Allow this release to be cleaned up automatically again."
-          : "Keep this release from being cleaned up automatically.",
-        icon: Pin,
-        disabled: pinningReleaseId === release.id,
-        run: () => void togglePin(release),
-      })
-    }
-    if (
-      release &&
-      release.state === "retained" &&
-      release.id !== deployment.liveReleaseId &&
-      can("destructive")
-    ) {
-      verbs.push({
-        key: "rollback",
-        label: "Roll back to this release",
-        detail: "Make this retained release live again.",
-        icon: RotateCounterClockwise,
-        run: () => setRollback({ open: true, releaseId: release.id }),
-      })
-    }
-    if (release && release.id !== deployment.liveReleaseId) {
-      verbs.push({
-        key: "compare",
-        label: "Compare with live",
-        detail: "What changed between this release and the live one.",
-        icon: Eye,
-        run: () => setCompare({ open: true, releaseId: release.id }),
-      })
-    }
-    if (isRetryable(run.state) && can("service.control")) {
-      verbs.push({
-        key: "retry",
-        label: "Retry",
-        detail: "Run this deployment again from the same source.",
-        icon: RotateCounterClockwise,
-        run: () => void act(run, "retry"),
-      })
-    }
-    if (isCancellable(run.state) && can("service.control")) {
-      verbs.push({
-        key: "cancel",
-        label: "Cancel",
-        detail: "Stop this deployment before it finishes.",
-        icon: StopCircle,
-        run: () => void act(run, "cancel"),
-      })
-    }
-    return verbs
-  }
+    }),
+    ...releaseVerbs({
+      release: releaseOf(run),
+      liveReleaseId: deployment.liveReleaseId,
+      can,
+      working: busy,
+      on: {
+        changes: (release) => setCompare({ open: true, releaseId: release.id }),
+        compare: (release) =>
+          setCompare({
+            open: true,
+            releaseId: deployment.liveReleaseId,
+            fromReleaseId: release.id,
+          }),
+        rollback: (release) => setRollback({ open: true, releaseId: release.id }),
+        pin: (release) => void togglePin(run, release),
+      },
+    }),
+  ]
+  // Where each run came from: the environment's live source, or — before a
+  // release has gone live and fixed one — the branch the project follows.
+  const source = { ...deployment, sourceRef: deployment.sourceRef || record.branch }
+
+  // Production is the public one; the project's own favicon here would only
+  // repeat the header's mark. A preview is the forge its pull request is on.
+  const environmentMark = (id: number) =>
+    id === project.environmentId ? (
+      <Globe aria-hidden className="size-3.5 text-muted-foreground" />
+    ) : forge ? (
+      <ProductGlyph id={forge} />
+    ) : (
+      <GitPullRequest aria-hidden className="size-3.5 text-muted-foreground" />
+    )
 
   return (
-    <div className="space-y-6">
-      {project.normalized && <Insights projectId={project.projectId} />}
+    <div className="space-y-8">
+      {project.normalized && (
+        <Insights
+          projectId={project.projectId}
+          onFailureClick={() => {
+            setFilter("failed")
+            list.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+          }}
+        />
+      )}
 
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {STATUS_FILTERS.map((entry) => (
-          <FilterChip
-            key={entry.key}
-            selected={filter === entry.key}
-            onClick={() => setFilter(entry.key)}
-          >
-            {entry.label}
-          </FilterChip>
-        ))}
-        {environments.length > 1 && (
-          <Select
-            value={String(selectedEnv)}
-            onValueChange={(value) => setEnvironmentId(Number(value))}
-          >
-            <SelectTrigger size="sm" className="ml-auto w-44" aria-label="Environment">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {environments.map((entry) => (
-                <SelectItem key={entry.id} value={String(entry.id)}>
-                  {entry.label}
-                </SelectItem>
+      <div ref={list} className="scroll-mt-6">
+        <Panel plain>
+          <PanelHeader
+            title="Deployments"
+            actions={
+              <>
+                <span className="max-sm:hidden">
+                  <RunStrip runs={environmentRuns.slice(0, 20)} />
+                </span>
+                {environments.length > 1 && (
+                  <Select
+                    value={String(selectedEnv)}
+                    onValueChange={(value) => setEnvironmentId(Number(value))}
+                  >
+                    <SelectTrigger size="sm" className="w-40 sm:ml-2" aria-label="Environment">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {environments.map((entry) => (
+                        <SelectItem key={entry.id} value={String(entry.id)}>
+                          {environmentMark(entry.id)}
+                          {entry.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </>
+            }
+          />
+          <PanelToolbar>
+            <ChipStrip>
+              {STATUS_FILTERS.map((entry) => (
+                <FilterChip
+                  key={entry.key}
+                  selected={filter === entry.key}
+                  // A filter that would show nothing is drawn the way the build
+                  // console's Errors chip is: there, and not pressable.
+                  disabled={counts[entry.key] === 0 && filter !== entry.key}
+                  className="disabled:opacity-50"
+                  onClick={() => setFilter(entry.key)}
+                >
+                  {entry.label} <ChipCount>{counts[entry.key]}</ChipCount>
+                </FilterChip>
               ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
-      <Panel plain>
-        <PanelHeader title="Deployments" />
-        <PanelBody flush>
-          {project.runsLoading && runs.length === 0 ? (
-            <LoadingPanel rows={5} />
-          ) : project.runs.length === 0 ? (
-            <EmptyState
-              icon={CloudUpload}
-              title="No deployments yet"
-              description="The first deployment will appear here as soon as its request is accepted."
-              className="border-0 py-6"
-            />
-          ) : runs.length === 0 ? (
-            <EmptyState
-              title="No deployments match"
-              description="Try another status, or clear the filters to see everything."
-              action={
-                <Button size="sm" variant="outline" onClick={() => setFilter("all")}>
-                  Clear filters
-                </Button>
-              }
-              className="border-0 py-6"
-            />
-          ) : (
-            <RowList aria-label="Deployments">
-              {runs.map((run) => {
-                const release = project.releases.find((candidate) => candidate.id === run.releaseId)
-                const isLive = Boolean(release) && release!.id === deployment.liveReleaseId
-                return (
-                  <Row
-                    key={run.id}
-                    // Not `href`/`onClick`: `Row` wraps its whole content in
-                    // one `<a>`/`<button>`, and this row's trailing
-                    // `VerbActions` nests a trigger button inside that same
-                    // element — invalid HTML (a control cannot nest inside
-                    // another), which React and the browser then disagree
-                    // about on every re-render, detaching the dialog this
-                    // menu opens mid-interaction. Design system §12 already
-                    // names the fix (`TableRow`'s `onActivate`): the row
-                    // itself stays inert and its title is the real link.
-                    leading={
-                      <span className="flex items-center gap-1.5">
-                        <RunStatus state={run.state} />
-                        <span className="numeric text-hint text-muted-foreground">
-                          {formatDuration(runDurationSeconds(run))}
-                        </span>
-                      </span>
-                    }
-                    title={
-                      <Link
-                        href={`/deploy/${project.projectId}/runs/${run.id}`}
-                        className="flex min-w-0 items-baseline gap-2 rounded-sm focus-ring hover:underline"
-                      >
-                        <span>{runTitle(run)}</span>
-                        {runSubject(run) && (
-                          <span className="min-w-0 truncate font-normal text-muted-foreground">
-                            {runSubject(run)}
-                          </span>
-                        )}
-                      </Link>
-                    }
-                    subtitle={<RunSubtitle run={run} />}
-                    trailing={
-                      <>
-                        {isLive && <Tag tone="success">Live</Tag>}
-                        {release?.pinned && <Tag>Pinned</Tag>}
-                        {run.environmentId !== project.environmentId && (
-                          <Tag>
-                            {environments.find((entry) => entry.id === run.environmentId)?.label ??
-                              "Preview"}
-                          </Tag>
-                        )}
-                        <VerbActions
-                          reveal
-                          verbs={rowVerbs(run)}
-                          menuLabel={`Actions for ${runTitle(run)}`}
-                        />
-                      </>
-                    }
-                  />
-                )
-              })}
-            </RowList>
+            </ChipStrip>
+          </PanelToolbar>
+          <PanelBody flush className="pt-4">
+            {project.runsLoading && runs.length === 0 ? (
+              <LoadingPanel rows={5} plain />
+            ) : project.runs.length === 0 ? (
+              <EmptyState
+                mark={<ProjectMark deployment={deployment} size="md" />}
+                title="No deployments yet"
+                description="The first deployment will appear here as soon as its request is accepted."
+                className="border-0 py-6"
+              />
+            ) : runs.length === 0 ? (
+              <EmptyState
+                title="No deployments match"
+                description="Try another status, or clear the filters to see everything."
+                action={
+                  <Button size="sm" variant="outline" onClick={() => setFilter("all")}>
+                    Clear filters
+                  </Button>
+                }
+                className="border-0 py-6"
+              />
+            ) : (
+              <div className="space-y-5">
+                {groups.map((group) => (
+                  <div key={group.label} className="space-y-2.5">
+                    {/* A day's count beside its date reads as part of it
+                        ("Sep 1 3"); only what is in flight is counted. */}
+                    <GroupRule
+                      label={group.label}
+                      count={group.label === "In progress" ? group.runs.length : undefined}
+                    />
+                    <ChoiceList aria-label={group.label}>
+                      {group.runs.map((run, offset) => {
+                        const release = releaseOf(run)
+                        const isLive = Boolean(release) && release!.id === deployment.liveReleaseId
+                        const pending = pendingOf(run, release)
+                        const preview =
+                          run.environmentId !== project.environmentId &&
+                          (environments.find((entry) => entry.id === run.environmentId)?.label ??
+                            "Preview")
+                        return (
+                          <RunRow
+                            key={run.id}
+                            run={run}
+                            deployment={source}
+                            release={release}
+                            live={isLive}
+                            index={group.start + offset}
+                            meter={meter(run)}
+                            tags={
+                              <>
+                                {pending && (
+                                  <TextShimmer className="text-hint">{pending.word}</TextShimmer>
+                                )}
+                                {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
+                                {preview && <Tag>{preview}</Tag>}
+                              </>
+                            }
+                            actions={
+                              <VerbActions
+                                dim
+                                verbs={verbsFor(run, pending?.verb)}
+                                menuLabel={`Actions for ${runTitle(run)}`}
+                              />
+                            }
+                          />
+                        )
+                      })}
+                    </ChoiceList>
+                  </div>
+                ))}
+              </div>
+            )}
+          </PanelBody>
+          {project.runs.length > 0 && !exhausted && (
+            <PanelFooter className="mt-4">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={loadingOlder}
+                pending={loadingOlder}
+                onClick={() => void loadOlder()}
+              >
+                Load older deployments
+              </Button>
+            </PanelFooter>
           )}
-        </PanelBody>
-        {project.runs.length > 0 && !exhausted && (
-          <PanelFooter>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={loadingOlder}
-              pending={loadingOlder}
-              onClick={() => void loadOlder()}
-            >
-              Load older deployments
-            </Button>
-          </PanelFooter>
-        )}
-      </Panel>
+        </Panel>
+      </div>
 
       {!project.normalized && (
         <LegacyRecovery
@@ -497,6 +584,7 @@ export function ProjectDeployments() {
         releases={project.releases}
         runs={project.runs}
         domains={domains}
+        remote={deployment.sourceRemote}
         initialReleaseId={rollback.releaseId}
       />
       <ReleaseComparisonSheet
@@ -504,8 +592,9 @@ export function ProjectDeployments() {
         onOpenChange={(open) => setCompare((current) => ({ ...current, open }))}
         projectId={project.projectId}
         environmentId={project.environmentId}
-        releaseId={deployment.liveReleaseId}
-        fromReleaseId={compare.releaseId}
+        releaseId={compare.releaseId}
+        fromReleaseId={compare.fromReleaseId}
+        releases={project.releases}
       />
     </div>
   )
@@ -518,6 +607,10 @@ export function ProjectDeployments() {
  * immutable release swap is — so it is the one rollback in this rebuild that
  * asks for a typed phrase rather than the plain confirmation the dialog above
  * uses (design-system confirm-dialog: typing is for the rare and unrecoverable).
+ *
+ * These rows are readings with a button, not destinations, so they stay a
+ * `RowList`; each commit is drawn as a forge draws one — its sha, then its
+ * author's square in their own hue.
  */
 function LegacyRecovery({
   projectId,
@@ -544,9 +637,9 @@ function LegacyRecovery({
       <PanelHeader title="Recovery" />
       <PanelBody flush>
         {commits.loading && !commits.data ? (
-          <LoadingRows rows={3} className="p-4" />
+          <LoadingRows rows={3} className="py-4" />
         ) : commits.error ? (
-          <ErrorState error={commits.error} className="m-4" />
+          <ErrorState error={commits.error} />
         ) : commits.data && commits.data.length === 0 ? (
           <EmptyNote>No recoverable commits were found.</EmptyNote>
         ) : (
@@ -556,10 +649,12 @@ function LegacyRecovery({
                 key={commit.sha}
                 title={commit.subject}
                 subtitle={
-                  <>
-                    <span className="font-mono">{commit.short}</span> · {commit.author} ·{" "}
-                    {relativeTime(commit.date)}
-                  </>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <ShortSha sha={commit.short} />
+                    <AuthorMark name={commit.author} />
+                    <span className="truncate max-sm:hidden">{commit.author}</span>
+                    <span className="shrink-0">· {relativeTime(commit.date)}</span>
+                  </span>
                 }
                 trailing={
                   commit.sha === currentSha ? (
@@ -579,14 +674,16 @@ function LegacyRecovery({
                           title: "Roll back",
                           confirmLabel: "Roll back",
                           phrase: commit.short,
+                          subject: {
+                            mark: <ProductLogo id="git" size="sm" />,
+                            name: commit.subject,
+                            facts: <ShortSha sha={commit.short} />,
+                          },
                           description: (
-                            <>
-                              <p>
-                                <b>{projectName}</b> will rebuild {commit.short}. The current
-                                workload remains the recovery point until activation.
-                              </p>
-                              <p className="text-xs text-muted-foreground">{commit.subject}</p>
-                            </>
+                            <p>
+                              <b>{projectName}</b> will rebuild {commit.short}. The current workload
+                              remains the recovery point until activation.
+                            </p>
                           ),
                           action: async (confirmation) => {
                             const result = await post<{ runId: number }>(

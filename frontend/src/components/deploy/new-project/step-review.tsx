@@ -190,9 +190,13 @@ export function StepReview({
 
       <FormSection title="At the cutover">
         <FormNote>
+          {/* "Nothing is lost" only when something is kept: with no mounts the
+              section above has just said the opposite. */}
           {configuration.runtime.strategy === "blue_green"
             ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
-            : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."}
+            : mounts.length === 0
+              ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
+              : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."}
         </FormNote>
       </FormSection>
 

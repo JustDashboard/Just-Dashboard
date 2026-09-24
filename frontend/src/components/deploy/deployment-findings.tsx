@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import type { DeploymentPreflightFinding } from "@/lib/types"
 import { humanize } from "@/components/deploy/vocabulary"
 import { Status, type Verdict } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 
 /** A preflight finding's severity as the app's own four-value verdict scale. */
 export function findingVerdict(severity: DeploymentPreflightFinding["severity"]): Verdict {
@@ -46,6 +47,11 @@ export function findingRemedy(finding: DeploymentPreflightFinding) {
  * error with no field attached to it; `action` and `deepLink` are how a
  * finding names its own remedy, so they are never dropped here.
  *
+ * It is a toned fence — the rank a `Notice` has, a step inside the review it
+ * sits in — with the title at the body's size, the owner as a tag at the
+ * row's edge rather than in the middle of the line, and what was measured as
+ * the literal it is.
+ *
  * `index` disambiguates a DOM id when a code repeats across rows — a mount
  * path outside its roots, an unavailable dependency and a domain conflict all
  * carry the same code once per instance rather than a code per row — and
@@ -78,7 +84,7 @@ export function FindingRow({
           : undefined
       }
       className={cn(
-        "rounded-xl border p-3",
+        "min-w-0 space-y-1.5 rounded-lg border p-3",
         finding.severity === "blocked" || finding.severity === "decision"
           ? "border-rule-danger bg-wash-danger"
           : finding.severity === "warning"
@@ -86,25 +92,34 @@ export function FindingRow({
             : "border-hairline",
       )}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Status verdict={findingVerdict(finding.severity)} label={humanize(finding.severity)} />
-        <p className="min-w-0 flex-1 text-xs font-medium">{finding.title}</p>
-        {finding.owner && <span className="text-micro text-muted-foreground">{finding.owner}</span>}
+      <div className="flex min-w-0 items-start gap-2.5">
+        <Status
+          verdict={findingVerdict(finding.severity)}
+          label={humanize(finding.severity)}
+          className="mt-px shrink-0"
+        />
+        <p className="min-w-0 flex-1 text-body leading-snug font-medium">{finding.title}</p>
+        {finding.owner && <Tag className="mt-0.5">{finding.owner}</Tag>}
       </div>
       {finding.measured && (
-        <p className="mt-2 font-mono text-hint break-words">{finding.measured}</p>
+        <Tag mono className="max-w-full break-all whitespace-normal">
+          {finding.measured}
+        </Tag>
       )}
       {finding.means && (
-        <p className="mt-1 text-hint leading-relaxed text-muted-foreground">{finding.means}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{finding.means}</p>
       )}
       {remedy && (
-        <p className="mt-1 text-hint leading-relaxed">
+        <p className="text-xs leading-relaxed">
           <b className="font-medium">Next:</b> {remedy}
           {finding.deepLink && (
             <>
               {" "}
               ·{" "}
-              <Link href={finding.deepLink} className="underline underline-offset-2">
+              <Link
+                href={finding.deepLink}
+                className="rounded-sm underline underline-offset-2 focus-ring"
+              >
                 Open owning page
               </Link>
             </>

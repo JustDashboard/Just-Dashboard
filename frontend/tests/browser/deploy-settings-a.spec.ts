@@ -17,7 +17,7 @@ function overflow(page: import("@playwright/test").Page) {
   return page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
 }
 
-// The pending-changes banner also names a changed variable in one of its own
+// The pending-changes strip also names a changed variable in one of its own
 // `<li>`s, so a bare `page.locator("li", { hasText: name })` matches it too.
 // Scoping to the named list is what actually picks out the variable row.
 function variableRow(page: import("@playwright/test").Page, name: string) {
@@ -36,17 +36,26 @@ test.describe("General settings", () => {
     })
 
     await page.goto("/deploy/7/settings/general")
-    await expect(page.getByRole("heading", { name: "Project", exact: true })).toBeVisible()
-    await expect(page.getByText("/srv/api-production")).toBeVisible()
-    await expect(page.getByText("Blue Green")).toBeVisible()
+    // The facts the old Project card repeated sit beside what sets them: the
+    // checkout and the repository on the Source head, which links to the
+    // repository's own page.
+    const source = page.getByRole("form", { name: "Source" })
+    await expect(source.getByText("/srv/api-production")).toBeVisible()
+    await expect(source.getByRole("link", { name: "acme/api" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/api",
+    )
+    await expect(page.getByRole("heading", { name: "Name", exact: true })).toBeVisible()
 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.screenshot({ path: test.info().outputPath("general-1280.png"), fullPage: true })
 
-    const nameCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Project name" }) })
+    const nameCard = page.getByRole("form", { name: "Project name" })
     await nameCard.getByLabel("Project name").fill("api-production-2")
+    // The limit is counted inside the field, and the head says there is an
+    // edit to save before Save is pressed.
+    await expect(nameCard.getByText("16/64", { exact: true })).toBeVisible()
+    await expect(nameCard.getByText("Unsaved changes", { exact: true })).toBeVisible()
     await nameCard.getByRole("button", { name: "Save" }).click()
     await expect(page.getByText("Project renamed")).toBeVisible()
     expect(renames.at(-1)).toEqual({ name: "api-production-2" })
@@ -68,9 +77,7 @@ test.describe("General settings", () => {
     })
 
     await page.goto("/deploy/7/settings/general")
-    const nameCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Project name" }) })
+    const nameCard = page.getByRole("form", { name: "Project name" })
     await nameCard.getByLabel("Project name").fill("payments-api")
     await nameCard.getByRole("button", { name: "Save" }).click()
     await expect(page.getByText("That name is already used by another project")).toBeVisible()
@@ -82,19 +89,30 @@ test.describe("General settings", () => {
     const fixture = await mockProject(page)
     await page.goto("/deploy/7/settings/general")
 
-    const gitCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Git", exact: true }) })
-    await expect(gitCard.getByText(/New commits to main deploy automatically/)).toBeVisible()
+    const gitCard = page.getByRole("form", { name: "Automatic deployment" })
+    // The watch is drawn — the repository, the branch check, the project —
+    // and the picture says what the policy does, so the switch needs no
+    // sentence repeating it.
+    const picture = gitCard.getByRole("list", { name: "How a push reaches a deployment" })
+    await expect(picture).toBeVisible()
+    await expect(picture.getByText("Every 5 s", { exact: true })).toBeVisible()
+    await expect(picture.getByText("each matching commit", { exact: true })).toBeVisible()
+    await expect(gitCard.getByText(/deploy automatically\./)).toHaveCount(0)
 
     await gitCard.getByLabel("Include paths").fill("services/api/**")
     await gitCard.getByLabel("Exclude paths").fill("docs/**")
-    await gitCard.getByRole("switch", { name: /Report deployment status/ }).click()
+    await gitCard.getByRole("switch", { name: /GitHub commit status/ }).click()
     await gitCard.getByRole("switch", { name: /^Deploy automatically/ }).click()
+    // The path filters only govern automatic deployments, so they fold away
+    // under the switch that turns those off — and are still saved.
+    await expect(gitCard.getByLabel("Include paths")).toHaveCount(0)
     await gitCard.getByRole("button", { name: "Save" }).click()
 
     await expect(page.getByText("Deployment policy saved")).toBeVisible()
-    await expect(gitCard.getByText(/cannot queue new deployments/)).toBeVisible()
+    await expect(picture.getByText("only when you press Deploy", { exact: true })).toBeVisible()
+    await expect(gitCard.getByText("Manual", { exact: true })).toBeVisible()
+    // What was saved is what the form holds: nothing left over to save.
+    await expect(gitCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
 
     const policy = fixture.gitPolicy()
     expect(policy.automatic).toBe(false)
@@ -115,7 +133,9 @@ test.describe("General settings", () => {
       }),
     )
     await page.goto("/deploy/7/settings/general")
-    await expect(page.getByRole("heading", { name: "Git", exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "Automatic deployment", exact: true }),
+    ).toBeVisible()
     await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0)
   })
 })
@@ -133,14 +153,25 @@ test.describe("Build settings", () => {
     })
 
     await page.goto("/deploy/7/settings/build")
-    const buildCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Build", exact: true }) })
+    const buildCard = page.getByRole("form", { name: "Build" })
+
+    // Every recipe the backend builds is offered — the select this replaced
+    // had three of eight — and the saved one is the lit card.
+    const builder = buildCard.getByRole("group", { name: "Builder" })
+    await expect(builder.getByRole("button")).toHaveCount(10)
+    await expect(builder.getByRole("button", { name: /^Node\.js/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    // The live release's own Build step: how long it took.
+    await expect(page.getByText("1m 12s", { exact: true })).toBeVisible()
 
     await buildCard.getByLabel("Build command").fill("bun run build")
     await buildCard.getByLabel("Start command").fill("bun run start")
-    await buildCard.getByLabel("Package manager").click()
-    await page.getByRole("option", { name: "npm", exact: true }).click()
+    await buildCard
+      .getByRole("group", { name: "Package manager" })
+      .getByRole("button", { name: /^npm/ })
+      .click()
     await expect(buildCard.getByLabel("Build command")).toHaveValue("npm run build")
     await expect(buildCard.getByLabel("Start command")).toHaveValue("npm run start")
 
@@ -179,16 +210,23 @@ test.describe("Build settings", () => {
     })
 
     await page.goto("/deploy/7/settings/build")
-    const tasksCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Release tasks" }) })
+    const tasksCard = page.getByRole("form", { name: "Release tasks" })
     await expect(tasksCard.getByText("No release tasks configured.")).toBeVisible()
+    // Where they run is drawn on the release path before any exists.
+    await expect(
+      tasksCard.getByRole("img", {
+        name: /run in the Release stage, after Build and before Start/,
+      }),
+    ).toBeVisible()
 
     await tasksCard.getByRole("button", { name: "Add release task" }).click()
+    // A new task takes the keyboard at its name, and every field is labelled.
+    await expect(tasksCard.getByLabel("Release task 1 name")).toBeFocused()
+    await expect(tasksCard.getByRole("group", { name: /^Task 1/ })).toContainText("seconds")
     await tasksCard.getByLabel("Release task 1 name").fill("Migrate database")
     await tasksCard.getByLabel("Release task 1 command").fill("./bin/migrate")
     await tasksCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Build settings saved")).toBeVisible()
+    await expect(page.getByText("Release tasks saved")).toBeVisible()
 
     const saved = writes.at(-1) as { build: { releaseTasks: unknown } }
     expect(saved.build.releaseTasks).toEqual([
@@ -216,6 +254,9 @@ test.describe("Build settings", () => {
     await page.goto("/deploy/7/settings/build")
     await expect(page.getByRole("heading", { name: "Build", exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0)
+    await expect(
+      page.getByRole("group", { name: "Builder" }).getByRole("button").first(),
+    ).toBeDisabled()
   })
 })
 
@@ -230,9 +271,15 @@ test.describe("Runtime settings", () => {
     })
 
     await page.goto("/deploy/7/settings/runtime")
-    const runtimeCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Runtime", exact: true }) })
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+    // The fixture's writable /data mount is what the executor refuses
+    // blue/green over: the reading and the Releases head say so before the
+    // next deployment finds out, and the choice cannot be taken again.
+    await expect(
+      page.getByText("/data is writable — two releases cannot share it", { exact: true }),
+    ).toBeVisible()
+    await expect(runtimeCard.getByText("Will fail on the next deployment")).toBeVisible()
+    await expect(runtimeCard.getByRole("button", { name: "Release blue / green" })).toHaveCount(0)
 
     await runtimeCard.getByLabel("Memory limit").fill("512")
     await runtimeCard.getByLabel("CPU limit").fill("1.5")
@@ -267,15 +314,22 @@ test.describe("Runtime settings", () => {
     })
 
     await page.goto("/deploy/7/settings/runtime")
-    const checksCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Health checks" }) })
+    const checksCard = page.getByRole("form", { name: "Health checks" })
     await expect(checksCard.getByText("No health checks configured.")).toBeVisible()
+    // A web project with nothing checking it moves traffic unverified.
+    const unverified = checksCard.getByText(/^No readiness check/)
+    await expect(unverified).toBeVisible()
 
     await checksCard.getByRole("button", { name: "Add check" }).click()
     await checksCard.getByLabel("Health check 1 name").fill("HTTP readiness")
+    await expect(checksCard.getByRole("radio", { name: "HTTP" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    await expect(checksCard.getByText("GET / → 2xx · 20 × 3 s").first()).toBeVisible()
+    await expect(unverified).toHaveCount(0)
     await checksCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Runtime settings saved")).toBeVisible()
+    await expect(page.getByText("Health checks saved")).toBeVisible()
 
     const saved = writes.at(-1) as { checks: Array<Record<string, unknown>> }
     expect(saved.checks).toHaveLength(1)
@@ -310,6 +364,142 @@ test.describe("Runtime settings", () => {
   })
 })
 
+test.describe("Runtime settings, drafts and refusals", () => {
+  test("a switch turned on and off again leaves nothing to save, and a cleared host port keeps its field", async ({
+    page,
+  }) => {
+    const writes: Array<Record<string, unknown>> = []
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        writes.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+
+    // Why blue/green fails is said beside the choice, at full ink.
+    await expect(
+      runtimeCard.getByText(
+        "Blue / green is unavailable: /data is writable — two releases cannot share it.",
+      ),
+    ).toBeVisible()
+
+    // The server leaves `false` out, so off again is what is saved.
+    const privileged = runtimeCard.getByRole("switch", { name: "Privileged container" })
+    await privileged.click()
+    await expect(runtimeCard.getByText("Unsaved changes", { exact: true })).toBeVisible()
+    await privileged.click()
+    await expect(runtimeCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
+
+    // Clearing the port to type another keeps the switch on and the field
+    // where it is, and a save with no port says so beside it.
+    await runtimeCard.getByRole("switch", { name: /fixed host port/ }).click()
+    const hostPort = runtimeCard.getByRole("spinbutton", { name: "Host port" })
+    await expect(hostPort).toHaveValue("3000")
+    await hostPort.fill("")
+    await expect(hostPort).toBeVisible()
+    await runtimeCard.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(runtimeCard.getByText("Use a port from 1 to 65535.")).toBeVisible()
+    expect(writes).toHaveLength(0)
+    await hostPort.fill("8080")
+    await expect(hostPort).toHaveValue("8080")
+    await runtimeCard.getByRole("switch", { name: /fixed host port/ }).click()
+    await expect(hostPort).toHaveCount(0)
+    await expect(runtimeCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
+  })
+
+  test("a plan refusal that names no field is the form's own sentence, not a toast", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback()
+      await route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "invalid_plan",
+            message: "runtime command passes credential material through argv",
+          },
+        }),
+      })
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+    await runtimeCard.getByLabel("Memory limit").fill("512")
+    await runtimeCard.getByRole("button", { name: "Save", exact: true }).click()
+
+    await expect(runtimeCard.getByRole("alert")).toHaveText(
+      "runtime command passes credential material through argv",
+    )
+    await expect(runtimeCard.getByText("Not saved", { exact: true })).toBeVisible()
+    await expect(page.getByText("Could not save runtime settings")).toHaveCount(0)
+  })
+
+  test("a command check takes one argument per line as it is typed", async ({ page }) => {
+    const writes: Array<Record<string, unknown>> = []
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        writes.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    const checksCard = page.getByRole("form", { name: "Health checks" })
+    await checksCard.getByRole("button", { name: "Add check" }).click()
+    await checksCard.getByRole("radio", { name: "Command" }).click()
+
+    const argv = checksCard.getByLabel("Command argv")
+    await argv.click()
+    await page.keyboard.type("pg_isready")
+    await page.keyboard.press("Enter")
+    await page.keyboard.type("-U ")
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Enter")
+    await page.keyboard.type("postgres")
+    await expect(argv).toHaveValue("pg_isready\n-U \n\npostgres")
+    await expect(checksCard.getByText("$ pg_isready -U postgres")).toBeVisible()
+
+    await checksCard.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(page.getByText("Health checks saved")).toBeVisible()
+    const saved = writes.at(-1) as { checks: Array<{ config: Record<string, unknown> }> }
+    expect(saved.checks[0].config.command).toEqual(["pg_isready", "-U", "postgres"])
+    await expect(argv).toHaveValue("pg_isready\n-U\npostgres")
+    await expect(checksCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
+  })
+})
+
+test.describe("Build settings for a Compose stack", () => {
+  test("a repository built as Compose keeps its root, platform and cache, and offers no builder", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/settings/build")
+    // Saved through the fixture's own endpoint, so the page reads it back as
+    // the server would hand it over.
+    await page.evaluate(async () => {
+      const url = "/api/v1/deploy/7/environments/12/configuration"
+      const current = await (await fetch(url)).json()
+      await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...current, build: { method: "compose", secrets: [] } }),
+      })
+    })
+    await page.reload()
+
+    const buildCard = page.getByRole("form", { name: "Build" })
+    await expect(buildCard.getByText("Compose", { exact: true })).toBeVisible()
+    await expect(buildCard.getByRole("group", { name: "Builder" })).toHaveCount(0)
+    await expect(buildCard.getByRole("textbox", { name: "Root directory" })).toBeVisible()
+    await expect(buildCard.getByRole("textbox", { name: "Target platform" })).toBeVisible()
+    await expect(buildCard.getByRole("switch", { name: "Force a clean build" })).toBeVisible()
+    await expect(buildCard.getByLabel("Build command")).toHaveCount(0)
+  })
+})
+
 test.describe("Environment variables", () => {
   test("adds a variable and shows it pending beside the existing secret", async ({ page }) => {
     await mockProject(page)
@@ -318,11 +508,20 @@ test.describe("Environment variables", () => {
     await expect(page.getByRole("heading", { name: "Environment variables" })).toBeVisible()
     await expect(variableRow(page, "API_TOKEN")).toBeVisible()
     await expect(variableRow(page, "API_TOKEN").getByText("Pending")).toBeVisible()
+    // Who can read it is said by name, whatever the three slots look like.
+    await expect(variableRow(page, "API_TOKEN").getByText("Reaches runtime")).toBeAttached()
+    // Every count is a chip over the list, and the chip narrows the list to it.
+    await expect(page.getByRole("button", { name: /^Pending/ })).toBeVisible()
 
-    await page.getByLabel("Variable name").fill("database_url")
-    await page.getByLabel("Value", { exact: true }).fill("postgres://example")
+    // The list comes first; adding one is a sheet from the section's head, and
+    // while it is open the sheet's own command is the only "Add variable".
+    await page.getByRole("button", { name: "Add variable" }).click()
+    const editor = page.getByRole("dialog", { name: "Add variable" })
+    await editor.getByLabel("Variable name").fill("database_url")
+    await editor.getByLabel("Value", { exact: true }).fill("postgres://example")
     await page.getByRole("button", { name: "Add variable" }).click()
     await expect(page.getByText("Variable saved")).toBeVisible()
+    await expect(editor).toHaveCount(0)
     await expect(variableRow(page, "DATABASE_URL")).toBeVisible()
 
     await page.setViewportSize({ width: 1280, height: 900 })
@@ -355,6 +554,7 @@ test.describe("Environment variables", () => {
     await page.getByRole("button", { name: "Dismiss" }).click()
     await expect(page.getByText("rotated-browser-secret")).toHaveCount(0)
 
+    await page.getByRole("button", { name: "Add variable" }).click()
     await page.getByLabel("Variable name").fill("new_secret")
     await page.getByRole("button", { name: "Generate secret" }).click()
     await expect(page.getByText("NEW_SECRET was generated")).toBeVisible()
@@ -390,8 +590,14 @@ test.describe("Environment variables", () => {
     })
 
     await page.goto("/deploy/7/settings/variables")
-    await page.getByRole("button", { name: "Paste a .env instead" }).click()
+    await page.getByRole("button", { name: "Import .env" }).click()
     await page.getByLabel("Dotenv values").fill("FOO=bar\nBAZ=qux")
+    // Every name in the paste is listed with what importing it does before
+    // anything is written.
+    const preview = page.getByRole("list", { name: "What this imports" })
+    await expect(preview.getByRole("listitem")).toHaveCount(2)
+    await expect(preview.getByRole("listitem").first()).toContainText("FOO")
+    await expect(preview.getByText("new", { exact: true })).toHaveCount(2)
     await page.getByRole("button", { name: "Import variables" }).click()
     await expect(page.getByText("Variables imported")).toBeVisible()
 
@@ -401,6 +607,27 @@ test.describe("Environment variables", () => {
       sensitivity: "secret",
       scopes: ["runtime"],
     })
+  })
+
+  test("a paste the server's dry run refuses as a whole says why, and cannot be imported", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/variables/import**", (route) =>
+      route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "variable_cycle", message: "A references B, which references A" },
+        }),
+      }),
+    )
+
+    await page.goto("/deploy/7/settings/variables")
+    await page.getByRole("button", { name: "Import .env" }).click()
+    await page.getByLabel("Dotenv values").fill("A=${{variable.B}}\nB=${{variable.A}}")
+    await expect(page.getByText("A references B, which references A")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Import variables" })).toBeDisabled()
   })
 
   test("a read-only role sees no add, generate or save controls", async ({ page }) => {
@@ -418,7 +645,9 @@ test.describe("Environment variables", () => {
     await expect(variableRow(page, "API_TOKEN")).toBeVisible()
     await expect(page.getByRole("button", { name: "Add variable" })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Generate secret" })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "Paste a .env instead" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Import .env" })).toHaveCount(0)
+    // A row a reader cannot edit is still drawn, but offers no editor.
+    await expect(page.getByRole("button", { name: "Edit API_TOKEN" })).toHaveCount(0)
   })
 
   test("editing a variable requires a real value again, and saves it non-empty", async ({
@@ -503,7 +732,7 @@ test.describe("Environment variables", () => {
     await expect(row.getByRole("button", { name: "Reveal" })).toBeEnabled()
   })
 
-  test("an unrecoverable row action error shows as a toast, never inside the add-variable card", async ({
+  test("an unrecoverable row action error shows as a toast, never inside the editor", async ({
     page,
   }) => {
     await mockProject(page)
@@ -525,10 +754,13 @@ test.describe("Environment variables", () => {
     await page.getByRole("menuitem", { name: "Rotate" }).click()
 
     await expect(page.getByText("Could not rotate API_TOKEN")).toBeVisible()
-    const addVariableCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Add a variable" }) })
-    await expect(addVariableCard.getByText("rotation service is down")).toHaveCount(0)
+    // The editor never opened for it, and the row carries no inline refusal.
+    await expect(page.locator("form")).toHaveCount(0)
+    await expect(
+      page
+        .getByRole("list", { name: "Environment variables" })
+        .getByText("rotation service is down"),
+    ).toHaveCount(0)
   })
 })
 
@@ -558,7 +790,9 @@ test.describe("Danger zone", () => {
     await page.goto("/deploy/7/settings/danger")
     await expect(page.getByRole("heading", { name: "Stop the application" })).toBeVisible()
     const readsBeforeClick = reads
+    // The header menu's own verb, so it asks first, as the menu does.
     await page.getByRole("button", { name: "Stop", exact: true }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click()
 
     await expect(page.getByText("Could not stop the application")).toBeVisible()
     await expect(page.getByText("The application is already stopped.")).toBeVisible()
@@ -583,6 +817,10 @@ test.describe("Danger zone", () => {
     await page.goto("/deploy/7/settings/danger")
     await expect(page.getByRole("button", { name: "Deployment actions" })).toBeVisible()
     await expect(page.getByRole("heading", { name: "Stop the application" })).toHaveCount(0)
+    // Acts the role cannot take are not drawn, and the empty page says why.
+    await expect(
+      page.getByText("Your role cannot stop, archive or delete this deployment."),
+    ).toBeVisible()
 
     // The header's menu takes the service down through the same operations,
     // so it agrees with the card: stopping and restarting need `destructive`,
@@ -607,9 +845,8 @@ test.describe("Build settings for static output and Python", () => {
     })
 
     await page.goto("/deploy/7/settings/build")
-    const buildCard = page
-      .locator("form")
-      .filter({ has: page.getByRole("heading", { name: "Build", exact: true }) })
+    const buildCard = page.getByRole("form", { name: "Build" })
+    const builder = buildCard.getByRole("group", { name: "Builder" })
 
     // A server has nothing for nginx to fall back to, so the switch only
     // appears once there is static output.
@@ -624,15 +861,26 @@ test.describe("Build settings for static output and Python", () => {
     expect(saved.build.spaFallback).toBe(true)
     expect(saved.build.outputDirectory).toBe("dist")
 
-    await buildCard.getByLabel("Language").click()
-    await page.getByRole("option", { name: "Python", exact: true }).click()
+    await builder.getByRole("button", { name: /^Python/ }).click()
     await expect(buildCard.getByLabel("Package manager")).toHaveCount(0)
-    await buildCard.getByLabel("Python version (optional)").fill("3.12")
+    await buildCard.getByRole("radio", { name: "3.12" }).click()
     await buildCard.getByRole("button", { name: "Save" }).click()
     await expect(page.getByText("Build settings saved").last()).toBeVisible()
     saved = writes.at(-1) as { build: Record<string, unknown> }
     expect(saved.build.recipe).toBe("python")
     expect(saved.build.pythonVersion).toBe("3.12")
     expect(saved.build.packageManager).toBeUndefined()
+
+    // Leaving the recipes for a Dockerfile takes the recipe with it: the
+    // server refuses a recipe on any other builder.
+    await builder.getByRole("button", { name: /^Dockerfile/ }).click()
+    await buildCard.getByLabel("Dockerfile path").fill("deploy/Dockerfile")
+    await buildCard.getByRole("button", { name: "Save" }).click()
+    await expect.poll(() => writes.length).toBe(3)
+    saved = writes.at(-1) as { build: Record<string, unknown> }
+    expect(saved.build.method).toBe("dockerfile")
+    expect(saved.build.dockerfile).toBe("deploy/Dockerfile")
+    expect(saved.build.recipe).toBeUndefined()
+    expect(saved.build.pythonVersion).toBeUndefined()
   })
 })

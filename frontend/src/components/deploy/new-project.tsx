@@ -309,6 +309,20 @@ export function NewProject({
       })
   }, [rememberedDraftId, draftId, setFlow])
 
+  // Only the strip moves, sideways: `scrollIntoView` would also scroll the page
+  // to the strip, which is the one thing this must not do on arrival.
+  const strip = useRef<HTMLDivElement>(null)
+  const choosing = !flow || linkArrived
+  useEffect(() => {
+    const row = strip.current
+    const chosen = row?.querySelector<HTMLElement>(`[data-source="${tab}"]`)
+    if (!row || !chosen) return
+    const edge = row.getBoundingClientRect()
+    const box = chosen.getBoundingClientRect()
+    if (box.left < edge.left) row.scrollLeft -= edge.left - box.left + 20
+    else if (box.right > edge.right) row.scrollLeft += box.right - edge.right + 20
+  }, [tab, choosing, resuming])
+
   if (resuming) return <PageState eyebrow={Eyebrow} title="New project" />
   if (resumeError)
     return (
@@ -327,7 +341,7 @@ export function NewProject({
     // the space left — never the page around it. Stacked, below that width,
     // the page scrolls as every other page does.
     <Page register="flow" fill="xl" className="animate-rise">
-      {!flow || linkArrived ? (
+      {choosing ? (
         <>
           {/* The screen asks something, and the question is the page's own
               rank — not a sentence under a title, which is the caption §5
@@ -343,18 +357,28 @@ export function NewProject({
             }
             steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
           />
+          {/* A group of pressed buttons, not a tablist: a tablist must own
+              tabs, and these are five toggles for one answer. On a phone the
+              five do not fit, so the strip runs to the screen's edge and
+              scrolls there, and the source cut off at the edge is what says
+              there are more — `ChipStrip`'s answer, since the scroll shade
+              is drawn in the page's own ground and cannot show on it. The
+              chosen one is brought into view, so a link that arrives on
+              Compose does not open on a strip that hides it. */}
           <div
-            role="tablist"
+            ref={strip}
+            role="group"
             aria-label="Project source"
-            className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline"
+            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline max-sm:-mx-5 max-sm:px-5 [&::-webkit-scrollbar]:hidden"
           >
             {TABS.map((option) => (
               <button
                 key={option.key}
                 type="button"
+                data-source={option.key}
                 aria-pressed={tab === option.key}
                 onClick={() => setTab(option.key)}
-                className={tabClasses(tab === option.key, "h-11")}
+                className={tabClasses(tab === option.key, "h-11 max-sm:px-2")}
               >
                 <option.icon
                   aria-hidden
@@ -428,7 +452,19 @@ function UnfinishedSetups({
           <ChipCount>{drafts.length}</ChipCount>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[30rem] max-w-[calc(100vw-2rem)] space-y-3 p-3">
+      <PopoverContent
+        align="end"
+        collisionPadding={16}
+        className="w-[30rem] max-w-[calc(100vw-2rem)] space-y-3 p-3"
+        // Radix skips links when it picks what to focus, and a row's title is
+        // a link — so the first thing the popover offered was deleting a
+        // setup, with its tooltip open. Opening it is asking to resume one.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          const resume = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("a[href]")
+          resume?.focus()
+        }}
+      >
         <h2 className="px-1 text-title leading-tight font-medium tracking-tight">
           Unfinished setups
         </h2>

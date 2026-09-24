@@ -98,7 +98,15 @@ export function ContainerId({ container }: { container: Container }) {
  * `statusDetail` below.
  */
 export function statusWord(container: Container) {
-  switch (container.state) {
+  return stateWord(container.state)
+}
+
+/**
+ * The same word for a bare Docker state, for a page that knows the state
+ * from somewhere other than Docker's listing — a deployment's runtime.
+ */
+export function stateWord(state: string) {
+  switch (state) {
     case "running":
       return "Running"
     case "paused":
@@ -114,7 +122,7 @@ export function statusWord(container: Container) {
     case "removing":
       return "Being removed"
     default:
-      return container.state
+      return state
   }
 }
 

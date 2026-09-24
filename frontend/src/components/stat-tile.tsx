@@ -85,7 +85,10 @@ export function StatTile({
         />
       )}
 
-      {trend && <div className="-mb-0.5 h-9 min-w-0">{trend}</div>}
+      {/* `empty:hidden` so a `TileTrend` with too few points to draw leaves no
+          band behind it: a caller passes the trend whenever the tile has a
+          series, and the line appears when its second point does. */}
+      {trend && <div className="-mb-0.5 h-9 min-w-0 empty:hidden">{trend}</div>}
 
       {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
     </div>
@@ -150,13 +153,27 @@ export function StatLink({
  * `columns` is the count at the widest breakpoint; below it they stack two-up
  * and then one-up, which is the arrangement every call site had written out by
  * hand as `sm:grid-cols-2 xl:grid-cols-4`.
+ *
+ * `dense` keeps them two-up on a phone as well, for a run of short figures
+ * that should not stack into four hundred pixels before the first thing the
+ * page is about: the Logs and Deployments readings, the settings pages'. The
+ * tiles give up a step of padding below `sm` to fit, and an odd count lets its
+ * last tile take the whole row rather than leave a hole beside it. From `sm`
+ * up it is the default grid exactly. It is opt-in because a figure like
+ * "Everything is up" needs the whole width of a phone, and only the call site
+ * knows which kind it has.
  */
 export function StatGrid({
   columns = 4,
   framed,
+  dense,
   className,
   ...props
-}: React.ComponentProps<"div"> & { columns?: 2 | 3 | 4 | 5; framed?: boolean }) {
+}: React.ComponentProps<"div"> & {
+  columns?: 2 | 3 | 4 | 5
+  framed?: boolean
+  dense?: boolean
+}) {
   return (
     <div
       data-slot="stat-grid"
@@ -175,11 +192,24 @@ export function StatGrid({
         // not its own descendant — so every grid of bare tiles started a
         // step in from the title it was meant to line up with.
         "[&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0",
-        !framed && "[&_[data-slot=stat-tile]]:pl-0",
-        "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
-        !framed &&
-          "sm:[&_[data-slot=stat-tile]]:pl-5 sm:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0 sm:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-0",
-        "grid-cols-1 sm:grid-cols-2",
+        // Dense writes the two-up rules at the base width, where the default
+        // writes them from `sm` over a one-up base.
+        dense
+          ? [
+              "grid-cols-2",
+              "[&>*]:border-l [&>*:nth-child(-n+2)]:border-t-0 [&>*:nth-child(2n+1)]:border-l-0",
+              !framed &&
+                "[&_[data-slot=stat-tile]]:pl-5 [&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0 [&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-0",
+              "max-sm:[&>*:last-child:nth-child(odd)]:col-span-2",
+              "max-sm:[&_[data-slot=stat-tile]]:py-3 max-sm:[&_[data-slot=stat-tile]]:pr-4 max-sm:[&_[data-slot=stat-tile]]:pl-4",
+            ]
+          : [
+              "grid-cols-1 sm:grid-cols-2",
+              !framed && "[&_[data-slot=stat-tile]]:pl-0",
+              "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
+              !framed &&
+                "sm:[&_[data-slot=stat-tile]]:pl-5 sm:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0 sm:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-0",
+            ],
         columns === 3 &&
           "lg:grid-cols-3 lg:[&>*]:border-l lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*:nth-child(2n+1)]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0",
         columns === 3 &&

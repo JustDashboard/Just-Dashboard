@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { describeClient, keyProduct, networkOf, parseAgent } from "./clients"
+import {
+  agentProduct,
+  crawlerOf,
+  describeClient,
+  hostOf,
+  keyProduct,
+  networkOf,
+  parseAgent,
+  productOfHost,
+  refererProduct,
+  wordsProduct,
+} from "./clients"
 
 const MAC_CHROME =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
@@ -97,12 +108,28 @@ describe("networkOf", () => {
     expect(networkOf("127.0.0.1").kind).toBe("server")
     expect(networkOf("::1").kind).toBe("server")
     expect(networkOf("::ffff:192.168.0.9").kind).toBe("local")
+    expect(networkOf("169.254.10.2").kind).toBe("local")
+    expect(networkOf("0.0.0.0").kind).toBe("local")
   })
 
   test("everything else is the internet", () => {
     expect(networkOf("203.0.113.7")).toEqual({ kind: "internet", label: "internet" })
     expect(networkOf("2a01:4f8::1").kind).toBe("internet")
     expect(networkOf("not an address").kind).toBe("internet")
+  })
+})
+
+describe("crawlerOf", () => {
+  test("a crawler in a browser's clothes is the engine that sends it", () => {
+    const smartphone =
+      "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    expect(crawlerOf(smartphone)).toEqual({ name: "Googlebot", product: "google" })
+    expect(crawlerOf("Mozilla/5.0 (compatible; bingbot/2.0)")).toEqual({
+      name: "bingbot",
+      product: "bing",
+    })
+    expect(crawlerOf("AhrefsBot/7.0")).toEqual({ name: "A crawler" })
+    expect(crawlerOf(MAC_CHROME)).toBeUndefined()
   })
 })
 
@@ -120,5 +147,105 @@ describe("keyProduct", () => {
     expect(keyProduct("backup-cron")).toBeUndefined()
     expect(keyProduct("laptop")).toBeUndefined()
     expect(keyProduct("")).toBeUndefined()
+  })
+})
+
+describe("wordsProduct", () => {
+  test("a pair of words is read before either alone", () => {
+    const table = { homeassistant: "home-assistant", home: "homepage", n8n: "n8n" }
+    expect(wordsProduct(["home", "assistant", "token"], table)).toBe("home-assistant")
+    expect(wordsProduct(["my", "home", "page"], table)).toBe("homepage")
+    expect(wordsProduct(["ci", "n8n"], table)).toBe("n8n")
+    expect(wordsProduct([], table)).toBeUndefined()
+  })
+})
+
+describe("agentProduct", () => {
+  test("the request log's browser families are drawn as their browsers", () => {
+    expect(agentProduct("Chrome")).toEqual({ product: "chrome", kind: "browser" })
+    expect(agentProduct("Edge")).toEqual({ product: "edge", kind: "browser" })
+    expect(agentProduct("Firefox")).toEqual({ product: "firefox", kind: "browser" })
+    expect(agentProduct("Safari")).toEqual({ product: "safari", kind: "browser" })
+  })
+
+  test("a program's first word is the runtime that sent it", () => {
+    expect(agentProduct("curl")).toEqual({ product: "curl", kind: "program" })
+    expect(agentProduct("Go-http-client")).toEqual({ product: "go", kind: "program" })
+    expect(agentProduct("python-requests")).toEqual({ product: "python", kind: "program" })
+    expect(agentProduct("okhttp")).toEqual({ kind: "program" })
+  })
+
+  test("the named crawlers are their search engines, and the rest are bots", () => {
+    expect(agentProduct("Googlebot")).toEqual({ product: "google", kind: "bot" })
+    expect(agentProduct("bingbot")).toEqual({ product: "bing", kind: "bot" })
+    expect(agentProduct("Other bots")).toEqual({ product: undefined, kind: "bot" })
+  })
+
+  test("a browser-shaped agent the backend could not name is unknown", () => {
+    expect(agentProduct("Mozilla")).toEqual({ kind: "unknown" })
+    expect(agentProduct("")).toEqual({ kind: "unknown" })
+  })
+})
+
+describe("hostOf", () => {
+  test("every shape a host is typed or pasted in", () => {
+    expect(hostOf("github.com")).toBe("github.com")
+    expect(hostOf("  GitHub.com ")).toBe("github.com")
+    expect(hostOf("https://github.com/owner/repo.git")).toBe("github.com")
+    expect(hostOf("https://x-access-token:abc@github.com/owner/repo")).toBe("github.com")
+    expect(hostOf("git@gitlab.com:group/project.git")).toBe("gitlab.com")
+    expect(hostOf("ssh://git@codeberg.org:22/owner/repo.git")).toBe("codeberg.org")
+    expect(hostOf("ghcr.io/owner/app:1.2")).toBe("ghcr.io")
+    expect(hostOf("registry.example.com:5000")).toBe("registry.example.com")
+    expect(hostOf("https://example.com?next=/")).toBe("example.com")
+    expect(hostOf("")).toBe("")
+  })
+})
+
+test("productOfHost matches a host and every name under it, nearest first", () => {
+  const table = { "github.com": "github", "api.github.com": "api" }
+  expect(productOfHost("github.com", table)).toBe("github")
+  expect(productOfHost("api.github.com", table)).toBe("api")
+  expect(productOfHost("uploads.github.com", table)).toBe("github")
+  expect(productOfHost("notgithub.com", table)).toBeUndefined()
+  expect(productOfHost("", table)).toBeUndefined()
+})
+
+describe("refererProduct", () => {
+  test("a site is drawn as itself, under any of its subdomains", () => {
+    expect(refererProduct("github.com")).toBe("github")
+    expect(refererProduct("gitlab.com")).toBe("gitlab")
+    expect(refererProduct("cn.bing.com")).toBe("bing")
+    expect(refererProduct("duckduckgo.com")).toBe("duckduckgo")
+    expect(refererProduct("news.ycombinator.com")).toBe("ycombinator")
+    expect(refererProduct("old.reddit.com")).toBe("reddit")
+    expect(refererProduct("www.linkedin.com")).toBe("linkedin")
+    expect(refererProduct("lnkd.in")).toBe("linkedin")
+    expect(refererProduct("l.facebook.com")).toBe("facebook")
+    expect(refererProduct("discord.com")).toBe("discord")
+    expect(refererProduct("app.slack.com")).toBe("slack")
+    expect(refererProduct("t.me")).toBe("telegram")
+    expect(refererProduct("claude.ai")).toBe("claude")
+  })
+
+  test("X answers on three names", () => {
+    expect(refererProduct("t.co")).toBe("x")
+    expect(refererProduct("x.com")).toBe("x")
+    expect(refererProduct("mobile.twitter.com")).toBe("x")
+  })
+
+  test("Google on every country's domain, and nothing that only contains the word", () => {
+    expect(refererProduct("www.google.com")).toBe("google")
+    expect(refererProduct("google.co.uk")).toBe("google")
+    expect(refererProduct("www.google.com.br")).toBe("google")
+    expect(refererProduct("google.de")).toBe("google")
+    expect(refererProduct("google.github.io")).toBeUndefined()
+    expect(refererProduct("notgoogle.com")).toBeUndefined()
+  })
+
+  test("a full referer reads the same as its host, and an unknown site has no mark", () => {
+    expect(refererProduct("https://news.ycombinator.com/item?id=1")).toBe("ycombinator")
+    expect(refererProduct("example.com")).toBeUndefined()
+    expect(refererProduct("")).toBeUndefined()
   })
 })

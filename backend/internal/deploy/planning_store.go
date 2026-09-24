@@ -695,6 +695,8 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: configuration step requires only configuration data", ErrInvalidPlan)
 		}
 		copy := canonicalConfiguration(*request.Configuration)
+		// Detection names the framework at commit; the browser does not.
+		copy.Build.Framework = ""
 		if request.Dotenv != nil {
 			values, err := ParseDotenv(*request.Dotenv)
 			if err != nil {
@@ -983,6 +985,7 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	configuration := canonicalConfiguration(*draft.Data.Configuration)
+	configuration.Build.Framework = detectedFramework(draft.Data.Detection, configuration.Build)
 	expectedDowntime := 0
 	if configuration.Runtime.Strategy == StrategyStopFirst {
 		expectedDowntime = 1
@@ -1030,7 +1033,7 @@ func (s *PlanningStore) Commit(
 		INSERT INTO deploy_build_plans(
 		  environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
 		VALUES(?, 1, ?, ?, ?, ?, ?, ?)`, environmentID, configuration.Build.Method,
-		string(buildJSON), string(detectionJSON), buildPreview, digestBytes(buildJSON), now.Unix()); err != nil {
+		string(buildJSON), string(detectionJSON), buildPreview, buildPlanDigest(configuration.Build), now.Unix()); err != nil {
 		return nil, err
 	}
 	runtimeJSON, _ := json.Marshal(configuration.Runtime)

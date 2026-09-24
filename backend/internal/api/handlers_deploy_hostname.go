@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -50,6 +51,12 @@ type hostnameSuggestion struct {
 	Method            string `json:"method"`
 	Detail            string `json:"detail"`
 	Address           string `json:"address,omitempty"`
+	// Resolves answers, for a hostname an administrator typed, whether its
+	// DNS already points at this server — the record they have to create is
+	// an A record to Address. A pointer for the same reason as NameTaken: a
+	// host with no public address of its own cannot make the comparison, and
+	// that silence is not a "no".
+	Resolves *bool `json:"resolves,omitempty"`
 	// NameTaken answers, for the `name` this was asked with, whether a live
 	// project already owns it. The name is unique in the schema, so without
 	// this the collision was a refusal at the very end of the setup — after
@@ -76,6 +83,18 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 		suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, chosen)
 		suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
 		suggestion.Detail = certificateDetail(suggestion)
+		if address := firstIPv4(proxysvc.PublicAddresses()); address != "" {
+			suggestion.Address = address
+			// The reverse proxy's own DNS check, so two pages never disagree
+			// about one name — and behind its capability, since resolving a
+			// caller-chosen name is traffic the caller directs. A lookup this
+			// request ran out of time for is no answer at all.
+			if httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+				if check := proxysvc.CheckDomainDNS(ctx, chosen); ctx.Err() == nil {
+					suggestion.Resolves = &check.PointsHere
+				}
+			}
+		}
 		httpx.JSON(w, http.StatusOK, suggestion)
 		return nil
 	}

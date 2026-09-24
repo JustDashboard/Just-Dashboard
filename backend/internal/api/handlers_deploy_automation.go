@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
@@ -25,6 +26,13 @@ func (s *Server) handleDeploymentTriggers(w http.ResponseWriter, r *http.Request
 	items, err := s.modules.deployAutomation.ListTriggers(r.Context(), projectID, environmentID)
 	if err != nil {
 		return httpx.Internal(err)
+	}
+	// The delivery log's own route is system.admin behind a session; the list
+	// carries a summary of it only for a caller who could read the log itself.
+	if principal := httpx.MustPrincipal(r); principal.Kind == "session" && principal.Can(auth.CapSystemAdmin) {
+		if err := s.modules.deployAutomation.AttachTriggerDeliveries(r.Context(), items); err != nil {
+			return httpx.Internal(err)
+		}
 	}
 	httpx.JSON(w, http.StatusOK, items)
 	return nil
@@ -103,7 +111,7 @@ func (s *Server) handleDeploymentTriggerDeliveries(w http.ResponseWriter, r *htt
 	if err != nil {
 		return err
 	}
-	items, err := s.modules.deployAutomation.TriggerDeliveries(r.Context(), projectID, environmentID, triggerID, 50)
+	items, err := s.modules.deployAutomation.TriggerDeliveries(r.Context(), projectID, environmentID, triggerID, atoiDefault(r.URL.Query().Get("limit"), 50))
 	if err != nil {
 		return mapAutomationError(err)
 	}
@@ -234,12 +242,12 @@ func (s *Server) handleDeploymentScheduleTest(w http.ResponseWriter, r *http.Req
 	if timezone == "" {
 		timezone = "UTC"
 	}
-	next, err := deploy.NextCron(req.Expression, timezone, time.Now().UTC())
+	runs, err := deploy.NextCronRuns(req.Expression, timezone, time.Now().UTC(), deploy.ScheduleNextRuns)
 	if err != nil {
 		return mapAutomationError(err)
 	}
 	httpx.SetAudit(r, "deploy.schedule.test", req.Name, map[string]any{"expression": req.Expression, "timezone": timezone})
-	httpx.JSON(w, http.StatusOK, map[string]any{"nextRunAt": next})
+	httpx.JSON(w, http.StatusOK, map[string]any{"nextRunAt": runs[0], "nextRuns": runs})
 	return nil
 }
 func (s *Server) handleDeploymentScheduleDelete(w http.ResponseWriter, r *http.Request) error {
@@ -301,7 +309,7 @@ func (s *Server) handleDeploymentPreviews(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleDeploymentNotifications(w http.ResponseWriter, r *http.Request) error {
-	items, err := s.modules.deployAutomation.ListNotificationChannels(r.Context())
+	items, err := s.modules.deployAutomation.NotificationChannelsWithHistory(r.Context())
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -313,7 +321,7 @@ func (s *Server) handleDeploymentNotificationDeliveries(w http.ResponseWriter, r
 	if err != nil {
 		return err
 	}
-	items, err := s.modules.deployAutomation.NotificationDeliveries(r.Context(), id, 50)
+	items, err := s.modules.deployAutomation.NotificationDeliveries(r.Context(), id, atoiDefault(r.URL.Query().Get("limit"), 50))
 	if err != nil {
 		return httpx.Internal(err)
 	}

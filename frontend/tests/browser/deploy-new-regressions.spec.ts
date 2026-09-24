@@ -3,6 +3,7 @@ import {
   blueprintCatalogue,
   gotoStep,
   json,
+  minecraftBlueprint,
   mockNewProject,
   postgresBlueprint,
 } from "./deploy-fixture"
@@ -65,6 +66,10 @@ test("switching templates keeps the catalogue width and each template's input", 
   await page.goto("/deploy/new?source=template")
   await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
   const domain = page.getByRole("textbox", { name: "Public domain" })
+  // Typed over the suggestion once it has landed: filled while it is still in
+  // flight, the suggestion arrives between the select and the insert, and the
+  // field reads "…sslip.iovault.example.test".
+  await expect(domain).toHaveValue(/sslip\.io$/)
   await domain.fill("vault.example.test")
   const catalogue = page.getByRole("group", { name: "Productivity" })
   const width = (await catalogue.boundingBox())!.width
@@ -382,4 +387,36 @@ test("an explicit variable reference replaces a retained value and a pasted conf
     ),
   ).toBeVisible()
   await expect(reference).toHaveValue("${{credential.api}}")
+})
+
+test("a required yes-or-no left unanswered says so under its switch", async ({ page }) => {
+  await mockNewProject(page)
+  // The schema allows a required boolean with no default; until it is
+  // answered the template cannot be used, and the screen has to say why.
+  await page.route("**/api/v1/deploy/blueprints/minecraft-java", (route) =>
+    json(route, {
+      ...minecraftBlueprint,
+      inputs: [
+        ...minecraftBlueprint.inputs,
+        {
+          name: "whitelist",
+          kind: "boolean",
+          label: "Only let listed players join",
+          required: true,
+          variable: "ENABLE_WHITELIST",
+        },
+      ],
+    }),
+  )
+  await page.goto("/deploy/new?source=template")
+  await page.getByRole("button", { name: "Use Minecraft (Java Edition)", exact: true }).click()
+  await page.getByRole("checkbox", { name: /I accept the Minecraft EULA/ }).check()
+  await page.getByRole("button", { name: "Use this template", exact: true }).click()
+
+  const option = page.getByRole("switch", { name: "Only let listed players join" })
+  await expect(option).not.toBeChecked()
+  await expect(page.getByRole("alert").filter({ hasText: /^Required\.$/ })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { level: 1, name: "What are you deploying?" }),
+  ).toBeVisible()
 })

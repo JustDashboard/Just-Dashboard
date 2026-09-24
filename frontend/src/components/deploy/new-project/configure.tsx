@@ -750,23 +750,11 @@ export function Configure({
        when a step has more settings than the window has room for it is the
        fields that scroll — between the question and the command, which stay
        where the reader left them. */
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_17rem] xl:grid-rows-[minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
           silently reverted once the response handler lands (§14). */}
       <fieldset disabled={Boolean(busy) || branchBusy} className="contents">
-        <aside className="min-w-0 xl:col-start-2 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto">
-          <PlanWiring
-            profile={flow.profile}
-            source={flow.source}
-            sourceLabel={flow.sourceLabel}
-            branch={isGitSource ? branch : undefined}
-            framework={flow.candidate?.framework}
-            configuration={configuration}
-            onOpenSection={openSection}
-          />
-        </aside>
-
         {/* The one surface on this screen that carries depth (§16): the fields
             are what the reader is deciding, and the drawing beside them is a
             reading of what they already say. Giving the drawing an edge too
@@ -911,6 +899,23 @@ export function Configure({
             )}
           </FlowActions>
         </FlowPanel>
+
+        {/* After the fields in the document, beside them from `xl`: stacked on
+            a phone, the drawing came first and the question's first field
+            started two-thirds of the way down every step — the same summary
+            scrolled past four times. It is a reading of what the fields say,
+            so it follows them and the command. */}
+        <aside className="min-w-0 xl:col-start-2 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto">
+          <PlanWiring
+            profile={flow.profile}
+            source={flow.source}
+            sourceLabel={flow.sourceLabel}
+            branch={isGitSource ? branch : undefined}
+            framework={flow.candidate?.framework}
+            configuration={configuration}
+            onOpenSection={openSection}
+          />
+        </aside>
       </fieldset>
     </div>
   )

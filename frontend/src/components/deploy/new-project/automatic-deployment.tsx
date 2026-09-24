@@ -61,7 +61,7 @@ export function AutomaticDeployment({
             rows={2}
             value={patterns}
             placeholder={"apps/web/**\npackages/ui/**"}
-            className="font-mono text-xs"
+            className="font-mono sm:text-xs"
             onChange={(event) => {
               setPatterns(event.target.value)
               onChange({ ...policy, watchInclude: linesOf(event.target.value) })

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { useMemoryState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
-import { bytes, calendarDate, clock } from "@/lib/format"
+import { bytes } from "@/lib/format"
 import type { BackupJob, BackupResource, Container, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
@@ -25,18 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SearchInput } from "@/components/page"
+import { RESOURCE_KIND_LABEL, lines } from "@/components/backups/shared"
 import {
-  RESOURCE_KIND_LABEL,
-  SCHEDULE_PRESETS,
-  WEEKDAYS,
-  lines,
+  ScheduleBuilder,
   scheduleExpression,
   scheduleFields,
-  schedulePreview,
-  scheduleLabel,
   scheduleValid,
-  type SchedulePreset,
-} from "@/components/backups/shared"
+} from "@/components/schedule-builder"
 
 /** What a job starts out as when it is opened for something in particular. */
 export type JobPrefill = {
@@ -159,7 +154,6 @@ export function JobDialog({
 
   const expression = scheduleExpression(schedule)
   const valid = scheduleValid(expression)
-  const preview = useMemo(() => schedulePreview(expression), [expression])
 
   const sourceList = lines(sources)
   const canSave = name.trim().length > 0 && sourceList.length > 0 && valid && !busy
@@ -386,9 +380,9 @@ export function JobDialog({
           <ScheduleBuilder
             fields={schedule}
             onChange={setSchedule}
-            expression={expression}
-            valid={valid}
-            preview={preview}
+            idPrefix="job"
+            label="Runs"
+            manual
           />
           <FieldRow>
             <Field
@@ -696,139 +690,6 @@ function ResourcePicker({
           </ul>
         </Group>
       )}
-    </div>
-  )
-}
-
-/**
- * A schedule as a sentence with the moments it fires under it, so "every
- * day at 3" and the expression the server stores cannot drift apart.
- */
-function ScheduleBuilder({
-  fields,
-  onChange,
-  expression,
-  valid,
-  preview,
-}: {
-  fields: ReturnType<typeof scheduleFields>
-  onChange: (fields: ReturnType<typeof scheduleFields>) => void
-  expression: string
-  valid: boolean
-  preview: Date[]
-}) {
-  const set = (patch: Partial<typeof fields>) => onChange({ ...fields, ...patch })
-  const timed =
-    fields.preset === "daily" || fields.preset === "weekly" || fields.preset === "monthly"
-  return (
-    <div className="space-y-3">
-      <FieldRow columns={3}>
-        <Field label="Runs" htmlFor="job-preset">
-          <Select value={fields.preset} onValueChange={(v) => set({ preset: v as SchedulePreset })}>
-            <SelectTrigger id="job-preset" size="sm" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SCHEDULE_PRESETS.map((p) => (
-                <SelectItem key={p.key} value={p.key}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        {(timed || fields.preset === "hourly") && (
-          <Field
-            label={fields.preset === "hourly" ? "At minute" : "At"}
-            htmlFor="job-time"
-            hint="Server time, 24-hour clock."
-          >
-            {fields.preset === "hourly" ? (
-              <Input
-                id="job-time"
-                type="number"
-                min={0}
-                max={59}
-                value={fields.time.split(":")[1] ?? "0"}
-                onChange={(e) => set({ time: `00:${e.target.value.padStart(2, "0")}` })}
-                className="font-mono"
-              />
-            ) : (
-              <Input
-                id="job-time"
-                type="time"
-                value={fields.time}
-                onChange={(e) => set({ time: e.target.value })}
-                className="font-mono"
-              />
-            )}
-          </Field>
-        )}
-        {fields.preset === "weekly" && (
-          <Field label="On" htmlFor="job-weekday">
-            <Select value={fields.weekday} onValueChange={(v) => set({ weekday: v })}>
-              <SelectTrigger id="job-weekday" size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WEEKDAYS.map((d, i) => (
-                  <SelectItem key={d} value={String(i)}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        )}
-        {fields.preset === "monthly" && (
-          <Field label="On day" htmlFor="job-day" hint="Months without that day skip it.">
-            <Input
-              id="job-day"
-              type="number"
-              min={1}
-              max={31}
-              value={fields.monthDay}
-              onChange={(e) => set({ monthDay: e.target.value })}
-              className="font-mono"
-            />
-          </Field>
-        )}
-      </FieldRow>
-      {fields.preset === "custom" && (
-        <Field
-          label="Cron expression"
-          htmlFor="job-cron"
-          hint="Five fields: minute, hour, day of month, month, day of week."
-          error={!valid ? "That is not an expression cron understands." : undefined}
-        >
-          <Input
-            id="job-cron"
-            value={fields.custom}
-            onChange={(e) => set({ custom: e.target.value })}
-            placeholder="0 3 * * *"
-            className="font-mono"
-          />
-        </Field>
-      )}
-      <FormNote>
-        {expression === "" ? (
-          "Runs only when you press Run now."
-        ) : valid ? (
-          <>
-            {scheduleLabel(expression)}
-            {preview.length > 0 && (
-              <span className="text-muted-foreground/80">
-                {" · next "}
-                {preview
-                  .map((d) => `${calendarDate(d.toISOString())} ${clock(d.toISOString())}`)
-                  .join(", ")}
-              </span>
-            )}
-          </>
-        ) : (
-          "Fix the expression to see when it fires."
-        )}
-      </FormNote>
     </div>
   )
 }

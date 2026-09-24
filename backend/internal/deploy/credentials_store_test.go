@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -182,6 +183,76 @@ func TestCredentialUsageCountingAndDeleteRefusesWhileInUse(t *testing.T) {
 	}
 	if err := fixture.plans.DeleteCredential(ctx, credential.ID); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("delete twice error = %v, want ErrCredentialNotFound", err)
+	}
+}
+
+// The projects a credential serves come from the same join as its count: an
+// archived project drops out of both, and a project with two environments on
+// the credential counts twice but is named once.
+func TestCredentialSummaryNamesTheProjectsBehindItsUsage(t *testing.T) {
+	t.Parallel()
+	fixture := newCredentialsFixture(t)
+	ctx := context.Background()
+	shared, err := fixture.plans.CreateCredential(ctx, CredentialCreateRequest{
+		Name: "shared-cred", Kind: CredentialGitBearer, Target: "github.com", Secret: "ghp_token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.plans.CreateCredential(ctx, CredentialCreateRequest{
+		Name: "unused-cred", Kind: CredentialGitBearer, Target: "gitlab.com", Secret: "glpat-token",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := fixture.now.Unix()
+	useCredential := func(name string, slugs ...string) int64 {
+		t.Helper()
+		project, err := fixture.store.DB.Exec(`
+			INSERT INTO deploy_projects(name, profile, repo_path, branch, compose_file, hook_secret, hook_id, enabled, created_at, updated_at)
+			VALUES(?, 'worker', ?, 'main', 'compose.yml', '', ?, 1, ?, ?)`, name, "/srv/"+name, name+"-hook", now, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projectID, _ := project.LastInsertId()
+		for _, slug := range slugs {
+			environment, err := fixture.store.DB.Exec(`
+				INSERT INTO deploy_environments(project_id, name, slug, kind, desired_revision, strategy, expected_downtime, protected, created_at, updated_at)
+				VALUES(?, ?, ?, 'production', 1, 'stop_first', 1, 1, ?, ?)`, projectID, slug, slug, now, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			environmentID, _ := environment.LastInsertId()
+			if _, err := fixture.store.DB.Exec(`
+				INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at)
+				VALUES(?, 1, 'git', '{}', ?, '{}', ?, ?)`,
+				environmentID, shared.ID, fakeContentDigest(name+"/"+slug), now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return projectID
+	}
+	second := useCredential("second-app", "production")
+	first := useCredential("first-app", "production", "staging")
+	archived := useCredential("archived-app", "production")
+	if _, err := fixture.store.DB.Exec(`UPDATE deploy_projects SET archived_at = ? WHERE id = ?`, now, archived); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := fixture.plans.ListCredentials(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int64{min(first, second), max(first, second)}
+	if len(listed) != 2 || listed[0].Name != "shared-cred" || listed[0].UsedBy != 3 ||
+		!slices.Equal(listed[0].UsedByProjectIDs, want) {
+		t.Fatalf("shared credential = %#v, want usedBy 3 across projects %v", listed[0], want)
+	}
+	if listed[1].UsedBy != 0 || listed[1].UsedByProjectIDs != nil {
+		t.Fatalf("unused credential = %#v, want no projects", listed[1])
+	}
+	fetched, err := fixture.plans.GetCredential(ctx, shared.ID)
+	if err != nil || !slices.Equal(fetched.UsedByProjectIDs, want) {
+		t.Fatalf("GetCredential projects = %#v, %v, want %v", fetched, err, want)
 	}
 }
 

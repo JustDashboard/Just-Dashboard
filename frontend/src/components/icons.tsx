@@ -65,6 +65,7 @@ import {
   DocumentPlusIcon,
   DocumentTextIcon,
   EllipsisHorizontalIcon,
+  EnvelopeIcon,
   ExclamationCircleIcon,
   ExclamationTriangleIcon,
   EyeIcon,
@@ -100,6 +101,7 @@ import {
   NoSymbolIcon,
   NumberedListIcon,
   PaintBrushIcon,
+  PaperAirplaneIcon,
   PauseIcon,
   PencilSquareIcon,
   PhotoIcon,
@@ -448,6 +450,13 @@ export const TerminalWindow: Icon = adapt(WindowIcon, "TerminalWindow")
 export const Logs: Icon = adapt(QueueListIcon, "Logs")
 export const Rss: Icon = adapt(RssIcon, "Rss")
 export const Notes: Icon = adapt(ClipboardDocumentListIcon, "Notes")
+
+/* Messages. E-mail is a protocol a dozen providers speak rather than a
+   product, so an e-mail channel keeps a glyph where a Discord or a Slack one
+   draws its own logo — the argument §14 makes for S3. `PaperAirplane` is a
+   message leaving: the verb that sends a test delivery, not a kind of thing. */
+export const Envelope: Icon = adapt(EnvelopeIcon, "Envelope")
+export const PaperAirplane: Icon = adapt(PaperAirplaneIcon, "PaperAirplane")
 
 /* git and deployment. Heroicons draws no git glyphs, so these are the nearest
    true things: a branch is connected nodes coming apart (`Share`), a merge the

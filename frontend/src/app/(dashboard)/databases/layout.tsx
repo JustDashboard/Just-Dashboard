@@ -21,6 +21,7 @@ import { ConnectionSwitcher } from "@/components/database/connection-switcher"
 import { DatabaseProvider, type SectionParams } from "@/components/database/db-context"
 import { useNavScope } from "@/components/nav-scope"
 import { NAV } from "@/components/nav"
+import { ProductGlyph } from "@/components/product-logo"
 
 /**
  * The section's pages, and which of them a non-SQL engine (Redis, Mongo) still
@@ -211,7 +212,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
           replaces: true,
           title: conn.name,
           caption: info?.label ?? conn.driver,
-          icon: Database,
+          mark: <ProductGlyph id={conn.driver} />,
           groups: [
             {
               items: pages.map((page) => ({

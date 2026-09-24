@@ -1,19 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import {
-  External,
-  GitHubMark,
-  LockClosed,
-  RefreshClockwise,
-  Terminal,
-  type Icon,
-} from "@/components/icons"
+import { External, LockClosed, RefreshClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { githubAppStage, githubAvatarUrl, useGitHubAccount, useGitHubApp } from "@/hooks/use-github"
+import { githubAppStage, useGitHubAccount, useGitHubApp } from "@/hooks/use-github"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
@@ -22,14 +15,17 @@ import { ChoiceList, ChoiceRow, FlowPanel, FlowPanelBody, FlowPanelHeader } from
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { SearchInput } from "@/components/page"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
 import { LanguageMark } from "@/components/language-icon"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ForgeFace } from "@/components/git/marks"
+import { BadgedLogo } from "@/components/client-mark"
+import { ProductGlyph, ProductLogo, hostProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -81,33 +77,21 @@ type PickableRepo = {
 }
 
 /**
- * An account's own face on GitHub — an identity's, and a repository owner's.
+ * One of the two ways this dashboard reaches GitHub, as what it is.
  *
- * Whose repositories these are is the question the identities answer, and a
- * face answers it before a name is read; two grey glyphs never did. Where there
- * is no account yet — no App installed, nobody signed in — the kind's glyph
- * stands in, because there is no face to draw.
+ * Connected, it is the account's own face — whose repositories these are is
+ * the question the identities answer, and a face answers it before a name is
+ * read. Not connected there is no face to draw, and the two grey glyphs that
+ * stood in read as two empty slots: the App is GitHub's own mark on the
+ * product tile, and the CLI is a terminal with GitHub in its corner — the
+ * shape the account pages give a program over the system it runs on — so the
+ * two say which is which before either title is read. Face and tile are the
+ * same 32px square, so the titles start at the same place either way.
  */
-function IdentityMark({ account, fallback: Fallback }: { account?: string; fallback: Icon }) {
-  // The glyph keeps the avatar's footprint, so the two titles start at the
-  // same place when one identity is connected and the other is not.
-  if (!account)
-    return (
-      <span className="flex size-6 items-center justify-center">
-        <Fallback className="size-4 text-muted-foreground" />
-      </span>
-    )
-  return (
-    <Avatar size="sm" className="border border-hairline">
-      <AvatarImage src={githubAvatarUrl(account)} alt="" />
-      {/* The kind's glyph rather than initials while the picture is on its
-          way: two letters in a filled circle is the pill §4 deleted, and a
-          column of twenty of them is a column of pills. */}
-      <AvatarFallback>
-        <Fallback className="size-3.5" />
-      </AvatarFallback>
-    </Avatar>
-  )
+function IdentityMark({ account, kind }: { account?: string; kind: "app" | "cli" }) {
+  if (account) return <ForgeFace login={account} provider="github" />
+  if (kind === "app") return <ProductLogo id="github" size="sm" />
+  return <BadgedLogo id="terminal" badge="github" fallback={Terminal} />
 }
 
 /**
@@ -332,11 +316,41 @@ export function SourceGit({
           {failure && <ErrorState error={failure} />}
           {status.error && <ErrorState error={status.error} />}
           {repos.error && <ErrorState error={repos.error} />}
+          {/* With neither identity connected there is nothing to list, and the
+              surface this screen is built around used to be an empty band
+              between its title and its foot. It says why and draws what would
+              fill it; the verbs are the identity rows' own (Connect, Sign in),
+              beside the state they change.
+
+              Only once both identities have answered: a read that failed is
+              not an account that is missing, and saying "no account
+              connected" under an App that is installed — or under the error
+              that says the CLI could not be asked — is the page stating
+              something it does not know. */}
+          {!canBrowse && !status.error && !app.error && (
+            <EmptyState
+              mark={<ProductLogo id="github" />}
+              title="No GitHub account connected"
+              description={
+                status.data?.available === false
+                  ? "Connect the GitHub App, and the repositories it reaches are listed here. Any clone URL works without it."
+                  : "Connect the GitHub App or sign the CLI in, and the repositories they reach are listed here. Any clone URL works without either."
+              }
+            />
+          )}
+          {!canBrowse && !status.error && app.error && (
+            <EmptyNote>
+              Nothing can be listed until the GitHub App answers. Any clone URL works without it.
+            </EmptyNote>
+          )}
           {canBrowse && (
             <>
+              {/* On a phone the search takes a line of its own, so it goes
+                  last there and the owner and the refresh share the first —
+                  in source order the refresh was left alone on a third. */}
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={owner} onValueChange={setOwner}>
-                  <SelectTrigger aria-label="Repository owner" className="w-44">
+                  <SelectTrigger aria-label="Repository owner" className="w-44 max-sm:flex-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -353,7 +367,7 @@ export function SourceGit({
                   onChange={(event) => setFilter(event.target.value)}
                   placeholder="Filter repositories"
                   aria-label="Filter repositories"
-                  containerClassName="min-w-0 flex-1 sm:w-auto"
+                  containerClassName="min-w-0 flex-1 max-sm:order-last sm:w-auto"
                 />
                 <IconAction
                   label="Refresh repositories"
@@ -475,7 +489,7 @@ export function SourceGit({
               <RowList aria-label="GitHub connections">
                 {merged ? (
                   <Row
-                    leading={<IdentityMark account={appAccount} fallback={GitHubMark} />}
+                    leading={<IdentityMark account={cliLogin} kind="app" />}
                     title={appAccount}
                     subtitle="GitHub App · GitHub CLI"
                     trailing={
@@ -490,9 +504,7 @@ export function SourceGit({
                 ) : (
                   <>
                     <Row
-                      leading={
-                        <IdentityMark account={installations[0]?.account} fallback={GitHubMark} />
-                      }
+                      leading={<IdentityMark account={installations[0]?.account} kind="app" />}
                       // The account, not the App's generated name: "Just
                       // Dashboard e4e5" is this dashboard's own label for
                       // itself, and what the reader is checking is whose
@@ -504,8 +516,10 @@ export function SourceGit({
                           : stage === "install"
                             ? "Created on GitHub, waiting for an account to install it"
                             : stage === "create"
-                              ? "One App in place of a token and a webhook for every repository"
-                              : "Reading the App…"
+                              ? "Not set up on this server"
+                              : // The rows wait for both answers, so no stage
+                                // here is a read that failed, not one pending.
+                                "Could not be read just now"
                       }
                       trailing={
                         <>
@@ -527,7 +541,9 @@ export function SourceGit({
                                 ? "Installed"
                                 : stage === "install"
                                   ? "Uninstalled"
-                                  : "Disconnected"
+                                  : stage === "create"
+                                    ? "Disconnected"
+                                    : "Unknown"
                             }
                           />
                           {stage === "create" && (
@@ -543,18 +559,17 @@ export function SourceGit({
                     />
                     <Row
                       leading={
-                        <IdentityMark
-                          account={signedIn ? cliLogin : undefined}
-                          fallback={Terminal}
-                        />
+                        <IdentityMark account={signedIn ? cliLogin : undefined} kind="cli" />
                       }
                       title={signedIn ? cliLogin : "GitHub CLI"}
                       subtitle={
                         signedIn
                           ? "GitHub CLI"
-                          : status.data?.available === false
-                            ? "gh is not installed on this host, so signing in is not available here"
-                            : "Installed on this host, nobody signed in"
+                          : !status.data
+                            ? "Could not be read just now"
+                            : status.data.available === false
+                              ? "gh is not installed on this host, so signing in is not available here"
+                              : "Installed on this host, nobody signed in"
                       }
                       trailing={
                         <>
@@ -568,12 +583,14 @@ export function SourceGit({
                             label={
                               signedIn
                                 ? "Signed in"
-                                : status.data?.available === false
-                                  ? "Unavailable"
-                                  : "Signed out"
+                                : !status.data
+                                  ? "Unknown"
+                                  : status.data.available === false
+                                    ? "Unavailable"
+                                    : "Signed out"
                             }
                           />
-                          {!signedIn && status.data?.available !== false && (
+                          {!signedIn && status.data && status.data.available !== false && (
                             <Link
                               href="/git"
                               className="rounded-sm text-hint underline underline-offset-2 focus-ring"
@@ -590,11 +607,12 @@ export function SourceGit({
             )}
             {/* An optional integration that cannot be read is information, not
                 a failure: the page used to paint a red error block across the
-                primary import path whenever GitHub was unreachable. */}
-            {app.error && (
+                primary import path whenever GitHub was unreachable. What it
+                costs is said where it shows — here while the CLI still lists
+                repositories, in the empty panel when nothing does. */}
+            {app.error && canBrowse && (
               <p className="pt-3 text-hint text-muted-foreground">
-                The GitHub App could not be read just now. Anything it grants is missing from the
-                list.
+                Anything the App grants is missing from the list until it can be read again.
               </p>
             )}
           </PanelBody>
@@ -603,14 +621,23 @@ export function SourceGit({
         <Panel plain>
           <PanelHeader title="Or paste a Git URL" />
           <PanelBody className="space-y-3">
+            {/* The host is read as the URL is typed and drawn at the field's
+                head, so "is this the GitLab one" is answered by the mark
+                before the address is read to its end — the same mark the
+                project will carry once it exists. */}
             <Field label="Clone URL" htmlFor="manual-url">
-              <Input
-                id="manual-url"
-                value={manualUrl}
-                onChange={(event) => setManualUrl(event.target.value)}
-                placeholder="https://github.com/owner/repository.git"
-                className="font-mono"
-              />
+              <InputGroup>
+                <InputGroupAddon aria-hidden className="px-3">
+                  <ProductGlyph id={hostProduct(manualUrl) ?? "git"} />
+                </InputGroupAddon>
+                <InputGroupInput
+                  id="manual-url"
+                  value={manualUrl}
+                  onChange={(event) => setManualUrl(event.target.value)}
+                  placeholder="https://github.com/you/app.git"
+                  className="font-mono"
+                />
+              </InputGroup>
             </Field>
             <Disclosure
               quiet
@@ -623,6 +650,7 @@ export function SourceGit({
                     id="manual-ref"
                     value={manualRef}
                     onChange={(event) => setManualRef(event.target.value)}
+                    className="font-mono"
                   />
                 </Field>
                 <Field label="Credential" htmlFor="manual-credential">
@@ -669,7 +697,7 @@ export function SourceGit({
 
         <FormNote>
           New commits to the selected branch deploy automatically after your first deployment,
-          unless you turn that off on the next screen.
+          unless you turn that off on the Review step.
         </FormNote>
       </div>
     </div>
@@ -685,6 +713,10 @@ export function SourceGit({
  * and wrong — an ARIA button takes its name from its contents, so the
  * description, the language and the last push would be read out as part of the
  * control's name, or silenced by an `aria-label` that overrides them.
+ *
+ * While its import is in flight a light runs round the row's edge (§17 pass
+ * 7): inspection takes seconds, and the press is answered on the thing that
+ * was pressed rather than by a word in its corner alone.
  */
 function RepoRow({
   repo,
@@ -699,6 +731,7 @@ function RepoRow({
     <ChoiceRow
       verb={`Import ${repo.nameWithOwner}`}
       onSelect={onImport}
+      busy={pending}
       // The owner is the face beside the row, so in the title it steps back
       // and the name — what tells forty rows apart — is the ink.
       title={
@@ -708,7 +741,7 @@ function RepoRow({
         </>
       }
       description={repo.description}
-      leading={<IdentityMark account={repo.owner} fallback={GitHubMark} />}
+      leading={<ForgeFace login={repo.owner} provider="github" />}
       trailing={
         <>
           {repo.private && (
@@ -719,8 +752,11 @@ function RepoRow({
           )}
           {repo.archived && <Tag>archived</Tag>}
           {repo.fork && <Tag>fork</Tag>}
+          {/* On a phone the coloured mark is the language (§14) and the name
+              needs the width the word took — "acme/design-tok…" beside a full
+              TYPESCRIPT. A language with no mark keeps its word. */}
           {repo.language && (
-            <Tag>
+            <Tag className="max-sm:[&_svg+span]:sr-only">
               <LanguageMark language={repo.language} />
             </Tag>
           )}

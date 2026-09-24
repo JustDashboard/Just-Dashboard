@@ -3,6 +3,8 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Check } from "@/components/icons"
+import { BlurFade } from "@/components/ui/blur-fade"
+import { BorderBeam } from "@/components/ui/border-beam"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { cn } from "@/lib/utils"
 
@@ -140,7 +142,10 @@ export function FlowSteps({
                 here ? "font-medium text-foreground" : "text-muted-foreground",
               )}
             >
-              {done && <Check aria-hidden className="size-3 shrink-0 text-brand" />}
+              {/* Not on a phone, where a finished step is a fifth of the
+                  width and the check left "Runti…": its lit rule already says
+                  it is done, and the word is what names the sequence. */}
+              {done && <Check aria-hidden className="size-3 shrink-0 text-brand max-sm:hidden" />}
               <span className="truncate">{step.label}</span>
             </span>
           </>
@@ -301,6 +306,8 @@ export function ChoiceRow({
   onSelect,
   href,
   disabled,
+  busy,
+  index,
   children,
   className,
 }: {
@@ -334,6 +341,20 @@ export function ChoiceRow({
    * nothing is the defect `ChoiceCard`'s own `disabled` exists to prevent.
    */
   disabled?: boolean
+  /**
+   * The thing this row names is working right now — a run in flight, a test
+   * delivery being sent, a backup being taken — so a light runs around its
+   * edge (§11 *live*), and the eye finds it in a list without reading. It is
+   * drawn over the edge rather than passed in as a child, because a child
+   * would flip the row to its two-line layout.
+   */
+  busy?: boolean
+  /**
+   * Position in the list, for the arrival stagger `ChoiceCard` has (§11
+   * *arrived*). Leave it out and the row simply appears, which is right for a
+   * list that re-renders under a poll.
+   */
+  index?: number
   /**
    * What the row carries beneath its line at the full width of the card — a
    * container's live readings on a screen too narrow to hold them beside its
@@ -400,52 +421,75 @@ export function ChoiceRow({
       </span>
     </>
   )
+  const body = (
+    <>
+      {busy && (
+        <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
+          <BorderBeam size={80} duration={4} />
+        </span>
+      )}
+      <div
+        onClick={(event) => {
+          if (disabled) return
+          // A control of its own inside the row — a copy button in the
+          // second line, a switch beneath it — is not a press on the row.
+          if (
+            event.target !== event.currentTarget &&
+            (event.target as HTMLElement).closest(CONTROL)
+          )
+            return
+          go()
+        }}
+        className={cn(
+          // A fixed minimum, because a description is optional and a run of
+          // cards where some are a line taller than others reads as a list
+          // that failed to load rather than as a list of different things.
+          // A row without one centres its title in the same box; nothing
+          // reserves an empty second line, which would be a row claiming
+          // content it has not got.
+          // The unnamed group as well, so `DimActions` in the actions slot
+          // brightens with the row the way it does in a table.
+          "group group/choice flex min-h-14 min-w-0 rounded-xl px-3 py-2.5 text-left",
+          !disabled && "cursor-pointer",
+          children ? "flex-col gap-2.5" : "items-center gap-3",
+          className,
+        )}
+      >
+        {children ? (
+          <>
+            <div className="flex min-w-0 items-center gap-3">{line}</div>
+            {children}
+          </>
+        ) : (
+          line
+        )}
+      </div>
+    </>
+  )
+  // The lit edge means "this is takeable" (§16), so a disabled row keeps its
+  // card and its resting edge, and its edge does not answer the pointer.
+  const card = disabled ? (
+    <div className="relative isolate rounded-xl border bg-choice-surface">{body}</div>
+  ) : (
+    <SpotlightBorder radius={320}>{body}</SpotlightBorder>
+  )
   return (
     <li data-slot="choice-row" className="min-w-0">
-      <SpotlightBorder radius={320}>
-        <div
-          onClick={(event) => {
-            if (disabled) return
-            // A control of its own inside the row — a copy button in the
-            // second line, a switch beneath it — is not a press on the row.
-            if (
-              event.target !== event.currentTarget &&
-              (event.target as HTMLElement).closest(CONTROL)
-            )
-              return
-            go()
-          }}
-          className={cn(
-            // A fixed minimum, because a description is optional and a run of
-            // cards where some are a line taller than others reads as a list
-            // that failed to load rather than as a list of different things.
-            // A row without one centres its title in the same box; nothing
-            // reserves an empty second line, which would be a row claiming
-            // content it has not got.
-            // The unnamed group as well, so `DimActions` in the actions slot
-            // brightens with the row the way it does in a table.
-            "group group/choice flex min-h-14 min-w-0 rounded-xl px-3 py-2.5 text-left",
-            !disabled && "cursor-pointer",
-            children ? "flex-col gap-2.5" : "items-center gap-3",
-            className,
-          )}
-        >
-          {children ? (
-            <>
-              <div className="flex min-w-0 items-center gap-3">{line}</div>
-              {children}
-            </>
-          ) : (
-            line
-          )}
-        </div>
-      </SpotlightBorder>
+      {/* Capped, so the rows past the first screen arrive together rather
+          than a list of forty taking over a second to finish landing. */}
+      {index === undefined ? card : <BlurFade delay={Math.min(index, 11) * 0.03}>{card}</BlurFade>}
     </li>
   )
 }
 
-/** Anything inside a row that owns its own press — mirrors `TableRow`'s rule. */
-const CONTROL = "a, button, input, select, textarea, label, [role='menuitem'], [role='switch']"
+/**
+ * Anything inside a row that owns its own press — mirrors `TableRow`'s rule.
+ * Exported for a card that is a click target without being a `ChoiceRow` — a
+ * grid card built on `SpotlightBorder` directly — so the rule of which presses
+ * it skips is written once.
+ */
+export const CONTROL =
+  "a, button, input, select, textarea, label, [role='menuitem'], [role='switch']"
 
 /**
  * What the next run of cards is, and how many of them.
@@ -455,11 +499,15 @@ const CONTROL = "a, button, input, select, textarea, label, [role='menuitem'], [
  * the page's would rank them as sections they are not. The Git page's
  * checkouts and the Docker lists split the same way — what needs you first.
  */
-export function GroupRule({ label, count }: { label: string; count: number }) {
+export function GroupRule({ label, count }: { label: string; count?: number }) {
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <p className="eyebrow shrink-0">{label}</p>
-      <span className="numeric shrink-0 text-micro text-muted-foreground">{count}</span>
+      {/* Left out where the label ends in a figure of its own — a date — and
+          the count would read as part of it. */}
+      {count !== undefined && (
+        <span className="numeric shrink-0 text-micro text-muted-foreground">{count}</span>
+      )}
       <span aria-hidden className="h-px min-w-0 flex-1 bg-hairline" />
     </div>
   )

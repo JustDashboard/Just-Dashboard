@@ -22,7 +22,11 @@
   across navigation but not a reload. All three have `useState`'s shape; a dotted key names the page and
   the thing, and a third argument to `useSessionState` is the value the address bar handed over, which
   wins on arrival and is remembered from then on. A form draft is keyed under the revision or name it
-  was read from, so a save from anywhere starts it again from the server's copy; a dialog's fields are
+  was read from, so a save from anywhere starts it again from the server's copy — except where one
+  revision covers several forms: every deployment settings form saves a new revision of the whole
+  configuration, so each keys its draft on a digest of its *own* saved value (`useSettingDraft`), and
+  a save of the form beside it leaves the draft alone while its own save still restarts it. A
+  dialog's fields are
   forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
   navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
   keeps a sheet's selection in the address bar and, per page and key, in the session store, so
@@ -60,7 +64,10 @@
   action's existing capability. Stack pages hide those controls from limited accounts, explain the
   restriction, and retain stack/config/log read views. Direct container controls retain their separate
   capability checks.
-- `ConfirmDialog` collects the typed phrase and the server re-checks it. Its `phrase` is optional and the
+- `ConfirmDialog` collects the typed phrase and the server re-checks it — with one exception: deleting an
+  archived deployment permanently asks for the project's name in the dialog alone, and its route keeps
+  ordinary confirmation ([`permanent-deletion.md`](../deployments/permanent-deletion.md)). Its
+  `phrase` is optional and the
   absence is meaningful: a request without one is reversible but still deserves a pause (deleting a
   terminal folder loses a grouping and nothing else), and asking somebody to type "delete folder" teaches
   them to type phrases without reading — the one habit the typed confirmation exists to prevent.
@@ -90,7 +97,14 @@
   did not come up and was undone — because showing that as either success or failure would misreport it.
   The form on `/dashboard/configuration` **derives** its draft from the poll rather than mirroring it into
   state: a copy refreshed every two seconds would wipe half-typed input during a restart.
-- Both runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`. The polled
+- `hooks/use-arrivals.ts` answers which rows of a polled or streamed list were not in it the last time
+  it changed, so those rows alone take `animate-rise` (request rows, container events, deliveries,
+  players). It is empty on the first render and holds its answer until the keys change again, kept as
+  state adjusted during render rather than in an effect, so an arrival costs no second paint and a
+  re-render mid-rise does not cut it short.
+- Both runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`, and a
+  deployment's build console paints its lines with the same row and the same drip
+  (`components/transcript-line.tsx`, which both import). The polled
   report carries only the file's last 64 KB; when that tail starts with the server's trimmed marker the
   console reads the whole file once (`getText` on `…/update/log` or `…/config/log`) and from then on
   extends it with each tail, finding where the tail begins in the whole copy (`extendTranscript`) and
