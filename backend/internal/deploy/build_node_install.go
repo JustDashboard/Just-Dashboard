@@ -128,7 +128,13 @@ type nodeInstallFacts struct {
 	manifest, settings nodeInstallManifest
 	// member is the package's directory under the install root, "" for a
 	// package that installs on its own.
-	member       string
+	member string
+	// workspace is a member's install root in the checkout ("" for its
+	// top), and workspacePackages the names of the other members detection
+	// found under it.
+	workspace         string
+	workspacePackages []string
+	// readings are the lockfiles at the install root.
 	readings     []nodeLockfileReading
 	declared     nodeDeclaredManager
 	signals      map[string][]string
@@ -182,6 +188,9 @@ func (f nodeInstallFacts) detectedInstalls(resolved string, assets bool, command
 // lockfile); member is the package's path under it.
 func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch string) nodeInstallFacts {
 	facts := nodeInstallFacts{member: member, signals: map[string][]string{}}
+	if member != "" {
+		facts.workspace = files.dir
+	}
 	_ = json.Unmarshal(manifest, &facts.manifest)
 	facts.settings = facts.manifest
 	if member != "" {
@@ -856,6 +865,14 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	}
 	choice.fieldPackageManager = field
 	plan := nodeInstallPlan{strict: true}
+	if facts.member != "" && !nodeMemberPathRE.MatchString(facts.member) {
+		blocked := nodeFinding("workspace_member_path_unsupported", PreflightBlocked,
+			"The workspace member's directory cannot be built by the recipe", nodeListedName(facts.member)+" is not a plain path of letters, digits and . _ @ + - /",
+			"The build and the server run in the member's directory, which the generated Dockerfile names in WORKDIR, ENV and RUN lines; a space, a quote or a $ in it breaks them.",
+			"Rename the directory to letters, digits and . _ @ + - only, or build with a Dockerfile.", "configuration.build.rootDirectory")
+		plan.blocked = &blocked
+		return plan
+	}
 	resolution, err := resolveNodeManager(facts, choice.selected)
 	if err != nil {
 		code, title := "package_manager_ambiguous", "Competing lockfiles need a package manager"
@@ -871,6 +888,12 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	plan.manager, plan.reading, plan.reason = resolution.manager, resolution.reading, resolution.reason
 	if plan.reading != nil {
 		plan.lockfile = plan.reading.Path
+		if facts.member != "" {
+			plan.findings = append(plan.findings, nodeFinding("workspace_lockfile", PreflightPass,
+				boundedFindingText("Installed from the workspace lockfile at "+rootLabelOf(facts.workspace)), path.Join(facts.workspace, plan.lockfile)+" records "+facts.member,
+				boundedFindingText("The package has no lockfile of its own: the build context is the workspace root, the install runs there from its lockfile, and the build and the server run in "+facts.member+"."),
+				"", field))
+		}
 	}
 	var glibc []string
 	plan.family, glibc = nodeImageFamily(facts, choice.assets)
@@ -945,6 +968,14 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 			"Use a Dockerfile, or change the command to one the Node image runs.", "configuration.build.buildCommand")
 		plan.blocked = &blocked
 		return plan
+	}
+	if !choice.assets {
+		if provided := plan.startRunners(nodeCommandTools(facts.manifest.Scripts, []string{plan.start})); len(provided) > 0 {
+			plan.findings = append(plan.findings, nodeFinding("runtime_runner_available", PreflightPass,
+				"The start command's runner is in the server image", strings.Join(provided, "; "),
+				"The server image starts from the same stage the build installed with, so the programs the start command and its package scripts run are there, offline.",
+				"", "configuration.build.startCommand"))
+		}
 	}
 	for _, segment := range nodeInstallSegments(plan.build) {
 		plan.findings = append(plan.findings, nodeFinding("install_in_build_command", PreflightWarning,
@@ -1034,6 +1065,10 @@ func nodeLockOrNone(lockfile string) string {
 func nodeRegenerateCommand(manager string) string {
 	return map[string]string{"npm": "npm install", "pnpm": "pnpm install", "yarn": "yarn install", "bun": "bun install"}[manager]
 }
+
+// nodeMemberPathRE is what a workspace member's directory may contain to be
+// written unquoted into the recipe's WORKDIR, ENV PATH and RUN lines.
+var nodeMemberPathRE = regexp.MustCompile(`^[A-Za-z0-9._@+/-]+$`)
 
 var nodePackageNameRE = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
 
@@ -1492,6 +1527,48 @@ func (p nodeInstallPlan) detected(manager, build, start string) DetectedNodeInst
 	install.Lockfile, install.Install, install.Toolchain = p.lockfile, p.installLine(), p.toolchain
 	install.Findings = append(install.Findings, p.findings...)
 	return install
+}
+
+// startRunners names each package-manager program the start command reaches
+// and where the server image gets it.
+func (p nodeInstallPlan) startRunners(tools map[string]bool) []string {
+	from := func(manager string) string {
+		for _, spec := range p.corepack {
+			if name, release, _ := strings.Cut(spec, "@"); name == manager {
+				release, _, _ = strings.Cut(release, "+")
+				return nodeManagerLabel(manager) + " " + release + " installed through Corepack"
+			}
+		}
+		switch {
+		case manager == "npm":
+			return "bundled with Node " + strconv.Itoa(p.node.major)
+		case manager == "yarn" && p.berry:
+			return "the Node image's Yarn, which runs the release .yarnrc.yml's yarnPath names"
+		case manager == "yarn":
+			return "Yarn 1 bundled with the Node image"
+		case manager == "bun" && p.bun != "":
+			return "Bun " + bunReleaseOf(p.bun) + " copied beside Node"
+		}
+		return ""
+	}
+	provided := []string{}
+	for _, runner := range []struct {
+		manager string
+		tools   []string
+	}{
+		{"npm", []string{"npm", "npx"}}, {"pnpm", []string{"pnpm", "pnpx"}}, {"yarn", []string{"yarn"}}, {"bun", []string{"bun", "bunx"}},
+	} {
+		used := []string{}
+		for _, tool := range runner.tools {
+			if tools[tool] {
+				used = append(used, tool)
+			}
+		}
+		if source := from(runner.manager); len(used) > 0 && source != "" {
+			provided = append(provided, strings.Join(used, ", ")+": "+source)
+		}
+	}
+	return provided
 }
 
 // installLine is the install as the Dockerfile runs it, without mounts.

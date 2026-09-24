@@ -470,6 +470,23 @@ func readNodeInstalls(checkout string, markers map[string]*detectedMarkers) {
 		}
 		marker.node = &source
 	}
+	// npm and Yarn 1 depend on a sibling with a plain range rather than
+	// workspace:, so a member's workspace dependencies are known by name.
+	members := map[string][]string{}
+	for _, dir := range dirs {
+		if source := markers[dir].node; source != nil && source.member() != "" && source.facts.manifest.Name != "" {
+			members[source.context] = append(members[source.context], source.facts.manifest.Name)
+		}
+	}
+	for _, dir := range dirs {
+		if source := markers[dir].node; source != nil && source.member() != "" {
+			for _, name := range members[source.context] {
+				if name != source.facts.manifest.Name {
+					source.facts.workspacePackages = append(source.facts.workspacePackages, name)
+				}
+			}
+		}
+	}
 }
 
 // withInstallVariables adds the registry credentials a package manager's

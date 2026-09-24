@@ -445,6 +445,91 @@ func TestWorkspaceMemberBuildsFromItsWorkspaceRoot(t *testing.T) {
 	}, nil)
 }
 
+// npm and Yarn 1 workspaces refer to a sibling by name and a plain range,
+// not workspace:; a Turborepo member that depends on one still builds it
+// first. The workspace's link entries are neither Git dependencies nor
+// downloads, and the member's install is named before Deploy.
+func TestNPMWorkspaceMemberBuildsItsSiblingsWithTurbo(t *testing.T) {
+	t.Parallel()
+	boundary := writeNodeTree(t, map[string]string{
+		"package.json":                 `{"name":"root","private":true,"workspaces":["apps/*","packages/*"],"devDependencies":{"turbo":"2.5.0"}}`,
+		"apps/web/package.json":        `{"name":"web","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.1.3","@acme/shared":"*"}}`,
+		"apps/docs/package.json":       `{"name":"docs","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.1.3"}}`,
+		"packages/shared/package.json": `{"name":"@acme/shared","version":"1.0.0","scripts":{"build":"tsc"}}`,
+		"package-lock.json": `{"name":"root","lockfileVersion":3,"requires":true,"packages":{` +
+			`"":{"name":"root","workspaces":["apps/*","packages/*"],"devDependencies":{"turbo":"2.5.0"}},` +
+			`"apps/web":{"name":"web","dependencies":{"next":"16.1.3","@acme/shared":"*"}},` +
+			`"apps/docs":{"name":"docs","dependencies":{"next":"16.1.3"}},` +
+			`"packages/shared":{"name":"@acme/shared","version":"1.0.0"},` +
+			`"node_modules/web":{"resolved":"apps/web","link":true},"node_modules/docs":{"resolved":"apps/docs","link":true},` +
+			`"node_modules/@acme/shared":{"resolved":"packages/shared","link":true},` +
+			`"node_modules/next":{"version":"16.1.3","resolved":"https://registry.npmjs.org/next/-/next-16.1.3.tgz"},` +
+			`"node_modules/turbo":{"version":"2.5.0","resolved":"https://registry.npmjs.org/turbo/-/turbo-2.5.0.tgz"}}}`,
+	})
+	result, err := (Detector{}).DetectPath(context.Background(), boundary, SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := func(root string) DetectedCandidate {
+		index := slices.IndexFunc(result.Candidates, func(candidate DetectedCandidate) bool { return candidate.Root == root })
+		if index < 0 {
+			t.Fatalf("candidates = %+v", result.Candidates)
+		}
+		return result.Candidates[index]
+	}
+	web, docs := candidate("apps/web"), candidate("apps/docs")
+	if web.PackageManager != "npm" || web.BuildCommand != "npx turbo run build --filter=web..." || docs.BuildCommand != "npm run build" {
+		t.Fatalf("web = %q %q, docs = %q", web.PackageManager, web.BuildCommand, docs.BuildCommand)
+	}
+	install := web.NodeInstalls[slices.IndexFunc(web.NodeInstalls, func(install DetectedNodeInstall) bool { return install.Manager == "npm" })]
+	if install.Install != "npm ci" || findingByCode(install.Findings, "git_dependencies") != nil {
+		t.Fatalf("install = %+v", install)
+	}
+	if workspace := findingByCode(install.Findings, "workspace_lockfile"); workspace == nil || workspace.Severity != PreflightPass ||
+		workspace.Title != "Installed from the workspace lockfile at ." || workspace.Measured != "package-lock.json records apps/web" {
+		t.Fatalf("workspace finding = %+v", workspace)
+	}
+	if runner := findingByCode(install.Findings, "runtime_runner_available"); runner == nil || runner.Measured != "npm: bundled with Node 22" {
+		t.Fatalf("runtime runner = %+v", runner)
+	}
+	if err := validateDetectedNodeInstall(web); err != nil {
+		t.Fatal(err)
+	}
+
+	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(context.Background(), boundary, filepath.Join(boundary, "apps", "web"),
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", RootDirectory: "apps/web", BuildCommand: web.BuildCommand, StartCommand: web.StartCommand}, false, "t:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN npm ci\nWORKDIR /app/apps/web\n", nodeBuildRun("npx turbo run build --filter=web...\n")}, []string{"apk add"})
+}
+
+// A member directory the recipe cannot write unquoted into WORKDIR, ENV and
+// RUN lines is refused by name before Deploy and at build, never rendered
+// into a Dockerfile BuildKit cannot parse.
+func TestWorkspaceMemberPathMustBePlain(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json":             `{"name":"root","private":true,"workspaces":["apps/*"]}`,
+		"apps/my web/package.json": `{"name":"web","scripts":{"build":"tsc","start":"node dist/index.js"},"dependencies":{"left-pad":"^1.3.0"}}`,
+		"package-lock.json":        `{"lockfileVersion":3,"packages":{"":{"name":"root","workspaces":["apps/*"]},"apps/my web":{"name":"web","dependencies":{"left-pad":"^1.3.0"}},"node_modules/left-pad":{"version":"1.3.0"}}}`,
+	}
+	source := readNodeTree(t, files, "apps/my web")
+	plan := planNodeInstall(source.facts, nodeInstallChoice{build: "npm run build", start: "npm run start"})
+	if plan.blocked == nil || plan.blocked.Code != "workspace_member_path_unsupported" || plan.blocked.FieldID != "configuration.build.rootDirectory" {
+		t.Fatalf("plan = %+v", plan.blocked)
+	}
+	boundary := writeNodeTree(t, files)
+	_, err := NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(context.Background(), boundary, filepath.Join(boundary, "apps", "my web"),
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", RootDirectory: "apps/my web", BuildCommand: "npm run build", StartCommand: "npm run start"}, false, "t:1")
+	if !errors.Is(err, ErrUnsupportedBuilder) || !strings.Contains(err.Error(), "apps/my web is not a plain path") {
+		t.Fatalf("prepare = %v", err)
+	}
+	if !nodeMemberPathRE.MatchString("packages/@scope/ui+v2") || nodeMemberPathRE.MatchString("apps/$HOME") {
+		t.Fatal("the member path rule is not the documented one")
+	}
+}
+
 // nodeRunnerFor is the Go side of the configure form's
 // withPackageManagerRunner; these rows are the ones deployment-defaults
 // tests hold it to.

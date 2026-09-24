@@ -199,8 +199,10 @@ logged note when that release has no image (other Bun declarations:
 **One toolchain for the build and the server.** The pinned releases are installed through Corepack into a
 `toolchain` stage (`COREPACK_HOME=/opt/corepack`), and both the build stage and a server's runtime stage
 start from it, with `COREPACK_ENABLE_NETWORK=0` at run time: a start command that runs `pnpm`, `yarn` or
-`bunx` finds the exact release offline, where the runtime stage used to have no pnpm at all. The runtime
-and build stages put `node_modules/.bin` on `PATH`. Bun is copied from its digest-pinned image beside
+`bunx` finds the exact release offline, where the runtime stage used to have no pnpm at all; the pass
+`runtime_runner_available` names each manager program the start command (or a package script it runs)
+reaches and where the server image gets it. The runtime and build stages put `node_modules/.bin` on
+`PATH`. Bun is copied from its digest-pinned image beside
 Node, with `bunx` linked to it: Bun installs and runs `bun` and `bunx` commands, and anything started
 through `node` runs on Node — the Bun image's own `node` is Bun, which made Bun the production runtime of
 every `bun.lock` project (`runtime_selected`). A command or package script the build runs that calls a
@@ -248,8 +250,15 @@ is never echoed).
 and `workspaces` (or `pnpm-workspace.yaml` `packages`) include it; a `pnpm-workspace.yaml` of settings
 alone is not a workspace. The build context widens to that root (`prepared.contextDirectory`), the
 install runs there, the build and the server run in the member's directory, and every workspace the
-lockfile records is compared. A member of a Turborepo that depends on workspace packages builds with
-`<runner> turbo run build --filter=<name>...`.
+lockfile records is compared; preflight shows it as the pass `workspace_lockfile` ("Installed from the
+workspace lockfile at ."). A member of a Turborepo that depends on workspace packages builds with
+`<runner> turbo run build --filter=<name>...`: a dependency is a workspace package when its range uses
+`workspace:` (pnpm, Bun, Berry) or when it names another member detection found under the same root, which
+is how npm and Yarn 1 workspaces refer to one (`"@acme/shared": "*"`). The member's directory is written
+unquoted into `WORKDIR`, `ENV PATH` and `RUN` lines, so one outside letters, digits and `. _ @ + - /` is
+refused before Deploy and at build (`workspace_member_path_unsupported`, blocked) rather than rendered
+into a Dockerfile BuildKit cannot parse. A Yarn 1 member that depends on a sibling by a plain range reads
+as stale, since Yarn 1 records no workspace in its lock; the install then runs unfrozen with a warning.
 
 **The repository's `.dockerignore`.** When the repository has one, the generated Dockerfile gets
 `.just-dashboard/Dockerfile.dockerignore`, which BuildKit prefers: the repository's file verbatim, then

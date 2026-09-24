@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -793,7 +794,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		schema: detectSchemaTool(dependencies, schemaPaths, facts.prisma),
 	}
 	// The name becomes part of a command, so it has to be a package name.
-	if install.context != install.dir && facts.workspaceTurbo && nodePackageNameRE.MatchString(manifest.Name) && nodeHasWorkspaceDependency(manifest) {
+	if install.context != install.dir && facts.workspaceTurbo && nodePackageNameRE.MatchString(manifest.Name) && nodeHasWorkspaceDependency(manifest, facts.workspacePackages) {
 		inputs.turboFilter = manifest.Name
 	}
 	candidate.BuildCommand, candidate.StartCommand = inputs.commands(runner)
@@ -970,10 +971,14 @@ func (in nodeCommandInputs) start(runner string) string {
 	return start
 }
 
-func nodeHasWorkspaceDependency(manifest nodeManifest) bool {
+// nodeHasWorkspaceDependency says whether a member depends on another
+// package of its workspace, which may need its own build first: through
+// pnpm, Bun and Berry's workspace: protocol, or by a sibling's name, which
+// is how npm and Yarn 1 workspaces refer to one.
+func nodeHasWorkspaceDependency(manifest nodeManifest, siblings []string) bool {
 	for _, kind := range []map[string]string{manifest.Dependencies, manifest.DevDependencies} {
-		for _, spec := range kind {
-			if strings.HasPrefix(spec, "workspace:") {
+		for name, spec := range kind {
+			if strings.HasPrefix(spec, "workspace:") || slices.Contains(siblings, name) {
 				return true
 			}
 		}

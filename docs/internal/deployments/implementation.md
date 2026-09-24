@@ -261,7 +261,9 @@ only renderer/executor/validation authority for their feature.
   recipe installs unfrozen instead of failing a frozen install. pnpm and Yarn Berry releases are pinned
   (declaration, or `nodeManagerReleases` keyed by lockfile format) into a `toolchain` stage the server's
   runtime stage shares, Bun is copied beside Node rather than replacing it, and a workspace member
-  prepares from its workspace root (`ArtifactBuilder.PrepareWithin`, `prepared.contextDirectory`). The
+  prepares from its workspace root (`ArtifactBuilder.PrepareWithin`, `prepared.contextDirectory`;
+  `workspace_lockfile` names it before Deploy, and a member directory the Dockerfile cannot carry unquoted
+  is `workspace_member_path_unsupported`). The
   UI swaps whole commands between managers from `nodeInstalls`, "From the lockfile" follows the resolved
   manager, and at build time a saved command whose plain runner names another manager runs through the
   resolved one with a logged note (`prepared.notes`, `prepared.buildCommand`/`startCommand`) and a
