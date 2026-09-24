@@ -101,6 +101,13 @@ func TestNodeListenFactsComeFromScriptsAndCode(t *testing.T) {
 			port:  3000, fixed: 3000, loopback: "127.0.0.1", certain: true, loopbackFromHas: "server.js:1",
 		},
 		{
+			// An admin listener on localhost beside the server on PORT is not
+			// the port the proxy reaches, and cannot make the loopback certain.
+			name:  "a loopback admin listener beside the server on PORT",
+			files: with(map[string]string{"package.json": `{"scripts":{"start":"node server.js"},"dependencies":{"express":"4"}}`, "server.js": "admin.listen(9229, '127.0.0.1')\napp.listen(process.env.PORT)\n"}),
+			port:  3000, readsPort: true, loopback: "127.0.0.1",
+		},
+		{
 			name:  "fastify without a host",
 			files: with(map[string]string{"package.json": `{"scripts":{"start":"node app.js"},"dependencies":{"fastify":"5"}}`, "app.js": "import Fastify from 'fastify'\nconst app = Fastify()\nawait app.listen({ port: 3000 })\n"}),
 			port:  3000, fixed: 3000, loopback: "localhost",
@@ -237,6 +244,22 @@ func TestPythonListenFactsFollowTheServedCommand(t *testing.T) {
 			port:  5000, fixed: 5000, loopback: "127.0.0.1", certain: true,
 		},
 		{
+			// app.run ignores PORT and, given no port, listens on 5000.
+			name:  "procfile runs app.run on every interface without a port",
+			files: map[string]string{"requirements.txt": "flask\n", "app.py": "from flask import Flask\napp = Flask(__name__)\nif __name__ == '__main__':\n    app.run(host='0.0.0.0')\n", "Procfile": "web: python app.py\n"},
+			port:  5000, fixed: 5000,
+		},
+		{
+			name:  "procfile runs app.run with a positional host and port",
+			files: map[string]string{"requirements.txt": "flask\n", "app.py": "from flask import Flask\napp = Flask(__name__)\napp.run('0.0.0.0', 8090, debug=False)\n", "Procfile": "web: python app.py\n"},
+			port:  8090, fixed: 8090,
+		},
+		{
+			name:  "procfile runs uvicorn.run without a port",
+			files: map[string]string{"requirements.txt": requirements, "main.py": "import uvicorn\nfrom fastapi import FastAPI\napp = FastAPI()\nuvicorn.run(app, host='0.0.0.0')\n", "Procfile": "web: python main.py\n"},
+			port:  8000, fixed: 8000,
+		},
+		{
 			name:  "procfile runserver on its default",
 			files: map[string]string{"requirements.txt": "django\n", "manage.py": "", "mysite/wsgi.py": "", "Procfile": "web: python manage.py runserver\n"},
 			port:  8000, fixed: 8000, loopback: "127.0.0.1", certain: true,
@@ -265,6 +288,7 @@ func TestGoServicesThatServeHTTPAreWebWithTheirPort(t *testing.T) {
 		fixed     int
 		readsPort bool
 		loopback  string
+		certain   bool
 	}{
 		{
 			name:    "gin literal",
@@ -289,12 +313,46 @@ func TestGoServicesThatServeHTTPAreWebWithTheirPort(t *testing.T) {
 		{
 			name:    "echo on localhost",
 			files:   map[string]string{"go.mod": "module x\n\ngo 1.26\n\nrequire github.com/labstack/echo/v4 v4.13.0\n", "main.go": "package main\n\nfunc main() {\n\te := echo.New()\n\te.Logger.Fatal(e.Start(\"localhost:1323\"))\n}\n"},
-			profile: ProfileWeb, framework: "echo", port: 1323, fixed: 1323, loopback: "localhost",
+			profile: ProfileWeb, framework: "echo", port: 1323, fixed: 1323, loopback: "localhost", certain: true,
 		},
 		{
 			name:    "a worker stays a service",
 			files:   map[string]string{"go.mod": "module x\n\ngo 1.26\n", "main.go": "package main\n\nfunc main() { for { work() } }\n"},
 			profile: ProfileService, framework: "go",
+		},
+		{
+			// A Redis client's Addr is not a listener, and the server's
+			// Addr built from PORT names no port of its own.
+			name: "a client's Addr beside a server on PORT",
+			files: map[string]string{"go.mod": "module x\n\ngo 1.26\n", "main.go": "package main\n\nfunc main() {\n\trdb := redis.NewClient(&redis.Options{Addr: \"localhost:6379\"})\n\t_ = rdb\n" +
+				"\tport := os.Getenv(\"PORT\")\n\tsrv := &http.Server{Addr: \":\" + port, Handler: mux}\n\tlog.Fatal(srv.ListenAndServe())\n}\n"},
+			profile: ProfileWeb, framework: "go", port: 8080, readsPort: true,
+		},
+		{
+			// pprof's localhost:6060 is the debugging endpoint beside the
+			// server; `":" + port` is no address literal.
+			name: "a pprof listener beside a server on PORT",
+			files: map[string]string{"go.mod": "module x\n\ngo 1.26\n", "main.go": "package main\n\nimport (\n\t\"net/http\"\n\t_ \"net/http/pprof\"\n\t\"os\"\n)\n\nfunc main() {\n" +
+				"\tgo http.ListenAndServe(\"localhost:6060\", nil)\n\tport := os.Getenv(\"PORT\")\n\taddr := \":\" + port\n\thttp.ListenAndServe(addr, mux)\n}\n"},
+			profile: ProfileWeb, framework: "go", port: 8080, readsPort: true,
+		},
+		{
+			name:    "an admin listener on loopback beside a server the scan cannot read",
+			files:   map[string]string{"go.mod": "module x\n\ngo 1.26\n", "main.go": "package main\n\nfunc main() {\n\tgo http.ListenAndServe(\"127.0.0.1:9090\", admin)\n\thttp.ListenAndServe(cfg.ListenAddr, mux)\n}\n"},
+			profile: ProfileService, framework: "go", loopback: "127.0.0.1",
+		},
+		{
+			name: "a server literal on loopback is certain",
+			files: map[string]string{"go.mod": "module x\n\ngo 1.26\n", "main.go": "package main\n\nfunc main() {\n\tsrv := &http.Server{Addr: \"127.0.0.1:8085\", Handler: mux}\n\tsrv.ListenAndServe()\n}\n",
+				"main_test.go": "package main\n\nfunc TestServe(t *testing.T) { go http.ListenAndServe(\":0\", nil) }\n"},
+			profile: ProfileWeb, framework: "go", port: 8085, fixed: 8085, loopback: "127.0.0.1", certain: true,
+		},
+		{
+			// A worker that only exposes Prometheus metrics is not a web
+			// server: GET / would 404 on it.
+			name:    "a metrics-only worker stays a service",
+			files:   map[string]string{"go.mod": "module x\n\ngo 1.26\n", "main.go": "package main\n\nfunc main() {\n\thttp.Handle(\"/metrics\", promhttp.Handler())\n\tgo http.ListenAndServe(\":2112\", nil)\n\tfor { work() }\n}\n"},
+			profile: ProfileService, framework: "go", port: 2112, fixed: 2112,
 		},
 		{
 			name:    "grpc keeps its port without becoming web",
@@ -307,7 +365,8 @@ func TestGoServicesThatServeHTTPAreWebWithTheirPort(t *testing.T) {
 			candidate := candidateBy(t, detectCandidates(t, test.files), BuildRecipe, "go")
 			listen := listenOf(candidate)
 			if candidate.Profile != test.profile || candidate.Framework != test.framework || candidate.Port != test.port ||
-				listen.Port != test.fixed || listen.ReadsPort != test.readsPort || listen.Loopback != test.loopback {
+				listen.Port != test.fixed || listen.ReadsPort != test.readsPort || listen.Loopback != test.loopback ||
+				listen.LoopbackCertain != test.certain {
 				t.Fatalf("candidate %s %s port %d, listen %+v", candidate.Profile, candidate.Framework, candidate.Port, listen)
 			}
 		})
@@ -337,6 +396,19 @@ func TestRustBindsAndPortsDropTheConfirmationWhenTheSourceAnswers(t *testing.T) 
 			name:      "actix reading PORT",
 			files:     map[string]string{"Cargo.toml": "[package]\nname = \"svc\"\n[dependencies]\nactix-web = \"4\"\n", "src/main.rs": "let port: u16 = std::env::var(\"PORT\").ok().and_then(|p| p.parse().ok()).unwrap_or(8081);\nHttpServer::new(|| App::new()).bind((\"0.0.0.0\", port))?.run().await\n"},
 			framework: "actix-web", port: 8081,
+		},
+		{
+			// String::from and a client's new() carry some other service's
+			// address; only the bind is the server's.
+			name: "a client address beside a bind on PORT",
+			files: map[string]string{"Cargo.toml": "[package]\nname = \"svc\"\n[dependencies]\naxum = \"0.8\"\n", "src/main.rs": "let url = String::from(\"localhost:6379\");\nlet client = Client::new(\"127.0.0.1:5432\");\n" +
+				"let port = std::env::var(\"PORT\").unwrap_or_else(|_| \"3002\".to_string());\nlet listener = TcpListener::bind(format!(\"0.0.0.0:{}\", port)).await?;\n"},
+			framework: "axum", port: 3002,
+		},
+		{
+			name:      "hyper's parsed address",
+			files:     map[string]string{"Cargo.toml": "[package]\nname = \"svc\"\n[dependencies]\nwarp = \"0.3\"\n", "src/main.rs": "Server::bind(&\"127.0.0.1:3003\".parse().unwrap()).serve(app).await?;\n"},
+			framework: "warp", port: 3003, loopback: "127.0.0.1", certain: true,
 		},
 		{
 			name:      "nothing readable still asks",
@@ -486,6 +558,30 @@ func TestDockerfilePortFallsBackToItsEnvironmentAndSource(t *testing.T) {
 	recipe := candidateBy(t, candidates, BuildRecipe, "node")
 	if listenOf(recipe).LoopbackRecipeFix != "HOST=0.0.0.0" || len(recipe.NetworkVariables) != 0 {
 		t.Fatalf("the recipe sets HOST itself: %+v", recipe)
+	}
+	// The recipe's code facts describe the code; the Dockerfile runs its own
+	// CMD, and one fronting that code on another port is not blocked by it.
+	server := map[string]string{
+		"package.json":      `{"scripts":{"start":"node server.js"},"dependencies":{"express":"4"}}`,
+		"package-lock.json": "{}",
+		"server.js":         "app.listen(3000, '127.0.0.1')\n",
+	}
+	for _, test := range []struct {
+		expose   string
+		loopback string
+	}{{"80", ""}, {"3000", "127.0.0.1"}} {
+		files := map[string]string{"Dockerfile": "FROM node:22\nEXPOSE " + test.expose + "\nCMD [\"/start.sh\"]\n"}
+		for name, content := range server {
+			files[name] = content
+		}
+		candidates := detectCandidates(t, files)
+		dockerfile := listenOf(candidateBy(t, candidates, BuildDockerfile, ""))
+		if dockerfile.Loopback != test.loopback || dockerfile.LoopbackCertain {
+			t.Fatalf("EXPOSE %s: Dockerfile listen %+v", test.expose, dockerfile)
+		}
+		if recipe := listenOf(candidateBy(t, candidates, BuildRecipe, "node")); !recipe.LoopbackCertain {
+			t.Fatalf("EXPOSE %s: recipe listen %+v", test.expose, recipe)
+		}
 	}
 }
 

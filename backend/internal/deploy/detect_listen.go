@@ -146,6 +146,43 @@ func (r listenReport) empty() bool {
 		len(r.open) == 0 && len(r.defaults) == 0 && r.hostFallback == nil && len(r.configPorts) == 0
 }
 
+// servedPorts are the literal ports the proxy could be reaching. A port bound
+// to loopback is a side listener — a debug or admin endpoint — whenever the
+// code also reads PORT or listens somewhere the scan cannot read, so it is
+// never the port the server is reached on.
+func (r listenReport) servedPorts() []sourceMark {
+	if r.readsPort == nil && len(r.open) == 0 {
+		return r.ports
+	}
+	var served []sourceMark
+	for _, mark := range r.ports {
+		if !loopbackHost(mark.host) {
+			served = append(served, mark)
+		}
+	}
+	return served
+}
+
+// loopbackCertain reports that the loopback listeners are the only way the
+// server listens: nothing else listens, and when the code reads PORT, at
+// least one loopback listener takes it — a loopback listener on a port of
+// its own beside a PORT read is the side listener, and the PORT read feeds
+// a server the scan did not see.
+func (r listenReport) loopbackCertain() bool {
+	if len(r.loopback) == 0 || len(r.open) > 0 {
+		return false
+	}
+	if r.readsPort == nil {
+		return true
+	}
+	for _, mark := range r.loopback {
+		if mark.port == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // singlePort is the one port a list agrees on; several different ones are
 // no answer.
 func singlePort(marks []sourceMark) (sourceMark, bool) {
@@ -381,10 +418,11 @@ func scanScriptListen(file string, content []byte) listenReport {
 	record := func(offset int, what string, portExpression, hostExpression string, hostGiven bool) {
 		port, fromEnv := portValue(portExpression, 0)
 		listener := mark(offset, port, "", what)
-		if port > 0 && !fromEnv {
-			r.ports = append(r.ports, listener)
-		}
+		fixed := port > 0 && !fromEnv
 		if !hostGiven {
+			if fixed {
+				r.ports = append(r.ports, listener)
+			}
 			if fastify {
 				listener.host = "localhost"
 				r.defaults = append(r.defaults, listener)
@@ -394,6 +432,15 @@ func scanScriptListen(file string, content []byte) listenReport {
 			return
 		}
 		host, fromHost, known := hostValue(hostExpression, 0)
+		if fixed {
+			// The port keeps a literal loopback host, so a side listener on
+			// localhost is never taken for the port the server is reached on.
+			fixedMark := listener
+			if known && !fromHost {
+				fixedMark.host = host
+			}
+			r.ports = append(r.ports, fixedMark)
+		}
 		listener.host = host
 		switch {
 		case !known:
@@ -518,21 +565,31 @@ func boundedCall(text string) string {
 	return text
 }
 
-// Go: the main package's listeners.
+// Go: the main package's listeners. An address is read only when it is one
+// whole string literal, or an identifier assigned exactly one: `":" + port`
+// names neither a port nor a host. A listen call whose address cannot be read
+// may well be on every interface, so it counts as an open listener, and a
+// debug server on localhost beside it can never make the loopback certain.
 var (
-	goListenCallRE = regexp.MustCompile(`\b(?:ListenAndServe|ListenAndServeTLS|Run|RunTLS|Start|StartTLS|Listen|ListenTLS)\(`)
-	goNetListenRE  = regexp.MustCompile(`\bnet\.Listen\(\s*"tcp[46]?"\s*,\s*`)
-	goAddrFieldRE  = regexp.MustCompile(`\bAddr\s*:\s*`)
-	goReadsPortRE  = regexp.MustCompile(`os\.(?:Getenv|LookupEnv)\(\s*"PORT"\s*\)`)
-	goReadsHostRE  = regexp.MustCompile(`os\.(?:Getenv|LookupEnv)\(\s*"HOST"\s*\)`)
-	goPortLiteral  = regexp.MustCompile(`"(?::)?(\d{4,5})"`)
-	goEmptyRunRE   = regexp.MustCompile(`\.Run\(\s*\)`)
-	goHostPrefixRE = regexp.MustCompile(`^"([^"]*):"\s*\+`)
-	goHTTPServerRE = regexp.MustCompile(`\bhttp\.(?:ListenAndServe|ListenAndServeTLS|Serve)\(|\bhttp\.Server\s*\{`)
+	goListenCallRE    = regexp.MustCompile(`\b(?:ListenAndServe|ListenAndServeTLS|Run|RunTLS|Start|StartTLS|Listen|ListenTLS|Serve|ServeTLS)\(`)
+	goNetListenRE     = regexp.MustCompile(`\bnet\.Listen\(\s*"tcp[46]?"\s*,`)
+	goServerLiteralRE = regexp.MustCompile(`\b(?:http|fasthttp)\.Server\s*\{`)
+	goAddrFieldRE     = regexp.MustCompile(`(?:^|[\s,{])Addr\s*:\s*([^,\n}]+)`)
+	goReadsPortRE     = regexp.MustCompile(`os\.(?:Getenv|LookupEnv)\(\s*"PORT"\s*\)`)
+	goReadsHostRE     = regexp.MustCompile(`os\.(?:Getenv|LookupEnv)\(\s*"HOST"\s*\)`)
+	goPortLiteral     = regexp.MustCompile(`"(?::)?(\d{4,5})"`)
+	goEmptyRunRE      = regexp.MustCompile(`\.Run\(\s*\)`)
+	goHostPrefixRE    = regexp.MustCompile(`^"([^"]*):"\s*\+`)
+	goHTTPServerRE    = regexp.MustCompile(`\bhttp\.(?:ListenAndServe|ListenAndServeTLS|Serve)\(|\bhttp\.Server\s*\{`)
+	goPprofImportRE   = regexp.MustCompile(`"net/http/pprof"`)
+	goAddressNameRE   = regexp.MustCompile(`(?i)(?:addr|port|listen|host|bind)[A-Za-z0-9_]*$`)
+	// goRouteRE reads the paths a main package registers, for telling a
+	// server from a worker that only exposes its metrics.
+	goRouteRE = regexp.MustCompile(`\.(?:Handle|HandleFunc|GET|POST|PUT|PATCH|DELETE|Get|Post|Put|Patch|Delete|Any|Group|Route|Mount)\(\s*"([^"]*)"`)
 )
 
 // goAddress reads a Go listen address argument: a string literal, or an
-// identifier assigned one in the same file.
+// identifier whose assignment's whole right-hand side is one.
 func goAddress(content []byte, expression string) (string, bool) {
 	expression = strings.TrimSpace(expression)
 	if literal, ok := stringLiteral(expression); ok {
@@ -541,11 +598,28 @@ func goAddress(content []byte, expression string) (string, bool) {
 	if !identifierRE.MatchString(expression) {
 		return "", false
 	}
-	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(expression) + `\s*:?=\s*("[^"\n]*")`)
+	re := regexp.MustCompile(`(?m)\b` + regexp.QuoteMeta(expression) + `(?:[ \t]+string)?[ \t]*:?=[ \t]*("[^"\n]*")[ \t]*(?://.*)?$`)
 	if match := re.FindSubmatch(content); match != nil {
 		return stringLiteral(string(match[1]))
 	}
 	return "", false
+}
+
+// goAddressLike reports whether an argument the scan cannot read is an
+// address at all. Run and Start are also what a command, a test or a
+// scheduler is started with, so only an argument that is built from a
+// quoted piece, assigned from one, or named like an address counts.
+func goAddressLike(content []byte, expression string) bool {
+	expression = strings.TrimSpace(expression)
+	if strings.Contains(expression, `"`) || goAddressNameRE.MatchString(expression) {
+		return true
+	}
+	if !identifierRE.MatchString(expression) {
+		return false
+	}
+	re := regexp.MustCompile(`(?m)\b` + regexp.QuoteMeta(expression) + `[ \t]*:?=[ \t]*([^\n]*)$`)
+	match := re.FindSubmatch(content)
+	return match != nil && (bytes.Contains(match[1], []byte(`":`)) || bytes.Contains(match[1], []byte("Getenv")))
 }
 
 func splitHostPort(address string) (string, int, bool) {
@@ -596,8 +670,47 @@ func scanGoListen(file string, content []byte, gin bool) listenReport {
 			r.open = append(r.open, found)
 		}
 	}
+	// address records a listen address expression, described by format:
+	// read, loopback by its literal host prefix, or unreadable and therefore
+	// open.
+	address := func(offset int, format, expression string) {
+		if value, ok := goAddress(content, expression); ok {
+			listener(offset, fmt.Sprintf(format, strconv.Quote(value)), value)
+		} else if match := goHostPrefixRE.FindStringSubmatch(strings.TrimSpace(expression)); match != nil && loopbackHost(match[1]) {
+			r.loopback = append(r.loopback, mark(offset, 0, match[1], fmt.Sprintf(format, boundedCall(expression))))
+		} else {
+			r.open = append(r.open, mark(offset, 0, "", fmt.Sprintf(format, boundedCall(expression))))
+		}
+	}
+	// A server literal's Addr is what its argument-less ListenAndServe
+	// listens on; only http.Server and fasthttp.Server have one, not every
+	// struct with an Addr field (a Redis client's options have one too).
+	servers, readServers := 0, 0
+	for _, loc := range goServerLiteralRE.FindAllIndex(content, -1) {
+		if commentedAt(content, loc[0], "//") {
+			continue
+		}
+		servers++
+		body, ok := callArguments(content, loc[1]-1)
+		if !ok {
+			continue
+		}
+		match := goAddrFieldRE.FindStringSubmatchIndex(body)
+		if match == nil {
+			continue
+		}
+		readServers++
+		address(loc[1]+match[2], "Addr: %s", body[match[2]:match[3]])
+	}
+	pprof := goPprofImportRE.Match(content)
 	for _, loc := range goListenCallRE.FindAllIndex(content, -1) {
 		if commentedAt(content, loc[0], "//") {
+			continue
+		}
+		name := strings.TrimSuffix(string(content[loc[0]:loc[1]]), "(")
+		receiver := content[max(0, loc[0]-5):loc[0]]
+		if name == "Listen" && bytes.HasSuffix(receiver, []byte("net.")) {
+			// net.Listen is read below, past its network argument.
 			continue
 		}
 		args, ok := callArguments(content, loc[1]-1)
@@ -605,43 +718,52 @@ func scanGoListen(file string, content []byte, gin bool) listenReport {
 			continue
 		}
 		parts := splitArguments(args)
-		if len(parts) == 0 {
+		switch {
+		case len(parts) == 0:
+			// srv.ListenAndServe() listens on the server's own Addr, which
+			// was read above when the file declares the server.
+			if strings.HasPrefix(name, "ListenAndServe") && readServers == 0 {
+				r.open = append(r.open, mark(loc[0], 0, "", name+"()"))
+			}
+			continue
+		case name == "ListenAndServeTLS" && len(parts) == 2 && servers > 0 && readServers == servers:
+			// The method form takes a certificate and a key, not an address.
+			continue
+		case name == "ListenAndServeTLS" && len(parts) == 2:
+			r.open = append(r.open, mark(loc[0], 0, "", name+"("+boundedCall(args)+")"))
 			continue
 		}
-		name := strings.TrimSuffix(string(content[loc[0]:loc[1]]), "(")
-		if address, ok := goAddress(content, parts[0]); ok {
-			listener(loc[0], name+"("+strconv.Quote(address)+")", address)
-		} else if match := goHostPrefixRE.FindStringSubmatch(parts[0]); match != nil && loopbackHost(match[1]) {
-			r.loopback = append(r.loopback, mark(loc[0], 0, match[1], name+"("+boundedCall(parts[0])+")"))
-		} else if name != "Run" && name != "Start" || strings.Contains(parts[0], "\"") {
-			// An address built at run time: `":"+port`, a config field. It
-			// may be every interface, so it never makes a loopback certain.
-			r.open = append(r.open, mark(loc[0], 0, "", name+"("+boundedCall(parts[0])+")"))
+		if value, ok := goAddress(content, parts[0]); ok {
+			host, _, valid := splitHostPort(value)
+			if !valid {
+				// t.Run("case", …), a job's Start("name"): not an address.
+				continue
+			}
+			if pprof && loopbackHost(host) && name == "ListenAndServe" && len(parts) == 2 && parts[1] == "nil" &&
+				bytes.HasSuffix(receiver, []byte("http.")) {
+				// net/http/pprof registers on the default mux; a loopback
+				// listener serving it is the debugging endpoint beside the
+				// server, not the server.
+				continue
+			}
+			listener(loc[0], name+"("+strconv.Quote(value)+")", value)
+			continue
 		}
+		if (name == "Run" || name == "Start" || name == "RunTLS" || name == "StartTLS") && !goAddressLike(content, parts[0]) {
+			continue
+		}
+		address(loc[0], name+"(%s)", parts[0])
 	}
 	for _, loc := range goNetListenRE.FindAllIndex(content, -1) {
 		if commentedAt(content, loc[0], "//") {
 			continue
 		}
-		end := bytes.IndexByte(content[loc[1]:], ')')
-		if end < 0 {
+		args, ok := callArguments(content, loc[0]+len("net.Listen"))
+		if !ok {
 			continue
 		}
-		if address, ok := goAddress(content, string(content[loc[1]:loc[1]+end])); ok {
-			listener(loc[0], "net.Listen("+strconv.Quote(address)+")", address)
-		}
-	}
-	for _, loc := range goAddrFieldRE.FindAllIndex(content, -1) {
-		if commentedAt(content, loc[0], "//") {
-			continue
-		}
-		rest := content[loc[1]:]
-		end := bytes.IndexAny(rest, ",\n}")
-		if end < 0 {
-			continue
-		}
-		if address, ok := goAddress(content, string(rest[:end])); ok {
-			listener(loc[0], "Addr: "+strconv.Quote(address), address)
+		if parts := splitArguments(args); len(parts) == 2 {
+			address(loc[0], `net.Listen("tcp", %s)`, parts[1])
 		}
 	}
 	if gin {
@@ -659,6 +781,38 @@ func scanGoListen(file string, content []byte, gin bool) listenReport {
 		r.hostFallback = host
 	}
 	return r
+}
+
+// goOperationalRoutes reports a main package whose every registered path is
+// an operational endpoint — metrics, profiling, health — which makes it a
+// worker with a side port rather than a web server.
+func goOperationalRoutes(content []byte) (routes int, operational bool) {
+	operational = true
+	for _, match := range goRouteRE.FindAllSubmatchIndex(content, -1) {
+		if commentedAt(content, match[0], "//") {
+			continue
+		}
+		route := string(content[match[2]:match[3]])
+		// Go 1.22 patterns carry a method: "GET /metrics".
+		if space := strings.LastIndexByte(route, ' '); space >= 0 {
+			route = route[space+1:]
+		}
+		routes++
+		if !operationalRoute(route) {
+			operational = false
+		}
+	}
+	return routes, operational
+}
+
+func operationalRoute(route string) bool {
+	route = strings.TrimSuffix(strings.ToLower(route), "/")
+	for _, prefix := range []string{"/metrics", "/debug", "/healthz", "/health", "/livez", "/readyz", "/ready", "/live"} {
+		if route == prefix || strings.HasPrefix(route, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 var loopbackLiteralRE = regexp.MustCompile(`"(127\.0\.0\.1|localhost|\[::1\]|::1)"`)
@@ -680,9 +834,13 @@ func hostFallbackMark(content []byte, read *regexp.Regexp, file string) *sourceM
 	return &sourceMark{path: file, line: lineOf(content, loc[0]), host: string(match[1]), what: "reads HOST, else " + string(match[1])}
 }
 
-// Rust: the served binary's bind.
+// Rust: the served binary's bind. Only the calls that take a listen address
+// are read — bind, run, serve and SocketAddr's constructors — since
+// String::from("localhost:6379") or a client's new("host:port") is some other
+// service's address.
 var (
-	rustBindCallRE  = regexp.MustCompile(`\b(?:bind|new|run|from)\(`)
+	rustBindCallRE  = regexp.MustCompile(`\b(?:bind|run|serve)\(|\bSocketAddr(?:V4|V6)?::(?:from|new)\(`)
+	rustParseAddrRE = regexp.MustCompile(`^&?"([^"]*)"\s*\.parse\b`)
 	rustReadsPortRE = regexp.MustCompile(`env::var(?:_os)?\(\s*"PORT"\s*\)|dotenvy::var\(\s*"PORT"\s*\)`)
 	rustReadsHostRE = regexp.MustCompile(`env::var(?:_os)?\(\s*"HOST"\s*\)`)
 	rustFallbackRE  = regexp.MustCompile(`unwrap_or(?:_else)?\(\s*(?:\|_\|\s*)?(?:String::from\()?(?:"(\d{2,5})"|(\d{2,5}))`)
@@ -723,6 +881,16 @@ func scanRustListen(file string, content []byte) listenReport {
 		case rustArrayAddrRE.MatchString(args):
 			match := rustArrayAddrRE.FindStringSubmatch(args)
 			host, port = strings.Join(match[1:5], "."), listenPort(match[5])
+		case strings.HasPrefix(name, "SocketAddr"):
+			// SocketAddr::from(([0, 0, 0, 0], 3000)) is the only form of its
+			// constructors that names the address in one literal.
+			continue
+		case rustParseAddrRE.MatchString(args):
+			var valid bool
+			host, port, valid = splitHostPort(rustParseAddrRE.FindStringSubmatch(args)[1])
+			if !valid {
+				continue
+			}
 		case rustTupleAddrRE.MatchString(args):
 			match := rustTupleAddrRE.FindStringSubmatch(args)
 			host, port = match[1], listenPort(match[2])
@@ -1134,6 +1302,7 @@ var (
 	pyKwargHostRE     = regexp.MustCompile(`\bhost\s*=\s*['"]([^'"]*)['"]`)
 	pyKwargHostKeyRE  = regexp.MustCompile(`\bhost\s*=`)
 	pyKwargPortRE     = regexp.MustCompile(`\bport\s*=\s*(\d{2,5})\b`)
+	pyKwargPortKeyRE  = regexp.MustCompile(`\bport\s*=`)
 	pyKwargPortEnvRE  = regexp.MustCompile(`\bport\s*=\s*int\(\s*os\.(?:environ\.get|getenv)\(\s*['"]PORT['"]\s*(?:,\s*['"]?(\d{2,5}))?`)
 	pyFlaskImportRE   = regexp.MustCompile(`(?m)^\s*(?:from\s+flask(?:_socketio)?\s+import|import\s+flask)\b`)
 	pyGunicornBindRE  = regexp.MustCompile(`(?m)^\s*bind\s*=\s*\[?\s*[fr]?['"]([^'"]+)['"]`)
@@ -1149,7 +1318,10 @@ func scanPythonListen(file string, content []byte) listenReport {
 		read := mark(loc[0], 0, "", "reads PORT")
 		r.readsPort = &read
 	}
-	calls := func(re *regexp.Regexp, name string, applies bool) {
+	// calls reads each run call's host and port. Neither app.run, socketio.run
+	// nor uvicorn.run reads PORT: given no port they listen on their own
+	// default, which is then a port the code fixes.
+	calls := func(re *regexp.Regexp, applies bool, defaultPort int) {
 		if !applies {
 			return
 		}
@@ -1161,11 +1333,37 @@ func scanPythonListen(file string, content []byte) listenReport {
 			if !ok {
 				continue
 			}
+			name := strings.TrimSuffix(string(content[loc[0]:loc[1]]), "(")
 			found := mark(loc[0], 0, "", name+"("+boundedCall(args)+")")
-			if match := pyKwargPortRE.FindStringSubmatch(args); match != nil {
+			// Flask's app.run(host, port) also takes both positionally;
+			// socketio.run and uvicorn.run take the application first.
+			var positional []string
+			if name != "socketio.run" && name != "uvicorn.run" {
+				for _, part := range splitArguments(args) {
+					if strings.Contains(part, "=") {
+						break
+					}
+					positional = append(positional, part)
+				}
+			}
+			host, hostKnown, hostGiven := "", false, pyKwargHostKeyRE.MatchString(args)
+			if match := pyKwargHostRE.FindStringSubmatch(args); match != nil {
+				host, hostKnown = match[1], true
+			} else if literal, ok := stringLiteral(firstOf(positional)); ok {
+				host, hostKnown, hostGiven = literal, true, true
+			} else if len(positional) > 0 {
+				hostGiven = true
+			}
+			found.host = host
+			switch match := pyKwargPortRE.FindStringSubmatch(args); {
+			case match != nil:
 				found.port = listenPort(match[1])
 				r.ports = append(r.ports, found)
-			} else if match := pyKwargPortEnvRE.FindStringSubmatch(args); match != nil {
+			case len(positional) > 1 && listenPort(positional[1]) > 0:
+				found.port = listenPort(positional[1])
+				r.ports = append(r.ports, found)
+			case pyKwargPortEnvRE.MatchString(args):
+				match := pyKwargPortEnvRE.FindStringSubmatch(args)
 				if r.readsPort == nil {
 					read := found
 					r.readsPort = &read
@@ -1175,15 +1373,20 @@ func scanPythonListen(file string, content []byte) listenReport {
 					fallback.port = port
 					r.fallbacks = append(r.fallbacks, fallback)
 				}
+			case !pyKwargPortKeyRE.MatchString(args) && len(positional) < 2:
+				fixed := found
+				fixed.port, fixed.what = defaultPort, fmt.Sprintf("%s(%s), default port %d", name, boundedCall(args), defaultPort)
+				r.ports = append(r.ports, fixed)
 			}
-			switch match := pyKwargHostRE.FindStringSubmatch(args); {
-			case match != nil && loopbackHost(match[1]):
-				found.host = match[1]
+			switch {
+			case hostKnown && loopbackHost(host):
 				r.loopback = append(r.loopback, found)
-			case match != nil && openHost(match[1]):
-				found.host = match[1]
+			case hostKnown && openHost(host):
 				r.open = append(r.open, found)
-			case match == nil && !pyKwargHostKeyRE.MatchString(args):
+			case hostGiven && !hostKnown:
+				// A host read from a variable may well be every interface.
+				r.open = append(r.open, found)
+			case !hostGiven:
 				// Flask's app.run and uvicorn.run both bind 127.0.0.1 when
 				// given no host; neither reads one from the environment.
 				found.host = "127.0.0.1"
@@ -1191,9 +1394,16 @@ func scanPythonListen(file string, content []byte) listenReport {
 			}
 		}
 	}
-	calls(pyRunCallRE, "app.run", pyFlaskImportRE.Match(content))
-	calls(pyUvicornRunRE, "uvicorn.run", true)
+	calls(pyRunCallRE, pyFlaskImportRE.Match(content), 5000)
+	calls(pyUvicornRunRE, true, 8000)
 	return r
+}
+
+func firstOf(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 // scanGunicornConfig reads a gunicorn configuration file's bind, which

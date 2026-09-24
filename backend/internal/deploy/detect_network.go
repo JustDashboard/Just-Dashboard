@@ -45,6 +45,10 @@ type goMainFacts struct {
 	report   listenReport
 	http     bool
 	emptyRun *sourceMark
+	// routes counts the paths the package registers, and operational says
+	// every one is a metrics, profiling or health endpoint.
+	routes      int
+	operational bool
 }
 
 const (
@@ -63,8 +67,9 @@ func newNetworkDetection(ctx context.Context, source string) *networkDetection {
 var goPackageMainRE = regexp.MustCompile(`(?m)^package\s+main\b`)
 
 // observeGo records a Go file's listeners when it belongs to a main package.
+// Test files are not in the binary, and their servers are not the service's.
 func (n *networkDetection) observeGo(rel string, content []byte) {
-	if !goPackageMainRE.Match(content) || strings.ContainsAny(rel, "\x00\r\n") {
+	if !goPackageMainRE.Match(content) || strings.ContainsAny(rel, "\x00\r\n") || strings.HasSuffix(rel, "_test.go") {
 		return
 	}
 	directory := path.Dir(rel)
@@ -73,11 +78,14 @@ func (n *networkDetection) observeGo(rel string, content []byte) {
 		if len(n.goMains) >= networkGoMainFiles {
 			return
 		}
-		facts = &goMainFacts{}
+		facts = &goMainFacts{operational: true}
 		n.goMains[directory] = facts
 	}
 	facts.report.merge(scanGoListen(rel, content, false))
 	facts.http = facts.http || goHTTPServerRE.Match(content)
+	routes, operational := goOperationalRoutes(content)
+	facts.routes += routes
+	facts.operational = facts.operational && operational
 	if loc := goEmptyRunRE.FindIndex(content); loc != nil && facts.emptyRun == nil && !commentedAt(content, loc[0], "//") {
 		facts.emptyRun = &sourceMark{path: rel, line: lineOf(content, loc[0]), port: 8080, what: "gin Run() follows PORT, else 8080"}
 	}
@@ -199,7 +207,7 @@ func settleListen(c *DetectedCandidate, in listenInputs) {
 			break
 		}
 		if code.readsPort == nil {
-			if mark, ok := singlePort(code.ports); ok {
+			if mark, ok := singlePort(code.servedPorts()); ok {
 				c.Port = mark.port
 				listen.Port, listen.PortFrom = mark.port, mark.at()+" "+mark.what
 				evidence(mark.path, fmt.Sprintf("listens on %d without reading PORT: %s%s", mark.port, mark.what, lineSuffix(mark)))
@@ -210,7 +218,7 @@ func settleListen(c *DetectedCandidate, in listenInputs) {
 		if mark, ok := singlePort(code.fallbacks); ok {
 			c.Port = mark.port
 			evidence(mark.path, fmt.Sprintf("listens on PORT, else %d%s", mark.port, lineSuffix(mark)))
-		} else if mark, ok := singlePort(code.ports); ok {
+		} else if mark, ok := singlePort(code.servedPorts()); ok {
 			c.Port = mark.port
 			evidence(mark.path, fmt.Sprintf("listens on %d and reads PORT%s", mark.port, lineSuffix(mark)))
 		} else {
@@ -228,7 +236,7 @@ func settleListen(c *DetectedCandidate, in listenInputs) {
 	case len(code.loopback) > 0:
 		first := code.loopback[0]
 		listen.Loopback, listen.LoopbackFrom = first.host, first.at()+" "+first.what
-		listen.LoopbackCertain = len(code.open) == 0
+		listen.LoopbackCertain = code.loopbackCertain()
 		evidence(first.path, fmt.Sprintf("binds %s%s, which nothing outside the container reaches", first.host, lineSuffix(first)))
 	case in.loopbackDefault != "":
 		listen.Loopback, listen.LoopbackFrom = in.loopbackDefault, in.loopbackDefaultAt
@@ -594,7 +602,11 @@ func (n *networkDetection) golang(marker *detectedMarkers, c *DetectedCandidate,
 		in.command, in.hasCommand = parseCommandListen(c.StartCommand, nil), true
 	}
 	settleListen(c, in)
-	serves := framework != "" || facts.http
+	// A net/http main package whose only routes are /metrics, /debug/pprof
+	// or a health endpoint is a worker with a side port; the web profile's
+	// readiness check on / would fail it. A web framework in go.mod keeps
+	// its routes in other packages, so its main package's are no measure.
+	serves := framework != "" || (facts.http && !(facts.routes > 0 && facts.operational))
 	if report.readsPort != nil && c.Port == 0 && serves {
 		c.Port = 8080
 		c.Evidence = append(c.Evidence, DetectionEvidence{Path: report.readsPort.path, Reason: "follows PORT; 8080 is the suggested port"})
@@ -920,10 +932,35 @@ func (n *networkDetection) dockerfile(marker *detectedMarkers, c *DetectedCandid
 		}
 	}
 	if c.Port != 0 {
-		// The image says where it listens; the code only adds a loopback.
+		// The image says where it listens; the code only adds a loopback,
+		// and only one on that port: a loopback app behind an nginx the
+		// image runs on its EXPOSE port is fronted, not unreachable.
 		in.code.ports, in.code.fallbacks, in.code.configPorts, in.code.readsPort = nil, nil, nil, nil
+		in.code.loopback = marksOnPort(in.code.loopback, c.Port)
+		in.code.defaults = marksOnPort(in.code.defaults, c.Port)
+		if fallback := in.code.hostFallback; fallback != nil && len(marksOnPort([]sourceMark{*fallback}, c.Port)) == 0 {
+			in.code.hostFallback = nil
+		}
 	}
 	settleListen(c, in)
+	if c.Listen != nil {
+		// The code was read for the recipe's start command; the image runs
+		// its own CMD, which may front that code or run other code, so a
+		// loopback read there is a warning, never a certainty.
+		c.Listen.LoopbackCertain = false
+	}
+}
+
+// marksOnPort keeps the listeners on port, and those whose port the scan
+// could not read.
+func marksOnPort(marks []sourceMark, port int) []sourceMark {
+	var kept []sourceMark
+	for _, mark := range marks {
+		if mark.port == 0 || mark.port == port {
+			kept = append(kept, mark)
+		}
+	}
+	return kept
 }
 
 // bridgeNames is the variable each `NAME=value` bridge sets.

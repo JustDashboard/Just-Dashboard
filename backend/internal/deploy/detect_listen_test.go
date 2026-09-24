@@ -73,8 +73,22 @@ func TestCompiledAndPythonListenScanners(t *testing.T) {
 		t.Fatalf("loopback through a constant = %+v", goReport)
 	}
 	goReport = scanGoListen("main.go", []byte("package main\nfunc main() {\n\tln, _ := net.Listen(\"tcp\", \"127.0.0.1:50051\")\n\ts := &http.Server{Addr: \":8081\"}\n}\n"), false)
-	if len(goReport.loopback) != 1 || len(goReport.open) != 1 || !equalInts(portsOf(goReport.ports), []int{50051, 8081}) {
+	if len(goReport.loopback) != 1 || len(goReport.open) != 1 || !equalInts(portsOf(goReport.ports), []int{8081, 50051}) {
 		t.Fatalf("net.Listen and Addr = %+v", goReport)
+	}
+	// Run and Start also start commands, tests and schedulers: only an
+	// address-like argument is an unreadable listener, and anything else
+	// unreadable is one.
+	for source, open := range map[string]int{
+		"package main\nfunc main() {\n\tif err := cmd.Run(ctx); err != nil {}\n\tjob.Start(queue)\n\tt.Run(\"case\", nil)\n}\n":     0,
+		"package main\nfunc main() {\n\taddr := \":\" + os.Getenv(\"PORT\")\n\te.Start(addr)\n}\n":                                  1,
+		"package main\nfunc main() {\n\tr.Run(cfg.ListenAddr)\n}\n":                                                                 1,
+		"package main\nfunc main() {\n\tsrv.Serve(ln)\n\tlis, _ := net.Listen(\"tcp\", fmt.Sprintf(\":%d\", port))\n}\n":            2,
+		"package main\nfunc main() {\n\tsrv := &http.Server{Handler: mux}\n\tsrv.ListenAndServeTLS(\"cert.pem\", \"key.pem\")\n}\n": 1,
+	} {
+		if report := scanGoListen("main.go", []byte(source), false); len(report.open) != open || len(report.ports) != 0 {
+			t.Fatalf("%q = %+v", source, report)
+		}
 	}
 
 	for _, test := range []struct {
@@ -107,6 +121,13 @@ func TestCompiledAndPythonListenScanners(t *testing.T) {
 	python = scanPythonListen("main.py", []byte("import os, uvicorn\nif __name__ == '__main__':\n    uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))\n"))
 	if len(python.open) != 1 || python.readsPort == nil || !equalInts(portsOf(python.fallbacks), []int{8080}) {
 		t.Fatalf("uvicorn.run = %+v", python)
+	}
+	// The default port of a run call that names none is a port the code
+	// fixes; socketio.run takes the application first, and a host read from
+	// a variable may be every interface.
+	python = scanPythonListen("app.py", []byte("from flask_socketio import SocketIO\nsocketio.run(app, host=HOST)\n"))
+	if !equalInts(portsOf(python.ports), []int{5000}) || len(python.open) != 1 || len(python.defaults) != 0 {
+		t.Fatalf("socketio.run = %+v", python)
 	}
 	python = scanPythonListen("worker.py", []byte("import asyncio\nasyncio.run(main())\n"))
 	if !python.empty() {
