@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -304,6 +305,39 @@ func TestNodeGitSourcesAreReadFromTheSpecification(t *testing.T) {
 	} {
 		if cloned, ssh := nodeGitSource(test.spec); cloned != test.cloned || ssh != test.ssh {
 			t.Fatalf("nodeGitSource(%q) = %t, %t", test.spec, cloned, ssh)
+		}
+	}
+}
+
+// Every finding the runtime planner can record fits the bounds a saved
+// draft is validated against: a detection that did not would be refused as
+// malformed when the draft is saved.
+func TestNodeRuntimeFindingsFitTheDetectionBounds(t *testing.T) {
+	t.Parallel()
+	trees := []map[string]string{
+		{"package.json": `{"name":"a","scripts":{"build":"tsc","start":"node --env-file=.env dist/index.js"},"engines":{"node":"18.x"},` +
+			`"dependencies":{"canvas":"^3.1.0","puppeteer":"^24.0.0","lib":"git+ssh://git@git.example.com/team/lib.git","node-sass":"^9.0.0",` +
+			`"@prisma/client":"^7.0.0","@t3-oss/env-nextjs":"^0.12.0","react-scripts":"4.0.3"},"devDependencies":{"prisma":"^7.0.0"}}`,
+			".nvmrc": "18", "prisma.config.ts": prisma7Config, "prisma/schema.prisma": prismaSchemaFor("sqlserver"), "src/env.js": t3Env},
+		{"package.json": `{"name":"b","scripts":{"build":"prisma generate && next build","start":"next start"},` +
+			`"dependencies":{"next":"16.0.0","playwright":"^1.48.0","@huggingface/transformers":"^3.0.0","@prisma/client":"^7.0.0"},"devDependencies":{"prisma":"^7.0.0"}}`,
+			"yarn.lock": yarnClassic, "prisma.config.ts": prisma7Config, "prisma/schema.prisma": prismaSchemaFor("postgresql")},
+	}
+	for _, files := range trees {
+		_, candidate := detectNodeTree(t, files)
+		if err := validateDetectedNodeInstall(candidate); err != nil {
+			for _, install := range candidate.NodeInstalls {
+				for _, item := range install.Findings {
+					if len(item.Means) > 512 || len(item.Action) > 512 || len(item.Title) > 512 {
+						t.Errorf("%s/%s is too long: %d %d %d", install.Manager, item.Code, len(item.Title), len(item.Means), len(item.Action))
+					}
+				}
+			}
+			t.Fatalf("detection does not validate: %v", err)
+		}
+		resolved := slices.IndexFunc(candidate.NodeInstalls, func(install DetectedNodeInstall) bool { return install.Manager == candidate.PackageManager })
+		if resolved < 0 || len(candidate.NodeInstalls[resolved].Findings) < 5 {
+			t.Fatalf("installs = %+v", candidate.NodeInstalls)
 		}
 	}
 }
