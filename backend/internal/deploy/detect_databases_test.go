@@ -43,6 +43,17 @@ func TestDatabaseDetectionAcrossManifests(t *testing.T) {
 		}, want: []DetectedDatabase{
 			{Engine: "postgres", Variable: "JDBC_DATABASE_URL", Evidence: "org.postgresql in the build manifest", Format: "jdbc"},
 		}},
+		{name: "Spring's datasource URL, not the first url key in the file", files: map[string]string{
+			"pom.xml":                            "<project><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency><dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId></dependency></dependencies></project>",
+			"src/main/resources/application.yml": "app:\n  webhook:\n    url: ${WEBHOOK_URL}\nspring:\n  datasource:\n    url: ${JDBC_DATABASE_URL}\n",
+		}, want: []DetectedDatabase{
+			{Engine: "postgres", Variable: "JDBC_DATABASE_URL", Evidence: "org.postgresql in the build manifest", Format: "jdbc"},
+		}},
+		{name: "MariaDB Connector/J reads only its own scheme", files: map[string]string{
+			"build.gradle": "plugins { id 'org.springframework.boot' version '3.4.0' }\ndependencies { runtimeOnly 'org.mariadb.jdbc:mariadb-java-client' }\n",
+		}, want: []DetectedDatabase{
+			{Engine: "mariadb", Variable: "SPRING_DATASOURCE_URL", Evidence: "mariadb-java-client in the build manifest", Format: "jdbc-mariadb"},
+		}},
 		{name: "Spring without a placeholder", files: map[string]string{
 			"build.gradle": "plugins { id 'org.springframework.boot' version '3.4.0' }\ndependencies { runtimeOnly 'com.mysql:mysql-connector-j' }\n",
 		}, want: []DetectedDatabase{
@@ -158,6 +169,8 @@ func TestConnectionStringForFormat(t *testing.T) {
 		{"postgres://jd:p%40ss@db-4.jd.internal:5432/app?sslmode=disable", "jdbc", "",
 			"jdbc:postgresql://db-4.jd.internal:5432/app?password=p%40ss&sslmode=disable&user=jd"},
 		{"mysql://jd:pw@db-5.jd.internal:3306/shop", "jdbc", "", "jdbc:mysql://db-5.jd.internal:3306/shop?password=pw&user=jd"},
+		// Quick setup's MariaDB records mysql://; Connector/J 3 wants its own scheme.
+		{"mysql://jd:pw@db-5.jd.internal:3306/shop", "jdbc-mariadb", "", "jdbc:mariadb://db-5.jd.internal:3306/shop?password=pw&user=jd"},
 		{"postgres://jd:p;w@db-4.jd.internal/app", "adonet", "", `Host=db-4.jd.internal;Port=5432;Database=app;Username=jd;Password="p;w"`},
 		{"mysql://jd:pw@db-5.jd.internal:3306/shop", "adonet", "", "Server=db-5.jd.internal;Port=3306;Database=shop;User ID=jd;Password=pw"},
 		{"mysql://jd:pw@db-5.jd.internal:3306/shop", "mysql2", "", "mysql2://jd:pw@db-5.jd.internal:3306/shop"},
@@ -172,6 +185,7 @@ func TestConnectionStringForFormat(t *testing.T) {
 	for _, refused := range []struct{ raw, format string }{
 		{"redis://:pw@db-6.jd.internal:6379", "jdbc"},
 		{"postgres://jd:pw@db-4.jd.internal/app", "mysql2"},
+		{"postgres://jd:pw@db-4.jd.internal/app", "jdbc-mariadb"},
 		{"jd:pw@tcp(127.0.0.1:3306)/app", "jdbc"},
 		{"postgres://jd:pw@db-4.jd.internal/app", "odbc"},
 	} {

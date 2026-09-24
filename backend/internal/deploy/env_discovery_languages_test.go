@@ -24,9 +24,13 @@ func TestEnvironmentDiscoveryAcrossLanguages(t *testing.T) {
 				"pom.xml": "<project><artifactId>api</artifactId><dependencies><dependency><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>",
 				"src/main/resources/application.properties": "spring.datasource.url=${DATABASE_URL}\nserver.port=${PORT:8080}\napp.cache=${CACHE_TTL:60}\n",
 				"src/main/resources/application-prod.yml":   "app:\n  jwt: ${JWT_SIGNING_KEY}\n",
-				"src/main/java/app/Config.java":             "class Config { String a = System.getenv(\"API_KEY\"); String b = System.getenv().get(\"REGION\"); @Value(\"${MAIL_FROM:noreply}\") String c; @Value(\"${WEBHOOK_TOKEN}\") String d; }",
+				// A developer's profile never loads here; a staging one may,
+				// so it is listed without deciding requiredness.
+				"src/main/resources/application-dev.yml":     "app:\n  token: ${DEV_ONLY_TOKEN}\n",
+				"src/main/resources/application-staging.yml": "app:\n  token: ${STAGING_TOKEN}\n",
+				"src/main/java/app/Config.java":              "class Config { String a = System.getenv(\"API_KEY\"); String b = System.getenv().get(\"REGION\"); @Value(\"${MAIL_FROM:noreply}\") String c; @Value(\"${WEBHOOK_TOKEN}\") String d; }",
 			},
-			names:    []string{"API_KEY", "CACHE_TTL", "DATABASE_URL", "JWT_SIGNING_KEY", "MAIL_FROM", "REGION", "WEBHOOK_TOKEN"},
+			names:    []string{"API_KEY", "CACHE_TTL", "DATABASE_URL", "JWT_SIGNING_KEY", "MAIL_FROM", "REGION", "STAGING_TOKEN", "WEBHOOK_TOKEN"},
 			required: []string{"DATABASE_URL", "JWT_SIGNING_KEY", "WEBHOOK_TOKEN"},
 			examples: map[string]string{"CACHE_TTL": "60", "MAIL_FROM": "noreply"},
 		},
@@ -68,6 +72,9 @@ func TestEnvironmentDiscoveryAcrossLanguages(t *testing.T) {
 				"mix.exs":            "defmodule App.MixProject do\n  defp deps, do: [{:phoenix, \"~> 1.7\"}]\nend\n",
 				"config/runtime.exs": "System.fetch_env!(\"SECRET_KEY_BASE\")\nSystem.get_env(\"DATABASE_URL\") ||\n  raise \"missing\"\nSystem.get_env(\"POOL_SIZE\", \"10\")\nSystem.fetch_env(\"OPTIONAL_KEY\")\n",
 				"lib/app/mailer.ex":  "System.fetch_env!(\"MAILGUN_KEY\")\n",
+				// A release never loads Mix's dev and test configuration.
+				"config/test.exs": "database: \"app_test#{System.get_env(\"MIX_TEST_PARTITION\")}\"\n",
+				"config/dev.exs":  "System.get_env(\"DEV_SECRET\") || raise \"missing\"\n",
 			},
 			// Phoenix reads PHX_HOST through its endpoint config, so it is implied.
 			names:    []string{"DATABASE_URL", "MAILGUN_KEY", "OPTIONAL_KEY", "PHX_HOST", "POOL_SIZE", "SECRET_KEY_BASE"},
@@ -108,6 +115,20 @@ func TestEnvironmentDiscoveryAcrossLanguages(t *testing.T) {
 			names:    []string{"APP_DATABASE_URL", "APP_DEBUG_SQL", "APP_REGION", "BOT_TOKEN", "CACHE_URL", "DATABASE_URL", "HANDLER_ONLY", "OPENAI_API_KEY", "REPLICA_URL"},
 			required: []string{"APP_DATABASE_URL", "BOT_TOKEN", "CACHE_URL", "DATABASE_URL", "OPENAI_API_KEY"},
 			examples: map[string]string{"APP_REGION": "eu-west-1"},
+		},
+		{
+			// A default passed positionally is still a default: django-environ's
+			// typed readers and decouple's config() take it second, while a bare
+			// env() or env.list() takes a cast there.
+			name: "Python positional defaults and casts",
+			files: map[string]string{
+				"requirements.txt":   "Django==5.2\ndjango-environ\npython-decouple\n",
+				"manage.py":          "import os\n",
+				"mysite/settings.py": "DEBUG = env.bool('DJANGO_DEBUG', False)\nWORKERS = env.int('WEB_CONCURRENCY', 4)\nTIMEOUT = config('TIMEOUT', 30, cast=int)\nCAST = env('CAST_ONLY', str)\nKEYWORD = env('KEYWORD', default=1)\nLISTED = env.list('LISTED', str)\nHOSTS = env.list('HOSTS_DEFAULT', default=['a'])\nFLAG = config('STARLETTE_FLAG', cast=bool, default=False)\nPLAIN = config('REQUIRED_PLAIN')\nTYPED = env('TYPED_DEFAULT', int, 5)\n",
+				"mysite/wsgi.py":     "application = get_wsgi_application()\n",
+			},
+			names:    []string{"CAST_ONLY", "DJANGO_DEBUG", "HOSTS_DEFAULT", "KEYWORD", "LISTED", "REQUIRED_PLAIN", "STARLETTE_FLAG", "TIMEOUT", "TYPED_DEFAULT", "WEB_CONCURRENCY"},
+			required: []string{"CAST_ONLY", "LISTED", "REQUIRED_PLAIN"},
 		},
 		{
 			name: "Python required reads only count at start-up",
@@ -174,6 +195,46 @@ func TestEnvironmentDiscoveryAcrossLanguages(t *testing.T) {
 				t.Fatalf("required = %v\n want %v", required, fixture.required)
 			}
 		})
+	}
+}
+
+func TestPythonReadHasDefault(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		callee, arguments string
+		want              bool
+	}{
+		{"env.bool", "False)", true},
+		{"env.int", "4)", true},
+		{"config", "30, cast=int)", true},
+		{"config", "cast=int)", false},
+		{"config", "cast=bool, default=False)", true},
+		{"env", "str)", false},
+		{"env", "default=1)", true},
+		{"env", "str, 'fallback')", true},
+		{"env", "'fallback')", true},
+		{"env", "None)", true},
+		{"env.list", "str)", false},
+		{"env.list", "default=['a, b'])", true},
+		{"env.str", "multiline=True)", false},
+		{"env", "cast=dict(value=int), parse_default=True)", false},
+	} {
+		content := []byte(test.arguments)
+		if got := pythonReadHasDefault(test.callee, callArguments(content, 0)); got != test.want {
+			t.Fatalf("%s(X, %s = %v, want %v (arguments %q)", test.callee, test.arguments, got, test.want, callArguments(content, 0))
+		}
+	}
+}
+
+func TestSpringDatasourceVariablesReadOnlyTheDatasourceKey(t *testing.T) {
+	t.Parallel()
+	yaml := "app:\n  webhook:\n    url: ${WEBHOOK_URL}\nspring:\n  mail:\n    url: ${MAIL_URL}\n  datasource:\n    # the pool reads it\n    url: \"${JDBC_DATABASE_URL}\"\n    username: ${DB_USER}\n---\nurl: ${TOP_URL}\n"
+	if got := springDatasourceVariables(false, []byte(yaml)); !reflect.DeepEqual(got, []string{"JDBC_DATABASE_URL"}) {
+		t.Fatalf("yaml = %v", got)
+	}
+	properties := "app.webhook.url=${WEBHOOK_URL}\nspring.datasource.hikari.jdbc-url=${POOL_URL}\n%dev.quarkus.datasource.jdbc.url=${DEV_URL}\n%prod.quarkus.datasource.jdbc.url=${PROD_URL}\n"
+	if got := springDatasourceVariables(true, []byte(properties)); !reflect.DeepEqual(got, []string{"POOL_URL", "PROD_URL"}) {
+		t.Fatalf("properties = %v", got)
 	}
 }
 

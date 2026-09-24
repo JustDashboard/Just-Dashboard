@@ -56,3 +56,10 @@ func MongoCPUUnsupported(architecture string, features []string) string {
 	}
 	return ""
 }
+
+// PostGISImageSupported reports whether quick setup's PostGIS image runs on
+// this architecture: postgis/postgis is published for x86-64 only, while
+// pgvector/pgvector ships arm64 as well.
+func PostGISImageSupported(architecture string) bool {
+	return architecture == "amd64"
+}

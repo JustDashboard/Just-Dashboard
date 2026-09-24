@@ -18,7 +18,9 @@ var (
 	pythonImportsEnvironRE = regexp.MustCompile(`(?m)^\s*from\s+os\s+import\s+[^\n]*\benviron\b`)
 	pythonBareEnvironRE    = regexp.MustCompile(`(?:^|[^.\w])environ(?:\[\s*|\.get\(\s*)['"]([A-Z][A-Z0-9_]+)['"]`)
 	pythonSubscriptReadRE  = regexp.MustCompile(`(?:\bos\.|(?:^|[^.\w]))environ\[\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\]`)
-	pythonCallReadRE       = regexp.MustCompile(`\b(?:env(?:\.(?:str|int|bool|float|list|tuple|dict|json|url|db|db_url|cache|cache_url|email|email_url|search_url|path))?|config)\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*`)
+	pythonCallReadRE       = regexp.MustCompile(`\b(env(?:\.(?:str|int|bool|float|list|tuple|dict|json|url|db|db_url|cache|cache_url|email|email_url|search_url|path))?|config)\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*`)
+	pythonKeywordArgRE     = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*=(?:[^=]|$)`)
+	pythonCastArgRE        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
 	pythonImplicitURLRE    = regexp.MustCompile(`\benv\.(db|db_url|cache|cache_url|email|email_url|search_url)\(\s*\)`)
 	pythonDatabaseURLRE    = regexp.MustCompile(`\bdj_database_url\.config\(([^)]*)\)`)
 	pythonNamedEnvArgRE    = regexp.MustCompile(`\benv\s*=\s*['"]([A-Z][A-Z0-9_]+)['"]`)
@@ -29,6 +31,10 @@ var (
 	pythonDebugAssignRE    = regexp.MustCompile(`(?m)^(?:DEBUG|app\.config\[['"]DEBUG['"]\]|app\.debug)\s*=\s*(.+)$`)
 	pythonSecretLiteralRE  = regexp.MustCompile(`(?m)^SECRET_KEY\s*=\s*[rbuRBU]?['"]([^'"]*)`)
 	pythonTruthyDefaultRE  = regexp.MustCompile(`(?i)(?:,\s*(?:default\s*=\s*)?)(?:['"](?:true|1|yes|on)['"]|True\b|1\b)`)
+	pythonQuotedNameRE     = regexp.MustCompile(`['"]([A-Z][A-Z0-9_]+)['"]`)
+	pythonHostListRE       = regexp.MustCompile(`(?m)^ALLOWED_HOSTS\s*=`)
+	pythonSplitSpaceRE     = regexp.MustCompile(`\.split\(\s*(?:\)|['"] ['"]\s*\))`)
+	pythonSplitCommaRE     = regexp.MustCompile(`\.split\(\s*['"],['"]\s*\)|\benv\.list\(|\bCsv\(|\bCommaSeparatedStrings\b|\bcast\s*=\s*list\b`)
 
 	// Ruby: ENV.fetch without a default or block raises at the read.
 	rubyFetchRE = regexp.MustCompile(`\bENV\.fetch\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\)`)
@@ -68,7 +74,8 @@ var (
 
 	// Configuration templates.
 	springPlaceholderRE = regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]+)(?::([^}]*))?\}`)
-	springDatasourceRE  = regexp.MustCompile(`(?m)^\s*(?:spring\.datasource\.)?(?:jdbc-)?url\s*[:=]\s*["']?\$\{([A-Z][A-Z0-9_]+)`)
+	springKeyValueRE    = regexp.MustCompile(`^([A-Za-z0-9_.%\-]+)\s*[:=]\s*(.*)$`)
+	springPlaceholderAt = regexp.MustCompile(`^["']?\$\{([A-Z][A-Z0-9_]+)`)
 	hoconPlaceholderRE  = regexp.MustCompile(`\$\{(\?)?([A-Z][A-Z0-9_]+)\}`)
 	erbEnvRE            = regexp.MustCompile(`\bENV(?:\.fetch\(|\[)\s*['"]([A-Z][A-Z0-9_]+)['"]`)
 
@@ -88,8 +95,11 @@ var (
 	nuxtRuntimeConfigRE = regexp.MustCompile(`\bruntimeConfig\s*:\s*\{`)
 	prismaConfigEnvRE   = regexp.MustCompile(`\benv\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\)`)
 
-	// HOST read next to a listen call is a bind address, not a public name.
-	hostBindContextRE = regexp.MustCompile(`\bPORT\b|\.listen\(|ListenAndServe|\.bind\(|bind_addr|SocketAddr|TcpListener|HttpServer::new|axum::serve|\bserve\(|\.run\(|uvicorn\.run|Kestrel|UseUrls`)
+	// HOST read next to a listen call, or falling back to the any address,
+	// is a bind address, not a public name.
+	hostBindContextRE = regexp.MustCompile(`\.listen\(|ListenAndServe|\.bind\(|bind_addr|SocketAddr|TcpListener|HttpServer::new|axum::serve|\bserve\(|\.run\(|uvicorn\.run|Kestrel|UseUrls`)
+	hostReadRE        = regexp.MustCompile(`['"]HOST['"]|\.HOST\b`)
+	anyAddressRE      = regexp.MustCompile(`['"](?:0\.0\.0\.0|::)['"]`)
 
 	// Database drivers that only speak a hosted provider's protocol.
 	hostedImportRE = regexp.MustCompile(`(?:from\s+|require\(\s*|import\(\s*)['"](drizzle-orm/neon-http|drizzle-orm/neon-serverless|drizzle-orm/vercel-postgres|drizzle-orm/planetscale-serverless|@neondatabase/serverless|@vercel/postgres|@planetscale/database|@prisma/adapter-neon|@prisma/adapter-planetscale|@upstash/redis|@vercel/kv)['"]`)
@@ -113,6 +123,7 @@ var (
 	supabaseAuthRE       = regexp.MustCompile(`\.auth\.(?:signInWithOAuth|signInWithOtp|signUp|resetPasswordForEmail)\(`)
 	stripeWebhookRE      = regexp.MustCompile(`\.webhooks\.constructEvent(?:Async)?\(`)
 	callbackURLRE        = regexp.MustCompile(`\bcallbackURL\s*:\s*['"](/[A-Za-z0-9_/.\-]*)['"]`)
+	passportStrategyRE   = regexp.MustCompile(`\bnew\s+(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?([A-Za-z0-9]*?)(?:OAuth2?|OAuth20)?Strategy\s*\(`)
 	allauthProviderRE    = regexp.MustCompile(`allauth\.socialaccount\.providers\.([a-z0-9_]+)`)
 	codegenLocalhostRE   = regexp.MustCompile(`https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[/'"\s]`)
 )
@@ -123,6 +134,7 @@ const (
 	observeSecretLiteral    = "secret_key_literal"
 	observeDebugLiteral     = "debug_literal"
 	observeDebugDefault     = "debug_default_true"
+	observeHostList         = "allowed_hosts"
 	observeDotenvRequired   = "dotenv_file_required"
 	observeHostedDriver     = "hosted_driver"
 	observeExtension        = "database_extension"
@@ -257,10 +269,24 @@ func (s *envScanner) observeSchema(rel string, content []byte) {
 func (s *envScanner) scanConfig(kind, rel string, content []byte) {
 	switch kind {
 	case "spring":
+		// A profile nobody activates in production — application-dev.yml,
+		// application-test.properties — says nothing about this deployment,
+		// and one that may be (staging, docker) is listed but decides no
+		// requiredness: only the base file and prod* profiles always load.
+		file := strings.ToLower(path.Base(rel))
+		profile := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSuffix(file, path.Ext(file)), "application"), "-")
+		if springDevProfile(profile) {
+			return
+		}
+		always := profile == "" || strings.HasPrefix(profile, "prod")
 		for _, match := range springPlaceholderRE.FindAllSubmatchIndex(content, -1) {
 			name := string(content[match[2]:match[3]])
 			if match[4] < 0 {
-				s.recordRead(name, rel, "", envReadRequired)
+				flags := envReadFlags(0)
+				if always {
+					flags = envReadRequired
+				}
+				s.recordRead(name, rel, "", flags)
 				continue
 			}
 			value := string(content[match[4]:match[5]])
@@ -273,8 +299,8 @@ func (s *envScanner) scanConfig(kind, rel string, content []byte) {
 				s.recordDefault(name, rel, value)
 			}
 		}
-		for _, match := range springDatasourceRE.FindAllSubmatch(content, -1) {
-			s.facts.observe(rel, observeSpringDatasource, string(match[1]))
+		for _, variable := range springDatasourceVariables(path.Ext(file) == ".properties", content) {
+			s.facts.observe(rel, observeSpringDatasource, variable)
 		}
 	case "hocon":
 		for _, match := range hoconPlaceholderRE.FindAllSubmatch(content, -1) {
@@ -295,6 +321,82 @@ func (s *envScanner) scanConfig(kind, rel string, content []byte) {
 	case "appsettings":
 		s.scanAppsettings(rel, content)
 	}
+}
+
+// springDevProfile names the Spring profiles only a developer's machine or
+// the test suite activates.
+func springDevProfile(profile string) bool {
+	for _, prefix := range []string{"dev", "local", "test", "ci"} {
+		if strings.HasPrefix(profile, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// springDatasourceKeys are the full keys a JVM framework reads its JDBC URL
+// from; a `url:` anywhere else — a webhook's, a mail server's — is not one.
+var springDatasourceKeys = map[string]bool{
+	"spring.datasource.url": true, "spring.datasource.jdbc-url": true, "spring.datasource.jdbcurl": true,
+	"spring.datasource.hikari.jdbc-url": true, "spring.datasource.hikari.jdbcurl": true,
+	"quarkus.datasource.jdbc.url": true, "datasources.default.url": true,
+}
+
+// springDatasourceVariables reads the variables a datasource URL key is
+// bound to, in file order: a properties file's full keys, or a YAML file's
+// nested ones by indentation. Quarkus's %prod. prefix is the production
+// profile; its %dev. and %test. keys are skipped.
+func springDatasourceVariables(properties bool, content []byte) []string {
+	type level struct {
+		indent int
+		key    string
+	}
+	found := []string{}
+	stack := []level{}
+	for index, line := range strings.Split(string(content), "\n") {
+		if index > 4000 {
+			break
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			stack = stack[:0]
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, "-") {
+			continue
+		}
+		match := springKeyValueRE.FindStringSubmatch(trimmed)
+		if match == nil {
+			continue
+		}
+		key, value := strings.ToLower(match[1]), strings.TrimSpace(match[2])
+		if !properties {
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
+				stack = stack[:len(stack)-1]
+			}
+			if value == "" {
+				stack = append(stack, level{indent: indent, key: key})
+				continue
+			}
+			parents := make([]string, 0, len(stack)+1)
+			for _, parent := range stack {
+				parents = append(parents, parent.key)
+			}
+			key = strings.Join(append(parents, key), ".")
+		}
+		if strings.HasPrefix(key, "%") {
+			profile, rest, _ := strings.Cut(key, ".")
+			if profile != "%prod" {
+				continue
+			}
+			key = rest
+		}
+		if placeholder := springPlaceholderAt.FindStringSubmatch(value); placeholder != nil && springDatasourceKeys[key] {
+			found = append(found, placeholder[1])
+		}
+	}
+	return found
 }
 
 // scanAppsettings lists .NET configuration an image expects from the
@@ -442,9 +544,27 @@ func (s *envScanner) scanLanguage(extension, rel, name string, content []byte) {
 		s.scanJavaScript(rel, name, content)
 	}
 	s.observeCommon(rel, content)
-	if _, reads := s.flags["HOST"][rel]; reads && hostBindContextRE.Match(content) {
+	if _, reads := s.flags["HOST"][rel]; reads && hostReadAsBind(content) {
 		s.flags["HOST"][rel] |= envReadBindHost
 	}
+}
+
+// hostReadAsBind reports a HOST read that is the address a server listens
+// on: within a few lines of a listen or bind call, or falling back to the
+// any address. Reading PORT beside it proves nothing — links and callbacks
+// are built from both.
+func hostReadAsBind(content []byte) bool {
+	lines := strings.Split(string(content), "\n")
+	for index, line := range lines {
+		if !hostReadRE.MatchString(line) {
+			continue
+		}
+		if anyAddressRE.MatchString(line) ||
+			hostBindContextRE.MatchString(strings.Join(lines[max(0, index-6):min(len(lines), index+7)], "\n")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *envScanner) recordAll(expression *regexp.Regexp, rel string, content []byte) {
@@ -509,22 +629,74 @@ func lineIndex(content []byte, offset int) int {
 	return strings.Count(string(content[:offset]), "\n")
 }
 
-// callArguments returns the text of a call's remaining arguments from just
-// after the first one up to its closing parenthesis, bounded.
-func callArguments(content []byte, offset int) string {
-	depth := 1
-	for index := offset; index < len(content) && index < offset+400; index++ {
-		switch content[index] {
+// callArguments splits a call's remaining arguments, from just after the
+// first one up to its closing parenthesis, at their top-level commas —
+// skipping nested brackets and string literals — bounded.
+func callArguments(content []byte, offset int) []string {
+	arguments := []string{}
+	depth, start := 1, offset
+	var quote byte
+	end := min(len(content), offset+400)
+	for index := offset; index < end; index++ {
+		c := content[index]
+		if quote != 0 {
+			if c == '\\' {
+				index++
+			} else if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
 		case '(', '[', '{':
 			depth++
 		case ')', ']', '}':
 			depth--
 			if depth == 0 {
-				return string(content[offset:index])
+				return append(arguments, strings.TrimSpace(string(content[start:index])))
+			}
+		case ',':
+			if depth == 1 {
+				arguments = append(arguments, strings.TrimSpace(string(content[start:index])))
+				start = index + 1
 			}
 		}
 	}
-	return string(content[offset:min(len(content), offset+400)])
+	return append(arguments, strings.TrimSpace(string(content[start:end])))
+}
+
+// pythonReadHasDefault reports whether an env()/config() read after its
+// name carries a default. django-environ's typed readers (env.bool, env.int…)
+// and python-decouple's config() take the default as the second positional
+// argument; django-environ's bare env(), its list/tuple/dict readers and
+// Starlette's config() take a cast there and the default after it. A type
+// name in that position is a cast, anything else — a literal, a call — is a
+// default, which also covers environs, whose bare env() is its str().
+func pythonReadHasDefault(callee string, arguments []string) bool {
+	positional := []string{}
+	for _, argument := range arguments {
+		if argument == "" {
+			continue
+		}
+		if keyword := pythonKeywordArgRE.FindStringSubmatch(argument); keyword != nil {
+			if keyword[1] == "default" {
+				return true
+			}
+			continue
+		}
+		positional = append(positional, argument)
+	}
+	if len(positional) == 0 {
+		return false
+	}
+	switch callee {
+	case "env", "config", "env.list", "env.tuple", "env.dict":
+		first := positional[0]
+		return len(positional) > 1 || !pythonCastArgRE.MatchString(first) || first == "True" || first == "False" || first == "None"
+	}
+	return true
 }
 
 func (s *envScanner) scanPython(rel, name string, content []byte) {
@@ -557,10 +729,10 @@ func (s *envScanner) scanPython(rel, name string, content []byte) {
 		rest := string(content[match[1]:min(len(content), match[1]+1)])
 		required := rest == ")"
 		if rest == "," {
-			required = !strings.Contains(callArguments(content, match[1]+1), "default")
+			required = !pythonReadHasDefault(string(content[match[2]:match[3]]), callArguments(content, match[1]+1))
 		}
 		if required {
-			s.recordRead(string(content[match[2]:match[3]]), rel, "", requiredFlag(match[0]))
+			s.recordRead(string(content[match[4]:match[5]]), rel, "", requiredFlag(match[0]))
 		}
 	}
 	implicit := map[string]string{"db": "DATABASE_URL", "db_url": "DATABASE_URL", "cache": "CACHE_URL", "cache_url": "CACHE_URL",
@@ -582,7 +754,9 @@ func (s *envScanner) scanPython(rel, name string, content []byte) {
 	}
 	s.scanPythonSettingsClasses(rel, lines)
 	s.scanPythonDebug(rel, name, content)
-	if match := pythonSecretLiteralRE.FindSubmatch(content); match != nil && (name == "settings.py" || strings.Contains(rel, "settings/") || name == "config.py") {
+	s.scanPythonHostList(rel, name, content)
+	if match := pythonSecretLiteralRE.FindSubmatch(content); match != nil && (name == "settings.py" || strings.Contains(rel, "settings/") || name == "config.py") &&
+		!pythonDevSettingsModule(rel) {
 		detail := "literal"
 		if strings.HasPrefix(string(match[1]), "django-insecure-") {
 			detail = "django-insecure"
@@ -670,15 +844,54 @@ func (s *envScanner) scanPythonSettingsClasses(rel string, lines []string) {
 	}
 }
 
+// pythonDevSettingsModule names the settings modules only a developer's
+// machine or the test suite loads — config/settings/local.py, settings_dev.py,
+// test.py — where debug on and a literal key are the point, not a leak.
+func pythonDevSettingsModule(rel string) bool {
+	for _, part := range strings.Split(strings.TrimSuffix(path.Base(rel), ".py"), "_") {
+		switch part {
+		case "local", "dev", "develop", "development", "test", "tests", "testing", "ci":
+			return true
+		}
+	}
+	return false
+}
+
+// pythonStatement returns an assignment's right-hand side from offset, with
+// the continuation lines a bracketed or chained expression runs onto, bounded.
+func pythonStatement(content []byte, offset int) string {
+	lines := strings.Split(string(content[offset:min(len(content), offset+600)]), "\n")
+	statement := lines[0]
+	for _, line := range lines[1:min(len(lines), 8)] {
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == line && !strings.HasPrefix(trimmed, ")") && !strings.HasPrefix(trimmed, "]") && !strings.HasPrefix(trimmed, ".") {
+			break
+		}
+		statement += " " + strings.TrimSpace(line)
+	}
+	return statement
+}
+
 // scanPythonDebug reads how Django or Flask turn debug mode on: a literal
 // True, or an environment read whose own default is truthy — which ships
-// tracebacks to every visitor unless DEBUG is set. The observation carries
-// the value that turns it off for the way the default is parsed, or nothing
-// when no value can (bool() of any non-empty string is True).
+// tracebacks to every visitor unless that variable is set. The observation
+// carries the variable the expression reads and the value that turns debug
+// off for the way the default is parsed — nothing when no value can (bool()
+// of any non-empty string is True).
 func (s *envScanner) scanPythonDebug(rel, name string, content []byte) {
+	if pythonDevSettingsModule(rel) {
+		return
+	}
 	for _, match := range pythonDebugAssignRE.FindAllSubmatch(content, -1) {
 		expression := strings.TrimSpace(string(match[1]))
-		reads := strings.Contains(expression, "DEBUG") &&
+		variable := ""
+		for _, read := range pythonQuotedNameRE.FindAllStringSubmatch(expression, -1) {
+			if strings.Contains(read[1], "DEBUG") {
+				variable = read[1]
+				break
+			}
+		}
+		reads := variable != "" &&
 			(strings.Contains(expression, "environ") || strings.Contains(expression, "getenv") ||
 				strings.Contains(expression, "env(") || strings.Contains(expression, "env.bool(") || strings.Contains(expression, "config("))
 		switch {
@@ -694,8 +907,35 @@ func (s *envScanner) scanPythonDebug(rel, name string, content []byte) {
 			case strings.HasPrefix(expression, "bool(") && !strings.Contains(expression, "==") && !strings.Contains(expression, " in "):
 				seed = ""
 			}
-			s.facts.observe(rel, observeDebugDefault, seed)
+			s.facts.observe(rel, observeDebugDefault, variable+"|"+seed)
 		}
+	}
+}
+
+// scanPythonHostList records which variable Django's settings read
+// ALLOWED_HOSTS from and how they split it: a comma list (env.list,
+// .split(",")) and a space list (.split(" "), .split()) need their own
+// rendering of the planned domain, and a value in the wrong one is a single
+// host Django never matches, so every request, readiness included, is a 400.
+// The separator stays empty when the expression does not say.
+func (s *envScanner) scanPythonHostList(rel, name string, content []byte) {
+	if !(name == "settings.py" || strings.Contains(rel, "settings/")) || pythonDevSettingsModule(rel) {
+		return
+	}
+	for _, match := range pythonHostListRE.FindAllIndex(content, -1) {
+		expression := pythonStatement(content, match[1])
+		read := pythonQuotedNameRE.FindStringSubmatch(expression)
+		if read == nil {
+			continue
+		}
+		separator := ""
+		switch {
+		case pythonSplitSpaceRE.MatchString(expression):
+			separator = "space"
+		case pythonSplitCommaRE.MatchString(expression):
+			separator = "comma"
+		}
+		s.facts.observe(rel, observeHostList, read[1]+"|"+separator)
 	}
 }
 
@@ -715,6 +955,11 @@ func (s *envScanner) scanRubyFetch(rel string, content []byte, bootTime bool) {
 
 func (s *envScanner) scanElixir(rel string, content []byte) {
 	config := strings.HasPrefix(rel, "config/") || strings.Contains(rel, "/config/")
+	if config && (path.Base(rel) == "dev.exs" || path.Base(rel) == "test.exs") {
+		// Mix loads these only in its dev and test environments; a release
+		// never reads them.
+		return
+	}
 	for _, match := range elixirReadRE.FindAllSubmatchIndex(content, -1) {
 		function := string(content[match[2]:match[3]])
 		name := string(content[match[4]:match[5]])
@@ -783,6 +1028,10 @@ func (s *envScanner) scanGo(rel string, content []byte) {
 				s.recordDefault(string(match[1]), rel, string(defaults[1]))
 			}
 		}
+	}
+	if strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/") {
+		// The recipe's own search skips what `go build` skips.
+		return
 	}
 	for _, match := range goDotenvLoadRE.FindAllIndex(content, -1) {
 		if goDotenvFatalRE.Match(content[match[1]:min(len(content), match[1]+240)]) {
@@ -905,8 +1154,20 @@ func (s *envScanner) scanJavaScript(rel, name string, content []byte) {
 	if stripeWebhookRE.MatchString(text) {
 		s.facts.observe(rel, observeStripeWebhook, javaScriptRoutePath(rel))
 	}
-	for _, match := range callbackURLRE.FindAllStringSubmatch(text, -1) {
-		s.facts.observe(rel, observeCallback, "passport||"+match[1])
+	// Passport's callbackURL, named by the strategy constructed around it.
+	// Better Auth's client takes a callbackURL too — where to land after
+	// sign-in, not an address a provider holds — so a file with no strategy
+	// is not read.
+	for _, match := range callbackURLRE.FindAllStringSubmatchIndex(text, -1) {
+		strategies := passportStrategyRE.FindAllStringSubmatch(text[max(0, match[0]-800):match[0]], -1)
+		if len(strategies) == 0 {
+			continue
+		}
+		provider := strings.ToLower(strategies[len(strategies)-1][1])
+		if provider == "" {
+			provider = "passport"
+		}
+		s.facts.observe(rel, observeCallback, "passport|"+provider+"|"+text[match[2]:match[3]])
 	}
 	if (strings.HasPrefix(name, "codegen.") || strings.HasPrefix(name, "openapi-ts.config.") || strings.HasPrefix(name, "orval.config.")) &&
 		codegenLocalhostRE.MatchString(text) {

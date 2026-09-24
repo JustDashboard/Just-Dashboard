@@ -379,20 +379,6 @@ var publicURLRules = []publicURLRule{
 		}
 		return ""
 	}},
-	// The loopback names keep the readiness probe, which dials 127.0.0.1,
-	// inside the allowlist.
-	{name: "ALLOWED_HOSTS", template: "{{hostname}},localhost,127.0.0.1", gate: func(s rootStack, _ DetectedVariable) string {
-		if s.django() {
-			return "Django answers only the hosts it allows"
-		}
-		return ""
-	}},
-	{name: "DJANGO_ALLOWED_HOSTS", template: "{{hostname}},localhost,127.0.0.1", gate: func(s rootStack, _ DetectedVariable) string {
-		if s.django() {
-			return "Django answers only the hosts it allows"
-		}
-		return ""
-	}},
 	{name: "SITE_URL", template: "{{scheme}}://{{hostname}}", gate: ungated("the application's own address")},
 	{name: "PUBLIC_URL", template: "{{scheme}}://{{hostname}}", gate: ungated("the application's own address")},
 	{name: "BASE_URL", template: "{{scheme}}://{{hostname}}", gate: ungated("the application's own address")},
@@ -469,7 +455,7 @@ func describeRootEnvironment(marker *detectedMarkers, scanner *envScanner, prism
 	variables = withImpliedVariables(stack, variables, prefixes)
 	databases := detectDatabases(marker, variables, prismaProviders, manifestDatabaseEvidence(stack, observations, variables)...)
 	databases = enrichDatabases(stack, databases, variables, observations)
-	notes := environmentNotes(stack, observations)
+	notes := environmentNotes(stack, observations, variables)
 	for index := range candidates {
 		candidate := &candidates[index]
 		candidate.Variables = variables
@@ -598,6 +584,30 @@ func classifyVariable(stack rootStack, variable *DetectedVariable, context class
 		variable.Setup, variable.SetupReason = "paste", "decrypts the committed Rails credentials; copy it from config/master.key"
 		return
 	}
+	if hostList, separator, source := djangoHostList(stack, variable.Name, context.observations); hostList {
+		// Bound only in the separator the settings split on: joined with the
+		// other one, the list is a single host Django never matches. The
+		// loopback names keep the readiness probe, which dials 127.0.0.1,
+		// inside the allowlist.
+		if separator != "" {
+			variable.Setup, variable.SetupReason = "domain", "Django answers only the hosts it allows"
+			if source != "" {
+				variable.SetupReason += " (" + source + " splits it on " + map[string]string{",": "commas", " ": "spaces"}[separator] + ")"
+			}
+			variable.DomainTemplate = strings.Join([]string{"{{hostname}}", "localhost", "127.0.0.1"}, separator)
+		}
+		return
+	}
+	if stack.django() || stack.flask() {
+		for _, debug := range observed(context.observations, observeDebugDefault) {
+			name, seed, _ := strings.Cut(debug.detail, "|")
+			if name == variable.Name && seed != "" {
+				variable.Setup, variable.DefaultValue = "default", seed
+				variable.SetupReason = "debug mode is on unless " + name + " is set (" + debug.source + ")"
+				return
+			}
+		}
+	}
 	for _, rule := range publicURLRules {
 		if rule.name != variable.Name {
 			continue
@@ -622,12 +632,6 @@ func classifyVariable(stack rootStack, variable *DetectedVariable, context class
 		variable.Setup, variable.DefaultValue = "default", "0.0.0.0"
 		variable.SetupReason = "read as the address the server listens on; inside the container only 0.0.0.0 is reachable"
 		return
-	case variable.Name == "DEBUG" && (stack.django() || stack.flask()):
-		if debug := observed(context.observations, observeDebugDefault); len(debug) > 0 && debug[0].detail != "" {
-			variable.Setup, variable.DefaultValue = "default", debug[0].detail
-			variable.SetupReason = "debug mode is on unless DEBUG is set (" + debug[0].source + ")"
-		}
-		return
 	case variable.Name == "SOLID_QUEUE_IN_PUMA" && solidQueueInPuma(stack):
 		variable.Setup, variable.DefaultValue = "default", "true"
 		variable.SetupReason = "Puma runs Solid Queue's jobs only when it is set"
@@ -644,6 +648,24 @@ func classifyVariable(stack rootStack, variable *DetectedVariable, context class
 			variable.SetupReason = "documented in " + variable.Sources[0]
 		}
 	}
+}
+
+// djangoHostList reports whether a variable is the list Django's
+// ALLOWED_HOSTS is read from, the separator its settings split it on (","
+// or " "; empty when the expression does not say), and the settings file
+// that says so. A name the settings were not seen reading counts only when
+// it is one of the two conventional names.
+func djangoHostList(stack rootStack, name string, observations []environmentObservation) (bool, string, string) {
+	if !stack.django() {
+		return false, "", ""
+	}
+	for _, observation := range observed(observations, observeHostList) {
+		variable, separator, _ := strings.Cut(observation.detail, "|")
+		if variable == name {
+			return true, map[string]string{"comma": ",", "space": " "}[separator], observation.source
+		}
+	}
+	return name == "ALLOWED_HOSTS" || name == "DJANGO_ALLOWED_HOSTS", "", ""
 }
 
 // withImpliedVariables adds what a framework reads internally and refuses to
@@ -797,7 +819,7 @@ func describeDockerfileFramework(stack rootStack, candidate *DetectedCandidate) 
 
 // environmentNotes turns a root's observations and manifests into the notes
 // preflight answers, in a stable order.
-func environmentNotes(stack rootStack, observations []environmentObservation) []EnvironmentNote {
+func environmentNotes(stack rootStack, observations []environmentObservation, variables []DetectedVariable) []EnvironmentNote {
 	notes := []EnvironmentNote{}
 	seen := map[string]bool{}
 	add := func(code, detail, source string) {
@@ -815,7 +837,16 @@ func environmentNotes(stack rootStack, observations []environmentObservation) []
 			if python {
 				add(observation.kind, observation.detail, observation.source)
 			}
-		case observeDotenvRequired, observeAuthService, observeBuildLocalhost:
+		case observeDotenvRequired:
+			// A recipe image creates the file only for the entry points the
+			// build compiles, so a workspace member's or an example's main.rs
+			// is not this root's.
+			if observation.detail == "dotenvy" && observation.source != path.Join(stack.root, "src/main.rs") &&
+				path.Dir(observation.source) != path.Join(stack.root, "src/bin") {
+				continue
+			}
+			add(observation.kind, observation.detail, observation.source)
+		case observeAuthService, observeBuildLocalhost:
 			add(observation.kind, observation.detail, observation.source)
 		case observeStripeWebhook:
 			add(observation.kind, observation.detail, observation.source)
@@ -868,6 +899,11 @@ func environmentNotes(stack rootStack, observations []environmentObservation) []
 		add("rails_credentials", "", path.Join(stack.root, credentials))
 		if requireMasterKey.Match(stack.facts[path.Join(stack.root, "config/environments/production.rb")]) {
 			add("rails_require_master_key", "", path.Join(stack.root, "config/environments/production.rb"))
+		}
+	}
+	for _, variable := range variables {
+		if hostList, _, _ := djangoHostList(stack, variable.Name, observations); hostList && variable.Setup == "" {
+			add("allowed_hosts_unbound", variable.Name, firstSource(variable))
 		}
 	}
 	if _, ok := stack.facts[path.Join(stack.root, "rel/overlays/bin/migrate")]; ok && stack.phoenix() {

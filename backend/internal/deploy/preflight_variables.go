@@ -396,7 +396,13 @@ func publicURLFinding(state environmentState, variable DetectedVariable) []Prefl
 	if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
 		host = parsed.Hostname()
 	}
-	host = strings.ToLower(strings.Split(host, ",")[0])
+	// A host list reads in the separator its template was rendered with; a
+	// value joined with the other one is a single host that matches nothing.
+	separator := ","
+	if strings.Contains(variable.DomainTemplate, " ") {
+		separator = " "
+	}
+	host = strings.ToLower(strings.TrimSpace(strings.Split(host, separator)[0]))
 	matches := false
 	for _, candidate := range state.domains {
 		if strings.EqualFold(candidate.Hostname, host) {
@@ -457,15 +463,28 @@ func frameworkFindings(state environmentState) []PreflightFinding {
 		insecure = append(insecure, note.Path+" turns DEBUG on literally")
 	}
 	for _, note := range state.note(observeDebugDefault) {
-		if note.Detail == "" || !state.set("DEBUG") {
-			insecure = append(insecure, note.Path+" turns debug mode on unless DEBUG is set")
+		name, seed, _ := strings.Cut(note.Detail, "|")
+		switch {
+		case seed == "":
+			insecure = append(insecure, note.Path+" turns debug mode on for any non-empty "+name)
+		case !state.set(name):
+			insecure = append(insecure, note.Path+" turns debug mode on unless "+name+" is set")
 		}
 	}
 	if len(insecure) > 0 {
 		findings = append(findings, finding("django_insecure_settings", PreflightWarning,
 			"Debug mode or a committed secret key would reach production", strings.Join(insecure, "; "),
 			"Debug pages show settings and tracebacks to every visitor, and a committed key lets anyone who can read the repository forge sessions.",
-			"Read SECRET_KEY and DEBUG from variables; the dashboard generates the key and sets DEBUG off.", "deploy", "variables"))
+			"Read SECRET_KEY and DEBUG from variables; the dashboard generates the key and sets debug off.", "deploy", "variables"))
+	}
+	for _, note := range state.note("allowed_hosts_unbound") {
+		if state.set(note.Detail) {
+			continue
+		}
+		findings = append(findings, finding("allowed_hosts_unbound_"+strings.ToLower(note.Detail), PreflightWarning,
+			note.Detail+" is not bound to the domain", "the settings do not say whether they split it on commas or spaces",
+			"Django answers 400 to every host it does not allow, the readiness check included.",
+			"Set "+note.Detail+" to the domain, localhost and 127.0.0.1, separated the way your settings split it.", "deploy", variableField(note.Detail)))
 	}
 	for _, note := range state.note(observeDotenvRequired) {
 		if state.method == BuildRecipe {
@@ -515,10 +534,18 @@ func databaseFindings(state environmentState, configuration PlanConfiguration, o
 				"deploy", variableField(database.Variable)))
 		}
 		if database.Format != "" && known && (strings.Contains(value, "://") || reference) && !formatMatches(database.Format, value) {
+			action := "Enter the " + formatLabel(database.Format) + " form of the connection string, or link the database from the variables step, which writes it."
+			if reference {
+				// The same database in the consumer's shape is one suffix away,
+				// and a typed reference can be edited wherever variables are.
+				target := strings.TrimSuffix(strings.TrimPrefix(value, "${{database."), "}}")
+				action = "Change it to ${{database." + strings.Split(target, ".")[0] + "." + database.Format + "}}, the same database in the " +
+					formatLabel(database.Format) + " form."
+			}
 			findings = append(findings, finding("database_url_format", PreflightWarning,
 				database.Variable+" needs a "+formatLabel(database.Format)+" connection string", "the value is a URL",
 				"The application parses this variable as "+formatLabel(database.Format)+" and refuses a postgres:// or mysql:// URL.",
-				"Link the database again from this screen; the link writes the "+formatLabel(database.Format)+" form.", "deploy", variableField(database.Variable)))
+				action, "deploy", variableField(database.Variable)))
 		}
 		if len(database.AlsoVariables) > 0 && linked && (database.Engine == "mysql" || database.Engine == "mariadb") {
 			findings = append(findings, finding("rails_multidb_create_denied", PreflightWarning,
@@ -538,10 +565,14 @@ func databaseFindings(state environmentState, configuration PlanConfiguration, o
 					}
 				}
 				if len(missing) > 0 {
+					action := "Link a PostgreSQL started with the " + extensionImage(missing[0]) + " variant, which quick setup offers."
+					if missing[0] == "postgis" && !PostGISImageSupported(observation.Architecture) {
+						action = "Link a PostgreSQL with PostGIS installed; the PostGIS image quick setup uses is published for x86-64 only."
+					}
 					findings = append(findings, finding("database_extension_missing", PreflightBlocked,
 						"The linked database cannot run this schema", "no "+strings.Join(missing, " or ")+" extension on "+dependency.Status,
 						"The schema creates the extension on its first migration, and this server does not ship it.",
-						"Link a PostgreSQL started with the "+extensionImage(missing[0])+" variant, which quick setup offers.", "databases", "dependencies"))
+						action, "databases", "dependencies"))
 				}
 			}
 		}
@@ -574,6 +605,8 @@ func formatMatches(format, value string) bool {
 	switch format {
 	case "jdbc":
 		return strings.HasPrefix(value, "jdbc:") || strings.Contains(value, ".jdbc")
+	case "jdbc-mariadb":
+		return strings.HasPrefix(value, "jdbc:mariadb:") || strings.Contains(value, ".jdbc-mariadb")
 	case "adonet":
 		return !strings.Contains(value, "://") && !strings.HasPrefix(value, "${{") || strings.Contains(value, ".adonet")
 	case "mysql2":
@@ -583,7 +616,7 @@ func formatMatches(format, value string) bool {
 }
 
 func formatLabel(format string) string {
-	return map[string]string{"jdbc": "JDBC", "adonet": "ADO.NET", "mysql2": "mysql2://"}[format]
+	return map[string]string{"jdbc": "JDBC", "jdbc-mariadb": "jdbc:mariadb://", "adonet": "ADO.NET", "mysql2": "mysql2://"}[format]
 }
 
 func hostedLabel(hosted string) string {
@@ -654,16 +687,26 @@ func callbackFindings(state environmentState) []PreflightFinding {
 		if !known {
 			continue
 		}
-		keyDomain := clerkKeyDomain(value)
+		keyDomain := strings.ToLower(clerkKeyDomain(value))
 		domain, planned := state.primaryDomain()
 		if keyDomain == "" || !planned {
 			continue
 		}
-		if registrableDomain(keyDomain) != registrableDomain(domain.Hostname) {
+		hostname := strings.ToLower(domain.Hostname)
+		switch {
+		case hostname == keyDomain || strings.HasSuffix(hostname, "."+keyDomain):
+		case registrableDomain(keyDomain) == registrableDomain(hostname):
+			// The same site under another name: Clerk serves it only when the
+			// instance lists it, which the key cannot say.
+			findings = append(findings, finding("clerk_key_domain_mismatch", PreflightWarning,
+				"This Clerk production key was issued for "+keyDomain, name+" was issued for "+keyDomain+", not "+hostname,
+				"A Clerk production instance serves its own domain and the subdomains it lists, so sign-in fails on "+hostname+" unless it is one.",
+				"Check that "+hostname+" is allowed in the Clerk instance, or deploy on "+keyDomain+".", "deploy", variableField(name)))
+		default:
 			findings = append(findings, finding("clerk_key_domain_mismatch", PreflightBlocked,
 				"This Clerk production key belongs to "+registrableDomain(keyDomain), name+" was issued for "+keyDomain,
-				"A Clerk production instance serves only its own domain, so sign-in fails on "+domain.Hostname+".",
-				"Add "+domain.Hostname+" to a Clerk production instance and use its key, or deploy on the key's domain.", "deploy", variableField(name)))
+				"A Clerk production instance serves only its own domain, so sign-in fails on "+hostname+".",
+				"Add "+hostname+" to a Clerk production instance and use its key, or deploy on the key's domain.", "deploy", variableField(name)))
 		}
 	}
 	return findings

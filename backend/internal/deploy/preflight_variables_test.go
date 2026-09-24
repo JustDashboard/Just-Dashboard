@@ -176,10 +176,53 @@ func TestEnvironmentFindings(t *testing.T) {
 		{
 			name: "a debug default the dashboard turns off is answered",
 			candidate: DetectedCandidate{Name: "django", BuildMethod: BuildRecipe, Framework: "django", EnvironmentNotes: []EnvironmentNote{
-				{Code: "debug_default_true", Detail: "False", Path: "mysite/settings.py"},
+				{Code: "debug_default_true", Detail: "DJANGO_DEBUG|False", Path: "config/settings/base.py"},
+			}},
+			configuration: PlanConfiguration{Variables: planned(PlannedVariable{Name: "DJANGO_DEBUG", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "False"})},
+			absent:        []string{"django_insecure_settings"},
+		},
+		{
+			// DEBUG itself being set says nothing when the settings read another name.
+			name: "a debug default read under another name stays on",
+			candidate: DetectedCandidate{Name: "django", BuildMethod: BuildRecipe, Framework: "django", EnvironmentNotes: []EnvironmentNote{
+				{Code: "debug_default_true", Detail: "DJANGO_DEBUG|False", Path: "config/settings/base.py"},
 			}},
 			configuration: PlanConfiguration{Variables: planned(PlannedVariable{Name: "DEBUG", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "False"})},
-			absent:        []string{"django_insecure_settings"},
+			want:          map[string]PreflightSeverity{"django_insecure_settings": PreflightWarning},
+		},
+		{
+			name: "a host list whose separator is unknown is not bound",
+			candidate: DetectedCandidate{Name: "django", BuildMethod: BuildRecipe, Framework: "django", EnvironmentNotes: []EnvironmentNote{
+				{Code: "allowed_hosts_unbound", Detail: "ALLOWED_HOSTS", Path: ".env.example"},
+			}},
+			want: map[string]PreflightSeverity{"allowed_hosts_unbound_allowed_hosts": PreflightWarning},
+		},
+		{
+			name: "a host list set by hand answers its note",
+			candidate: DetectedCandidate{Name: "django", BuildMethod: BuildRecipe, Framework: "django", EnvironmentNotes: []EnvironmentNote{
+				{Code: "allowed_hosts_unbound", Detail: "ALLOWED_HOSTS", Path: ".env.example"},
+			}},
+			staged: map[string]string{"ALLOWED_HOSTS": "app.example.com"},
+			absent: []string{"allowed_hosts_unbound_allowed_hosts"},
+		},
+		{
+			name: "a space-separated host list bound to the domain passes",
+			candidate: DetectedCandidate{Name: "django", BuildMethod: BuildRecipe, Framework: "django", Variables: []DetectedVariable{
+				{Name: "DJANGO_ALLOWED_HOSTS", Sources: []string{"app/settings.py"}, Setup: "domain", SetupReason: "Django answers only the hosts it allows", DomainTemplate: "{{hostname}} localhost 127.0.0.1"},
+			}},
+			configuration: PlanConfiguration{Domains: appDomain, Variables: planned(
+				PlannedVariable{Name: "DJANGO_ALLOWED_HOSTS", Sensitivity: "plain", Scopes: []string{"runtime"}, DomainTemplate: "{{hostname}} localhost 127.0.0.1", Value: "app.example.com localhost 127.0.0.1"},
+			)},
+			want: map[string]PreflightSeverity{"public_url_bound_django_allowed_hosts": PreflightPass},
+		},
+		{
+			name: "a comma-joined value for a space-separated list is one host that matches nothing",
+			candidate: DetectedCandidate{Name: "django", BuildMethod: BuildRecipe, Framework: "django", Variables: []DetectedVariable{
+				{Name: "DJANGO_ALLOWED_HOSTS", Sources: []string{"app/settings.py"}, Setup: "domain", SetupReason: "Django answers only the hosts it allows", DomainTemplate: "{{hostname}} localhost 127.0.0.1"},
+			}},
+			configuration: PlanConfiguration{Domains: appDomain},
+			staged:        map[string]string{"DJANGO_ALLOWED_HOSTS": "app.example.com,localhost"},
+			want:          map[string]PreflightSeverity{"public_url_mismatch_django_allowed_hosts": PreflightWarning},
 		},
 		{
 			name: "an empty .env in a recipe image passes; a Dockerfile must provide it",
@@ -196,6 +239,14 @@ func TestEnvironmentFindings(t *testing.T) {
 			}},
 			staged: map[string]string{"DATABASE_URL": "${{database.4}}", "SPRING_DATASOURCE_URL": "${{database.5}}"},
 			want:   map[string]PreflightSeverity{"hosted_driver_local_database": PreflightWarning, "database_url_format": PreflightWarning},
+		},
+		{
+			name: "MariaDB Connector/J refuses the mysql JDBC scheme",
+			candidate: DetectedCandidate{Name: "api", BuildMethod: BuildRecipe, Databases: []DetectedDatabase{
+				{Engine: "mariadb", Variable: "SPRING_DATASOURCE_URL", Evidence: "mariadb-java-client", Format: "jdbc-mariadb"},
+			}},
+			staged: map[string]string{"SPRING_DATASOURCE_URL": "${{database.5.jdbc}}"},
+			want:   map[string]PreflightSeverity{"database_url_format": PreflightWarning},
 		},
 		{
 			name: "the JDBC form of the link satisfies the consumer",
@@ -240,6 +291,13 @@ func TestEnvironmentFindings(t *testing.T) {
 			configuration: PlanConfiguration{Domains: appDomain},
 			staged:        map[string]string{"NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_" + base64.RawStdEncoding.EncodeToString([]byte("clerk.old-host.com$"))},
 			want:          map[string]PreflightSeverity{"external_callback_registration": PreflightWarning, "clerk_key_domain_mismatch": PreflightBlocked},
+		},
+		{
+			name:          "a Clerk key for another host on the same site warns",
+			candidate:     DetectedCandidate{Name: "web", BuildMethod: BuildRecipe},
+			configuration: PlanConfiguration{Domains: []PlannedDomain{{Hostname: "shop.example.com", HTTPS: true, Ownership: OwnershipManaged}}},
+			staged:        map[string]string{"NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_" + base64.RawStdEncoding.EncodeToString([]byte("clerk.app.example.com$"))},
+			want:          map[string]PreflightSeverity{"clerk_key_domain_mismatch": PreflightWarning},
 		},
 		{
 			name:          "a Clerk key for the planned domain passes",
@@ -373,5 +431,55 @@ func TestCPUFeaturesAndMongoSupport(t *testing.T) {
 		if got := MongoCPUUnsupported(test.architecture, test.features); got != test.want {
 			t.Fatalf("%s %v = %q", test.architecture, test.features, got)
 		}
+	}
+}
+
+// A finding's action is the concrete next step: the shaped reference that
+// resolves to the same database, and on a host the PostGIS image does not
+// run on, a server the operator brings rather than one quick setup cannot
+// start.
+func TestEnvironmentFindingActionsNameTheFix(t *testing.T) {
+	t.Parallel()
+	spring := DetectedCandidate{Name: "api", BuildMethod: BuildRecipe, Databases: []DetectedDatabase{
+		{Engine: "mariadb", Variable: "SPRING_DATASOURCE_URL", Evidence: "mariadb-java-client", Format: "jdbc-mariadb"},
+	}}
+	draft := variablesDraft(spring, PlanConfiguration{}, map[string]string{"SPRING_DATASOURCE_URL": "${{database.5.jdbc}}"})
+	format, ok := findingByCode(environmentFindings(draft, *draft.Data.Configuration, HostObservation{}), "database_url_format")
+	if !ok || !strings.Contains(format.Action, "${{database.5.jdbc-mariadb}}") {
+		t.Fatalf("database_url_format = %+v", format)
+	}
+	geo := DetectedCandidate{Name: "geo", BuildMethod: BuildRecipe, Databases: []DetectedDatabase{
+		{Engine: "postgres", Variable: "DATABASE_URL", Evidence: "geoalchemy2", Extensions: []string{"postgis"}},
+	}}
+	link := PlanConfiguration{Dependencies: []PlannedDependency{{Kind: "database", Ownership: OwnershipLinked, ResourceKind: "database_connection", ResourceID: "4"}}}
+	for architecture, want := range map[string]string{"amd64": "which quick setup offers", "arm64": "x86-64 only"} {
+		observation := HostObservation{Architecture: architecture, Dependencies: []DependencyObservation{
+			{Kind: "database", ResourceKind: "database_connection", ResourceID: "4", Available: true, Status: "jd-postgres", Extensions: []string{}},
+		}}
+		draft := variablesDraft(geo, link, nil)
+		missing, ok := findingByCode(environmentFindings(draft, *draft.Data.Configuration, observation), "database_extension_missing")
+		if !ok || !strings.Contains(missing.Action, want) {
+			t.Fatalf("%s: database_extension_missing = %+v", architecture, missing)
+		}
+	}
+	if !PostGISImageSupported("amd64") || PostGISImageSupported("arm64") {
+		t.Fatal("postgis/postgis is published for amd64 only")
+	}
+}
+
+// Linked databases are asked about extensions only when the schema needs one.
+func TestObservationRequestAsksForTheSchemasExtensions(t *testing.T) {
+	t.Parallel()
+	plain := variablesDraft(DetectedCandidate{Name: "web", BuildMethod: BuildRecipe, Databases: []DetectedDatabase{
+		{Engine: "postgres", Variable: "DATABASE_URL", Evidence: "pg"},
+	}}, PlanConfiguration{}, nil)
+	if request := preflightObservationRequest(plain, *plain.Data.Configuration); request.DatabaseExtensions != nil {
+		t.Fatalf("extensions = %v", request.DatabaseExtensions)
+	}
+	vector := variablesDraft(DetectedCandidate{Name: "rag", BuildMethod: BuildRecipe, Databases: []DetectedDatabase{
+		{Engine: "postgres", Variable: "DATABASE_URL", Evidence: "pgvector", Extensions: []string{"vector", "postgis"}},
+	}}, PlanConfiguration{}, nil)
+	if request := preflightObservationRequest(vector, *vector.Data.Configuration); !reflect.DeepEqual(request.DatabaseExtensions, []string{"postgis", "vector"}) {
+		t.Fatalf("extensions = %v", request.DatabaseExtensions)
 	}
 }

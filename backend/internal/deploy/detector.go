@@ -267,11 +267,11 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			denoEntryPaths = append(denoEntryPaths, filepath.ToSlash(rel))
 		}
 		if !interesting {
-			if scanner.scannable(filepath.ToSlash(rel), name) {
+			if scanner.factFile(filepath.ToSlash(rel), name) || scanner.scannable(filepath.ToSlash(rel), name) {
 				// Application code is read under the scanner's own budget, apart
 				// from detection's limits: the names an application reads are a
 				// convenience for the form, never a reason to call a scan truncated.
-				if info, err := entry.Info(); err == nil && scanner.budget(info.Size()) {
+				if info, err := entry.Info(); err == nil && scanner.admit(filepath.ToSlash(rel), name, info.Size()) {
 					if content, _, err := readDetectionFile(path, envScanMaxFile); err == nil {
 						scanner.scanSource(filepath.ToSlash(rel), content)
 					}

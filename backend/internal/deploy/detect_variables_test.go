@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -156,6 +157,36 @@ func TestVariableClassificationPerFramework(t *testing.T) {
 			unclassified: []string{"SECRET_KEY_STRIPE"},
 		},
 		{
+			// The testdriven.io convention: a space-separated list, bound in
+			// spaces, and a debug default read under another name, seeded off.
+			// config/settings/local.py turns debug on for a developer only.
+			name: "Django settings that split hosts on spaces",
+			files: map[string]string{
+				"requirements.txt":              "Django==5.2\ndjango-environ\n",
+				"manage.py":                     "import os\n",
+				"config/settings/base.py":       "DEBUG = env.bool('DJANGO_DEBUG', True)\nALLOWED_HOSTS = os.environ.get(\n    'DJANGO_ALLOWED_HOSTS', 'localhost'\n).split(' ')\n",
+				"config/settings/local.py":      "DEBUG = True\nSECRET_KEY = 'local-only'\n",
+				"config/settings/production.py": "CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS')\n",
+				"config/wsgi.py":                "application = get_wsgi_application()\n",
+			},
+			want: map[string]expectation{
+				"DJANGO_ALLOWED_HOSTS": {setup: "domain", template: "{{hostname}} localhost 127.0.0.1"},
+				"DJANGO_DEBUG":         {setup: "default", value: "False"},
+			},
+		},
+		{
+			name: "cookiecutter-django reads its host list with env.list",
+			files: map[string]string{
+				"requirements.txt":              "Django==5.2\ndjango-environ\n",
+				"manage.py":                     "import os\n",
+				"config/settings/production.py": "ALLOWED_HOSTS = env.list(\"DJANGO_ALLOWED_HOSTS\", default=[\"example.com\"])\n",
+				"config/wsgi.py":                "application = get_wsgi_application()\n",
+			},
+			want: map[string]expectation{
+				"DJANGO_ALLOWED_HOSTS": {setup: "domain", template: "{{hostname}},localhost,127.0.0.1"},
+			},
+		},
+		{
 			name: "SvelteKit on the Node adapter",
 			files: map[string]string{
 				"package.json":            `{"scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"2","@sveltejs/adapter-node":"5","vite":"6"}}`,
@@ -294,6 +325,34 @@ func TestBundlerDefinesMarkVariablesInlined(t *testing.T) {
 	}
 }
 
+// A host list whose separator the settings do not reveal is left unbound and
+// noted, since a list joined the wrong way is one host Django never matches.
+func TestDjangoHostListWithAnUnknownSeparatorIsNoted(t *testing.T) {
+	t.Parallel()
+	result := detectFixture(t, map[string]string{
+		"requirements.txt":   "Django==5.2\n",
+		"manage.py":          "import os\n",
+		".env.example":       "ALLOWED_HOSTS=localhost\n",
+		"mysite/settings.py": "ALLOWED_HOSTS = hosts_from(os.environ['ALLOWED_HOSTS'])\n",
+		"mysite/wsgi.py":     "application = get_wsgi_application()\n",
+	})
+	candidate := result.Candidates[0]
+	hosts, _ := variableNamed(candidate.Variables, "ALLOWED_HOSTS")
+	if hosts.Setup != "" || hosts.DomainTemplate != "" {
+		t.Fatalf("ALLOWED_HOSTS = %+v", hosts)
+	}
+	found := false
+	for _, note := range candidate.EnvironmentNotes {
+		found = found || (note.Code == "allowed_hosts_unbound" && note.Detail == "ALLOWED_HOSTS")
+	}
+	if !found {
+		t.Fatalf("notes = %+v", candidate.EnvironmentNotes)
+	}
+	if err := validateDetectedEnvironment(candidate); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // HOST is a bind address when it is read beside a listen; otherwise it is a
 // name like any other, because some applications build public URLs from it.
 func TestHostVariableIsABindAddressOnlyWhereItIsListenedOn(t *testing.T) {
@@ -314,6 +373,27 @@ func TestHostVariableIsABindAddressOnlyWhereItIsListenedOn(t *testing.T) {
 	host, ok = variableNamed(public.Candidates[0].Variables, "HOST")
 	if !ok || host.Setup != "" {
 		t.Fatalf("public HOST = %+v", host)
+	}
+	// Reading PORT beside HOST is how links are built too.
+	links := detectFixture(t, map[string]string{
+		"package.json":      `{"scripts":{"start":"node server.js"},"dependencies":{"express":"5"}}`,
+		"package-lock.json": `{}`,
+		"server.js":         "const app = express()\n",
+		"lib/links.js":      "export const base = `https://${process.env.HOST}:${process.env.PORT}`\n",
+	})
+	host, ok = variableNamed(links.Candidates[0].Variables, "HOST")
+	if !ok || host.Setup != "" {
+		t.Fatalf("link HOST = %+v", host)
+	}
+	fallback := detectFixture(t, map[string]string{
+		"package.json":      `{"scripts":{"start":"node server.js"},"dependencies":{"fastify":"5"}}`,
+		"package-lock.json": `{}`,
+		"server.js":         "import { config } from './config.js'\n",
+		"config.js":         "export const config = { host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT) }\n",
+	})
+	host, ok = variableNamed(fallback.Candidates[0].Variables, "HOST")
+	if !ok || host.Setup != "default" || host.DefaultValue != "0.0.0.0" {
+		t.Fatalf("any-address HOST = %+v", host)
 	}
 }
 
@@ -425,6 +505,34 @@ func TestPhoenixDockerfileCandidate(t *testing.T) {
 	}
 }
 
+// Rails' credentials, Puma and database.yml are read whatever the size of the
+// app/ tree walked before them.
+func TestRailsFactsSurviveALargeSourceTree(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"Dockerfile":                        "FROM ruby:3.4-slim\nEXPOSE 80\n",
+		"Gemfile.lock":                      "GEM\n  specs:\n    pg (1.5.9)\n    railties (8.0.3)\n    solid_queue (1.1.5)\n",
+		"config/application.rb":             "module Shop\n  class Application < Rails::Application\n  end\nend\n",
+		"config/credentials.yml.enc":        "c2VjcmV0",
+		"config/puma.rb":                    "plugin :solid_queue if ENV[\"SOLID_QUEUE_IN_PUMA\"]\n",
+		"config/environments/production.rb": "Rails.application.configure do\n  config.require_master_key = true\nend\n",
+		"config/database.yml":               "production:\n  primary:\n    database: shop\n  cache:\n    database: shop_cache\n",
+	}
+	for index := range 420 {
+		files[fmt.Sprintf("app/models/model_%03d.rb", index)] = "class Model < ApplicationRecord\nend\n"
+	}
+	candidate := candidateByMethod(t, detectFixture(t, files), BuildDockerfile)
+	for _, name := range []string{"RAILS_MASTER_KEY", "SOLID_QUEUE_IN_PUMA", "SECRET_KEY_BASE"} {
+		if _, ok := variableNamed(candidate.Variables, name); !ok {
+			t.Fatalf("%s lost under the source budget: %+v", name, candidate.Variables)
+		}
+	}
+	if !stringSliceContains(noteCodes(candidate.EnvironmentNotes), "rails_credentials") ||
+		len(candidate.Databases) != 1 || !reflect.DeepEqual(candidate.Databases[0].AlsoVariables, []string{"CACHE_DATABASE_URL"}) {
+		t.Fatalf("notes %+v databases %+v", candidate.EnvironmentNotes, candidate.Databases)
+	}
+}
+
 // Django's settings commit a key and turn debug on literally; both are notes
 // for preflight, and neither carries the key.
 func TestDjangoInsecureSettingsAreNoted(t *testing.T) {
@@ -443,6 +551,18 @@ func TestDjangoInsecureSettingsAreNoted(t *testing.T) {
 			t.Fatalf("the committed key leaked into %+v", note)
 		}
 	}
+	// A developer's settings module turns debug on and commits a key on
+	// purpose; production never imports it.
+	local := detectFixture(t, map[string]string{
+		"requirements.txt":                 "Django==5.2\n",
+		"manage.py":                        "import os\n",
+		"config/settings/local.py":         "SECRET_KEY = 'django-insecure-abc123'\nDEBUG = True\n",
+		"config/settings/settings_test.py": "DEBUG = os.environ.get('DEBUG', 'True') == 'True'\n",
+		"config/settings/production.py":    "DEBUG = False\n",
+	})
+	if notes := local.Candidates[0].EnvironmentNotes; len(notes) != 0 {
+		t.Fatalf("dev-only settings were noted: %+v", notes)
+	}
 }
 
 // Auth.js providers, a Stripe webhook route, Firebase and Supabase sign-in
@@ -456,13 +576,17 @@ func TestExternalCallbacksAreNoted(t *testing.T) {
 		"app/(billing)/api/webhooks/stripe/route.ts": "stripe.webhooks.constructEvent(body, sig, secret)\n",
 		"lib/firebase.ts": "import { getAuth } from 'firebase/auth'\ngetAuth(app)\n",
 		"lib/supabase.ts": "supabase.auth.signInWithOAuth({ provider: 'google' })\n",
+		"lib/passport.ts": "passport.use(new GoogleStrategy({\n  clientID: process.env.GOOGLE_ID,\n  callbackURL: '/auth/google/callback',\n}, verify))\n",
+		// Better Auth's client callbackURL is where sign-in lands, not a
+		// provider's registered address.
+		"lib/sign-in.ts": "authClient.signIn.social({ provider: 'github', callbackURL: '/dashboard' })\n",
 	})
 	details := map[string]string{}
 	for _, note := range result.Candidates[0].EnvironmentNotes {
 		details[note.Code+":"+note.Detail] = note.Path
 	}
 	for _, want := range []string{
-		"auth_callback:github|/api/auth/callback/github", "stripe_webhook:/api/webhooks/stripe",
+		"auth_callback:github|/api/auth/callback/github", "stripe_webhook:/api/webhooks/stripe", "auth_callback:google|/auth/google/callback",
 		"auth_service:firebase", "auth_service:supabase", "auth_service:clerk",
 	} {
 		if _, ok := details[want]; !ok {
@@ -471,6 +595,11 @@ func TestExternalCallbacksAreNoted(t *testing.T) {
 	}
 	if _, ok := details["auth_callback:credentials|/api/auth/callback/credentials"]; ok {
 		t.Fatal("the credentials provider has no third-party callback")
+	}
+	for detail := range details {
+		if strings.Contains(detail, "/dashboard") || strings.HasPrefix(detail, "auth_callback:|") {
+			t.Fatalf("notes %v carry a landing page or an unnamed provider", details)
+		}
 	}
 }
 
@@ -498,6 +627,17 @@ func TestDotenvAndBuildLocalhostNotes(t *testing.T) {
 	})
 	if !stringSliceContains(noteCodes(rust.Candidates[0].EnvironmentNotes), "dotenv_file_required") {
 		t.Fatalf("rust notes = %+v", rust.Candidates[0].EnvironmentNotes)
+	}
+	// The recipe creates the file only for the root's own entry points, so a
+	// member crate's or a test fixture's fatal load says nothing about it.
+	elsewhere := detectFixture(t, map[string]string{
+		"Cargo.toml":              "[package]\nname = \"api\"\nversion = \"0.1.0\"\n\n[dependencies]\naxum = \"0.8\"\n",
+		"src/main.rs":             "fn main() {}\n",
+		"tools/seed/src/main.rs":  "fn main() { dotenvy::dotenv().expect(\".env\"); }\n",
+		"src/testdata/fixture.go": "package fixture\nfunc f() { if err := godotenv.Load(); err != nil { log.Fatal(err) } }\n",
+	})
+	if stringSliceContains(noteCodes(elsewhere.Candidates[0].EnvironmentNotes), "dotenv_file_required") {
+		t.Fatalf("notes = %+v", elsewhere.Candidates[0].EnvironmentNotes)
 	}
 	codegen := detectFixture(t, map[string]string{
 		"package.json":      `{"scripts":{"build":"npm run codegen && next build","codegen":"graphql-codegen","start":"next start"},"dependencies":{"next":"16"}}`,

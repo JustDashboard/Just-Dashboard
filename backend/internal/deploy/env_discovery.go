@@ -130,8 +130,12 @@ var (
 // detection itself over its limits.
 type envScanner struct {
 	files, bytes int64
-	found        map[string]*DetectedVariable
-	order        []string
+	// factFiles and factBytes are the fact files' own budget, so an app/
+	// tree walked first cannot crowd out the credentials, Puma and
+	// database.yml facts a root's classification rests on.
+	factFiles, factBytes int64
+	found                map[string]*DetectedVariable
+	order                []string
 	// positions records where each name was first seen in each source, in
 	// walk order, so a template's names can be listed in the file's order.
 	positions map[string]map[string]int
@@ -153,6 +157,8 @@ const (
 	envScanMaxFiles = 400
 	envScanMaxBytes = 3 << 20
 	envScanMaxFile  = 256 << 10
+	envFactMaxFiles = 64
+	envFactMaxBytes = 1 << 20
 )
 
 func newEnvScanner() *envScanner {
@@ -179,12 +185,33 @@ func (s *envScanner) scannable(rel, name string) bool {
 		strings.Contains(name, ".test.") || strings.Contains(name, ".spec.") || strings.Contains(name, ".stories.") {
 		return false
 	}
+	return !envSkippedPath(rel)
+}
+
+func envSkippedPath(rel string) bool {
 	for _, segment := range strings.Split(path.Dir(rel), "/") {
 		if envSkippedDirs[segment] {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+// factFile reports a fact file the scan still has room for, whatever the
+// source budget says.
+func (s *envScanner) factFile(rel, name string) bool {
+	return environmentFactFile(rel, name) && !envSkippedPath(rel) && s.factFiles < envFactMaxFiles
+}
+
+// admit reserves a file from the budget that applies to it: a fact file's
+// own, else the source scan's. False means it is not read.
+func (s *envScanner) admit(rel, name string, size int64) bool {
+	if s.factFile(rel, name) && size <= envScanMaxFile && s.factBytes+size <= envFactMaxBytes {
+		s.factFiles++
+		s.factBytes += size
+		return true
+	}
+	return s.scannable(rel, name) && s.budget(size)
 }
 
 // budget reserves a file of the given size; false means the scan is over.

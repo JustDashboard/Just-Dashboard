@@ -119,6 +119,9 @@ type ObservationRequest struct {
 	Domains             []PlannedDomain
 	Dependencies        []PlannedDependency
 	NeedsFirewall       bool
+	// DatabaseExtensions are the schema extensions detection says a linked
+	// PostgreSQL must offer; only then is each linked server asked.
+	DatabaseExtensions []string
 }
 
 // PreflightObserver is intentionally read-only. A test double can prove
@@ -144,6 +147,14 @@ type PlanningFirewall interface {
 
 type PlanningDependencies interface {
 	ObserveDependencies(context.Context, []PlannedDependency) ([]DependencyObservation, error)
+}
+
+// PlanningDatabaseExtensions is the optional half of PlanningDependencies
+// that asks a linked database which of the wanted schema extensions it
+// offers. Each question is a connection to that database, so preflight asks
+// only when detection says the schema needs one.
+type PlanningDatabaseExtensions interface {
+	DatabaseExtensions(ctx context.Context, resourceID string, wanted []string) ([]string, error)
 }
 
 type PlanningProxy interface {
@@ -344,6 +355,18 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if len(request.Dependencies) > 0 && o.resources != nil {
 		dependencyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		observed, err := o.resources.ObserveDependencies(dependencyCtx, request.Dependencies)
+		if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
+			for index := range observed {
+				if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
+					continue
+				}
+				// Unknown is not a refusal: a server that cannot be asked
+				// leaves the finding to the first migration.
+				if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
+					observed[index].Extensions = available
+				}
+			}
+		}
 		cancel()
 		if err == nil {
 			observation.Dependencies = observed
@@ -497,6 +520,15 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 					request.Ports = append(request.Ports, PortObservation{Address: address, Port: port, Protocol: "tcp"})
 				}
 			}
+		}
+	}
+	if candidate := selectedDetectionCandidate(draft.Data.Detection); candidate != nil {
+		extensions := []string{}
+		for _, database := range candidate.Databases {
+			extensions = append(extensions, database.Extensions...)
+		}
+		if len(extensions) > 0 {
+			request.DatabaseExtensions = uniqueSorted(extensions)
 		}
 	}
 	request.Paths = uniqueSorted(request.Paths)

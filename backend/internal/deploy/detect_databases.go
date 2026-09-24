@@ -256,17 +256,26 @@ func enrichDatabases(stack rootStack, databases []DetectedDatabase, variables []
 		if !relational || database.Hosted != "" {
 			continue
 		}
+		// MariaDB Connector/J 3 accepts only its own scheme, and quick setup's
+		// MariaDB records a mysql:// address, so the driver picks the form.
+		jdbc := "jdbc"
+		if database.Engine == "mariadb" {
+			jdbc = "jdbc-mariadb"
+		}
 		switch {
 		case strings.Contains(stack.jvm, "spring-boot") || strings.Contains(stack.jvm, "org.springframework.boot"):
-			database.Format = "jdbc"
+			database.Format = jdbc
 			database.Variable = "SPRING_DATASOURCE_URL"
 			if datasource := observed(observations, observeSpringDatasource); len(datasource) > 0 {
 				database.Variable = datasource[0].detail
 			}
 		case strings.Contains(stack.jvm, "io.quarkus"):
-			database.Format, database.Variable = "jdbc", "QUARKUS_DATASOURCE_JDBC_URL"
+			database.Format, database.Variable = jdbc, "QUARKUS_DATASOURCE_JDBC_URL"
+			if datasource := observed(observations, observeSpringDatasource); len(datasource) > 0 {
+				database.Variable = datasource[0].detail
+			}
 		case strings.Contains(stack.jvm, "io.micronaut"):
-			database.Format, database.Variable = "jdbc", "DATASOURCES_DEFAULT_URL"
+			database.Format, database.Variable = jdbc, "DATASOURCES_DEFAULT_URL"
 		case len(stack.nuget) > 0:
 			database.Format = "adonet"
 			database.Variable = "CONNECTIONSTRINGS__DEFAULTCONNECTION"
@@ -380,7 +389,7 @@ func laravelURLVariable(marker *detectedMarkers, variables []DetectedVariable) s
 }
 
 var (
-	databaseFormats = map[string]bool{"": true, "jdbc": true, "adonet": true, "mysql2": true}
+	databaseFormats = map[string]bool{"": true, "jdbc": true, "jdbc-mariadb": true, "adonet": true, "mysql2": true}
 )
 
 func validateDetectedDatabaseDetails(database DetectedDatabase) error {
@@ -403,9 +412,10 @@ func validateDetectedDatabaseDetails(database DetectedDatabase) error {
 
 // ConnectionStringForFormat renders an application database URL in the
 // shape its consumer parses. A JDBC URL carries the credentials as query
-// parameters, which pgJDBC, Connector/J and MariaDB Connector/J all read; an
-// ADO.NET string is Npgsql's or MySqlConnector's keyword form. database, when
-// set, names another database on the same server.
+// parameters, which pgJDBC, Connector/J and MariaDB Connector/J all read, and
+// "jdbc-mariadb" writes MariaDB Connector/J's own scheme whatever the server;
+// an ADO.NET string is Npgsql's or MySqlConnector's keyword form. database,
+// when set, names another database on the same server.
 func ConnectionStringForFormat(raw, format, database string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
@@ -433,7 +443,13 @@ func ConnectionStringForFormat(raw, format, database string) (string, error) {
 		}
 		parsed.Scheme = "mysql2"
 		return parsed.String(), nil
-	case "jdbc":
+	case "jdbc", "jdbc-mariadb":
+		if format == "jdbc-mariadb" {
+			if engine == "postgresql" {
+				return "", fmt.Errorf("postgres connections have no jdbc-mariadb form")
+			}
+			engine = "mariadb"
+		}
 		query := parsed.Query()
 		if user != "" {
 			query.Set("user", user)

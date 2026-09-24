@@ -280,8 +280,9 @@ type DetectedDatabase struct {
 	Variable string `json:"variable"`
 	Evidence string `json:"evidence"`
 	// Format is the connection string the consumer parses when it is not a
-	// URL: "jdbc" (Spring, Quarkus), "adonet" (.NET) or "mysql2" (Rails
-	// before 7.2, which has no mysql:// adapter alias).
+	// URL: "jdbc" (Spring, Quarkus), "jdbc-mariadb" (the same over MariaDB
+	// Connector/J, which refuses jdbc:mysql://), "adonet" (.NET) or "mysql2"
+	// (Rails before 7.2, which has no mysql:// adapter alias).
 	Format string `json:"format,omitempty"`
 	// Extensions are the Postgres extensions the schema needs (vector,
 	// postgis); the official image ships neither.
