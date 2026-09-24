@@ -21,7 +21,14 @@ BuildKit environment secret mount. Frozen run inputs supply the names at prepara
 build time; the bindings must agree. A variable's explicit `build.secrets` mapping to `install` limits
 it to dependency installation instead. Build settings expose this choice for each build-scoped value.
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
-secret mappings; they retain their existing refusal of requested secrets.
+secret mappings; they retain their existing refusal of requested secrets. The one exception is a value
+the Dockerfile itself asks for and that is public by design: a **plain** build-scoped variable with a
+browser-public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `NUXT_PUBLIC_`, `REACT_APP_`) that the
+Dockerfile declares with `ARG` is passed as `--build-arg NAME`, the value only in buildx's process
+environment (`deploy/build_dockerfile_args.go`). Preflight lists what is passed
+(`dockerfile_build_args`) and warns about every other declared argument that will be empty
+(`dockerfile_arg_not_passed`); a secret, or a name that would replace the builder's own environment
+(`DOCKER_*`, `PATH`, …), never qualifies.
 
 Neither generated Dockerfiles nor command arguments contain variable values. Logs redact exact values.
 An ephemeral mount does not prevent application build code from intentionally copying a value into its
@@ -58,8 +65,23 @@ engine.
 
 A `web:` process in a Heroku-style `Procfile` is the repository declaring how it is served, and outranks
 a start script and a framework default alike; it is only ever a server command, so a site framework's
-build is still served by nginx. `release:` processes are not run automatically; add one as a release
-task. A command that carries credential material is ignored.
+build is still served by nginx. A command that carries credential material is ignored.
+
+## Release commands
+
+The command a repository declares runs once before each release — a Procfile `release:` process,
+`fly.toml`'s `[deploy] release_command`, `render.yaml`'s `preDeployCommand` (when one service declares
+it), or a Phoenix release's `rel/overlays/bin/migrate` — is the candidate's `releaseCommand`. The form
+plans it as a release task named `release` that runs **in the release image** (`runner: "image"`): one
+throwaway container of the candidate release's image, with the runtime variables the release starts
+with plus the task's own `release_task`-scoped ones, on the project's database networks, removed when
+it exits. A command with shell syntax runs through the image's `/bin/sh`; a plain one is executed
+directly, so an image without a shell still runs `bin/migrate`. Without such a task preflight warns
+`release_command_unmapped`. A task with no runner is the historical shell over the unbuilt checkout in
+the dashboard's own container; preflight refuses one that needs the application's toolchain
+(`npx`, `python`, `bundle`, a `node_modules/.bin` or `.venv` tool, a repository script) or a program
+the dashboard does not have, as `release_task_tool_missing`, and such a task no longer counts as the
+schema step.
 
 ## JavaScript and static output
 
@@ -69,7 +91,8 @@ recipe and preflight refuse rather than install from a lockfile the project may 
 manager must have its own lockfile. Plain HTML uses the selected source directory as
 its public root; its output directory is empty, not the source directory repeated a second time.
 Packaged static output always serves on nginx port 80, regardless of a repository's development/start
-script port. Quick setup and the wizard generate required HTTP readiness checks for that serving port.
+script port. nginx refuses every dot-path except `.well-known/` (`location ~ /\.(?!well-known/)`), so a
+stray `.git/`, `.env` or `.htaccess` in the published directory is never served. Quick setup and the wizard generate required HTTP readiness checks for that serving port.
 
 The catalogue in `deploy/frameworks_node.go` is ordered and the first match wins, so a meta-framework
 built on Vite is recognised before Vite itself — every one of them lists `vite`, and reading that alone
@@ -101,9 +124,9 @@ worker unless the manifest names an HTTP library.
 A site whose client owns its routes — Vite, Create React App, Vue CLI, Ember, Parcel and Angular
 detections — carries `build.spaFallback`, which makes nginx answer any path with no file behind it with
 `index.html`; multi-page generators (Astro, Gatsby, Docusaurus, VitePress, Eleventy, SvelteKit static)
-keep nginx's own configuration byte for byte. The switch is on the configure form and Build settings
-whenever there is static output, and is valid only with a static site or a recipe with an output
-directory.
+serve files as they are, with the dot-path rule and no fallback. The switch is on the configure form and
+Build settings whenever there is static output, and is valid only with a static site or a recipe with an
+output directory.
 
 A service whose manifest depends on a recognised migration tool starts by applying its schema: the
 detected start command becomes `<runner> <schema command> && <start>`, in front of a start script or a
@@ -117,9 +140,80 @@ explicit flag and Drizzle's stops to ask a question nobody can answer, so a sche
 fails the start instead of dropping it. The tool must be installed by the lockfile; the runtime stage
 copies the build's `node_modules`, so a devDependency is available to the start command.
 
-Detection preserves an actual Dockerfile/Containerfile filename relative to its build root. A single
-literal TCP `EXPOSE` in the final stage supplies the suggested port; dynamic/multiple ports still need
-an operator's explicit choice. A Dockerfile inherited base's unrecorded exposed port is not guessed.
+## Repository Dockerfiles and Compose files
+
+A repository's own container definitions are read as data, never built during detection
+(`deploy/dockerfile_parse.go`, `dockerfile_facts.go`, `detector_dockerfile.go`, `detector_compose.go`).
+The parser follows BuildKit: parser directives (`# escape=`), `\` continuations with comment lines
+inside them, and heredoc bodies.
+
+- **Names and places.** `Dockerfile`, `Containerfile`, and their variants (`Dockerfile.prod`,
+  `Dockerfile-dev`, `api.Dockerfile`, `Containerfile.worker`) are candidates, including under `build/`
+  (Go's `build/package/Dockerfile`) and `deploy/`. Dev-container and GitHub Action Dockerfiles, and
+  Compose files under `.devcontainer/`, are not. A name saying `prod`/`production`/`release` is a
+  production Dockerfile; one saying `dev`/`local`/`test`/`debug`/`ci` is a development one that is
+  listed but never chosen on its own; any other variant is medium confidence.
+- **Build context.** A Dockerfile is built from the directory a Compose service names for it, else the
+  nearest directory from its own up to the repository root that holds the paths its `COPY`/`ADD` lines
+  read — `docker/Dockerfile` written for `docker build -f docker/Dockerfile .` builds from the root — and
+  `build.dockerfile` is its path relative to that context.
+- **Stage and port.** When the last stage is `dev`/`development`/`test`/`debug`, the candidate builds
+  `production`/`prod`/`release`/`runner`/`runtime` (`build.target`, passed as `--target`; a Compose
+  service's own `target` wins). The port is the one TCP `EXPOSE` of the built stage and the stages it
+  derives from, resolving `$PORT`/`${PORT}` through the file's own `ARG`/`ENV` defaults and setting aside
+  debugger and metrics ports (9229, 5005, 9464, 9090); anything else still asks.
+- **What the tree shows will fail** is recorded as the candidate's `imageBuildIssues` and becomes a
+  preflight finding of the same code: `dockerfile_refused` (a secret-named `ENV`/`ARG`, shell assignment
+  or flag given a literal — not empty values, `$VAR` references, switches, numbers, the placeholder words
+  Rails and Django use, or `*_FILE` paths; `SECRET_KEY_BASE_DUMMY=1` builds), `dockerfile_copy_source_missing`,
+  `dockerfile_copy_ignored` (the context's `.dockerignore`, or `<Dockerfile>.dockerignore`, with BuildKit's
+  pattern rules), `dockerfile_arg_required` (an `ARG` without default in `FROM`), `dockerfile_ssh_mount`,
+  `dockerfile_standalone_missing` (a Next.js Dockerfile copying `.next/standalone` without
+  `output: 'standalone'`), `dockerfile_dev_server` (warning), `script_crlf` and `script_not_executable`
+  (the file an exec-form `ENTRYPOINT`/`CMD` or `RUN ./x` executes, or a recipe's start script, committed
+  with Windows line endings or without its executable bit, unless the Dockerfile fixes it). A
+  `FROM --platform=` for another architecture is `foreign_architecture_build`, blocked when this host has
+  no binfmt emulator for it.
+- **Choosing.** Candidates are ranked by whether they may be chosen on their own, whether they build as
+  detected (no blocking issue, no recipe issue, no unresolved package manager), confidence, and — only
+  between candidates at the same root — intent: a production-named Dockerfile, then the plain
+  Dockerfile, then the recipe; a Dockerfile that runs a dev server, or declares no `ARG` for a
+  browser-public variable the source reads, ranks below the recipe. The winner is listed first with the
+  reason (`selectionReason`, the `detection_selected` finding's measured text); only a true tie leaves the
+  choice to the operator. A buildable Dockerfile beside a recipe blocked by competing lockfiles wins;
+  preflight names a skipped Dockerfile's problem as `dockerfile_not_selected`.
+- **Compose files in a repository** are classified before they become candidates. One that runs only
+  backing images (Postgres, MySQL, Redis, Mongo, Mailpit, MinIO, …) is not a candidate: its databases
+  become suggestions on the candidates beside it. One whose builds all come from paths the checkout lacks
+  (Laravel Sail's `vendor/laravel/sail/runtimes`) is a low-confidence development stack. Any other is a
+  Compose candidate that is chosen only when nothing else is there, because a Compose file in a Git
+  source is analysed only as a Compose source: preflight blocks it as `compose_analysis_missing`, and the
+  project step offers to re-read the same repository as one.
+- **A Compose source** records each service's build `target` and `args` (resolved at build time from
+  the build-scoped values with Compose's own `${X:-default}` rules and passed like Dockerfile build
+  arguments), `platform`, `env_file` entries, and the platforms each image is published for. Variables
+  interpolated with a default are optional rows with the default as the example, never required secrets.
+  Preflight blocks a build context the checkout lacks (`compose_build_context_missing`), a required
+  `env_file` it lacks (`compose_env_file_missing`), a refused service Dockerfile, and an image with no
+  build for this host's architecture (`compose_image_platform_missing`). The primary service — the one
+  readiness and the release's container follow — builds or publishes a port, prefers `web`, `app`,
+  `frontend`, `server` or `api`, and is never a database.
+- **Languages without a recipe.** A Vapor or Hummingbird `Package.swift` with no Dockerfile is a
+  low-confidence candidate whose `dockerfile_missing` finding says to commit the template's Dockerfile;
+  with one, the Dockerfile is chosen over the template's Compose file. `Environment.get("X")` reads are
+  listed as variables. Rails, Phoenix and Swift Dockerfiles carry their framework's name.
+
+## Build context
+
+Every recipe and static build writes `.just-dashboard/Dockerfile.dockerignore`, which BuildKit reads in
+place of the repository's own `.dockerignore` (`deploy/build_dockerignore.go`). It keeps the
+repository's rules except any that would leave out a file the recipe reads by name — a manifest,
+lockfile, framework configuration, Prisma schema — which is `dockerignore_drops_recipe_input`, a warning
+that the rule is set aside; then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own
+files. The static, PHP, Node and Deno images, which are served or copied whole, also exclude `.git`;
+recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
+git-commit-id, SourceLink) keep it. A static site also excludes `.env` and `.env.*`. Committed `.env`
+files are otherwise left in: Next.js and Vite read public build values from them.
 
 ## Python
 
@@ -200,7 +294,7 @@ place of the HTTP service just because its `[[bin]]` appears first.
 
 A `pom.xml` builds with `maven:3-eclipse-temurin-<release>` (`mvn -q -B -DskipTests package`); a
 `build.gradle(.kts)` with `gradle:8-jdk<release>` (`./gradlew --no-daemon -q build -x test` through
-the committed wrapper, or the image's own Gradle). The one executable jar — not `-sources`, `-javadoc`,
+the committed wrapper, its Windows line endings stripped first, or the image's own Gradle). The one executable jar — not `-sources`, `-javadoc`,
 Spring Boot's `-plain` or a shade plugin's `original-` — becomes `/app/app.jar` on
 `eclipse-temurin:<release>-jre-alpine`, run by `java -jar` as an unprivileged user with
 `-XX:MaxRAMPercentage=75` so the heap follows the container's limit. The release comes from
@@ -246,6 +340,9 @@ or php-fpm pair — and the version comes from Composer's `php` constraint with 
 default, and a constraint the catalogue cannot satisfy (`^7.4`) is a `recipe_unsupported` finding.
 `ext-*` requirements install through `install-php-extensions` (built-ins such as `mbstring` are skipped;
 `pdo_mysql`, `pdo_pgsql` and `opcache` are always present, so a linked database works without asking).
+FrankenPHP does not read `.htaccess`, so one with access or rewrite rules is a `php_htaccess_ignored`
+warning, and a plain PHP application served from the repository root (`--root /app`) is a
+`php_docroot_is_repository_root` warning: dependencies, lockfiles and logs under it are reachable.
 Composer runs from the `composer:2` image with `--no-dev --optimize-autoloader`; a `package.json` whose
 build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on the manifest's own
 runtime whose `public/build` is copied in. Laravel's start runs `php artisan migrate --force` first;
