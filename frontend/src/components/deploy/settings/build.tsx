@@ -1138,7 +1138,7 @@ function BuildForm({
               const product = variableProduct(variable.name)
               const ships =
                 variable.sensitivity === "secret" &&
-                stage === "build" &&
+                stage !== "install" &&
                 BROWSER_PREFIX.test(variable.name)
               return (
                 <li key={variable.name} className="min-w-0 py-2 first:pt-0 last:pb-0">
@@ -1174,15 +1174,15 @@ function BuildForm({
                             ...(build.secrets ?? []).filter(
                               (binding) => binding.variable !== variable.name,
                             ),
-                            ...(step === "install"
-                              ? [{ variable: variable.name, step: "install" as const }]
-                              : []),
+                            // "build" is what an unmapped build value already gets.
+                            ...(step === "build" ? [] : [{ variable: variable.name, step }]),
                           ],
                         })
                       }
                       options={[
                         { value: "build", label: "Build" },
                         { value: "install", label: "Install only" },
+                        { value: "install_and_build", label: "Both" },
                       ]}
                     />
                   </div>
@@ -1196,7 +1196,10 @@ function BuildForm({
               )
             })}
           </ul>
-          <FormNote>Install only keeps a private registry token out of the build command.</FormNote>
+          <FormNote>
+            Install only keeps a private registry token out of the build command. Both also mounts
+            the value in the install, for a postinstall script that reads it.
+          </FormNote>
         </SettingSection>
       )}
     </SettingForm>

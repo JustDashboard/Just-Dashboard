@@ -869,7 +869,7 @@ func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
 func buildSecretMounts(secrets []BuildSecretConfig, step string) string {
 	ids := []string{}
 	for _, secret := range secrets {
-		if secret.Step == step {
+		if buildSecretReaches(secret.Step, step) {
 			ids = append(ids, secret.Variable)
 		}
 	}

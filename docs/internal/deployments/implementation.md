@@ -311,7 +311,8 @@ only renderer/executor/validation authority for their feature.
   never argv/build args; custom Dockerfiles with requested secrets or obvious embedded credentials fail
   closed because their layer history cannot be guaranteed.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
-  package credentials; a registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is
+  package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
+  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is
   mapped to the install step when a draft supplies it, and `registry_token_missing` names one that cannot
   reach the install. Preparation logs its install decisions (an unfrozen install, a moved runner, a
   `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter

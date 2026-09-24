@@ -99,7 +99,7 @@ func registryCredentialFindings(candidate *DetectedCandidate, configuration Plan
 			return planned.Name == variable.Name && slices.Contains(planned.Scopes, "build")
 		})
 		mapped := slices.ContainsFunc(configuration.Build.Secrets, func(secret BuildSecretConfig) bool {
-			return secret.Variable == variable.Name && secret.Step == "install"
+			return secret.Variable == variable.Name && buildSecretReaches(secret.Step, "install")
 		})
 		if declared && mapped {
 			continue

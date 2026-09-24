@@ -320,8 +320,11 @@ type BuildPlanConfig struct {
 	Framework string `json:"framework,omitempty"`
 }
 
-// BuildSecretConfig names a variable and the single reviewed recipe stage in
-// which BuildKit may expose it. Values never enter this plan or process argv.
+// BuildSecretConfig names a variable and the reviewed recipe stages in which
+// BuildKit may expose it: "install", "build", or "install_and_build" for a
+// value both the dependency install and the build command read — a root
+// package's own postinstall runs inside the install. Values never enter this
+// plan or process argv.
 type BuildSecretConfig struct {
 	Variable string `json:"variable"`
 	Step     string `json:"step"`
@@ -1169,9 +1172,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	seenBuildSecrets := map[string]bool{}
 	for _, secret := range c.Build.Secrets {
-		if ValidateEnvKey(secret.Variable) != nil || (secret.Step != "install" && secret.Step != "build") ||
+		if ValidateEnvKey(secret.Variable) != nil || !validBuildSecretStep(secret.Step) ||
 			seenBuildSecrets[secret.Variable] || !variableScopes[secret.Variable]["build"] {
-			return fmt.Errorf("build secret %q must name one build-scoped variable and install or build step", secret.Variable)
+			return fmt.Errorf("build secret %q must name one build-scoped variable and the install, build or install_and_build step", secret.Variable)
 		}
 		seenBuildSecrets[secret.Variable] = true
 	}
@@ -1388,6 +1391,22 @@ func validRecipe(name string) bool {
 		return true
 	}
 	return false
+}
+
+// validBuildSecretStep is the closed set of recipe stages a build value can
+// be mounted in.
+func validBuildSecretStep(step string) bool {
+	switch step {
+	case "install", "build", "install_and_build":
+		return true
+	}
+	return false
+}
+
+// buildSecretReaches says whether a value mapped to mapped is mounted in the
+// recipe stage step.
+func buildSecretReaches(mapped, step string) bool {
+	return mapped == step || mapped == "install_and_build"
 }
 
 // validDetectedDatabaseEngine is the closed set of engines quick setup can

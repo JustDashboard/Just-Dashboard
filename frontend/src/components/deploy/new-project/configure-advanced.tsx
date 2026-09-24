@@ -20,7 +20,7 @@ import { humanize } from "@/components/deploy/vocabulary"
 import { MountRows } from "@/components/deploy/settings/mounts"
 import { imageProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
-import type { DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
+import type { BuildSecretStep, DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 
 type Check = DeploymentConfiguration["checks"][number]
@@ -843,7 +843,7 @@ function BuildSecretEditor({
                 onValueChange={(step) =>
                   onChange(
                     secrets.map((item, i) =>
-                      i === index ? { ...item, step: step as "install" | "build" } : item,
+                      i === index ? { ...item, step: step as BuildSecretStep } : item,
                     ),
                   )
                 }
@@ -857,6 +857,7 @@ function BuildSecretEditor({
                 <SelectContent>
                   <SelectItem value="install">Install step</SelectItem>
                   <SelectItem value="build">Build step</SelectItem>
+                  <SelectItem value="install_and_build">Install and build</SelectItem>
                 </SelectContent>
               </Select>
               <IconAction

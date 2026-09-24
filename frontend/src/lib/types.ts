@@ -3238,6 +3238,13 @@ export type DeploymentDraftSource = {
 
 export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
 
+/**
+ * The recipe stage a build variable is mounted in: the dependency install, the
+ * build command, or both — a root package's own postinstall runs inside the
+ * install. `validBuildSecretStep` is the server's closed set.
+ */
+export type BuildSecretStep = "install" | "build" | "install_and_build"
+
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
   "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
@@ -3476,7 +3483,7 @@ export type DeploymentConfiguration = {
     spaFallback?: boolean
     targetPlatform?: string
     noCache?: boolean
-    secrets?: { variable: string; step: "install" | "build" }[]
+    secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
       name: string
       command: string

@@ -20,9 +20,15 @@ root package, an unsupported interpreter release) is a low-confidence candidate 
 Every `build`-scoped variable automatically reaches the recipe's build command through a required
 BuildKit environment secret mount. Frozen run inputs supply the names at preparation and values at
 build time; the bindings must agree. A variable's explicit `build.secrets` mapping to `install` limits
-it to dependency installation instead. Build settings expose this choice for each build-scoped value. A
-registry credential a package manager's configuration names is mapped to install automatically when a
-draft gives it a value (see [JavaScript installs](#javascript-installs)).
+it to dependency installation instead, and `install_and_build` mounts the same secret in both RUN
+steps — for a value a root package's own `postinstall` or `prepare` script reads, since those run inside
+the install. A variable has one mapping; `install_and_build` is the one way to reach both steps, and
+BuildKit still receives one secret. Build settings expose this choice for each build-scoped value
+("Build", "Install only", "Both"). A registry credential a package manager's configuration names is
+mapped to install automatically when a draft gives it a value (see
+[JavaScript installs](#javascript-installs)). Nothing maps a database URL to the install on its own:
+the install also runs every dependency's install script, and Prisma's `generate` does not connect (see
+[JavaScript runtime and toolchain](#javascript-runtime-and-toolchain)).
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
 secret mappings; they retain their existing refusal of requested secrets.
 
