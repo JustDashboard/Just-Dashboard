@@ -279,3 +279,20 @@ func TestPreflightNamesImageTasksOutsideAComposeStack(t *testing.T) {
 		t.Fatalf("a Dockerfile release's task = %+v", item)
 	}
 }
+
+func TestPreflightRefusesBuildsInAPastedComposeFile(t *testing.T) {
+	analysis := &ComposeAnalysis{PrimaryService: "web", Services: []ComposeServicePlan{
+		{Name: "db", Image: "postgres:17"}, {Name: "web", BuildContext: "."},
+	}}
+	for mode, blocked := range map[SourceMode]bool{SourceModeComposePaste: true, SourceModeComposeUpload: true, SourceModeComposeGit: false} {
+		draft := &Draft{Data: DraftData{
+			Intent:    &DraftIntentConfig{Name: "stack", Profile: ProfileCompose},
+			Source:    &DraftSourceConfig{Kind: SourceCompose, Mode: mode},
+			Detection: &DetectionResult{Source: SourceIdentity{Kind: SourceCompose}, Compose: analysis},
+		}}
+		item, ok := findingByCode(imageBuildFindings(draft, PlanConfiguration{Build: BuildPlanConfig{Method: BuildCompose}}, HostObservation{}), "compose_build_without_checkout")
+		if ok != blocked || (ok && (item.Severity != PreflightBlocked || item.Measured != "web")) {
+			t.Fatalf("%s: finding = %+v (%v)", mode, item, ok)
+		}
+	}
+}

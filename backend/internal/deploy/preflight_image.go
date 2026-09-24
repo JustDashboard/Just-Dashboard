@@ -197,6 +197,7 @@ func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observati
 			"Move the entry point under public/, or serve the framework's own document root.", "deploy", "configuration.build.startCommand"))
 	}
 	findings = append(findings, composeBuildFindings(detection, configuration, observation)...)
+	findings = append(findings, pastedComposeBuildFindings(draft.Data.Source, detection, configuration)...)
 	findings = append(findings, releaseTaskFindings(planned, detection, configuration, observation)...)
 	return findings
 }
@@ -391,6 +392,31 @@ func composeBuildFindings(detection *DetectionResult, configuration PlanConfigur
 			"", "docker", "configuration.build.primaryService"))
 	}
 	return findings
+}
+
+// pastedComposeBuildFindings: a pasted or uploaded Compose file arrives
+// without the files around it, so a service that builds has no Dockerfile
+// and no context to build from — a certain failure only the build used to
+// report.
+func pastedComposeBuildFindings(source *DraftSourceConfig, detection *DetectionResult, configuration PlanConfiguration) []PreflightFinding {
+	if source == nil || (source.Mode != SourceModeComposePaste && source.Mode != SourceModeComposeUpload) ||
+		configuration.Build.Method != BuildCompose || detection == nil || detection.Compose == nil {
+		return nil
+	}
+	building := []string{}
+	for _, service := range detection.Compose.Services {
+		if service.BuildContext != "" {
+			building = append(building, service.Name)
+		}
+	}
+	if len(building) == 0 {
+		return nil
+	}
+	return []PreflightFinding{finding("compose_build_without_checkout", PreflightBlocked,
+		"A pasted Compose file builds services it has no files for", strings.Join(building, ", "),
+		"Only the Compose file itself is kept; the Dockerfile and build context a service builds from are not, so its build fails with 'not found'.",
+		"Deploy the repository as a Compose source (Compose files in Git or a local checkout), or give the service a published image.",
+		"docker", "source.compose")}
 }
 
 // composeBuildArgFindings: a Compose build argument is interpolated from the
