@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RELEASE_GROUPS } from "@/components/deploy/vocabulary"
 import { StageStrip } from "@/components/deploy/run-pipeline"
 import { useProject } from "@/components/deploy/project-context"
+import { isReleaseTaskFailure } from "@/components/deploy/failure-cause"
 
 export type ReleaseTask = NonNullable<DeploymentConfiguration["build"]["releaseTasks"]>[number]
 
@@ -73,8 +74,7 @@ export function ReleaseTasks({
   const failedOnTask = project.runs.find(
     (run) =>
       run.environmentId === project.environmentId &&
-      // Every release-task failure's code starts so, whichever cause it named.
-      run.terminalCode?.startsWith("release_") &&
+      isReleaseTaskFailure(run.terminalCode) &&
       run.id > (liveRun?.id ?? 0),
   )
   const lastRun = failedOnTask ?? liveRun

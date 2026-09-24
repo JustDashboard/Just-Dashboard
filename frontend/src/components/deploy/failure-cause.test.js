@@ -7,6 +7,7 @@ import {
   failureLabel,
   failureCause,
   fixTarget,
+  isReleaseTaskFailure,
   runPlanIsStale,
   settingsChangeText,
 } from "./failure-cause"
@@ -166,13 +167,31 @@ describe("driftLine", () => {
 describe("deploying with current settings", () => {
   test("pins the run's commit only where a revision applies", () => {
     const run = { sourceRevision: "a".repeat(40), planRevision: 2, environmentId: 1 }
-    expect(
-      deployWithCurrentSettings(run, { sourceKind: "git", sourceRemote: "https://github.com/a/b" }),
-    ).toEqual({ operation: "deploy", sourceRevision: "a".repeat(40) })
-    expect(deployWithCurrentSettings(run, { sourceKind: "local" })).toEqual({ operation: "deploy" })
-    expect(deployWithCurrentSettings({}, { sourceKind: "git", sourceRemote: "x" })).toEqual({
+    const git = { sourceKind: "git", sourceRemote: "https://github.com/a/b" }
+    const drift = { changes: [{ kind: "build", field: "packageManager", change: "changed" }] }
+    expect(deployWithCurrentSettings(run, git, drift)).toEqual({
+      operation: "deploy",
+      sourceRevision: "a".repeat(40),
+    })
+    expect(deployWithCurrentSettings(run, { sourceKind: "local" }, drift)).toEqual({
       operation: "deploy",
     })
+    expect(deployWithCurrentSettings({}, { sourceKind: "git", sourceRemote: "x" }, drift)).toEqual({
+      operation: "deploy",
+    })
+  })
+
+  test("never asks a changed or unknown source for the run's old commit", () => {
+    const run = { sourceRevision: "a".repeat(40) }
+    const git = { sourceKind: "git", sourceRemote: "https://github.com/a/b" }
+    const moved = {
+      changes: [
+        { kind: "build", field: "packageManager", change: "changed" },
+        { kind: "source", field: "source", change: "changed" },
+      ],
+    }
+    expect(deployWithCurrentSettings(run, git, moved)).toEqual({ operation: "deploy" })
+    expect(deployWithCurrentSettings(run, git, undefined)).toEqual({ operation: "deploy" })
   })
 
   test("a run is stale once a later plan is saved for its environment", () => {
@@ -181,6 +200,17 @@ describe("deploying with current settings", () => {
     expect(runPlanIsStale({ planRevision: 3, environmentId: 1 }, deployment)).toBe(false)
     expect(runPlanIsStale({ planRevision: 2, environmentId: 9 }, deployment)).toBe(false)
     expect(runPlanIsStale({ planRevision: 2, environmentId: 1 }, undefined)).toBe(false)
+  })
+})
+
+describe("isReleaseTaskFailure", () => {
+  test("reads every release task cause and no other release_ fault", () => {
+    expect(isReleaseTaskFailure("release_task_failed")).toBe(true)
+    expect(isReleaseTaskFailure("release_migration_failed")).toBe(true)
+    expect(isReleaseTaskFailure("release_env_missing")).toBe(true)
+    expect(isReleaseTaskFailure("release_pointer_mismatch")).toBe(false)
+    expect(isReleaseTaskFailure("build_failed")).toBe(false)
+    expect(isReleaseTaskFailure(undefined)).toBe(false)
   })
 })
 

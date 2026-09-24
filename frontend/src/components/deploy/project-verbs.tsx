@@ -33,6 +33,7 @@ import { FormFact } from "@/components/form"
 import { ProductGlyph } from "@/components/product-logo"
 import type { ProjectOperation } from "@/components/deploy/project-context"
 import { ProjectMark } from "@/components/deploy/project-mark"
+import { runPlanIsStale } from "@/components/deploy/failure-cause"
 import {
   deploymentURL,
   hostOf,
@@ -356,10 +357,15 @@ export function useProjectVerbs(
     }
   }
   if (control && !active && last && runFailed(last.state) && isRetryable(last.state)) {
+    // A retry replays the plan and variables the run used; once newer
+    // settings are saved, the name says so, since Deploy is what uses them.
+    const stale = runPlanIsStale(last, summary)
     verbs.push({
       key: "retry",
-      label: "Retry",
-      detail: `Run ${runTitle(last)} again from the start.`,
+      label: stale ? "Retry with the settings it used" : "Retry",
+      detail: stale
+        ? `Run ${runTitle(last)} again with its own plan and variables; the settings saved since are not used.`
+        : `Run ${runTitle(last)} again from the start.`,
       icon: RotateCounterClockwise,
       group: "Building",
       progressive: "Retrying…",

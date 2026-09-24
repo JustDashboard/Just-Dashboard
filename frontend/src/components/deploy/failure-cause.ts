@@ -112,6 +112,24 @@ export function causeTitle(code: string) {
   return CAUSE_TITLES[code] ?? sentence(code)
 }
 
+/** The codes a run ends with when one of its release tasks failed, whichever cause it named. */
+const RELEASE_TASK_FAILURES = new Set([
+  "release_migration_failed",
+  "release_migration_failed_before",
+  "release_database_not_empty",
+  "release_database_auth_failed",
+  "release_database_unreachable",
+  "release_env_missing",
+  "release_task_command_not_found",
+  "release_task_timeout",
+  "release_task_failed",
+])
+
+/** Whether a terminal code is a release task's failure, not another `release_` fault. */
+export function isReleaseTaskFailure(code: string | undefined) {
+  return code !== undefined && RELEASE_TASK_FAILURES.has(code)
+}
+
 /** The codes that say where a run failed rather than why. */
 const GENERIC_FAILURES = new Set([
   "build_failed",
@@ -298,13 +316,24 @@ export function driftLine(drift: DeploymentRunSettingsDrift | undefined) {
 /**
  * The request "Deploy with current settings" makes: the run's own commit for
  * a remote Git source, so the new settings are tried on exactly what failed,
- * and a plain deploy for a source a revision does not apply to.
+ * and a plain deploy for a source a revision does not apply to. The commit is
+ * pinned only when the run's drift is known and leaves the source alone: a
+ * source moved to another branch or repository would be asked for a commit
+ * that is not its own.
  */
 export function deployWithCurrentSettings(
   run: Pick<DeploymentEngineRun, "sourceRevision">,
   deployment: Pick<DeploymentSummary, "sourceKind" | "sourceRemote"> | undefined,
+  drift: Pick<DeploymentRunSettingsDrift, "changes"> | undefined,
 ) {
-  if (run.sourceRevision && deployment?.sourceKind === "git" && deployment.sourceRemote) {
+  const sameSource =
+    drift !== undefined && !drift.changes.some((change) => change.kind === "source")
+  if (
+    sameSource &&
+    run.sourceRevision &&
+    deployment?.sourceKind === "git" &&
+    deployment.sourceRemote
+  ) {
     return { operation: "deploy", sourceRevision: run.sourceRevision }
   }
   return { operation: "deploy" }

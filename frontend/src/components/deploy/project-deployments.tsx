@@ -14,6 +14,7 @@ import type {
   DeploymentEngineRun,
   DeploymentPreview,
   DeploymentRelease,
+  DeploymentRunSettingsDrift,
   DeploymentRunState,
   DeploymentRunsPage,
 } from "@/lib/types"
@@ -47,6 +48,7 @@ import {
   deploymentURL,
   hostOf,
   isActiveRun,
+  isRetryable,
   runDurationSeconds,
   runFailed,
   runTitle,
@@ -252,6 +254,25 @@ export function ProjectDeployments() {
   }, [project.runs, older])
 
   const environmentRuns = allRuns.filter((run) => run.environmentId === selectedEnv)
+  // The newest run, when it can be retried, is the one a fix was saved for.
+  // Its drift counts what no plan revision does — a variable given another
+  // scope — and says whether the source itself moved; older rows go by the
+  // plan revision alone.
+  const newest = environmentRuns[0]
+  const retryable = newest && isRetryable(newest.state) ? newest : undefined
+  const drift = usePoll(
+    (signal) =>
+      get<DeploymentRunSettingsDrift>(
+        `/deploy/${project.projectId}/runs/${retryable?.id}/settings-drift`,
+        undefined,
+        signal,
+      ),
+    0,
+    [project.projectId, retryable?.id, deployment.desiredRevision],
+    { enabled: retryable !== undefined && can("service.control") },
+  )
+  const driftOf = (run: DeploymentEngineRun) =>
+    drift.data?.runId === run.id ? drift.data : undefined
   const runs = environmentRuns.filter((run) => matchesFilter(run, filter))
   const counts = Object.fromEntries(
     STATUS_FILTERS.map((entry) => [
@@ -352,7 +373,7 @@ export function ProjectDeployments() {
     try {
       const created = await post<DeploymentEngineRun>(
         `/deploy/${project.projectId}/environments/${run.environmentId}/runs`,
-        deployWithCurrentSettings(run, deployment),
+        deployWithCurrentSettings(run, deployment, driftOf(run)),
       )
       answered(run.id)
       router.push(`/deploy/${project.projectId}/runs/${created.id}`)
@@ -391,7 +412,7 @@ export function ProjectDeployments() {
       url,
       can,
       working: busy,
-      stale: runPlanIsStale(run, deployment),
+      stale: driftOf(run)?.changed ?? runPlanIsStale(run, deployment),
       on: {
         open: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
         visit: () => window.open(url, "_blank", "noopener,noreferrer"),

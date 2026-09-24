@@ -413,7 +413,9 @@ export function RunPage() {
     try {
       const created = await post<DeploymentEngineRun>(
         `/deploy/${projectId}/environments/${run.environmentId}/runs`,
-        commitGone ? { operation: "deploy" } : deployWithCurrentSettings(run, deployment),
+        commitGone
+          ? { operation: "deploy" }
+          : deployWithCurrentSettings(run, deployment, drift.data),
       )
       router.push(`/deploy/${projectId}/runs/${created.id}`)
     } catch (error) {
