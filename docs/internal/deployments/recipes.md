@@ -96,7 +96,9 @@ A server framework's entry file (`.output/server/index.mjs`, `build/server/index
 …) is checked in the generated Dockerfile after the build when the start command is still the
 framework's own, so a wrong output path fails the build with the framework's name instead of failing the
 readiness gate. A custom start command skips the check. `main` without a start script is a low-confidence
-worker unless the manifest names an HTTP library.
+worker unless the manifest names an HTTP library; a bot or queue library answers the question, making
+it a worker without one, and a start script beside such a library no longer makes it a web service on
+3000 (see "Readiness, workers and start commands").
 
 A site whose client owns its routes — Vite, Create React App, Vue CLI, Ember, Parcel and Angular
 detections — carries `build.spaFallback`, which makes nginx answer any path with no file behind it with
@@ -254,6 +256,88 @@ Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is prese
 configure form mints `APP_KEY` for a Laravel import (`base64:` over 32 random bytes) and offers a
 **Generate** button on any variable whose name ends in `SECRET`, `KEY` or `SECRET_KEY_BASE`. Laravel's
 `.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`.
+
+## Readiness, workers and start commands
+
+A release takes traffic only after its readiness check passes, and the check a detected plan carries is
+the one the source declares (`detect_readiness.go`), strongest first:
+
+1. The final stage's Dockerfile `HEALTHCHECK`. A `curl`/`wget` of `localhost` on the served port (or
+   `$PORT`) becomes an HTTP check of that path; any other command becomes a `docker_health` check that
+   waits for Docker's own verdict, with a budget covering the healthcheck's start period and retries.
+2. A health path a previous platform's file names: `fly.toml` HTTP checks, `render.yaml`
+   `healthCheckPath`, `railway.json`/`railway.toml` `healthcheckPath`, Kamal's `proxy.healthcheck.path`.
+3. A health endpoint the framework declares, probed expecting a 2xx: Rails `get "up" =>
+   "rails/health#show"`, Laravel's `health: '/up'`, Spring Boot Actuator (`/actuator/health`, under
+   `server.servlet.context-path` and `management.endpoints.web.base-path`; skipped when
+   `management.server.port` moves it), Quarkus SmallRye Health (`/q/health/ready`), Micronaut
+   management (`/health`), ASP.NET `MapHealthChecks("…")`, Strapi `/_health`, Medusa `/health`,
+   Directus `/server/health`, Django's root URLconf (a health route, django-health-check's include, a
+   view at `/`, else the admin login page), and file-routed health endpoints — Next.js
+   `app/**/health/route.ts` and `pages/api/health.ts` (under a literal `basePath`), Nuxt/Nitro
+   `server/api|routes/health.*`, SvelteKit `src/routes/**/health/+server.ts`, Remix resource routes,
+   Astro endpoints.
+4. A health route registered in code (`app.get('/healthz')`, `@app.get("/health")`, a NestJS
+   `@Controller('health')` under a literal global prefix, `HandleFunc("/healthz")`, axum/actix/warp
+   routes, `@GetMapping("/health")`, `MapGet("/health")`). A router can mount it under a prefix
+   detection cannot see, so it is probed accepting any answer.
+5. The convention: a page framework (Next.js, Nuxt, SvelteKit, Astro, Remix, React Router, Angular SSR,
+   Solid/TanStack Start, Streamlit, Gradio, Flask routing `/`, Laravel, Fresh, plain PHP) is asked for a
+   2xx at `/`; everything else — Express/Fastify/Hono/Koa/Elysia/hapi and unknown Node servers, Nest,
+   FastAPI, Go, Rust, JVM, .NET, Deno, Symfony, Slim, a Rails API — accepts any answer from `/`, and so
+   does a page framework whose authentication SDK (Clerk, Auth0, Kinde, WorkOS, Logto, Descope) sends an
+   anonymous visitor to a sign-in page on the provider's site.
+
+"Any answer" is the check's `acceptAnyAnswer`: every status below 500 passes except 400 and 421, which
+are how host allowlists refuse a request, and a redirect is itself the answer. It proves the server
+serves without requiring a page at the path; preflight names it (`readiness_root_unverified`, a pass)
+with the remedy of a real health route.
+
+The probe dials only the candidate, but when the release has a domain it introduces itself the way the
+proxy does: `Host` and `X-Forwarded-Host` are the domain and `X-Forwarded-Proto` its scheme, so Django's
+`ALLOWED_HOSTS`, Rails' `force_ssl` and host authorization, and anything else that checks the request
+answer as they will for visitors. A redirect to the candidate's own address, or to one of the release's
+own domains (a locale prefix, a login page, the https form of the same URL), is followed on the candidate
+— at most four times; a redirect anywhere else is never requested and is reported with its origin.
+
+Budgets follow the start: 20 attempts 3 s apart by default; 40 for a JVM service or a start command
+that applies migrations; 60 attempts 5 s apart for Wagtail's first migrations; 60 attempts 10 s apart
+when a Python application loads a model while it starts (`from_pretrained(`, `pipeline(`,
+`SentenceTransformer(`, `whisper.load_model(`, `YOLO(` and the like at module level, under `__main__`,
+or in a lifespan/startup hook, with a model library among the dependencies). Preflight then warns
+`python_model_download_at_start` until a volume keeps the cache (`/root/.cache/huggingface`, or
+`/root/.cache`), since the download is otherwise part of every release's container.
+
+Preflight also reads what the source says about how it answers: `readiness_host_allowlist` when a literal
+`ALLOWED_HOSTS` or `config.hosts` refuses a planned domain (or 127.0.0.1 without one),
+`readiness_redirects_to_https` when `config.force_ssl` without `config.assume_ssl`, or
+`SECURE_SSL_REDIRECT`, meets a plan with no HTTPS domain — or, for Django, runs without
+`SECURE_PROXY_SSL_HEADER`, which loops behind any proxy — and `readiness_path_unrouted` when a strict
+check asks for `/` of a Python application whose router serves nothing there. `readiness_path_detected`
+names the declared source the check came from.
+
+**Workers.** A package that never listens is a worker: no port, no route, no readiness gate. Node:
+`discord.js`, `telegraf`, `grammy`, `node-telegram-bot-api`, `@slack/bolt` in socket mode,
+`whatsapp-web.js`, Baileys, `mineflayer`, `tmi.js`, BullMQ/Bull/Bee-Queue, Agenda, pg-boss, Graphile
+Worker and the cron schedulers, when no framework or HTTP library is in the manifest and nothing in the
+package calls `.listen(`/`createServer(`/`Bun.serve(` (a keep-alive server keeps it web). Python, for a
+root no web framework or `web:` process claimed: a `worker:` process, a root script (or package
+`__main__`) that imports a bot library — discord.py and its forks, python-telegram-bot, pyTelegramBotAPI,
+aiogram, Pyrogram, Telethon, Slack Bolt with `SocketModeHandler`, TwitchIO — and runs it (`python
+bot.py`), Celery (`celery -A <module> worker`), RQ (`rq worker --url "$REDIS_URL"`), Dramatiq and arq.
+A script that serves HTTP itself (`web.run_app`, `uvicorn.run`, a webhook server) is left as it was.
+Planned as web anyway, such a package gets `web_profile_without_listener`.
+
+**Start commands.** A container lives as long as its main process, so a start command that backgrounds
+the server makes it exit. Detection rewrites the certain cases into their foreground form — `pm2 start`
+(with pm2 installed) into `<runner> pm2-runtime start …`, `forever start` into `forever …`, `gunicorn
+--daemon` without the flag, a lone command's trailing `&` removed — looking through the package script
+the start command runs. Anything else (`pm2` not installed, `nohup … > log &`, `uwsgi --daemonize`,
+`celery multi`, a detached `screen`/`tmux`) is `start_command_daemonizes`, blocked for a recipe and a
+warning for a Dockerfile's own `CMD`; `a & b` runs a second, unsupervised process and is
+`start_command_backgrounds` (one process per project: deploy the other as its own worker). When a
+single container nonetheless exits with code 0 while readiness waits, the run's diagnosis is
+`start_command_exited`.
 
 ## Verification
 

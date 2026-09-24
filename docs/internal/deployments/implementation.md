@@ -152,7 +152,10 @@ only renderer/executor/validation authority for their feature.
   one flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises
   `readiness_missing` as a *decision* for those profiles, so an empty check list made the most
-  ordinary deployment there is unsavable over a control the operator was never shown.
+  ordinary deployment there is unsavable over a control the operator was never shown. The check is the
+  candidate's detected `readiness` — its path, whether any answer counts, Docker health for a
+  Dockerfile `HEALTHCHECK` command, and a slow start's budget (recipes.md, "Readiness, workers and
+  start commands") — and GET `/` expecting a 2xx only when detection found nothing.
 - A draft route distinguishes why an id did not answer: `403 draft_forbidden` for another user's draft,
   `410 draft_expired` for one past `expiresAt`, and `404 draft_not_found` only for an id that names
   nothing at all — the first two used to collapse into the third, which hid an ownership refusal behind
@@ -341,7 +344,9 @@ only renderer/executor/validation authority for their feature.
   The tail is written to the run transcript after redaction of every runtime variable value; step
   evidence records state and counts, never output. Compensation runs afterwards, so the operator reads
   why the application never listened instead of only "could not connect". The step message points at the
-  transcript when output was captured.
+  transcript when output was captured. The diagnosis names one proven cause: a missing table
+  (`schema_missing`), or a single container that stopped with exit code 0 (`start_command_exited`, a
+  start command that returned instead of serving).
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move.
@@ -354,10 +359,16 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
-  Default HTTP checks require a final 2xx response and follow at most four redirects on the same
-  origin. External redirects and loops fail, so a candidate cannot pass by redirecting to the old
-  public release or to a page that returns 500. Explicit expected-status lists retain exact-status,
-  no-redirect behavior.
+  An HTTP check against the candidate introduces itself as the proxy does when the release has a
+  domain — `Host`/`X-Forwarded-Host` the domain, `X-Forwarded-Proto` its scheme,
+  `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
+  Default HTTP checks require a final 2xx response and follow at most four redirects that stay on the
+  candidate's address or name one of the release's own domains; the latter are re-asked of the
+  candidate, never of the domain. Redirects elsewhere are never requested and fail with their origin
+  in the message (`redirect_off_origin`), as do loops (`redirect_loop`), so a candidate cannot pass by
+  redirecting to the old public release or to a page that returns 500. `acceptAnyAnswer` checks accept
+  the first answer below 500 other than 400 and 421 (what host allowlists answer); explicit
+  expected-status lists retain exact-status, no-redirect behavior, and a check cannot set both.
 - Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
