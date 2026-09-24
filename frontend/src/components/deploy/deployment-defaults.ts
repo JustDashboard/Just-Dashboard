@@ -294,7 +294,9 @@ export function defaultConfiguration(
     variables: [
       ...composeVariables.map((name) => ({
         name,
-        sensitivity: "secret" as const,
+        // A browser-public value is compiled into the page by design, and
+        // only a plain one can reach a Compose build argument.
+        sensitivity: BROWSER_PREFIX.test(name) ? ("plain" as const) : ("secret" as const),
         scopes: ["runtime"],
         required: true,
         reference: "",
@@ -386,7 +388,39 @@ export function composeSourceForCandidate(
       subdirectory: source.subdirectory,
       composeFiles,
     }
+  const url = connectedRepositoryRemote(source)
+  if (source.mode === "connected_repository" && url)
+    return {
+      kind: "compose",
+      mode: "compose_git",
+      url,
+      ref: source.ref,
+      credentialId: source.credentialId,
+      subdirectory: source.subdirectory,
+      includeSubmodules: source.includeSubmodules,
+      includeLfs: source.includeLfs,
+      composeFiles,
+    }
   return undefined
+}
+
+const PROVIDER_ORIGINS: Record<string, string> = {
+  github: "https://github.com",
+  gitlab: "https://gitlab.com",
+  bitbucket: "https://bitbucket.org",
+}
+
+/**
+ * The HTTPS remote a connected repository is cloned from, built the way the
+ * backend's `remoteForSource` builds it, so the same credential reads it.
+ */
+export function connectedRepositoryRemote(source: DeploymentDraftSource) {
+  if (source.mode !== "connected_repository" || !source.repository) return undefined
+  const origin =
+    source.provider === "gitea"
+      ? source.providerBaseUrl?.replace(/\/+$/, "")
+      : PROVIDER_ORIGINS[source.provider ?? ""]
+  return origin ? `${origin}/${source.repository}.git` : undefined
 }
 
 /**
@@ -503,6 +537,8 @@ export function validateConfiguration(
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
     errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+  if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
+    errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [
     ["internalPort", configuration.runtime.internalPort ?? 0],
     ["hostPort", configuration.runtime.hostPort ?? 0],
@@ -549,10 +585,39 @@ export function validateConfiguration(
     errors.releaseTasks =
       "Release tasks need a name, command, 1–3600 second timeout, and Release task-scoped variables."
   else if (
-    configuration.build.method === "none" &&
+    !buildsReleaseImage(configuration.build.method) &&
     releaseTasks.some((task) => task.runner === "image")
   )
     errors.releaseTasks =
       "A release task that runs in the release image needs a build that produces one; run it in the dashboard's shell instead."
   return errors
+}
+
+/** Whether a build method produces an image a release task can run in, as the backend decides. */
+export function buildsReleaseImage(method: DeploymentBuildMethod | undefined) {
+  return method !== "none" && method !== "legacy_compose"
+}
+
+/**
+ * Where a new release task runs: the release's image when the build makes
+ * one, since only there are the application's toolchain and variables.
+ */
+export function defaultReleaseTaskRunner(
+  method: DeploymentBuildMethod | undefined,
+): "image" | undefined {
+  return buildsReleaseImage(method) ? "image" : undefined
+}
+
+const DOCKERFILE_STAGE = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/
+
+/**
+ * Prefixes whose variables a front-end build inlines into the JavaScript it
+ * serves — the backend's `publicBuildPrefixes`.
+ */
+export const BROWSER_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|NUXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)/
+
+/** The Stage field's hint: what leaving it empty does, and the stages detection read. */
+export function dockerfileStageHint(stages?: string[]) {
+  const base = "Leave empty to build the last stage."
+  return stages?.length ? `${base} This Dockerfile's stages: ${stages.join(", ")}.` : base
 }

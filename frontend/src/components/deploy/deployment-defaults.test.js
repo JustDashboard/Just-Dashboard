@@ -4,7 +4,10 @@ import {
   candidateBlocker,
   checksForRuntime,
   composeSourceForCandidate,
+  connectedRepositoryRemote,
   defaultConfiguration,
+  defaultReleaseTaskRunner,
+  dockerfileStageHint,
   discoveredEnvironmentRows,
   generateSecretValue,
   mergeDiscoveredRows,
@@ -329,11 +332,51 @@ describe("repository container definitions", () => {
 
   test("an image task without an image to run in is refused before save", () => {
     const plan = defaultConfiguration("worker", candidate({ buildMethod: "recipe" }))
-    plan.build.method = "none"
     plan.build.releaseTasks = [
       { name: "migrate", command: "bin/migrate", timeoutSeconds: 60, env: [], runner: "image" },
     ]
-    expect(validateConfiguration(plan, "worker").releaseTasks).toContain("release image")
+    for (const method of ["none", "legacy_compose"]) {
+      plan.build.method = method
+      expect(validateConfiguration(plan, "worker").releaseTasks).toContain("release image")
+      expect(defaultReleaseTaskRunner(method)).toBeUndefined()
+    }
+    plan.build.method = "compose"
+    expect(validateConfiguration(plan, "worker").releaseTasks).toBeUndefined()
+    expect(defaultReleaseTaskRunner("dockerfile")).toBe("image")
+  })
+
+  test("a blank release task command is refused before save", () => {
+    const plan = defaultConfiguration("worker", candidate({ buildMethod: "recipe" }))
+    plan.build.releaseTasks = [{ name: "migrate", command: "  \n", timeoutSeconds: 60, env: [] }]
+    expect(validateConfiguration(plan, "worker").releaseTasks).toContain("command")
+  })
+
+  test("a Dockerfile stage is a stage name, and the hint names the ones detection read", () => {
+    const plan = defaultConfiguration("web", candidate({ buildMethod: "dockerfile" }))
+    plan.build.target = "prod --push"
+    expect(validateConfiguration(plan, "web").target).toContain("stage name")
+    plan.build.target = "runner"
+    expect(validateConfiguration(plan, "web").target).toBeUndefined()
+    expect(dockerfileStageHint(["deps", "runner"])).toBe(
+      "Leave empty to build the last stage. This Dockerfile's stages: deps, runner.",
+    )
+    expect(dockerfileStageHint()).toBe("Leave empty to build the last stage.")
+  })
+
+  test("a browser-public Compose variable is planned plain, so a build argument can carry it", () => {
+    const plan = defaultConfiguration(
+      "compose",
+      undefined,
+      { kind: "compose", mode: "compose_git" },
+      {
+        candidates: [],
+        compose: { variables: ["NEXT_PUBLIC_API_URL", "DATABASE_URL"] },
+      },
+    )
+    const sensitivity = Object.fromEntries(
+      plan.variables.map((variable) => [variable.name, variable.sensitivity]),
+    )
+    expect(sensitivity).toEqual({ NEXT_PUBLIC_API_URL: "plain", DATABASE_URL: "secret" })
   })
 
   test("the candidate list says what stops a candidate building", () => {
@@ -392,5 +435,41 @@ describe("repository container definitions", () => {
     expect(composeSourceForCandidate({ kind: "git", mode: "git_url", url: "x" }, candidate())).toBe(
       undefined,
     )
+    // A connected repository keeps its credential and becomes the remote the
+    // backend would clone it from.
+    expect(
+      composeSourceForCandidate(
+        {
+          kind: "git",
+          mode: "connected_repository",
+          provider: "github",
+          repository: "o/r",
+          ref: "main",
+          credentialId: 7,
+        },
+        compose,
+      ),
+    ).toMatchObject({
+      mode: "compose_git",
+      url: "https://github.com/o/r.git",
+      credentialId: 7,
+      ref: "main",
+    })
+  })
+
+  test("a connected repository's remote is the one the backend clones", () => {
+    const connected = { kind: "git", mode: "connected_repository", repository: "team/app" }
+    expect(connectedRepositoryRemote({ ...connected, provider: "gitlab" })).toBe(
+      "https://gitlab.com/team/app.git",
+    )
+    expect(
+      connectedRepositoryRemote({
+        ...connected,
+        provider: "gitea",
+        providerBaseUrl: "https://git.example.com/",
+      }),
+    ).toBe("https://git.example.com/team/app.git")
+    expect(connectedRepositoryRemote({ ...connected, provider: "gitea" })).toBeUndefined()
+    expect(connectedRepositoryRemote({ kind: "git", mode: "git_url", url: "x" })).toBeUndefined()
   })
 })

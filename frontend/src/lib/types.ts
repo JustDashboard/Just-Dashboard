@@ -3293,6 +3293,8 @@ export type DeploymentDetectionCandidate = {
   dockerfileArgs?: DeploymentDockerfileArg[]
   /** Literal `FROM --platform=` values the Dockerfile pins. */
   dockerfilePlatforms?: string[]
+  /** The Dockerfile's named stages, which a configured stage must be one of. */
+  dockerfileStages?: string[]
   /** What detection proved about how this candidate's image would build. */
   imageBuildIssues?: DeploymentImageBuildIssue[]
   /** The command the repository declares runs once before each release. */
@@ -3477,6 +3479,8 @@ export type DeploymentConfiguration = {
     targetPlatform?: string
     /** The Dockerfile stage to build (custom Dockerfiles only). */
     target?: string
+    /** The Compose service readiness and the release's container follow; empty keeps detection's. */
+    primaryService?: string
     noCache?: boolean
     secrets?: { variable: string; step: "install" | "build" }[]
     releaseTasks?: {

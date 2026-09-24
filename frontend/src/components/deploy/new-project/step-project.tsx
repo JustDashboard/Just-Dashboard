@@ -32,6 +32,7 @@ import {
 import {
   candidateBlocker,
   composeSourceForCandidate,
+  dockerfileStageHint,
   withPackageManagerRunner,
 } from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
@@ -142,7 +143,9 @@ export function StepProject({
    */
   const buildFacts =
     configuration.build.method === "dockerfile"
-      ? configuration.build.dockerfile || "Dockerfile"
+      ? `${configuration.build.dockerfile || "Dockerfile"}${
+          configuration.build.target ? ` · stage ${configuration.build.target}` : ""
+        }`
       : [
           configuration.build.buildCommand,
           configuration.build.startCommand,
@@ -287,6 +290,38 @@ export function StepProject({
                 </Tag>
               ))}
             </div>
+            {flow.detection.compose.services.length > 1 && (
+              <Field
+                label="Primary service"
+                htmlFor="compose-primary-service"
+                hint="Readiness and the release's container follow it. Detection picks one that builds or publishes a port, never a database."
+              >
+                <Select
+                  value={
+                    configuration.build.primaryService ??
+                    flow.detection.compose.primaryService ??
+                    flow.detection.compose.services[0].name
+                  }
+                  onValueChange={(value) =>
+                    updateBuild({
+                      primaryService:
+                        value === flow.detection?.compose?.primaryService ? undefined : value,
+                    })
+                  }
+                >
+                  <SelectTrigger id="compose-primary-service" className="w-full font-mono">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {flow.detection.compose.services.map((service) => (
+                      <SelectItem key={service.name} value={service.name} className="font-mono">
+                        {service.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             {flow.detection.compose.unsupported.map((item) => (
               <Notice key={item} tone="warning" title="Needs explicit review">
                 {item}
@@ -542,7 +577,29 @@ export function StepProject({
                     id="dockerfile"
                     className="font-mono"
                     value={configuration.build.dockerfile ?? "Dockerfile"}
-                    onChange={(event) => updateBuild({ dockerfile: event.target.value })}
+                    // A stage belongs to the file it was read from; another
+                    // file keeping it would fail with "not a stage".
+                    onChange={(event) =>
+                      updateBuild({ dockerfile: event.target.value, target: undefined })
+                    }
+                  />
+                </Field>
+              )}
+              {configuration.build.method === "dockerfile" && (
+                <Field
+                  label="Stage"
+                  htmlFor="dockerfile-target"
+                  hint={dockerfileStageHint(flow.candidate?.dockerfileStages)}
+                  error={errors.target}
+                >
+                  <Input
+                    id="dockerfile-target"
+                    className="font-mono"
+                    value={configuration.build.target ?? ""}
+                    onChange={(event) =>
+                      updateBuild({ target: event.target.value.trim() || undefined })
+                    }
+                    placeholder="the last stage"
                   />
                 </Field>
               )}
