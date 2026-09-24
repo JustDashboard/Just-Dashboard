@@ -367,7 +367,7 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 		if err != nil {
 			return nil, err
 		}
-		lines = append(stage, "RUN "+buildSecrets+recipe.node.build)
+		lines = append(stage, recipe.node.buildRun(buildSecrets, recipe.node.build, boundToBuild(config.Secrets)))
 	}
 	extensions := append([]string(nil), phpDefaultExtensions...)
 	for _, extension := range recipe.extensions {

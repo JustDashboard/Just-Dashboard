@@ -146,6 +146,8 @@ type nodeInstallFacts struct {
 	// repository declares; prisma is the package's Prisma configuration.
 	runtime nodeRuntimeFacts
 	prisma  nodePrismaFacts
+	// envValidation is the env-validation schema the build imports.
+	envValidation nodeEnvValidation
 }
 
 // detectedLockfiles are the readings as the candidate records them.
@@ -298,6 +300,7 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 	facts.registry = mergeDetectedVariables(facts.registry)
 	facts.runtime = readNodeRuntimeFacts(files, member, facts.manifest, facts.settings, engineStrict)
 	facts.prisma = readPrismaFacts(files.sub(member), facts.manifest)
+	facts.envValidation = readEnvValidation(files.sub(member), facts.manifest)
 	return facts
 }
 
@@ -785,8 +788,9 @@ type nodeInstallPlan struct {
 	family string
 	// image is what the dependencies need from the image beyond the install,
 	// prisma the generate step and the placeholders Prisma's config needs.
-	image  nodeImagePlan
-	prisma nodePrismaPlan
+	image    nodeImagePlan
+	prisma   nodePrismaPlan
+	buildEnv nodeBuildPlan
 	// berry keeps Yarn's cache inside the build so a Plug'n'Play install
 	// is copied with the application.
 	berry     bool
@@ -1005,6 +1009,7 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	if !choice.assets {
 		planPrisma(facts, &plan)
 	}
+	planNodeBuild(facts, &plan, choice.assets)
 	planNodeRelease(facts, &plan)
 	return plan
 }

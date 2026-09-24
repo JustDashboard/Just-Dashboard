@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+// nodeBuildRun is the build command's RUN as the recipe renders it with no
+// defaults beyond the heap: the probe, then NODE_OPTIONS unless the build
+// supplies its own.
+func nodeBuildRun(command string) string {
+	return nodeBuildRunWith("", "", command)
+}
+
+// nodeBuildRunWith is the same RUN with mounts and further defaults.
+func nodeBuildRunWith(mounts, defaults, command string) string {
+	if defaults != "" {
+		defaults = " " + defaults
+	}
+	return "RUN " + mounts + nodeHeapProbe + ` && export NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}"` + defaults + " && " + command
+}
+
 // The Node release comes from the repository's own declarations, nearest
 // version file first, then package.json; a range keeps the default when it
 // allows it. A release outside the catalogue runs on the nearest major with a
@@ -256,7 +271,7 @@ func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
 		{name: "Playwright downloads Chromium into the application on Debian", files: map[string]string{"package.json": manifest(`"dependencies":{"playwright":"^1.48.0"}`), "package-lock.json": npmLock},
 			config: server, findings: []string{"headless_browser", "glibc_image_selected"},
 			want: []string{"FROM node:22-bookworm-slim@sha256:", "ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright\nWORKDIR /app\n",
-				"RUN npx playwright install chromium\nRUN npm run build\n", "COPY --from=build /app /app\nRUN npx playwright install-deps chromium\nCMD"}},
+				"RUN npx playwright install chromium\n" + nodeBuildRun("npm run build\n"), "COPY --from=build /app /app\nRUN npx playwright install-deps chromium\nCMD"}},
 		{name: "Playwright for tests changes nothing", files: map[string]string{"package.json": manifest(`"devDependencies":{"@playwright/test":"^1.48.0","playwright":"^1.48.0"}`), "package-lock.json": npmLock},
 			config: server, absent: []string{"bookworm", "playwright", "apk add"}},
 	} {

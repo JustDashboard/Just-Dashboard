@@ -361,7 +361,7 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 		lines = append(lines, nodeRunWith(buildSecrets, plan.prisma.defaults, plan.prisma.generate))
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
-		lines = append(lines, nodeRunWith(buildSecrets, plan.buildDefaults(), command))
+		lines = append(lines, plan.buildRun(buildSecrets, command, boundToBuild(config.Secrets)))
 	}
 	defaults := recipe.node.resolution.nodeFrameworkDefaults
 	if strings.TrimSpace(config.OutputDirectory) == "" && defaults.Entry != "" && frameworkDefaultStart(config.StartCommand, defaults.Start) {

@@ -671,6 +671,13 @@ type nodeImagePlan struct {
 // supplies none, so an operator's own build variable of the same name wins.
 type nodeEnvDefault struct{ name, value string }
 
+// assignment is the default as the RUN's shell reads it: "${NAME:-value}"
+// is expanded by that shell, never by the Dockerfile parser, and only recipe
+// constants are ever written this way.
+func (d nodeEnvDefault) assignment() string {
+	return d.name + `="${` + d.name + `:-` + d.value + `}"`
+}
+
 // nodeImageFamily chooses Debian slim when a package the application loads
 // ships glibc binaries only; everything else stays on Alpine.
 func nodeImageFamily(facts nodeInstallFacts, assets bool) (string, []string) {
@@ -817,16 +824,14 @@ func nodePackagesLine(family string, packages []string) string {
 }
 
 // nodeRunWith renders a RUN that gives each default to the commands that
-// follow, unless the build supplied the variable: "${NAME:-value}" is
-// expanded by the RUN's shell, never by the Dockerfile parser, and only
-// recipe constants are ever written this way.
+// follow, unless the build supplied the variable.
 func nodeRunWith(mounts string, defaults []nodeEnvDefault, command string) string {
 	if len(defaults) == 0 {
 		return "RUN " + mounts + command
 	}
 	assignments := make([]string, 0, len(defaults))
 	for _, value := range defaults {
-		assignments = append(assignments, value.name+`="${`+value.name+`:-`+value.value+`}"`)
+		assignments = append(assignments, value.assignment())
 	}
 	return "RUN " + mounts + "export " + strings.Join(assignments, " ") + " && " + command
 }

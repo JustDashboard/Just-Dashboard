@@ -150,7 +150,7 @@ func TestNodeRecipeRendersEachManagersInstall(t *testing.T) {
 				"ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_AUTO_PIN=0\n",
 				"RUN corepack enable pnpm && corepack install -g pnpm@10.34.5\n",
 				"FROM toolchain AS build\nWORKDIR /app\nCOPY . .\nRUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\n",
-				"RUN pnpm run build\n",
+				nodeBuildRun("pnpm run build\n"),
 				"FROM toolchain\nWORKDIR /app\nENV NODE_ENV=production\nENV COREPACK_ENABLE_NETWORK=0\nENV PATH=/app/node_modules/.bin:$PATH\n",
 				`CMD ["/bin/sh","-c","pnpm run start"]`,
 			},
@@ -182,7 +182,7 @@ func TestNodeRecipeRendersEachManagersInstall(t *testing.T) {
 		},
 		{
 			name: "Yarn 1 installs frozen with its own flag", files: map[string]string{"package.json": leftPad(""), "yarn.lock": yarnClassic},
-			config: server, want: []string{"FROM node:22-alpine@sha256:", " AS build\n", "RUN yarn install --frozen-lockfile\n", "RUN yarn run build\n"},
+			config: server, want: []string{"FROM node:22-alpine@sha256:", " AS build\n", "RUN yarn install --frozen-lockfile\n", nodeBuildRun("yarn run build\n")},
 			absent: []string{"--immutable", "corepack", "AS toolchain"}, toolchain: "yarn 1.22 (classic, bundled with the Node image)",
 		},
 		{
@@ -226,7 +226,7 @@ func TestNodeRecipeRendersEachManagersInstall(t *testing.T) {
 			name: "Bun installs beside Node at the declared release", files: map[string]string{"package.json": leftPad(`,"packageManager":"bun@1.2.21"`), "bun.lock": bunLock},
 			config: server,
 			want: []string{"FROM node:22-alpine@sha256:", "COPY --from=oven/bun:1.2.21-alpine@sha256:", " /usr/local/bin/bun /usr/local/bin/bun\nRUN ln -s bun /usr/local/bin/bunx\n",
-				"RUN bun install --frozen-lockfile\n", "RUN bun run build\n", `CMD ["/bin/sh","-c","bun run start"]`},
+				"RUN bun install --frozen-lockfile\n", nodeBuildRun("bun run build\n"), `CMD ["/bin/sh","-c","bun run start"]`},
 			absent: []string{"FROM oven/bun"}, toolchain: "bun 1.2.21 (packageManager)",
 		},
 		{
@@ -261,7 +261,7 @@ func TestNodeRecipeRendersEachManagersInstall(t *testing.T) {
 		},
 		{
 			name: "no lockfile installs rather than refuses", files: map[string]string{"package.json": leftPad("")},
-			config: server, want: []string{"RUN npm install --no-audit --no-fund\n", "RUN npm run build\n"},
+			config: server, want: []string{"RUN npm install --no-audit --no-fund\n", nodeBuildRun("npm run build\n")},
 		},
 		{
 			name: "scripts that call bunx get Bun under npm", files: map[string]string{
@@ -294,7 +294,7 @@ func TestPrepareMovesSavedCommandsToTheResolvedManager(t *testing.T) {
 	if prepared.BuildCommand != "bun run build" || prepared.StartCommand != "bunx prisma migrate deploy && bun run start" {
 		t.Fatalf("prepared commands = %q / %q", prepared.BuildCommand, prepared.StartCommand)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN bun run build\n", `"bunx prisma migrate deploy \u0026\u0026 bun run start"`}, []string{"npm run"})
+	assertDockerfile(t, prepared.DockerfilePreview, []string{nodeBuildRun("bun run build\n"), `"bunx prisma migrate deploy \u0026\u0026 bun run start"`}, []string{"npm run"})
 	if !slices.Contains(prepared.Notes, "Build command runs with bun: `bun run build` (saved: `npm run build`)") {
 		t.Fatalf("notes = %v", prepared.Notes)
 	}
@@ -440,7 +440,7 @@ func TestWorkspaceMemberBuildsFromItsWorkspaceRoot(t *testing.T) {
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
 		"FROM toolchain AS build\nWORKDIR /app\nCOPY . .\nRUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\nWORKDIR /app/apps/web\n",
 		"ENV PATH=/app/apps/web/node_modules/.bin:/app/node_modules/.bin:$PATH",
-		"RUN pnpm exec turbo run build --filter=web...\n",
+		nodeBuildRun("pnpm exec turbo run build --filter=web...\n"),
 		"FROM toolchain\nWORKDIR /app/apps/web\n", "COPY --from=build /app /app",
 	}, nil)
 }

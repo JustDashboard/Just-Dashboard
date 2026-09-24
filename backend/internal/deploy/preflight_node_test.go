@@ -276,5 +276,5 @@ func TestPHPAssetStageSharesTheNodeInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"FROM node:22-alpine@sha256:", " AS assets\n", "RUN npm install --no-audit --no-fund\n", "RUN npm run build\n"}, nil)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"FROM node:22-alpine@sha256:", " AS assets\n", "RUN npm install --no-audit --no-fund\n", nodeBuildRun("npm run build\n")}, nil)
 }

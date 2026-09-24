@@ -91,7 +91,7 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 		// The asset stage installs through the Node recipe's own planner:
 		// Bun is copied beside Node rather than replacing it.
 		"FROM node:22-alpine@sha256:", "AS assets-toolchain", "COPY --from=oven/bun:1-alpine@sha256:",
-		"FROM assets-toolchain AS assets", "bun install --frozen-lockfile", "RUN bun run build",
+		"FROM assets-toolchain AS assets", "bun install --frozen-lockfile", nodeBuildRun("bun run build"),
 		"FROM composer:2@sha256:", "AS composer", "FROM dunglas/frankenphp:1-php8.4-alpine@sha256:",
 		"ENV COMPOSER_ALLOW_SUPERUSER=1 LOG_CHANNEL=stderr",
 		"RUN install-php-extensions pdo_mysql pdo_pgsql opcache intl redis",

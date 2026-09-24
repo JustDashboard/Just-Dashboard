@@ -336,6 +336,33 @@ runs `prisma migrate` or `prisma db` gets no placeholder, since it needs the rea
 value is never widened to the install on its own — the install also runs every dependency's install
 script — unless the variable is mapped to `install_and_build` (`prisma_config_env`).
 
+**The build command's RUN** (`build_node_build.go`) starts by sizing V8's heap to the build host:
+`jd_heap=$(awk … /proc/meminfo)` takes three quarters of `MemAvailable` when the build starts, at most
+4 GiB and nothing below 256 MiB, and the build runs with `NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}"`. V8's
+own default is a quarter of physical memory, which a Next.js build on a 2 GiB server exhausts while memory
+is still free; a limit under what is available makes a build that outgrows the host stop with
+"JavaScript heap out of memory" instead of being killed by the kernel. It is computed inside the RUN, so
+the Dockerfile is the same on every host, and a `NODE_OPTIONS` the build supplies — a build variable, or
+an assignment in the package's own script — replaces it. The PHP recipe's asset stage builds the same
+way.
+
+- A webpack 4 toolchain — `react-scripts` before 5, `@vue/cli-service` before 5, `webpack` before 5.61,
+  Nuxt before 2.16, `@angular-devkit/build-angular` before 13, `laravel-mix` before 6,
+  `@symfony/webpack-encore` before 1, by the lockfile's version or the range's floor — hashes with MD4,
+  which OpenSSL 3 refuses (`error:0308010C`). Its build runs with `--openssl-legacy-provider` in front of
+  whatever `NODE_OPTIONS` it has (`legacy_openssl_provider`, a warning that names the upgrade).
+- T3 Env (`@t3-oss/env-nextjs`, `-core`, `-nuxt`) validates its schema when `next build` imports it. The
+  schema file (`src/env.js` and the usual places) is read as text for its `server` and `client` keys,
+  leaving out those whose schema is optional or has a default. When a required server key is not mounted
+  in the build and the schema honours `SKIP_ENV_VALIDATION` (create-t3-app's does), the build runs with
+  `SKIP_ENV_VALIDATION="${SKIP_ENV_VALIDATION:-1}"`; validation still runs when the server starts. The
+  decision follows the build's mounts, so the Dockerfile changes when the variables do.
+- A build or start command, or a package script it runs, that passes `node --env-file=<path>` (or `tsx`
+  or Bun) exits when the file is missing, and an env file is rarely committed. The build stage (before
+  the build) or the runtime stage (after copying the application) runs `[ -e <path> ] || : > <path>`,
+  and the process environment takes precedence over the empty file (`env_file_placeholder`). Only a
+  plain path inside the package is written; `--env-file-if-exists` needs nothing.
+
 ## Python
 
 The recipe reads `requirements.txt`, a PEP 621 `pyproject.toml`, a Poetry `pyproject.toml`, `uv.lock`

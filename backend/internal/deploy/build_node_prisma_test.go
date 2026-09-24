@@ -24,6 +24,8 @@ func prismaSchemaFor(provider string) string { return strings.Replace(prismaSche
 func TestNodeRecipeGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
 	t.Parallel()
 	placeholder := `export DATABASE_URL="${DATABASE_URL:-postgresql://127.0.0.1:5432/prisma-generate}" && `
+	database := `DATABASE_URL="${DATABASE_URL:-postgresql://127.0.0.1:5432/prisma-generate}"`
+	mount := "--mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true "
 	for _, test := range []struct {
 		name     string
 		files    map[string]string
@@ -41,7 +43,7 @@ func TestNodeRecipeGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
 			want: []string{
 				" AS build\nRUN apk add --no-cache openssl\n",
 				"RUN " + placeholder + "npm install --no-audit --no-fund\n",
-				"ENV PATH=/app/node_modules/.bin:$PATH\nRUN " + placeholder + "npx prisma generate\nRUN " + placeholder + "npm run build\n",
+				"ENV PATH=/app/node_modules/.bin:$PATH\nRUN " + placeholder + "npx prisma generate\n" + nodeBuildRunWith("", database, "npm run build\n"),
 			},
 			findings: []string{"prisma_generate_added", "prisma_config_env"},
 		},
@@ -54,7 +56,7 @@ func TestNodeRecipeGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
 			want: []string{
 				"RUN " + placeholder + "npm install --no-audit --no-fund\n",
 				"RUN --mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true " + placeholder + "npx prisma generate\n",
-				"RUN --mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true " + placeholder + "npm run build\n",
+				nodeBuildRunWith(mount, database, "npm run build\n"),
 			},
 			absent: []string{"required=true " + placeholder + "npm install"},
 		},
@@ -86,7 +88,7 @@ func TestNodeRecipeGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
 			files: map[string]string{"package.json": strings.Replace(prisma7Manifest, "prisma generate && next build", "prisma migrate deploy && next build", 1),
 				"prisma.config.ts": prisma7Config, "prisma/schema.prisma": prismaSchemaFor("postgresql")},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"},
-			want:   []string{"RUN " + placeholder + "npx prisma generate\nRUN npm run build\n"},
+			want:   []string{"RUN " + placeholder + "npx prisma generate\n" + nodeBuildRun("npm run build\n")},
 		},
 		{
 			name:   "Prisma 6 generates without placeholders",
