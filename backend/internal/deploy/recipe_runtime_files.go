@@ -57,13 +57,14 @@ var (
 // copied, so the image cannot pick up a file from outside the checkout.
 func compiledRuntimeAssets(root, extension string) []string {
 	found := map[string]bool{}
+	ignored := dockerIgnoredNames(root)
 	add := func(name string) {
 		name = strings.TrimSuffix(strings.TrimPrefix(name, "./"), "/")
 		if first, _, _ := strings.Cut(name, "/"); first != "" {
 			name = first
 		}
 		if !runtimeAssetNameRE.MatchString(name) || strings.ContainsAny(name, "*?[") || name == ".git" ||
-			name == "target" || name == "vendor" || name == ".just-dashboard" || name == "node_modules" {
+			name == "target" || name == "vendor" || name == ".just-dashboard" || name == "node_modules" || ignored(name) {
 			return
 		}
 		info, err := os.Lstat(filepath.Join(root, name))
@@ -137,6 +138,41 @@ func compiledRuntimeAssets(root, extension string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// dockerIgnoredNames reports whether the repository's .dockerignore keeps a
+// root-level name out of the build context, where a COPY of it from the
+// build stage would fail the build. Anything a rule might touch — including
+// an entry a later "!" rule re-includes — counts as ignored: leaving an asset
+// out only loses the convenience, copying a missing one loses the build.
+func dockerIgnoredNames(root string) func(string) bool {
+	content, err := readContainedRegular(root, ".dockerignore", 64<<10)
+	if err != nil {
+		return func(string) bool { return false }
+	}
+	var patterns []string
+	for _, line := range strings.Split(string(content), "\n") {
+		pattern := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "!"))
+		pattern = strings.TrimPrefix(strings.TrimPrefix(pattern, "/"), "./")
+		if pattern == "" || strings.HasPrefix(pattern, "#") {
+			continue
+		}
+		patterns = append(patterns, pattern)
+	}
+	return func(name string) bool {
+		for _, pattern := range patterns {
+			// "**/x" matches at the top level too; a pattern reaching inside a
+			// directory leaves the directory itself in the context.
+			pattern = strings.TrimSuffix(strings.TrimPrefix(pattern, "**/"), "/")
+			if strings.Contains(pattern, "/") {
+				continue
+			}
+			if matched, err := path.Match(pattern, name); err != nil || matched {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // compiledRuntimeLines is the runtime stage the Go and Rust recipes share:

@@ -39,6 +39,18 @@ func TestCompiledRuntimeAssetsFollowTheConventionsAndTheSource(t *testing.T) {
 		t.Fatalf("assets = %q, want %q", got, want)
 	}
 
+	ignoring := t.TempDir()
+	for name, content := range map[string]string{
+		"main.go": "package main\n", "templates/a.html": "x", "config.yaml": "secret: x", "static/a.css": "x",
+		"public/a": "x", "locales/en.json": "{}", "assets/a.png": "x",
+		".dockerignore": "# local only\nconfig.yaml\n**/*.log\ntemplates/drafts\n/static/\n!public\nassets\n",
+	} {
+		writeBuildFixture(t, ignoring, name, content)
+	}
+	if got := compiledRuntimeAssets(ignoring, ".go"); !reflect.DeepEqual(got, []string{"locales", "templates"}) {
+		t.Fatalf("assets despite .dockerignore = %q", got)
+	}
+
 	rust := t.TempDir()
 	for name, content := range map[string]string{
 		"Cargo.toml":           "[package]\nname = \"app\"\n",
