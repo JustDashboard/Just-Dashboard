@@ -69,9 +69,15 @@ func (r *CheckRunner) httpAttempt(
 		return
 	}
 	result.Address = address
+	// A wildcard domain names no host a visitor sends, and Django refuses a
+	// Host with a "*" in it whatever it allows, so the first concrete domain
+	// introduces the candidate.
 	var origin *url.URL
-	if len(planned) > 0 {
-		origin = planned[0]
+	for _, plannedOrigin := range planned {
+		if !strings.HasPrefix(plannedOrigin.Hostname(), "*.") {
+			origin = plannedOrigin
+			break
+		}
 	}
 	// Listed statuses and any-answer checks judge the first answer: a
 	// redirect is itself the answer they were written to accept or refuse.
@@ -162,6 +168,15 @@ func redirectOnCandidate(candidate, location *url.URL, planned []*url.URL) (*url
 		return nil, nil, false
 	}
 	for _, origin := range planned {
+		if wildcard, ok := strings.CutPrefix(origin.Hostname(), "*."); ok {
+			// A wildcard domain serves each name one label under it, and the
+			// name the redirect chose is the Host its next request carries.
+			label, rest, _ := strings.Cut(strings.ToLower(location.Hostname()), ".")
+			if label == "" || rest != wildcard {
+				continue
+			}
+			origin = &url.URL{Scheme: origin.Scheme, Host: strings.Replace(origin.Host, "*", label, 1)}
+		}
 		if !sameHostAndPort(location, origin) {
 			continue
 		}

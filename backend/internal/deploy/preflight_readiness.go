@@ -61,7 +61,8 @@ func readinessPreflightFindings(draft *Draft, configuration PlanConfiguration) [
 	if readiness == nil {
 		return findings
 	}
-	findings = append(findings, hostAllowlistFindings(readiness, configuration.Domains)...)
+	findings = append(findings, hostAllowlistFindings(readiness, configuration.Domains,
+		runtimeCheckHost(firstNonEmpty(configuration.Runtime.BindAddress, "127.0.0.1")))...)
 	if readiness.HTTPSRedirect != "" {
 		https := false
 		for _, domain := range configuration.Domains {
@@ -155,16 +156,21 @@ func startCommandFindings(selected *DetectedCandidate, configuration PlanConfigu
 }
 
 // hostAllowlistFindings warn when the application's literal host allowlist
-// refuses the name readiness and visitors use: the planned domains, or the
-// loopback address when there are none.
-func hostAllowlistFindings(readiness *DetectedReadiness, domains []PlannedDomain) []PreflightFinding {
+// refuses the name readiness and visitors use: the planned domains, or, when
+// there are none, the loopback address the probe dials and sends as Host.
+// "localhost" is not that address: an allowlist of only it answers the
+// probe 400.
+func hostAllowlistFindings(readiness *DetectedReadiness, domains []PlannedDomain, probeHost string) []PreflightFinding {
 	if readiness.AllowedHostsSource == "" {
 		return nil
 	}
 	var refused []string
 	if len(domains) == 0 {
-		if !hostAllowed("127.0.0.1", readiness.AllowedHosts) && !hostAllowed("localhost", readiness.AllowedHosts) {
-			refused = append(refused, "127.0.0.1")
+		if strings.Contains(probeHost, ":") {
+			probeHost = "[" + probeHost + "]"
+		}
+		if !hostAllowed(probeHost, readiness.AllowedHosts) {
+			refused = append(refused, probeHost)
 		}
 	}
 	for _, domain := range domains {
@@ -183,7 +189,7 @@ func hostAllowlistFindings(readiness *DetectedReadiness, domains []PlannedDomain
 	measured := fmt.Sprintf("%s is not in %s (%s)", strings.Join(refused, ", "), readiness.AllowedHostsSource, allowed)
 	action := "Add the planned domain to the allowlist, or read it from a variable set to the domain."
 	if len(domains) == 0 {
-		action = "Add a domain to this plan and to the allowlist, or allow 127.0.0.1 for a deployment without one."
+		action = "Add a domain to this plan and to the allowlist, or allow " + refused[0] + " for a deployment without one."
 	}
 	return []PreflightFinding{finding("readiness_host_allowlist", PreflightWarning,
 		"The application's host allowlist refuses the name it is reached by", boundedEvidence(measured),

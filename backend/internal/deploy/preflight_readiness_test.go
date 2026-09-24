@@ -137,19 +137,27 @@ func TestPreflightWarnsWhenTheHostAllowlistRefusesTheDomain(t *testing.T) {
 		name    string
 		allowed []string
 		domains []PlannedDomain
+		bind    string
 		warn    bool
 	}{
-		{"exact", []string{"app.example.com"}, []PlannedDomain{domain}, false},
-		{"subdomain pattern", []string{".example.com"}, []PlannedDomain{domain}, false},
-		{"wildcard", []string{"*"}, []PlannedDomain{domain}, false},
-		{"another host", []string{"old.example.org"}, []PlannedDomain{domain}, true},
-		{"empty list", nil, []PlannedDomain{domain}, true},
-		{"no domain, loopback refused", []string{"app.example.com"}, nil, true},
-		{"no domain, loopback allowed", []string{"localhost", "app.example.com"}, nil, false},
+		{"exact", []string{"app.example.com"}, []PlannedDomain{domain}, "", false},
+		{"subdomain pattern", []string{".example.com"}, []PlannedDomain{domain}, "", false},
+		{"wildcard", []string{"*"}, []PlannedDomain{domain}, "", false},
+		{"another host", []string{"old.example.org"}, []PlannedDomain{domain}, "", true},
+		{"empty list", nil, []PlannedDomain{domain}, "", true},
+		{"no domain, loopback refused", []string{"app.example.com"}, nil, "", true},
+		{"no domain, loopback allowed", []string{"127.0.0.1", "app.example.com"}, nil, "", false},
+		// The probe sends Host 127.0.0.1, which "localhost" does not match.
+		{"no domain, only localhost allowed", []string{"localhost"}, nil, "", true},
+		{"no domain, DEBUG's local names", []string{".localhost", "127.0.0.1", "[::1]"}, nil, "", false},
+		{"no domain, IPv6 probe", []string{"127.0.0.1"}, nil, "::", true},
+		{"no domain, IPv6 probe allowed", []string{"[::1]"}, nil, "::", false},
 	} {
 		candidate := DetectedCandidate{BuildMethod: BuildRecipe, Readiness: &DetectedReadiness{
 			Kind: "http", Path: "/", Source: readinessFromConvention, AllowedHosts: test.allowed, AllowedHostsSource: "ALLOWED_HOSTS in mysite/settings.py"}}
-		item := findingByCode(readinessPreflightFindings(readinessDraft(ProfileWeb, candidate), readinessPlan(BuildRecipe, "gunicorn", `{"path":"/"}`, test.domains...)), "readiness_host_allowlist")
+		plan := readinessPlan(BuildRecipe, "gunicorn", `{"path":"/"}`, test.domains...)
+		plan.Runtime.BindAddress = test.bind
+		item := findingByCode(readinessPreflightFindings(readinessDraft(ProfileWeb, candidate), plan), "readiness_host_allowlist")
 		if (item != nil) != test.warn {
 			t.Fatalf("%s: %+v", test.name, item)
 		}

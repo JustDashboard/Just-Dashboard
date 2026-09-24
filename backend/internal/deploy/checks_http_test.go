@@ -157,6 +157,62 @@ func TestHTTPReadinessFollowsPlannedDomainRedirectsOnTheCandidate(t *testing.T) 
 	}
 }
 
+// A wildcard domain is no name a request carries, and Django answers a Host
+// with a "*" in it 400 whatever ALLOWED_HOSTS says. The probe introduces
+// itself by the first concrete domain, or not at all, and a redirect to one
+// name under the wildcard carries that name.
+func TestHTTPReadinessNeverSendsAWildcardHost(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var hosts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hosts = append(hosts, r.Host)
+		mu.Unlock()
+		switch {
+		case strings.Contains(r.Host, "*"):
+			w.WriteHeader(http.StatusBadRequest)
+		case r.URL.Path == "/tenant":
+			http.Redirect(w, r, "https://acme.example.com/home", http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+	runner := NewCheckRunner(nil)
+	for _, test := range []struct {
+		path   string
+		public []string
+		hosts  []string
+	}{
+		{path: "/", public: []string{"https://*.example.com/", "https://app.example.com/"}, hosts: []string{"app.example.com"}},
+		{path: "/", public: []string{"https://*.example.com/"}},
+		{path: "/tenant", public: []string{"https://*.example.com/"}, hosts: []string{"", "acme.example.com"}},
+	} {
+		mu.Lock()
+		hosts = nil
+		mu.Unlock()
+		target := candidateTarget(t, server, test.public...)
+		evidence := runner.Run(context.Background(), readinessCheck(t, CheckConfiguration{Path: test.path}), target)
+		if evidence.Outcome != HealthPassed {
+			t.Fatalf("%s %v: %+v", test.path, test.public, evidence)
+		}
+		mu.Lock()
+		for index, want := range test.hosts {
+			if want == "" {
+				want = net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
+			}
+			if index >= len(hosts) || hosts[index] != want {
+				t.Fatalf("%s %v: hosts %q", test.path, test.public, hosts)
+			}
+		}
+		if len(test.hosts) == 0 && (len(hosts) != 1 || strings.Contains(hosts[0], "example")) {
+			t.Fatalf("%s %v: hosts %q", test.path, test.public, hosts)
+		}
+		mu.Unlock()
+	}
+}
+
 // An any-answer check proves the server answers without requiring a page at
 // the path: an API's 404, a login wall's 401, a redirect to a hosted sign-in.
 // It still refuses a 5xx, and the 400/421 a host allowlist answers with.
