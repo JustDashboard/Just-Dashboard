@@ -1209,7 +1209,9 @@ errors filter that could hide it. When `GET /deploy/{id}/runs/{run}/settings-dri
 the variables changed since the run — the plan revision's fields and the variables' names, digests
 and scopes, never a value — the header's command becomes Deploy with current settings (the run's own
 commit for a remote Git source, a plain deploy otherwise), Retry moves to the menu as "Retry with the
-settings it used", and one line under the failure says what changed. The build console paints its lines
+settings it used", and one line under the failure says what changed. A run that failed with
+`source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot be
+fetched again. The build console paints its lines
 through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`), numbers
 them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage and
 errors (with a count), shows the time since the run began, wraps, follows, copies and downloads

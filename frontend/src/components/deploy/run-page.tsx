@@ -360,8 +360,12 @@ export function RunPage() {
   const cause = failure?.cause
   // A remedy is a settings change, which only an administrator can save.
   const fix = cause?.fix && can("system.admin") ? fixTarget(projectId, cause.fix) : undefined
+  // A commit a force-push removed cannot be fetched again, so retrying it
+  // fails the same way: what can be deployed is the branch as it is now.
+  const commitGone = run.terminalCode === "source_revision_unavailable"
   const stale =
-    isRetryable(run.state) && (drift.data ? drift.data.changed : runPlanIsStale(run, deployment))
+    isRetryable(run.state) &&
+    (commitGone || (drift.data ? drift.data.changed : runPlanIsStale(run, deployment)))
   const changedSince = isRetryable(run.state) ? driftLine(drift.data) : undefined
 
   const selected =
@@ -409,7 +413,7 @@ export function RunPage() {
     try {
       const created = await post<DeploymentEngineRun>(
         `/deploy/${projectId}/environments/${run.environmentId}/runs`,
-        deployWithCurrentSettings(run, deployment),
+        commitGone ? { operation: "deploy" } : deployWithCurrentSettings(run, deployment),
       )
       router.push(`/deploy/${projectId}/runs/${created.id}`)
     } catch (error) {
@@ -471,8 +475,10 @@ export function RunPage() {
       ? [
           {
             key: "retry",
-            label: "Retry with the settings it used",
-            detail: "Run this deployment again with its own plan and variables, unchanged.",
+            label: commitGone ? "Retry the recorded commit" : "Retry with the settings it used",
+            detail: commitGone
+              ? "Try the commit this run recorded again, in case the remote has it back."
+              : "Run this deployment again with its own plan and variables, unchanged.",
             icon: RefreshClockwise,
             progressive: "Starting…",
             disabled: working === "retry",
@@ -554,7 +560,11 @@ export function RunPage() {
               {canRun && stale && (
                 <Button size="sm" pending={working === "deploy"} onClick={deployCurrent}>
                   <RefreshClockwise className="size-3.5" />
-                  {working === "deploy" ? "Starting…" : "Deploy with current settings"}
+                  {working === "deploy"
+                    ? "Starting…"
+                    : commitGone
+                      ? "Deploy the branch head"
+                      : "Deploy with current settings"}
                 </Button>
               )}
               {canRun && run.state === "succeeded" && isLiveRelease && (
