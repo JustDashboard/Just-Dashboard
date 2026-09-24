@@ -28,6 +28,9 @@ type dotnetProject struct {
 	exe         bool
 	assembly    string
 	multiTarget bool
+	// seeds are the committed SQLite files copied into the data directory
+	// (recipe_runtime_files.go).
+	seeds []string
 }
 
 func parseDotnetProject(file string, content []byte) (dotnetProject, error) {
@@ -186,8 +189,11 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 		// on one of them copies that ownership the first time it is used.
 		"RUN mkdir -p " + dotnetRuntimeDataDir + " " + dotnetDataProtectionAt + " && chown app:app /app " + dotnetRuntimeDataDir + " /home/app/.aspnet " + dotnetDataProtectionAt,
 		"COPY --from=build --chown=app:app /out /app",
-		"USER app",
 	}
+	for _, seed := range project.seeds {
+		lines = append(lines, "COPY --from=build --chown=app:app /src/"+seed+" "+dotnetRuntimeDataDir+"/"+path.Base(seed))
+	}
+	lines = append(lines, "USER app")
 	if strings.TrimSpace(config.StartCommand) == "" {
 		// Kestrel reads its port from ASPNETCORE_HTTP_PORTS, not PORT; the
 		// shell bridges the one the runtime injects.

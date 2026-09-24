@@ -32,6 +32,10 @@ var compiledRuntimeAssetNames = []string{
 	"templates", "views", "static", "public", "assets", "migrations", "locales", "i18n", "config",
 }
 
+// compiledRuntimeWalkEntries bounds the source scan the way detection's
+// MaxFiles bounds its walk.
+const compiledRuntimeWalkEntries = 20000
+
 var compiledConfigFileRE = regexp.MustCompile(`^config[A-Za-z0-9._-]*\.(?:ya?ml|toml|json)$`)
 
 // Literal paths a Go or Rust service hands to a template loader, a file
@@ -57,7 +61,7 @@ var (
 // copied, so the image cannot pick up a file from outside the checkout.
 func compiledRuntimeAssets(root, extension string) []string {
 	found := map[string]bool{}
-	ignored := dockerIgnoredNames(root)
+	ignored := dockerIgnoredPaths(root)
 	add := func(name string) {
 		name = strings.TrimSuffix(strings.TrimPrefix(name, "./"), "/")
 		if first, _, _ := strings.Cut(name, "/"); first != "" {
@@ -87,8 +91,13 @@ func compiledRuntimeAssets(root, extension string) []string {
 	if extension == ".rs" {
 		expressions = rustRuntimeFileREs
 	}
-	files, bytes := 0, int64(0)
+	files, bytes, entries := 0, int64(0), 0
 	_ = filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
+		// Every entry counts, not only the sources read: a checkout of a
+		// hundred thousand assets must not keep Prepare walking.
+		if entries++; entries > compiledRuntimeWalkEntries {
+			return filepath.SkipAll
+		}
 		if err != nil {
 			return nil
 		}
@@ -140,40 +149,119 @@ func compiledRuntimeAssets(root, extension string) []string {
 	return names
 }
 
-// dockerIgnoredNames reports whether the repository's .dockerignore keeps a
-// root-level name out of the build context, where a COPY of it from the
-// build stage would fail the build. Anything a rule might touch — including
-// an entry a later "!" rule re-includes — counts as ignored: leaving an asset
-// out only loses the convenience, copying a missing one loses the build.
-func dockerIgnoredNames(root string) func(string) bool {
+// dockerIgnoredPaths reports whether the repository's .dockerignore keeps a
+// root-relative path out of the build context, where a COPY of it from the
+// build stage would fail the build. A path is out when a rule matches it or
+// a directory above it. Anything a rule might touch — including an entry a
+// later "!" rule re-includes — counts as ignored: leaving a file out only
+// loses the convenience, copying a missing one loses the build.
+func dockerIgnoredPaths(root string) func(string) bool {
 	content, err := readContainedRegular(root, ".dockerignore", 64<<10)
 	if err != nil {
 		return func(string) bool { return false }
 	}
-	var patterns []string
+	var patterns [][]string
 	for _, line := range strings.Split(string(content), "\n") {
 		pattern := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "!"))
-		pattern = strings.TrimPrefix(strings.TrimPrefix(pattern, "/"), "./")
+		pattern = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(pattern, "/"), "./"), "/")
 		if pattern == "" || strings.HasPrefix(pattern, "#") {
 			continue
 		}
-		patterns = append(patterns, pattern)
+		patterns = append(patterns, strings.Split(pattern, "/"))
 	}
 	return func(name string) bool {
-		for _, pattern := range patterns {
-			// "**/x" matches at the top level too; a pattern reaching inside a
-			// directory leaves the directory itself in the context.
-			pattern = strings.TrimSuffix(strings.TrimPrefix(pattern, "**/"), "/")
-			if strings.Contains(pattern, "/") {
-				continue
-			}
-			if matched, err := path.Match(pattern, name); err != nil || matched {
-				return true
+		segments := strings.Split(name, "/")
+		for depth := 1; depth <= len(segments); depth++ {
+			for _, pattern := range patterns {
+				if dockerIgnoreMatches(pattern, segments[:depth]) {
+					return true
+				}
 			}
 		}
 		return false
 	}
 }
+
+// dockerIgnoreMatches matches one rule's segments against a path's: "**"
+// stands for any number of directories, every other segment follows
+// path.Match, and a segment that cannot be read matches anything. It walks
+// the rule once over the set of reachable positions, so no rule — however
+// many "**" a repository writes — costs more than its length times the
+// path's.
+func dockerIgnoreMatches(pattern, segments []string) bool {
+	reached := make([]bool, len(segments)+1)
+	reached[0] = true
+	for _, part := range pattern {
+		next := make([]bool, len(segments)+1)
+		if part == "**" {
+			for index, any := range reached {
+				next[index] = any || (index > 0 && next[index-1])
+			}
+		} else {
+			for index := range segments {
+				if !reached[index] {
+					continue
+				}
+				if matched, err := path.Match(part, segments[index]); err != nil || matched {
+					next[index+1] = true
+				}
+			}
+		}
+		reached = next
+	}
+	return reached[len(segments)]
+}
+
+// dotnetSQLiteSeeds are the committed SQLite files the project's connection
+// strings name, by root-relative path. Detection moves such a database into
+// dotnetRuntimeDataDir (detect_state.go); the recipe copies the committed
+// file there too, so a new volume mounted on that directory starts from it —
+// Docker fills an empty named volume from the image the first time it is
+// mounted — rather than empty. The ASP.NET Core Identity template commits an
+// app.db with its schema and never migrates, so an empty file there fails
+// every sign-in. Later releases find the volume filled and copy nothing.
+func dotnetSQLiteSeeds(root string, project dotnetProject) []string {
+	content, err := readContainedRegular(root, project.file, 512<<10)
+	if err != nil || !dotnetSQLitePackageRE.Match(content) {
+		return nil
+	}
+	ignored := dockerIgnoredPaths(root)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil
+	}
+	var seeds []string
+	bases := map[string]bool{}
+	for _, name := range []string{"appsettings.Production.json", "appsettings.json"} {
+		settings, err := readContainedRegular(root, name, 256<<10)
+		if err != nil {
+			continue
+		}
+		for _, match := range dotnetConnectionRE.FindAllStringSubmatch(string(settings), 4) {
+			file := path.Clean(strings.TrimPrefix(strings.TrimSpace(match[3]), "./"))
+			base := path.Base(file)
+			if !sqliteFileName(file) || strings.Contains(file, ":memory:") || !runtimeAssetPathRE.MatchString(file) ||
+				!safePersistentName(base) || bases[base] || ignored(file) {
+				continue
+			}
+			// The path itself must be the committed file, not a link to one.
+			real, err := containedRegularPath(root, file, 1<<30)
+			if err != nil || real != filepath.Join(realRoot, filepath.FromSlash(file)) {
+				continue
+			}
+			bases[base] = true
+			seeds = append(seeds, file)
+		}
+		// The same file detection read: Production's connection strings
+		// replace the base file's.
+		break
+	}
+	return seeds
+}
+
+// runtimeAssetPathRE is a relative path whose every segment is a plain name,
+// safe to write unquoted into a COPY instruction.
+var runtimeAssetPathRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}(?:/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}){0,7}$`)
 
 // compiledRuntimeLines is the runtime stage the Go and Rust recipes share:
 // the binary at /app, run as an unprivileged user from its own home, with the
@@ -187,10 +275,18 @@ func compiledRuntimeLines(base ResolvedImage, assets []string, startCommand stri
 		"WORKDIR " + compiledRuntimeHome,
 		"COPY --from=build /out/app /app",
 	}
+	linked := true
 	for _, asset := range assets {
 		lines = append(lines, "COPY --from=build --chown=app:app /src/"+asset+" "+compiledRuntimeHome+"/"+asset)
+		linked = linked && asset != "app"
 	}
-	lines = append(lines, "RUN mkdir -p "+compiledRuntimeHome+"/data")
+	prepare := "RUN mkdir -p " + compiledRuntimeHome + "/data"
+	if linked {
+		// The working directory used to be /, where a saved start command's
+		// ./app found the binary; the link keeps it finding it.
+		prepare += " && ln -s /app " + compiledRuntimeHome + "/app"
+	}
+	lines = append(lines, prepare)
 	if strings.TrimSpace(startCommand) == "" {
 		return append(lines, `ENTRYPOINT ["/app"]`)
 	}

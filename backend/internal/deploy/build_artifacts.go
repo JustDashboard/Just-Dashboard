@@ -600,6 +600,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		project.seeds = dotnetSQLiteSeeds(root, project)
 		return selectedRecipe{kind: "dotnet", catalogueKey: "dotnet", dotnet: project}, nil
 	case "deno":
 		deno, err := selectDenoRecipe(root, config)
@@ -942,30 +943,40 @@ func writeGeneratedDockerfile(root, content string) error {
 }
 
 func readContainedRegular(root, relative string, limit int64) ([]byte, error) {
+	realPath, err := containedRegularPath(root, relative, limit)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(realPath)
+}
+
+// containedRegularPath is where a relative path lands when it is a bounded
+// regular file inside root, reached without leaving it through a symlink.
+func containedRegularPath(root, relative string, limit int64) (string, error) {
 	if !safeRelativePath(relative) {
-		return nil, fmt.Errorf("path escapes the build context")
+		return "", fmt.Errorf("path escapes the build context")
 	}
 	path := filepath.Join(root, filepath.Clean(relative))
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	rel, err := filepath.Rel(realRoot, realPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return nil, fmt.Errorf("path escapes the build context")
+		return "", fmt.Errorf("path escapes the build context")
 	}
 	info, err := os.Lstat(realPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > limit {
-		return nil, fmt.Errorf("path is not a bounded regular file")
+		return "", fmt.Errorf("path is not a bounded regular file")
 	}
-	return os.ReadFile(realPath)
+	return realPath, nil
 }
 
 func validateCustomDockerfile(content []byte) error {

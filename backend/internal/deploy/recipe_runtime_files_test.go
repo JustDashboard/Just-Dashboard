@@ -83,7 +83,7 @@ func TestCompiledRecipesRunFromAWritableHomeWithTheirFiles(t *testing.T) {
 	for _, want := range []string{
 		"RUN adduser -D -u 10001 app\nUSER app\nWORKDIR /home/app\nCOPY --from=build /out/app /app\n",
 		"COPY --from=build --chown=app:app /src/templates /home/app/templates\n",
-		"RUN mkdir -p /home/app/data\n", `ENTRYPOINT ["/app"]`,
+		"RUN mkdir -p /home/app/data && ln -s /app /home/app/app\n", `ENTRYPOINT ["/app"]`,
 	} {
 		if !strings.Contains(runtime, want) {
 			t.Fatalf("Go runtime stage missing %q:\n%s", want, runtime)
@@ -106,6 +106,12 @@ func TestCompiledRecipesRunFromAWritableHomeWithTheirFiles(t *testing.T) {
 			t.Fatalf("Rust Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}
 	}
+
+	// A root-level directory named app is copied as it is; nothing links over it.
+	lines := strings.Join(compiledRuntimeLines(ResolvedImage{Reference: "alpine:3.22", Digest: "sha256:" + strings.Repeat("a", 64)}, []string{"app", "templates"}, ""), "\n")
+	if strings.Contains(lines, "ln -s") || !strings.Contains(lines, "/src/app /home/app/app") {
+		t.Fatalf("runtime lines with an app directory:\n%s", lines)
+	}
 }
 
 func TestDotnetRuntimeOwnsItsDirectoryDataAndKeyRing(t *testing.T) {
@@ -121,6 +127,80 @@ func TestDotnetRuntimeOwnsItsDirectoryDataAndKeyRing(t *testing.T) {
 		"COPY --from=build --chown=app:app /out /app\nUSER app\n"
 	if !strings.Contains(prepared.DockerfilePreview, want) {
 		t.Fatalf("runtime stage:\n%s", prepared.DockerfilePreview)
+	}
+}
+
+func TestDotnetRecipeSeedsTheDataDirectoryWithACommittedDatabase(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeBuildFixture(t, root, "Web.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" /></ItemGroup></Project>`)
+	writeBuildFixture(t, root, "appsettings.json", `{"ConnectionStrings":{"DefaultConnection":"DataSource=Data/app.db;Cache=Shared","Audit":"Data Source=audit.db","Other":"Data Source=missing.db","Dup":"Data Source=elsewhere/app.db"}}`)
+	writeBuildFixture(t, root, "Data/app.db", "SQLite format 3\x00")
+	writeBuildFixture(t, root, "audit.db", "SQLite format 3\x00")
+	writeBuildFixture(t, root, "elsewhere/app.db", "SQLite format 3\x00")
+	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root, BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}, false, "t:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "COPY --from=build --chown=app:app /out /app\n" +
+		"COPY --from=build --chown=app:app /src/Data/app.db /app/data/app.db\n" +
+		"COPY --from=build --chown=app:app /src/audit.db /app/data/audit.db\nUSER app\n"
+	if !strings.Contains(prepared.DockerfilePreview, want) {
+		t.Fatalf("runtime stage:\n%s", prepared.DockerfilePreview)
+	}
+
+	// A file the build context leaves out, a link, or a project without
+	// SQLite seeds nothing.
+	for name, setup := range map[string]func(string){
+		"ignored": func(dir string) { writeBuildFixture(t, dir, ".dockerignore", "**/*.db\n") },
+		"linked": func(dir string) {
+			if err := os.Remove(filepath.Join(dir, "Data/app.db")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("../audit.db", filepath.Join(dir, "Data/app.db")); err != nil {
+				t.Fatal(err)
+			}
+			writeBuildFixture(t, dir, "appsettings.json", `{"ConnectionStrings":{"DefaultConnection":"DataSource=Data/app.db"}}`)
+		},
+		"no sqlite": func(dir string) {
+			writeBuildFixture(t, dir, "Web.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>`)
+		},
+	} {
+		dir := t.TempDir()
+		writeBuildFixture(t, dir, "Web.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" /></ItemGroup></Project>`)
+		writeBuildFixture(t, dir, "appsettings.json", `{"ConnectionStrings":{"DefaultConnection":"DataSource=Data/app.db"}}`)
+		writeBuildFixture(t, dir, "Data/app.db", "SQLite format 3\x00")
+		writeBuildFixture(t, dir, "audit.db", "SQLite format 3\x00")
+		setup(dir)
+		project, err := selectDotnetRecipe(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seeds := dotnetSQLiteSeeds(dir, project); len(seeds) != 0 {
+			t.Errorf("%s: seeds = %q", name, seeds)
+		}
+	}
+}
+
+func TestDockerIgnoredPathsReadRulesConservatively(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	// The last rule is thousands of "**" long: matching it stays linear.
+	writeBuildFixture(t, root, ".dockerignore", "bin\n**/obj\nData/*.bak\nsrc/**/secret.db\n"+strings.Repeat("**/", 2000)+"x\n")
+	ignored := dockerIgnoredPaths(root)
+	for name, want := range map[string]bool{
+		"bin": true, "bin/app.db": true, "obj": true, "Web/obj/app.db": true, "Data/a.bak": true,
+		"src/secret.db": true, "src/a/b/secret.db": true, "deep/x": true, "x": true,
+		"Data/app.db": false, "templates": false, "binary": false,
+	} {
+		if got := ignored(name); got != want {
+			t.Errorf("%s ignored = %v, want %v", name, got, want)
+		}
+	}
+	// A rule that cannot be read might exclude anything.
+	writeBuildFixture(t, root, ".dockerignore", "[\n")
+	if !dockerIgnoredPaths(root)("templates") {
+		t.Fatal("an unreadable rule was taken to exclude nothing")
 	}
 }
 
