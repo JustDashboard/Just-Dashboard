@@ -315,7 +315,9 @@ only renderer/executor/validation authority for their feature.
   `ResolveGitRevision`; a local checkout's recorded commit), reads it through a temporary planning
   worktree (`HostSourceAnalyzer.InspectRevision`: the bounded, blob-filtered planning mirror, fetching a
   pinned commit by id when the branch has moved past it; a local checkout's commit is fetched at depth
-  one, never its working tree) and returns `{findings, planRevision, sourceRevision, checkedAt}`. An
+  one, never its working tree, one inspection at a time, within a minute, and only after its tree
+  listing shows at most 20,000 files and 256 MiB — a larger commit is `source_inspection_unavailable`
+  and left to the deployment's own read) and returns `{findings, planRevision, sourceRevision, checkedAt}`. An
   answer is kept for three minutes per environment, plan revision and commit. It is advisory — a
   warning never gates `/runs`, and analyze_plan stays the gate every trigger passes, git watch, hooks,
   schedules and previews included — and, being a read, it is kept out of the audit log

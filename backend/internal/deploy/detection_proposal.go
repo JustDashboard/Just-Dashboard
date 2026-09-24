@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 )
 
@@ -155,6 +156,9 @@ func (c *DeploymentChecker) Detect(ctx context.Context, projectID, environmentID
 	var detection *DetectionResult
 	identity := plan.Identity
 	if sourceHasTree(plan.Source) {
+		if c.sources == nil {
+			return nil, fmt.Errorf("%w: %w: source inspection is unavailable", ErrSourceUnavailable, ErrGitUnavailable)
+		}
 		if err := c.sources.InspectRevision(ctx, plan.Source, plan.Identity, func(root string, inspected SourceIdentity) error {
 			identity = inspected
 			result, err := (Detector{}).DetectPath(ctx, root, inspected)

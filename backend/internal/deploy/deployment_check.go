@@ -118,6 +118,9 @@ func inspectDeploymentSource(ctx context.Context, inspector SourceInspector, pla
 // Git's own output, which never leaves the planning boundary.
 func sourceInspectionUnavailable(err error) string {
 	switch {
+	case errors.Is(err, errInspectionTooLarge):
+		return fmt.Sprintf("the commit has more than %d files or %d MiB, more than a check copies",
+			localInspectionMaxFiles, localInspectionMaxBytes>>20)
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "reading the commit took too long"
 	case errors.Is(err, ErrSourceUnavailable), errors.Is(err, ErrGitUnavailable):
@@ -377,12 +380,22 @@ func NewDeploymentChecker(
 	runs *OrchestrationStore,
 	planning *PlanningStore,
 	sources *HostSourceAnalyzer,
-	observer PreflightObserver,
+	observer *HostPreflightObserver,
 ) *DeploymentChecker {
-	return &DeploymentChecker{
-		runs: runs, planning: planning, sources: sources, observer: observer,
+	checker := &DeploymentChecker{
+		runs: runs, planning: planning,
 		now: time.Now, cache: map[deploymentCheckKey]deploymentCheckEntry{},
 	}
+	// A module that is not wired stays a nil interface, which the checks
+	// read as unavailable; a typed nil pointer would read as present and
+	// fail on first use.
+	if sources != nil {
+		checker.sources = sources
+	}
+	if observer != nil {
+		checker.observer = observer
+	}
+	return checker
 }
 
 // Check evaluates the environment's desired plan against the commit a
@@ -464,6 +477,9 @@ func (c *DeploymentChecker) resolveRevision(ctx context.Context, plan *deploymen
 			return ErrRefNotApplicable
 		}
 		return nil
+	}
+	if c.sources == nil && request.SourceRevision == "" {
+		return fmt.Errorf("%w: %w: source inspection is unavailable", ErrSourceUnavailable, ErrGitUnavailable)
 	}
 	switch {
 	case request.SourceRevision != "":

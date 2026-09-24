@@ -51,6 +51,9 @@ type HostSourceAnalyzer struct {
 	cacheRoot    string
 	detector     Detector
 	gitMu        sync.Mutex
+	// inspectMu serializes copies of local checkouts made for inspection,
+	// which request handlers ask for on a page's arrival.
+	inspectMu sync.Mutex
 }
 
 func NewHostSourceAnalyzer(

@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -332,5 +333,22 @@ func TestSourceChangeSavesFreshDetectionAndProposesWhatChanged(t *testing.T) {
 	}
 	if proposal.Revision != 2 || len(proposal.Variables) != 1 || len(proposal.NewVariables) != 1 || proposal.NewVariables[0] != "VITE_API_URL" {
 		t.Fatalf("proposal = %#v", proposal)
+	}
+}
+
+// A checker built without its source or host modules reads them as absent
+// — the check and Detect again say so — rather than holding typed nil
+// pointers that panic on first use.
+func TestDeploymentCheckerWithoutItsModulesSaysSo(t *testing.T) {
+	fixture := newReleaseStoreFixture(t)
+	fixture.addSourcePlan(t, 1, "/srv/release-fixture", strings.Repeat("d", 40), BuildPlanConfig{
+		Method: BuildRecipe, Recipe: "node", PackageManager: "npm", BuildCommand: "npm run build", StartCommand: "npm run start",
+	}, StoredBuildEvidence{})
+	checker := NewDeploymentChecker(fixture.runs, fixture.variables, nil, nil)
+	if _, err := checker.Check(context.Background(), fixture.projectID, fixture.envID, DeploymentCheckRequest{}); !errors.Is(err, ErrBuilderUnavailable) {
+		t.Fatalf("check without a host observer = %v", err)
+	}
+	if _, err := checker.Detect(context.Background(), fixture.projectID, fixture.envID); !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("detect without a source analyzer = %v", err)
 	}
 }

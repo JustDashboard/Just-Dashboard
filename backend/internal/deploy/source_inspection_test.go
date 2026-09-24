@@ -137,3 +137,47 @@ func TestInspectRevisionReadsALocalCheckoutAtItsRecordedCommit(t *testing.T) {
 		t.Fatalf("the working tree was read instead of the recorded commit: %s", manifest)
 	}
 }
+
+// A local checkout's commit is sized from its tree listing before anything
+// is copied, and a tree past either bound is declined — by file count or by
+// bytes — with the listing stopped where it crossed.
+func TestLocalInspectionSizesTheCommitBeforeCopyingIt(t *testing.T) {
+	repository, revision := gitTree(t, map[string]string{
+		"package.json":         `{"name":"sized"}`,
+		"src/index.ts":         "export {}\n",
+		"assets/big.bin":       strings.Repeat("x", 4096),
+		"assets/tab\tname.txt": "a path with a tab\n",
+	})
+	if err := boundLocalGitTree(context.Background(), repository, revision); err != nil {
+		t.Fatalf("a small commit was declined: %v", err)
+	}
+	listing := planningGitOutput(t, repository, "ls-tree", "-r", "-l", "-z", "--full-tree", revision)
+	for _, fixture := range []struct {
+		name     string
+		files    int
+		bytes    int64
+		exceeded bool
+	}{
+		{"within both", 4, 1 << 20, false},
+		{"too many files", 3, 1 << 20, true},
+		{"too many bytes", 100, 4096, true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			budget := &gitTreeBudget{maxFiles: fixture.files, maxBytes: fixture.bytes}
+			// Written in small pieces, as a pipe hands a listing over.
+			var err error
+			for offset := 0; offset < len(listing) && err == nil; offset += 7 {
+				_, err = budget.Write([]byte(listing[offset:min(offset+7, len(listing))]))
+			}
+			if budget.exceeded != fixture.exceeded || (err != nil) != fixture.exceeded {
+				t.Fatalf("exceeded = %v, err = %v; counted %d files, %d bytes", budget.exceeded, err, budget.files, budget.bytes)
+			}
+			if !fixture.exceeded && (budget.files != 4 || budget.bytes < 4096) {
+				t.Fatalf("counted %d files, %d bytes", budget.files, budget.bytes)
+			}
+		})
+	}
+	if text := sourceInspectionUnavailable(errInspectionTooLarge); !strings.Contains(text, "more than a check copies") {
+		t.Fatalf("a declined commit reads as %q", text)
+	}
+}
