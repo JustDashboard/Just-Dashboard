@@ -2,27 +2,26 @@ package deploy
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
 )
 
 // What a JavaScript build command's RUN needs besides its variables: a
-// legacy OpenSSL provider for webpack 4 toolchains, a heap sized to the
-// build host, a way past an env-validation schema whose server variables
-// have no build value, and the env file a command names that is not
-// committed. Each is a recipe constant or a shell expression, never a
-// variable's value, and each gives way to a value the build supplies.
-
-// nodeHeapProbe sizes V8's heap to the build host when the build starts:
-// three quarters of the memory and swap then free, at most 4 GiB — V8's own
-// ceiling on a large host — and nothing below 256 MiB. V8's default is a
-// quarter of physical memory, which a Next.js build on a 2 GiB server
-// exhausts while memory is still free; below what the host can give, a
-// build that would outgrow it stops with "JavaScript heap out of memory"
-// instead of being killed by the kernel. It is computed inside the RUN, so
-// the Dockerfile is the same on every host.
-const nodeHeapProbe = `jd_heap=$(awk '/^(MemAvailable|SwapFree):/ { kb += $2 } END { m = int(kb * 3 / 4096); if (m > 4096) m = 4096; if (m >= 256) printf "--max-old-space-size=%d", m }' /proc/meminfo)`
+// legacy OpenSSL provider for webpack 4 toolchains, a way past an
+// env-validation schema whose server variables have no build value, and the
+// env file a command names that is not committed. Each is a recipe constant
+// or a shell expression, never a variable's value, and each gives way to a
+// value the build supplies.
+//
+// The build's heap is left at V8's own default. NODE_OPTIONS is inherited by
+// every node process the build starts — Next.js's page workers, a bundler's
+// minifier workers — so a larger heap is a larger ceiling for each of them at
+// once, and on a small host that turns a "JavaScript heap out of memory" into
+// swapping and the kernel's OOM killer choosing among this server's
+// services. Preflight's build_memory_low says so before Deploy instead, and
+// an operator who has the memory sets NODE_OPTIONS as a build variable.
 
 // nodeLegacyWebpack are toolchains that hash with MD4 through webpack 4,
 // which OpenSSL 3 — Node 17 and later — refuses with "error:0308010C:digital
@@ -157,7 +156,7 @@ type nodeBuildPlan struct {
 // the schema that validates variables at build time.
 func planNodeBuild(facts nodeInstallFacts, plan *nodeInstallPlan, assets bool) {
 	for _, legacy := range nodeLegacyWebpack {
-		version, ok := facts.installedVersion(legacy.name)
+		version, ok := facts.directVersion(legacy.name, plan.reading)
 		if !ok || !version.less(legacy.before) {
 			continue
 		}
@@ -178,6 +177,11 @@ func planNodeBuild(facts nodeInstallFacts, plan *nodeInstallPlan, assets bool) {
 	}{{"build", plan.build, false}, {"start", plan.start, true}} {
 		for _, envFile := range nodeEnvFiles(facts.manifest.Scripts, command.text) {
 			line := "[ -e " + envFile + " ] || : > " + envFile
+			if directory := path.Dir(envFile); directory != "." {
+				// The directory may be ignored or never committed, and the
+				// redirection cannot create it.
+				line = "[ -e " + envFile + " ] || { mkdir -p " + directory + " && : > " + envFile + "; }"
+			}
 			if command.runtime {
 				plan.image.runtimeRuns = append(plan.image.runtimeRuns, line)
 			} else {
@@ -215,20 +219,22 @@ func nodeEnvFiles(scripts map[string]string, command string) []string {
 // build step mounts, which decide whether an env-validation schema has to be
 // skipped at build time.
 func (p nodeInstallPlan) buildRun(mounts, command string, bound map[string]bool) string {
-	options := `${NODE_OPTIONS:-$jd_heap}`
+	assignments := []string{}
 	if p.buildEnv.legacyOpenSSL != "" {
 		// The provider is what makes the build work at all, so an operator's
 		// NODE_OPTIONS is kept beside it rather than replacing it.
-		options = "--openssl-legacy-provider " + options
+		assignments = append(assignments, `NODE_OPTIONS="--openssl-legacy-provider${NODE_OPTIONS:+ $NODE_OPTIONS}"`)
 	}
-	assignments := []string{`NODE_OPTIONS="` + options + `"`}
 	for _, value := range p.buildDefaults() {
 		assignments = append(assignments, value.assignment())
 	}
 	if len(p.buildEnv.env.missing(bound)) > 0 && p.buildEnv.env.skippable {
 		assignments = append(assignments, nodeEnvDefault{"SKIP_ENV_VALIDATION", "1"}.assignment())
 	}
-	return "RUN " + mounts + nodeHeapProbe + " && export " + strings.Join(assignments, " ") + " && " + command
+	if len(assignments) == 0 {
+		return "RUN " + mounts + command
+	}
+	return "RUN " + mounts + "export " + strings.Join(assignments, " ") + " && " + command
 }
 
 // missing lists the server variables the schema requires that the build

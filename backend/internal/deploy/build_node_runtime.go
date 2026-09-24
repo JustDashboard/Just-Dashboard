@@ -454,23 +454,27 @@ func (f nodeInstallFacts) present(name string) bool {
 	return false
 }
 
-// installedVersion is the version of a package the install puts in place:
-// the exact one a lockfile records, else the lowest its range allows, which
-// is the one that matters for a "before this release" rule.
-func (f nodeInstallFacts) installedVersion(name string) (nodeVersion, bool) {
-	for _, reading := range f.readings {
-		if version, ok := parseNodeVersion(reading.names[name]); ok {
-			return version, true
+// directVersion is the version the install puts in place of a package the
+// package's own manifest depends on: the one the installed lockfile records
+// while its range still allows it, else the lowest the range allows, which
+// is the one that matters for a "before this release" rule. A package only
+// another dependency pulls in — webpack 4 under Storybook 6 — is not the
+// build's toolchain, and a lockfile the install does not use says nothing.
+func (f nodeInstallFacts) directVersion(name string, reading *nodeLockfileReading) (nodeVersion, bool) {
+	spec := f.manifest.version(name)
+	if spec == "" {
+		return nodeVersion{}, false
+	}
+	if reading != nil {
+		locked := reading.names[name]
+		if version, ok := parseNodeVersion(locked); ok {
+			if satisfied, known := nodeRangeSatisfies(locked, spec); !known || satisfied {
+				return version, true
+			}
 		}
 	}
-	for _, manifest := range []nodeInstallManifest{f.manifest, f.settings} {
-		spec := manifest.version(name)
-		if spec == "" {
-			continue
-		}
-		if interval, ok := nodeRangeInterval(strings.TrimSpace(strings.Split(spec, "||")[0])); ok && interval.low.set {
-			return interval.low.v, true
-		}
+	if interval, ok := nodeRangeInterval(strings.TrimSpace(strings.Split(spec, "||")[0])); ok && interval.low.set {
+		return interval.low.v, true
 	}
 	return nodeVersion{}, false
 }

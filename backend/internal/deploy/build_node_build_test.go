@@ -30,10 +30,10 @@ export const env = createEnv({
 });
 `
 
-// The build command's RUN: a heap sized to the host unless the build brings
-// NODE_OPTIONS, the legacy OpenSSL provider a webpack 4 toolchain cannot
-// build without, SKIP_ENV_VALIDATION when the schema's server variables
-// have no build value, and the env files a command names created empty.
+// The build command's RUN: V8's own heap, the legacy OpenSSL provider a
+// webpack 4 toolchain cannot build without, SKIP_ENV_VALIDATION when the
+// schema's server variables have no build value, and the env files a
+// command names created empty.
 func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 	t.Parallel()
 	t3 := `{"name":"t3","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"15.0.0","@t3-oss/env-nextjs":"^0.12.0","zod":"^3.24.0"}}`
@@ -49,8 +49,16 @@ func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 		{name: "Create React App 4 builds with the legacy provider", files: map[string]string{
 			"package.json": `{"name":"cra","scripts":{"build":"react-scripts build"},"dependencies":{"react-scripts":"4.0.3"}}`},
 			config:   BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "build"},
-			want:     []string{`export NODE_OPTIONS="--openssl-legacy-provider ${NODE_OPTIONS:-$jd_heap}" && npm run build` + "\n"},
+			want:     []string{`RUN export NODE_OPTIONS="--openssl-legacy-provider${NODE_OPTIONS:+ $NODE_OPTIONS}" && npm run build` + "\n"},
 			findings: []string{"legacy_openssl_provider"}},
+		{name: "a webpack 4 another dependency pulls in is not the build's toolchain", files: map[string]string{
+			"package.json":      `{"name":"app","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.1.3"},"devDependencies":{"@storybook/react":"6.5.16"}}`,
+			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"next":"16.1.3"},"devDependencies":{"@storybook/react":"6.5.16"}},"node_modules/next":{"version":"16.1.3"},"node_modules/@storybook/react":{"version":"6.5.16"},"node_modules/webpack":{"version":"4.47.0"}}}`},
+			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"}, want: []string{nodeBuildRun("npm run build\n")}, absent: []string{"legacy", "NODE_OPTIONS"}},
+		{name: "a stale lockfile's old webpack is not what installs", files: map[string]string{
+			"package.json":      `{"name":"app","scripts":{"build":"webpack"},"devDependencies":{"webpack":"^5.90.0"}}`,
+			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"devDependencies":{"webpack":"^5.38.0"}},"node_modules/webpack":{"version":"5.38.1"}}}`},
+			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "dist"}, absent: []string{"legacy"}},
 		{name: "a locked webpack before 5.61", files: map[string]string{
 			"package.json":      `{"name":"app","scripts":{"build":"webpack"},"devDependencies":{"webpack":"^5.38.0"}}`,
 			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"devDependencies":{"webpack":"^5.38.0"}},"node_modules/webpack":{"version":"5.38.1"}}}`},
@@ -64,7 +72,7 @@ func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "build"}, absent: []string{"legacy"}},
 		{name: "T3 Env skipped while server variables have no build value", files: map[string]string{"package.json": t3, "src/env.js": t3Env},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"}, bound: []string{"DATABASE_URL"},
-			want: []string{`NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}" SKIP_ENV_VALIDATION="${SKIP_ENV_VALIDATION:-1}" && npm run build` + "\n"}},
+			want: []string{`env=DATABASE_URL,required=true export SKIP_ENV_VALIDATION="${SKIP_ENV_VALIDATION:-1}" && npm run build` + "\n"}, absent: []string{"NODE_OPTIONS", "max-old-space-size"}},
 		{name: "T3 Env validates when every server variable reaches the build", files: map[string]string{"package.json": t3, "src/env.js": t3Env},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"}, bound: []string{"DATABASE_URL", "AUTH_DISCORD_ID", "RATE"},
 			absent: []string{"SKIP_ENV_VALIDATION="}},
@@ -84,6 +92,10 @@ func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 			"package.json": `{"name":"api","scripts":{"build":"tsx --env-file './.env.local' scripts/build.ts","start":"node dist/server.js"}}`},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"},
 			want:   []string{"RUN [ -e .env.local ] || : > .env.local\n" + nodeBuildRun("npm run build\n")}},
+		{name: "an env file's missing directory is created with it", files: map[string]string{
+			"package.json": `{"name":"api","scripts":{"build":"tsc","start":"node --env-file=config/.env dist/server.js"}}`},
+			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"},
+			want:   []string{"COPY --from=build /app /app\nRUN [ -e config/.env ] || { mkdir -p config && : > config/.env; }\nCMD"}},
 		{name: "a Procfile start command", files: map[string]string{"package.json": `{"name":"api","scripts":{"build":"tsc"}}`},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "node --env-file .env.production dist/index.js"},
 			want:   []string{"RUN [ -e .env.production ] || : > .env.production\nCMD"}},

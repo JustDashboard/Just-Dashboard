@@ -336,21 +336,24 @@ runs `prisma migrate` or `prisma db` gets no placeholder, since it needs the rea
 value is never widened to the install on its own — the install also runs every dependency's install
 script — unless the variable is mapped to `install_and_build` (`prisma_config_env`).
 
-**The build command's RUN** (`build_node_build.go`) starts by sizing V8's heap to the build host:
-`jd_heap=$(awk … /proc/meminfo)` takes three quarters of `MemAvailable` plus `SwapFree` when the build
-starts, at most 4 GiB and nothing below 256 MiB, and the build runs with `NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}"`. V8's
-own default is a quarter of physical memory, which a Next.js build on a 2 GiB server exhausts while memory
-is still free; a limit under what the host can give makes a build that outgrows it stop with
-"JavaScript heap out of memory" instead of being killed by the kernel. It is computed inside the RUN, so
-the Dockerfile is the same on every host, and a `NODE_OPTIONS` the build supplies — a build variable, or
-an assignment in the package's own script — replaces it. The PHP recipe's asset stage builds the same
-way.
+**The build command's RUN** (`build_node_build.go`) leaves V8's heap at its own default (a quarter of
+physical memory, at most about 4 GiB). `NODE_OPTIONS` is inherited by every `node` process a build starts —
+Next.js's page workers, a bundler's minifier workers — so a raised limit is a raised ceiling for each of
+them at once, and on a small host it turns a "JavaScript heap out of memory" into swapping and the
+kernel's OOM killer choosing among this server's services; Turbopack's memory is native and not bounded
+by the flag at all. Preflight's `build_memory_low` warns before Deploy when the host's free memory and swap
+are below the selected build's estimated peak, and an operator who has the memory sets `NODE_OPTIONS`
+(`--max-old-space-size=…`) as a build variable, which reaches the RUN as is. The RUN adds only what the
+toolchain needs, below; the PHP recipe's asset stage builds the same way.
 
 - A webpack 4 toolchain — `react-scripts` before 5, `@vue/cli-service` before 5, `webpack` before 5.61,
   Nuxt before 2.16, `@angular-devkit/build-angular` before 13, `laravel-mix` before 6,
-  `@symfony/webpack-encore` before 1, by the lockfile's version or the range's floor — hashes with MD4,
-  which OpenSSL 3 refuses (`error:0308010C`). Its build runs with `--openssl-legacy-provider` in front of
-  whatever `NODE_OPTIONS` it has (`legacy_openssl_provider`, a warning that names the upgrade).
+  `@symfony/webpack-encore` before 1, as a direct dependency of the package, by the installed lockfile's
+  version while the range still allows it, else the range's floor — hashes with MD4, which OpenSSL 3
+  refuses (`error:0308010C`). A webpack 4 that only another dependency pulls in (Storybook 6 beside a
+  Turbopack build) is not the build's toolchain, and a competing lockfile says nothing. Its build runs with
+  `NODE_OPTIONS="--openssl-legacy-provider${NODE_OPTIONS:+ $NODE_OPTIONS}"`, keeping any `NODE_OPTIONS` the
+  build has (`legacy_openssl_provider`, a warning that names the upgrade).
 - T3 Env (`@t3-oss/env-nextjs`, `-core`, `-nuxt`) validates its schema when `next build` imports it. The
   schema file (`src/env.js` and the usual places) is read as text for its `server` and `client` keys,
   leaving out those whose schema is optional or has a default. When a required server key is not mounted
@@ -359,9 +362,11 @@ way.
   decision follows the build's mounts, so the Dockerfile changes when the variables do.
 - A build or start command, or a package script it runs, that passes `node --env-file=<path>` (or `tsx`
   or Bun) exits when the file is missing, and an env file is rarely committed. The build stage (before
-  the build) or the runtime stage (after copying the application) runs `[ -e <path> ] || : > <path>`,
-  and the process environment takes precedence over the empty file (`env_file_placeholder`). Only a
-  plain path inside the package is written; `--env-file-if-exists` needs nothing.
+  the build) or the runtime stage (after copying the application) runs `[ -e <path> ] || : > <path>`
+  (`[ -e <path> ] || { mkdir -p <dir> && : > <path>; }` when the path has a directory, which may be
+  ignored or never committed), and the process environment takes precedence over the empty file
+  (`env_file_placeholder`). Only a plain path inside the package is written; `--env-file-if-exists` needs
+  nothing.
 
 **Before Deploy.** Preflight (`preflight_build.go`) judges what the build will meet from the candidate's
 `nodeBuild` record, the configuration's values and the host, and names each case before a build runs:
@@ -539,7 +544,7 @@ raises `lockfile_out_of_sync` before Deploy and installs unfrozen instead of fai
 and the build around the install are covered by `build_node_runtime_test.go` (the Node and Bun release
 from every declaration, and the system packages each dependency adds), `build_node_prisma_test.go`
 (`prisma generate` and the `env()` placeholders, the incident repository with Prisma 7's
-`prisma.config.ts` included), `build_node_build_test.go` (heap, legacy OpenSSL, T3 Env, `--env-file`)
+`prisma.config.ts` included), `build_node_build_test.go` (legacy OpenSSL, T3 Env, `--env-file`)
 and `preflight_build_test.go`; the rendered Dockerfiles for canvas on Alpine, a GitHub dependency,
 onnxruntime-node on Debian slim, Puppeteer with Alpine's Chromium, Prisma 7 on npm and on Bun with Node
 24, and a webpack-4-era build were built and run locally when they were written.

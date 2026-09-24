@@ -7,18 +7,17 @@ import (
 )
 
 // nodeBuildRun is the build command's RUN as the recipe renders it with no
-// defaults beyond the heap: the probe, then NODE_OPTIONS unless the build
-// supplies its own.
+// defaults: the command alone, on V8's own heap.
 func nodeBuildRun(command string) string {
 	return nodeBuildRunWith("", "", command)
 }
 
-// nodeBuildRunWith is the same RUN with mounts and further defaults.
+// nodeBuildRunWith is the same RUN with mounts and defaults exported first.
 func nodeBuildRunWith(mounts, defaults, command string) string {
-	if defaults != "" {
-		defaults = " " + defaults
+	if defaults == "" {
+		return "RUN " + mounts + command
 	}
-	return "RUN " + mounts + nodeHeapProbe + ` && export NODE_OPTIONS="${NODE_OPTIONS:-$jd_heap}"` + defaults + " && " + command
+	return "RUN " + mounts + "export " + defaults + " && " + command
 }
 
 // The Node release comes from the repository's own declarations, nearest

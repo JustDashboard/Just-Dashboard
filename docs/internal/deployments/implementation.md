@@ -312,7 +312,8 @@ only renderer/executor/validation authority for their feature.
   reads `MemAvailable` and `SwapFree`, and `build_memory_low` (warning, `preflight_build.go`) compares
   them with the selected recipe's estimated build peak (a Next.js, Nuxt, Angular, Gatsby, Docusaurus,
   Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, Maven/Gradle and .NET
-  ~1.5 GiB). The same file judges what the configuration gives a JavaScript build against what the
+  ~1.5 GiB). The JavaScript recipe leaves V8's heap at its default rather than injecting
+  `NODE_OPTIONS`, which every worker process of a build would inherit. The same file judges what the configuration gives a JavaScript build against what the
   candidate recorded (`nodeBuild`): an env-validation schema's variables without a build value
   (`build_env_validation_skipped`, `build_env_missing`, `build_env_client_missing`), a prerendering
   framework's build-scoped database URL that points at a `db-N.jd.internal` alias or loopback, or a
