@@ -225,10 +225,33 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 		}
 		candidate.StartCommand = "frankenphp php-server --listen :80 --root /app" + strings.TrimSuffix("/"+root, "/")
 	}
-	if parsed && len(marker.packageJSON) > 0 {
-		var node nodeManifest
-		if parseNodeManifest(marker.packageJSON, &node) && node.Scripts["build"] != "" && (node.has("laravel-vite-plugin") || node.has("vite") || node.has("@symfony/webpack-encore")) {
-			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "package.json"), Reason: "front-end assets are built by a Node stage inside the PHP recipe"})
+	if parsed && len(marker.packageJSON) > 0 && phpBuildsAssets(marker.packageJSON) {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "package.json"), Reason: "front-end assets are built by a Node stage inside the PHP recipe"})
+		if marker.node != nil {
+			// The asset stage installs through the same planner as the Node
+			// recipe, so its lockfile question is asked here, before
+			// deploying, and answered by the same package manager choice.
+			facts := marker.node.facts
+			candidate.PackageManagers = facts.lockfileManagers()
+			candidate.Lockfiles = facts.detectedLockfiles()
+			chosen, err := resolveNodeManager(facts, "")
+			if err == nil {
+				candidate.PackageManager = chosen.manager
+				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "package.json"), Reason: "assets install: " + boundedEvidenceSentence(chosen.reason)})
+			} else {
+				paths := []string{}
+				for _, reading := range facts.readings {
+					paths = append(paths, reading.Path)
+				}
+				candidate.NeedsDecision = append(candidate.NeedsDecision, "choose the package manager: competing lockfiles "+strings.Join(paths, ", "))
+				if candidate.Confidence == ConfidenceHigh {
+					candidate.Confidence = ConfidenceMedium
+				}
+			}
+			candidate.NodeInstalls = facts.detectedInstalls(candidate.PackageManager, true, func(runner string) (string, string) {
+				return runner + " run build", ""
+			})
+			candidate.Variables = facts.registry
 		}
 	}
 	if procfileWeb := procfileProcess(marker.procfile, "web"); procfileWeb != "" && rejectPlanSecretLiteral("Procfile web process", procfileWeb) == nil {
@@ -248,12 +271,37 @@ type phpRecipe struct {
 	extensions []string
 	composer   bool
 	// assets is the Node package manager that builds front-end assets, when
-	// package.json declares a build script; empty means no asset stage.
-	assets   string
-	lockfile string
+	// package.json declares a build script; empty means no asset stage. node
+	// is that stage's install plan, from the same planner as the Node recipe.
+	assets       string
+	lockfile     string
+	node         nodeInstallPlan
+	inputs       []string
+	dockerignore []byte
 }
 
-func selectPHPRecipe(root string, config BuildPlanConfig) (phpRecipe, error) {
+// phpBuildsAssets says a PHP application's package.json is built by the
+// recipe's asset stage: a build script, and Vite, laravel-vite-plugin or
+// Encore to run it.
+func phpBuildsAssets(content []byte) bool {
+	var manifest nodeManifest
+	return parseNodeManifest(content, &manifest) && manifest.Scripts["build"] != "" &&
+		(manifest.has("laravel-vite-plugin") || manifest.has("vite") || manifest.has("@symfony/webpack-encore"))
+}
+
+// phpAssetInstall plans the asset stage's install for the application at
+// root. The stage builds from the application's own directory, so its
+// lockfile is looked for there alone.
+func phpAssetInstall(root string, selected string, arch string) (nodeInstallSource, nodeInstallPlan, error) {
+	source, err := readNodeInstallSource(root, "", arch, newNodeReadBudget())
+	if err != nil {
+		return nodeInstallSource{}, nodeInstallPlan{}, err
+	}
+	plan := planNodeInstall(source.facts, nodeInstallChoice{selected: selected, build: "npm run build", assets: true})
+	return source, plan, nil
+}
+
+func selectPHPRecipe(boundary, root string, config BuildPlanConfig) (phpRecipe, error) {
 	recipe := phpRecipe{version: phpDefaultVersion}
 	if regularExists(root, "composer.json") {
 		content, err := readContainedRegular(root, "composer.json", 512<<10)
@@ -277,25 +325,16 @@ func selectPHPRecipe(root string, config BuildPlanConfig) (phpRecipe, error) {
 				break
 			}
 		}
-		if regularExists(root, "package.json") {
-			node, err := readContainedRegular(root, "package.json", 512<<10)
-			if err == nil {
-				var manifest nodeManifest
-				if parseNodeManifest(node, &manifest) && manifest.Scripts["build"] != "" &&
-					(manifest.has("laravel-vite-plugin") || manifest.has("vite") || manifest.has("@symfony/webpack-encore")) {
-					present := []string{}
-					for _, lock := range nodeLockfiles {
-						if regularExists(root, lock.path) {
-							present = append(present, lock.path)
-						}
-					}
-					manager, lockfile, err := resolveNodePackageManager(present, declaredNodePackageManager(node), config.PackageManager)
-					if err != nil {
-						return phpRecipe{}, fmt.Errorf("%w: the PHP recipe builds package.json's assets with a Node stage: %v", ErrUnsupportedBuilder, strings.TrimPrefix(err.Error(), ErrUnsupportedBuilder.Error()+": "))
-					}
-					recipe.assets, recipe.lockfile = manager, lockfile
-				}
+		if node, err := readContainedRegular(root, "package.json", 512<<10); err == nil && phpBuildsAssets(node) {
+			source, plan, err := phpAssetInstall(root, config.PackageManager, nodeTargetArch(config.TargetPlatform))
+			if err != nil {
+				return phpRecipe{}, err
 			}
+			if plan.blocked != nil {
+				return phpRecipe{}, fmt.Errorf("%w: the PHP recipe builds package.json's assets with a Node stage: %s", ErrUnsupportedBuilder, plan.blocked.Measured)
+			}
+			recipe.assets, recipe.lockfile, recipe.node = plan.manager, plan.lockfile, plan
+			recipe.inputs, recipe.dockerignore = source.installInputs(plan), source.facts.dockerignore
 		}
 	} else if !regularExists(root, "index.php") && !regularExists(root, "public/index.php") {
 		return phpRecipe{}, fmt.Errorf("%w: PHP recipe requires composer.json or an index.php", ErrUnsupportedBuilder)
@@ -312,7 +351,7 @@ func selectPHPRecipe(root string, config BuildPlanConfig) (phpRecipe, error) {
 func phpRecipeBases(recipe phpRecipe) []string {
 	bases := []string{"dunglas/frankenphp:1-php" + recipe.version + "-alpine", recipeBaseCatalogue["php:composer"][0]}
 	if recipe.assets != "" {
-		bases = append(bases, recipeBaseCatalogue["node:"+recipe.assets][0])
+		bases = append(bases, recipe.node.baseImages(false)...)
 	}
 	return bases
 }
@@ -323,17 +362,11 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 	}
 	var lines []string
 	if recipe.assets != "" {
-		install := map[string]string{
-			"npm": "npm ci", "pnpm": "corepack enable && pnpm install --frozen-lockfile",
-			"yarn": "corepack enable && yarn install --immutable", "bun": "bun install --frozen-lockfile",
-		}[recipe.assets]
-		lines = append(lines,
-			"FROM "+immutableImageReference(bases[2])+" AS assets",
-			"WORKDIR /app",
-			"COPY . .",
-			"RUN "+installSecrets+install,
-			"RUN "+buildSecrets+recipe.assets+" run build",
-		)
+		stage, _, err := nodeInstallStage(recipe.node, bases[2], bases, "assets-toolchain", "assets", installSecrets)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(stage, "RUN "+buildSecrets+recipe.node.build)
 	}
 	extensions := append([]string(nil), phpDefaultExtensions...)
 	for _, extension := range recipe.extensions {

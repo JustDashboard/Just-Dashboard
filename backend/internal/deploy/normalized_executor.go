@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -396,15 +397,25 @@ func (e *NormalizedStepExecutor) prepareContext(
 		return normalizedStepFailure(err)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
-	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
+	prepared, err := e.builder.PrepareWithin(ctx, source.Root, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
 		result.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
 		return result
 	}
+	if prepared.ContextDirectory != "" {
+		// A workspace member builds from its workspace root, where its
+		// lockfile and the generated Dockerfile are.
+		buildRoot = filepath.Join(source.Root, filepath.FromSlash(prepared.ContextDirectory))
+	}
 	if err := stepLog(execution, "status", "Prepared "+string(plan.Build.Method)+" artifact plan with "+prepared.CachePolicy+" cache policy"); err != nil {
 		return normalizedStepFailure(err)
+	}
+	for _, note := range prepared.Notes {
+		if err := stepLog(execution, "status", note); err != nil {
+			return normalizedStepFailure(err)
+		}
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(preparedStepEvidence{
 		Source: *source, BuildRoot: buildRoot, Prepared: prepared,

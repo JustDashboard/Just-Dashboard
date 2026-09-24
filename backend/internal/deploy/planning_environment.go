@@ -1,6 +1,9 @@
 package deploy
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 func (d *Draft) refreshEnvironmentKeys() {
 	d.EnvironmentKeys = nil
@@ -31,7 +34,32 @@ func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanCon
 			Name: name, Sensitivity: "secret", Scopes: []string{"runtime", "build"},
 		})
 	}
-	return canonicalConfiguration(configuration)
+	return canonicalConfiguration(d.withInstallCredentials(configuration))
+}
+
+// withInstallCredentials maps each registry credential detection found in a
+// package manager's configuration to the install step, when the plan gives
+// it a build-scoped value and has not mapped it already: the install is the
+// one step that reads it, and a value left on the build step never reaches
+// the install that fails without it.
+func (d *Draft) withInstallCredentials(configuration PlanConfiguration) PlanConfiguration {
+	candidate := selectedDetectionCandidate(d.Data.Detection)
+	if candidate == nil || configuration.Build.Method != BuildRecipe {
+		return configuration
+	}
+	for _, detected := range candidate.Variables {
+		if detected.Step != "install" || slices.ContainsFunc(configuration.Build.Secrets, func(secret BuildSecretConfig) bool {
+			return secret.Variable == detected.Name
+		}) {
+			continue
+		}
+		if slices.ContainsFunc(configuration.Variables, func(variable PlannedVariable) bool {
+			return variable.Name == detected.Name && slices.Contains(variable.Scopes, "build")
+		}) {
+			configuration.Build.Secrets = append(configuration.Build.Secrets, BuildSecretConfig{Variable: detected.Name, Step: "install"})
+		}
+	}
+	return configuration
 }
 
 // The same precedence is used for required checks, reference validation and

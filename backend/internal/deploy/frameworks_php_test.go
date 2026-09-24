@@ -88,7 +88,10 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"FROM oven/bun:1-alpine@sha256:", "AS assets", "bun install --frozen-lockfile", "RUN bun run build",
+		// The asset stage installs through the Node recipe's own planner:
+		// Bun is copied beside Node rather than replacing it.
+		"FROM node:22-alpine@sha256:", "AS assets-toolchain", "COPY --from=oven/bun:1-alpine@sha256:",
+		"FROM assets-toolchain AS assets", "bun install --frozen-lockfile", "RUN bun run build",
 		"FROM composer:2@sha256:", "AS composer", "FROM dunglas/frankenphp:1-php8.4-alpine@sha256:",
 		"ENV COMPOSER_ALLOW_SUPERUSER=1 LOG_CHANNEL=stderr",
 		"RUN install-php-extensions pdo_mysql pdo_pgsql opcache intl redis",
@@ -102,7 +105,7 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}
 	}
-	if prepared.Toolchain != "php 8.4" || len(prepared.BaseImages) != 3 {
+	if prepared.Toolchain != "php 8.4 · assets: bun 1 (the newest 1.x image)" || len(prepared.BaseImages) != 4 {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	if strings.Contains(prepared.DockerfilePreview, "mbstring") {

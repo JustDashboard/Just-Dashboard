@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -558,19 +557,9 @@ func preflightFindings(
 				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
 		}
 	}
-	if selected != nil && selected.Recipe == "node" && configuration.Build.Method == BuildRecipe {
-		switch chosen := configuration.Build.PackageManager; {
-		case chosen != "" && len(selected.PackageManagers) > 0 && !slices.Contains(selected.PackageManagers, chosen):
-			findings = append(findings, finding("package_manager_lockfile_missing", PreflightBlocked,
-				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(selected.PackageManagers, ", "),
-				"A frozen install needs the selected manager's own lockfile.",
-				"Choose a package manager whose lockfile is committed, or commit its lockfile.", "deploy", "configuration.build.packageManager"))
-		case chosen == "" && selected.PackageManager == "" && len(selected.PackageManagers) > 1:
-			findings = append(findings, finding("package_manager_ambiguous", PreflightBlocked,
-				"Competing lockfiles need a package manager", strings.Join(selected.PackageManagers, ", "),
-				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
-				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
-		}
+	if selected != nil && configuration.Build.Method == BuildRecipe &&
+		(selected.Recipe == "node" || (selected.Recipe == "php" && len(selected.NodeInstalls) > 0)) {
+		findings = append(findings, nodeInstallFindings(selected, configuration)...)
 	}
 	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,

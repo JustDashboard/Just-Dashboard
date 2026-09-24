@@ -79,6 +79,9 @@ type detectedMarkers struct {
 	composerLock      bool
 	phpIndex          bool
 	phpPublicIndex    bool
+	// node is the package's install inputs, read after the walk under
+	// their own budget.
+	node *nodeInstallSource
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
@@ -499,6 +502,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	for _, candidateRoot := range roots {
 		allRoots = append(allRoots, filepath.ToSlash(candidateRoot))
 	}
+	readNodeInstalls(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
@@ -511,7 +515,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		variables := scanner.variables(root, allRoots)
 		databases := detectDatabases(marker, variables, prismaProviders)
 		for index := range candidates {
-			candidates[index].Variables = variables
+			candidates[index].Variables = withInstallVariables(variables, candidates[index].Variables)
 			candidates[index].Databases = databases
 		}
 		result.Candidates = append(result.Candidates, candidates...)
@@ -723,54 +727,58 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		Evidence:      []DetectionEvidence{{Path: marker.packagePath, Reason: "JavaScript package manifest"}},
 		NeedsDecision: []string{},
 	}
-	present := make([]string, 0, len(marker.lockfiles))
-	for _, lockfile := range marker.lockfiles {
-		present = append(present, filepath.Base(lockfile))
+	install := marker.node
+	if install == nil {
+		install = &nodeInstallSource{facts: nodeInstallFacts{signals: map[string][]string{}}}
 	}
-	candidate.PackageManagers = nodePackageManagers(present)
-	manager, lockfile, _ := resolveNodePackageManager(present, declaredNodePackageManager(marker.packageJSON), "")
-	candidate.PackageManager = manager
-	switch {
-	case len(marker.lockfiles) == 1:
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: marker.lockfiles[0], Reason: "single recognized JavaScript lockfile",
-		})
-	case len(marker.lockfiles) == 0:
+	facts := install.facts
+	candidate.PackageManagers = facts.lockfileManagers()
+	candidate.Lockfiles = facts.detectedLockfiles()
+	candidate.NodeVersion = nodeRecipeNodeVersion
+	// Whether the manager is settled caps the confidence the framework
+	// reading may claim: a Next.js match does not make competing lockfiles
+	// any less of a question.
+	settled := true
+	chosen, resolveErr := resolveNodeManager(facts, "")
+	if resolveErr == nil {
+		candidate.PackageManager = chosen.manager
+		evidencePath := marker.packagePath
+		if chosen.reading != nil {
+			evidencePath = joinRoot(install.context, chosen.reading.Path)
+		}
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: evidencePath, Reason: boundedEvidenceSentence(chosen.reason)})
+	} else {
+		settled = false
 		candidate.Confidence = ConfidenceLow
-		candidate.NeedsDecision = append(candidate.NeedsDecision, "add one supported JavaScript lockfile")
-	case manager != "":
+		paths := []string{}
+		for _, reading := range facts.readings {
+			paths = append(paths, reading.Path)
+		}
+		candidate.NeedsDecision = append(candidate.NeedsDecision, "choose the package manager: competing lockfiles "+strings.Join(paths, ", "))
+	}
+	if install.context != install.dir {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: marker.packagePath, Reason: "packageManager selects " + manager + " and " + lockfile + " among competing lockfiles",
+			Path: joinRoot(install.context, "package.json"), Reason: "installed from the workspace lockfile at " + rootLabelOf(install.context),
 		})
-	default:
-		candidate.Confidence = ConfidenceLow
-		candidate.NeedsDecision = append(candidate.NeedsDecision, "choose the package manager: competing lockfiles "+strings.Join(present, ", "))
+	}
+	for _, superseded := range facts.superseded {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(install.context, "package.json"), Reason: superseded})
 	}
 	// The runner has to be the one the lockfile names. The build recipe picks
-	// its base image from that lockfile — a bun.lock project builds on
-	// oven/bun, which has no npm on it at all — so "npm run build" was not a
-	// harmless stylistic default: it was a build that died on `npm: not found`
-	// after a successful install, with nothing in the configuration screen
-	// saying which field was wrong. With no lockfile, or with competing ones
-	// nothing resolves, npm is the guess that fails most legibly: the recipe
-	// refuses a build it cannot pin before any command is run.
-	runner := manager
+	// its toolchain from that lockfile, and a runner the image lacks was a
+	// build that died on `<runner>: not found` after a successful install,
+	// with nothing in the configuration screen saying which field was wrong.
+	// With competing lockfiles nothing resolves yet, and npm is the guess
+	// that fails most legibly: the build refuses before any command runs.
+	runner := candidate.PackageManager
 	if runner == "" {
 		runner = "npm"
 	}
 	framework := matchNodeFramework(manifest)
+	files := nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile}
 	var resolution nodeFrameworkResolution
 	if framework != nil {
-		resolution = framework.resolve(manifest, nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile}, runner)
-	}
-	buildScript := "build"
-	if resolution.BuildScript != "" {
-		buildScript = resolution.BuildScript
-	}
-	if command := manifest.Scripts[buildScript]; command != "" {
-		candidate.BuildCommand = runner + " run " + buildScript
-		candidate.Evidence = append(candidate.Evidence,
-			DetectionEvidence{Path: marker.packagePath, Reason: buildScript + " script: " + boundedEvidence(command)})
+		resolution = framework.resolve(manifest, files, runner)
 	}
 	// A Procfile is the one place a repository declares how it is served
 	// rather than leaving it to be inferred, so it outranks a start script
@@ -780,22 +788,36 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	if procfileWeb != "" && rejectPlanSecretLiteral("Procfile web process", procfileWeb) != nil {
 		procfileWeb = ""
 	}
+	inputs := nodeCommandInputs{
+		manifest: manifest, files: files, framework: framework, procfileWeb: procfileWeb,
+		schema: detectSchemaTool(dependencies, schemaPaths),
+	}
+	if install.context != install.dir && facts.workspaceTurbo && manifest.Name != "" && nodeHasWorkspaceDependency(manifest) {
+		inputs.turboFilter = manifest.Name
+	}
+	candidate.BuildCommand, candidate.StartCommand = inputs.commands(runner)
+	bareStart := inputs.start(runner)
+	buildScript := "build"
+	if resolution.BuildScript != "" {
+		buildScript = resolution.BuildScript
+	}
+	if command := manifest.Scripts[buildScript]; command != "" {
+		candidate.Evidence = append(candidate.Evidence,
+			DetectionEvidence{Path: marker.packagePath, Reason: buildScript + " script: " + boundedEvidence(command)})
+	}
 	if framework == nil {
 		candidate.Framework = matchNodeServerLibrary(manifest)
 		entry := nodeMainEntry(manifest)
 		switch {
 		case procfileWeb != "":
-			candidate.StartCommand = procfileWeb
 			candidate.Profile, candidate.Port = ProfileWeb, 3000
 			candidate.Evidence = append(candidate.Evidence,
 				DetectionEvidence{Path: filepath.ToSlash(filepath.Join(marker.root, "Procfile")), Reason: "web process: " + boundedEvidence(procfileWeb)})
 		case manifest.Scripts["start"] != "":
-			candidate.StartCommand = runner + " run start"
 			candidate.Profile, candidate.Port = ProfileWeb, 3000
 			candidate.Evidence = append(candidate.Evidence,
 				DetectionEvidence{Path: marker.packagePath, Reason: "start script: " + boundedEvidence(manifest.Scripts["start"])})
 		case entry != "":
-			candidate.StartCommand = nodeEntryCommand(runner, entry)
 			candidate.Evidence = append(candidate.Evidence,
 				DetectionEvidence{Path: marker.packagePath, Reason: "main entry: " + entry})
 			// A main file says how the package runs, not whether anything
@@ -831,14 +853,11 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 			candidate.Profile, candidate.Port = ProfileWeb, resolution.Port
 			switch {
 			case procfileWeb != "":
-				candidate.StartCommand = procfileWeb
 				candidate.Evidence = append(candidate.Evidence,
 					DetectionEvidence{Path: filepath.ToSlash(filepath.Join(marker.root, "Procfile")), Reason: "web process: " + boundedEvidence(procfileWeb)})
 			default:
-				candidate.StartCommand = resolution.Start
 				for _, script := range resolution.StartScripts {
 					if command := manifest.Scripts[script]; command != "" {
-						candidate.StartCommand = runner + " run " + script
 						candidate.Evidence = append(candidate.Evidence,
 							DetectionEvidence{Path: marker.packagePath, Reason: script + " script: " + boundedEvidence(command)})
 						break
@@ -851,27 +870,130 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "add a "+buildScript+" script that runs the "+framework.Label+" build")
 		}
 	}
-	if tool := detectSchemaTool(dependencies, schemaPaths); tool != nil {
+	if !settled {
+		candidate.Confidence = ConfidenceLow
+	}
+	if tool := inputs.schema; tool != nil {
 		candidate.SchemaTool = tool.Tool.Name
 		candidate.Evidence = append(candidate.Evidence, tool.Evidence)
 		switch {
-		case tool.Tool.applied(manifest.Scripts["start"]) || tool.Tool.applied(candidate.StartCommand):
+		case inputs.schemaInStart(bareStart):
 			candidate.SchemaInStart = true
 			candidate.Evidence[len(candidate.Evidence)-1].Reason = tool.Tool.Label + " schema applied by the package's own start script"
 		case tool.Command == "":
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "choose how "+tool.Tool.Label+" migrations run before the database is used")
 		default:
 			candidate.SchemaCommand = tool.Command
-			if candidate.StartCommand != "" && candidate.OutputDirectory == "" {
-				candidate.StartCommand = nodeExecRunner(runner) + " " + tool.Command + " && " + candidate.StartCommand
-			}
 		}
 	}
-	if _, err := validateNodeRecipeContent(marker.packageJSON, nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile},
-		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: manager, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {
+	candidate.NodeInstalls = facts.detectedInstalls(candidate.PackageManager, false, inputs.commands)
+	candidate.Variables = facts.registry
+	if _, err := validateNodeRecipeContent(marker.packageJSON, files,
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: runner, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {
 		candidate.RecipeIssue = err.Error()
 	}
 	return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, candidate)}
+}
+
+// nodeCommandInputs is what the detected build and start commands are made
+// from, apart from the runner. Detection proposes commands for the manager
+// that resolved, and records them for every other manager as well, from
+// this one function, so a manager chosen later swaps whole commands.
+type nodeCommandInputs struct {
+	manifest    nodeManifest
+	files       nodeRootFiles
+	framework   *nodeFramework
+	procfileWeb string
+	schema      *detectedSchemaTool
+	// turboFilter is the workspace member Turborepo builds, with the
+	// workspace packages it depends on.
+	turboFilter string
+}
+
+func (in nodeCommandInputs) schemaInStart(start string) bool {
+	return in.schema != nil && (in.schema.Tool.applied(in.manifest.Scripts["start"]) || in.schema.Tool.applied(start))
+}
+
+func (in nodeCommandInputs) commands(runner string) (string, string) {
+	var resolution nodeFrameworkResolution
+	if in.framework != nil {
+		resolution = in.framework.resolve(in.manifest, in.files, runner)
+	}
+	buildScript := "build"
+	if resolution.BuildScript != "" {
+		buildScript = resolution.BuildScript
+	}
+	build := ""
+	if in.manifest.Scripts[buildScript] != "" {
+		build = runner + " run " + buildScript
+		if in.turboFilter != "" {
+			build = nodeExecRunner(runner) + " turbo run " + buildScript + " --filter=" + in.turboFilter + "..."
+		}
+	}
+	start := in.start(runner)
+	if in.schema != nil && in.schema.Command != "" && start != "" && !in.schemaInStart(start) {
+		start = nodeExecRunner(runner) + " " + in.schema.Command + " && " + start
+	}
+	return build, start
+}
+
+// start is the served command before any schema step is chained in front.
+func (in nodeCommandInputs) start(runner string) string {
+	var resolution nodeFrameworkResolution
+	if in.framework != nil {
+		resolution = in.framework.resolve(in.manifest, in.files, runner)
+	}
+	start := ""
+	switch {
+	case in.framework == nil && in.procfileWeb != "":
+		start = in.procfileWeb
+	case in.framework == nil && in.manifest.Scripts["start"] != "":
+		start = runner + " run start"
+	case in.framework == nil:
+		if entry := nodeMainEntry(in.manifest); entry != "" {
+			start = nodeEntryCommand(runner, entry)
+		}
+	case resolution.Output != "":
+	case in.procfileWeb != "":
+		start = in.procfileWeb
+	default:
+		start = resolution.Start
+		for _, script := range resolution.StartScripts {
+			if in.manifest.Scripts[script] != "" {
+				start = runner + " run " + script
+				break
+			}
+		}
+	}
+	return start
+}
+
+func nodeHasWorkspaceDependency(manifest nodeManifest) bool {
+	for _, kind := range []map[string]string{manifest.Dependencies, manifest.DevDependencies} {
+		for _, spec := range kind {
+			if strings.HasPrefix(spec, "workspace:") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func rootLabelOf(root string) string {
+	if root == "" {
+		return "."
+	}
+	return root
+}
+
+// boundedEvidenceSentence keeps a detection sentence within the evidence
+// bounds without the credential filter boundedEvidence applies to script
+// text: this text is assembled from lockfile and package names.
+func boundedEvidenceSentence(value string) string {
+	if len(value) > 480 {
+		return value[:477] + "..."
+	}
+	return value
 }
 
 // nodeMainEntry is the file package.json says the package runs from, when it

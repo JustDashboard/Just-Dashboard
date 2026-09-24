@@ -214,16 +214,57 @@ type DetectedCandidate struct {
 	Databases            []DetectedDatabase  `json:"databases,omitempty"`
 	Evidence             []DetectionEvidence `json:"evidence"`
 	NeedsDecision        []string            `json:"needsDecision"`
+	// Lockfiles are the JavaScript lockfiles committed for this package (or
+	// its workspace), each compared with package.json. NodeInstalls is what
+	// the recipe installs under each package manager an operator can choose,
+	// computed by the same planner the build runs, so preflight can judge a
+	// choice without reading the source again. NodeVersion is the Node major
+	// the recipe builds on and where it came from.
+	Lockfiles    []DetectedLockfile    `json:"lockfiles,omitempty"`
+	NodeInstalls []DetectedNodeInstall `json:"nodeInstalls,omitempty"`
+	NodeVersion  string                `json:"nodeVersion,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
 // example env file or in the code itself. Example is the template's own
 // value when it has one and it is not credential-shaped; a committed real
-// .env contributes names only.
+// .env contributes names only. Step "install" marks a registry credential a
+// package manager's configuration reads, which only the dependency install
+// needs; InstallRequired says the install fails without it.
 type DetectedVariable struct {
-	Name    string   `json:"name"`
-	Example string   `json:"example,omitempty"`
-	Sources []string `json:"sources"`
+	Name            string   `json:"name"`
+	Example         string   `json:"example,omitempty"`
+	Sources         []string `json:"sources"`
+	Step            string   `json:"step,omitempty"`
+	InstallRequired bool     `json:"installRequired,omitempty"`
+}
+
+// DetectedLockfile is one committed JavaScript lockfile compared, as data,
+// with the package.json of every workspace it records. State is in_sync,
+// stale (the manager's frozen install would refuse it) or unknown; the name
+// lists are capped and Note is the sentence an operator reads.
+type DetectedLockfile struct {
+	Path    string   `json:"path"`
+	Manager string   `json:"manager"`
+	State   string   `json:"state"`
+	Missing []string `json:"missing,omitempty"`
+	Extra   []string `json:"extra,omitempty"`
+	Changed []string `json:"changed,omitempty"`
+	Note    string   `json:"note,omitempty"`
+}
+
+// DetectedNodeInstall is the dependency install the recipe runs when Manager
+// is chosen: the lockfile it installs from, the exact command, the manager
+// release, the build and start commands detection proposes for that runner,
+// and the preflight findings that choice carries.
+type DetectedNodeInstall struct {
+	Manager      string             `json:"manager"`
+	Lockfile     string             `json:"lockfile,omitempty"`
+	Install      string             `json:"install,omitempty"`
+	Toolchain    string             `json:"toolchain,omitempty"`
+	BuildCommand string             `json:"buildCommand,omitempty"`
+	StartCommand string             `json:"startCommand,omitempty"`
+	Findings     []PreflightFinding `json:"findings,omitempty"`
 }
 
 // DetectedDatabase is a database engine the source's dependencies or example
@@ -918,8 +959,10 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.GoVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !goRecipeVersionRE.MatchString(c.Build.GoVersion)) {
 		return fmt.Errorf("Go version must select stable Go 1.25 or 1.26 in a Go recipe; use a Dockerfile for other toolchains")
 	}
-	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !validNodePackageManager(c.Build.PackageManager)) {
-		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript recipe")
+	// The PHP recipe installs its front-end assets through the same Node
+	// install, so the same choice applies to it.
+	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php") || !validNodePackageManager(c.Build.PackageManager)) {
+		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript or PHP recipe")
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
 		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
@@ -1487,6 +1530,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 				return fmt.Errorf("%w: detected candidate contains credential material", ErrInvalidPlan)
 			}
 		}
+		if err := validateDetectedNodeInstall(candidate); err != nil {
+			return err
+		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {
 			if rejectPlanSecretLiteral("detected label", label) != nil {
 				return fmt.Errorf("%w: detected candidate contains credential material", ErrInvalidPlan)
@@ -1505,6 +1551,7 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		}
 		for _, variable := range candidate.Variables {
 			if ValidateEnvKey(variable.Name) != nil || len(variable.Example) > 256 ||
+				(variable.Step != "" && variable.Step != "install") ||
 				strings.ContainsAny(variable.Example, "\x00\r\n") ||
 				rejectPlanSecretLiteral("detected variable example", variable.Example) != nil ||
 				len(variable.Sources) > 8 {
@@ -1532,6 +1579,58 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 	}
 	if !selected {
 		return fmt.Errorf("%w: selected detection candidate does not exist", ErrInvalidPlan)
+	}
+	return nil
+}
+
+// validateDetectedNodeInstall bounds the lockfile readings and install
+// plans a saved draft carries, the way every other detected field is: they
+// are stored, revalidated when the draft returns, and shown to operators.
+func validateDetectedNodeInstall(candidate DetectedCandidate) error {
+	malformed := fmt.Errorf("%w: detected Node install is malformed", ErrInvalidPlan)
+	text := func(value string, limit int) bool {
+		return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") &&
+			rejectPlanSecretLiteral("detected install", value) == nil
+	}
+	names := func(list []string) bool {
+		if len(list) > nodeListedNames {
+			return false
+		}
+		for _, name := range list {
+			if name == "" || !text(name, 512) {
+				return false
+			}
+		}
+		return true
+	}
+	if len(candidate.Lockfiles) > len(nodeLockfileNames) || len(candidate.NodeInstalls) > len(nodeManagerOrder) || !text(candidate.NodeVersion, 64) {
+		return malformed
+	}
+	for _, lockfile := range candidate.Lockfiles {
+		if nodeLockfileManager(lockfile.Path) == "" || nodeLockfileManager(lockfile.Path) != lockfile.Manager ||
+			(lockfile.State != LockfileInSync && lockfile.State != LockfileStale && lockfile.State != LockfileUnknown) ||
+			!names(lockfile.Missing) || !names(lockfile.Extra) || !names(lockfile.Changed) || !text(lockfile.Note, 512) {
+			return malformed
+		}
+	}
+	for _, install := range candidate.NodeInstalls {
+		if !validNodePackageManager(install.Manager) || (install.Lockfile != "" && nodeLockfileManager(install.Lockfile) == "") ||
+			!text(install.Install, 1024) || !text(install.Toolchain, 256) ||
+			!text(install.BuildCommand, 4096) || !text(install.StartCommand, 4096) || len(install.Findings) > 32 {
+			return malformed
+		}
+		for _, finding := range install.Findings {
+			switch finding.Severity {
+			case PreflightPass, PreflightWarning, PreflightDecision, PreflightBlocked, PreflightUnavailable:
+			default:
+				return malformed
+			}
+			if finding.Code == "" || !text(finding.Code, 64) || !text(finding.Title, 512) || !text(finding.Measured, 512) ||
+				!text(finding.Means, 512) || !text(finding.Action, 512) || !text(finding.Owner, 64) ||
+				!text(finding.FieldID, 256) || finding.DeepLink != "" {
+				return malformed
+			}
+		}
 	}
 	return nil
 }
