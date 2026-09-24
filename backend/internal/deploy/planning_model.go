@@ -214,6 +214,16 @@ type DetectedCandidate struct {
 	Databases            []DetectedDatabase  `json:"databases,omitempty"`
 	Evidence             []DetectionEvidence `json:"evidence"`
 	NeedsDecision        []string            `json:"needsDecision"`
+
+	// Readiness is how the candidate proves it is serving, read from what the
+	// source declares (detect_readiness.go); nil keeps the plan's GET / check.
+	Readiness *DetectedReadiness `json:"readiness,omitempty"`
+	// BackgroundWorker names the library that makes the candidate a process
+	// that never listens, such as a chat bot or a queue consumer.
+	BackgroundWorker *DetectedBackgroundWorker `json:"backgroundWorker,omitempty"`
+	// StartDetaches is a start command that puts the application in the
+	// background, which detection could not rewrite into a foreground one.
+	StartDetaches *DetectedStartDetach `json:"startDetaches,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -1528,6 +1538,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 				rejectPlanSecretLiteral("detection decision", decision) != nil {
 				return fmt.Errorf("%w: detection decision is malformed", ErrInvalidPlan)
 			}
+		}
+		if err := validateDetectedServing(candidate); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 		}
 	}
 	if !selected {

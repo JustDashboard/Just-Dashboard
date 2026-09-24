@@ -138,6 +138,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	pythonEntries := []pythonEntry{}
 	denoEntryPaths := []string{}
 	scanner := newEnvScanner()
+	readiness := newReadinessScanner()
 	prismaProviders := map[string]string{}
 	skip := map[string]bool{
 		".just-dashboard": true,
@@ -179,6 +180,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return stop
 		}
 		name := strings.ToLower(entry.Name())
+		readiness.visit(path, filepath.ToSlash(rel))
 		// Presence is all a schema marker proves, so a repository with a
 		// thousand migrations records a handful of them. The bound is per
 		// name: migrations sort before the schema they belong to, and an
@@ -508,6 +510,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		candidates := candidatesForMarkers(marker,
 			pathsUnderRoot(schemaPaths, root, packageRoots), pythonEntriesUnderRoot(pythonEntries, root, pythonRoots))
+		refineServing(candidates, marker, readiness, root, allRoots)
 		variables := scanner.variables(root, allRoots)
 		databases := detectDatabases(marker, variables, prismaProviders)
 		for index := range candidates {
