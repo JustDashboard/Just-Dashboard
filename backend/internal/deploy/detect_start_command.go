@@ -58,6 +58,7 @@ var (
 	pm2SimpleRE      = regexp.MustCompile(`^` + envPrefix + `(?:(?:npx|bunx)\s+|pnpm\s+exec\s+|yarn\s+)?pm2\s+start\s+` + simpleArguments + `$`)
 	foreverSimpleRE  = regexp.MustCompile(`^` + envPrefix + `(?:(?:npx|bunx)\s+)?forever\s+start\s+` + simpleArguments + `$`)
 	backgroundOnlyRE = regexp.MustCompile(`^(?:nohup\s+)?` + simpleArguments + `\s*&$`)
+	npmVariableRE    = regexp.MustCompile(`\$\{?npm_\w+`)
 	scriptSegmentRE  = regexp.MustCompile(`^(?:bun|npm|pnpm|yarn)\s+run\s+(\S+)$|^(?:npm|pnpm|yarn|bun)\s+(start)$`)
 )
 
@@ -162,9 +163,13 @@ type startSettler struct {
 	manifest            nodeManifest
 	node                bool
 	runner              string
+	yarnBerry           bool
 	packagePath, source string
 	evidence            []DetectionEvidence
 	detach              *DetectedStartDetach
+	// rewritten is the last command settle rewrote, kept to be recorded as
+	// the detach when the script holding it cannot be replaced after all.
+	rewritten *DetectedStartDetach
 }
 
 func (s *startSettler) declared(name string) bool { return s.node && s.manifest.has(name) }
@@ -185,10 +190,28 @@ func (s *startSettler) settle(command, script, top string, depth int) (string, b
 				continue
 			}
 			owner := firstNonEmpty(top, name)
+			mark := len(s.evidence)
 			if fixed, bodyChanged := s.settle(body, name, owner, depth+1); bodyChanged {
+				// Outside the package manager the body would lose the npm_*
+				// variables it sets, so a body that reads them keeps its
+				// script and the command is recorded as one detection could
+				// not fix.
+				if npmVariableRE.MatchString(body) {
+					s.evidence = s.evidence[:mark]
+					if s.detach == nil {
+						s.detach = s.rewritten
+					}
+					continue
+				}
 				parts := strings.Split(fixed, " && ")
 				for part := range parts {
 					parts[part] = withExecRunner(strings.TrimSpace(parts[part]), s.runner, s.declared)
+				}
+				// The package manager ran the pre<name> hook before the
+				// script (a prestart that migrates the database, say); the
+				// replacement runs it the same way.
+				if hook := s.preHook(segment, name); hook != "" {
+					parts = append([]string{hook}, parts...)
 				}
 				segments[index], changed = strings.Join(parts, " && "), true
 			}
@@ -209,6 +232,10 @@ func (s *startSettler) settle(command, script, top string, depth int) (string, b
 					why = script + " script: " + why
 				}
 				s.evidence = append(s.evidence, DetectionEvidence{Path: from, Reason: boundedEvidence(why)})
+				s.rewritten = &DetectedStartDetach{
+					Command: boundedEvidence(segment), Script: top, Source: from,
+					Effect: issue.effect, Reason: issue.reason, Action: issue.action,
+				}
 				continue
 			}
 		}
@@ -218,6 +245,36 @@ func (s *startSettler) settle(command, script, top string, depth int) (string, b
 		}
 	}
 	return strings.Join(segments, " && "), changed
+}
+
+// preHook is the command that runs a script's pre<name> hook with the
+// package manager segment named it with. Every manager the recipes install
+// runs the hook before the script except Yarn 2 and later.
+func (s *startSettler) preHook(segment, name string) string {
+	hook := "pre" + name
+	if strings.TrimSpace(s.manifest.Scripts[hook]) == "" {
+		return ""
+	}
+	manager := strings.Fields(segment)[0]
+	if manager == "yarn" && s.yarnBerry {
+		return ""
+	}
+	return manager + " run " + hook
+}
+
+// yarnBerryPackageManager reports whether package.json pins Yarn 2 or
+// later, which runs no pre and post hooks; without a pin Corepack installs
+// Yarn 1, which runs them.
+func yarnBerryPackageManager(packageJSON []byte) bool {
+	var manifest struct {
+		PackageManager string `json:"packageManager"`
+	}
+	if json.Unmarshal(packageJSON, &manifest) != nil {
+		return false
+	}
+	version, ok := strings.CutPrefix(strings.TrimSpace(manifest.PackageManager), "yarn@")
+	major, _, _ := strings.Cut(version, ".")
+	return ok && major != "" && major != "0" && major != "1"
 }
 
 // settleStartCommand checks a recipe candidate's start command, and the
@@ -231,6 +288,7 @@ func settleStartCommand(candidate *DetectedCandidate, marker *detectedMarkers) {
 	settler.node = candidate.Recipe == "node" && parseNodeManifest(marker.packageJSON, &settler.manifest)
 	if settler.node {
 		settler.runner = nodeExecRunner(firstNonEmpty(candidate.PackageManager, "npm"))
+		settler.yarnBerry = yarnBerryPackageManager(marker.packageJSON)
 	}
 	if procfile := procfileProcess(marker.procfile, "web"); procfile != "" && strings.Contains(candidate.StartCommand, procfile) {
 		settler.source = path.Join(marker.root, "Procfile")

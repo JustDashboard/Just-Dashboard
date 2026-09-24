@@ -67,6 +67,21 @@ func TestStartCommandsThatDetachAreRewrittenOrRecorded(t *testing.T) {
 		{name: "a package binary leaves its script with the runner",
 			files: map[string]string{"package.json": `{"scripts":{"start":"cross-env NODE_ENV=production node server.js &"},"dependencies":{"express":"^4.21.0","cross-env":"^7.0.0"}}`, "package-lock.json": nodeLock},
 			start: "npx cross-env NODE_ENV=production node server.js"},
+		{name: "pm2 start keeps the prestart hook npm ran first",
+			files: map[string]string{"package.json": `{"scripts":{"prestart":"prisma migrate deploy","start":"pm2 start dist/main.js"},"dependencies":{"express":"^4.21.0","pm2":"^5.4.0","prisma":"^6.0.0"}}`, "package-lock.json": nodeLock},
+			start: "npm run prestart && npx pm2-runtime start dist/main.js"},
+		{name: "pm2 start keeps the prestart hook under bun",
+			files: map[string]string{"package.json": `{"scripts":{"prestart":"bun run migrate","start":"pm2 start server.js"},"dependencies":{"hono":"^4.0.0","pm2":"^5.4.0"}}`, "bun.lock": ""},
+			start: "bun run prestart && bunx pm2-runtime start server.js"},
+		{name: "pm2 start keeps the hook of the script it runs through",
+			files: map[string]string{"package.json": `{"scripts":{"start":"npm run serve","preserve":"node scripts/migrate.js","serve":"pm2 start app.js"},"dependencies":{"fastify":"^5.0.0","pm2":"^5.4.0"}}`, "package-lock.json": nodeLock},
+			start: "npm run preserve && npx pm2-runtime start app.js"},
+		{name: "yarn 4 runs no prestart hook to keep",
+			files: map[string]string{"package.json": `{"packageManager":"yarn@4.5.0","scripts":{"prestart":"node migrate.js","start":"pm2 start server.js"},"dependencies":{"express":"^4.21.0","pm2":"^5.4.0"}}`, "yarn.lock": ""},
+			start: "yarn pm2-runtime start server.js"},
+		{name: "a script reading npm variables keeps its package manager",
+			files: map[string]string{"package.json": `{"scripts":{"start":"pm2 start server.js --name $npm_package_name"},"dependencies":{"express":"^4.21.0","pm2":"^5.4.0"}}`, "package-lock.json": nodeLock},
+			start: "npm run start", script: "start", effect: startDetachExits},
 		{name: "pm2 start without pm2 installed",
 			files: map[string]string{"package.json": `{"scripts":{"start":"pm2 start app.js"},"dependencies":{"express":"^4.21.0"}}`, "package-lock.json": nodeLock},
 			start: "npm run start", script: "start", effect: startDetachExits},
@@ -138,4 +153,20 @@ func evidenceText(candidate DetectedCandidate) string {
 		reasons = append(reasons, evidence.Reason)
 	}
 	return strings.Join(reasons, "\n")
+}
+
+func TestYarnBerryPackageManager(t *testing.T) {
+	t.Parallel()
+	for manifest, berry := range map[string]bool{
+		`{"packageManager":"yarn@4.5.0+sha512.abc"}`: true,
+		`{"packageManager":"yarn@2.4.3"}`:            true,
+		`{"packageManager":"yarn@1.22.22"}`:          false,
+		`{"packageManager":"pnpm@9.0.0"}`:            false,
+		`{}`:                                         false,
+		`not json`:                                   false,
+	} {
+		if got := yarnBerryPackageManager([]byte(manifest)); got != berry {
+			t.Fatalf("%s: %v", manifest, got)
+		}
+	}
 }
