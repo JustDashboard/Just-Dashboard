@@ -160,7 +160,11 @@ or `examples/`), shallowest first:
 | Streamlit | `streamlit run <script> --server.port 8501 --server.address 0.0.0.0 --server.headless true` | 8501 |
 | Gradio | `python <script>` with `GRADIO_SERVER_NAME=0.0.0.0` in the image | 7860 |
 
-A framework whose application object is not in an entry file keeps the port and asks for the module.
+A framework whose application object is not in an entry file keeps the port and asks for the module. A
+Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
+listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
+it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
+for.
 
 Python migration tools are recognised the way the Node ones are, and share their preflight findings:
 Django (`python manage.py migrate --noinput`, already the default start's first step), Alembic
@@ -170,11 +174,11 @@ head`, `-c <ini>` when it is not at the root), Flask-Migrate (`migrations/alembi
 command is chained before a detected start; a `Procfile` web process is the repository's own and is not
 rewritten, so a linked database without the step raises `schema_step_missing` instead. A start command
 that runs a committed `prestart.sh` (or `scripts/prestart.sh`) which applies the migrations counts as the
-step. A
-Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
-listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
-it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
-for.
+step. Alembic is chained only when the `env.py` beside its script location takes the database from the
+running environment — it overrides `sqlalchemy.url`, reads a variable or the application's settings, or
+imports the application's engine. An `env.py` that connects to the URL `alembic.ini` commits would reach
+a developer's database, fail, and keep the server from ever starting; it is recorded without a command,
+and a linked database raises `schema_step_missing` with the change `env.py` needs.
 
 ## Go
 
@@ -196,11 +200,17 @@ The runtime stage runs the binary at `/app` as the unprivileged `app` user from 
 service reads at runtime are copied there, owned by that user: `templates`, `views`, `static`, `public`,
 `assets`, `migrations`, `locales`, `i18n`, `config` and `config*.{yaml,yml,toml,json}` when they exist,
 plus the directory named by any literal path the sources hand to `LoadHTMLGlob`, `ParseGlob`,
-`http.Dir`, `Static`/`StaticFile`, `os.DirFS` or a `file://` migration source (read as text under a
-fixed budget; symlinks are never copied, nor is a name the repository's `.dockerignore` keeps out of
-the build context, because copying a file the context lacks would fail the build). `/home/app/data` is created and owned by `app`, so a volume
-mounted there starts writable. Rust uses the same stage, reading `ServeDir`, `ServeFile`, `Tera::new`,
-`NamedFile` and actix `Files` literals.
+`http.Dir`, `Static`/`StaticFile`, `os.DirFS` or a `file://` migration source. The sources are read as
+text under a fixed budget, and the walk stops after 20,000 entries. Symlinks are never copied, nor is a
+name the repository's `.dockerignore` keeps out of the build context, because copying a file the context
+lacks would fail the build. `/home/app/data` is created and owned by `app`, so a volume mounted there
+starts writable. Rust uses the same stage, reading `ServeDir`, `ServeFile`, `Tera::new`, `NamedFile` and
+actix `Files` literals.
+
+The working directory used to be `/`. A relative path in a saved custom start command now resolves
+against `/home/app`, so the stage links `/home/app/app` to the binary: a command such as `./app serve`
+still starts it. The link is left out when the repository has a root-level `app` directory the stage
+copies instead.
 
 This recipe uses `CGO_ENABLED=0`. Local non-test source importing `C`, unsupported source versions and
 explicit CGO-enabling commands produce actionable planning/preparation refusals. Dependencies needing
@@ -254,9 +264,17 @@ user, so a relative `app.db` and a volume on either directory are writable.
 
 EF Core migrations (a `Microsoft.EntityFrameworkCore.Design` or `.Tools` reference and a committed
 `*ModelSnapshot.cs`) are recorded as the `ef-core` schema tool. Source that calls `Database.Migrate()`,
-`MigrateAsync()` or `EnsureCreated()` applies them itself; otherwise a linked database raises
-`schema_step_missing`, whose action is to call `Database.Migrate()` at startup — the EF command-line
-tools and the design-time project are not in the runtime image, and a release task runs on the host.
+`MigrateAsync()` or `EnsureCreated()` applies them itself; otherwise a linked database, or a SQLite
+database moved onto a volume, raises `schema_step_missing`, whose action is to call `Database.Migrate()`
+at startup — the EF command-line tools and the design-time project are not in the runtime image, and a
+release task runs on the host.
+
+A SQLite file an `appsettings` connection string names, committed to the repository, is copied into
+`/app/data` owned by `app`: Docker fills an empty named volume from the image the first time it is
+mounted, so the volume detection plans there starts from the committed database — the ASP.NET Core
+Identity template ships `app.db` with its schema and never migrates — rather than from an empty file every
+sign-in fails on. Later releases find the volume filled and copy nothing. A file the repository's
+`.dockerignore` leaves out of the build context, or one reached through a symlink, is not copied.
 
 ## Deno
 
@@ -317,33 +335,48 @@ reported instead.
 | Source | State | Plan |
 | --- | --- | --- |
 | Prisma `provider = "sqlite"`, `url = env("X")` (or Prisma 7's `prisma.config`) | the database | volume at `/data`, `X=file:/data/<file>` |
-| `better-sqlite3`, `sqlite3`, `@libsql/client`, Payload's SQLite adapter, Drizzle's `sqlite`/`turso` dialect | a file named by a variable, or a literal in the source | volume and variable in the example's own shape (`file:` for libSQL); a literal only in its own directory |
+| `better-sqlite3`, `sqlite3`, `@libsql/client`, Payload's SQLite adapter, Drizzle's `sqlite` dialect | a file named by a variable, or a literal in the source | volume and variable in the example's own shape (`file:` for libSQL); a literal only in its own directory |
+| Drizzle's `turso` dialect, a `TURSO_*` variable, or any example naming a hosted database (`libsql://`, `https://`) | nothing local | none: the data lives in the hosted database, which a local file must not replace |
+| `lowdb` `JSONFile`/`JSONFilePreset` | the JSON database | its own directory, or a warning |
 | Strapi | `.tmp/data.db`, `public/uploads` | volumes on both |
 | `multer` `dest`/`destination`, `UPLOAD_DIR`-style variables | uploads | the directory, or `/data/uploads` through the variable |
 | Django `django.db.backends.sqlite3`, `MEDIA_ROOT` | the database, media | the file's own directory when it has one; `NAME` or `MEDIA_ROOT` read from a variable moves to `/data` |
 | SQLAlchemy `sqlite:///…` (Flask-SQLAlchemy 3 resolves relative paths in `instance/`) | the database | its own directory, or a warning |
-| Laravel with `DB_CONNECTION=sqlite` (or none, from Laravel 11) | `database/database.sqlite`, sessions, cache, queue | volume at `/app/storage`, `DB_DATABASE=/app/storage/database.sqlite` when `config/database.php` reads it |
+| Laravel with `DB_CONNECTION=sqlite` (or none, from Laravel 11) | `database/database.sqlite`, sessions, cache, queue | volume at `/app/storage`, `DB_DATABASE=/app/storage/database.sqlite` when `config/database.php` reads it; a planned `DB_CONNECTION` other than `sqlite`, or a `DB_URL`, takes the file out of use |
 | Laravel with Filament, Media Library or `FILESYSTEM_DISK=public` | uploads on the local disks | volume at `/app/storage` |
 | Statamic | `content/`, `users/` | reported: they are the repository's own files |
 | Rails `database.yml` production `sqlite3`, Active Storage `Disk` + `:local`, Kamal `volumes:` | `storage/` | volume at `<final WORKDIR>/storage` |
 | Go `modernc.org/sqlite`, `mattn/go-sqlite3`, … and Rust `rusqlite`, `sqlx`/`diesel` with SQLite | a file named by a variable, or a literal | `/home/app/data` through the variable (keeping `sqlite://`, `file:` and the query), a literal only under `data/` |
-| PocketBase | `pb_data` beside the binary | reported, with `serve --dir=/home/app/data` |
-| `Microsoft.EntityFrameworkCore.Sqlite` with an `appsettings.json` `Data Source=` | the database | `/app/data` through `ConnectionStrings__<name>` (only `Cache`, `Mode`, `Foreign Keys`, `Pooling` and `Default Timeout` options are kept) |
+| PocketBase (the Go recipe with no start command of its own) | its databases and uploads | start `/app serve --http=0.0.0.0:${PORT:-8090} --dir=/home/app/data` on port 8090, volume at `/home/app/data`; with a start command of its own, reported |
+| `Microsoft.EntityFrameworkCore.Sqlite` with an `appsettings.json` `Data Source=` | the database | `/app/data` through `ConnectionStrings__<name>` (only `Cache`, `Mode`, `Foreign Keys`, `Pooling` and `Default Timeout` options are kept), seeded from a committed copy |
+| A Phoenix release built by its own Dockerfile with `ecto_sqlite3` | the file `runtime.exs` reads from `DATABASE_PATH` | `/data/<app>.db` through it when the image runs as root; reported under `USER nobody` |
 | ASP.NET cookie auth, Identity, Razor Pages, MVC views, antiforgery or Blazor without `PersistKeysTo*` | the Data Protection key ring | volume at `/home/app/.aspnet/DataProtection-Keys` |
-| Dockerfile `VOLUME` (final stage, inherited from an earlier stage), a local image's declared volumes | the declared path | a volume on it |
+| Dockerfile `VOLUME` (final stage, inherited from an earlier stage), a local image's declared volumes | the declared path | a volume on it; scratch space (`/tmp`, `/var/tmp`, `/run`, `/var/run`, `/var/cache`, `/dev/shm`) is left anonymous |
+
+A variable holds one value, so detection keeps one entry per variable — the reader that read it more
+closely wins (Django's `MEDIA_ROOT` from the settings, not from the generic upload-variable list).
 
 The configure form turns every target into a managed named volume (`<slug>-<hash>-<purpose>`, the shape a
-template's volumes have), with a storage dependency whose purpose Review shows, fills the moving
-variable's row (`Keeps it on the volume at …`), and releases stop-first, because preflight refuses
-candidate-first activation with a writable mount. A variable the operator changes or empties is read
-again by preflight, never echoed: it compares where the state would be written with the plan's writable
-mounts. State no mount keeps is a warning before deploy — `sqlite_ephemeral`, `uploads_ephemeral`,
-`persistent_path_unmounted`, `declared_volume_unmounted`, `dotnet_data_protection_ephemeral` — whose
-action is the volume and variable detection proposed, a server database through the variable a SQLite
-fallback is read from, or the change the source needs. State that is kept passes as
-`persistent_state_kept`, and `backup_policy_missing` then asks for a backup. A linked server database in
-the variable a SQLite default falls back from takes the file out of use and raises nothing. A container
-that cannot write its SQLite file fails its readiness gate with `sqlite_not_writable` named.
+template's volumes have, the hash covering the project's name and its draft, so one repository imported
+twice never shares a volume), with a storage dependency whose purpose Review shows. The value that moves
+the state is declared by the plan — plain, scoped to the runtime and release tasks, not the build, which
+has no volume mounted and may open the committed default instead — and its environment row shows it
+(`Keeps it on the volume at …`); the row is sent only when the operator changes it. Releases are
+stop-first, because preflight refuses candidate-first activation with a writable mount. A variable the
+operator changes or empties is read again by preflight, never echoed: it compares where the state would
+be written with the plan's writable mounts. A managed volume another project's plan already manages is
+`storage_owned_by_other_project` (blocked, naming the owner): both would share the data and removing
+either would offer to delete it. The draft's preflight raises it and commit refuses it again, for a
+project created in between; a mount marked Linked shares a volume on purpose. State no mount keeps is a
+warning before deploy — `sqlite_ephemeral`, `uploads_ephemeral`, `persistent_path_unmounted`,
+`declared_volume_unmounted`, `dotnet_data_protection_ephemeral` — whose action is the volume and variable
+detection proposed, a server database through the variable a SQLite fallback is read from, or the change
+the source needs. State that is kept passes as `persistent_state_kept`, and `backup_policy_missing` then
+asks for a backup. A linked server database in the variable a SQLite default falls back from takes the
+file out of use and raises nothing. SQLite moved onto a volume starts empty the way a new server database
+does, so the detected schema tool's step is checked for it too (`schema_step_missing`, titled for the
+volume). A container that cannot open or write its SQLite file — the directory is missing or not writable
+by its user — fails its readiness gate with `sqlite_not_writable` named.
 
 Limits: an image's declared volumes are read only when the image is already on this host (the registry
 manifest does not carry its configuration), and a base image's own `VOLUME` behind a Dockerfile is not
@@ -356,11 +389,14 @@ A project that creates its first administrator or lookup rows in a seed records 
 (`seedCommand`, and `seedResets` when the seed deletes or truncates first): Prisma's `prisma.seed` or
 Prisma 7's `migrations.seed` (`<runner> prisma db seed`), a `db:seed`, `seed` or `prisma:seed` script,
 Laravel's `DatabaseSeeder` when it does more than the skeleton's test user (`php artisan db:seed
---force`), and a `db/seeds.rb` with code (`bin/rails db:seed`). When the plan links a database or keeps
-SQLite on a new volume, and neither the start command nor a release task seeds, preflight raises
-`seed_available` (a warning) naming the command to run once from the project's console after the first
-release. It is never run automatically: a release task runs on the host, not in the application image,
-and a seed that clears tables must not run on every release.
+--force`), a `db/seeds.rb` with code (`bin/rails db:seed`), and the fixtures a Django application commits
+in its `fixtures/` directories, outside any test directory (`python manage.py loaddata <names>`). When
+the plan links a database or keeps SQLite on a new volume, and neither the start command nor a release
+task seeds, preflight raises `seed_available` (a warning) naming the command to run once from the
+project's console after the first release. Only a first release does: a deployment that replaces a live
+runtime has a database that already holds whatever was seeded. It is never run automatically: a release
+task runs on the host, not in the application image, and a seed that clears tables must not run on every
+release.
 
 ## Verification
 

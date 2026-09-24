@@ -299,12 +299,19 @@ only renderer/executor/validation authority for their feature.
   read from a variable, the value that moves it there. The walk hands every file to a state scanner with
   its own budgets (configuration apart from source, so a large tree cannot crowd out the schema); it reads
   text only. The configure form plans one managed named volume per target with a storage dependency,
-  fills the moving variable and releases stop-first; preflight (`deploy/preflight_state.go`) compares the
-  state with the plan's writable mounts and planned values — never echoing a value — and warns per kind
-  (`sqlite_ephemeral`, `uploads_ephemeral`, `persistent_path_unmounted`, `declared_volume_unmounted`,
-  `dotnet_data_protection_ephemeral`) or passes `persistent_state_kept`. Detection also records a seed
-  (`seedCommand`, `seedResets`); `seed_available` warns when a linked database or a new SQLite volume
-  would start without it.
+  named per draft, declares the moving variable (plain, runtime and release-task scopes) and releases
+  stop-first; preflight (`deploy/preflight_state.go`) compares the state with the plan's writable mounts
+  and planned values — never echoing a value — and warns per kind (`sqlite_ephemeral`,
+  `uploads_ephemeral`, `persistent_path_unmounted`, `declared_volume_unmounted`,
+  `dotnet_data_protection_ephemeral`) or passes `persistent_state_kept`; SQLite on a volume also has its
+  schema step checked. Detection also records a seed (`seedCommand`, `seedResets`); `seed_available` warns
+  when a linked database or a new SQLite volume would start without it, on a first release only — the
+  observation's `replacesRuntime` says a live runtime is being replaced.
+- A managed Docker volume belongs to one project (`deploy/planning_volume_owner.go`). `SavePreflight`
+  adds `storage_owned_by_other_project` (blocked, naming the owner) for a planned managed mount or storage
+  dependency another project's desired plan already manages, since only the store knows the owners, and
+  `Commit` checks again inside its transaction, refusing with `ErrInvalidPlan` a volume taken in between.
+  Linked and bind mounts are never owned.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
   Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
