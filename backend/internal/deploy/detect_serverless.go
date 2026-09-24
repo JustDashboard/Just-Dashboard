@@ -112,12 +112,22 @@ func (s *repoShapeScan) applyServerless(result *DetectionResult, context shapeCo
 				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "package.json"),
 					Reason: "@cloudflare/vite-plugin writes the client build to dist/client"})
 			}
-			if config.main != "" && len(config.main) <= 1024 {
-				candidate.ServerlessCode = append(candidate.ServerlessCode, DetectedServerlessCode{
-					Platform: "cloudflare-workers", Entry: strings.TrimPrefix(config.main, "./"), Paths: []string{config.file}, Blocking: true,
-				})
-				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: config.file,
-					Reason: "Worker entry " + boundedEvidence(config.main) + " runs only on Cloudflare Workers"})
+			if entry := strings.TrimPrefix(config.main, "./"); entry != "" && len(entry) <= 1024 {
+				switch {
+				case wranglerAdapterOutput(entry):
+					candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: config.file,
+						Reason: "Worker entry " + boundedEvidence(entry) + " is written by the framework's Cloudflare adapter; the Node build serves the same application"})
+				default:
+					// Only an application with no server of its own loses its
+					// API with the Worker. One the recipe starts in Node keeps
+					// serving; the Worker is a second runtime that stays behind.
+					ownServer := candidate.StartCommand != "" && !strings.Contains(candidate.StartCommand, entry)
+					candidate.ServerlessCode = append(candidate.ServerlessCode, DetectedServerlessCode{
+						Platform: "cloudflare-workers", Entry: entry, Paths: []string{config.file}, Blocking: !ownServer,
+					})
+					candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: config.file,
+						Reason: "Worker entry " + boundedEvidence(entry) + " runs only on Cloudflare Workers"})
+				}
 			}
 		}
 		static := candidate.Profile == ProfileStatic || candidate.BuildMethod == BuildStatic
@@ -163,6 +173,20 @@ func (s *repoShapeScan) applyServerless(result *DetectionResult, context shapeCo
 				Reason: serverlessLabel(platform) + " functions beside a static site: " + strings.Join(paths[:min(len(paths), 3)], ", ")})
 		}
 	}
+}
+
+// wranglerAdapterOutputs are the Worker entries a framework's Cloudflare
+// adapter writes at build time (OpenNext, Astro, SvelteKit, Nitro): the
+// application behind them is the one the framework itself builds.
+var wranglerAdapterOutputs = []string{".open-next/", "dist/_worker.js", ".svelte-kit/cloudflare/", ".output/server/"}
+
+func wranglerAdapterOutput(entry string) bool {
+	for _, prefix := range wranglerAdapterOutputs {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func serverlessLabel(platform string) string {

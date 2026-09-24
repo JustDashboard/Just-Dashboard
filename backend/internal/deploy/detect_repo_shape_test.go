@@ -2,6 +2,8 @@ package deploy
 
 import (
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -463,6 +465,38 @@ func TestRepositoryShapeEvidenceIsValidated(t *testing.T) {
 	}
 }
 
+// What validation would refuse is dropped before the result is saved, so an
+// odd name in a repository costs that one fact and never the import.
+func TestInvalidShapeFactsAreDroppedNotFatal(t *testing.T) {
+	source := &DraftSourceConfig{Kind: SourceGit, Mode: SourceModeLocalCheckout}
+	result := DetectionResult{Source: SourceIdentity{Kind: SourceGit}, SelectedID: "a",
+		SetAside: []DetectionSetAside{{Path: "a\nb", Kind: "template", Reason: "index.html under a template"}, {Path: "docs", Kind: "tooling", Reason: "kept"}},
+		Candidates: []DetectedCandidate{{
+			ID: "a", Name: "app", Profile: ProfileWeb, BuildMethod: BuildRecipe, Confidence: ConfidenceHigh, NeedsDecision: []string{},
+			Demotion: strings.Repeat("d", 600),
+			Evidence: []DetectionEvidence{{Path: "fly.toml", Reason: strings.Repeat("r", 700)}, {Path: "x\ny", Reason: "newline path"}},
+			Processes: []DetectedProcess{
+				{Name: "queue worker", Kind: "worker", Command: "bin/worker", Source: "fly.toml", Reason: "fly.toml"},
+				{Name: "jobs", Kind: "worker", Command: "bin/jobs", Source: "fly.toml", Reason: "fly.toml"},
+			},
+			PlatformManifests: []DetectedPlatformManifest{{File: "fly.toml", Platform: "fly", HealthPath: strings.Repeat("h", 2000)}},
+			Companions:        []string{"../api"},
+		}},
+	}
+	if validateDetectionResult(source, result) == nil {
+		t.Fatal("the fixture is already valid")
+	}
+	keepValidShape(&result)
+	if err := validateDetectionResult(source, result); err != nil {
+		t.Fatalf("still refused: %v", err)
+	}
+	candidate := result.Candidates[0]
+	if len(result.SetAside) != 1 || len(candidate.Processes) != 1 || candidate.Processes[0].Name != "jobs" ||
+		len(candidate.PlatformManifests) != 0 || len(candidate.Companions) != 0 || len(candidate.Evidence) != 1 || candidate.Demotion == "" {
+		t.Fatalf("kept = %#v", result)
+	}
+}
+
 func TestHundredsOfRootsKeepTheBestRanked(t *testing.T) {
 	files := map[string]string{"package.json": nextManifest, "package-lock.json": "{}"}
 	for index := 0; index < 90; index++ {
@@ -476,5 +510,107 @@ func TestHundredsOfRootsKeepTheBestRanked(t *testing.T) {
 	result.Source.Kind = SourceGit
 	if err := validateDetectionResult(&DraftSourceConfig{Kind: SourceGit, Mode: SourceModeLocalCheckout}, result); err != nil {
 		t.Fatalf("bounded result refused: %v", err)
+	}
+}
+
+// A package.json that only runs tooling owns no static files and ranks below
+// the site the repository publishes; a program with a landing page stays the
+// program, so its code is never served as files.
+func TestToolingPackageNeverHidesTheSite(t *testing.T) {
+	tooling := `{"name":"site","private":true,"scripts":{"format":"prettier --write .","prepare":"husky"},"devDependencies":{"prettier":"3","husky":"9"}}`
+	for _, folder := range []string{"public", "site", "web", "docs"} {
+		t.Run("tooling root and "+folder, func(t *testing.T) {
+			result := detectShapeFixture(t, map[string]string{
+				"package.json": tooling, "package-lock.json": "{}", folder + "/index.html": "<html></html>",
+			})
+			selected := selectedOf(result)
+			root := candidateAtRoot(result, "", BuildRecipe)
+			if selected == nil || selected.Root != folder || selected.BuildMethod != BuildStatic || selected.Demotion != "" {
+				t.Fatalf("selected = %#v, candidates = %#v", selected, result.Candidates)
+			}
+			if root == nil || !strings.Contains(root.Demotion, "only runs tooling") {
+				t.Fatalf("tooling root = %#v", root)
+			}
+		})
+	}
+	t.Run("npm init's main with no such file is still tooling", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json":      `{"name":"site","main":"index.js","scripts":{"build":"tailwindcss -i in.css -o out.css"},"devDependencies":{"tailwindcss":"4"}}`,
+			"package-lock.json": "{}", "index.html": "<html></html>", "about/index.html": "<html></html>",
+		})
+		if len(result.Candidates) != 1 || result.Candidates[0].Profile != ProfileStatic || result.Candidates[0].OutputDirectory != "." ||
+			!evidenceMentions(&result.Candidates[0], "1 more pages") {
+			t.Fatalf("tooling site = %#v", result.Candidates)
+		}
+	})
+	for name, files := range map[string]map[string]string{
+		"discord bot with a landing page": {
+			"package.json": `{"name":"bot","main":"index.js","dependencies":{"discord.js":"14"}}`, "package-lock.json": "{}",
+			"index.js": "require('discord.js')\n", "index.html": "<html></html>",
+		},
+		"script with a main file and a landing page": {
+			"package.json": `{"name":"bot","main":"bot.js","dependencies":{"some-sdk":"1"}}`, "package-lock.json": "{}",
+			"bot.js": "", "index.html": "<html></html>",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := detectShapeFixture(t, files)
+			for _, candidate := range result.Candidates {
+				if candidate.Profile == ProfileStatic || candidate.BuildMethod == BuildStatic || candidate.OutputDirectory != "" {
+					t.Fatalf("a program became a static site: %#v", result.Candidates)
+				}
+			}
+			if root := candidateAtRoot(result, "", BuildRecipe); root == nil || root.StartCommand == "" || root.Demotion != "" {
+				t.Fatalf("program = %#v", result.Candidates)
+			}
+		})
+	}
+	t.Run("an application still owns its public folder", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json": `{"name":"bot","main":"index.js","dependencies":{"discord.js":"14"}}`, "package-lock.json": "{}",
+			"index.js": "", "public/index.html": "<html></html>",
+		})
+		if len(result.Candidates) != 1 || setAsideKind(result, "static-files") == nil {
+			t.Fatalf("candidates = %#v", result.Candidates)
+		}
+	})
+}
+
+// The breadth-first pass and the lexical pass share one judgement of each
+// directory, so a pruned directory is recorded once and never entered.
+func TestWalkJudgesEachDirectoryOnce(t *testing.T) {
+	root := t.TempDir()
+	for _, file := range []string{"package.json", "a/b/package.json", "a/b/c.txt", "skip/package.json", "skip/deep/x.txt"} {
+		writeBuildFixture(t, root, file, "{}")
+	}
+	directories := map[string]int{}
+	files := map[string]int{}
+	err := walkDetectionTree(root, func(name string) bool { return name == "package.json" }, func(path string, entry fs.DirEntry, err error) error {
+		rel, _ := filepath.Rel(root, path)
+		if entry.IsDir() {
+			directories[filepath.ToSlash(rel)]++
+			if entry.Name() == "skip" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		files[filepath.ToSlash(rel)]++
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for directory, visits := range directories {
+		if visits != 1 {
+			t.Fatalf("%s judged %d times: %v", directory, visits, directories)
+		}
+	}
+	if directories["skip/deep"] != 0 || files["skip/package.json"] != 0 || files["skip/deep/x.txt"] != 0 {
+		t.Fatalf("a pruned directory was entered: %v, %v", directories, files)
+	}
+	for _, file := range []string{"package.json", "a/b/package.json", "a/b/c.txt"} {
+		if files[file] != 1 {
+			t.Fatalf("%s visited %d times: %v", file, files[file], files)
+		}
 	}
 }

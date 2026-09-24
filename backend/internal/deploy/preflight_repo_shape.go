@@ -47,11 +47,14 @@ func detectionOutcomeFindings(detection *DetectionResult, configuration PlanConf
 	for _, candidate := range detection.Candidates {
 		allNotDeployable = allNotDeployable && candidate.NotDeployable != ""
 	}
+	selected := selectedDetectionCandidate(detection)
 	if allNotDeployable {
 		candidate := detection.Candidates[0]
-		return []PreflightFinding{notAServiceFinding(candidate, PreflightBlocked)}
+		if selected != nil {
+			candidate = *selected
+		}
+		return []PreflightFinding{notAServiceFinding(candidate, notAServiceSeverity(candidate, configuration))}
 	}
-	selected := selectedDetectionCandidate(detection)
 	if selected == nil {
 		return []PreflightFinding{finding("detection_ambiguous", PreflightDecision,
 			"Choose one detected candidate", fmt.Sprintf("%d candidates", len(detection.Candidates)),
@@ -62,15 +65,25 @@ func detectionOutcomeFindings(detection *DetectionResult, configuration PlanConf
 		"Detected plan selected", boundedText(selectionReason(*selected, detection.Candidates), 512),
 		"The build plan has explicit evidence.", "", "deploy", "detection")}
 	if selected.NotDeployable != "" {
-		severity := PreflightBlocked
-		if command := strings.TrimSpace(configuration.Build.StartCommand); command != "" && command != selected.StartCommand {
-			// The operator has said how it runs; the verdict stays visible
-			// but no longer stands between them and the deploy.
-			severity = PreflightWarning
-		}
-		findings = append(findings, notAServiceFinding(*selected, severity))
+		findings = append(findings, notAServiceFinding(*selected, notAServiceSeverity(*selected, configuration)))
 	}
 	return findings
+}
+
+// notAServiceSeverity blocks a source that is not a service until the
+// operator says how it runs anyway — a start command of their own, or a
+// build method other than the one detection judged. The verdict then stays
+// visible as a warning but no longer stands between them and the deploy:
+// detection can be wrong, and a src-layout bot is not a library.
+func notAServiceSeverity(candidate DetectedCandidate, configuration PlanConfiguration) PreflightSeverity {
+	build := configuration.Build
+	if command := strings.TrimSpace(build.StartCommand); command != "" && command != candidate.StartCommand {
+		return PreflightWarning
+	}
+	if build.Method != "" && build.Method != candidate.BuildMethod {
+		return PreflightWarning
+	}
+	return PreflightBlocked
 }
 
 func notAServiceFinding(candidate DetectedCandidate, severity PreflightSeverity) PreflightFinding {
@@ -128,7 +141,7 @@ func gitRequirementFindings(source *DraftSourceConfig, detection *DetectionResul
 	if requirements.Submodules {
 		needed, elsewhere := []string{}, []string{}
 		for _, submodule := range requirements.SubmoduleList {
-			if !underRoot(submodule.Path, root) && !underRoot(root, submodule.Path) {
+			if !submoduleInRoot(submodule, root) {
 				continue
 			}
 			needed = append(needed, submodule.Path)
@@ -167,8 +180,15 @@ func gitRequirementFindings(source *DraftSourceConfig, detection *DetectionResul
 		}
 	}
 	if requirements.LFS {
-		tracked := lfsFilesUnder(requirements, root)
+		tracked, exact := lfsFilesUnder(requirements, root)
 		available := observation.Facilities["git-lfs"].Available
+		count := fmt.Sprintf("%d LFS file(s) under the build root", tracked)
+		if !exact {
+			// Past the listed paths a nested root's count is a floor, and a
+			// zero is not a reason to pass.
+			count = fmt.Sprintf("at least %d of the repository's %d LFS files under the build root; only %d are listed",
+				tracked, requirements.LFSFiles, len(requirements.LFSPaths))
+		}
 		switch {
 		case !requirements.LFSChecked:
 			severity, action := PreflightDecision, "Choose whether required Git LFS objects should be fetched."
@@ -178,21 +198,24 @@ func gitRequirementFindings(source *DraftSourceConfig, detection *DetectionResul
 			findings = append(findings, finding("git_lfs", severity,
 				"Repository declares Git LFS objects", fmt.Sprintf("included: %t", source.IncludeLFS),
 				"Bounded detection skips LFS object downloads.", action, "git", "source.includeLfs"))
-		case tracked == 0:
+		case tracked == 0 && exact:
 			findings = append(findings, finding("git_lfs", PreflightPass,
 				"No Git LFS files under the build root", "", "The LFS patterns match nothing this project builds.", "", "git", "source.includeLfs"))
 		case source.IncludeLFS && !available:
 			findings = append(findings, finding("git_lfs_unavailable", PreflightBlocked,
-				"git-lfs is not installed on this host", fmt.Sprintf("%d LFS file(s) under the build root", tracked),
+				"git-lfs is not installed on this host", count,
 				"The release would stop at acquiring the source: Git cannot download LFS objects without git-lfs.",
 				"Install git-lfs on the server (apt install git-lfs), or turn LFS off to deploy the pointer files.", "git", "source.includeLfs"))
 		case source.IncludeLFS:
 			findings = append(findings, finding("git_lfs", PreflightPass,
-				"Git LFS objects are downloaded with the source", fmt.Sprintf("%d file(s)", tracked),
+				"Git LFS objects are downloaded with the source", count,
 				"git-lfs is installed and the release pulls the objects.", "", "git", "source.includeLfs"))
 		default:
-			findings = append(findings, finding("git_lfs", PreflightWarning,
-				"Git LFS files will deploy as pointer files", fmt.Sprintf("%d file(s) under the build root", tracked),
+			title := "Git LFS files will deploy as pointer files"
+			if tracked == 0 {
+				title = "Git LFS files may deploy as pointer files"
+			}
+			findings = append(findings, finding("git_lfs", PreflightWarning, title, count,
 				"Each LFS-tracked file holds a few lines of text naming the object instead of its content.",
 				"Turn on LFS in the Source section unless the build does not need these files.", "git", "source.includeLfs"))
 		}
@@ -300,12 +323,19 @@ func repoShapeFindings(detection *DetectionResult, configuration PlanConfigurati
 		}
 	}
 	for _, code := range selected.ServerlessCode {
-		if code.Blocking {
+		switch {
+		case code.Blocking:
 			findings = append(findings, finding("edge_runtime_code_not_deployed", PreflightBlocked,
 				"This application's server code runs only on "+serverlessLabel(code.Platform), boundedText(code.Entry+" ("+strings.Join(code.Paths, ", ")+")", 512),
 				code.Entry+" is a Worker entry: a container build serves the client files and never runs it, so every API route is missing.",
 				"Serve the API from Node (for Hono, @hono/node-server) with a start command, or use a Dockerfile that runs workerd.",
 				"deploy", "configuration.build"))
+			continue
+		case code.Platform == "cloudflare-workers":
+			findings = append(findings, finding("edge_runtime_code_not_deployed", PreflightWarning,
+				"A Cloudflare Worker entry is not deployed", boundedText(code.Entry+" ("+strings.Join(code.Paths, ", ")+")", 512),
+				"The application's own server runs; "+code.Entry+" runs only on Cloudflare Workers, so whatever it alone serves will be missing.",
+				"Move what the Worker serves into the application, or deploy the Worker on Cloudflare.", "deploy", "configuration.build"))
 			continue
 		}
 		findings = append(findings, finding("serverless_functions_dropped", PreflightWarning,

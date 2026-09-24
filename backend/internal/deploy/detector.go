@@ -570,7 +570,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	// tooling or asset pipelines, what other platforms' files declare, what
 	// else the source runs — and the ranking that selects the application.
 	shape.shapeDetection(&result, shapeContext{
-		markers: markers, identity: identity, goSources: goSources, pythonEntries: pythonEntries,
+		ctx: detectCtx, markers: markers, identity: identity, goSources: goSources, pythonEntries: pythonEntries,
 		variables: func(root string) []DetectedVariable { return scanner.variables(root, allRoots) },
 		databases: func(root string, variables []DetectedVariable) []DetectedDatabase {
 			return detectDatabases(&detectedMarkers{root: root}, variables, prismaProviders)

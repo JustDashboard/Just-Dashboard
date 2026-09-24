@@ -269,6 +269,9 @@ func flyTarget(root string, content []byte) platformTarget {
 			manifest.StartCommand = command
 			continue
 		}
+		if !validProcessName(entry.key) {
+			continue
+		}
 		target.processes = append(target.processes, DetectedProcess{Name: entry.key, Kind: processKind(entry.key, command), Command: command,
 			Source: file, Reason: "fly.toml declares the " + entry.key + " process"})
 	}
@@ -1016,6 +1019,14 @@ func (s *repoShapeScan) applyPlatformManifests(result *DetectionResult, context 
 	}
 	sort.Strings(roots)
 	for _, root := range roots {
+		// Past detection's deadline the files are left unread, and the
+		// result says it stopped short.
+		if context.ctx.Err() != nil {
+			if !result.Truncated {
+				result.Truncated, result.TruncatedReason = true, "time limit reached"
+			}
+			return
+		}
 		for _, target := range s.platformTargets(root) {
 			for index := range result.Candidates {
 				candidate := &result.Candidates[index]
@@ -1047,7 +1058,7 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 			evidence(platform + " start command not used: " + reason)
 			break
 		}
-		candidate.StartCommand = manifest.StartCommand
+		candidate.StartCommand = withSchemaStep(candidate, manifest.StartCommand)
 		startTaken = true
 		manifest.Applied = append(manifest.Applied, "start command")
 		evidence(platform + " start command: " + boundedEvidence(manifest.StartCommand))
@@ -1091,7 +1102,7 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 	}
 	if manifest.HealthPath != "" {
 		if strings.HasPrefix(manifest.HealthPath, "/") && len(manifest.HealthPath) <= 1024 && !strings.ContainsAny(manifest.HealthPath, " \t\r\n") {
-			evidence(platform + " health check path " + manifest.HealthPath)
+			evidence(platform + " health check path " + boundedEvidence(manifest.HealthPath))
 		} else {
 			manifest.HealthPath = ""
 		}
@@ -1119,6 +1130,22 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 		manifest.Applied = manifest.Applied[:16]
 	}
 	candidate.PlatformManifests = append(candidate.PlatformManifests, manifest)
+}
+
+// withSchemaStep keeps the detected schema step in front of a start command
+// another platform's file declares, the way the package's own start gets it:
+// the database this server creates is empty until the step runs, and that
+// platform ran it somewhere this file does not say.
+func withSchemaStep(candidate *DetectedCandidate, command string) string {
+	tool := schemaToolByName(candidate.SchemaTool)
+	if candidate.SchemaCommand == "" || candidate.SchemaInStart || tool == nil || tool.applied(command) {
+		return command
+	}
+	runner := candidate.PackageManager
+	if runner == "" {
+		runner = "npm"
+	}
+	return nodeExecRunner(runner) + " " + candidate.SchemaCommand + " && " + command
 }
 
 // runnerConflict refuses a declared command that runs a JavaScript package

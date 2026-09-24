@@ -29,19 +29,23 @@ const walkDetectionPassEntries = 400_000
 // walkDetectionTree calls visit exactly as filepath.WalkDir would — once for
 // every directory it enters (SkipDir prunes it) and once for every file —
 // except that the files `first` names are visited in the breadth-first pass
-// and are not visited again. A directory is visited in both passes, so the
-// callback's directory branch must be idempotent.
+// and are not visited again. A directory is judged once: the lexical pass
+// reuses the breadth-first pass's answer instead of asking again, so what
+// the callback records about a directory (a pruned manifest, the workflows
+// .github holds) is recorded once.
 func walkDetectionTree(root string, first func(lowerName string) bool, visit fs.WalkDirFunc) error {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return visit(root, nil, err)
 	}
+	judged := map[string]error{}
 	if err := visit(root, fs.FileInfoToDirEntry(info), nil); err != nil {
 		if errors.Is(err, filepath.SkipDir) || errors.Is(err, filepath.SkipAll) {
 			return nil
 		}
 		return err
 	}
+	judged[root] = nil
 	queue := []string{root}
 	listed := 0
 	for len(queue) > 0 && listed < walkDetectionPassEntries {
@@ -57,6 +61,7 @@ func walkDetectionTree(root string, first func(lowerName string) bool, visit fs.
 			if entry.IsDir() {
 				if err := visit(path, entry, nil); err != nil {
 					if errors.Is(err, filepath.SkipDir) {
+						judged[path] = filepath.SkipDir
 						continue
 					}
 					if errors.Is(err, filepath.SkipAll) {
@@ -64,6 +69,7 @@ func walkDetectionTree(root string, first func(lowerName string) bool, visit fs.
 					}
 					return err
 				}
+				judged[path] = nil
 				queue = append(queue, path)
 				continue
 			}
@@ -82,6 +88,11 @@ func walkDetectionTree(root string, first func(lowerName string) bool, visit fs.
 		}
 	}
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err == nil && entry != nil && entry.IsDir() {
+			if decision, ok := judged[path]; ok {
+				return decision
+			}
+		}
 		if err == nil && entry != nil && !entry.IsDir() && first(strings.ToLower(entry.Name())) {
 			return nil
 		}

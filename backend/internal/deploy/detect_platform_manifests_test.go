@@ -1,9 +1,11 @@
 package deploy
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTOMLReaderReadsManifestShapes(t *testing.T) {
@@ -320,4 +322,86 @@ func TestPlatformBuildCommandsLoseTheirInstallSteps(t *testing.T) {
 			t.Fatalf("cleanPlatformCommand(%q) = %q, want %q", input, got, want)
 		}
 	}
+}
+
+// A value left open reads in linear time and ends the document; it used to
+// rescan the growing value on every line, seconds for one 64 KiB file.
+func TestTOMLReaderStopsAtAnUnterminatedValue(t *testing.T) {
+	for name, opening := range map[string]string{"array": `items = [`, "string": `text = """`} {
+		t.Run(name, func(t *testing.T) {
+			document := "[build]\ndockerfile = \"Dockerfile\"\n" + opening + "\n" + strings.Repeat("\"padding value\",\n", 4000) + "[after]\nkey = \"read from inside the value\"\n"
+			started := time.Now()
+			entries := readTOML([]byte(document))
+			if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+				t.Fatalf("readTOML took %s", elapsed)
+			}
+			if tomlText(entries, "build", "dockerfile") != "Dockerfile" || tomlText(entries, "after", "key") != "" {
+				t.Fatalf("entries = %#v", entries)
+			}
+		})
+	}
+	closed := readTOML([]byte("list = [\n" + strings.Repeat("\"x\",\n", 200) + "]\nnext = \"y\"\n"))
+	if value, _ := tomlLookup(closed, "", "list"); len(value.list) != 200 || tomlText(closed, "", "next") != "y" {
+		t.Fatalf("a long closed array = %#v", closed)
+	}
+}
+
+func TestPlatformManifestsKeepWhatDetectionAdds(t *testing.T) {
+	t.Run("the schema step stays in front of a platform start command", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json":         `{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16","@prisma/client":"7"},"devDependencies":{"prisma":"7"}}`,
+			"package-lock.json":    "{}",
+			"prisma/schema.prisma": "datasource db {\n  provider = \"postgresql\"\n}\n",
+			"prisma/migrations/20240101000000_init/migration.sql": "",
+			"render.yaml": "services:\n  - type: web\n    name: web\n    runtime: node\n    startCommand: npm start\n",
+		})
+		candidate := selectedOf(result)
+		if candidate == nil || candidate.StartCommand != "npx prisma migrate deploy && npm start" {
+			t.Fatalf("start = %#v", candidate)
+		}
+	})
+	t.Run("a platform start that migrates itself is taken as it is", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json":         `{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16","@prisma/client":"7"},"devDependencies":{"prisma":"7"}}`,
+			"package-lock.json":    "{}",
+			"prisma/schema.prisma": "datasource db {\n  provider = \"postgresql\"\n}\n",
+			"railway.json":         `{"deploy":{"startCommand":"npx prisma db push && npm start"}}`,
+		})
+		if candidate := selectedOf(result); candidate == nil || candidate.StartCommand != "npx prisma db push && npm start" {
+			t.Fatalf("start = %#v", candidate)
+		}
+	})
+	t.Run("odd names and long commands cost only themselves", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"requirements.txt": "flask==3.1.0\n", "app.py": "from flask import Flask\napp = Flask(__name__)\n",
+			"fly.toml": "[processes]\n  app = \"gunicorn app:app\"\n  \"queue worker\" = \"python worker.py\"\n  jobs = \"python jobs.py\"\n" +
+				"[[http_service.checks]]\n  path = \"/" + strings.Repeat("h", 900) + "\"\n",
+			"Procfile": "web: gunicorn app:app\nclock: python " + strings.Repeat("x", 2000) + ".py\n",
+		}, SourceIdentity{Kind: SourceGit})
+		candidate := selectedOf(result)
+		if candidate == nil {
+			t.Fatalf("candidates = %#v", result.Candidates)
+		}
+		names := []string{}
+		for _, process := range candidate.Processes {
+			names = append(names, process.Name)
+		}
+		if !slices.Equal(names, []string{"jobs"}) {
+			t.Fatalf("processes = %#v", candidate.Processes)
+		}
+		if err := validateDetectionResult(&DraftSourceConfig{Kind: SourceGit, Mode: SourceModeLocalCheckout}, result); err != nil {
+			t.Fatalf("detection refused its own result: %v", err)
+		}
+	})
+	t.Run("past the deadline the files are left unread", func(t *testing.T) {
+		scan := newRepoShapeScan(t.TempDir(), DetectionLimits{})
+		scan.recordFile("", "fly.toml", []byte("[http_service]\ninternal_port = 8080\n"))
+		result := DetectionResult{Candidates: []DetectedCandidate{{ID: "a", Root: "", BuildMethod: BuildRecipe, Profile: ProfileWeb}}}
+		expired, cancel := context.WithCancel(t.Context())
+		cancel()
+		scan.applyPlatformManifests(&result, shapeContext{ctx: expired, markers: map[string]*detectedMarkers{}})
+		if len(result.Candidates[0].PlatformManifests) != 0 || !result.Truncated || result.TruncatedReason != "time limit reached" {
+			t.Fatalf("result = %#v", result)
+		}
+	})
 }

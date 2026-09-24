@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -128,6 +129,13 @@ type repoShapeScan struct {
 	pythonProcess  []pythonEntry
 	workflows      map[string][]byte
 	depthManifests []string
+	// prunedDirs are the directories the depth bound kept the walk out of;
+	// past its bound, prunedMore says there were others.
+	prunedDirs []string
+	prunedMore bool
+	// walkStopped says a detection bound ended the walk before its lexical
+	// pass finished, so what the walk did not see may still be there.
+	walkStopped    bool
 	manifestsBOM   []string
 	templatedIndex []string
 	lfsDeclared    bool
@@ -228,6 +236,11 @@ func (s *repoShapeScan) setAsideDirectory(path, rel, name string) bool {
 // Examples and fixtures nest deeply by nature and are not worth the warning.
 func (s *repoShapeScan) depthPruned(path, rel string) {
 	rel = filepath.ToSlash(rel)
+	if len(s.prunedDirs) < 256 {
+		s.prunedDirs = append(s.prunedDirs, rel)
+	} else {
+		s.prunedMore = true
+	}
 	if decoySegment(rel) != "" || len(s.depthManifests) >= 8 {
 		return
 	}
@@ -459,10 +472,12 @@ func (s *repoShapeScan) readWorkflows(githubDir string) {
 		if !entry.Type().IsRegular() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
 			continue
 		}
-		if len(s.workflows) >= 16 {
+		if len(s.workflows) >= 16 || s.bytes >= shapeMaxBytes {
 			return
 		}
-		if content, _, err := readDetectionFile(filepath.Join(directory, entry.Name()), 64<<10); err == nil {
+		content, n, err := readDetectionFile(filepath.Join(directory, entry.Name()), 64<<10)
+		s.bytes += n
+		if err == nil {
 			s.workflows[".github/workflows/"+entry.Name()] = content
 		}
 	}
@@ -499,6 +514,9 @@ func decoySegment(rel string) string {
 
 // shapeContext is what the post-walk shaping needs from DetectPath.
 type shapeContext struct {
+	// ctx is detection's own deadline: reading other platforms' files after
+	// the walk is held to the same time bound as the walk.
+	ctx           context.Context
 	markers       map[string]*detectedMarkers
 	identity      SourceIdentity
 	goSources     *goSourceScan
@@ -511,6 +529,9 @@ type shapeContext struct {
 // the repository as a whole shows, removes what is not the application, and
 // ranks what is left so the right candidate is selected on its own.
 func (s *repoShapeScan) shapeDetection(result *DetectionResult, context shapeContext) {
+	// Every way the walk can stop early marks the result truncated, and only
+	// the depth note below is added after it.
+	s.walkStopped = result.Truncated
 	s.applyGitRequirements(result)
 	if len(s.manifestsBOM) > 0 {
 		for index := range result.Candidates {
@@ -562,7 +583,25 @@ func (s *repoShapeScan) shapeDetection(result *DetectionResult, context shapeCon
 			Reason: fmt.Sprintf("%d lower-ranked candidates are not listed", dropped)})
 	}
 	result.SetAside = append([]DetectionSetAside(nil), s.setAside...)
+	keepValidShape(result)
 	result.SelectedID = rankedSelection(result.Candidates)
+}
+
+// absenceKnown says whether the walk saw everything under root, so that a
+// file it did not record is really not there. A verdict drawn from a file's
+// absence — no src/main.rs, no main package, no script at the top — is drawn
+// only then: a walk a bound cut short would otherwise call a service whose
+// entry point it never reached a library.
+func (s *repoShapeScan) absenceKnown(root string) bool {
+	if s.walkStopped || s.filesTruncated || s.prunedMore {
+		return false
+	}
+	for _, directory := range s.prunedDirs {
+		if underRoot(directory, root) {
+			return false
+		}
+	}
+	return true
 }
 
 func rootLabelOf(root string) string {
@@ -730,6 +769,11 @@ func (s *repoShapeScan) skipStaticIndex(absolute, rel string) bool {
 			return true
 		}
 	}
+	// Past the shape budget an index.html is taken for a site, which is what
+	// every one of them was before templates were told apart.
+	if s.bytes >= shapeMaxBytes {
+		return false
+	}
 	file, err := os.Open(absolute)
 	if err != nil {
 		return false
@@ -737,6 +781,7 @@ func (s *repoShapeScan) skipStaticIndex(absolute, rel string) bool {
 	defer file.Close()
 	buffer := make([]byte, 4096)
 	n, _ := io.ReadFull(file, buffer)
+	s.bytes += int64(n)
 	head := strings.TrimSpace(string(manifestText(buffer[:n])))
 	switch {
 	case strings.HasPrefix(head, "---"):
@@ -763,21 +808,29 @@ var staticCodeDirectories = map[string]bool{
 // they belong to.
 func (s *repoShapeScan) applyStaticShape(result *DetectionResult, context shapeContext) {
 	s.applyToolingSites(result, context)
-	statics := []int{}
-	code := []int{}
+	statics, sites, code := []int{}, []int{}, []int{}
 	for index, candidate := range result.Candidates {
-		if candidate.BuildMethod == BuildStatic {
+		switch {
+		case candidate.BuildMethod == BuildStatic:
 			statics = append(statics, index)
-		} else if candidate.NotDeployable == "" && candidate.Profile != ProfileCompose {
+			sites = append(sites, index)
+		case candidate.Profile == ProfileStatic && candidate.OutputDirectory == ".":
+			// A plain HTML site with a build step serves its package root,
+			// so the index.html files under it are its pages.
+			sites = append(sites, index)
+		case candidate.NotDeployable == "" && candidate.Profile != ProfileCompose &&
+			!(candidate.Recipe == "node" && s.nodeToolingOnly(candidate.Root, context.markers[candidate.Root])):
+			// Only an application serves files of its own. A package.json of
+			// prettier and husky beside a site in public/ does not own it.
 			code = append(code, index)
 		}
 	}
 	drop := map[string]bool{}
-	// Pages of a site: an index.html nested in another plain static root.
+	// Pages of a site: an index.html nested in another site's root.
 	pages := map[string]int{}
 	for _, index := range statics {
 		candidate := result.Candidates[index]
-		for _, other := range statics {
+		for _, other := range sites {
 			ancestor := result.Candidates[other]
 			if other == index || ancestor.Root == candidate.Root || !underRoot(candidate.Root, ancestor.Root) {
 				continue
@@ -815,14 +868,14 @@ func (s *repoShapeScan) applyStaticShape(result *DetectionResult, context shapeC
 		}
 		if candidate.Root == application.Root || servedFolder {
 			drop[candidate.ID] = true
-			reason := "static files of the " + label + " application in " + rootLabelOf(application.Root)
+			reason := boundedText("static files of the "+label+" application in "+rootLabelOf(application.Root), 512)
 			s.addSetAside(DetectionSetAside{Path: rootLabelOf(candidate.Root), Reason: reason, Kind: "static-files"})
 			result.Candidates[owner].Evidence = append(result.Candidates[owner].Evidence,
 				DetectionEvidence{Path: joinRoot(candidate.Root, "index.html"), Reason: reason})
 			continue
 		}
 		candidate.Confidence = ConfidenceLow
-		candidate.Demotion = "static files inside the " + label + " application in " + rootLabelOf(application.Root)
+		candidate.Demotion = boundedText("static files inside the "+label+" application in "+rootLabelOf(application.Root), 512)
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "index.html"), Reason: candidate.Demotion})
 	}
 	for id, count := range pages {
@@ -847,6 +900,33 @@ func (s *repoShapeScan) applyStaticShape(result *DetectionResult, context shapeC
 		}
 	}
 	removeCandidates(result, func(candidate DetectedCandidate) bool { return drop[candidate.ID] })
+	s.demoteToolingRoots(result, context)
+}
+
+// demoteToolingRoots ranks a package.json that runs nothing of its own below
+// whatever else the repository offers. It used to win on depth alone: a root
+// of prettier and husky was selected over the GitHub Pages site in public/
+// or site/ that is what the repository publishes.
+func (s *repoShapeScan) demoteToolingRoots(result *DetectionResult, context shapeContext) {
+	tooling := map[int]bool{}
+	for index, candidate := range result.Candidates {
+		if candidate.Recipe == "node" && candidate.BuildMethod == BuildRecipe && candidate.Profile != ProfileStatic &&
+			candidate.NotDeployable == "" && candidate.Demotion == "" && s.nodeToolingOnly(candidate.Root, context.markers[candidate.Root]) {
+			tooling[index] = true
+		}
+	}
+	other := false
+	for index, candidate := range result.Candidates {
+		other = other || (!tooling[index] && candidateTier(candidate) == 2)
+	}
+	if !other {
+		return
+	}
+	for index := range tooling {
+		candidate := &result.Candidates[index]
+		candidate.Demotion = boundedText("package.json in "+rootLabelOf(candidate.Root)+" only runs tooling: no start script, framework, server library or main file", 512)
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "package.json"), Reason: candidate.Demotion})
+	}
 }
 
 func applicationLabel(candidate DetectedCandidate) string {
@@ -895,7 +975,7 @@ func (s *repoShapeScan) applyDecoys(result *DetectionResult) {
 			continue
 		}
 		if label := decoySegment(candidate.Root); label != "" {
-			candidate.Demotion = rootLabelOf(candidate.Root) + " is " + label + ", not the application"
+			candidate.Demotion = boundedText(rootLabelOf(candidate.Root)+" is "+label+", not the application", 512)
 		}
 	}
 	for index := range result.Candidates {
@@ -905,7 +985,7 @@ func (s *repoShapeScan) applyDecoys(result *DetectionResult) {
 		}
 		for _, other := range result.Candidates {
 			if other.ID != candidate.ID && candidateTier(other) == 2 && !documentationCandidate(other) {
-				candidate.Demotion = "documentation site beside the " + applicationLabel(other) + " application in " + rootLabelOf(other.Root)
+				candidate.Demotion = boundedText("documentation site beside the "+applicationLabel(other)+" application in "+rootLabelOf(other.Root), 512)
 				break
 			}
 		}
@@ -954,34 +1034,30 @@ func validateRepoShapeEvidence(detection DetectionResult) error {
 		detection.GitRequirements.LFSFiles < 0 {
 		return fmt.Errorf("%w: repository shape evidence exceeds its bounds", ErrInvalidPlan)
 	}
-	text := func(value string, limit int) bool {
-		return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") &&
-			rejectPlanSecretLiteral("repository shape evidence", value) == nil
-	}
 	for _, item := range detection.SetAside {
-		if !setAsideKinds[item.Kind] || !text(item.Path, 4096) || !text(item.Reason, 512) {
+		if !validSetAside(item) {
 			return fmt.Errorf("%w: set-aside evidence is malformed", ErrInvalidPlan)
 		}
 	}
 	for _, alternative := range detection.Alternatives {
 		if (alternative.Kind != "template" && alternative.Kind != "image") || alternative.Ref == "" ||
-			!text(alternative.Ref, 512) || !text(alternative.Label, 256) || !text(alternative.Evidence, 512) {
+			!shapeText(alternative.Ref, 512) || !shapeText(alternative.Label, 256) || !shapeText(alternative.Evidence, 512) {
 			return fmt.Errorf("%w: detection alternative is malformed", ErrInvalidPlan)
 		}
 	}
 	for _, submodule := range detection.GitRequirements.SubmoduleList {
-		if submodule.Path == "" || !text(submodule.Path, 4096) {
+		if submodule.Path == "" || !shapeText(submodule.Path, 4096) {
 			return fmt.Errorf("%w: submodule evidence is malformed", ErrInvalidPlan)
 		}
 	}
 	for _, file := range detection.GitRequirements.LFSPaths {
-		if file == "" || !text(file, 4096) {
+		if file == "" || !shapeText(file, 4096) {
 			return fmt.Errorf("%w: LFS evidence is malformed", ErrInvalidPlan)
 		}
 	}
 	for _, candidate := range detection.Candidates {
 		if (candidate.NotDeployable != "" && notDeployableKinds[candidate.NotDeployable] == "") ||
-			!text(candidate.Demotion, 512) || !text(candidate.DesktopShell, 32) ||
+			!shapeText(candidate.Demotion, 512) || !shapeText(candidate.DesktopShell, 32) ||
 			len(candidate.Companions) > 8 || len(candidate.Processes) > 16 || len(candidate.PlatformManifests) > 12 ||
 			len(candidate.ServerlessCode) > 8 || len(candidate.ImportCaseMismatches) > 16 {
 			return fmt.Errorf("%w: detected candidate shape is malformed", ErrInvalidPlan)
@@ -992,34 +1068,107 @@ func validateRepoShapeEvidence(detection DetectionResult) error {
 			}
 		}
 		for _, process := range candidate.Processes {
-			if !validProcessKind(process.Kind) || !validProcessName(process.Name) || !text(process.Command, 4096) ||
-				!text(process.Source, 4096) || !text(process.Reason, 512) {
+			if !validDetectedProcess(process) {
 				return fmt.Errorf("%w: detected process is malformed", ErrInvalidPlan)
 			}
 		}
 		for _, manifest := range candidate.PlatformManifests {
-			if err := validatePlatformManifest(manifest, text); err != nil {
+			if err := validatePlatformManifest(manifest, shapeText); err != nil {
 				return err
 			}
 		}
 		for _, code := range candidate.ServerlessCode {
-			if !text(code.Platform, 64) || !text(code.Entry, 4096) || len(code.Paths) > 16 {
+			if !validServerlessCode(code) {
 				return fmt.Errorf("%w: serverless evidence is malformed", ErrInvalidPlan)
-			}
-			for _, file := range code.Paths {
-				if !text(file, 4096) {
-					return fmt.Errorf("%w: serverless evidence is malformed", ErrInvalidPlan)
-				}
 			}
 		}
 		for _, mismatch := range candidate.ImportCaseMismatches {
-			if (mismatch.Language != "javascript" && mismatch.Language != "php") || mismatch.Line < 0 ||
-				!text(mismatch.File, 4096) || !text(mismatch.Specifier, 1024) || !text(mismatch.Actual, 4096) {
+			if !validImportCaseMismatch(mismatch) {
 				return fmt.Errorf("%w: import evidence is malformed", ErrInvalidPlan)
 			}
 		}
 	}
 	return nil
+}
+
+// shapeText is the rule every repository-shape string is held to: bounded,
+// on one line, and nothing credential-shaped.
+func shapeText(value string, limit int) bool {
+	return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") &&
+		rejectPlanSecretLiteral("repository shape evidence", value) == nil
+}
+
+func validSetAside(item DetectionSetAside) bool {
+	return setAsideKinds[item.Kind] && shapeText(item.Path, 4096) && shapeText(item.Reason, 512)
+}
+
+func validDetectedProcess(process DetectedProcess) bool {
+	return validProcessKind(process.Kind) && validProcessName(process.Name) && shapeText(process.Command, 4096) &&
+		shapeText(process.Source, 4096) && shapeText(process.Reason, 512)
+}
+
+func validServerlessCode(code DetectedServerlessCode) bool {
+	if !shapeText(code.Platform, 64) || !shapeText(code.Entry, 4096) || len(code.Paths) > 16 {
+		return false
+	}
+	for _, file := range code.Paths {
+		if !shapeText(file, 4096) {
+			return false
+		}
+	}
+	return true
+}
+
+func validImportCaseMismatch(mismatch ImportCaseMismatch) bool {
+	return (mismatch.Language == "javascript" || mismatch.Language == "php") && mismatch.Line >= 0 &&
+		shapeText(mismatch.File, 4096) && shapeText(mismatch.Specifier, 1024) && shapeText(mismatch.Actual, 4096)
+}
+
+// keepValidShape drops each fact the validation above, or the evidence rule
+// of validateDetectionResult, would refuse: a process named with a space, a
+// path with a newline in it, a reason built from a very long root. Every one
+// of them comes from the repository, and one odd file must cost only that
+// fact — a result that fails validation is an import that cannot be saved.
+func keepValidShape(result *DetectionResult) {
+	result.SetAside = keepValid(result.SetAside, validSetAside)
+	for index := range result.Candidates {
+		candidate := &result.Candidates[index]
+		if candidate.Demotion = boundedText(candidate.Demotion, 512); !shapeText(candidate.Demotion, 512) {
+			// Its rank stands; only the wording built from an odd root goes.
+			candidate.Demotion = "ranked below the application"
+		}
+		candidate.Processes = keepValid(candidate.Processes, validDetectedProcess)
+		candidate.PlatformManifests = keepValid(candidate.PlatformManifests, func(manifest DetectedPlatformManifest) bool {
+			return validatePlatformManifest(manifest, shapeText) == nil
+		})
+		candidate.ServerlessCode = keepValid(candidate.ServerlessCode, validServerlessCode)
+		candidate.ImportCaseMismatches = keepValid(candidate.ImportCaseMismatches, validImportCaseMismatch)
+		candidate.Companions = keepValid(candidate.Companions, safeRelativePath)
+		evidence := make([]DetectionEvidence, 0, len(candidate.Evidence))
+		for _, item := range candidate.Evidence {
+			item.Reason = boundedText(item.Reason, 512)
+			if len(item.Path) <= 4096 && !strings.ContainsAny(item.Path, "\x00\r\n") &&
+				rejectPlanSecretLiteral("detection evidence", item.Reason) == nil {
+				evidence = append(evidence, item)
+			}
+		}
+		candidate.Evidence = evidence
+	}
+}
+
+// keepValid filters into a new slice: candidates copied from one another can
+// share a backing array, and filtering one in place would rewrite the other.
+func keepValid[T any](items []T, valid func(T) bool) []T {
+	if len(items) == 0 {
+		return items
+	}
+	kept := make([]T, 0, len(items))
+	for _, item := range items {
+		if valid(item) {
+			kept = append(kept, item)
+		}
+	}
+	return kept
 }
 
 // devStaticServers are the programs a plain HTML site previews itself with
@@ -1038,26 +1187,62 @@ func devStaticServerScript(script string) bool {
 	return false
 }
 
+// nodeRuntimeLibraries are dependencies only a program running in Node has:
+// a chat-bot SDK, a database driver, a queue, a scheduler, a headless
+// browser. Browser libraries (jQuery, Bootstrap, Alpine) are what a plain
+// site lists, and say nothing.
+var nodeRuntimeLibraries = []string{
+	"discord.js", "telegraf", "grammy", "node-telegram-bot-api", "@slack/bolt", "whatsapp-web.js", "@whiskeysockets/baileys",
+	"tmi.js", "mineflayer", "eris", "bullmq", "bull", "bee-queue", "agenda", "node-cron", "cron", "node-schedule",
+	"mongoose", "mongodb", "pg", "mysql", "mysql2", "sqlite3", "better-sqlite3", "redis", "ioredis", "@prisma/client",
+	"sequelize", "typeorm", "knex", "drizzle-orm", "puppeteer", "playwright", "ws", "socket.io", "dotenv", "amqplib",
+	"kafkajs", "nodemailer",
+}
+
+// nodeToolingOnly says a package.json runs nothing of its own: no framework,
+// no server library, no start script beyond a static preview server, no
+// Procfile web process, no runtime library and no main file that exists. It
+// builds CSS, formats code or hooks Git; the site or the application it
+// serves is somewhere else.
+func (s *repoShapeScan) nodeToolingOnly(root string, marker *detectedMarkers) bool {
+	var manifest nodeManifest
+	if marker == nil || !parseNodeManifest(marker.packageJSON, &manifest) || matchNodeFramework(manifest) != nil ||
+		matchNodeServerLibrary(manifest) != "" || procfileProcess(marker.procfile, "web") != "" {
+		return false
+	}
+	if start := manifest.Scripts["start"]; start != "" && !devStaticServerScript(start) {
+		return false
+	}
+	for _, library := range nodeRuntimeLibraries {
+		if manifest.Dependencies[library] != "" {
+			return false
+		}
+	}
+	// npm init writes "main": "index.js" whether or not the file exists, so
+	// only a main file that is there makes a program.
+	if entry := nodeMainEntry(manifest); entry != "" && (s.files[joinRoot(root, entry)] || !s.absenceKnown(root)) {
+		return false
+	}
+	return true
+}
+
 // applyToolingSites turns a plain HTML site whose package.json only runs
 // tooling — the Tailwind CLI, PostCSS, a formatter, a live-reload server —
 // into the static site it is. It used to be a Node worker that asked for a
 // start command, or a web service on port 3000 running a dev server that
-// listens somewhere else.
+// listens somewhere else. A bot with a landing page is not one: its main
+// file or its runtime libraries keep it the program it is, so its code and
+// configuration are never served as files.
 func (s *repoShapeScan) applyToolingSites(result *DetectionResult, context shapeContext) {
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		marker := context.markers[candidate.Root]
 		if candidate.Recipe != "node" || candidate.NotDeployable != "" || marker == nil || marker.staticFile == "" ||
-			marker.staticFile != joinRoot(candidate.Root, "index.html") {
+			marker.staticFile != joinRoot(candidate.Root, "index.html") || !s.nodeToolingOnly(candidate.Root, marker) {
 			continue
 		}
 		var manifest nodeManifest
-		if !parseNodeManifest(marker.packageJSON, &manifest) || matchNodeFramework(manifest) != nil || matchNodeServerLibrary(manifest) != "" {
-			continue
-		}
-		if start := manifest.Scripts["start"]; start != "" && !devStaticServerScript(start) {
-			continue
-		}
+		parseNodeManifest(marker.packageJSON, &manifest)
 		evidence := DetectionEvidence{Path: joinRoot(candidate.Root, "package.json"), Reason: "package.json only runs tooling; index.html is the site"}
 		if manifest.Scripts["build"] == "" {
 			site := newDetectedCandidate(candidate.Root, BuildStatic, DetectedCandidate{

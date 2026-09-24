@@ -274,7 +274,9 @@ func otherEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 	if content, ok := files.files["pubspec.yaml"]; ok {
 		text := string(content)
 		if strings.Contains(text, "flutter:") || strings.Contains(text, "sdk: flutter") {
-			if s.files[joinRoot(root, "web/index.html")] {
+			// Only a walk that saw the whole root can say web/ is missing;
+			// otherwise the web target is given the benefit of the doubt.
+			if s.files[joinRoot(root, "web/index.html")] || !s.absenceKnown(root) {
 				return &ecosystemMatch{language: "Flutter", framework: "flutter", label: "Flutter web app", marker: joinRoot(root, "pubspec.yaml"),
 					profile: ProfileStatic, port: 80, primary: true,
 					remedy: "flutter build web writes build/web; commit a Dockerfile that builds it and serves build/web with nginx"}
@@ -387,6 +389,23 @@ func (s *repoShapeScan) applyEcosystems(result *DetectionResult, context shapeCo
 			})
 			continue
 		}
+		if marker := context.markers[root]; marker != nil && len(marker.procfile) > 0 {
+			declared := procfileKinds(marker.procfile)
+			kept := match.processes[:0]
+			for _, process := range match.processes {
+				if !declared[process.Kind] {
+					kept = append(kept, process)
+				}
+			}
+			match.processes = kept
+		}
+		// A site generator's package.json at its own root runs its CSS or
+		// formatting tooling: the site is the generator's, as a Rails app's
+		// asset bundle is Rails'.
+		siteTooling := match.profile == ProfileStatic && s.nodeToolingOnly(root, context.markers[root])
+		pipeline := func(candidate DetectedCandidate) bool {
+			return candidate.Recipe == "node" && (match.ownsAssets || (siteTooling && candidate.Root == root))
+		}
 		dockerfile := -1
 		others := 0
 		for index, candidate := range result.Candidates {
@@ -395,14 +414,14 @@ func (s *repoShapeScan) applyEcosystems(result *DetectionResult, context shapeCo
 			}
 			if candidate.BuildMethod == BuildDockerfile {
 				dockerfile = index
-			} else if candidate.BuildMethod != BuildStatic && !(match.ownsAssets && candidate.Recipe == "node") {
+			} else if candidate.BuildMethod != BuildStatic && !pipeline(candidate) {
 				others++
 			}
 		}
-		if match.ownsAssets {
+		if match.ownsAssets || siteTooling {
 			removeCandidates(result, func(candidate DetectedCandidate) bool {
-				owned := candidate.Recipe == "node" && (candidate.Root == root || candidate.Root == joinRoot(root, "assets") ||
-					candidate.Root == joinRoot(root, "frontend") || candidate.Root == joinRoot(root, "app/javascript"))
+				owned := candidate.Recipe == "node" && (candidate.Root == root || (match.ownsAssets && (candidate.Root == joinRoot(root, "assets") ||
+					candidate.Root == joinRoot(root, "frontend") || candidate.Root == joinRoot(root, "app/javascript"))))
 				if owned {
 					s.addSetAside(DetectionSetAside{Path: joinRoot(candidate.Root, "package.json"), Kind: "asset-pipeline",
 						Reason: "package.json builds the " + match.label + "'s assets; the application needs a " + match.language + " build"})
@@ -470,7 +489,7 @@ func appendProcesses(existing []DetectedProcess, processes ...DetectedProcess) [
 		}
 		duplicate := false
 		for _, known := range existing {
-			if known.Name == process.Name && known.Kind == process.Kind {
+			if (known.Name == process.Name && known.Kind == process.Kind) || (process.Command != "" && known.Command == process.Command) {
 				duplicate = true
 				break
 			}

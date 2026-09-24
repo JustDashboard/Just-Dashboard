@@ -27,6 +27,11 @@ type tomlValue struct {
 	isList bool
 }
 
+// tomlMaxValueLines bounds a multi-line string or array. A value that runs
+// past it, or to the end of the file unterminated, ends the document: what
+// follows would be read from inside the value.
+const tomlMaxValueLines = 256
+
 func readTOML(content []byte) []tomlEntry {
 	lines := strings.Split(string(manifestText(content)), "\n")
 	var entries []tomlEntry
@@ -55,23 +60,40 @@ func readTOML(content []byte) []tomlEntry {
 		}
 		key := normalizeTOMLKey(strings.TrimSpace(rawKey))
 		rawValue = strings.TrimSpace(rawValue)
+		// A multi-line value is gathered line by line, each line scanned once:
+		// rescanning the whole value for every line it grew by made a single
+		// unterminated array in a 64 KiB file cost seconds.
 		switch {
 		case strings.HasPrefix(rawValue, `"""`) || strings.HasPrefix(rawValue, `'''`):
 			quote := rawValue[:3]
-			body := rawValue[3:]
-			for !strings.Contains(body, quote) && position+1 < len(lines) {
+			var body strings.Builder
+			body.WriteString(rawValue[3:])
+			closed := strings.Contains(rawValue[3:], quote)
+			for extra := 0; !closed; extra++ {
+				if extra == tomlMaxValueLines || position+1 >= len(lines) {
+					return entries
+				}
 				position++
-				body += "\n" + lines[position]
+				body.WriteString("\n" + lines[position])
+				closed = strings.Contains(lines[position], quote)
 			}
-			body, _, _ = strings.Cut(body, quote)
-			entries = append(entries, tomlEntry{table: table, index: index, key: key, value: tomlValue{text: strings.TrimPrefix(body, "\n")}})
+			text, _, _ := strings.Cut(body.String(), quote)
+			entries = append(entries, tomlEntry{table: table, index: index, key: key, value: tomlValue{text: strings.TrimPrefix(text, "\n")}})
 		case strings.HasPrefix(rawValue, "["):
-			body := rawValue
-			for !balancedTOMLArray(body) && position+1 < len(lines) {
+			var scan tomlArrayScan
+			var body strings.Builder
+			body.WriteString(rawValue)
+			balanced := scan.feed(rawValue)
+			for extra := 0; !balanced; extra++ {
+				if extra == tomlMaxValueLines || position+1 >= len(lines) {
+					return entries
+				}
 				position++
-				body += " " + strings.TrimSpace(stripTOMLComment(lines[position]))
+				line := " " + strings.TrimSpace(stripTOMLComment(lines[position]))
+				body.WriteString(line)
+				balanced = scan.feed(line)
 			}
-			entries = append(entries, tomlEntry{table: table, index: index, key: key, value: tomlValue{list: tomlStrings(body), isList: true}})
+			entries = append(entries, tomlEntry{table: table, index: index, key: key, value: tomlValue{list: tomlStrings(body.String()), isList: true}})
 		case strings.HasPrefix(rawValue, "{"):
 			body := strings.TrimSuffix(strings.TrimPrefix(rawValue, "{"), "}")
 			for _, pair := range splitTOMLInline(body) {
@@ -116,26 +138,32 @@ func normalizeTOMLKey(key string) string {
 	return strings.Join(parts, ".")
 }
 
-func balancedTOMLArray(body string) bool {
-	depth := 0
-	inString := byte(0)
-	for index := 0; index < len(body); index++ {
-		switch character := body[index]; {
-		case inString != 0:
-			if character == '\\' && inString == '"' {
+// tomlArrayScan follows an array's brackets and strings across the lines it
+// is fed, so a line is scanned once however long the array grows.
+type tomlArrayScan struct {
+	depth    int
+	inString byte
+}
+
+// feed scans the next part of the array and says whether it has closed.
+func (a *tomlArrayScan) feed(text string) bool {
+	for index := 0; index < len(text); index++ {
+		switch character := text[index]; {
+		case a.inString != 0:
+			if character == '\\' && a.inString == '"' {
 				index++
-			} else if character == inString {
-				inString = 0
+			} else if character == a.inString {
+				a.inString = 0
 			}
 		case character == '"' || character == '\'':
-			inString = character
+			a.inString = character
 		case character == '[':
-			depth++
+			a.depth++
 		case character == ']':
-			depth--
+			a.depth--
 		}
 	}
-	return depth <= 0
+	return a.depth <= 0
 }
 
 // tomlStrings reads the string elements of an array, in order.

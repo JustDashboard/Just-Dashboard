@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"encoding/json"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -55,6 +56,17 @@ var (
 	pyprojectScriptsRE     = regexp.MustCompile(`(?m)^\s*\[(project\.scripts|tool\.poetry\.scripts)\]\s*$`)
 	pyprojectBuildSystemRE = regexp.MustCompile(`(?m)^\s*\[build-system\]\s*$`)
 	pythonNotebookServer   = []string{"voila", "jupyter-server", "jupyterlab", "notebook", "panel", "mercury"}
+	// pythonServiceDependencies are what a program runs with rather than
+	// what a package exports: chat-bot SDKs, queue workers, schedulers and
+	// servers. A project that depends on one is run, even when it has a
+	// build backend and nothing at its top (a src layout started with
+	// python -m). Client libraries such as aiohttp or grpcio say nothing
+	// either way and are left out.
+	pythonServiceDependencies = []string{
+		"discord.py", "py-cord", "nextcord", "disnake", "hikari", "aiogram", "python-telegram-bot", "pytelegrambotapi",
+		"telethon", "pyrogram", "slack-bolt", "twitchio", "celery", "rq", "dramatiq", "arq", "huey", "apscheduler",
+		"schedule", "uvicorn", "gunicorn", "hypercorn", "waitress", "tornado", "twisted",
+	}
 )
 
 func (s *repoShapeScan) applyNotDeployable(result *DetectionResult, context shapeContext) {
@@ -122,7 +134,7 @@ func (s *repoShapeScan) applyNotDeployable(result *DetectionResult, context shap
 					roots = append(roots, root)
 				}
 			}
-			if context.goSources != nil {
+			if context.goSources != nil && s.absenceKnown(candidate.Root) {
 				if library, examples := context.goSources.libraryModule(candidate.Root, roots); library {
 					candidate.NotDeployable = "library"
 					reason := "no main package in the module; it is a library"
@@ -292,6 +304,11 @@ func (s *repoShapeScan) classifyPythonProject(candidate *DetectedCandidate, mark
 			return
 		}
 	}
+	// Both verdicts rest on what the walk did not find, and on nothing
+	// saying the project runs itself.
+	if !s.absenceKnown(candidate.Root) || s.pythonRunsItself(candidate.Root, marker, deps) {
+		return
+	}
 	pyproject := marker.pythonFiles["pyproject.toml"]
 	switch {
 	case s.notebooksUnder(candidate.Root) > 0 && !s.topLevelPython(candidate.Root):
@@ -306,6 +323,26 @@ func (s *repoShapeScan) classifyPythonProject(candidate *DetectedCandidate, mark
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "pyproject.toml"),
 			Reason: "pyproject packages a library: a build backend, no web framework and no script to run"})
 	}
+}
+
+// pythonRunsItself says a Python project declares how it runs even without a
+// framework or a script at its top: a Procfile or Dockerfile, a package with
+// a __main__.py for python -m, or a dependency only a program has.
+func (s *repoShapeScan) pythonRunsItself(root string, marker *detectedMarkers, deps pythonDependencies) bool {
+	if len(marker.procfile) > 0 || marker.dockerfile != "" {
+		return true
+	}
+	for _, name := range pythonServiceDependencies {
+		if deps.has(name) {
+			return true
+		}
+	}
+	for file := range s.files {
+		if path.Base(file) == "__main__.py" && underRoot(file, root) && decoySegment(strings.TrimPrefix(file, root)) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // topLevelPython says whether a root holds a Python script of its own,
@@ -357,7 +394,7 @@ func (s *repoShapeScan) classifyRustCrate(candidate *DetectedCandidate, marker *
 		return
 	}
 	binaries := s.rustBinaries[candidate.Root] || len(manifest.bins) > 0
-	if !binaries && (cargoLibTableRE.Match(marker.cargoToml) || s.files[joinRoot(candidate.Root, "src/lib.rs")]) {
+	if !binaries && s.absenceKnown(candidate.Root) && (cargoLibTableRE.Match(marker.cargoToml) || s.files[joinRoot(candidate.Root, "src/lib.rs")]) {
 		candidate.NotDeployable = "library"
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: cargo, Reason: "library crate: no src/main.rs, src/bin/ or [[bin]] target"})
 	}

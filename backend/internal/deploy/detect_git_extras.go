@@ -178,7 +178,7 @@ func (s *repoShapeScan) applyGitRequirements(result *DetectionResult) {
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		for _, submodule := range requirements.SubmoduleList {
-			if !underRoot(submodule.Path, candidate.Root) && !underRoot(candidate.Root, submodule.Path) {
+			if !submoduleInRoot(submodule, candidate.Root) {
 				continue
 			}
 			if submodule.SameSource {
@@ -191,17 +191,26 @@ func (s *repoShapeScan) applyGitRequirements(result *DetectionResult) {
 			candidate.NeedsDecision = append(candidate.NeedsDecision,
 				"confirm access to Git submodule "+submodule.Path+" on another host, or leave submodules off")
 		}
-		if tracked := lfsFilesUnder(requirements, candidate.Root); tracked > 0 {
+		if tracked, _ := lfsFilesUnder(requirements, candidate.Root); tracked > 0 {
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: rootLabelOf(candidate.Root),
 				Reason: fmt.Sprintf("%d file(s) under this root are stored in Git LFS and are downloaded with the source", tracked)})
 		}
 	}
 }
 
-// lfsFilesUnder counts the LFS-tracked files a build root holds.
-func lfsFilesUnder(requirements GitRequirements, root string) int {
+// submoduleInRoot says whether a build root needs a submodule: it lies
+// inside the root, or the root lies inside it.
+func submoduleInRoot(submodule GitSubmodule, root string) bool {
+	return underRoot(submodule.Path, root) || underRoot(root, submodule.Path)
+}
+
+// lfsFilesUnder counts the LFS-tracked files a build root holds, and says
+// whether the count is exact. The repository root's is; a nested root is
+// counted from the listed paths, which hold every tracked file only when the
+// list was not cut short.
+func lfsFilesUnder(requirements GitRequirements, root string) (int, bool) {
 	if root == "" {
-		return requirements.LFSFiles
+		return requirements.LFSFiles, true
 	}
 	count := 0
 	for _, file := range requirements.LFSPaths {
@@ -209,5 +218,5 @@ func lfsFilesUnder(requirements GitRequirements, root string) int {
 			count++
 		}
 	}
-	return count
+	return count, requirements.LFSFiles <= len(requirements.LFSPaths)
 }

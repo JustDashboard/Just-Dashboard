@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -93,6 +94,33 @@ func TestSubmodulesAndLFSAreDecidedPerBuildRoot(t *testing.T) {
 	}
 }
 
+// A nested root's LFS count comes from the listed paths; when the list was
+// cut short, a zero is unknown and warns instead of passing. A submodule the
+// root lies inside is one the root needs.
+func TestLFSCountBeyondTheListIsUnknown(t *testing.T) {
+	paths := make([]string, 256)
+	for index := range paths {
+		paths[index] = fmt.Sprintf("assets/%03d.png", index)
+	}
+	detection := DetectionResult{GitRequirements: GitRequirements{
+		LFS: true, LFSChecked: true, LFSFiles: 300, LFSPaths: paths,
+		Submodules: true, SubmodulesChecked: true, SubmoduleList: []GitSubmodule{{Path: "site", SameSource: true}},
+	}}
+	nested := PlanConfiguration{Build: BuildPlanConfig{Method: BuildStatic, RootDirectory: "site/public"}}
+	observation := HostObservation{Facilities: map[string]FacilityObservation{"git-lfs": {Available: true}}}
+	findings := gitRequirementFindings(&DraftSourceConfig{Kind: SourceGit}, &detection, nested, observation)
+	if !hasFinding(findings, "git_lfs", PreflightWarning) || hasFinding(findings, "git_lfs", PreflightPass) {
+		t.Fatalf("unknown count = %#v", findings)
+	}
+	if !hasFinding(findings, "git_submodules", PreflightWarning) {
+		t.Fatalf("a root inside a submodule did not need it: %#v", findings)
+	}
+	detection.GitRequirements.LFSFiles = 256
+	if findings := gitRequirementFindings(&DraftSourceConfig{Kind: SourceGit}, &detection, nested, observation); !hasFinding(findings, "git_lfs", PreflightPass) {
+		t.Fatalf("an exact zero = %#v", findings)
+	}
+}
+
 func TestCaseMismatchedImportsAreFound(t *testing.T) {
 	result := detectShapeFixture(t, map[string]string{
 		"package.json": nextManifest, "package-lock.json": "{}",
@@ -162,6 +190,46 @@ func TestServerlessAndEdgeCodeIsNamed(t *testing.T) {
 		findings := repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}})
 		if !hasFinding(findings, "serverless_functions_dropped", PreflightWarning) {
 			t.Fatalf("findings = %#v", findings)
+		}
+	})
+	t.Run("next.js on the OpenNext adapter", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json":      `{"name":"web","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16","react":"19"},"devDependencies":{"@opennextjs/cloudflare":"1","wrangler":"4"}}`,
+			"package-lock.json": "{}",
+			"wrangler.jsonc":    "{\n  \"main\": \".open-next/worker.js\",\n  \"assets\": { \"directory\": \".open-next/assets\" }\n}\n",
+		})
+		candidate := selectedOf(result)
+		if candidate == nil || len(candidate.ServerlessCode) != 0 || !evidenceMentions(candidate, "framework's Cloudflare adapter") {
+			t.Fatalf("opennext = %#v", candidate)
+		}
+		findings := repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}})
+		if hasFinding(findings, "edge_runtime_code_not_deployed", PreflightBlocked) || hasFinding(findings, "edge_runtime_code_not_deployed", PreflightWarning) {
+			t.Fatalf("findings = %#v", findings)
+		}
+	})
+	t.Run("a Worker beside an application with its own server", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json": nextManifest, "package-lock.json": "{}",
+			"wrangler.toml": "name = \"edge\"\nmain = \"src/edge.ts\"\n",
+		})
+		candidate := selectedOf(result)
+		if candidate == nil || len(candidate.ServerlessCode) != 1 || candidate.ServerlessCode[0].Blocking {
+			t.Fatalf("worker beside next = %#v", candidate)
+		}
+		findings := repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}})
+		if !hasFinding(findings, "edge_runtime_code_not_deployed", PreflightWarning) || hasFinding(findings, "serverless_functions_dropped", PreflightWarning) {
+			t.Fatalf("findings = %#v", findings)
+		}
+	})
+	t.Run("a Worker-only application", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"package.json":      `{"name":"api","scripts":{"dev":"wrangler dev","deploy":"wrangler deploy"},"dependencies":{"hono":"4"},"devDependencies":{"wrangler":"4"}}`,
+			"package-lock.json": "{}",
+			"wrangler.toml":     "name = \"api\"\nmain = \"src/index.ts\"\n",
+		})
+		candidate := candidateAtRoot(result, "", BuildRecipe)
+		if candidate == nil || len(candidate.ServerlessCode) != 1 || !candidate.ServerlessCode[0].Blocking {
+			t.Fatalf("worker-only = %#v", candidate)
 		}
 	})
 	t.Run("next.js api routes are its own", func(t *testing.T) {

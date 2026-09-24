@@ -199,6 +199,21 @@ func TestSecondaryProcessesAreDetected(t *testing.T) {
 			t.Fatalf("horizon extensions = %v", manifest.extensions())
 		}
 	})
+	t.Run("a Procfile worker is the Gemfile's worker", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"Gemfile": "gem 'rails'\ngem 'sidekiq'\n", "Gemfile.lock": railsGemfileLock,
+			"Procfile": "web: bin/rails server\nworker: bundle exec sidekiq\n",
+		})
+		candidate := candidateAtRoot(result, "", BuildRecipe)
+		if candidate == nil || len(candidate.Processes) != 1 || candidate.Processes[0].Name != "worker" ||
+			candidate.Processes[0].Source != "Procfile" {
+			t.Fatalf("processes = %#v", candidate)
+		}
+		if merged := appendProcesses([]DetectedProcess{{Name: "sidekiq", Kind: "worker", Command: "bundle exec sidekiq"}},
+			DetectedProcess{Name: "jobs", Kind: "worker", Command: "bundle exec sidekiq"}); len(merged) != 1 {
+			t.Fatalf("one command became two processes: %#v", merged)
+		}
+	})
 	t.Run("bullmq worker file", func(t *testing.T) {
 		result := detectShapeFixture(t, map[string]string{
 			"package.json":      `{"name":"api","scripts":{"start":"node server.js"},"dependencies":{"express":"4","bullmq":"5"}}`,
@@ -210,4 +225,32 @@ func TestSecondaryProcessesAreDetected(t *testing.T) {
 			t.Fatalf("processes = %#v", processes)
 		}
 	})
+}
+
+// A site generator's root package.json of Tailwind or PostCSS is its tooling,
+// not a Node worker that hides the generator.
+func TestSiteGeneratorOwnsItsToolingPackage(t *testing.T) {
+	tooling := `{"name":"site","scripts":{"build:css":"tailwindcss -i assets/in.css -o assets/out.css"},"devDependencies":{"tailwindcss":"4","postcss":"8"}}`
+	for name, files := range map[string]map[string]string{
+		"hugo":   {"hugo.toml": "baseURL = \"https://example.test/\"\n", "content/_index.md": ""},
+		"mkdocs": {"mkdocs.yml": "site_name: Docs\n", "docs/index.md": ""},
+		"jekyll": {"Gemfile": "gem 'jekyll'\n", "_config.yml": "title: Blog\n", "_posts/2024-01-01-hello.md": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files["package.json"], files["package-lock.json"] = tooling, "{}"
+			result := detectShapeFixture(t, files)
+			if len(result.Candidates) != 1 || result.Candidates[0].Framework != name || result.Candidates[0].RecipeIssue == "" {
+				t.Fatalf("candidates = %#v", result.Candidates)
+			}
+			if setAsideKind(result, "asset-pipeline") == nil {
+				t.Fatalf("the tooling package was not named: %#v", result.SetAside)
+			}
+		})
+	}
+	withServer := detectShapeFixture(t, map[string]string{
+		"hugo.toml": "baseURL = \"https://example.test/\"\n", "package.json": expressManifest, "package-lock.json": "{}", "server.js": "",
+	})
+	if candidateAtRoot(withServer, "", BuildRecipe) == nil || candidateAtRoot(withServer, "", BuildRecipe).Recipe != "node" {
+		t.Fatalf("an Express server beside hugo.toml was taken for tooling: %#v", withServer.Candidates)
+	}
 }

@@ -76,11 +76,14 @@ func (s *repoShapeScan) applyProcesses(result *DetectionResult, context shapeCon
 		marker := context.markers[candidate.Root]
 		if marker != nil && len(marker.procfile) > 0 {
 			for _, process := range procfileProcesses(marker.procfile) {
-				if process[0] == "web" {
+				// Held to the same bound and screening as a command from any
+				// other platform's file.
+				command := cleanPlatformCommand(process[1], false)
+				if process[0] == "web" || command == "" {
 					continue
 				}
 				candidate.Processes = appendProcesses(candidate.Processes, DetectedProcess{
-					Name: process[0], Kind: processKind(process[0], process[1]), Command: process[1],
+					Name: process[0], Kind: processKind(process[0], command), Command: command,
 					Source: joinRoot(candidate.Root, "Procfile"), Reason: "Procfile declares the " + process[0] + " process",
 				})
 			}
@@ -98,6 +101,20 @@ func (s *repoShapeScan) applyProcesses(result *DetectionResult, context shapeCon
 			candidate.Processes = appendProcesses(candidate.Processes, s.nodeProcesses(*candidate, marker)...)
 		}
 	}
+}
+
+// procfileKinds are the kinds of process a Procfile declares besides web. A
+// framework's conventional worker gives way to one the source declares: the
+// Gemfile's sidekiq and a Procfile's `worker: bundle exec sidekiq` are one
+// process, not two.
+func procfileKinds(procfile []byte) map[string]bool {
+	kinds := map[string]bool{}
+	for _, process := range procfileProcesses(procfile) {
+		if process[0] != "web" {
+			kinds[processKind(process[0], process[1])] = true
+		}
+	}
+	return kinds
 }
 
 func hasProcessKind(processes []DetectedProcess, kind string) bool {
