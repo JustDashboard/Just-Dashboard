@@ -165,6 +165,16 @@ var buildRefusalCodes = map[string]bool{
 	"python_version_unsupported": true, "start_command_missing": true,
 }
 
+// recipeDecidedCodes are the findings detection's facts raise about what
+// the recipe itself decides when it prepares a plan: which lockfile installs,
+// which toolchain builds, which main package is the command. A dry run that
+// prepared the plan has decided each of them against the tree, so a finding
+// that says otherwise is detection's guess outvoted, not a second opinion.
+var recipeDecidedCodes = map[string]bool{
+	"package_manager_lockfile_missing": true, "package_manager_ambiguous": true,
+	"go_version_unsupported": true, "go_main_missing": true, "go_main_ambiguous": true,
+}
+
 // applyDryRunVerdict merges a dry run into findings computed from detection.
 // A candidate's RecipeIssue was decided with detection's proposed settings,
 // not the plan's, so once the recipe has spoken for the plan that relay is
@@ -174,6 +184,10 @@ func applyDryRunVerdict(findings []PreflightFinding, err error, build BuildPlanC
 	named := false
 	for _, item := range findings {
 		if item.Code == "recipe_unsupported" {
+			continue
+		}
+		if err == nil && recipeDecidedCodes[item.Code] &&
+			(item.Severity == PreflightBlocked || item.Severity == PreflightDecision) {
 			continue
 		}
 		if (item.Severity == PreflightBlocked || item.Severity == PreflightDecision) && buildRefusalCodes[item.Code] {

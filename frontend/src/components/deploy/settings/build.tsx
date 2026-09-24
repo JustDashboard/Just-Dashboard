@@ -48,6 +48,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
   PYTHON_VERSION,
+  goMainPackageList,
   validateConfiguration,
   withPackageManagerRunner,
 } from "@/components/deploy/deployment-defaults"
@@ -922,7 +923,7 @@ function BuildForm({
             hint={
               proposedFor("build.goPackage") ??
               (proposal?.candidate?.goMainPackages?.length
-                ? `Main packages: ${proposal.candidate.goMainPackages.map((main) => (main === "." ? "." : `./${main}`)).join(", ")}.`
+                ? `Main packages: ${goMainPackageList(proposal.candidate)}.`
                 : "The directory of the command to build, such as cmd/api; empty lets the recipe choose.")
             }
             error={errorFor("build-go-package")}

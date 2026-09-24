@@ -227,37 +227,27 @@ func goDirectorySkipped(dir string, nestedModules []string) bool {
 	return false
 }
 
+// goMainPackagesKept is how many main packages a candidate lists. A tools
+// monorepo can hold hundreds; the ranking reads them all, and the list the
+// plan is checked against says how many it left out.
+const goMainPackagesKept = 64
+
 // applyGoModulePackages records a Go candidate's main packages, and the one
-// the ranking chose, from the file facts detection read. A module with no
-// main package is a library: it stays listed, at low confidence, so a
+// the ranking chose, from the recipe's own scan of the module. A module with
+// no main package is a library: it stays listed, at low confidence, so a
 // service elsewhere in the repository is selected over it.
-func applyGoModulePackages(candidate *DetectedCandidate, files []goSourceFacts, moduleRoots []string, marker *detectedMarkers) {
-	prefix := rootPrefix(candidate.Root)
-	local := []goSourceFacts{}
-	for _, file := range files {
-		switch {
-		case candidate.Root == "":
-		case file.dir == candidate.Root:
-			file.dir = "."
-		case strings.HasPrefix(file.dir, prefix):
-			file.dir = strings.TrimPrefix(file.dir, prefix)
-		default:
-			continue
-		}
-		local = append(local, file)
-	}
-	nested := []string{}
-	for _, other := range moduleRoots {
-		if other != candidate.Root && strings.HasPrefix(other, prefix) {
-			nested = append(nested, strings.TrimPrefix(other, prefix))
-		}
-	}
-	packages := collectGoModulePackages(local, nested)
+func applyGoModulePackages(candidate *DetectedCandidate, packages goModulePackages, marker *detectedMarkers) {
 	if len(packages.cgo) > 0 {
 		candidate.RecipeIssue = "CGO source requires a Dockerfile with the required C toolchain (" +
 			goPackageArgument(packages.cgo[0]) + " imports \"C\")"
 	}
-	candidate.GoMainPackages = packages.mains
+	for _, main := range packages.mains {
+		if len(candidate.GoMainPackages) < goMainPackagesKept && validGoPackagePath(main) {
+			candidate.GoMainPackages = append(candidate.GoMainPackages, main)
+		} else {
+			candidate.GoMainPackagesOmitted++
+		}
+	}
 	modulePath, moduleFile := "", path.Join(candidate.Root, "go.mod")
 	if marker != nil {
 		modulePath, moduleFile = goModulePath(marker.goModContent), filepath.ToSlash(marker.goMod)
@@ -265,9 +255,11 @@ func applyGoModulePackages(candidate *DetectedCandidate, files []goSourceFacts, 
 	chosen, reason := chooseGoMainPackage(packages.mains, packages.serving, modulePath)
 	switch {
 	case chosen != "":
-		candidate.GoPackage = chosen
+		if validGoPackagePath(chosen) {
+			candidate.GoPackage = chosen
+		}
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: path.Join(candidate.Root, chosen), Reason: "builds " + goPackageArgument(chosen) + ": " + reason,
+			Path: path.Join(candidate.Root, chosen), Reason: detectionLine("builds " + goPackageArgument(chosen) + ": " + reason),
 		})
 	case len(packages.mains) == 0:
 		label := candidate.Root
@@ -283,11 +275,20 @@ func applyGoModulePackages(candidate *DetectedCandidate, files []goSourceFacts, 
 		*candidate = newDetectedCandidate(candidate.Root, candidate.BuildMethod, *candidate)
 	default:
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-			Path: moduleFile, Reason: "main packages " + goMainPackageList(packages.mains),
+			Path: moduleFile, Reason: detectionLine("main packages " + goMainPackageList(packages.mains, 0)),
 		})
 		candidate.NeedsDecision = append(candidate.NeedsDecision,
-			"choose the Go main package to build: "+goMainPackageList(packages.mains))
+			detectionLine("choose the Go main package to build: "+goMainPackageList(packages.mains, 0)))
 	}
+}
+
+// detectionLine bounds a line of detection text to what a saved detection
+// accepts.
+func detectionLine(text string) string {
+	if bounded, cut := truncateUTF8(text, 509); cut {
+		return bounded + "..."
+	}
+	return text
 }
 
 // chooseGoMainPackage ranks a module's main packages the way its layout
@@ -443,8 +444,11 @@ func scanGoModule(root string) (goModulePackages, error) {
 			}
 			return nil
 		}
+		// The go command ignores files whose names start with _ or ., as it
+		// ignores directories named that way.
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() ||
-			!strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			!strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") ||
+			strings.HasPrefix(entry.Name(), "_") || strings.HasPrefix(entry.Name(), ".") {
 			return nil
 		}
 		files++
@@ -506,16 +510,36 @@ func selectGoMainPackage(packages goModulePackages, config BuildPlanConfig, modu
 		return "", fmt.Errorf("%w: the Go module has no buildable main package; it is a library, or its command lives in a nested module whose directory should be the root", ErrUnsupportedBuilder)
 	}
 	return "", fmt.Errorf("%w: the Go module has %d main packages (%s); choose the one to build in Build settings",
-		ErrUnsupportedBuilder, len(packages.mains), goMainPackageList(packages.mains))
+		ErrUnsupportedBuilder, len(packages.mains), goMainPackageList(packages.mains, 0))
 }
 
-// goMainPackageList names packages as the go command takes them: ./cmd/api.
-func goMainPackageList(mains []string) string {
-	named := make([]string, 0, len(mains))
-	for _, main := range mains {
-		named = append(named, goPackageArgument(main))
+// goMainPackageList names packages as the go command takes them — ./cmd/api
+// — as many as fit a line of text, then how many more there are, so a
+// module of many commands still reads as one bounded sentence. omitted
+// counts packages a caller already left out of mains.
+func goMainPackageList(mains []string, omitted int) string {
+	const bound = 360
+	listed := ""
+	for index, main := range mains {
+		next := goPackageArgument(main)
+		if index > 0 {
+			next = ", " + next
+		}
+		if len(listed)+len(next) > bound {
+			if listed == "" {
+				listed, _ = truncateUTF8(next, bound)
+				listed += "..."
+				index++
+			}
+			omitted += len(mains) - index
+			break
+		}
+		listed += next
 	}
-	return strings.Join(named, ", ")
+	if omitted > 0 {
+		listed += fmt.Sprintf(" and %d more", omitted)
+	}
+	return listed
 }
 
 func goPackageArgument(pkg string) string {

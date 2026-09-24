@@ -130,9 +130,10 @@ func goMainPackageFindings(candidate *DetectedCandidate, build BuildPlanConfig) 
 	}
 	if build.GoPackage != "" {
 		chosen := path.Clean(build.GoPackage)
-		if len(candidate.GoMainPackages) > 0 && !slices.Contains(candidate.GoMainPackages, chosen) {
+		if len(candidate.GoMainPackages) > 0 && candidate.GoMainPackagesOmitted == 0 &&
+			!slices.Contains(candidate.GoMainPackages, chosen) {
 			return []PreflightFinding{finding("go_main_missing", PreflightBlocked,
-				"The selected Go main package is not a command", goPackageArgument(chosen)+"; main packages: "+goMainPackageList(candidate.GoMainPackages),
+				"The selected Go main package is not a command", goPackageArgument(chosen)+"; main packages: "+goMainPackageList(candidate.GoMainPackages, candidate.GoMainPackagesOmitted),
 				"The recipe builds one package main; the directory selected has none that builds for linux.",
 				"Choose one of the module's main packages in Build settings.", "deploy", "configuration.build.goPackage")}
 		}
@@ -147,7 +148,7 @@ func goMainPackageFindings(candidate *DetectedCandidate, build BuildPlanConfig) 
 			"deploy", "configuration.build.rootDirectory")}
 	case candidate.GoPackage == "" && len(candidate.GoMainPackages) > 1:
 		return []PreflightFinding{finding("go_main_ambiguous", PreflightDecision,
-			"Choose the Go main package to build", goMainPackageList(candidate.GoMainPackages),
+			"Choose the Go main package to build", goMainPackageList(candidate.GoMainPackages, candidate.GoMainPackagesOmitted),
 			"The module has several commands and nothing in its layout says which one is the service.",
 			"Choose the main package in the build settings.", "deploy", "configuration.build.goPackage")}
 	}

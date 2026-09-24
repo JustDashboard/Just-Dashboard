@@ -235,6 +235,37 @@ func TestDraftPreflightNamesAMovedBranchAndAnEditedRoot(t *testing.T) {
 	}
 }
 
+// What detection's facts say the recipe would decide — the lockfile, the
+// toolchain, the main package — is outvoted by a dry run that prepared the
+// plan, since the recipe decided it against the tree itself. Findings the
+// recipe does not decide stay, and a refusal leaves every one standing.
+func TestAPreparedDryRunOutvotesDetectionsGuessAtTheRecipe(t *testing.T) {
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}
+	guesses := []PreflightFinding{
+		finding("go_main_missing", PreflightBlocked, "This Go module has no main package", "", "", "", "deploy", "configuration.build.rootDirectory"),
+		finding("go_main_ambiguous", PreflightDecision, "Choose the Go main package to build", "./a, ./b", "", "", "deploy", "configuration.build.goPackage"),
+		finding("go_version_unsupported", PreflightBlocked, "Selected Go version cannot build this source", "", "", "", "deploy", "configuration.build.goVersion"),
+		finding("package_manager_ambiguous", PreflightBlocked, "Competing lockfiles need a package manager", "bun, npm", "", "", "deploy", "configuration.build.packageManager"),
+		finding("package_manager_lockfile_missing", PreflightBlocked, "Selected package manager has no lockfile", "", "", "", "deploy", "configuration.build.packageManager"),
+	}
+	kept := []PreflightFinding{
+		finding("python_version_unsupported", PreflightWarning, "Selected Python version cannot run this project", "", "", "", "deploy", "configuration.build.pythonVersion"),
+		finding("dependencies_unpinned", PreflightWarning, "Dependencies are not pinned to exact versions", "", "", "", "deploy", "configuration.build"),
+	}
+	got := applyDryRunVerdict(append(append([]PreflightFinding{}, guesses...), kept...), nil, build)
+	if len(got) != len(kept) || got[0].Code != kept[0].Code || got[1].Code != kept[1].Code {
+		t.Fatalf("a prepared plan kept detection's guesses: %#v", got)
+	}
+	refused := errors.Join(ErrUnsupportedBuilder, errors.New("the Go module has no buildable main package"))
+	if got := applyDryRunVerdict(append([]PreflightFinding{}, guesses...), refused, build); len(got) != len(guesses) {
+		t.Fatalf("a refused plan lost the findings that name why: %#v", got)
+	}
+	unavailable := applyDryRunVerdict(append([]PreflightFinding{}, guesses...), ErrBuilderUnavailable, build)
+	if len(unavailable) != len(guesses) {
+		t.Fatalf("a dry run that could not run outvoted detection: %#v", unavailable)
+	}
+}
+
 // A checkout reached through a linked directory is opened by its resolved
 // path, and that path is taken out of a refusal as the root's own is.
 func TestRefusalTextLeavesNoHostPathOfALinkedCheckout(t *testing.T) {

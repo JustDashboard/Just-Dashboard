@@ -225,15 +225,25 @@ and never by compiling (`deploy/go_packages.go`, shared by detection and the rec
 linux on the host's architecture with cgo disabled and no extra tags, judged on its `//go:build` line
 (or legacy `+build` lines) and its `_GOOS`/`_GOARCH` file-name suffix, so `ignore`, `tools` and mage
 files drop out; `testdata/`, `_*` and `.*` directories and nested modules (a directory with its own
-`go.mod`) are not part of the module. Detection records `goMainPackages` and chooses `goPackage` by
+`go.mod`) are not part of the module, and neither are files whose names start with `_` or `.`.
+Detection runs the recipe's own scan (`scanGoModule`: file headers only, at most 10,000 files and 32 MiB
+per module) at each Go candidate's root, apart from its walk's shared read budget, so a module whose
+generated or internal sources outweigh that budget is still read whole and never mistaken for a
+library; a module past the scan's own bound carries the recipe's refusal as its `RecipeIssue`.
+Detection records `goMainPackages` (the first 64, with `goMainPackagesOmitted` counting the rest, so
+a package chosen past the list is not called missing) and chooses `goPackage` by
 the layout's own convention: the module root, then `cmd/<module name>`, then the one of
 `cmd/{server,api,web,app}` that exists, then the only main that imports `net/http` or a known router or
 RPC server. A tie asks — a `NeedsDecision` and the `go_main_ambiguous` decision on
-`build.goPackage`, which a run cannot go past — and a module with no main package is a low-confidence
+`build.goPackage`, which a run cannot go past; the packages it names are one bounded line, the first
+few then "and N more" — and a module with no main package is a low-confidence
 `Go library` candidate (`goLibrary`) with the blocked `go_main_missing`. `build.goPackage` names the
 package the recipe builds (`go build … ./<goPackage>`); it must be a buildable main, or the recipe and
 preflight refuse it. Without it the recipe makes the same choice detection did, and refuses an
-undecided module with its main packages named.
+undecided module with its main packages named. When preflight has the tree, a dry run that prepares
+the plan outvotes these findings — `go_main_missing`, `go_main_ambiguous`, `go_version_unsupported`,
+like `package_manager_lockfile_missing` and `package_manager_ambiguous` — because the recipe decided
+each of them against the commit itself.
 
 A custom build command executes exactly as configured and must produce an executable at `/out/app`; it
 decides what it compiles, so no main package is asked for. The historical detected `go build ./...`

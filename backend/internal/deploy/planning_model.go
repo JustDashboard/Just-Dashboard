@@ -223,8 +223,11 @@ type DetectedCandidate struct {
 	// GoMainPackages are the module's buildable main packages, relative to
 	// the candidate root ("." for the root itself); GoPackage is the one the
 	// ranking chose, empty when the ranking tied or there is none.
-	GoMainPackages []string `json:"goMainPackages,omitempty"`
-	GoPackage      string   `json:"goPackage,omitempty"`
+	// GoMainPackagesOmitted counts the mains past the list's bound, so a
+	// package missing from a list that is not whole is not called absent.
+	GoMainPackages        []string `json:"goMainPackages,omitempty"`
+	GoMainPackagesOmitted int      `json:"goMainPackagesOmitted,omitempty"`
+	GoPackage             string   `json:"goPackage,omitempty"`
 	// GoLibrary says the module has no buildable main package at all, which
 	// no Go setting can fix: the recipe builds a command, not a library.
 	GoLibrary bool `json:"goLibrary,omitempty"`
@@ -1507,7 +1510,8 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			len(candidate.GoMinimumVersion) > 32 || (candidate.GoMinimumVersion != "" && !stableGoVersionRE.MatchString(candidate.GoMinimumVersion)) ||
 			len(candidate.GoToolchain) > 32 || strings.ContainsAny(candidate.GoToolchain, "\x00\r\n ") ||
 			len(candidate.GoVersionFile) > 32 || strings.ContainsAny(candidate.GoVersionFile, "\x00\r\n") ||
-			len(candidate.GoMainPackages) > 64 || slices.ContainsFunc(candidate.GoMainPackages, func(pkg string) bool { return !validGoPackagePath(pkg) }) ||
+			len(candidate.GoMainPackages) > goMainPackagesKept || slices.ContainsFunc(candidate.GoMainPackages, func(pkg string) bool { return !validGoPackagePath(pkg) }) ||
+			candidate.GoMainPackagesOmitted < 0 ||
 			(candidate.GoPackage != "" && !validGoPackagePath(candidate.GoPackage)) ||
 			len(candidate.PythonRequires) > 128 || strings.ContainsAny(candidate.PythonRequires, "\x00\r\n") ||
 			(candidate.PythonInstall != "" && !validPythonInstallKind(candidate.PythonInstall)) ||

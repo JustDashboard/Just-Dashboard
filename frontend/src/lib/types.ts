@@ -3292,6 +3292,8 @@ export type DeploymentDetectionCandidate = {
   goVersionFile?: string
   /** The module's buildable main packages ("." is the root) and the one detection chose. */
   goMainPackages?: string[]
+  /** How many main packages the bounded list above leaves out. */
+  goMainPackagesOmitted?: number
   goPackage?: string
   /** A Go module with no main package: nothing for the recipe to run. */
   goLibrary?: boolean

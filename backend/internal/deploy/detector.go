@@ -132,7 +132,6 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	markers := map[string]*detectedMarkers{}
 	gitModulesPath := ""
 	lfsAttributesPath := ""
-	goFiles := []goSourceFacts{}
 	schemaPaths := []string{}
 	schemaPathCounts := map[string]int{}
 	pythonEntries := []pythonEntry{}
@@ -223,21 +222,6 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 						scanner.scanSource(filepath.ToSlash(rel), content)
 					}
 				}
-			}
-			return nil
-		}
-		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
-			result.ScannedBytes += n
-			if result.ScannedBytes > limits.MaxReadBytes {
-				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
-				return stop
-			}
-			if facts, ok := readGoSourceFacts(filepath.ToSlash(rel), content); err == nil && ok {
-				goFiles = append(goFiles, facts)
-			}
-			if err == nil && scanner.scannable(filepath.ToSlash(rel), name) && scanner.budget(n) {
-				scanner.scanSource(filepath.ToSlash(rel), content)
 			}
 			return nil
 		}
@@ -518,16 +502,19 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		result.Candidates = append(result.Candidates, candidates...)
 	}
 	sortDetectedCandidates(result.Candidates)
-	goModuleRoots := []string{}
-	for candidateRoot, marker := range markers {
-		if marker.goMod != "" {
-			goModuleRoots = append(goModuleRoots, filepath.ToSlash(candidateRoot))
-		}
-	}
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
-			applyGoModulePackages(candidate, goFiles, goModuleRoots, markers[filepath.FromSlash(candidate.Root)])
+			// Main packages are read by the recipe's own scan of the module —
+			// headers only, under its own bound — not from the files this walk
+			// read before its budget ran out, so what detection says about
+			// them is what the recipe will decide.
+			packages, err := scanGoModule(filepath.Join(root, filepath.FromSlash(candidate.Root)))
+			if err != nil {
+				candidate.RecipeIssue = recipeRefusalText(err, root)
+			} else {
+				applyGoModulePackages(candidate, packages, markers[filepath.FromSlash(candidate.Root)])
+			}
 		}
 		if gitModulesPath != "" {
 			result.Candidates[index].Evidence = append(result.Candidates[index].Evidence,

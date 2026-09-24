@@ -501,3 +501,15 @@ export function needsStartCommand(build: DeploymentConfiguration["build"]) {
       return false
   }
 }
+
+/**
+ * A Go candidate's main packages as the go command names them — `./cmd/api`
+ * — the first few, then how many more: a tools monorepo can have hundreds,
+ * and a hint is one line.
+ */
+export function goMainPackageList(candidate: DeploymentDetectionCandidate | undefined) {
+  const mains = candidate?.goMainPackages ?? []
+  const shown = mains.slice(0, 8).map((main) => (main === "." ? "." : `./${main}`))
+  const more = mains.length - shown.length + (candidate?.goMainPackagesOmitted ?? 0)
+  return shown.join(", ") + (more > 0 ? ` and ${more} more` : "")
+}

@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"fmt"
 	"runtime"
 	"slices"
 	"strings"
@@ -223,4 +224,99 @@ func findingByCode(findings []PreflightFinding, code string) *PreflightFinding {
 		}
 	}
 	return nil
+}
+
+// Detection's facts about main packages come from the recipe's own scan of
+// the module, not from the files its walk read before a byte budget ran out:
+// a service whose generated or internal code outweighs the budget is still a
+// service, and its root command is still the one the plan builds.
+func TestGoDetectionReadsMainPackagesPastTheWalkBudget(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "go.mod", "module example.test/store\n\ngo 1.26\n")
+	body := "package store\n\n// " + strings.Repeat("x", 400<<10) + "\n"
+	for index := range 12 {
+		writeBuildFixture(t, root, fmt.Sprintf("internal/store/generated_%02d.go", index), body)
+	}
+	writeBuildFixture(t, root, "main.go", "package main\n\nimport \"net/http\"\n\nfunc main() { _ = http.ListenAndServe }\n")
+	writeBuildFixture(t, root, "examples/demo/main.go", "package main\n\nfunc main() {}\n")
+	// Go ignores files named with a leading underscore or dot, as it ignores
+	// such directories.
+	writeBuildFixture(t, root, "cmd/tool/_scratch.go", "package main\n\nfunc main() {}\n")
+	writeBuildFixture(t, root, "cmd/tool/.hidden.go", "package main\n\nfunc main() {}\n")
+
+	detection, err := (Detector{}).DetectPath(t.Context(), root, SourceIdentity{Kind: SourceGit})
+	if err != nil || len(detection.Candidates) != 1 {
+		t.Fatalf("detect: %#v, %v", detection, err)
+	}
+	candidate := detection.Candidates[0]
+	if detection.Truncated || candidate.GoLibrary || candidate.GoPackage != "." ||
+		!slices.Equal(candidate.GoMainPackages, []string{".", "examples/demo"}) {
+		t.Fatalf("truncated=%v candidate = %#v", detection.Truncated, candidate)
+	}
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "go", GoPackage: candidate.GoPackage}
+	if findings := plannedRecipeFindings(&candidate, build); findingByCode(findings, "go_main_missing") != nil ||
+		findingByCode(findings, "go_main_ambiguous") != nil {
+		t.Fatalf("a service was refused as a library: %#v", findings)
+	}
+	if err := dryRunBuild(t.Context(), root, build, nil); err != nil {
+		t.Fatalf("the recipe refuses what detection proposed: %v", err)
+	}
+}
+
+// A module of many commands is still a detection a draft can save: the list
+// is bounded, the text naming the choice is one bounded line, and a package
+// chosen from past the list's bound is not called missing.
+func TestGoDetectionOfManyMainPackagesStaysWithinItsBounds(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "go.mod", "module example.test/tools\n\ngo 1.26\n")
+	for index := range 70 {
+		writeBuildFixture(t, root, fmt.Sprintf("cmd/tool-number-%02d/main.go", index), "package main\n\nfunc main() {}\n")
+	}
+	detection, err := (Detector{}).DetectPath(t.Context(), root, SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil || len(detection.Candidates) != 1 {
+		t.Fatalf("detect: %#v, %v", detection, err)
+	}
+	candidate := detection.Candidates[0]
+	if len(candidate.GoMainPackages) != goMainPackagesKept || candidate.GoMainPackagesOmitted != 70-goMainPackagesKept ||
+		candidate.GoPackage != "" {
+		t.Fatalf("main packages = %d listed, %d omitted, chose %q", len(candidate.GoMainPackages), candidate.GoMainPackagesOmitted, candidate.GoPackage)
+	}
+	decision := strings.Join(candidate.NeedsDecision, " ")
+	if !strings.Contains(decision, "./cmd/tool-number-00, ./cmd/tool-number-01") || !strings.Contains(decision, " more") {
+		t.Fatalf("decision = %q", decision)
+	}
+	source := DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/o/r.git", Ref: "main"}
+	detection.Source.Remote, detection.Source.Repository, err = remoteForSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detection.Source.Ref = canonicalSourceConfig(source).Ref
+	if err := validateDetectionResult(&source, detection); err != nil {
+		t.Fatalf("a many-command module cannot be saved: %v", err)
+	}
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}
+	if item := findingByCode(plannedRecipeFindings(&candidate, build), "go_main_ambiguous"); item == nil ||
+		!strings.HasSuffix(item.Measured, "more") || len(item.Measured) > 512 {
+		t.Fatalf("ambiguity = %#v", item)
+	}
+	build.GoPackage = "cmd/tool-number-69"
+	if findings := plannedRecipeFindings(&candidate, build); len(findings) != 0 {
+		t.Fatalf("a main package past the list's bound was refused: %#v", findings)
+	}
+	if err := dryRunBuild(t.Context(), root, build, nil); err != nil {
+		t.Fatalf("the recipe refuses the chosen package: %v", err)
+	}
+}
+
+func TestGoMainPackageListIsOneBoundedLine(t *testing.T) {
+	if got := goMainPackageList([]string{".", "cmd/api"}, 0); got != "., ./cmd/api" {
+		t.Fatalf("short list = %q", got)
+	}
+	if got := goMainPackageList([]string{"cmd/api"}, 3); got != "./cmd/api and 3 more" {
+		t.Fatalf("list with omitted packages = %q", got)
+	}
+	long := strings.Repeat("deep/", 100) + "cmd"
+	if got := goMainPackageList([]string{long, "cmd/api"}, 0); len(got) > 400 || !strings.HasSuffix(got, "... and 1 more") {
+		t.Fatalf("an overlong first package = %q", got)
+	}
 }
