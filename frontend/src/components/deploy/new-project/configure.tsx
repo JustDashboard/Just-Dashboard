@@ -23,6 +23,7 @@ import { blockingFindings, warningFindings } from "@/components/deploy/deploymen
 import {
   checksForRuntime,
   discoveredEnvironmentRows,
+  environmentRowsToSend,
   mergeDiscoveredRows,
   releaseStrategy,
   validateConfiguration,
@@ -136,7 +137,7 @@ export function Configure({
     () =>
       discoveredEnvironmentRows(flow.candidate).map((row) =>
         flow.draft.environmentKeys?.includes(row.name)
-          ? { ...row, value: "", generated: false }
+          ? { ...row, value: "", generated: false, note: undefined }
           : row,
       ),
     [flow.candidate, flow.draft.environmentKeys],
@@ -196,7 +197,9 @@ export function Configure({
     setEnvironment((current) => {
       const mine = current?.draftId === draftId ? current : null
       const found = discoveredEnvironmentRows(flow.candidate).map((row) =>
-        mine?.retainedKeys.includes(row.name) ? { ...row, value: "", generated: false } : row,
+        mine?.retainedKeys.includes(row.name)
+          ? { ...row, value: "", generated: false, note: undefined }
+          : row,
       )
       const rows = mine?.rows ?? discoveredEnvironmentRows(previous)
       return {
@@ -209,7 +212,7 @@ export function Configure({
   }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
-  const sentRows = envRows.filter((row) => row.name.trim() && (!row.detected || row.value))
+  const sentRows = environmentRowsToSend(envRows, flow.configuration.variables)
   const text = environmentText(sentRows, dotenv)
   const environmentNames = new Set([
     ...retainedKeys,

@@ -405,6 +405,7 @@ function effectiveConfiguration(
     source,
     detection,
     draft.data.intent?.name,
+    draft.id,
   )
 }
 
