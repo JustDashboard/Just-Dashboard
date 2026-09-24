@@ -148,8 +148,12 @@ func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observati
 		if configured == "" {
 			configured = "Dockerfile"
 		}
+		measured := joinRoot(build.RootDirectory, configured)
+		if build.Target != "" {
+			measured += ", stage " + build.Target
+		}
 		findings = append(findings, finding("dockerfile_unchecked", PreflightWarning,
-			"The chosen Dockerfile is checked only when it builds", joinRoot(build.RootDirectory, configured),
+			"The chosen Dockerfile is checked only when it builds", measured,
 			"Detection read the repository's Dockerfiles as they were found; this combination of file and build context was not one of them.",
 			"Choose the detected Dockerfile and root directory, or accept that problems in this file surface during the build.",
 			"deploy", "configuration.build.dockerfile"))
@@ -169,6 +173,16 @@ func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observati
 		}
 	}
 	if build.Method == BuildDockerfile && planned != nil {
+		if build.Target != "" && !slicesContain(planned.DockerfileStages, strings.ToLower(build.Target)) {
+			stages := "it names no stages"
+			if len(planned.DockerfileStages) > 0 {
+				stages = "its stages are " + strings.Join(planned.DockerfileStages, ", ")
+			}
+			findings = append(findings, finding("dockerfile_target_missing", PreflightBlocked,
+				"The Dockerfile has no stage by that name", build.Target+": "+stages,
+				"buildx stops before building anything when --target names a stage the file does not have.",
+				"Choose one of the Dockerfile's stages, or clear the stage to build the last one.", "deploy", "configuration.build.target"))
+		}
 		findings = append(findings, dockerfileArgFindings(*planned, configuration)...)
 		for _, platform := range planned.DockerfilePlatforms {
 			if item, ok := foreignArchitectureFinding(platform, "FROM --platform in "+joinRoot(planned.Root, planned.Dockerfile), observation); ok {

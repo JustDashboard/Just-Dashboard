@@ -32,7 +32,7 @@ func dockerfileBuildInputs(content []byte, target string, plainBuildVariables []
 		}
 	}
 	declared := map[string]bool{}
-	for _, arg := range model.args() {
+	for _, arg := range model.args(target) {
 		declared[arg.Name] = true
 	}
 	names := []string{}

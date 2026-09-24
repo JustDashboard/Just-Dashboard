@@ -222,6 +222,8 @@ type DetectedCandidate struct {
 	DockerfileTarget    string          `json:"dockerfileTarget,omitempty"`
 	DockerfileArgs      []DockerfileArg `json:"dockerfileArgs,omitempty"`
 	DockerfilePlatforms []string        `json:"dockerfilePlatforms,omitempty"`
+	// DockerfileStages are the named stages a configured target must be one of.
+	DockerfileStages []string `json:"dockerfileStages,omitempty"`
 	// ImageBuildIssues are what detection proved about how this candidate's
 	// image would build — a refused line, a missing COPY source, a script
 	// without its executable bit — so preflight says so before Deploy.

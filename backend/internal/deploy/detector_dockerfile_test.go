@@ -392,7 +392,7 @@ func TestDetectionSurvivesRepositoryNamesShapedLikeCredentials(t *testing.T) {
 	result := detectFixture(t, map[string]string{
 		"docker-compose.yml": "services:\n  cache:\n    image: registry.example.com/api_token=abc:1\n  web:\n    image: postgres:16\n",
 		"package.json":       nextManifest, "bun.lock": "{}",
-		"Dockerfile":         "FROM node:22\nARG API_TOKEN_PORT=3000\nEXPOSE ${API_TOKEN_PORT}\n",
+		"Dockerfile": "FROM node:22\nARG API_TOKEN_PORT=3000\nEXPOSE ${API_TOKEN_PORT}\n",
 	})
 	if len(result.Candidates) == 0 {
 		t.Fatal("no candidates")
@@ -450,3 +450,100 @@ CMD ["node", "server.js"]
 	}
 }
 
+// Each of these Dockerfiles builds as committed; a check that reads past
+// what the build runs, or reads shell text too literally, would refuse it.
+func TestDockerfileStaticChecksReadOnlyWhatTheBuildRuns(t *testing.T) {
+	railsWindows := strings.Replace(railsDockerfile, "COPY . .\n",
+		"COPY . .\n\n# Adjust binfiles to be executable on Linux\nRUN chmod +x bin/* && \\\n    sed -i \"s/\\r$//g\" bin/* && \\\n    sed -i 's/ruby\\.exe$/ruby/' bin/*\n", 1)
+	for _, fixture := range []struct {
+		name  string
+		files map[string]string
+		// modes overrides the fixture's file modes.
+		modes  map[string]os.FileMode
+		absent []string
+	}{
+		{
+			"a development stage the production target never uses",
+			map[string]string{"Dockerfile": "FROM node:22 AS production\nWORKDIR /app\nCOPY . .\nCMD [\"node\", \"server.js\"]\n\nFROM production AS dev\nCOPY .env.development .\nRUN --mount=type=ssh git clone git@github.com:o/r.git\nCMD [\"npm\", \"run\", \"dev\"]\n", "server.js": ""},
+			nil, []string{"dockerfile_copy_source_missing", "dockerfile_ssh_mount"},
+		},
+		{
+			"an earlier stage nothing copies from",
+			map[string]string{"Dockerfile": "FROM node:22 AS test\nCOPY .env.test .\n\nFROM node:22\nWORKDIR /app\nCOPY server.js .\nCMD [\"node\", \"server.js\"]\n", "server.js": ""},
+			nil, []string{"dockerfile_copy_source_missing"},
+		},
+		{
+			"a FROM argument with a default in the expression",
+			map[string]string{"Dockerfile": "ARG BASE\nARG GO_VERSION\nFROM ${BASE:-golang:1.22} AS build\nFROM golang:${GO_VERSION:-1.22}-alpine\nCMD [\"/app\"]\n"},
+			nil, []string{"dockerfile_arg_required"},
+		},
+		{
+			"a chmod operand followed by a separator",
+			map[string]string{"Dockerfile": "FROM golang:1.22\nWORKDIR /app\nCOPY . .\nRUN chmod +x ./run/start; go build ./...\nENTRYPOINT [\"./run/start\"]\n", "run/start": "#!/bin/sh\n"},
+			map[string]os.FileMode{"run/start": 0o644}, []string{"script_not_executable"},
+		},
+		{
+			"the Rails template generated on Windows normalises bin/* itself",
+			map[string]string{
+				"Dockerfile": railsWindows, "Gemfile": "gem 'rails'\n", "Gemfile.lock": "GEM\n  specs:\n    railties (8.0.1)\n",
+				"bin/docker-entrypoint": "#!/bin/bash -e\r\nexec \"${@}\"\r\n", "bin/thrust": "#!/usr/bin/env ruby\r\n", "bin/rails": "#!/usr/bin/env ruby\r\n",
+			},
+			map[string]os.FileMode{"bin/docker-entrypoint": 0o644, "bin/thrust": 0o644, "bin/rails": 0o644}, []string{"script_crlf", "script_not_executable"},
+		},
+		{
+			"a find over the script's directory",
+			map[string]string{"Dockerfile": "FROM alpine\nWORKDIR /app\nCOPY . .\nRUN find scripts -type f -exec sed -i 's/\\r$//' {} +\nENTRYPOINT [\"sh\", \"./scripts/entry.sh\"]\n", "scripts/entry.sh": "#!/bin/sh\r\n"},
+			nil, []string{"script_crlf"},
+		},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := t.TempDir()
+			for relative, content := range fixture.files {
+				writeBuildFixture(t, root, relative, content)
+				mode, set := fixture.modes[relative]
+				if !set {
+					mode = 0o755
+				}
+				if err := os.Chmod(filepath.Join(root, relative), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := (Detector{}).DetectPath(t.Context(), root, SourceIdentity{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, candidate := range result.Candidates {
+				if candidate.BuildMethod != BuildDockerfile {
+					continue
+				}
+				found = true
+				for _, code := range fixture.absent {
+					if issue, present := fixtureIssue(candidate, code); present {
+						t.Fatalf("%s reported for a Dockerfile that builds: %+v", code, issue)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("no Dockerfile candidate: %+v", result.Candidates)
+			}
+		})
+	}
+
+	// The stages a used stage copies or mounts from are still checked.
+	for name, dockerfile := range map[string]string{
+		"COPY --from":      "FROM node:22 AS deps\nCOPY .npmrc .\nFROM node:22\nCOPY --from=deps /root/.npmrc /x\nCMD [\"node\"]\n",
+		"RUN --mount from": "FROM node:22 AS deps\nCOPY .npmrc .\nFROM node:22\nRUN --mount=type=bind,from=deps,target=/deps ls /deps\nCMD [\"node\"]\n",
+		"a numbered stage": "FROM node:22\nCOPY .npmrc .\nFROM node:22\nCOPY --from=0 /root/.npmrc /x\nCMD [\"node\"]\n",
+	} {
+		result := detectFixture(t, map[string]string{"Dockerfile": dockerfile})
+		if _, found := fixtureIssue(result.Candidates[0], "dockerfile_copy_source_missing"); !found {
+			t.Fatalf("%s: a stage the build depends on was not checked: %+v", name, result.Candidates[0].ImageBuildIssues)
+		}
+	}
+	// BuildKit resolves every FROM, used or not.
+	result := detectFixture(t, map[string]string{"Dockerfile": "ARG BASE\nFROM ${BASE} AS unused\nFROM alpine\nCMD [\"true\"]\n"})
+	if _, found := fixtureIssue(result.Candidates[0], "dockerfile_arg_required"); !found {
+		t.Fatalf("an unset FROM argument in an unused stage fails the build: %+v", result.Candidates[0].ImageBuildIssues)
+	}
+}

@@ -50,6 +50,19 @@ func TestPreflightReportsDockerfileIssuesForThePlannedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A stage the file does not have stops buildx before it builds anything.
+	staged := dockerfile
+	staged.DockerfileStages = []string{"deps", "runner"}
+	draft, configuration = imageFindingDraft([]DetectedCandidate{staged}, BuildPlanConfig{Method: BuildDockerfile, Dockerfile: "Dockerfile", Target: "production"})
+	if item, ok := findingByCode(imageBuildFindings(draft, configuration, HostObservation{}), "dockerfile_target_missing"); !ok ||
+		item.Severity != PreflightBlocked || item.Measured != "production: its stages are deps, runner" || item.FieldID != "configuration.build.target" {
+		t.Fatalf("missing stage = %+v", item)
+	}
+	configuration.Build.Target = "runner"
+	if item, ok := findingByCode(imageBuildFindings(draft, configuration, HostObservation{}), "dockerfile_target_missing"); ok {
+		t.Fatalf("an existing stage = %+v", item)
+	}
+
 	// Another file is evidence about something detection did not read.
 	draft, configuration = imageFindingDraft([]DetectedCandidate{dockerfile}, BuildPlanConfig{Method: BuildDockerfile, Dockerfile: "docker/prod.Dockerfile"})
 	findings = imageBuildFindings(draft, configuration, HostObservation{})

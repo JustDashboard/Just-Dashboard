@@ -104,6 +104,85 @@ func (m dockerfileModel) lineage(stage int) []int {
 	return result
 }
 
+// reachable are the stages a build of the target runs: the target, the
+// stages it is built FROM, and every stage one of those copies or mounts
+// from. BuildKit skips every other stage, so a COPY of a file the checkout
+// lacks in an unused development stage never fails a production build. A
+// `--from` naming an image or a build argument is not a stage.
+func (m dockerfileModel) reachable(target string) map[int]bool {
+	result := map[int]bool{}
+	if len(m.stages) == 0 {
+		return result
+	}
+	names := map[string]int{}
+	for index, stage := range m.stages {
+		if stage.Name != "" {
+			names[stage.Name] = index
+		}
+	}
+	pending := []int{m.finalStage(target)}
+	visit := func(reference string) {
+		reference = strings.ToLower(strings.TrimSpace(reference))
+		if index, ok := names[reference]; ok {
+			pending = append(pending, index)
+		} else if index, err := strconv.Atoi(reference); err == nil && index >= 0 && index < len(m.stages) {
+			pending = append(pending, index)
+		}
+	}
+	for len(pending) > 0 {
+		stage := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if result[stage] {
+			continue
+		}
+		result[stage] = true
+		if parent := m.stages[stage].Parent; parent >= 0 {
+			pending = append(pending, parent)
+		}
+		for _, instruction := range m.stages[stage].Instructions {
+			switch instruction.Keyword {
+			case "COPY", "ADD":
+				if from, ok := instruction.flag("from"); ok {
+					visit(from)
+				}
+			case "RUN":
+				for _, flag := range instruction.Flags {
+					mount, isMount := strings.CutPrefix(flag, "--mount=")
+					if !isMount {
+						continue
+					}
+					for _, option := range strings.Split(mount, ",") {
+						if key, value, _ := strings.Cut(option, "="); strings.EqualFold(key, "from") {
+							visit(value)
+						}
+					}
+				}
+			}
+		}
+	}
+	return result
+}
+
+// baseImage is the image the built stage ultimately starts from, as written.
+func (m dockerfileModel) baseImage(target string) string {
+	if len(m.stages) == 0 {
+		return ""
+	}
+	lineage := m.lineage(m.finalStage(target))
+	return m.stages[lineage[len(lineage)-1]].Base
+}
+
+// stageNames are the stages a build can target by name, in file order.
+func (m dockerfileModel) stageNames() []string {
+	names := []string{}
+	for _, stage := range m.stages {
+		if stage.Name != "" && dockerfileStageNameRE.MatchString(stage.Name) && !slicesContain(names, stage.Name) && len(names) < 32 {
+			names = append(names, stage.Name)
+		}
+	}
+	return names
+}
+
 // preferredTarget chooses the stage to build when the file's last stage is
 // a development one: a multi-stage file that ends in `dev` is written for
 // `docker build --target production`, and building it whole deploys a dev
@@ -273,7 +352,8 @@ type DockerfileArg struct {
 	Consumed bool `json:"consumed,omitempty"`
 }
 
-func (m dockerfileModel) args() []DockerfileArg {
+func (m dockerfileModel) args(target string) []DockerfileArg {
+	reach := m.reachable(target)
 	byName := map[string]*DockerfileArg{}
 	order := []string{}
 	declare := func(name string, hasDefault bool) *DockerfileArg {
@@ -291,13 +371,18 @@ func (m dockerfileModel) args() []DockerfileArg {
 			continue
 		}
 		arg := declare(global.Name, global.HasValue)
+		// BuildKit resolves every stage's FROM, used or not, so an unset
+		// argument there fails the build whichever stage is the target.
 		for _, stage := range m.stages {
-			if dockerfileReferences(stage.Base+" "+stage.Platform, global.Name) {
+			if dockerfileRequiresValue(stage.Base+" "+stage.Platform, global.Name) {
 				arg.UsedInFrom = true
 			}
 		}
 	}
-	for _, stage := range m.stages {
+	for stageIndex, stage := range m.stages {
+		if !reach[stageIndex] {
+			continue
+		}
 		for index, instruction := range stage.Instructions {
 			if instruction.Keyword != "ARG" {
 				continue
@@ -324,6 +409,17 @@ func (m dockerfileModel) args() []DockerfileArg {
 		result = append(result, *byName[name])
 	}
 	return result
+}
+
+// dockerfileRequiresValue says text reads name with nothing to fall back
+// on: `${X:-d}` and `${X-d}` have the default, and `${X:+a}` is simply empty.
+func dockerfileRequiresValue(text, name string) bool {
+	for _, match := range dockerfileExpansionRE.FindAllStringSubmatch(text, -1) {
+		if (match[1] == name && match[2] == "") || match[4] == name {
+			return true
+		}
+	}
+	return false
 }
 
 func dockerfileReferences(text, name string) bool {
@@ -356,12 +452,15 @@ type dockerfileCopySource struct {
 	Glob    bool
 }
 
-// copySources are the build-context paths COPY and ADD read: not a --from
-// stage or image, not a heredoc, not a URL, and not a path only a build
-// argument decides.
-func (m dockerfileModel) copySources() []dockerfileCopySource {
+// copySources are the build-context paths COPY and ADD read in the stages
+// the build runs: not a --from stage or image, not a heredoc, not a URL, and
+// not a path only a build argument decides.
+func (m dockerfileModel) copySources(reach map[int]bool) []dockerfileCopySource {
 	result := []dockerfileCopySource{}
-	for _, stage := range m.stages {
+	for index, stage := range m.stages {
+		if !reach[index] {
+			continue
+		}
 		for _, instruction := range stage.Instructions {
 			if instruction.Keyword != "COPY" && instruction.Keyword != "ADD" {
 				continue
@@ -397,8 +496,11 @@ func (m dockerfileModel) copySources() []dockerfileCopySource {
 
 // sshMountLine is the first RUN that mounts an SSH agent, which a
 // deployment build never forwards.
-func (m dockerfileModel) sshMountLine() int {
-	for _, stage := range m.stages {
+func (m dockerfileModel) sshMountLine(reach map[int]bool) int {
+	for index, stage := range m.stages {
+		if !reach[index] {
+			continue
+		}
 		for _, instruction := range stage.Instructions {
 			if instruction.Keyword != "RUN" {
 				continue
@@ -415,8 +517,11 @@ func (m dockerfileModel) sshMountLine() int {
 
 // copiesNextStandalone is the official Next.js Dockerfile's dependency on
 // `output: 'standalone'`: without it the directory it copies never exists.
-func (m dockerfileModel) copiesNextStandalone() int {
-	for _, stage := range m.stages {
+func (m dockerfileModel) copiesNextStandalone(reach map[int]bool) int {
+	for index, stage := range m.stages {
+		if !reach[index] {
+			continue
+		}
 		for _, instruction := range stage.Instructions {
 			if (instruction.Keyword == "COPY" || instruction.Keyword == "ADD") && strings.Contains(instruction.Args, ".next/standalone") {
 				return instruction.Line
@@ -530,17 +635,24 @@ func (m dockerfileModel) scripts(target string) []dockerfileScript {
 			case "RUN":
 				words := instruction.commandWords(m.escape)
 				for position, word := range words {
-					if word == "chmod" {
-						for _, operand := range words[position+1:] {
-							if operand == "&&" || operand == ";" {
-								break
-							}
+					if word != "chmod" {
+						continue
+					}
+					for _, raw := range words[position+1:] {
+						// Word splitting leaves `;`, `&&` and `|` attached to
+						// the operand before them (`chmod +x ./start; go
+						// build`), and the command ends there.
+						operand, ends := shellOperand(raw)
+						if operand != "" {
 							// A recursive or wildcard chmod covers files this
 							// cannot name one by one.
 							if operand == "-R" || operand == "--recursive" || strings.ContainsAny(operand, "*?") {
 								chmodded["*"] = true
 							}
 							chmodded[path.Base(operand)] = true
+						}
+						if ends {
+							break
 						}
 					}
 				}
@@ -596,7 +708,11 @@ func (m dockerfileModel) scripts(target string) []dockerfileScript {
 		script.Candidates = resolve(script.Container, workdirs[stage])
 		result = append(result, script)
 	}
+	reach := m.reachable(target)
 	for index, stage := range m.stages {
+		if !reach[index] {
+			continue
+		}
 		for _, instruction := range stage.Instructions {
 			if instruction.Keyword != "RUN" {
 				continue
@@ -604,6 +720,15 @@ func (m dockerfileModel) scripts(target string) []dockerfileScript {
 			words := instruction.commandWords(m.escape)
 			for len(words) > 0 && strings.Contains(words[0], "=") && !strings.HasPrefix(words[0], "-") {
 				words = words[1:]
+			}
+			for position, word := range words {
+				if operand, ends := shellOperand(word); ends {
+					words = words[:position:position]
+					if operand != "" {
+						words = append(words, operand)
+					}
+					break
+				}
 			}
 			if len(words) == 0 || !strings.HasPrefix(words[0], "./") && !(dockerfileShells[words[0]] && len(words) > 1 && strings.HasPrefix(words[1], "./")) {
 				continue
@@ -644,15 +769,65 @@ func dockerfileExecutedScript(words []string, scriptable func(string) bool) (doc
 	return dockerfileScript{Container: words[0]}, true
 }
 
-// normalizesLineEndings says a RUN step strips carriage returns from a file
-// itself (dos2unix, or sed on \r), which makes a CRLF checkout harmless.
-func (m dockerfileModel) normalizesLineEndings(base string) bool {
+// shellOperand is a word with a trailing command separator (`;`, `&&`, `||`,
+// `|`) taken off, and whether the command ends at it.
+func shellOperand(word string) (string, bool) {
+	switch word {
+	case ";", "&&", "||", "|", "&":
+		return "", true
+	}
+	if cut := strings.IndexAny(word, ";|&"); cut >= 0 {
+		return word[:cut], true
+	}
+	return word, false
+}
+
+// normalizesLineEndings says a RUN step strips carriage returns from the
+// script itself (dos2unix, or sed on \r), which makes a CRLF checkout
+// harmless: naming it, or a wildcard or directory that covers it — the Rails
+// template generated on Windows runs `sed -i "s/\r$//g" bin/*`.
+func (m dockerfileModel) normalizesLineEndings(script dockerfileScript, candidate string) bool {
 	for _, stage := range m.stages {
 		for _, instruction := range stage.Instructions {
-			if instruction.Keyword == "RUN" && strings.Contains(instruction.Args, base) &&
-				(strings.Contains(instruction.Args, "dos2unix") || strings.Contains(instruction.Args, `\r`)) {
+			if instruction.Keyword != "RUN" ||
+				!strings.Contains(instruction.Args, "dos2unix") && !strings.Contains(instruction.Args, `\r`) {
+				continue
+			}
+			for _, word := range instruction.commandWords(m.escape) {
+				if operand, _ := shellOperand(word); operand != "" && lineEndingOperandCovers(operand, script.Container, candidate) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// lineEndingOperandCovers says a word of a normalising RUN reaches the
+// script: its name, a wildcard matching it, or a directory holding it, read
+// against the path in the image and the path in the context alike.
+func lineEndingOperandCovers(operand, container, candidate string) bool {
+	operand = strings.Trim(operand, `"'`)
+	if operand == "" || strings.HasPrefix(operand, "-") {
+		return false
+	}
+	for _, target := range []string{path.Clean(container), path.Clean(candidate)} {
+		if strings.Contains(operand, path.Base(target)) {
+			return true
+		}
+		cleaned := path.Clean(operand)
+		if strings.ContainsAny(cleaned, "*?[") {
+			if matched, _ := path.Match(cleaned, target); matched {
 				return true
 			}
+			if matched, _ := path.Match(path.Base(cleaned), path.Base(target)); matched && !strings.Contains(cleaned, "/") {
+				return true
+			}
+			continue
+		}
+		if cleaned == "." || cleaned == "/" || strings.HasPrefix(target, strings.TrimSuffix(cleaned, "/")+"/") ||
+			strings.HasSuffix(path.Dir(target), "/"+cleaned) {
+			return true
 		}
 	}
 	return false

@@ -58,6 +58,7 @@ func validateCandidateImageFacts(candidate DetectedCandidate) error {
 	if (candidate.DockerfileRole != "" && candidate.DockerfileRole != DockerfileRoleProduction && candidate.DockerfileRole != DockerfileRoleDevelopment) ||
 		(candidate.DockerfileTarget != "" && !dockerfileStageNameRE.MatchString(candidate.DockerfileTarget)) ||
 		len(candidate.DockerfileArgs) > 64 || len(candidate.DockerfilePlatforms) > 16 || len(candidate.ImageBuildIssues) > 32 ||
+		len(candidate.DockerfileStages) > 32 ||
 		len(candidate.ReleaseCommand) > 1024 || strings.ContainsAny(candidate.ReleaseCommand, "\x00\r\n") ||
 		rejectPlanSecretLiteral("release command", candidate.ReleaseCommand) != nil ||
 		secretCommandFlagRE.MatchString(candidate.ReleaseCommand) {
@@ -70,6 +71,11 @@ func validateCandidateImageFacts(candidate DetectedCandidate) error {
 	}
 	for _, platform := range candidate.DockerfilePlatforms {
 		if !validPlatform(platform) {
+			return malformed
+		}
+	}
+	for _, stage := range candidate.DockerfileStages {
+		if !dockerfileStageNameRE.MatchString(stage) {
 			return malformed
 		}
 	}
@@ -359,7 +365,7 @@ func dockerfileCandidate(tree detectionTree, dockerfile detectedDockerfile, refe
 			evidence[len(evidence)-1].Reason = "builds stage " + target + " as " + reference.ComposePath + " does"
 		}
 	}
-	context := chooseDockerfileContext(tree, directory, model.copySources())
+	context := chooseDockerfileContext(tree, directory, model.copySources(model.reachable(target)))
 	if reference != nil {
 		context = reference.Context
 		evidence = append(evidence, DetectionEvidence{Path: reference.ComposePath,
@@ -382,7 +388,7 @@ func dockerfileCandidate(tree detectionTree, dockerfile detectedDockerfile, refe
 	candidate := DetectedCandidate{
 		Name: name, Profile: ProfileWeb, Confidence: ConfidenceHigh,
 		Dockerfile: relative, DockerfileRole: role, DockerfileTarget: target,
-		DockerfileArgs: model.args(), DockerfilePlatforms: model.platforms(),
+		DockerfileArgs: model.args(target), DockerfilePlatforms: model.platforms(), DockerfileStages: model.stageNames(),
 		NeedsDecision: []string{},
 	}
 	switch {
@@ -434,8 +440,9 @@ func dockerfileIssues(tree detectionTree, model dockerfileModel, content []byte,
 		ignore, _ = tree.read(ignoreFile, 256<<10)
 	}
 	rules := parseDockerignore(ignore)
+	reach := model.reachable(target)
 	reported := 0
-	for _, source := range model.copySources() {
+	for _, source := range model.copySources(reach) {
 		if reported >= 4 {
 			break
 		}
@@ -463,17 +470,17 @@ func dockerfileIssues(tree detectionTree, model dockerfileModel, content []byte,
 			reported++
 		}
 	}
-	for _, arg := range model.args() {
+	for _, arg := range model.args(target) {
 		if arg.UsedInFrom && !arg.HasDefault {
 			issues = append(issues, newImageBuildIssue("dockerfile_arg_required", PreflightBlocked, 0, arg.Name,
 				"FROM uses build argument "+arg.Name+", which has no default"))
 		}
 	}
-	if line := model.sshMountLine(); line > 0 {
+	if line := model.sshMountLine(reach); line > 0 {
 		issues = append(issues, newImageBuildIssue("dockerfile_ssh_mount", PreflightBlocked, line, "",
 			fmt.Sprintf("line %d mounts an SSH agent (--mount=type=ssh)", line)))
 	}
-	if line := model.copiesNextStandalone(); line > 0 {
+	if line := model.copiesNextStandalone(reach); line > 0 {
 		if configured, known := nextStandaloneConfigured(tree, context); known && !configured {
 			issues = append(issues, newImageBuildIssue("dockerfile_standalone_missing", PreflightBlocked, line, ".next/standalone",
 				fmt.Sprintf("line %d copies .next/standalone, but next.config does not set output: 'standalone'", line)))
@@ -500,7 +507,7 @@ func dockerfileScriptIssues(tree detectionTree, model dockerfileModel, context, 
 			if script.Starts {
 				severity = PreflightBlocked
 			}
-			if head, found := tree.read(relative, 64<<10); found && scriptHasCRLF(head) && !model.normalizesLineEndings(path.Base(candidate)) {
+			if head, found := tree.read(relative, 64<<10); found && scriptHasCRLF(head) && !model.normalizesLineEndings(script, candidate) {
 				issues = append(issues, newImageBuildIssue("script_crlf", severity, script.Line, relative,
 					fmt.Sprintf("%s (run by %s on line %d) has Windows line endings", relative, script.Keyword, script.Line)))
 			}
