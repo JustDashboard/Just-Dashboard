@@ -535,7 +535,7 @@ export function Configure({
         (configuration.runtime.internalPort ?? 0) === 0
       )
         return "Set the port your application listens on inside the container."
-      return errors.internalPort ?? errors.hostPort
+      return errors.internalPort ?? errors.hostPort ?? errors.maxRequestBodyMb
     }
     if (target === "variables") {
       if (

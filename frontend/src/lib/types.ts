@@ -3257,6 +3257,35 @@ export type DeploymentDetectedDatabase = {
   evidence: string
 }
 
+/**
+ * What the source says about where its server listens: a port it fixes
+ * whatever PORT says, whether it reads PORT, and a loopback bind nothing
+ * outside the container reaches. Preflight re-checks these against the plan.
+ */
+export type DeploymentDetectedListen = {
+  port?: number
+  portFrom?: string
+  readsPort?: boolean
+  readsPortFrom?: string
+  loopback?: string
+  loopbackFrom?: string
+  loopbackCertain?: boolean
+  loopbackRecipeFix?: string
+  loopbackVariable?: string
+  unbridged?: string
+}
+
+/**
+ * A plain runtime variable the deployment's place behind the proxy decides:
+ * AUTH_TRUST_HOST, NEXTAUTH_URL (following the primary domain), HOST.
+ */
+export type DeploymentNetworkVariable = {
+  name: string
+  value?: string
+  domainTemplate?: string
+  reason: string
+}
+
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
   goVersion?: string
@@ -3281,6 +3310,8 @@ export type DeploymentDetectionCandidate = {
   spaFallback?: boolean
   pythonVersion?: string
   unpinnedDependencies?: boolean
+  listen?: DeploymentDetectedListen
+  networkVariables?: DeploymentNetworkVariable[]
   variables?: DeploymentDetectedVariable[]
   databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
@@ -3462,6 +3493,8 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** The largest request body the route lets through, in MB; empty is 64. */
+    maxRequestBodyMb?: number
     mounts?: {
       source: string
       target: string

@@ -37,6 +37,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  DEFAULT_MAX_REQUEST_BODY_MB,
+  MAX_REQUEST_BODY_MB,
+} from "@/components/deploy/deployment-defaults"
 import { useProject } from "@/components/deploy/project-context"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
@@ -153,6 +157,7 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.cpus": "runtime-cpus",
   "runtime.pidsLimit": "runtime-pids",
   "runtime.restartPolicy": "runtime-restart",
+  "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
 }
@@ -164,6 +169,7 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-internal-port": "listen",
   "runtime-host-port": "listen",
   "runtime-bind": "listen",
+  "runtime-max-body": "listen",
   "runtime-memory": "resources",
   "runtime-cpus": "resources",
   "runtime-pids": "resources",
@@ -612,7 +618,7 @@ function RuntimeForm({
         status={statuses(
           exposed && <Status key="public" tone="warning" label="Public" />,
           settingStatus({
-            dirty: draft.changed(["internalPort", "hostPort", "bindAddress"]),
+            dirty: draft.changed(["internalPort", "hostPort", "bindAddress", "maxRequestBodyMb"]),
             refused: refusedIn("listen"),
           }),
         )}
@@ -638,6 +644,36 @@ function RuntimeForm({
               className="font-mono"
               onChange={(event) => patch({ internalPort: clampPort(event.target.value) })}
             />
+          </InputGroup>
+        </Field>
+        <Field
+          label="Largest upload"
+          htmlFor="runtime-max-body"
+          info={`The proxy answers a bigger request with 413 before the application sees it. Zero keeps the ${DEFAULT_MAX_REQUEST_BODY_MB} MB default.`}
+          hint={runtime.maxRequestBodyMb ? undefined : `${DEFAULT_MAX_REQUEST_BODY_MB} MB default`}
+          error={errorFor("runtime-max-body")}
+        >
+          <InputGroup>
+            <InputGroupInput
+              id="runtime-max-body"
+              type="number"
+              min={0}
+              max={MAX_REQUEST_BODY_MB}
+              value={runtime.maxRequestBodyMb ?? 0}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("runtime-max-body"))}
+              className="font-mono"
+              onChange={(event) =>
+                patch({
+                  maxRequestBodyMb:
+                    Math.min(MAX_REQUEST_BODY_MB, Math.max(0, Number(event.target.value) || 0)) ||
+                    undefined,
+                })
+              }
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupText>MB</InputGroupText>
+            </InputGroupAddon>
           </InputGroup>
         </Field>
         <OptionList>
