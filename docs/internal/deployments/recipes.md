@@ -535,4 +535,11 @@ acceptance. The remaining catalogue entries are covered by rendered-Dockerfile a
 and every rendered install), `preflight_node_test.go` and `build_node_incident_test.go`, which keeps the
 incident that motivated them fixed: a Next.js 16 + Prisma 7 repository with an in-sync `bun.lock` beside a
 `package-lock.json` fifteen dependencies behind now resolves to Bun with no decision, and a forced npm
-raises `lockfile_out_of_sync` before Deploy and installs unfrozen instead of failing `npm ci`.
+raises `lockfile_out_of_sync` before Deploy and installs unfrozen instead of failing `npm ci`. The image
+and the build around the install are covered by `build_node_runtime_test.go` (the Node and Bun release
+from every declaration, and the system packages each dependency adds), `build_node_prisma_test.go`
+(`prisma generate` and the `env()` placeholders, the incident repository with Prisma 7's
+`prisma.config.ts` included), `build_node_build_test.go` (heap, legacy OpenSSL, T3 Env, `--env-file`)
+and `preflight_build_test.go`; the rendered Dockerfiles for canvas on Alpine, a GitHub dependency,
+onnxruntime-node on Debian slim, Puppeteer with Alpine's Chromium, Prisma 7 on npm and on Bun with Node
+24, and a webpack-4-era build were built and run locally when they were written.
