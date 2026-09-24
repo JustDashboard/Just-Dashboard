@@ -264,7 +264,14 @@ only renderer/executor/validation authority for their feature.
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
   never a refusal), `variables` (the environment names the source reads, with example values and
   where each was read — `env_discovery.go`) and `databases` (the engines its dependencies and
-  documented URLs name, each with the variable the connection belongs in). The closed recipe set is
+  documented URLs name, each with the variable the connection belongs in), `listen` (where the source
+  says its server listens: a port it fixes, whether it reads PORT, a loopback bind, each naming its
+  file and line — `detect_listen.go`, `detect_network.go`) and `networkVariables` (plain runtime
+  variables the proxy decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`, which
+  the form seeds as removable plan variables). Preflight re-checks `listen` against the plan
+  (`preflight_network.go`: `listen_loopback`, `port_hardcoded`, `proxy_headers_trusted`,
+  `forwarded_headers_untrusted`, `request_body_limit` and the rest, listed in the recipe guide), so a
+  loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
@@ -341,10 +348,18 @@ only renderer/executor/validation authority for their feature.
   The tail is written to the run transcript after redaction of every runtime variable value; step
   evidence records state and counts, never output. Compensation runs afterwards, so the operator reads
   why the application never listened instead of only "could not connect". The step message points at the
-  transcript when output was captured.
+  transcript when output was captured. A running candidate's listening sockets are read too, by
+  `cat /proc/net/tcp /proc/net/tcp6` inside its own container through the check runner's closed-argv
+  exec (bounded output, only parsed addresses kept); one listening only on loopback gets the cause
+  `loopback_only`, named in the step message even when the application printed nothing.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. Compose and host-network applications keep their own environment conventions.
-  This keeps application startup aligned with Docker publication; the host port may still move.
+  This keeps application startup aligned with Docker publication; the host port may still move. The
+  recipes switch framework trust of the proxy's `X-Forwarded-*` headers on (`FORWARDED_ALLOW_IPS=*`,
+  `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, `SERVER_FORWARD_HEADERS_STRATEGY`, Quarkus proxy forwarding,
+  SvelteKit's header variables), which is safe while the proxy is the only way in; a plan that publishes
+  on `0.0.0.0`/`::` is reachable directly, so `containerRuntimeEnvironment` writes each setting's
+  withdrawn value unless the plan sets the variable itself (`network_trust.go`).
 - HTTP/TCP readiness checks follow the recorded runtime publication when a saved check refers to the
   primary service's original internal or requested host port. Explicit unrelated ports, remote hosts
   and full URLs retain their configured targets. Quick deploy leaves the check port unset to follow
@@ -362,6 +377,12 @@ only renderer/executor/validation authority for their feature.
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
   moves only after required readiness/smoke checks pass.
+- A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240; zero is
+  64 MB). nginx's own default is 1 MB, which refused a phone photo before the application saw it, so an
+  nginx route always writes `client_max_body_size`; Caddy has no default limit, so a Caddy route writes
+  `request_body { max_size }` only when the plan names one. The project's Runtime settings (Where it
+  listens) and the new-project limits fold edit it; preflight's `request_body_limit` pass states it, and
+  release comparison lists a change.
 - Deployment-owned nginx cutover is serialized and snapshots the prior bytes, mode and exact symlink
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation

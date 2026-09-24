@@ -6,7 +6,7 @@
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, preview variables, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
-- [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, the single-page fallback and toolchain selection.
+- [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, the single-page fallback and toolchain selection.
 - [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, complete path comparison and decision evidence.
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access

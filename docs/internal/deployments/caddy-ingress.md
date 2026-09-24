@@ -48,6 +48,14 @@ client addresses. Host nginx routes have always written `/var/log/nginx/<route>.
 this driver was silent. See
 [`request-observability.md`](request-observability.md).
 
+## Request body limit
+
+A managed route carries the plan's `runtime.maxRequestBodyMb` as `request_body { max_size <N>MB }` when
+the plan names one. Caddy itself sets no request-body limit, so a route whose plan names none writes no
+directive and behaves as before; the host-nginx driver, whose own default is 1 MB, always writes
+`client_max_body_size` (64 MB unless the plan says otherwise). A route written before the limit existed
+keeps its bytes until the next activation rewrites it; the reconcile pass does not add the directive.
+
 ## Certificates and application networking
 
 Caddy owns issuance and renewal on its existing public listener. A deterministic, temporary site

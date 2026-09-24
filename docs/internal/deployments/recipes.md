@@ -59,7 +59,99 @@ engine.
 A `web:` process in a Heroku-style `Procfile` is the repository declaring how it is served, and outranks
 a start script and a framework default alike; it is only ever a server command, so a site framework's
 build is still served by nginx. `release:` processes are not run automatically; add one as a release
-task. A command that carries credential material is ignored.
+task. A command that carries credential material is ignored. Its port and bind flags are read like any
+start command's (next section): `--port 5000` makes 5000 the candidate's port, `-b 0.0.0.0:$PORT` follows
+PORT, and a gunicorn line with no `--bind` takes its bind from `gunicorn.conf.py` (or the `-c` file).
+
+## Where the server listens, and whom it trusts
+
+The runtime injects `PORT` and publishes the container's port to the managed proxy, which reaches it over
+a Docker network address and forwards `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-For`. Two
+things break that silently: a server that ignores PORT and listens elsewhere, and one bound to
+`127.0.0.1`/`localhost`/`::1`, which nothing outside its own container reaches. Both used to end as a
+readiness timeout that named neither. Detection now reads, as bounded text and never by running anything
+(`deploy/detect_listen.go`, `deploy/detect_network.go`):
+
+- **The start command**, following package scripts: `-p`/`--port N`, `--port=N`, a `PORT=N` prefix,
+  `--bind host:N`, `--server.port N`, `-Dserver.port=N`, `--urls URL`, `runserver [host:]N`, `$PORT` and
+  `${PORT:-N}` (which follow PORT), and the defaults of servers that bind loopback or ignore PORT when
+  told nothing: `vite preview` (4173), `astro preview` (4321), `uvicorn`, `hypercorn`, `daphne`,
+  `flask run`, `fastapi dev`, `manage.py runserver`, `next start -H localhost`.
+- **The served code**, when the command runs a file: `app.listen(4000)`, `listen(port, '127.0.0.1')`,
+  `listen({ port, host })` (shorthand followed to its constant), `Bun.serve`/`Deno.serve` options, Hono's
+  `serve`, a PORT read and its `|| 5000` fallback, `process.env.HOST || 'localhost'`, Fastify and Nest's
+  Fastify adapter (both bind localhost when given no host); Go main-package `Run(":8080")`,
+  `ListenAndServe`, `net.Listen`, `Addr:` and gin's argument-less `Run()` (PORT, else 8080); Rust
+  `bind("127.0.0.1:3000")`, `bind(("0.0.0.0", 8080))`, `SocketAddr::from(([0,0,0,0], N))`, warp's `run`;
+  Python `app.run(...)` and `uvicorn.run(...)` (both 127.0.0.1 without `host=`); Vert.x `listen(8888)`,
+  Javalin `start(7070)`, Ktor `embeddedServer(port = …)`; `app.Run("http://localhost:5000")`, `UseUrls`,
+  `ListenLocalhost` in `Program.cs`.
+- **Configuration**: `server.port`/`server.address` (Spring, Helidon), `quarkus.http.port`,
+  `micronaut.server.port` in `application.properties`/`.yml`, Ktor's `application.conf`, `Rocket.toml`,
+  `appsettings(.Production).json` Kestrel endpoints and `Urls`, `gunicorn.conf.py`, a Dockerfile's final
+  `ENV PORT=`/`ARG PORT=` when it has no single `EXPOSE`, and Phoenix's `config/runtime.exs` PORT default.
+
+The port precedence is the command's explicit port, then a configured port (a suggestion when the
+recipe bridges it onto PORT, fixed otherwise), then a code literal when the code never reads PORT, then
+a PORT read's own fallback, then the framework default. The candidate carries the result as `listen`
+(`port`/`portFrom` for a port the source fixes, `readsPort`, `loopback`/`loopbackFrom`,
+`loopbackCertain`, `loopbackRecipeFix`, `loopbackVariable`, `unbridged`), each fact naming its file and
+line, and evidence lines say the same. Preflight re-checks it against the plan — a replaced start command
+is read on its own — and raises:
+
+| Code | Severity | When |
+| --- | --- | --- |
+| `listen_loopback` | blocked when the loopback bind is certain (a literal or a served default with no other listener), else warning | the server binds loopback and nothing in the plan moves it |
+| `listen_loopback_moved` | pass | the recipe (`HOST`, `UVICORN_HOST`, `FLASK_RUN_HOST`, `ROCKET_ADDRESS`, a Kestrel bridge) or a plan variable moves it |
+| `port_hardcoded` | warning | the source fixes a port the plan's internal port differs from |
+| `port_from_source` | pass | the plan's port is the one the source fixes, or the server follows PORT |
+| `listen_endpoints_unbridged` | warning | several Kestrel endpoints, or an HTTPS one, keep their own addresses |
+| `start_command_dev_server` | warning | a Python recipe runs `runserver`, `flask run`, `fastapi dev` or `--reload` |
+| `proxy_headers_trusted` | pass | the recipe or a plan variable makes the app believe the proxy's forwarded headers |
+| `forwarded_headers_untrusted` | warning | that trust is withdrawn because the port is published on every interface |
+| `proxy_trust_variable_missing` | warning | a variable detection proposed for proxy trust (`AUTH_TRUST_HOST`) was removed |
+| `request_body_limit` | pass | the plan has a route: the largest upload the proxy lets through |
+
+What the recipes write so the server listens where the proxy reaches it and believes the headers it
+sends, without asking:
+
+- **Every Node server** gets `ENV HOST=0.0.0.0` in its runtime stage — Nuxt 2, Nitro, adapter-node,
+  Adonis and `process.env.HOST || 'localhost'` bind it, and it is inert where unused (Next.js does not
+  read `HOST`). **SvelteKit adapter-node** also gets `PROTOCOL_HEADER=x-forwarded-proto`,
+  `HOST_HEADER=x-forwarded-host`, `ADDRESS_HEADER=x-forwarded-for` and `XFF_DEPTH=1`, so form actions are
+  not refused as cross-site and `getClientAddress` is the visitor's. A start whose script is a bare
+  `vite preview`/`astro preview` becomes `<runner> vite preview … --host 0.0.0.0`.
+- **Auth.js**: `next-auth` 5 (or `beta`) and `@auth/*` get a plain plan variable `AUTH_TRUST_HOST=true`,
+  without which every request is refused as an untrusted host; `next-auth` 4 gets `NEXTAUTH_URL` with the
+  domain template `{{scheme}}://{{hostname}}`, which follows the primary domain. Both are visible,
+  removable plan variables (`networkVariables` on the candidate) for every build method, including a
+  Dockerfile beside the package, rather than image settings.
+- **Python** images set `FORWARDED_ALLOW_IPS=*` (gunicorn, uvicorn and the uvicorn inside Gradio,
+  Chainlit and NiceGUI read it; their default trusts only 127.0.0.1, and the proxy is not 127.0.0.1),
+  `UVICORN_HOST=0.0.0.0` and `FLASK_RUN_HOST=0.0.0.0` (both default to 127.0.0.1; an explicit `--host`
+  wins).
+- **ASP.NET Core** sets `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`; **Spring Boot** sets
+  `SERVER_FORWARD_HEADERS_STRATEGY=framework`; **Quarkus** sets `QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING`
+  and `QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED`. OAuth/OIDC redirect URIs and secure cookies then use
+  https; detection names the sign-in packages (`Microsoft.AspNetCore.Authentication.*`,
+  `Microsoft.Identity.Web`, `spring-boot-starter-oauth2-client`/`-security`) that depend on it.
+- A server that reads `HOST` with a loopback fallback (`process.env.HOST || 'localhost'`,
+  `env::var("HOST").unwrap_or("127.0.0.1")`) in a build whose image does not set HOST — a Dockerfile, a
+  Go or Rust recipe — gets a `HOST=0.0.0.0` plan variable instead. HOST is never injected globally: some
+  applications use it as their public hostname.
+
+Trusting forwarded headers is safe only while the proxy is the only way in: it replaces whatever a client
+sent. A plan that publishes the container on `0.0.0.0`/`::` is reachable directly, so the runtime writes
+the withdrawn value of every trust setting (`FORWARDED_ALLOW_IPS=127.0.0.1`,
+`ASPNETCORE_FORWARDEDHEADERS_ENABLED=false`, `SERVER_FORWARD_HEADERS_STRATEGY=none`, the Quarkus
+switches `false`, SvelteKit's three header variables empty) unless the plan sets the variable itself, and
+preflight says so. Host networking is left unchanged.
+
+When a candidate fails its readiness gate anyway, the diagnosis also reads its listening sockets: the
+runtime owner runs `cat /proc/net/tcp /proc/net/tcp6` inside the candidate's own container (closed
+argv, bounded output, only the parsed addresses kept; an image without `cat` reports nothing). A
+candidate listening only on loopback gets the cause `loopback_only`, named in the failure message even
+when the application printed nothing.
 
 ## JavaScript and static output
 
@@ -81,7 +173,7 @@ missing is a low-confidence candidate that asks for one.
 | --- | --- | --- | --- |
 | Next.js | `next` | server, 3000 | `<manager> run start` (`<runner> next start` without a script) |
 | SvelteKit | `@sveltejs/kit` + `adapter-node` / `adapter-static` | server, 3000 / site `build` | `node build` (Bun: `bun ./build/index.js`); other adapters need a Dockerfile |
-| Astro | `astro` (+ `@astrojs/node`) | site `dist` / server, 4321 | `node ./dist/server/entry.mjs` with `HOST=0.0.0.0`; a provider adapter is a decision |
+| Astro | `astro` (+ `@astrojs/node`) | site `dist` / server, 4321 | `node ./dist/server/entry.mjs` (every Node server's runtime stage sets `HOST=0.0.0.0`); a provider adapter is a decision |
 | Nuxt 3/4 | `nuxt` | server, 3000 / site `.output/public` for `nuxt generate` | `node .output/server/index.mjs`; Nuxt 2 runs `nuxt start` |
 | Remix | `@remix-run/dev` (+ `@remix-run/serve`) | server, 3000 | `remix-serve ./build/server/index.js` |
 | React Router (framework mode) | `@react-router/dev` (+ `@react-router/serve`) | server, 3000 | `react-router-serve ./build/server/index.js`; `react-router` alone is a Vite site |
@@ -118,8 +210,10 @@ fails the start instead of dropping it. The tool must be installed by the lockfi
 copies the build's `node_modules`, so a devDependency is available to the start command.
 
 Detection preserves an actual Dockerfile/Containerfile filename relative to its build root. A single
-literal TCP `EXPOSE` in the final stage supplies the suggested port; dynamic/multiple ports still need
-an operator's explicit choice. A Dockerfile inherited base's unrecorded exposed port is not guessed.
+literal TCP `EXPOSE` in the final stage supplies the suggested port. Without one, the final stage's
+`ENV PORT=N`/`ARG PORT=N`, then what the source at that root says about its listener, then a Phoenix
+`config/runtime.exs` PORT default supply it; otherwise the port stays unset for the operator. A
+Dockerfile inherited base's unrecorded exposed port is not guessed.
 
 ## Python
 
@@ -147,14 +241,15 @@ or `examples/`), shallowest first:
 
 | Framework | Start | Port |
 | --- | --- | --- |
-| Django (`manage.py`) | `python manage.py migrate --noinput && gunicorn <project>.wsgi:application --bind 0.0.0.0:8000`, with `collectstatic` before it when WhiteNoise is installed; `uvicorn <project>.asgi:application` when only an ASGI module exists and uvicorn is declared | 8000 |
-| FastAPI | `uvicorn <module>:<object> --host 0.0.0.0 --port 8000` for the `= FastAPI(` object found | 8000 |
-| Flask | `gunicorn --bind 0.0.0.0:8000 <module>:<object>`, or `'<package>:create_app()'` for a factory | 8000 |
-| Streamlit | `streamlit run <script> --server.port 8501 --server.address 0.0.0.0 --server.headless true` | 8501 |
+| Django (`manage.py`) | `python manage.py migrate --noinput && gunicorn <project>.wsgi:application --bind 0.0.0.0:${PORT:-8000}`, with `collectstatic` before it when WhiteNoise is installed; `uvicorn <project>.asgi:application` when only an ASGI module exists and uvicorn is declared | 8000 |
+| FastAPI | `uvicorn <module>:<object> --host 0.0.0.0 --port ${PORT:-8000}` for the `= FastAPI(` object found | 8000 |
+| Flask | `gunicorn --bind 0.0.0.0:${PORT:-8000} <module>:<object>`, or `'<package>:create_app()'` for a factory | 8000 |
+| Streamlit | `streamlit run <script> --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true` | 8501 |
 | Gradio | `python <script>` with `GRADIO_SERVER_NAME=0.0.0.0` in the image | 7860 |
 
-A framework whose application object is not in an entry file keeps the port and asks for the module. A
-Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
+The detected commands read `${PORT:-N}` rather than a fixed port, so changing the application port in
+Build settings moves the server with it. A framework whose application object is not in an entry file
+keeps the port and asks for the module. A Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
 listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
 it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
 for.
@@ -174,6 +269,13 @@ explicit package choice for a repository with several mains. The historical dete
 command still executes, followed by the default output-producing build for compatibility. A custom start
 command replaces the default `/app` entrypoint and runs inside the unprivileged runtime container.
 
+A module whose main package serves HTTP — `gin`, `echo`, `fiber`, `chi`, `gorilla/mux` or connect in
+`go.mod`, or `net/http` in the main package — is a web candidate with the framework and the port its
+main package names (`Run(":8081")`, `ListenAndServe(":9000", …)`), or 8080 with the evidence "follows
+PORT" when it reads PORT, so it gets a readiness gate and a suggested hostname instead of an unset port.
+A gRPC or other listener keeps the service profile with its port. Several main packages are the
+recipe's own question and name no port.
+
 This recipe uses `CGO_ENABLED=0`. Local non-test source importing `C`, unsupported source versions and
 explicit CGO-enabling commands produce actionable planning/preparation refusals. Dependencies needing
 CGO or more complex native-library/workspace arrangements require a Dockerfile; source scanning does
@@ -187,9 +289,14 @@ when `rust-toolchain(.toml)` pins a stable release — nightly and beta need a D
 `musl-dev`, `pkgconfig` and static OpenSSL installed so the usual crates link. `cargo fetch` is its own
 layer under the install secret mount; the build is `cargo build --release`, `--locked` when `Cargo.lock`
 is committed (its absence is the unpinned warning). A custom build command runs in its place and must
-still leave `target/release/<binary>`. `axum` (3000), `actix-web` (8080), `rocket` (8000), `warp`
-(3030), `poem` (3000) and `salvo` (5800) mark a web service with the framework's conventional port and
-ask to confirm it; a crate with none is a worker that asks. A workspace without a root package is a
+still leave `target/release/<binary>`. `loco-rs` (5150, recognised before the axum it
+is built on), `axum` (3000), `actix-web` (8080), `rocket` (8000), `warp` (3030), `poem` (3000) and `salvo`
+(5800) mark a web service with the framework's conventional port. The served binary's `src/main.rs` (or
+`src/bin/<binary>.rs`) and `Rocket.toml` are read for the port and bind; the "confirm the port" decision
+stays only when none of them names one. Rocket, whose default address is 127.0.0.1, runs as
+`exec env ROCKET_PORT=${PORT:-8000} /app` with `ROCKET_ADDRESS=0.0.0.0` (both outrank `Rocket.toml`);
+Loco starts with `/app start --binding 0.0.0.0 --port ${PORT:-5150}`. A crate with no framework is a
+worker that asks. A workspace without a root package is a
 `recipe_unsupported` finding: set the root directory to the member crate.
 
 When `package.default-run` is declared, it selects the served binary ahead of that fallback, including
@@ -207,7 +314,13 @@ Spring Boot's `-plain` or a shade plugin's `original-` — becomes `/app/app.jar
 `.java-version`, the pom's `java.version`/`maven.compiler.release` properties, or Gradle's toolchain and
 compatibility settings; 11, 17, 21 and 25 are in the catalogue and 21 is the default. Spring Boot,
 Quarkus, Micronaut, Javalin, Ktor, Helidon and Vert.x mark a web service (8080; Javalin 7070); a plain
-project is a worker that asks. A multi-module Maven project is a `recipe_unsupported` finding: set the
+project is a worker that asks. These frameworks do not read PORT, so the default start command bridges
+it into the variable that outranks `application.properties`/`.yml`: `exec env SERVER_PORT=${PORT:-8080}
+java -jar /app/app.jar` for Spring Boot and Helidon, `QUARKUS_HTTP_PORT` for Quarkus,
+`MICRONAUT_SERVER_PORT` for Micronaut (`exec` keeps java as PID 1). A configured `server.port` becomes the
+suggested port. Vert.x, Javalin and Ktor's embedded server fix their port in code, which detection reads
+(`listen(8888)`, `start(7070)`, `embeddedServer(port = …)`); Ktor's `application.conf` with
+`port = ${?PORT}` follows PORT. A multi-module Maven project is a `recipe_unsupported` finding: set the
 root directory to the module that builds the application.
 
 ## .NET
@@ -220,7 +333,13 @@ supported portable entry in `<TargetFrameworks>`; restore and publish explicitly
 framework. Platform-specific-only target lists require a Dockerfile. net8.0, net9.0
 and net10.0 are in the catalogue. Kestrel reads its port from `ASPNETCORE_HTTP_PORTS`, so the default
 start command bridges the `PORT` the runtime injects: `ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet
-/app/<Assembly>.dll`. A web project listens on 8080; a console program asks whether it serves.
+/app/<Assembly>.dll`. An `appsettings.json`/`appsettings.Production.json` that names Kestrel endpoints or
+`Urls` outranks that variable, so the bridge also sets the one endpoint's
+`Kestrel__Endpoints__<Name>__Url=http://+:${PORT:-8080}`, or `URLS=http://+:${PORT:-8080}`; several
+endpoints, or an HTTPS one, cannot all move to one port and are named in `listen_endpoints_unbridged`. A
+URL passed in `Program.cs` (`app.Run("http://localhost:5000")`, `UseUrls`) outranks everything and is
+read as a fixed port and, on loopback, a blocker. A web project listens on 8080; a console program asks
+whether it serves.
 
 ## Deno
 
@@ -229,10 +348,13 @@ quotes or comment-like text inside task strings. Invalid configuration does not 
 parsed tasks.
 
 `deno.json`/`deno.jsonc` (comments and trailing commas tolerated) supplies the `build` and `start`
-tasks; without a start task the conventional entry file (`main.ts`, `server.ts`, `mod.ts`, …) is run
-with `--allow-all`. `deno install` (`--frozen` with a `deno.lock`) caches the imports on
-`denoland/deno:alpine` before the build task runs. A `fresh` import names the framework. `Deno.serve`'s
-default of 8000 is the port, and the candidate asks to confirm it.
+tasks; without a start task the conventional entry file (`main.ts`, `server.ts`, `mod.ts`, `main.js`,
+`server.js`, `main.tsx`, `index.ts`, `app.ts`, `src/main.ts`, `src/server.ts`, `src/index.ts`) is run with
+`--allow-all`. `deno install` (`--frozen` with a `deno.lock`) caches the imports on `denoland/deno:alpine`
+before the build task runs. A `fresh` import names the framework. The port is read from the start task
+(`deno serve --port 3000`, else `deno serve`'s 8000) or the served file (`Deno.serve({ port: 3000 })`, Oak's
+`listen({ port })`, a `Deno.env.get("PORT")` read); with nothing readable it is `Deno.serve`'s default of
+8000, stated as evidence rather than asked as a question.
 
 ## PHP
 
