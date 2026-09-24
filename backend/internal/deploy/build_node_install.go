@@ -123,8 +123,8 @@ type nodeInstallFacts struct {
 	manifest, settings nodeInstallManifest
 	// member is the package's directory under the install root, "" for a
 	// package that installs on its own.
-	member   string
-	readings []nodeLockfileReading
+	member       string
+	readings     []nodeLockfileReading
 	declared     nodeDeclaredManager
 	signals      map[string][]string
 	yarn         nodeYarnConfig
