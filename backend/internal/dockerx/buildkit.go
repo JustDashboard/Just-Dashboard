@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +33,16 @@ type ImmutableBuildOptions struct {
 	NoCache    bool
 	Pull       bool
 	Secrets    []BuildxSecret
+	// Target selects a Dockerfile stage. BuildArgs are passed as
+	// `--build-arg NAME`, which buildx reads from its own environment, so a
+	// value never appears in argv.
+	Target    string
+	BuildArgs []BuildxArg
+}
+
+type BuildxArg struct {
+	Name  string
+	Value string
 }
 
 type ImmutableImage struct {
@@ -145,6 +156,12 @@ func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, [
 	if opts.NoCache {
 		args = append(args, "--no-cache")
 	}
+	if opts.Target != "" {
+		if !buildxTargetRE.MatchString(opts.Target) {
+			return nil, nil, fmt.Errorf("invalid Buildx target stage")
+		}
+		args = append(args, "--target", opts.Target)
+	}
 	secrets := append([]BuildxSecret(nil), opts.Secrets...)
 	sort.Slice(secrets, func(i, j int) bool { return secrets[i].ID < secrets[j].ID })
 	environment := scrubBuildEnvironment(os.Environ())
@@ -158,10 +175,33 @@ func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, [
 		environment = append(environment, envName+"="+secret.Value)
 		args = append(args, "--secret", "id="+secret.ID+",env="+envName)
 	}
+	buildArgs := append([]BuildxArg(nil), opts.BuildArgs...)
+	sort.Slice(buildArgs, func(i, j int) bool { return buildArgs[i].Name < buildArgs[j].Name })
+	seenArgs := map[string]bool{}
+	for _, arg := range buildArgs {
+		if !buildxArgNameRE.MatchString(arg.Name) || seenArgs[arg.Name] || strings.ContainsRune(arg.Value, 0) {
+			return nil, nil, fmt.Errorf("invalid or duplicate build argument")
+		}
+		seenArgs[arg.Name] = true
+		prefix := arg.Name + "="
+		kept := environment[:0]
+		for _, entry := range environment {
+			if !strings.HasPrefix(entry, prefix) {
+				kept = append(kept, entry)
+			}
+		}
+		environment = append(kept, prefix+arg.Value)
+		args = append(args, "--build-arg", arg.Name)
+	}
 	args = append(args, ".")
 	environment = append(environment, "BUILDKIT_PROGRESS=plain", "DOCKER_CLI_HINTS=false")
 	return args, environment, nil
 }
+
+var (
+	buildxTargetRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
+	buildxArgNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+)
 
 func scrubBuildEnvironment(source []string) []string {
 	result := make([]string, 0, len(source))

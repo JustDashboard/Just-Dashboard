@@ -396,7 +396,15 @@ func (e *NormalizedStepExecutor) prepareContext(
 		return normalizedStepFailure(err)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
-	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
+	names := buildVariableNames(buildVariables)
+	if plan.Build.Method == BuildDockerfile {
+		// A custom Dockerfile never binds names as secrets; the names it is
+		// handed are the plain values it may receive as build arguments.
+		if names, err = e.plainBuildVariableNames(ctx, execution.Run); err != nil {
+			return normalizedStepFailure(err)
+		}
+	}
+	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)

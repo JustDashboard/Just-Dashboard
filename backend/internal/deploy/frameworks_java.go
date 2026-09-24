@@ -168,7 +168,9 @@ func renderJavaDockerfile(recipe javaRecipe, config BuildPlanConfig, bases []Res
 		tool, jars = "Gradle", "build/libs"
 		runner := "gradle"
 		if recipe.wrapper {
-			runner = "chmod +x ./gradlew && ./gradlew"
+			// A wrapper committed from Windows starts with `#!/bin/sh\r`, which
+			// runs as "sh\r: not found"; the CR is stripped before it is used.
+			runner = `sed -i 's/\r$//' ./gradlew && chmod +x ./gradlew && ./gradlew`
 		}
 		if build == "" {
 			build = runner + " --no-daemon -q build -x test"
