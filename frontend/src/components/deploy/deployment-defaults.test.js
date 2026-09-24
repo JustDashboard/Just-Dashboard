@@ -394,6 +394,34 @@ describe("persistent state", () => {
     ).toBe("blue_green")
   })
 
+  test("a re-detection fills an empty row with the value that moves state onto its volume", () => {
+    const current = [
+      { name: "DATABASE_URL", value: "", source: ".env.example", detected: true },
+      { name: "API_KEY", value: "typed" },
+    ]
+    const merged = mergeDiscoveredRows(
+      current,
+      discoveredEnvironmentRows(candidate({ persistentPaths: [prisma] })),
+    )
+    expect(merged).toEqual([
+      {
+        name: "DATABASE_URL",
+        value: "file:/data/dev.db",
+        source: ".env.example",
+        detected: true,
+        note: "Keeps it on the volume at /data",
+      },
+      { name: "API_KEY", value: "typed" },
+    ])
+    const typed = [{ name: "DATABASE_URL", value: "file:/srv/mine.db" }]
+    expect(
+      mergeDiscoveredRows(
+        typed,
+        discoveredEnvironmentRows(candidate({ persistentPaths: [prisma] })),
+      ),
+    ).toBe(typed)
+  })
+
   test("the variable that moves the state onto its volume arrives filled", () => {
     const rows = discoveredEnvironmentRows(
       candidate({

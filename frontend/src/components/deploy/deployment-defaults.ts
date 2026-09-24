@@ -514,13 +514,24 @@ export function discoveredEnvironmentRows(
 /**
  * Folds a re-detection's variables into rows the operator may already have
  * typed into: nothing typed is lost, and a name already present is not
- * listed twice. A lone blank row gives way to the detected ones.
+ * listed twice. A lone blank row gives way to the detected ones, and a row
+ * still empty takes a value the new detection filled in — the one that
+ * moves state onto a volume the plan now carries.
  */
 export function mergeDiscoveredRows(current: EnvironmentRow[], discovered: EnvironmentRow[]) {
   const names = new Set(current.map((row) => row.name).filter(Boolean))
   const additions = discovered.filter((row) => row.detected && !names.has(row.name))
-  if (!additions.length) return current
-  const kept = current.filter((row) => row.name || row.value)
+  const filled = new Map(
+    discovered.filter((row) => row.detected && row.note && row.value).map((row) => [row.name, row]),
+  )
+  const refills = current.some((row) => row.name && !row.value && filled.has(row.name))
+  if (!additions.length && !refills) return current
+  const kept = current
+    .filter((row) => row.name || row.value)
+    .map((row) => {
+      const found = !row.value ? filled.get(row.name) : undefined
+      return found ? { ...row, value: found.value, note: found.note } : row
+    })
   return [...kept, ...additions]
 }
 
