@@ -28,7 +28,7 @@ func declaredNodePackageManager(manifest []byte) string {
 	var declared struct {
 		PackageManager string `json:"packageManager"`
 	}
-	if json.Unmarshal(manifest, &declared) != nil {
+	if json.Unmarshal(manifestText(manifest), &declared) != nil {
 		return ""
 	}
 	name, _, _ := strings.Cut(strings.TrimSpace(declared.PackageManager), "@")
@@ -111,7 +111,7 @@ type nodeRecipeFramework struct {
 
 func validateNodeRecipeContent(content []byte, files nodeRootFiles, config BuildPlanConfig) (nodeRecipeFramework, error) {
 	var manifest nodeManifest
-	if json.Unmarshal(content, &manifest) != nil {
+	if !parseNodeManifest(content, &manifest) {
 		return nodeRecipeFramework{}, fmt.Errorf("%w: package.json is malformed", ErrUnsupportedBuilder)
 	}
 	framework := matchNodeFramework(manifest)

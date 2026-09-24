@@ -130,8 +130,8 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	detectCtx, cancel := context.WithTimeout(ctx, limits.MaxDuration)
 	defer cancel()
 	markers := map[string]*detectedMarkers{}
-	gitModulesPath := ""
-	lfsAttributesPath := ""
+	shape := newRepoShapeScan(root, limits)
+	goSources := newGoSourceScan()
 	cgoPaths := []string{}
 	schemaPaths := []string{}
 	schemaPathCounts := map[string]int{}
@@ -146,13 +146,28 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		".venv": true, "venv": true, "__pycache__": true,
 	}
 	stop := errors.New("bounded detector stopped")
-	walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	// The file bound counts files detection opens, not files a repository
+	// holds: ten thousand images are no reason to stop looking for the
+	// manifest beside them.
+	readMarkerFile := func(path string, max int64) ([]byte, int64, error) {
+		if result.ScannedFiles >= limits.MaxFiles {
+			result.Truncated, result.TruncatedReason = true, "file limit reached"
+			return nil, 0, stop
+		}
+		result.ScannedFiles++
+		return readDetectionFile(path, max)
+	}
+	manifestFirst := func(name string) bool { return detectionInterestingName(name) || repoShapeFileName(name) }
+	walkErr := walkDetectionTree(root, manifestFirst, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
 		if err := detectCtx.Err(); err != nil {
 			result.Truncated = true
 			result.TruncatedReason = "time limit reached"
+			return stop
+		}
+		if result.Truncated {
 			return stop
 		}
 		rel, err := filepath.Rel(root, path)
@@ -164,19 +179,22 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			depth = strings.Count(rel, string(filepath.Separator)) + 1
 		}
 		if entry.IsDir() {
-			if rel != "." && (skip[entry.Name()] || depth > limits.MaxDepth) {
+			switch {
+			case rel == ".":
+				return nil
+			case skip[entry.Name()]:
+				return filepath.SkipDir
+			case depth > limits.MaxDepth:
+				shape.depthPruned(path, rel)
+				return filepath.SkipDir
+			case shape.setAsideDirectory(path, rel, entry.Name()):
 				return filepath.SkipDir
 			}
 			return nil
 		}
+		shape.observeFile(rel, entry)
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
 			return nil
-		}
-		result.ScannedFiles++
-		if result.ScannedFiles > limits.MaxFiles {
-			result.Truncated = true
-			result.TruncatedReason = "file limit reached"
-			return stop
 		}
 		name := strings.ToLower(entry.Name())
 		// Presence is all a schema marker proves, so a repository with a
@@ -210,7 +228,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			// are enough to find an application object, and a repository of
 			// packages must not turn detection into a source scan.
 			if len(pythonEntries) < 64 {
-				content, n, err := readDetectionFile(path, 64<<10)
+				content, n, err := readMarkerFile(path, 64<<10)
 				result.ScannedBytes += n
 				if result.ScannedBytes > limits.MaxReadBytes {
 					result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
@@ -226,35 +244,34 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return nil
 		}
 		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
-			result.ScannedBytes += n
-			if result.ScannedBytes > limits.MaxReadBytes {
-				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
-				return stop
-			}
-			if err == nil && sourceUsesCGO(content) {
+			// Go source is read head-first under a budget of its own, so
+			// generated code cannot spend what the manifests need.
+			content, ok := goSources.read(path, rel, name)
+			if ok && sourceUsesCGO(content) {
 				cgoPaths = append(cgoPaths, rel)
 			}
-			if err == nil && scanner.scannable(filepath.ToSlash(rel), name) && scanner.budget(n) {
-				scanner.scanSource(filepath.ToSlash(rel), content)
+			if ok && scanner.scannable(filepath.ToSlash(rel), name) {
+				if len(content) == goScanHead {
+					if info, err := entry.Info(); err == nil && scanner.budget(info.Size()) {
+						if full, _, err := readDetectionFile(path, envScanMaxFile); err == nil {
+							scanner.scanSource(filepath.ToSlash(rel), full)
+						}
+					}
+				} else if scanner.budget(int64(len(content))) {
+					scanner.scanSource(filepath.ToSlash(rel), content)
+				}
 			}
 			return nil
 		}
-		interesting := name == "package.json" || name == "go.mod" || name == "dockerfile" ||
-			name == ".go-version" ||
-			name == "containerfile" || name == "compose.yml" || name == "compose.yaml" ||
-			name == "docker-compose.yml" || name == "docker-compose.yaml" ||
-			name == "index.html" || name == ".gitmodules" || name == ".gitattributes" ||
-			name == "bun.lock" || name == "bun.lockb" || name == "package-lock.json" ||
-			name == "pnpm-lock.yaml" || name == "yarn.lock" || name == "requirements.txt" ||
-			name == "uv.lock" || name == "poetry.lock" || name == "pyproject.toml" ||
-			name == "angular.json" || name == "procfile" || name == "manage.py" ||
-			name == "runtime.txt" || name == ".python-version" ||
-			name == "cargo.toml" || name == "cargo.lock" || name == "rust-toolchain" || name == "rust-toolchain.toml" ||
-			name == "pom.xml" || name == "build.gradle" || name == "build.gradle.kts" || name == "gradlew" ||
-			name == ".java-version" || strings.HasSuffix(name, ".csproj") ||
-			name == "deno.json" || name == "deno.jsonc" || name == "deno.lock" ||
-			name == "composer.json" || name == "composer.lock" || name == "index.php"
+		if shapeRoot, shapeKey, limit, ok := shapeFileTarget(rel, name, depth); ok {
+			shape.readFile(path, shapeRoot, shapeKey, limit)
+			// A vite.config or a tasks.py is also application source whose
+			// environment reads the form lists.
+			if !envSourceExtensions[filepath.Ext(name)] {
+				return nil
+			}
+		}
+		interesting := detectionInterestingName(name)
 		if denoEntryNames[name] && len(denoEntryPaths) < 64 {
 			denoEntryPaths = append(denoEntryPaths, filepath.ToSlash(rel))
 		}
@@ -266,17 +283,22 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				if info, err := entry.Info(); err == nil && scanner.budget(info.Size()) {
 					if content, _, err := readDetectionFile(path, envScanMaxFile); err == nil {
 						scanner.scanSource(filepath.ToSlash(rel), content)
+						shape.sources.scan(filepath.ToSlash(rel), name, content)
 					}
 				}
 			}
 			return nil
 		}
 		if name == ".gitmodules" {
-			gitModulesPath = rel
+			content, n, err := readMarkerFile(path, 64<<10)
+			result.ScannedBytes += n
+			if err == nil {
+				shape.gitModulesPath, shape.gitModules = filepath.ToSlash(rel), content
+			}
 			return nil
 		}
 		if name == ".gitattributes" {
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if result.ScannedBytes > limits.MaxReadBytes {
 				result.Truncated = true
@@ -284,8 +306,12 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				return stop
 			}
 			if err == nil && strings.Contains(strings.ToLower(string(content)), "filter=lfs") {
-				lfsAttributesPath = rel
+				shape.lfsDeclared = true
+				shape.readGitAttributes(filepath.ToSlash(rel), content)
 			}
+			return nil
+		}
+		if name == "index.html" && shape.skipStaticIndex(path, rel) {
 			return nil
 		}
 		parent := filepath.Dir(rel)
@@ -312,19 +338,19 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			markers[parent] = marker
 		}
 		readMarker := func(limit int64) ([]byte, bool) {
-			content, n, err := readDetectionFile(path, limit)
+			content, n, err := readMarkerFile(path, limit)
 			result.ScannedBytes += n
 			if result.ScannedBytes > limits.MaxReadBytes {
 				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
 				return nil, false
 			}
-			return content, err == nil
+			return shape.manifest(filepath.ToSlash(rel), content), err == nil
 		}
 		switch name {
 		case "dockerfile", "containerfile":
 			if marker.dockerfile == "" {
 				marker.dockerfile = rel
-				content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+				content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 				result.ScannedBytes += n
 				if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
 					marker.dockerfileContent = content
@@ -337,13 +363,13 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			marker.compose = append(marker.compose, rel)
 		case "go.mod":
 			marker.goMod = rel
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if err == nil {
 				marker.goModContent = content
 			}
 		case ".go-version":
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if err == nil {
 				marker.goVersionFile = content
@@ -409,7 +435,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			// The lock's package names say which framework is installed; a
 			// lock too large to read still proves the install is frozen.
 			marker.pythonFiles[name] = []byte("locked")
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
 				marker.pythonFiles[name] = content
@@ -418,7 +444,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				return stop
 			}
 		case "runtime.txt", ".python-version":
-			content, n, err := readDetectionFile(path, 4096)
+			content, n, err := readMarkerFile(path, 4096)
 			result.ScannedBytes += n
 			if err == nil {
 				if name == "runtime.txt" {
@@ -428,10 +454,10 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				}
 			}
 		case "requirements.txt", "pyproject.toml":
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
-				marker.pythonFiles[name] = content
+				marker.pythonFiles[name] = shape.manifest(filepath.ToSlash(rel), content)
 			} else if result.ScannedBytes > limits.MaxReadBytes {
 				result.Truncated = true
 				result.TruncatedReason = "read-byte limit reached"
@@ -440,23 +466,23 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		case "index.html":
 			marker.staticFile = rel
 		case "angular.json", "procfile":
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
 				if name == "procfile" {
-					marker.procfile = content
+					marker.procfile = shape.manifest(filepath.ToSlash(rel), content)
 				} else {
-					marker.angularJSON = content
+					marker.angularJSON = shape.manifest(filepath.ToSlash(rel), content)
 				}
 			} else if result.ScannedBytes > limits.MaxReadBytes {
 				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
 				return stop
 			}
 		case "package.json":
-			content, n, err := readDetectionFile(path, limits.MaxFileBytes)
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
 			result.ScannedBytes += n
 			if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
-				marker.packageJSON, marker.packagePath = content, rel
+				marker.packageJSON, marker.packagePath = shape.manifest(filepath.ToSlash(rel), content), rel
 			} else if result.ScannedBytes > limits.MaxReadBytes {
 				result.Truncated = true
 				result.TruncatedReason = "read-byte limit reached"
@@ -534,26 +560,43 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 					break
 				}
 			}
-		}
-		if gitModulesPath != "" {
-			result.Candidates[index].Evidence = append(result.Candidates[index].Evidence,
-				DetectionEvidence{Path: gitModulesPath, Reason: "Git submodules are declared but not fetched during bounded detection"})
-			result.Candidates[index].NeedsDecision = append(result.Candidates[index].NeedsDecision,
-				"confirm required submodules and credential access")
-		}
-		if lfsAttributesPath != "" {
-			result.Candidates[index].Evidence = append(result.Candidates[index].Evidence,
-				DetectionEvidence{Path: lfsAttributesPath, Reason: "Git LFS objects are skipped during bounded detection"})
-			result.Candidates[index].NeedsDecision = append(result.Candidates[index].NeedsDecision,
-				"confirm required Git LFS objects and credential access")
+			if goSources.truncated {
+				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "go.mod"),
+					Reason: fmt.Sprintf("Go source scan stopped after %d files; the rest was not checked for cgo", goSources.files)})
+			}
 		}
 	}
-	result.GitRequirements = GitRequirements{
-		Submodules: gitModulesPath != "",
-		LFS:        lfsAttributesPath != "",
-	}
-	result.SelectedID = selectedCandidate(result.Candidates)
+	// What only the repository as a whole shows — which roots are examples,
+	// tooling or asset pipelines, what other platforms' files declare, what
+	// else the source runs — and the ranking that selects the application.
+	shape.shapeDetection(&result, shapeContext{
+		markers: markers, identity: identity, goSources: goSources, pythonEntries: pythonEntries,
+		variables: func(root string) []DetectedVariable { return scanner.variables(root, allRoots) },
+		databases: func(root string, variables []DetectedVariable) []DetectedDatabase {
+			return detectDatabases(&detectedMarkers{root: root}, variables, prismaProviders)
+		},
+	})
 	return result, nil
+}
+
+// detectionInterestingName names the files whose content says what a
+// directory is. The walk's breadth-first pass reads them before any source.
+func detectionInterestingName(name string) bool {
+	return name == "package.json" || name == "go.mod" || name == "dockerfile" ||
+		name == ".go-version" ||
+		name == "containerfile" || name == "compose.yml" || name == "compose.yaml" ||
+		name == "docker-compose.yml" || name == "docker-compose.yaml" ||
+		name == "index.html" || name == ".gitmodules" || name == ".gitattributes" ||
+		name == "bun.lock" || name == "bun.lockb" || name == "package-lock.json" ||
+		name == "pnpm-lock.yaml" || name == "yarn.lock" || name == "requirements.txt" ||
+		name == "uv.lock" || name == "poetry.lock" || name == "pyproject.toml" ||
+		name == "angular.json" || name == "procfile" || name == "manage.py" ||
+		name == "runtime.txt" || name == ".python-version" ||
+		name == "cargo.toml" || name == "cargo.lock" || name == "rust-toolchain" || name == "rust-toolchain.toml" ||
+		name == "pom.xml" || name == "build.gradle" || name == "build.gradle.kts" || name == "gradlew" ||
+		name == ".java-version" || strings.HasSuffix(name, ".csproj") ||
+		name == "deno.json" || name == "deno.jsonc" || name == "deno.lock" ||
+		name == "composer.json" || name == "composer.lock" || name == "index.php"
 }
 
 func readDetectionFile(path string, max int64) ([]byte, int64, error) {
@@ -911,24 +954,6 @@ func newDetectedCandidate(root string, method BuildMethod, candidate DetectedCan
 	hash := sha256.Sum256([]byte(root + "\x00" + string(method) + "\x00" + candidate.Name))
 	candidate.ID = "candidate-" + hex.EncodeToString(hash[:6])
 	return candidate
-}
-
-func selectedCandidate(candidates []DetectedCandidate) string {
-	best := ""
-	bestRank := 0
-	tied := false
-	for _, candidate := range candidates {
-		rank := confidenceRank(candidate.Confidence)
-		if rank > bestRank {
-			best, bestRank, tied = candidate.ID, rank, false
-		} else if rank == bestRank && rank != 0 {
-			tied = true
-		}
-	}
-	if tied {
-		return ""
-	}
-	return best
 }
 
 func confidenceRank(confidence DetectionConfidence) int {

@@ -228,7 +228,9 @@ func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftS
 		return DetectionResult{}, fmt.Errorf("%w: %w: managed Git mirror is unavailable: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
 	}
 	localRef := "refs/just-dashboard/planning/" + strings.TrimPrefix(digestBytes([]byte(remoteRef)), "sha256:")
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+	// Bounded, but for a large repository on a slow link: ten seconds failed
+	// the inspection of exactly the monorepos detection most needs to see.
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 60*time.Second)
 	_, err = runPlanningGit(fetchCtx, mirror, environment,
 		"fetch", "--force", "--depth=1", "--filter=blob:limit=1048576", "--no-tags",
 		"origin", "+"+remoteRef+":"+localRef)
@@ -258,7 +260,7 @@ func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftS
 		}
 		_ = os.RemoveAll(temporary)
 	}()
-	worktreeCtx, cancelWorktree := context.WithTimeout(ctx, 10*time.Second)
+	worktreeCtx, cancelWorktree := context.WithTimeout(ctx, 30*time.Second)
 	_, err = runPlanningGit(worktreeCtx, mirror, environment,
 		"worktree", "add", "--detach", "--force", "--", temporary, identity.Revision)
 	cancelWorktree()

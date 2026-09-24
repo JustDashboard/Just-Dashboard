@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -39,7 +40,7 @@ type composerManifest struct {
 
 func parseComposerManifest(content []byte) (composerManifest, bool) {
 	var manifest composerManifest
-	if json.Unmarshal(content, &manifest) != nil {
+	if json.Unmarshal(manifestText(content), &manifest) != nil {
 		return composerManifest{}, false
 	}
 	return manifest, true
@@ -60,6 +61,16 @@ func (m composerManifest) extensions() []string {
 			continue
 		}
 		names = append(names, extension)
+	}
+	if m.has("laravel/horizon") {
+		// Horizon supervises its workers with process control and reaches
+		// its queues through Redis. Its own composer.json requires both,
+		// so the application's never names them.
+		for _, extension := range []string{"pcntl", "redis"} {
+			if !slices.Contains(names, extension) {
+				names = append(names, extension)
+			}
+		}
 	}
 	sort.Strings(names)
 	return names

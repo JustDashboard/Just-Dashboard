@@ -96,7 +96,11 @@ type DependencyObservation struct {
 }
 
 type ObservationRequest struct {
-	NeedsGit     bool
+	NeedsGit bool
+	// NeedsGitLFS asks whether git-lfs is installed, for a source that
+	// downloads LFS objects: without it the release stops at acquiring the
+	// source.
+	NeedsGitLFS  bool
 	NeedsDocker  bool
 	NeedsBuildx  bool
 	NeedsCompose bool
@@ -173,6 +177,9 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	if request.NeedsGit {
 		observation.Facilities["git"] = FacilityObservation{Available: hostexec.Available("git")}
+	}
+	if request.NeedsGitLFS {
+		observation.Facilities["git-lfs"] = FacilityObservation{Available: hostexec.Available("git-lfs")}
 	}
 	if request.NeedsDocker || request.NeedsCompose {
 		facility := FacilityObservation{}
@@ -451,6 +458,7 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	source := draft.Data.Source
 	request := ObservationRequest{
 		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
+		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
 		NeedsDocker:  configuration.Build.Method != BuildNone,
 		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
 		NeedsCompose: configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
@@ -599,39 +607,10 @@ func preflightFindings(
 			"The selected evidence proposes "+string(selected.BuildMethod)+" for this source.",
 			action, "deploy", "configuration.build.method"))
 	}
-	if len(detection.Candidates) == 0 {
-		findings = append(findings, finding("detection_empty", PreflightBlocked,
-			"No deployable plan was detected", "", "There is no build/runtime candidate to review.",
-			"Choose a build method and configuration.", "deploy", "configuration.build.method"))
-	} else if detection.SelectedID == "" {
-		findings = append(findings, finding("detection_ambiguous", PreflightDecision,
-			"Choose one detected candidate", fmt.Sprintf("%d candidates", len(detection.Candidates)),
-			"Multiple equally strong roots or methods were found.", "Select the intended root and method.",
-			"deploy", "detection.selectedId"))
-	} else {
-		findings = append(findings, finding("detection_selected", PreflightPass,
-			"Detected plan selected", detection.SelectedID, "The build plan has explicit evidence.", "", "deploy", "detection"))
-	}
-	if detection.GitRequirements.Submodules {
-		severity := PreflightDecision
-		action := "Choose whether required submodules should be fetched."
-		if draft.Data.Source.IncludeSubmodules {
-			severity, action = PreflightPass, ""
-		}
-		findings = append(findings, finding("git_submodules", severity,
-			"Repository declares Git submodules", fmt.Sprintf("included: %t", draft.Data.Source.IncludeSubmodules),
-			"Bounded detection does not fetch submodule repositories or their credentials.", action, "git", "source.includeSubmodules"))
-	}
-	if detection.GitRequirements.LFS {
-		severity := PreflightDecision
-		action := "Choose whether required Git LFS objects should be fetched."
-		if draft.Data.Source.IncludeLFS {
-			severity, action = PreflightPass, ""
-		}
-		findings = append(findings, finding("git_lfs", severity,
-			"Repository declares Git LFS objects", fmt.Sprintf("included: %t", draft.Data.Source.IncludeLFS),
-			"Bounded detection skips LFS object downloads.", action, "git", "source.includeLfs"))
-	}
+	// Whether detection chose, and what the source is (preflight_repo_shape.go).
+	findings = append(findings, detectionOutcomeFindings(detection, configuration)...)
+	findings = append(findings, repoShapeFindings(detection, configuration)...)
+	findings = append(findings, gitRequirementFindings(draft.Data.Source, detection, configuration, observation)...)
 	if detection.Compose != nil {
 		configuredVariables := map[string]bool{}
 		for _, variable := range configuration.Variables {
@@ -660,7 +639,7 @@ func preflightFindings(
 	}
 	if detection.Truncated {
 		findings = append(findings, finding("detection_truncated", PreflightWarning,
-			"Repository scan reached a bound", detection.TruncatedReason,
+			"Repository scan reached a bound", fmt.Sprintf("%s; %d candidate(s) found before it", detection.TruncatedReason, len(detection.Candidates)),
 			"Results are deterministic but may not include a deeper candidate.",
 			"Confirm the selected root or narrow the source subdirectory.", "deploy", "source.subdirectory"))
 	}

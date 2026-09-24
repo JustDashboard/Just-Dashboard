@@ -54,10 +54,16 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	if len(first.Candidates) != 2 || first.SelectedID != "" {
 		t.Fatalf("monorepo detection = %#v, want two ambiguous high-confidence candidates", first)
 	}
+	// The declared submodule and LFS pattern lie outside both build roots,
+	// so they are recorded as evidence and owe neither candidate a decision.
+	if !first.GitRequirements.Submodules || !first.GitRequirements.LFS || len(first.GitRequirements.SubmoduleList) != 1 ||
+		first.GitRequirements.SubmoduleList[0].Path != "shared" || first.GitRequirements.LFSFiles != 0 {
+		t.Fatalf("Git requirements = %#v", first.GitRequirements)
+	}
 	for _, candidate := range first.Candidates {
 		decisions := strings.Join(candidate.NeedsDecision, " ")
-		if !strings.Contains(decisions, "submodules") || !strings.Contains(decisions, "Git LFS") {
-			t.Fatalf("candidate lacks bounded Git dependency evidence: %#v", candidate)
+		if strings.Contains(decisions, "submodule") || strings.Contains(decisions, "LFS") {
+			t.Fatalf("candidate owes a Git decision for paths outside its root: %#v", candidate)
 		}
 		for _, evidence := range candidate.Evidence {
 			if strings.Contains(evidence.Path, "linked-outside") {
