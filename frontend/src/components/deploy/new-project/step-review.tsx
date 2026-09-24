@@ -319,6 +319,13 @@ function PassedChecks({
   // Said by the Address node and by the sections above respectively; a pass
   // whose whole content is already on screen is noise at the foot of it.
   const covered = new Set(["dns_verified", "domain_ownership", "detection_selected"])
+  // A pass whose measurement is the answer, not a restatement of its title:
+  // which lockfile was chosen and why, and the commands the build will run.
+  const readings = new Set([
+    "build_commands",
+    "package_manager_resolved",
+    "package_manager_version",
+  ])
   const passed = findings.filter(
     (finding) => finding.severity === "pass" && !covered.has(finding.code),
   )
@@ -336,6 +343,11 @@ function PassedChecks({
         {passed.map((finding, index) => (
           <li key={`${finding.code}:${index}`} className="min-w-0">
             <Status verdict="ok" label={finding.title} className="font-normal" />
+            {readings.has(finding.code) && finding.measured && (
+              <p className="pl-3 font-mono text-hint break-words text-muted-foreground">
+                {finding.measured}
+              </p>
+            )}
           </li>
         ))}
       </ul>

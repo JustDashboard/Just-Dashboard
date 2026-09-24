@@ -243,23 +243,30 @@ const EXEC_RUNNER: Record<NodePackageManager, string> = {
 
 /**
  * Moves a detected command to another package manager: each `&&` segment
- * that is a plain `<manager> run <script>` or a dependency binary run through
- * the manager (`npx prisma migrate deploy`) follows the choice; anything else
- * is the operator's own command and is left alone. A bare `yarn <thing>` is
- * only a binary run when it is chained, because on its own it is just as
- * likely a script shorthand.
+ * that is a plain `<manager> run <script>`, npm's, pnpm's or Yarn's `start`
+ * and `test` shorthands, or a dependency binary run through the manager
+ * (`npx prisma migrate deploy`) follows the choice, after any `NAME=value`
+ * assignments in front of it; anything else is the operator's own command and
+ * is left alone. A bare `yarn <thing>` is only a binary run when it is
+ * chained, because on its own it is just as likely a script shorthand. The
+ * backend moves a saved command the same way at build time (nodeRunnerFor in
+ * build_node_install.go); the two are held to the same rows.
  */
 export function withPackageManagerRunner(command: string, manager?: NodePackageManager) {
   if (!manager) return command
   const segments = command.trim().split(/\s+&&\s+/)
   return segments
     .map((segment) => {
-      const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(segment)
-      if (script) return `${manager} run ${script[1]}`
-      const binary = /^(?:npx|bunx|pnpm exec) (.+)$/.exec(segment)
-      if (binary) return `${EXEC_RUNNER[manager]} ${binary[1]}`
-      const yarnBinary = segments.length > 1 ? /^yarn (?!run )(.+)$/.exec(segment) : null
-      if (yarnBinary) return `${EXEC_RUNNER[manager]} ${yarnBinary[1]}`
+      const [, assignments, body] = /^((?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(.*)$/.exec(segment)!
+      const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(body)
+      if (script) return `${assignments}${manager} run ${script[1]}`
+      const shorthand = /^(npm|pnpm|yarn) (start|test)$/.exec(body)
+      if (shorthand && shorthand[1] !== manager)
+        return `${assignments}${manager} run ${shorthand[2]}`
+      const binary = /^(?:npx|bunx|pnpm exec) (.+)$/.exec(body)
+      if (binary) return `${assignments}${EXEC_RUNNER[manager]} ${binary[1]}`
+      const yarnBinary = segments.length > 1 ? /^yarn (?!run )(.+)$/.exec(body) : null
+      if (yarnBinary) return `${assignments}${EXEC_RUNNER[manager]} ${yarnBinary[1]}`
       return segment
     })
     .join(" && ")
@@ -392,6 +399,117 @@ export function withPersistentVariables(
         value,
       })),
   ]
+}
+
+/**
+ * Moves the plan's commands to the package manager chosen, where `undefined`
+ * is "from the lockfile" — the manager detection resolved, not the command's
+ * old runner. A command that is still one detection proposed is swapped whole
+ * for the one detection proposes for the new manager, which carries what a
+ * pattern cannot (SvelteKit's `bun ./build/index.js` under Bun is `node build`
+ * under npm); a command the operator wrote keeps its words, with only its
+ * plain runner segments moved.
+ */
+export function commandsForPackageManager(
+  candidate: DeploymentDetectionCandidate | undefined,
+  commands: { buildCommand?: string; startCommand?: string },
+  manager: NodePackageManager | undefined,
+) {
+  const target = manager ?? candidate?.packageManager
+  if (!target) return commands
+  const installs = candidate?.nodeInstalls ?? []
+  const chosen = installs.find((install) => install.manager === target)
+  const move = (current: string | undefined, key: "buildCommand" | "startCommand") => {
+    if (!current) return current
+    const detected = installs.some((install) => install[key] === current)
+    if (detected && chosen?.[key]) return chosen[key]
+    return withPackageManagerRunner(current, target)
+  }
+  return {
+    buildCommand: move(commands.buildCommand, "buildCommand"),
+    startCommand: move(commands.startCommand, "startCommand"),
+  }
+}
+
+export const PACKAGE_MANAGER_LABELS: Record<NodePackageManager, string> = {
+  bun: "Bun",
+  npm: "npm",
+  pnpm: "pnpm",
+  yarn: "Yarn",
+}
+
+export type PackageManagerOption = {
+  value: NodePackageManager
+  label: string
+  /** What detection read for this choice: whether its lockfile matches package.json. */
+  hint: string
+  /** The build would refuse it — another manager's lockfile is committed and this one has none. */
+  disabled: boolean
+}
+
+/**
+ * Each package manager as an option, with what choosing it means for this
+ * repository: the incident this exists for was an operator choosing npm
+ * between two lockfiles with nothing saying that package-lock.json was fifteen
+ * dependencies behind while bun.lock matched.
+ */
+export function packageManagerOptions(
+  candidate: DeploymentDetectionCandidate | undefined,
+): PackageManagerOption[] {
+  return (["bun", "npm", "pnpm", "yarn"] as const).map((manager) => {
+    const install = candidate?.nodeInstalls?.find((item) => item.manager === manager)
+    const blocked = install?.findings?.find((finding) => finding.severity === "blocked")
+    let hint = ""
+    if (!install) {
+      // A candidate detected before installs were recorded names lockfiles only.
+      hint = candidate?.packageManagers?.includes(manager) ? "lockfile committed" : ""
+    } else if (blocked) {
+      hint = blocked.code === "package_manager_lockfile_missing" ? "no lockfile" : blocked.title
+    } else if (!install.lockfile) {
+      hint = "no lockfile · unpinned install"
+    } else {
+      const lockfile = candidate?.lockfiles?.find((item) => item.path === install.lockfile)
+      hint =
+        lockfile?.state === "in_sync"
+          ? `${install.lockfile} matches`
+          : lockfile?.state === "stale"
+            ? `${install.lockfile} out of sync`
+            : install.lockfile
+    }
+    return {
+      value: manager,
+      label: PACKAGE_MANAGER_LABELS[manager],
+      hint,
+      disabled: Boolean(blocked),
+    }
+  })
+}
+
+/** What "from the lockfile" resolves to, for the option's own hint. */
+export function automaticPackageManagerHint(candidate: DeploymentDetectionCandidate | undefined) {
+  if (candidate?.packageManager) return PACKAGE_MANAGER_LABELS[candidate.packageManager]
+  return (candidate?.packageManagers?.length ?? 0) > 1 ? "choose one" : ""
+}
+
+/**
+ * The reading under the field for the manager a plan resolves to: what its
+ * lockfile says and the install the recipe runs, e.g. "bun.lock matches
+ * package.json · bun install --frozen-lockfile".
+ */
+export function packageManagerReading(
+  candidate: DeploymentDetectionCandidate | undefined,
+  manager: NodePackageManager | undefined,
+) {
+  const target = manager ?? candidate?.packageManager
+  const install = candidate?.nodeInstalls?.find((item) => item.manager === target)
+  if (!install?.install) return undefined
+  const lockfile = candidate?.lockfiles?.find((item) => item.path === install.lockfile)
+  return [
+    lockfile?.note ?? (install.lockfile ? undefined : "No lockfile is committed"),
+    install.install,
+  ]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 export function defaultConfiguration(
@@ -722,7 +840,12 @@ export function discoveredEnvironmentRows(
     name: variable.name,
     value: "",
     example: variable.example,
-    source: variable.sources[0],
+    // A registry credential is read by the dependency install alone, and the
+    // plan maps it there once it has a value.
+    source:
+      variable.step === "install"
+        ? `${variable.sources[0]} · read by the install`
+        : variable.sources[0],
     detected: true,
     ...(variable.setup ? { setup: variable.setup, reason: variable.setupReason } : {}),
     ...(variable.required ? { required: true } : {}),

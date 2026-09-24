@@ -334,7 +334,7 @@ func TestManifestsWithAByteOrderMarkAreRead(t *testing.T) {
 	if _, err := validateNodeRecipeContent([]byte(bom+nextManifest), nodeRootFiles{}, BuildPlanConfig{Method: BuildRecipe, Recipe: "node"}); err != nil {
 		t.Fatalf("recipe refused a BOM manifest: %v", err)
 	}
-	if declaredNodePackageManager([]byte(bom+`{"packageManager":"pnpm@9.0.0"}`)) != "pnpm" {
+	if facts := readNodeInstallFacts(nodeFiles{}, "", []byte(bom+`{"packageManager":"pnpm@9.0.0"}`), "x64"); facts.declared.name != "pnpm" {
 		t.Fatal("packageManager behind a BOM was not read")
 	}
 	composer := detectShapeFixture(t, map[string]string{"composer.json": bom + `{"require":{"laravel/framework":"^12.0"}}`, "artisan": ""})

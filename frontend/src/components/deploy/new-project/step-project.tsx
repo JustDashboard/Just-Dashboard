@@ -31,10 +31,13 @@ import {
   humanize,
 } from "@/components/deploy/vocabulary"
 import {
+  automaticPackageManagerHint,
   candidateBlocker,
+  commandsForPackageManager,
   composeSourceForCandidate,
   dockerfileStageHint,
-  withPackageManagerRunner,
+  packageManagerOptions,
+  packageManagerReading,
 } from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
@@ -400,6 +403,21 @@ export function StepProject({
             </ul>
           </Disclosure>
         )}
+        {/* The files behind every default above, so a proposal can be
+            checked rather than taken on trust: which lockfile matched, which
+            script starts the server. */}
+        {(flow.candidate?.evidence?.length ?? 0) > 0 && (
+          <Disclosure quiet summary="What detection read">
+            <ul className="space-y-1 text-hint">
+              {flow.candidate!.evidence.map((item, index) => (
+                <li key={`${item.path}-${index}`} className="min-w-0 break-words">
+                  <span className="font-mono">{item.path}</span>
+                  <span className="text-muted-foreground"> — {item.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </Disclosure>
+        )}
         {flow.detection?.compose && (
           <div className="space-y-2 pt-1">
             <div className="flex flex-wrap gap-1.5">
@@ -603,8 +621,12 @@ export function StepProject({
                         goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
+                        // The PHP recipe's asset stage installs through the
+                        // same Node install, so the choice survives the move.
                         packageManager:
-                          recipe === "node" ? configuration.build.packageManager : undefined,
+                          recipe === "node" || recipe === "php"
+                            ? configuration.build.packageManager
+                            : undefined,
                       })
                     }}
                   >
@@ -626,48 +648,66 @@ export function StepProject({
                   </Select>
                 </Field>
               )}
-              {configuration.build.method === "recipe" && configuration.build.recipe === "node" && (
-                <Field
-                  label="Package manager"
-                  htmlFor="package-manager"
-                  hint={
-                    (flow.candidate?.packageManagers?.length ?? 0) > 1 &&
-                    !flow.candidate?.packageManager
-                      ? `This repository has lockfiles for ${flow.candidate?.packageManagers?.join(" and ")}. Choose the one it uses.`
-                      : "Leave on the lockfile unless the repository has more than one."
-                  }
-                >
-                  <Select
-                    value={configuration.build.packageManager ?? "lockfile"}
-                    onValueChange={(value) => {
-                      const packageManager =
-                        value === "lockfile" ? undefined : (value as NodePackageManager)
-                      updateBuild({
-                        packageManager,
-                        buildCommand: withPackageManagerRunner(
-                          configuration.build.buildCommand ?? "",
-                          packageManager,
-                        ),
-                        startCommand: withPackageManagerRunner(
-                          configuration.build.startCommand ?? "",
-                          packageManager,
-                        ),
-                      })
-                    }}
+              {configuration.build.method === "recipe" &&
+                (configuration.build.recipe === "node" ||
+                  (configuration.build.recipe === "php" &&
+                    (flow.candidate?.nodeInstalls?.length ?? 0) > 0)) && (
+                  <Field
+                    label="Package manager"
+                    htmlFor="package-manager"
+                    hint={
+                      packageManagerReading(flow.candidate, configuration.build.packageManager) ??
+                      ((flow.candidate?.packageManagers?.length ?? 0) > 1 &&
+                      !flow.candidate?.packageManager
+                        ? `This repository has lockfiles for ${flow.candidate?.packageManagers?.join(" and ")}. Choose the one it uses.`
+                        : "Leave on the lockfile unless the repository has more than one.")
+                    }
                   >
-                    <SelectTrigger id="package-manager" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lockfile">From the lockfile</SelectItem>
-                      <SelectItem value="bun">Bun</SelectItem>
-                      <SelectItem value="npm">npm</SelectItem>
-                      <SelectItem value="pnpm">pnpm</SelectItem>
-                      <SelectItem value="yarn">Yarn</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
+                    <Select
+                      value={configuration.build.packageManager ?? "lockfile"}
+                      onValueChange={(value) => {
+                        const packageManager =
+                          value === "lockfile" ? undefined : (value as NodePackageManager)
+                        // The PHP recipe's commands are PHP's; only the asset
+                        // stage follows the manager, and it names its own.
+                        updateBuild(
+                          configuration.build.recipe === "php"
+                            ? { packageManager }
+                            : {
+                                packageManager,
+                                ...commandsForPackageManager(
+                                  flow.candidate,
+                                  configuration.build,
+                                  packageManager,
+                                ),
+                              },
+                        )
+                      }}
+                    >
+                      <SelectTrigger id="package-manager" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem
+                          value="lockfile"
+                          hint={automaticPackageManagerHint(flow.candidate)}
+                        >
+                          From the lockfile
+                        </SelectItem>
+                        {packageManagerOptions(flow.candidate).map((option) => (
+                          <SelectItem
+                            key={option.value}
+                            value={option.value}
+                            hint={option.hint}
+                            disabled={option.disabled}
+                          >
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
               {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
                 <Field
                   label="Go version"

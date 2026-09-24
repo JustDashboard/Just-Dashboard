@@ -197,7 +197,7 @@ func annotateImageFacts(tree detectionTree, markers map[string]*detectedMarkers,
 				kind = "static"
 			}
 			ignore, _ := tree.read(joinRoot(candidate.Root, ".dockerignore"), 256<<10)
-			_, dropped := recipeDockerignore(ignore, tree.entries(candidate.Root), kind)
+			_, dropped := recipeDockerignore(ignore, tree.entries(candidate.Root), kind, nil)
 			for _, drop := range dropped {
 				candidate.ImageBuildIssues = append(candidate.ImageBuildIssues, newImageBuildIssue("dockerignore_drops_recipe_input",
 					PreflightWarning, 0, drop.Input, ".dockerignore rule "+drop.Rule+" would leave out "+drop.Input+"; the automatic build sets that rule aside"))

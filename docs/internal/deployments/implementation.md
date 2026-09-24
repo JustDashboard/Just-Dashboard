@@ -265,12 +265,31 @@ only renderer/executor/validation authority for their feature.
   instead of being silently discarded. Setup saves a typed database reference; activation joins an owned
   environment network and reconciliation repairs the DNS alias after a matching container replacement.
   Existing literal IP variables require reconnecting once. See [database networks](database-networks.md).
-- Detected JavaScript commands name the package manager the checkout's lockfile locks to
-  (`bun`/`pnpm`/`yarn`/`npm run …`). Competing lockfiles resolve only through the explicit build setting
-  or `package.json` `packageManager`; changing the setting in the UI rewrites plain `<manager> run
-  <script>` commands to the new runner. The recipe picks its base image from that same lockfile, and
-  `oven/bun` carries no npm, so a hardcoded `npm run build` was a build that installed cleanly and then
-  died on `npm: not found`.
+- A JavaScript package's install is one plan (`deploy/build_node_install.go`) that detection,
+  preflight and the recipe share, computed from lockfiles and package-manager configuration read as data
+  under their own budget (`build_node_lockfile.go`), each lockfile and workspace manifest parsed once per
+  detection however many members compare against it. Detection records each committed lockfile compared
+  with `package.json` (`lockfiles`: `in_sync`/`stale`/`unknown` with the drift named), the plan under each
+  of the four managers with that manager's build and start commands and its preflight findings
+  (`nodeInstalls`), and the Node release (`nodeVersion`: the nearest version file or the `package.json`
+  volta/devEngines/engines field, on the digest-pinned `node:20`/`22`/`24` catalogue, 22 by default —
+  `build_node_runtime.go`); competing lockfiles resolve through the build
+  setting, the manifest's declaration, the one lockfile a frozen install accepts, the one in sync, then
+  manager-exclusive files, and only a tie is `package_manager_ambiguous`. Preflight
+  (`preflight_node.go`) judges `configuration.build.packageManager` — or the resolved manager when it is
+  empty — from that record, so a stale chosen lockfile is `lockfile_out_of_sync` before Deploy, and the
+  recipe installs unfrozen instead of failing a frozen install. pnpm and Yarn Berry releases are pinned
+  (declaration, or `nodeManagerReleases` keyed by lockfile format) into a `toolchain` stage the server's
+  runtime stage shares, Bun is copied beside Node rather than replacing it, and a workspace member
+  prepares from its workspace root (`ArtifactBuilder.PrepareWithin`, `prepared.contextDirectory`;
+  `workspace_lockfile` names it before Deploy, and a member directory the Dockerfile cannot carry unquoted
+  is `workspace_member_path_unsupported`). The
+  UI swaps whole commands between managers from `nodeInstalls`, "From the lockfile" follows the resolved
+  manager, and at build time a saved command whose plain runner names another manager runs through the
+  resolved one with a logged note (`prepared.notes`, `prepared.buildCommand`/`startCommand`) and a
+  `runner_mismatch` preflight warning. The configuration read carries `detected`, the stored candidate
+  the build still describes, so Build settings show which lockfile matches. The contract is
+  [the recipe guide](recipes.md#javascript-installs).
 - Detection is a catalogue, not a handful of special cases. `deploy/frameworks_node.go` names Next.js,
   SvelteKit, Astro, Nuxt, Remix, React Router, SolidStart, TanStack Start, Nitro, Angular, NestJS,
   Gatsby, Docusaurus, VitePress, Eleventy, Create React App, Vue CLI, Ember, Parcel and Vite, in an
@@ -370,15 +389,20 @@ only renderer/executor/validation authority for their feature.
   binary runner (`npx`/`bunx`/`pnpm exec`/`yarn`). Prisma and Drizzle deploy committed migrations and
   otherwise push the declared model; Knex, Sequelize and MikroORM run their migration command; TypeORM
   is recorded as a decision because its data source cannot be guessed. The rule set lives in
-  `deploy/schema_tools.go`; the Python tools (Django, Alembic, Flask-Migrate, Aerich) and EF Core are in
-  `deploy/detect_schema.go` and share the same lookup. Preflight adds `schema_step_missing` (warning, on
+  `deploy/schema_tools.go`; Prisma's schema path follows `package.json`'s `prisma.schema` and
+  `prisma.config.*`'s `schema:`/`migrations.path`, and the recipe generates the Prisma client itself with
+  placeholders for the names `prisma.config.*` reads through `env()` (`build_node_prisma.go`). The Python
+  tools (Django, Alembic, Flask-Migrate, Aerich) and EF Core are in `deploy/detect_schema.go` and share
+  the same lookup. Preflight adds `schema_step_missing` (warning, on
   the start command) when a database is linked and neither the start command, a release task nor the
   start script runs the tool, and `schema_step` (pass) when one does; no linked database means no
   finding. A step that pushes the declared model (`prisma db push`, `drizzle-kit push`, recorded as
   `schemaPush` when the package's own start script does it) is `schema_push_unversioned` (warning)
   instead of a pass, linked database or not, and a refused push is named `schema_push_refused` by the
-  failed gate's output classifier. Changing the package manager rewrites the chained binary runner with
-  the script runner.
+  failed gate's output classifier. Changing the package manager swaps the whole start command for
+  detection's command for that manager, chained step included; detection records each manager's commands
+  after every pass that rewrites them (`refreshNodeInstalls`), so a settled detaching start or a preview
+  bound to every interface moves with the runner.
 - Detection records the state an application writes to its own filesystem as `persistentPaths`
   (`deploy/detect_state.go`, [the recipe guide](recipes.md#persistent-state)): SQLite files, upload
   directories, framework storage, Dockerfile and image `VOLUME`s and ASP.NET's Data Protection key ring,
@@ -409,7 +433,24 @@ only renderer/executor/validation authority for their feature.
   pgvector or PostGIS — one bounded `pg_available_extensions` read through the dashboard's own pool
   (`PlanningDatabaseExtensions`). It cannot build, pull, start, stop, write proxy/firewall
   configuration, modify a checkout or enqueue a backup. The persisted exact
-  plan excludes raw observed import material and accepts only typed secret references.
+  plan excludes raw observed import material and accepts only typed secret references. The observer
+  reads `MemAvailable` and `SwapFree`, and `build_memory_low` (warning, `preflight_build.go`) compares
+  them with the selected recipe's estimated build peak (a Next.js, Nuxt, Angular, Gatsby, Docusaurus,
+  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, Maven/Gradle and .NET
+  ~1.5 GiB). The JavaScript recipe leaves V8's heap at its default rather than injecting
+  `NODE_OPTIONS`, which every worker process of a build would inherit. The same file judges what the
+  configuration gives a JavaScript build against what the candidate recorded (`nodeBuild`): an
+  env-validation schema's variables without a build value (`build_env_validation_skipped`,
+  `build_env_missing`, `build_env_client_missing` — when the recipe runs the build past a schema that
+  honours `SKIP_ENV_VALIDATION`, the environment check does not also refuse those names as
+  `build_variable_missing_*`, and without the skip it refuses them per field and the schema's summary
+  lists only the rest), a prerendering framework's build-scoped database URL that points at a
+  `db-N.jd.internal` alias or loopback, or a typed database reference (`build_database_unreachable` —
+  BuildKit cannot join the environment's network, and `--network=host` would hand repository build code
+  the host's loopback services), and platform variables an operator's pasted `.env` sets
+  (`port_variable_mismatch`, `node_env_not_production`, `host_variable_loopback_hostname`; a loopback
+  `HOST` is the environment check's `host_variable_loopback_host`). Values are compared, never echoed,
+  except a port number, a `NODE_ENV` word and a host name.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
   static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
@@ -426,7 +467,11 @@ only renderer/executor/validation authority for their feature.
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
   dashboard files stay out of the image whatever the repository's own ignore file says.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
-  package credentials. Serving defaults per framework, the Python install shapes and interpreter
+  package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
+  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
+  alone and mapped to the install step when a draft supplies it (`Draft.withEnvironmentMetadata`), and
+  `registry_token_missing` names one that cannot reach the install, for the PHP asset stage too. Preparation logs its install decisions (an unfrozen install, a moved runner, a
+  `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter
   selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
   behavior are defined in [the recipe contract](recipes.md), including the exact limits of live
   framework verification.

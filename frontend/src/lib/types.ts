@@ -2392,6 +2392,8 @@ export type DeploymentBuildEvidence = {
       recipeVersion?: string
       /** The language release the recipe built with: "rust 1.85", "java 21 (maven)". */
       toolchain?: string
+      /** The Node major a JavaScript build ran on and what chose it: "22 (.nvmrc)". */
+      nodeVersion?: string
       baseImages?: { reference: string; digest: string }[]
       dockerfilePreview?: string
       dockerfileDigest?: string
@@ -3238,6 +3240,13 @@ export type DeploymentDraftSource = {
 
 export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
 
+/**
+ * The recipe stage a build variable is mounted in: the dependency install, the
+ * build command, or both — a root package's own postinstall runs inside the
+ * install. `validBuildSecretStep` is the server's closed set.
+ */
+export type BuildSecretStep = "install" | "build" | "install_and_build"
+
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
   "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
@@ -3270,6 +3279,42 @@ export type DeploymentDetectedVariable = {
   requiredRead?: boolean
   /** A committed file whose value for this name points at loopback. */
   localhostIn?: string
+  /**
+   * "install" for a registry credential a package manager's configuration
+   * (.npmrc, .yarnrc.yml, bunfig.toml) names: only the dependency install
+   * reads it. `installRequired` says the install fails without it.
+   */
+  step?: "install"
+  installRequired?: boolean
+}
+
+/** A committed JavaScript lockfile, compared as data with package.json. */
+export type DeploymentDetectedLockfile = {
+  path: string
+  manager: NodePackageManager
+  /** `stale` is what the manager's frozen install would refuse. */
+  state: "in_sync" | "stale" | "unknown"
+  missing?: string[]
+  extra?: string[]
+  changed?: string[]
+  /** The sentence an operator reads: "package-lock.json is missing 15 dependencies (…)". */
+  note?: string
+}
+
+/**
+ * What the recipe installs when `manager` is chosen, computed by the same
+ * planner the build runs. An empty `install` with a blocked finding is a
+ * choice the build would refuse.
+ */
+export type DeploymentDetectedNodeInstall = {
+  manager: NodePackageManager
+  lockfile?: string
+  install?: string
+  toolchain?: string
+  /** Detection's commands for this manager's runner. */
+  buildCommand?: string
+  startCommand?: string
+  findings?: DeploymentPreflightFinding[]
 }
 
 export type DeploymentVariableSetup = "generate" | "domain" | "default" | "paste"
@@ -3479,6 +3524,24 @@ export type DeploymentDetectionCandidate = {
     actual: string
     language: "javascript" | "php"
   }[]
+  lockfiles?: DeploymentDetectedLockfile[]
+  nodeInstalls?: DeploymentDetectedNodeInstall[]
+  /** The Node major the recipe builds on and where it came from, e.g. "22 (.nvmrc)". */
+  nodeVersion?: string
+  /**
+   * What the build reads that preflight judges against the configuration and
+   * the host: the env-validation schema it imports and the memory it is
+   * estimated to peak at.
+   */
+  nodeBuild?: {
+    envSchema?: string
+    envServer?: string[]
+    envClient?: string[]
+    envSkippable?: boolean
+    memoryMiB?: number
+    /** Names `prisma.config` reads that the recipe gives a placeholder while `prisma generate` runs. */
+    prismaEnv?: string[]
+  }
 }
 
 export type DeploymentDockerfileArg = {
@@ -3717,7 +3780,7 @@ export type DeploymentConfiguration = {
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
     noCache?: boolean
-    secrets?: { variable: string; step: "install" | "build" }[]
+    secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
       name: string
       command: string
@@ -3852,6 +3915,8 @@ export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "
   /** Present once the backend fills it in; until then the Source card falls back to the summary. */
   source?: DeploymentDraftSource
   identity?: SourceIdentity
+  /** The detected candidate this build still describes, from the evidence saved with the plan. */
+  detected?: DeploymentDetectionCandidate
 }
 
 /**

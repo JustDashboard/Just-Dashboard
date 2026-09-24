@@ -105,9 +105,14 @@ type detectedSchemaTool struct {
 // detectSchemaTool picks the first configured tool the manifest depends on.
 // Paths are relative to the package root. The precedence matters only when a
 // project carries two tools, where the earlier one is the one that owns
-// migrations in practice.
-func detectSchemaTool(dependencies map[string]string, paths []string) *detectedSchemaTool {
+// migrations in practice. prisma is what Prisma's own configuration says
+// about where its schema and migrations are, which moves them out of the
+// default lookup.
+func detectSchemaTool(dependencies map[string]string, paths []string, prisma nodePrismaFacts) *detectedSchemaTool {
 	for _, tool := range schemaTools {
+		if tool.Name == "prisma" && prisma.schema != "" {
+			tool.configFile, tool.migrationFile = prismaDeclaredLocations(prisma, paths)
+		}
 		declared := ""
 		for _, name := range tool.Dependencies {
 			if dependencies[name] != "" {
@@ -153,6 +158,31 @@ func detectSchemaTool(dependencies map[string]string, paths []string) *detectedS
 		return result
 	}
 	return nil
+}
+
+// prismaDeclaredLocations matches a schema at the path package.json or
+// prisma.config declares — a file, or a directory of .prisma files — and
+// the migrations Prisma keeps beside it or at the declared path.
+func prismaDeclaredLocations(prisma nodePrismaFacts, paths []string) (func(string) bool, func(string) bool) {
+	schema := prisma.schema
+	directory := path.Dir(schema)
+	for _, candidate := range paths {
+		if strings.HasPrefix(candidate, schema+"/") {
+			directory = schema
+			break
+		}
+	}
+	migrations := path.Join(directory, "migrations")
+	if prisma.migrations != "" {
+		migrations = prisma.migrations
+	}
+	config := func(p string) bool {
+		return p == schema || (directory == schema && strings.HasPrefix(p, schema+"/") && strings.HasSuffix(p, ".prisma"))
+	}
+	migration := func(p string) bool {
+		return path.Base(p) == "migration.sql" && strings.HasPrefix(p, migrations+"/")
+	}
+	return config, migration
 }
 
 func schemaToolByName(name string) *schemaTool {

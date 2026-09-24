@@ -30,7 +30,7 @@ func TestDockerignoreMatchesBuildKitSemantics(t *testing.T) {
 func TestRecipeDockerignoreKeepsRepositoryRulesButNotRecipeInputs(t *testing.T) {
 	t.Parallel()
 	content, dropped := recipeDockerignore([]byte("*\n!dist\n!package.json\nnode_modules\n*.log\n"),
-		[]string{"package.json", "bun.lock", "next.config.ts", "src", "README.md"}, "node")
+		[]string{"package.json", "bun.lock", "next.config.ts", "src", "README.md"}, "node", nil)
 	if len(dropped) != 1 || dropped[0].Rule != "*" || dropped[0].Input != "bun.lock" {
 		t.Fatalf("dropped = %+v", dropped)
 	}
@@ -45,7 +45,7 @@ func TestRecipeDockerignoreKeepsRepositoryRulesButNotRecipeInputs(t *testing.T) 
 		}
 	}
 
-	static, _ := recipeDockerignore(nil, []string{"index.html"}, "static")
+	static, _ := recipeDockerignore(nil, []string{"index.html"}, "static", nil)
 	rules = parseDockerignore([]byte(static))
 	for _, path := range []string{".env", ".env.production", ".git/HEAD"} {
 		if excluded, _ := dockerignoreExcludes(rules, path); !excluded {
@@ -53,7 +53,7 @@ func TestRecipeDockerignoreKeepsRepositoryRulesButNotRecipeInputs(t *testing.T) 
 		}
 	}
 	// Toolchains that stamp builds from Git keep the repository metadata.
-	golang, _ := recipeDockerignore(nil, []string{"go.mod"}, "go")
+	golang, _ := recipeDockerignore(nil, []string{"go.mod"}, "go", nil)
 	if excluded, _ := dockerignoreExcludes(parseDockerignore([]byte(golang)), ".git/HEAD"); excluded {
 		t.Error("the Go recipe lost .git")
 	}
@@ -98,7 +98,7 @@ func TestPreparedRecipeAndStaticBuildsWriteTheirIgnoreFile(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, ".just-dashboard")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeGeneratedDockerignore(root, "x\n"); err == nil {
+	if _, err := writeRecipeDockerignore(root, "static", nil); err == nil {
 		t.Fatal("the ignore file followed a checkout symlink out of the context")
 	}
 }

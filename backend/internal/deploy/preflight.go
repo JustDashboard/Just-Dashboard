@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,11 +50,14 @@ type HostObservation struct {
 	OS              string                         `json:"os"`
 	Architecture    string                         `json:"architecture"`
 	AvailableMemory int64                          `json:"availableMemoryBytes"`
-	AvailableDisk   int64                          `json:"availableDiskBytes"`
-	CPUCount        int                            `json:"cpuCount,omitempty"`
-	Domains         []DomainObservation            `json:"domains"`
-	Firewall        FirewallObservation            `json:"firewall"`
-	Dependencies    []DependencyObservation        `json:"dependencies"`
+	// AvailableSwap is free swap, which a build can page into when memory
+	// runs short.
+	AvailableSwap int64                   `json:"availableSwapBytes,omitempty"`
+	AvailableDisk int64                   `json:"availableDiskBytes"`
+	CPUCount      int                     `json:"cpuCount,omitempty"`
+	Domains       []DomainObservation     `json:"domains"`
+	Firewall      FirewallObservation     `json:"firewall"`
+	Dependencies  []DependencyObservation `json:"dependencies"`
 	// ReplacesRuntime says a live release is being replaced, so the data a
 	// plan keeps already exists; only a first release starts it empty.
 	ReplacesRuntime bool `json:"replacesRuntime,omitempty"`
@@ -394,7 +396,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			observation.Dependencies = observed
 		}
 	}
-	observation.AvailableMemory = availableMemory()
+	observation.AvailableMemory, observation.AvailableSwap = hostMemory()
 	observation.CPUCount = runtime.NumCPU()
 	observation.CPUFeatures = HostCPUFeatures()
 	diskRoot := o.volumeRoot
@@ -623,19 +625,9 @@ func preflightFindings(
 				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
 		}
 	}
-	if selected != nil && selected.Recipe == "node" && configuration.Build.Method == BuildRecipe {
-		switch chosen := configuration.Build.PackageManager; {
-		case chosen != "" && len(selected.PackageManagers) > 0 && !slices.Contains(selected.PackageManagers, chosen):
-			findings = append(findings, finding("package_manager_lockfile_missing", PreflightBlocked,
-				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(selected.PackageManagers, ", "),
-				"A frozen install needs the selected manager's own lockfile.",
-				"Choose a package manager whose lockfile is committed, or commit its lockfile.", "deploy", "configuration.build.packageManager"))
-		case chosen == "" && selected.PackageManager == "" && len(selected.PackageManagers) > 1:
-			findings = append(findings, finding("package_manager_ambiguous", PreflightBlocked,
-				"Competing lockfiles need a package manager", strings.Join(selected.PackageManagers, ", "),
-				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
-				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
-		}
+	if selected != nil && configuration.Build.Method == BuildRecipe &&
+		(selected.Recipe == "node" || (selected.Recipe == "php" && len(selected.NodeInstalls) > 0)) {
+		findings = append(findings, nodeInstallFindings(selected, configuration)...)
 	}
 	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
@@ -1057,6 +1049,12 @@ func preflightFindings(
 			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
 			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
+	findings = append(findings, buildMemoryFindings(selected, configuration, observation)...)
+	findings = append(findings, platformVariableFindings(configuration, resolvedVariables)...)
+	if selected != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
+		findings = append(findings, buildEnvValidationFindings(selected, configuration, resolvedVariables)...)
+		findings = append(findings, buildDatabaseFindings(selected, configuration, resolvedVariables)...)
+	}
 	if observation.AvailableMemory > 0 && observation.AvailableMemory < 256<<20 {
 		findings = append(findings, finding("host_memory_low", PreflightWarning,
 			"Host memory headroom is low", fmt.Sprintf("%d MiB available", observation.AvailableMemory>>20),
@@ -1446,21 +1444,29 @@ func listeningTCPPorts() map[int]bool {
 	return result
 }
 
-func availableMemory() int64 {
+// hostMemory reads the memory available to a new workload and the free
+// swap, in bytes.
+func hostMemory() (available, swap int64) {
 	file, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[0] == "MemAvailable:" {
-			value, _ := strconv.ParseInt(fields[1], 10, 64)
-			return value * 1024
+		if len(fields) < 2 {
+			continue
+		}
+		value, _ := strconv.ParseInt(fields[1], 10, 64)
+		switch fields[0] {
+		case "MemAvailable:":
+			available = value * 1024
+		case "SwapFree:":
+			swap = value * 1024
 		}
 	}
-	return 0
+	return available, swap
 }
 
 func stableFindingCodes(findings []PreflightFinding) []string {

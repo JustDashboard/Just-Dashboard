@@ -1,0 +1,5 @@
+const express = require('express')
+const value = require('fs').readFileSync(__dirname + '/value.txt', 'utf8')
+const app = express()
+app.get('/', (request, response) => response.send('<main>' + value + '</main>'))
+app.listen(Number(process.env.PORT) || 3000, '0.0.0.0')

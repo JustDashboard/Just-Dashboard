@@ -1,6 +1,10 @@
 package deploy
 
-import "sort"
+import (
+	"path"
+	"slices"
+	"sort"
+)
 
 func (d *Draft) refreshEnvironmentKeys() {
 	d.EnvironmentKeys = nil
@@ -27,13 +31,63 @@ func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanCon
 		}
 	}
 	sort.Strings(names)
+	installOnly := d.installOnlyCredentials()
 	for _, name := range names {
+		scopes := []string{"runtime", "build"}
+		if installOnly[name] {
+			// Only the install reads a registry token, so the running
+			// application never receives it.
+			scopes = []string{"build"}
+		}
 		configuration.Variables = append(configuration.Variables, PlannedVariable{
 			Name: name, Sensitivity: suppliedVariableSensitivity(PlannedVariable{Name: name, Sensitivity: "plain"}),
-			Scopes: []string{"runtime", "build"},
+			Scopes: scopes,
 		})
 	}
-	return canonicalConfiguration(configuration)
+	return canonicalConfiguration(d.withInstallCredentials(configuration))
+}
+
+// installOnlyCredentials are the registry credentials detection found in a
+// package manager's configuration and nowhere the source reads at run time.
+func (d *Draft) installOnlyCredentials() map[string]bool {
+	names := map[string]bool{}
+	candidate := selectedDetectionCandidate(d.Data.Detection)
+	if candidate == nil {
+		return names
+	}
+	for _, detected := range candidate.Variables {
+		if detected.Step == "install" && len(detected.Sources) > 0 && !slices.ContainsFunc(detected.Sources, func(source string) bool {
+			return !slices.Contains(nodeRegistryConfigFiles, path.Base(source))
+		}) {
+			names[detected.Name] = true
+		}
+	}
+	return names
+}
+
+// withInstallCredentials maps each registry credential detection found in a
+// package manager's configuration to the install step, when the plan gives
+// it a build-scoped value and has not mapped it already: the install is the
+// one step that reads it, and a value left on the build step never reaches
+// the install that fails without it.
+func (d *Draft) withInstallCredentials(configuration PlanConfiguration) PlanConfiguration {
+	candidate := selectedDetectionCandidate(d.Data.Detection)
+	if candidate == nil || configuration.Build.Method != BuildRecipe {
+		return configuration
+	}
+	for _, detected := range candidate.Variables {
+		if detected.Step != "install" || slices.ContainsFunc(configuration.Build.Secrets, func(secret BuildSecretConfig) bool {
+			return secret.Variable == detected.Name
+		}) {
+			continue
+		}
+		if slices.ContainsFunc(configuration.Variables, func(variable PlannedVariable) bool {
+			return variable.Name == detected.Name && slices.Contains(variable.Scopes, "build")
+		}) {
+			configuration.Build.Secrets = append(configuration.Build.Secrets, BuildSecretConfig{Variable: detected.Name, Step: "install"})
+		}
+	}
+	return configuration
 }
 
 // suppliedVariableSensitivity is how a value typed into the environment is

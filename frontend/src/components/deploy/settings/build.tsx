@@ -47,9 +47,12 @@ import { useProject } from "@/components/deploy/project-context"
 import {
   BROWSER_PREFIX,
   PYTHON_VERSION,
+  automaticPackageManagerHint,
+  commandsForPackageManager,
   dockerfileStageHint,
+  packageManagerOptions,
+  packageManagerReading,
   validateConfiguration,
-  withPackageManagerRunner,
 } from "@/components/deploy/deployment-defaults"
 import {
   BUILD_METHOD_SHORT,
@@ -249,13 +252,17 @@ const BUILDERS: Builder[] = [
   },
 ]
 
-const MANAGERS: { key?: NodePackageManager; label: string; detail: string }[] = [
-  { label: "Lockfile", detail: "decides" },
-  { key: "bun", label: "Bun", detail: "bun.lock" },
-  { key: "npm", label: "npm", detail: "package-lock" },
-  { key: "pnpm", label: "pnpm", detail: "pnpm-lock" },
-  { key: "yarn", label: "Yarn", detail: "yarn.lock" },
-]
+/**
+ * Each manager's lockfile by name, for a project whose saved evidence predates
+ * detection reading them; with it, each card says whether its lockfile
+ * matches package.json.
+ */
+const LOCKFILE_NAMES: Record<NodePackageManager, string> = {
+  bun: "bun.lock",
+  npm: "package-lock",
+  pnpm: "pnpm-lock",
+  yarn: "yarn.lock",
+}
 
 const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
 
@@ -661,6 +668,18 @@ function BuildForm({
   const bunLastBuild = evidence?.prepared?.baseImages?.some((base) =>
     base.reference.startsWith("oven/bun"),
   )
+  // What detection read for the code this build still describes; absent
+  // once the build moved to a directory or recipe detection did not read.
+  const detected = configuration.detected
+  // "Lockfile" resolves to the manager detection chose, so a command left on
+  // another manager's runner moves with it instead of staying behind on an
+  // image that lacks that runner.
+  const choosePackageManager = (packageManager: NodePackageManager | undefined) =>
+    setBuild({
+      ...build,
+      packageManager,
+      ...(recipe === "php" ? {} : commandsForPackageManager(detected, build, packageManager)),
+    })
   // What the last build did is said only while the draft still builds the
   // same way: a Node toolchain or a Node Dockerfile under a Python recipe
   // would be a stale fact dressed as a current one.
@@ -687,7 +706,9 @@ function BuildForm({
         secrets: build.method === "recipe" ? build.secrets : [],
         goVersion: next === "go" ? build.goVersion : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
-        packageManager: next === "node" ? build.packageManager : undefined,
+        // The PHP recipe's asset stage installs through the same Node
+        // install, so the choice survives the move between the two.
+        packageManager: next === "node" || next === "php" ? build.packageManager : undefined,
       })
       return
     }
@@ -732,6 +753,7 @@ function BuildForm({
           asLastBuilt &&
           evidence?.prepared?.toolchain && (
             <span className="block truncate font-mono">
+              {evidence.prepared.nodeVersion && `node ${evidence.prepared.nodeVersion} · `}
               {evidence.prepared.toolchain} · last build
             </span>
           )
@@ -778,44 +800,49 @@ function BuildForm({
           />
         )}
 
-        {build.method === "recipe" && recipe === "node" && (
-          <Field
-            label="Package manager"
-            hint="Pick one when the repository has more than one lockfile."
-            error={errorFor("build-package-manager")}
-          >
-            <ChoiceGrid
-              id="build-package-manager"
-              columns="compact"
-              role="group"
-              aria-label="Package manager"
+        {build.method === "recipe" &&
+          (recipe === "node" ||
+            (recipe === "php" && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            <Field
+              label="Package manager"
+              hint={
+                packageManagerReading(detected, build.packageManager) ??
+                "Pick one when the repository has more than one lockfile."
+              }
+              error={errorFor("build-package-manager")}
             >
-              {MANAGERS.map((manager) => (
+              <ChoiceGrid
+                id="build-package-manager"
+                columns="compact"
+                role="group"
+                aria-label="Package manager"
+              >
                 <ProductCard
-                  key={manager.label}
-                  product={manager.key}
                   fallback={LockClosed}
-                  label={manager.label}
-                  detail={!manager.key && bunLastBuild ? "bun last build" : manager.detail}
-                  selected={build.packageManager === manager.key}
-                  disabled={!canEdit}
-                  onClick={() =>
-                    setBuild({
-                      ...build,
-                      packageManager: manager.key,
-                      buildCommand:
-                        build.buildCommand &&
-                        withPackageManagerRunner(build.buildCommand, manager.key),
-                      startCommand:
-                        build.startCommand &&
-                        withPackageManagerRunner(build.startCommand, manager.key),
-                    })
+                  label="Lockfile"
+                  detail={
+                    automaticPackageManagerHint(detected) ||
+                    (bunLastBuild ? "bun last build" : "decides")
                   }
+                  selected={build.packageManager === undefined}
+                  disabled={!canEdit}
+                  onClick={() => choosePackageManager(undefined)}
                 />
-              ))}
-            </ChoiceGrid>
-          </Field>
-        )}
+                {packageManagerOptions(detected).map((option) => (
+                  <ProductCard
+                    key={option.value}
+                    product={option.value}
+                    fallback={LockClosed}
+                    label={option.label}
+                    detail={option.hint || LOCKFILE_NAMES[option.value]}
+                    selected={build.packageManager === option.value}
+                    disabled={!canEdit || option.disabled}
+                    onClick={() => choosePackageManager(option.value)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </Field>
+          )}
 
         {build.method === "recipe" && recipe === "python" && (
           <Field
@@ -1166,7 +1193,7 @@ function BuildForm({
               const product = variableProduct(variable.name)
               const ships =
                 variable.sensitivity === "secret" &&
-                stage === "build" &&
+                stage !== "install" &&
                 BROWSER_PREFIX.test(variable.name)
               return (
                 <li key={variable.name} className="min-w-0 py-2 first:pt-0 last:pb-0">
@@ -1202,15 +1229,15 @@ function BuildForm({
                             ...(build.secrets ?? []).filter(
                               (binding) => binding.variable !== variable.name,
                             ),
-                            ...(step === "install"
-                              ? [{ variable: variable.name, step: "install" as const }]
-                              : []),
+                            // "build" is what an unmapped build value already gets.
+                            ...(step === "build" ? [] : [{ variable: variable.name, step }]),
                           ],
                         })
                       }
                       options={[
                         { value: "build", label: "Build" },
                         { value: "install", label: "Install only" },
+                        { value: "install_and_build", label: "Both" },
                       ]}
                     />
                   </div>
@@ -1224,7 +1251,10 @@ function BuildForm({
               )
             })}
           </ul>
-          <FormNote>Install only keeps a private registry token out of the build command.</FormNote>
+          <FormNote>
+            Install only keeps a private registry token out of the build command. Both also mounts
+            the value in the install, for a postinstall script that reads it.
+          </FormNote>
         </SettingSection>
       )}
     </SettingForm>

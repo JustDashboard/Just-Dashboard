@@ -115,6 +115,13 @@ type EnvironmentConfiguration struct {
 	// names one, the same as everywhere else this type is returned.
 	Source   *DraftSourceConfig `json:"source,omitempty"`
 	Identity *SourceIdentity    `json:"identity,omitempty"`
+	// Detected is the candidate detection recorded for what this build
+	// still describes — the same directory, method and recipe — from the
+	// evidence saved with the desired plan: its lockfiles and the install
+	// each package manager runs, so Build settings can say which choice
+	// matches the repository. It is absent once the build describes
+	// something detection did not read.
+	Detected *DetectedCandidate `json:"detected,omitempty"`
 }
 
 type ConfigurationWriteRequest struct {
@@ -1024,19 +1031,19 @@ func (s *PlanningStore) EnvironmentConfiguration(
 		Variables: []DeploymentVariable{}, Dependencies: []PlannedDependency{},
 		Checks: []PlannedCheck{}, Domains: []PlannedDomain{},
 	}
-	var buildJSON, runtimeJSON string
+	var buildJSON, runtimeJSON, evidenceJSON string
 	// The LEFT JOIN is the same desired-revision source row SaveEnvironmentSource
 	// starts from; a legacy project without one leaves sourceJSON/identityJSON
 	// NULL instead of failing this read.
 	var sourceJSON, identityJSON sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT e.desired_revision, b.config_json, r.config_json, src.config_json, src.identity_json
+		SELECT e.desired_revision, b.config_json, b.evidence_json, r.config_json, src.config_json, src.identity_json
 		  FROM deploy_environments e
 		  JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
 		  JOIN deploy_runtime_plans r ON r.environment_id = e.id AND r.revision = e.desired_revision
 		  LEFT JOIN deploy_sources src ON src.environment_id = e.id AND src.revision = e.desired_revision
 		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&result.Revision, &buildJSON, &runtimeJSON, &sourceJSON, &identityJSON); err != nil {
+		Scan(&result.Revision, &buildJSON, &evidenceJSON, &runtimeJSON, &sourceJSON, &identityJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
@@ -1052,6 +1059,10 @@ func (s *PlanningStore) EnvironmentConfiguration(
 	}
 	if json.Unmarshal([]byte(buildJSON), &result.Build) != nil || json.Unmarshal([]byte(runtimeJSON), &result.Runtime) != nil {
 		return nil, fmt.Errorf("%w: desired plan configuration is malformed", ErrInvalidPlan)
+	}
+	var evidence StoredBuildEvidence
+	if json.Unmarshal([]byte(evidenceJSON), &evidence) == nil {
+		result.Detected = describedCandidate(evidence.Candidates, result.Build)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT kind, ownership, resource_kind, resource_id, config_json
@@ -1461,4 +1472,17 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 		})
 	}
 	return changes
+}
+
+// describedCandidate is the stored candidate a build still describes: the
+// same directory and method, and for a recipe the same recipe.
+func describedCandidate(candidates []DetectedCandidate, build BuildPlanConfig) *DetectedCandidate {
+	for index := range candidates {
+		candidate := &candidates[index]
+		if sameBuildRoot(candidate.Root, build.RootDirectory) && candidate.BuildMethod == build.Method &&
+			(build.Method != BuildRecipe || build.Recipe == "" || candidate.Recipe == build.Recipe) {
+			return candidate
+		}
+	}
+	return nil
 }

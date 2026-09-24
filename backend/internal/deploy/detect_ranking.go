@@ -23,6 +23,9 @@ type candidateScore struct {
 	selectable bool
 	buildable  bool
 	confidence int
+	// evidence is the confidence roots are compared by: Confidence, or what
+	// the source supports when only an unsettled package manager lowered it.
+	evidence   int
 	preference int
 	// blocker is why the candidate cannot build as detected, for the reason.
 	blocker string
@@ -72,6 +75,10 @@ func scoreCandidate(candidate DetectedCandidate, only bool) candidateScore {
 		selectable: candidate.NotDeployable == "", buildable: true, confidence: confidenceRank(candidate.Confidence),
 		tier: candidateTier(candidate), root: candidate.Root, area: candidateArea(candidate.Root), depth: rootDepth(candidate.Root),
 		static: candidate.BuildMethod == BuildStatic,
+	}
+	score.evidence = score.confidence
+	if candidate.readingConfidence != "" {
+		score.evidence = confidenceRank(candidate.readingConfidence)
 	}
 	if issue, blocked := candidate.blockingImageIssue(); blocked {
 		score.buildable, score.blocker = false, issue.Detail
@@ -165,7 +172,7 @@ func (s candidateScore) outranksAcrossRoots(other candidateScore) int {
 	if result := compareRanks(s.tier, other.tier); result != 0 {
 		return result
 	}
-	if result := compareRanks(s.confidence, other.confidence); result != 0 {
+	if result := compareRanks(s.evidence, other.evidence); result != 0 {
 		return result
 	}
 	if s.root != "" && other.root != "" {
@@ -307,7 +314,7 @@ func rankCandidates(candidates []DetectedCandidate) (string, string) {
 		reason += candidateLabel(runnerUp) + " is ranked below the application (" + runnerUp.Demotion + ")"
 	case sameRoot && bestScore.buildable && !runnerScore.buildable:
 		reason += candidateLabel(runnerUp) + " cannot build as detected; " + runnerScore.blocker
-	case bestScore.confidence != runnerScore.confidence:
+	case sameRoot && bestScore.confidence != runnerScore.confidence, !sameRoot && bestScore.evidence != runnerScore.evidence:
 		reason += "stronger evidence"
 	case !sameRoot && best.Root != "" && runnerUp.Root != "" && bestScore.area != runnerScore.area:
 		reason += rootLabel(best.Root) + " is where the repository keeps its applications, not its shared packages"

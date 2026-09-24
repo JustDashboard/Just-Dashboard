@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -27,6 +28,12 @@ type environmentState struct {
 	holdsValues bool
 	domains     []PlannedDomain
 	method      BuildMethod
+	// recipeSupplied are build-time reads the Node recipe's build runs
+	// without a value for: an env schema's names it skips with
+	// SKIP_ENV_VALIDATION (preflight_build.go names those instead), and the
+	// names prisma.config reads, which it gives a placeholder while
+	// `prisma generate` runs (build_node_prisma.go).
+	recipeSupplied map[string]bool
 }
 
 func newEnvironmentState(draft *Draft, configuration PlanConfiguration) environmentState {
@@ -40,6 +47,18 @@ func newEnvironmentState(draft *Draft, configuration PlanConfiguration) environm
 	}
 	for name, value := range draft.environment {
 		state.staged[name] = value
+	}
+	state.recipeSupplied = map[string]bool{}
+	if record := nodeBuildSkipsValidation(state.candidate, configuration); record != nil {
+		for _, name := range slices.Concat(record.EnvServer, record.EnvClient) {
+			state.recipeSupplied[name] = true
+		}
+	}
+	if state.candidate != nil && state.candidate.NodeBuild != nil &&
+		configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
+		for _, name := range state.candidate.NodeBuild.PrismaEnv {
+			state.recipeSupplied[name] = true
+		}
 	}
 	return state
 }
@@ -297,7 +316,7 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 		if (variable.RequiredRead || (variable.Required && !isDeclared(state, name))) && !set && variable.Setup == "" {
 			likely = append(likely, name)
 		}
-		if variable.Phase == "build" && state.method == BuildRecipe && !state.buildScoped(name) {
+		if variable.Phase == "build" && state.method == BuildRecipe && !state.buildScoped(name) && !state.recipeSupplied[name] {
 			if variable.Required {
 				findings = append(findings, finding("build_variable_missing_"+strings.ToLower(name), PreflightBlocked,
 					name+" is needed while the build runs", "read at build time in "+variableReadIn(variable),

@@ -30,7 +30,7 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			name:   "every node server binds HOST",
 			files:  map[string]string{"package.json": `{"scripts":{"start":"node server.js"},"dependencies":{"express":"4"}}`, "package-lock.json": "{}"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", StartCommand: "npm run start"},
-			want:   []string{"ENV NODE_ENV=production\nENV HOST=0.0.0.0\nCOPY --from=build /app /app"},
+			want:   []string{"ENV NODE_ENV=production\nENV PATH=/app/node_modules/.bin:$PATH\nENV HOST=0.0.0.0\nCOPY --from=build /app /app"},
 			absent: []string{"PROTOCOL_HEADER"},
 		},
 		{

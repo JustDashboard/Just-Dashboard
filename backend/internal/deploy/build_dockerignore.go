@@ -1,8 +1,6 @@
 package deploy
 
 import (
-	"crypto/rand"
-	"errors"
 	"os"
 	"path"
 	"strings"
@@ -59,8 +57,11 @@ func recipeInput(name string) bool {
 
 // recipeDockerignore renders the ignore file for a generated Dockerfile of
 // the given recipe kind ("static" for a plain static site) from the
-// repository's own rules and the names at the build root.
-func recipeDockerignore(repository []byte, rootNames []string, kind string) (string, []dockerignoreDrop) {
+// repository's own rules and the names at the build root. installInputs are
+// the context paths a Node install reads (a trailing slash marks a
+// directory), which may sit below the root: a workspace member's
+// package.json, .yarn/releases.
+func recipeDockerignore(repository []byte, rootNames []string, kind string, installInputs []string) (string, []dockerignoreDrop) {
 	rules := parseDockerignore(repository)
 	inputs := []string{}
 	for _, name := range rootNames {
@@ -98,6 +99,30 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string) (str
 	for _, rule := range rules {
 		lines = append(lines, rule.Line)
 	}
+	// An install input below the root is brought back after the rules that
+	// leave it out rather than by setting them aside, so the repository's
+	// exclusions of everything else under that directory still stand.
+	for _, input := range installInputs {
+		if len(rules) == 0 {
+			break
+		}
+		directory := strings.HasSuffix(input, "/")
+		input = strings.TrimSuffix(input, "/")
+		excluded, decidedBy := dockerignoreExcludes(rules, input)
+		// A directory is re-included even when the rules keep it, since one
+		// of them may still reach a file under it (`*.cjs` and
+		// .yarn/releases).
+		if !excluded && !directory {
+			continue
+		}
+		if excluded {
+			dropped = append(dropped, dockerignoreDrop{Rule: decidedBy, Input: input})
+		}
+		lines = append(lines, "!"+input)
+		if directory {
+			lines = append(lines, "!"+input+"/**")
+		}
+	}
 	// These come last so that no repository rule can bring them back.
 	lines = append(lines, "**/node_modules", ".dockerignore", ".just-dashboard", ".just-dashboard-build-metadata-*")
 	switch kind {
@@ -116,32 +141,6 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string) (str
 	return strings.Join(lines, "\n") + "\n", dropped
 }
 
-// writeGeneratedDockerignore places the ignore file beside the generated
-// Dockerfile with the same discipline: root-relative, exclusive, renamed
-// into place, so a checkout symlink cannot redirect it.
-func writeGeneratedDockerignore(root, content string) error {
-	directory, err := os.OpenRoot(root)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	if err := directory.MkdirAll(".just-dashboard", 0o700); err != nil {
-		return err
-	}
-	temporary := ".just-dashboard/.Dockerfile.dockerignore-" + rand.Text()
-	file, err := directory.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	defer directory.Remove(temporary)
-	_, writeErr := file.WriteString(content)
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		return err
-	}
-	return directory.Rename(temporary, ".just-dashboard/Dockerfile.dockerignore")
-}
-
 // buildRootNames lists the names at a build root for recipeDockerignore.
 func buildRootNames(root string) []string {
 	entries, err := os.ReadDir(root)
@@ -158,10 +157,20 @@ func buildRootNames(root string) []string {
 	return names
 }
 
-// writeRecipeDockerignore renders and writes the ignore file for a generated
-// Dockerfile at root.
-func writeRecipeDockerignore(root, kind string) error {
+// writeRecipeDockerignore renders the ignore file for a generated
+// Dockerfile at the build context root and writes it beside the Dockerfile,
+// with the same discipline: root-relative, exclusive, renamed into place, so
+// a checkout symlink cannot redirect it. It returns what the run log says
+// about each repository rule the build set aside or overrode.
+func writeRecipeDockerignore(root, kind string, installInputs []string) ([]string, error) {
 	repository, _ := readContainedRegular(root, ".dockerignore", 256<<10)
-	content, _ := recipeDockerignore(repository, buildRootNames(root), kind)
-	return writeGeneratedDockerignore(root, content)
+	content, dropped := recipeDockerignore(repository, buildRootNames(root), kind, installInputs)
+	if err := writeGeneratedFile(root, "Dockerfile.dockerignore", content); err != nil {
+		return nil, err
+	}
+	notes := make([]string, 0, len(dropped))
+	for _, drop := range dropped {
+		notes = append(notes, ".dockerignore excludes "+drop.Input+" (rule "+drop.Rule+"); the build context keeps it because the build reads it")
+	}
+	return notes, nil
 }
