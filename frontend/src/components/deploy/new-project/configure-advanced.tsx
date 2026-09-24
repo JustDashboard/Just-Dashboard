@@ -501,7 +501,15 @@ function CheckFields({
       </FieldRow>
       {check.kind === "http" && (
         <FieldRow columns={2}>
-          <Field label="Path" htmlFor={`${idPrefix}-path`} hint="Starts with /.">
+          <Field
+            label="Path"
+            htmlFor={`${idPrefix}-path`}
+            hint={
+              config.acceptAnyAnswer
+                ? "Starts with /. Any answer below 500 counts."
+                : "Starts with /."
+            }
+          >
             <Input
               id={`${idPrefix}-path`}
               value={String(config.path ?? "/")}

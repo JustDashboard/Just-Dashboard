@@ -336,8 +336,14 @@ function variablesFact(declared: number, typed: number) {
 
 /** What a check actually asks — a path, a command, or a port. */
 function checkTarget(check: DeploymentConfiguration["checks"][number]) {
-  const config = (check.config ?? {}) as { path?: string; command?: string[]; port?: number }
-  if (config.path) return `GET ${config.path}`
+  const config = (check.config ?? {}) as {
+    path?: string
+    command?: string[]
+    port?: number
+    acceptAnyAnswer?: boolean
+  }
+  if (config.path) return `GET ${config.path}${config.acceptAnyAnswer ? " (any answer)" : ""}`
+  if (check.kind === "docker_health") return "the image's HEALTHCHECK"
   if (config.command?.length) return config.command.join(" ")
   if (config.port) return `a connection on ${config.port}`
   return check.kind

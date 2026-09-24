@@ -2,6 +2,7 @@ import type {
   DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentDetection,
+  DeploymentDetectedReadiness,
   DeploymentDetectionCandidate,
   DeploymentDraftSource,
   DeploymentSourceMode,
@@ -310,7 +311,7 @@ export function defaultConfiguration(
       })),
     ],
     dependencies: [],
-    checks: defaultChecks(profile, port),
+    checks: defaultChecks(profile, port, candidate?.readiness),
     domains: [],
   }
 }
@@ -325,10 +326,16 @@ export function defaultConfiguration(
  * Advanced that nobody had been asked about. The check is the right default on
  * its own merits: traffic should not move to a candidate that has not answered
  * once, and both the port and the path are already known here.
+ *
+ * The check is the one detection read from the source when it found one: a
+ * Dockerfile HEALTHCHECK, a declared health route, the budget a slow start
+ * needs. Without that, GET / expecting a 2xx failed every healthy API with no
+ * page at its root, so detection also says when any answer should count.
  */
 export function defaultChecks(
   profile: WorkloadProfile,
   port: number,
+  readiness?: DeploymentDetectedReadiness,
 ): DeploymentConfiguration["checks"] {
   if (profile === "game")
     return [
@@ -347,16 +354,36 @@ export function defaultChecks(
         config: { port },
       },
     ]
-  if ((profile === "web" || profile === "static") && port > 0)
+  if ((profile === "web" || profile === "static") && port > 0) {
+    const budget = {
+      attempts: readiness?.attempts ?? 20,
+      timeoutSeconds: 5,
+      intervalSeconds: readiness?.intervalSeconds ?? 3,
+    }
+    if (readiness?.kind === "docker_health")
+      return [
+        {
+          name: "Container health",
+          kind: "docker_health",
+          phase: "readiness",
+          required: true,
+          config: budget,
+        },
+      ]
     return [
       {
         name: "HTTP readiness",
         kind: "http",
         phase: "readiness",
         required: true,
-        config: { path: "/", attempts: 20, timeoutSeconds: 5, intervalSeconds: 3 },
+        config: {
+          path: readiness?.path ?? "/",
+          ...(readiness?.acceptAnyAnswer ? { acceptAnyAnswer: true } : {}),
+          ...budget,
+        },
       },
     ]
+  }
   return []
 }
 
@@ -374,11 +401,12 @@ export function checksForRuntime(
   checks: DeploymentConfiguration["checks"],
   profile: WorkloadProfile,
   port: number,
+  readiness?: DeploymentDetectedReadiness,
 ): DeploymentConfiguration["checks"] {
   if (profile === "worker") return checks.filter((check) => check.phase !== "readiness")
   const gated = profile === "web" || profile === "static"
   if (!gated || port <= 0 || checks.some((check) => check.phase === "readiness")) return checks
-  return [...checks, ...defaultChecks(profile, port)]
+  return [...checks, ...defaultChecks(profile, port, readiness)]
 }
 
 /**

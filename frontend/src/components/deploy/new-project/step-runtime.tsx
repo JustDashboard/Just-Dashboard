@@ -117,7 +117,12 @@ export function StepRuntime({
                 setConfiguration({
                   ...configuration,
                   runtime: { ...runtime, internalPort },
-                  checks: checksForRuntime(configuration.checks, flow.profile, internalPort),
+                  checks: checksForRuntime(
+                    configuration.checks,
+                    flow.profile,
+                    internalPort,
+                    flow.candidate?.readiness,
+                  ),
                 })
               }}
               className="font-mono"
