@@ -7,7 +7,8 @@ redirect output outside the build context. Detection ignores this generated dire
 
 Detection reads manifests as data — `package.json`, `angular.json`, `requirements.txt`, `pyproject.toml`,
 `uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
-`Procfile` — and names a candidate per root with the framework, the build and start commands, the port,
+`Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml` and
+`pnpm-workspace.yaml` — and names a candidate per root with the framework, the build and start commands, the port,
 static output, the interpreter or toolchain release, and the environment variables and databases the
 source reads. Every default is a plan field the configure form and the Build settings can change. A
 detected framework that the recipe cannot serve automatically (a provider adapter, a workspace without a
@@ -19,7 +20,9 @@ root package, an unsupported interpreter release) is a low-confidence candidate 
 Every `build`-scoped variable automatically reaches the recipe's build command through a required
 BuildKit environment secret mount. Frozen run inputs supply the names at preparation and values at
 build time; the bindings must agree. A variable's explicit `build.secrets` mapping to `install` limits
-it to dependency installation instead. Build settings expose this choice for each build-scoped value.
+it to dependency installation instead. Build settings expose this choice for each build-scoped value. A
+registry credential a package manager's configuration names is mapped to install automatically when a
+draft gives it a value (see [JavaScript installs](#javascript-installs)).
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
 secret mappings; they retain their existing refusal of requested secrets.
 
@@ -63,10 +66,8 @@ task. A command that carries credential material is ignored.
 
 ## JavaScript and static output
 
-The lockfile selects npm, pnpm, Yarn or Bun. When lockfiles for more than one manager are committed,
-the build setting `packageManager` chooses, then `packageManager` in `package.json`; with neither, the
-recipe and preflight refuse rather than install from a lockfile the project may have abandoned. A chosen
-manager must have its own lockfile. Plain HTML uses the selected source directory as
+How dependencies install — which package manager, from which lockfile, frozen or not, with which
+release — is [JavaScript installs](#javascript-installs) below. Plain HTML uses the selected source directory as
 its public root; its output directory is empty, not the source directory repeated a second time.
 Packaged static output always serves on nginx port 80, regardless of a repository's development/start
 script port. Quick setup and the wizard generate required HTTP readiness checks for that serving port.
@@ -92,6 +93,10 @@ missing is a low-confidence candidate that asks for one.
 | Create React App, Vue CLI, Ember, Parcel, Vite | their packages | site `build` / `dist` | single-page fallback on by default |
 | Express, Fastify, Hono, Koa, Elysia, hapi | their packages | server, 3000 | the `start` script, else `node <main>` (`bun <main>` with a Bun lockfile) |
 
+Every command the table proposes uses the resolved manager's runner (`bun`/`npm`/`pnpm`/`yarn run`,
+`bunx`/`npx`/`pnpm exec`/`yarn` for a binary), and detection records the commands it would propose for
+each of the four managers, so choosing another manager swaps whole commands.
+
 A server framework's entry file (`.output/server/index.mjs`, `build/server/index.js`, `dist/main.js`,
 …) is checked in the generated Dockerfile after the build when the start command is still the
 framework's own, so a wrong output path fails the build with the framework's name instead of failing the
@@ -116,6 +121,131 @@ is, and static output never gains a start command. Prisma's push refuses destruc
 explicit flag and Drizzle's stops to ask a question nobody can answer, so a schema that would lose data
 fails the start instead of dropping it. The tool must be installed by the lockfile; the runtime stage
 copies the build's `node_modules`, so a devDependency is available to the start command.
+
+## JavaScript installs
+
+`deploy/build_node_install.go` plans a JavaScript package's dependency install once, from files read as
+data, and detection (which records the plan on the candidate for every package manager, as
+`nodeInstalls`), preflight (which judges the operator's choice from that record) and the recipe (which
+renders it) all use the same plan, so they cannot disagree. Reads go through an `os.Root` and never
+follow a symlink to a file; nothing in the checkout is executed.
+
+**Lockfiles are compared, not only named.** Every committed lockfile — `bun.lock`, `bun.lockb`,
+`package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock` — is read under a budget of its
+own (16 MiB a file, 32 MiB a detection or build, never counted as detection truncation) and compared with
+the `package.json` of every workspace it records, the way that manager's frozen install compares it
+(`build_node_lockfile.go`): a dependency missing from the lock or removed from `package.json` is drift for
+every manager; pnpm and Yarn also compare the range text, while npm and Bun accept a changed range the
+locked version still satisfies (npm's range grammar is evaluated as data, `node_semver.go`). Yarn 1 is read
+from its entry headers, Berry from its workspace blocks, pnpm up to its package list, npm entry by entry,
+Bun's text lock as JSONC; `bun.lockb` is binary and can only prove a name missing. Each reading on the
+candidate (`lockfiles`) is `in_sync`, `stale` — the frozen install would refuse it — or `unknown`, with the
+sentence the screens show: "package-lock.json is missing 15 dependencies (prisma, @prisma/client, … and 12
+more)".
+
+**Which manager installs.** The build setting `packageManager`; then `packageManager` or
+`devEngines.packageManager` in `package.json` (the workspace root's, for a member); then the one lockfile
+a frozen install would accept; then the one lockfile that is in sync; then the files only one manager
+writes — `trustedDependencies`, `bunfig.toml`, `@types/bun`, `pnpm-workspace.yaml`, the `pnpm` field,
+`.pnpmfile.cjs`, `.yarnrc.yml`, `.yarn/releases`, and package scripts that call `bun`, `bunx`, `pnpm` or
+`yarn`. Only a genuine tie is a decision (`package_manager_ambiguous`, blocked). `bun.lock` supersedes
+`bun.lockb` and `npm-shrinkwrap.json` supersedes `package-lock.json`. Without any lockfile the same order
+ends at npm. A chosen manager whose lockfile is not committed while another's is is refused before the
+build, naming the lockfile that is (`package_manager_lockfile_missing`, blocked) — the shape a later
+commit that switched lockfiles leaves behind. When lockfiles competed, the `package_manager_resolved`
+pass says why one won and which to delete.
+
+**Frozen when the lockfile is right, a warning when it is not.**
+
+| Manager | Lockfile in sync or unknown | Lockfile provably stale, or none |
+| --- | --- | --- |
+| npm | `npm ci` | `npm install --no-audit --no-fund` |
+| pnpm | `pnpm install --frozen-lockfile` | `pnpm install --no-frozen-lockfile` |
+| Yarn 1 (`# yarn lockfile v1`) | `yarn install --frozen-lockfile` | `yarn install` |
+| Yarn 2 and later (`__metadata:`) | `yarn install --immutable` | `yarn install --no-immutable` |
+| Bun | `bun install --frozen-lockfile` | `bun install` |
+
+A stale lockfile raises `lockfile_out_of_sync` (a warning that names the drift and, when another lockfile
+matches, offers that manager), and the run log says the install is unfrozen and why. A repository without
+a lockfile — tutorials, repositories that ignore it — installs unfrozen with `dependencies_unpinned`,
+rather than being refused. Yarn 1 ignores `--immutable`, which is why it gets its own flag.
+
+**Pinned manager releases.** pnpm and Yarn Berry run an exact release: the one `package.json` declares
+(its hash included), else the reviewed table `nodeManagerReleases` keyed by the lockfile format — pnpm
+`lockfileVersion` 5.x → 7.33.7, 6.x → 8.15.9, 9.0 → 10.34.5 (also the release without a lockfile); Berry
+metadata 4 → 2.4.3, 5 → 3.1.1, 6 → 3.8.7, 8 → 4.9.2, 10 → 4.18.0 — or the release a committed `.yarnrc.yml`
+`yarnPath` names, which Yarn 1 dispatches to. Corepack's own default is the newest release, which moves
+under a digest-pinned image and rejects older lockfiles. A Berry lock in no known format installs with
+4.18.0 unfrozen (`yarn_version_inferred`), and a declared pnpm whose major cannot read the lockfile is
+refused (`package_manager_lockfile_incompatible`). Yarn 1 is the Node image's own 1.22. Bun follows a
+`packageManager` of `bun@x.y.z` (`oven/bun:x.y.z-alpine`), falling back to `oven/bun:1-alpine` with a
+logged note when that release has no image. `package_manager_version` (a pass) and the build evidence's
+`toolchain` name the release and what chose it.
+
+**One toolchain for the build and the server.** The pinned releases are installed through Corepack into a
+`toolchain` stage (`COREPACK_HOME=/opt/corepack`), and both the build stage and a server's runtime stage
+start from it, with `COREPACK_ENABLE_NETWORK=0` at run time: a start command that runs `pnpm`, `yarn` or
+`bunx` finds the exact release offline, where the runtime stage used to have no pnpm at all. The runtime
+and build stages put `node_modules/.bin` on `PATH`. Bun is copied from its digest-pinned image beside
+Node 22, with `bunx` linked to it: Bun installs and runs `bun` and `bunx` commands, and anything started
+through `node` runs on Node — the Bun image's own `node` is Bun, which made Bun the production runtime of
+every `bun.lock` project (`runtime_selected`). A command or package script the build runs that calls a
+manager other than the chosen one — `bunx` in an npm project, `pnpm` in a Bun one — gets that tool added
+the same way (`script_runtime_added`); `deno` cannot be, and is refused (`command_runner_missing`). A
+manifest declaring another manager than the committed lockfile's runs with `COREPACK_ENABLE_STRICT=0`
+(`package_manager_declaration_conflict`).
+
+**Yarn Plug'n'Play.** Berry keeps its cache inside the build (`YARN_ENABLE_GLOBAL_CACHE=false`) so it is
+copied with the application. When the linker is Plug'n'Play and a command runs outside `yarn` — a
+framework's `node build` — the install sets `YARN_NODE_LINKER=node-modules`; the lockfile does not depend
+on the linker (`yarn_linker_adjusted`).
+
+**Dependency install scripts.** pnpm 10 skips dependency build scripts without a policy and pnpm 11 fails
+on them; with no policy declared the install adds `--config.dangerously-allow-all-builds=true` — what npm,
+Yarn and pnpm 9 do, inside the build container (`dependency_scripts_allowed`). A declared policy is kept;
+one written only in pnpm 10's fields under pnpm 11 or later is `pnpm_build_policy_ignored`, and one that
+leaves out a package whose script the application needs at run time (better-sqlite3, sqlite3, bcrypt,
+argon2, canvas, puppeteer, node-sass, Prisma 6 and earlier, sharp before 0.33, …) is
+`install_scripts_blocked`. Declaring Bun's `trustedDependencies` replaces Bun's default allowlist, so the
+install trusts such packages that are installed but not listed (`bun pm trust`, `install_scripts_trusted`).
+
+**npm's lockfile quirks.** A `package-lock.json` whose locked peers break their ranges was written with
+`--legacy-peer-deps`; unless `.npmrc` already says so the install passes that flag, which installs exactly
+the locked tree (`peer_dependencies_legacy`). A lock that lacks this platform's `-linux-<arch>-musl`
+optional binaries (npm/cli#4828 — Rollup, lightningcss, Tailwind's oxide, SWC) gets them added at the
+exact version the parent names, after `npm ci` (`optional_binary_missing`). A lock resolving packages from
+an intranet host is `registry_host_private`.
+
+**Registry credentials.** `.npmrc` (`${NAME}`), `.yarnrc.yml` (`${NAME}`, with or without a default) and
+`bunfig.toml` (`$NAME`) are read as data for the variables their credentials name. Each becomes a detected
+variable marked for the install step (`step: "install"`), required when a dependency's scope installs from
+that registry, or when Yarn would abort without it (Berry fails every install on an unset variable with no
+default). A value given in the draft is mapped to the install step automatically; preflight's
+`registry_token_missing` is blocked when a required credential cannot reach the install and a warning
+otherwise, and a literal token committed to a configuration file is `registry_token_committed` (the value
+is never echoed).
+
+**Workspaces.** A package with no lockfile of its own installs from the nearest ancestor whose lockfile
+and `workspaces` (or `pnpm-workspace.yaml` `packages`) include it; a `pnpm-workspace.yaml` of settings
+alone is not a workspace. The build context widens to that root (`prepared.contextDirectory`), the
+install runs there, the build and the server run in the member's directory, and every workspace the
+lockfile records is compared. A member of a Turborepo that depends on workspace packages builds with
+`<runner> turbo run build --filter=<name>...`.
+
+**The repository's `.dockerignore`.** When the repository has one, the generated Dockerfile gets
+`.just-dashboard/Dockerfile.dockerignore`, which BuildKit prefers: the repository's file verbatim, then
+exceptions for the install inputs the recipe reads (`package.json`, the lockfile, `.npmrc`, `.yarnrc.yml`,
+`.yarn/releases`, `patches`, …). The operator's other exclusions stand, and the run log names each input
+a repository pattern had excluded.
+
+**Commands follow the manager.** Choosing a manager in the configure form or Build settings swaps a
+command that is still one detection proposed for the one it proposes for the new manager (`nodeInstalls`),
+and "From the lockfile" means the manager detection resolved; a command the operator wrote keeps its
+words with only its plain runner segments moved. At build time a saved command whose plain runner names
+another manager (`npm run build` after a commit replaced `package-lock.json` with `bun.lock`) runs through
+the resolved manager's runner; the run log says so and preflight raises `runner_mismatch`. A second
+install in the build command is `install_in_build_command`. Review lists the install, build and start
+commands the Dockerfile runs (`build_commands`).
 
 Detection preserves an actual Dockerfile/Containerfile filename relative to its build root. A single
 literal TCP `EXPOSE` in the final stage supplies the suggested port; dynamic/multiple ports still need
@@ -248,7 +378,10 @@ default, and a constraint the catalogue cannot satisfy (`^7.4`) is a `recipe_uns
 `pdo_mysql`, `pdo_pgsql` and `opcache` are always present, so a linked database works without asking).
 Composer runs from the `composer:2` image with `--no-dev --optimize-autoloader`; a `package.json` whose
 build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on the manifest's own
-runtime whose `public/build` is copied in. Laravel's start runs `php artisan migrate --force` first;
+runtime whose `public/build` is copied in. That asset stage installs through the same plan as the Node
+recipe ([JavaScript installs](#javascript-installs), toolchain stage `assets-toolchain`), the same
+`packageManager` build setting applies to a `php` recipe, and its lockfile findings — competing lockfiles,
+none (`assets_dependencies_unpinned`), a stale one — reach preflight before Deploy. Laravel's start runs `php artisan migrate --force` first;
 Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is present. `storage/`,
 `bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. The
 configure form mints `APP_KEY` for a Laravel import (`base64:` over 32 random bytes) and offers a
@@ -257,7 +390,8 @@ configure form mints `APP_KEY` for a Laravel import (`base64:` over 32 random by
 
 ## Verification
 
-`TestLiveDetectedFrameworkBuildAndServing` builds locked Next.js, Vite, SvelteKit Node/static, plain HTML,
+`TestLiveDetectedFrameworkBuildAndServing` builds locked Next.js (Bun, and pnpm started through `pnpm run
+start`), an Express server installed and started by Yarn 1, Vite, SvelteKit Node/static, plain HTML,
 Containerfile and Go fixtures through detection and the real artifact/runtime owners, and the catalogue's
 own starters: Astro 7 (static), Nuxt 4 and React Router 8 (servers), FastAPI on an unpinned
 `requirements.txt` with no server declared, a Flask factory on a bare `pyproject.toml`, a Django project
@@ -270,4 +404,9 @@ metadata and saved image layers for private install credentials. The Go fixture 
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
-(`frameworks_*_test.go`, `build_recipes_test.go`).
+(`frameworks_*_test.go`, `build_recipes_test.go`). JavaScript installs are covered by
+`build_node_lockfile_test.go` (each manager's lockfile shapes), `build_node_install_test.go` (resolution
+and every rendered install), `preflight_node_test.go` and `build_node_incident_test.go`, which keeps the
+incident that motivated them fixed: a Next.js 16 + Prisma 7 repository with an in-sync `bun.lock` beside a
+`package-lock.json` fifteen dependencies behind now resolves to Bun with no decision, and a forced npm
+raises `lockfile_out_of_sync` before Deploy and installs unfrozen instead of failing `npm ci`.

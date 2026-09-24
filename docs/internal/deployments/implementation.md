@@ -245,12 +245,26 @@ only renderer/executor/validation authority for their feature.
   instead of being silently discarded. Setup saves a typed database reference; activation joins an owned
   environment network and reconciliation repairs the DNS alias after a matching container replacement.
   Existing literal IP variables require reconnecting once. See [database networks](database-networks.md).
-- Detected JavaScript commands name the package manager the checkout's lockfile locks to
-  (`bun`/`pnpm`/`yarn`/`npm run …`). Competing lockfiles resolve only through the explicit build setting
-  or `package.json` `packageManager`; changing the setting in the UI rewrites plain `<manager> run
-  <script>` commands to the new runner. The recipe picks its base image from that same lockfile, and
-  `oven/bun` carries no npm, so a hardcoded `npm run build` was a build that installed cleanly and then
-  died on `npm: not found`.
+- A JavaScript package's install is one plan (`deploy/build_node_install.go`) that detection,
+  preflight and the recipe share, computed from lockfiles and package-manager configuration read as data
+  under their own budget (`build_node_lockfile.go`). Detection records each committed lockfile compared
+  with `package.json` (`lockfiles`: `in_sync`/`stale`/`unknown` with the drift named), the plan under each
+  of the four managers with that manager's build and start commands and its preflight findings
+  (`nodeInstalls`), and the Node release (`nodeVersion`); competing lockfiles resolve through the build
+  setting, the manifest's declaration, the one lockfile a frozen install accepts, the one in sync, then
+  manager-exclusive files, and only a tie is `package_manager_ambiguous`. Preflight
+  (`preflight_node.go`) judges `configuration.build.packageManager` — or the resolved manager when it is
+  empty — from that record, so a stale chosen lockfile is `lockfile_out_of_sync` before Deploy, and the
+  recipe installs unfrozen instead of failing a frozen install. pnpm and Yarn Berry releases are pinned
+  (declaration, or `nodeManagerReleases` keyed by lockfile format) into a `toolchain` stage the server's
+  runtime stage shares, Bun is copied beside Node 22 rather than replacing it, and a workspace member
+  prepares from its workspace root (`ArtifactBuilder.PrepareWithin`, `prepared.contextDirectory`). The
+  UI swaps whole commands between managers from `nodeInstalls`, "From the lockfile" follows the resolved
+  manager, and at build time a saved command whose plain runner names another manager runs through the
+  resolved one with a logged note (`prepared.notes`, `prepared.buildCommand`/`startCommand`) and a
+  `runner_mismatch` preflight warning. The configuration read carries `detected`, the stored candidate
+  the build still describes, so Build settings show which lockfile matches. The contract is
+  [the recipe guide](recipes.md#javascript-installs).
 - Detection is a catalogue, not a handful of special cases. `deploy/frameworks_node.go` names Next.js,
   SvelteKit, Astro, Nuxt, Remix, React Router, SolidStart, TanStack Start, Nitro, Angular, NestJS,
   Gatsby, Docusaurus, VitePress, Eleventy, Create React App, Vue CLI, Ember, Parcel and Vite, in an
@@ -286,7 +300,7 @@ only renderer/executor/validation authority for their feature.
   `deploy/schema_tools.go`. Preflight adds `schema_step_missing` (warning, on the start command) when a
   database is linked and neither the start command, a release task nor the start script runs the tool,
   and `schema_step` (pass) when one does; no linked database means no finding. Changing the package
-  manager rewrites the chained binary runner with the script runner.
+  manager swaps the whole start command for detection's command for that manager, chained step included.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
   Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
@@ -297,7 +311,10 @@ only renderer/executor/validation authority for their feature.
   never argv/build args; custom Dockerfiles with requested secrets or obvious embedded credentials fail
   closed because their layer history cannot be guaranteed.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
-  package credentials. Serving defaults per framework, the Python install shapes and interpreter
+  package credentials; a registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is
+  mapped to the install step when a draft supplies it, and `registry_token_missing` names one that cannot
+  reach the install. Preparation logs its install decisions (an unfrozen install, a moved runner, a
+  `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter
   selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
   behavior are defined in [the recipe contract](recipes.md), including the exact limits of live
   framework verification.
