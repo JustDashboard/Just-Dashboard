@@ -245,3 +245,65 @@ func TestFindingsAreOrderedBySeverityAndCarryAnActionableOwner(t *testing.T) {
 		}
 	}
 }
+
+// A first deploy that failed is the one thing a never-live project has to
+// say, and a failed deploy after a live release is news until a later one
+// replaces it. Both name the cause and link to the run.
+func TestDiagnosisNamesTheLastFailedDeployment(t *testing.T) {
+	t.Parallel()
+	failed := &EngineRun{
+		ID: 41, EnvironmentID: 1, State: RunFailed, TerminalCode: "build_lockfile_out_of_sync",
+		TerminalReason: "The install step (`npm ci`) exited with code 1: package-lock.json is out of sync with package.json.",
+	}
+	never := Diagnose(DiagnosisInput{ProjectID: 9, LastRun: failed})
+	if len(never.Findings) != 1 || never.Status != "partial" {
+		t.Fatalf("never-live diagnosis = %+v", never)
+	}
+	finding := never.Findings[0]
+	if finding.Code != "last_deploy_failed" || finding.Severity != DiagnosisCritical ||
+		finding.Title != "The last deployment failed: lockfile out of sync" ||
+		finding.DeepLink != "/deploy/9/runs/41" || !strings.Contains(finding.Measured, "package-lock.json") {
+		t.Fatalf("finding = %+v", finding)
+	}
+
+	live := healthyDiagnosisInput()
+	live.ProjectID = 9
+	live.LastRun = &EngineRun{ID: 42, State: RunRolledBack, TerminalCode: "runtime_env_missing", CandidateReleaseID: 8}
+	diagnosis := Diagnose(live)
+	if len(diagnosis.Findings) != 1 || diagnosis.Findings[0].Severity != DiagnosisWarning ||
+		!strings.Contains(diagnosis.Findings[0].Measured, "runtime_env_missing") {
+		t.Fatalf("live diagnosis = %+v", diagnosis.Findings)
+	}
+
+	replaced := healthyDiagnosisInput()
+	replaced.LastRun = &EngineRun{ID: 43, State: RunSucceeded, ReleaseID: 7}
+	if findings := Diagnose(replaced).Findings; len(findings) != 0 {
+		t.Fatalf("a succeeded last run produced %+v", findings)
+	}
+}
+
+func TestDiagnosisNamesWhyAutomaticDeploysStopped(t *testing.T) {
+	t.Parallel()
+	for reason, want := range map[string]string{
+		"ref_not_found":             "main no longer exists",
+		"source_auth_failed":        "credential can no longer read",
+		"source_repository_missing": "repository was not found",
+		"source_unreachable":        "remote is unreachable",
+	} {
+		input := healthyDiagnosisInput()
+		input.ProjectID = 3
+		input.GitWatch = &GitWatchStatus{Status: "unavailable", Reason: reason, Branch: "main"}
+		findings := Diagnose(input).Findings
+		if len(findings) != 1 || findings[0].Code != "auto_deploy_stopped" || !strings.Contains(findings[0].Title, want) {
+			t.Fatalf("%s = %+v", reason, findings)
+		}
+		if reason == "source_auth_failed" && findings[0].DeepLink != "/deploy/credentials" {
+			t.Fatalf("credential finding links to %q", findings[0].DeepLink)
+		}
+	}
+	input := healthyDiagnosisInput()
+	input.GitWatch = &GitWatchStatus{Status: "unavailable", Reason: "source_unavailable"}
+	if findings := Diagnose(input).Findings; len(findings) != 0 {
+		t.Fatalf("an unexplained miss produced %+v", findings)
+	}
+}

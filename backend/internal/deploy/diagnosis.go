@@ -3,6 +3,7 @@ package deploy
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // DiagnosisSeverity orders findings by what an operator must do about them.
@@ -48,8 +49,14 @@ type Diagnosis struct {
 // It carries no owner handles on purpose: diagnosis is a pure function over
 // observations already made, so every claim and every silence is testable.
 type DiagnosisInput struct {
-	LiveReleaseID    int64
-	RuntimeRecorded  bool
+	ProjectID       int64
+	LiveReleaseID   int64
+	RuntimeRecorded bool
+	// LastRun is the environment's newest run, whose failure is news until a
+	// later release replaces it. GitWatch is automatic deployment's own
+	// reading of the branch it follows.
+	LastRun          *EngineRun
+	GitWatch         *GitWatchStatus
 	PendingChanges   bool
 	DesiredRevision  int
 	LivePlanRevision int
@@ -71,9 +78,16 @@ func Diagnose(input DiagnosisInput) Diagnosis {
 	}
 	find := func(finding DiagnosisFinding) { result.Findings = append(result.Findings, finding) }
 
+	if finding := lastDeployFailed(input); finding != nil {
+		find(*finding)
+	}
+	if finding := autoDeployStopped(input); finding != nil {
+		find(*finding)
+	}
 	if input.LiveReleaseID <= 0 {
-		// A deployment that has never deployed has nothing to be wrong with.
-		// Its saved plan is not "not live yet"; it has simply not run.
+		// A deployment that has never deployed has no runtime to be wrong
+		// with. Its saved plan is not "not live yet"; it has simply not run,
+		// and a first deploy that failed was named above.
 		silence("runtime", "This deployment has no live release, so no runtime, domain or storage claim can be made.")
 		return result
 	}
@@ -369,4 +383,74 @@ func dependencySilenceReason(summary DependencySummary) string {
 		return summary.Reason
 	}
 	return "Dependency evidence for this release is unavailable."
+}
+
+// lastDeployFailed names the newest run when it failed and nothing it made
+// is live: the cause is its terminal code, the evidence its terminal reason.
+// It is critical when nothing serves at all, and a warning while an older
+// release still does.
+func lastDeployFailed(input DiagnosisInput) *DiagnosisFinding {
+	run := input.LastRun
+	if run == nil || (run.State != RunFailed && run.State != RunFailedActivation && run.State != RunRolledBack) {
+		return nil
+	}
+	if run.ReleaseID != 0 && run.ReleaseID == input.LiveReleaseID {
+		return nil
+	}
+	title := "The last deployment failed"
+	if cause := causeTitle(run.TerminalCode); cause != "" {
+		title = "The last deployment failed: " + strings.ToLower(cause[:1]) + cause[1:]
+	}
+	finding := DiagnosisFinding{
+		Code: "last_deploy_failed", Severity: DiagnosisWarning, Title: title,
+		Measured: truncateUTF8Prefix(run.TerminalReason, 600),
+		Means:    "The previous release keeps serving; the changes in this deployment are not live.",
+		Action:   "Open the failed deployment to read its cause and apply the fix it offers.",
+		Owner:    "deployment",
+		DeepLink: fmt.Sprintf("/deploy/%d/runs/%d", input.ProjectID, run.ID),
+	}
+	if input.LiveReleaseID <= 0 {
+		finding.Severity = DiagnosisCritical
+		finding.Means = "Nothing is live yet: the first release never started."
+	}
+	if finding.Measured == "" {
+		finding.Measured = "The run ended with " + orDefault(run.TerminalCode, "a failure") + "."
+	}
+	return &finding
+}
+
+// autoDeployStopped names why automatic deployment could not read its branch
+// when git's own answer said why; an unexplained miss stays the header's
+// "needs attention" without a finding.
+func autoDeployStopped(input DiagnosisInput) *DiagnosisFinding {
+	watch := input.GitWatch
+	if watch == nil || watch.Status != "unavailable" {
+		return nil
+	}
+	source := fmt.Sprintf("/deploy/%d/settings/general#source", input.ProjectID)
+	finding := DiagnosisFinding{Code: "auto_deploy_stopped", Severity: DiagnosisWarning, Owner: "source", DeepLink: source,
+		Means: "Pushes to the branch are not deployed until this is fixed."}
+	branch := orDefault(watch.Branch, "the branch")
+	switch watch.Reason {
+	case "ref_not_found":
+		finding.Title = "Automatic deploys stopped: " + branch + " no longer exists"
+		finding.Measured = "The remote answered and has no branch " + branch + "; it was renamed or deleted."
+		finding.Action = "Point the source at the branch the repository uses now."
+	case "source_auth_failed":
+		finding.Title = "Automatic deploys stopped: the credential can no longer read this repository"
+		finding.Measured = "The Git remote refused the saved credential."
+		finding.Action = "Rotate or reconnect the credential, then save the source again."
+		finding.Owner, finding.DeepLink = "credentials", "/deploy/credentials"
+	case "source_repository_missing":
+		finding.Title = "Automatic deploys stopped: the repository was not found"
+		finding.Measured = "The Git remote has no such repository, or the credential cannot see it."
+		finding.Action = "Check the repository address and that the credential can read it."
+	case "source_unreachable":
+		finding.Title = "Automatic deploys paused: the Git remote is unreachable"
+		finding.Measured = "The remote could not be reached from this server."
+		finding.Action = "Check the server's outbound network and DNS; the watcher keeps trying."
+	default:
+		return nil
+	}
+	return &finding
 }
