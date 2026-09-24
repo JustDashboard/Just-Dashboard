@@ -312,6 +312,11 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   if (
     (detection?.candidates?.length ?? 0) > 1 ||
     (candidate?.needsDecision?.length ?? 0) > 0 ||
+    // What the repository is, or a better way to run it, is this screen's
+    // to say: a library is not a plan to review, and a reviewed template of
+    // the same application is offered beside the source.
+    Boolean(candidate?.notDeployable) ||
+    (detection?.alternatives?.length ?? 0) > 0 ||
     Boolean(detection?.unavailable) ||
     !DEPLOYMENT_NAME.test(flow.name) ||
     // The name was asked about while the source was inspected, so a collision
@@ -656,10 +661,20 @@ export async function fetchHostnameSuggestion(name: string) {
 export async function inspectAndPrepare(
   name: string,
   profile: WorkloadProfile,
-  source: DeploymentDraftSource,
+  initialSource: DeploymentDraftSource,
   extra: { sourceLabel: string; githubRepo?: string; importPreview?: ImportPreview },
 ): Promise<ConfigureFlow> {
-  const result = await inspectSource(name, profile, source)
+  let source = initialSource
+  let result = await inspectSource(name, profile, source)
+  // A theme submodule on the repository's own host, or images the build root
+  // keeps in LFS, are part of what gets built: turning them on here is
+  // answering a question detection already answered, the way the Source
+  // section's switches would. A submodule on another host is still asked.
+  const clone = automaticCloneOptions(result.detection, result.candidate, source)
+  if (clone) {
+    source = { ...source, ...clone }
+    result = await reinspect(result.draft, profile, source)
+  }
   const hostname = await fetchHostnameSuggestion(name)
   const effectiveProfile = result.candidate?.profile ?? profile
   // HTTPS is offered by default because it is what anyone wants, but a
@@ -857,4 +872,94 @@ export function railsDatabaseRows(
     name,
     value: `\${{database.${connectionId}.url.${database}_${name.replace(/_DATABASE_URL$/, "").toLowerCase()}}}`,
   }))
+}
+
+// ---------------------------------------------------------------------------
+// Repository shape
+// ---------------------------------------------------------------------------
+
+function underRoot(path: string, root: string) {
+  return !root || path === root || path.startsWith(`${root}/`)
+}
+
+/**
+ * The declared submodules a build root needs: those inside it, and the one
+ * it is itself inside. Preflight judges them the same way.
+ */
+export function submodulesForRoot(
+  requirements: DeploymentDetection["gitRequirements"] | undefined,
+  root: string,
+) {
+  return (requirements?.submoduleList ?? []).filter(
+    (submodule) => underRoot(submodule.path, root) || underRoot(root, submodule.path),
+  )
+}
+
+/**
+ * How many LFS-tracked files a build root holds. The repository root's count
+ * is exact; a nested root is counted from the listed paths, and when the
+ * list was cut short the count is unknown rather than zero.
+ */
+export function lfsFilesForRoot(
+  requirements: DeploymentDetection["gitRequirements"] | undefined,
+  root: string,
+): number | undefined {
+  if (!root) return requirements?.lfsFiles ?? 0
+  const paths = requirements?.lfsPaths ?? []
+  const listed = paths.filter((path) => underRoot(path, root)).length
+  if (listed === 0 && (requirements?.lfsFiles ?? 0) > paths.length) return undefined
+  return listed
+}
+
+/**
+ * The clone options detection has already answered for the chosen root: its
+ * submodules when every one it holds is on the repository's own host, and
+ * Git LFS when files under it are tracked by LFS. Nothing when the source
+ * already includes them, when a submodule needs access to another host, or
+ * when the source is not a Git checkout.
+ */
+export function automaticCloneOptions(
+  detection: DeploymentDetection | undefined,
+  candidate: DeploymentDetectionCandidate | undefined,
+  source: DeploymentDraftSource,
+): Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> | undefined {
+  if (!detection || (source.kind !== "git" && source.kind !== "local")) return undefined
+  const root = candidate?.root ?? ""
+  const requirements = detection.gitRequirements
+  const options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> = {}
+  const submodules = submodulesForRoot(requirements, root)
+  if (
+    requirements.submodulesChecked &&
+    !source.includeSubmodules &&
+    submodules.length > 0 &&
+    submodules.every((submodule) => submodule.sameSource)
+  )
+    options.includeSubmodules = true
+  const lfsFiles = lfsFilesForRoot(requirements, root)
+  if (requirements.lfsChecked && !source.includeLfs && lfsFiles) options.includeLfs = true
+  return Object.keys(options).length ? options : undefined
+}
+
+const NOT_DEPLOYABLE: Record<string, string> = {
+  library: "a library",
+  cli: "a command-line tool",
+  "editor-extension": "an editor extension",
+  "browser-extension": "a browser extension",
+  "github-action": "a GitHub Action",
+  "desktop-app": "a desktop app",
+  "mobile-app": "a mobile app",
+  notebook: "notebooks",
+  "windows-only": "Windows-only",
+}
+
+/**
+ * What the candidate chooser says about a candidate beyond its confidence:
+ * that it is not a service, or why it ranks below the application.
+ */
+export function candidateStanding(candidate: DeploymentDetectionCandidate) {
+  if (candidate.notDeployable)
+    return `Not a service: ${NOT_DEPLOYABLE[candidate.notDeployable] ?? candidate.notDeployable}`
+  if (candidate.demotion) return candidate.demotion
+  if (candidate.recipeIssue && !candidate.recipe) return "No automatic recipe"
+  return undefined
 }

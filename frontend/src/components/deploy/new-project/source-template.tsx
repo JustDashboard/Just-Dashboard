@@ -68,6 +68,9 @@ const TOPICS = [
 
 type TopicKey = (typeof TOPICS)[number]["key"]
 
+/** The backend's blueprint identifier: lowercase, digits and inner dashes. */
+const BLUEPRINT_ID = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/
+
 const TOPIC_OF: Record<string, TopicKey> = {
   actual: "productivity",
   docuseal: "productivity",
@@ -143,14 +146,27 @@ function asError(error: unknown) {
  * gave it: everything the server reviews is shown, on the shelves above, and
  * one "Use" inspects with whatever inputs are filled in.
  */
-export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
+export function SourceTemplate({
+  onInspected,
+  initialTemplate,
+}: {
+  onInspected: (flow: ConfigureFlow) => void
+  /** A blueprint id from the address, chosen on arrival. */
+  initialTemplate?: string
+}) {
   const catalogue = usePoll(
     (signal) => get<BlueprintSummary[]>("/deploy/blueprints/", undefined, signal),
     0,
   )
   const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
   const [topic, setTopic] = useSessionState<TopicKey | "all">("deploy.new.template.topic", "all")
-  const [selectedId, setSelectedId] = useSessionState("deploy.new.template.selected", "")
+  // The id comes from the address and becomes a request path, so only a
+  // blueprint identifier's shape is taken from it.
+  const [selectedId, setSelectedId] = useSessionState(
+    "deploy.new.template.selected",
+    "",
+    initialTemplate && BLUEPRINT_ID.test(initialTemplate) ? initialTemplate : undefined,
+  )
   const [inputs, setInputs] = useSessionState<Record<string, string>>(
     `deploy.new.template.inputs.${selectedId}`,
     {},

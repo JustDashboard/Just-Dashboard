@@ -31,8 +31,15 @@ func TestRankCandidatesComparesBuildabilityOnlyWithinARoot(t *testing.T) {
 			1, "cannot build as detected",
 		},
 		{
+			// Buildability does not count across directories; the shallower
+			// root, which a build of the repository starts from, does.
 			"a buildable helper Dockerfile elsewhere does not beat the application's recipe",
 			[]DetectedCandidate{recipe("", ConfidenceHigh, "needs a lockfile"), dockerfile("tools/worker", ConfidenceHigh, false)},
+			0, "shallower root",
+		},
+		{
+			"two directories as deep and as strong are the operator's call",
+			[]DetectedCandidate{recipe("frontend", ConfidenceHigh, "needs a lockfile"), dockerfile("worker", ConfidenceHigh, false)},
 			-1, "equally strong",
 		},
 		{
@@ -41,8 +48,8 @@ func TestRankCandidatesComparesBuildabilityOnlyWithinARoot(t *testing.T) {
 			0, "stronger evidence",
 		},
 		{
-			"a directory's best candidate represents it: the recipe beside a blocked Dockerfile still ties another root",
-			[]DetectedCandidate{recipe("", ConfidenceHigh, ""), dockerfile("", ConfidenceHigh, true), recipe("apps/api", ConfidenceHigh, "")},
+			"a directory's best candidate represents it: the recipe beside a blocked Dockerfile ties another root as deep",
+			[]DetectedCandidate{recipe("apps/web", ConfidenceHigh, ""), dockerfile("apps/web", ConfidenceHigh, true), recipe("apps/api", ConfidenceHigh, "")},
 			-1, "equally strong",
 		},
 		{
@@ -94,13 +101,16 @@ func TestDetectionDoesNotChooseAHelperDockerfileOverTheApplication(t *testing.T)
 			}
 		}
 	})
-	t.Run("an application Dockerfile in another directory is the operator's call", func(t *testing.T) {
+	t.Run("an application Dockerfile in another directory does not outrank the root application", func(t *testing.T) {
 		result := detectFixture(t, incident(map[string]string{
 			"worker/Dockerfile": "FROM node:22\nWORKDIR /app\nCOPY worker.js .\nCMD [\"node\", \"worker.js\"]\n",
 			"worker/worker.js":  "",
 		}))
-		if result.SelectedID != "" {
-			t.Fatalf("selected %q (%s); a Dockerfile elsewhere must not win on buildability", result.SelectedID, result.SelectionReason)
+		// The root recipe still owes its package-manager choice; the
+		// Dockerfile elsewhere must not win on buildability.
+		selected := selectedFixtureCandidate(t, result)
+		if selected.BuildMethod != BuildRecipe || selected.Root != "" || !strings.Contains(result.SelectionReason, "shallower root") {
+			t.Fatalf("selected %s at %q (%s), want the root recipe", selected.BuildMethod, selected.Root, result.SelectionReason)
 		}
 	})
 }

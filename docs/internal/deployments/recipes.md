@@ -12,7 +12,8 @@ static output, the interpreter or toolchain release, and the environment variabl
 source reads. Every default is a plan field the configure form and the Build settings can change. A
 detected framework that the recipe cannot serve automatically (a provider adapter, a workspace without a
 root package, an unsupported interpreter release) is a low-confidence candidate with a decision or a
-`recipe_unsupported` preflight finding, never a silent guess.
+`recipe_unsupported` preflight finding, never a silent guess. Which of a repository's roots is the
+application, and what it is when it is not a service, is [repository shape](#repository-shape-and-candidate-selection).
 
 ## Build values
 
@@ -109,7 +110,9 @@ committed file whose value points at loopback.
   `AUTH_SECRET`/`NEXTAUTH_SECRET`, Better Auth, Payload, Rails' and Phoenix's `SECRET_KEY_BASE`,
   Django's `SECRET_KEY`/`DJANGO_SECRET_KEY` (only when its settings read that exact name), Flask's,
   Strapi's `APP_KEYS` (four keys) and salts, Directus `KEY`/`SECRET`, Medusa, AdonisJS, and
-  `SESSION_SECRET`/`COOKIE_SECRET`/`JWT_SECRET` beside the session or JWT library that signs with them.
+  `SESSION_SECRET`/`COOKIE_SECRET`/`JWT_SECRET` beside the session or JWT library that signs with them,
+  and a name another platform's file generates (render.yaml `generateValue`, app.json
+  `generator: "secret"`) as 64 hex characters.
   Every rule is an exact name gated by the dependency that issues it to itself, so a provider's
   credential — `STRIPE_SECRET_KEY`, `CLERK_SECRET_KEY`, `SUPABASE_JWT_SECRET`, `AUTH_GITHUB_SECRET` —
   is never generated. A secret the framework reads internally (`SECRET_KEY_BASE` for Rails, Auth.js's
@@ -213,11 +216,14 @@ connection refused on loopback, by port — never the line it was read from.
 ## Procfile
 
 A `web:` process in a Heroku-style `Procfile` is the repository declaring how it is served, and outranks
-a start script and a framework default alike; it is only ever a server command, so a site framework's
-build is still served by nginx. A `release:` process is the candidate's release command
-([Release commands](#release-commands)). A command that carries credential material is ignored. Its port and bind flags are read like any
-start command's (next section): `--port 5000` makes 5000 the candidate's port, `-b 0.0.0.0:$PORT` follows
-PORT, and a gunicorn line with no `--bind` takes its bind from `gunicorn.conf.py` (or the `-c` file).
+a start script, another platform's file and a framework default alike; it is only ever a server command,
+so a site framework's build is still served by nginx. A `release:` line is the candidate's release
+command ([Release commands](#release-commands)), and every other process line is recorded as one of the
+candidate's [processes](#background-processes): a worker, clock or beat line is a process this project
+does not run. A command that carries credential material is ignored. Its port and bind flags are read
+like any start command's (next section): `--port 5000` makes 5000 the candidate's port,
+`-b 0.0.0.0:$PORT` follows PORT, and a gunicorn line with no `--bind` takes its bind from
+`gunicorn.conf.py` (or the `-c` file).
 
 ## Where the server listens, and whom it trusts
 
@@ -367,6 +373,227 @@ dashboard does not have — in its own image that includes `npx`, `python` and `
 `release_task_tool_missing`, and a host task that runs the application's code no longer counts as the
 schema step.
 
+## Repository shape and candidate selection
+
+Detection reads a checkout in two passes (`detect_walk.go`). The first lists directories breadth-first
+to the depth bound and reads only the files whose names say what a directory is — the manifests above,
+Dockerfiles and Compose files, and the repository-shape files below — so ten thousand images under
+`assets/` or megabytes of generated Go under `api/` can no longer spend the bound before the root's
+`package.json` or `go.mod` is read. The second walks everything else, reusing the first pass's
+judgement of each directory, so a pruned directory is recorded once and never entered. The file bound
+(10,000) counts files detection opens, not files the repository holds. Go source is read head-first (64 KiB, enough for
+the package clause, the imports and the cgo check) under a budget of its own (3,000 files, 24 MiB), and
+files marked `// Code generated … DO NOT EDIT.` and `*.pb.go` are skipped; a module whose scan stopped
+early says so in its evidence. A manifest the depth bound kept detection from reading sets `truncated`,
+and every candidate found before a bound carries that as evidence. A verdict drawn from a file the walk
+did not find — no `src/main.rs`, no main package, no script at a Python project's top, no `web/` in a
+Flutter app — is drawn only when the walk saw everything under that root: after a bound stopped it, or
+when the depth bound pruned a directory under the root, the candidate keeps its ordinary plan instead
+of being called a library. Editor, CI and tool directories
+(`.devcontainer`, `.github`, `.vscode`, `.idea`, caches and build outputs such as `.svelte-kit`,
+`.nuxt`, `coverage`) are never walked; a development container's Dockerfile is recorded as set aside,
+not offered. A directory holding `pyvenv.cfg` or `conda-meta/` is a committed virtualenv whatever it is
+called: it is skipped, and preflight's `committed_virtualenv` warns that the build context carries it.
+A manifest that starts with a UTF-8 byte-order mark (PowerShell 5.1 writes one), or is UTF-16 with a
+mark, is read as npm, Composer and Deno read it; the recipe accepts the same file.
+
+Candidates are ranked, and the one that outranks every other is selected (`detect_ranking.go`, with each
+candidate's standing read here). Two candidates for one directory are two ways to build one application
+and compare as [Repository Dockerfiles and Compose files](#repository-dockerfiles-and-compose-files)
+says. Between directories the order is: whether it may be chosen on its own at all (a service, not a
+development Dockerfile); whether something ranks it below the application; its confidence; between two
+nested roots, `apps/`, `services/` or `web/` above `packages/`, `libs/` or `tools/`; and, on a tie, the
+shallower root — unless that is plain static files, which say least about what a repository is for.
+Which of two directories builds as detected never decides between them. A tie is still the operator's
+choice. A candidate ranked down is chosen on its
+own only when it is the only deployable thing and nothing in the repository is a library it could be
+the example of; a candidate that is not a service is never chosen on its own. At most the 64
+best-ranked candidates are listed, and the rest are counted under "Not offered", so a repository of
+fixtures stays a result the chooser can show. Ranked down
+(`demotion`, said beside it in the candidate chooser and by `selected_candidate_demoted` when it is
+picked anyway):
+
+- roots under `examples/`, `demo(s)/`, `sample(s)/`, `fixtures/`, `test(s)/`, `e2e/`, `playground/`,
+  `sandbox/`, `benchmark(s)/`, `templates/` or a Storybook;
+- a documentation site (Docusaurus, VitePress, Starlight, Nextra, MkDocs, Hugo, Jekyll, or plain HTML
+  under `docs/`) beside an application;
+- a workspace root whose applications are its member packages;
+- an `index.html` root nested inside a code root outside the folders a framework serves
+  (`static_candidate_nested` when selected);
+- a `package.json` that only runs tooling — no framework, server library, start script beyond a
+  static preview server, runtime library (a bot SDK, a database driver, a queue) or main file that
+  exists — when anything else is deployable: a root of prettier and husky used to win on depth over
+  the GitHub Pages site in `public/` or `site/`;
+- the frontend of a split repository's API, and a desktop shell's frontend (below).
+
+An `index.html` is not a site when it sits under `templates/`, `layouts/`, `_includes/`, `partials/`,
+`views/`, `themes/`, a coverage or test report, or when its first 4 KiB start with front matter or hold
+`{%`, `<?php` or `<%=` — a Flask or Jinja template used to become a site serving raw template source. An
+`index.html` nested inside another plain static root is a page of that site ("2 more pages under ."). One
+at or under an application's root, in a folder the framework serves (`public/`, `static/`, `assets/`,
+`templates/`, `views/`, `wwwroot/`, `priv/`), is that application's static files and is set aside with
+evidence on the application — an Express API with `public/index.html` used to deploy the folder on nginx
+and not the API. A tooling-only `package.json` is no application and owns no static files. A plain HTML
+site whose `package.json` only runs tooling (the Tailwind CLI, PostCSS, a formatter, a `live-server` or
+`http-server` preview) is a static site: with a build script it is "Static site with a build step", the
+Node recipe with output directory `.`, whose image serves the package root after the build without
+`node_modules`, the package manifests, the lockfiles or dotfiles, and whose nested `index.html` files are
+its pages; without one it is a plain static site. `"main": "index.js"`, which `npm init` writes whether
+or not the file exists, counts only when the file is there. A bot or script with a landing page — a
+main file that exists, or a runtime library such as `discord.js` — stays the program it is, so its code
+and configuration are never served as files.
+
+A repository split into a frontend and an API (`detect_split_repository.go`) is one deployment when the
+server's own scripts build the frontend (`npm --prefix client run build`, `cd client`, `--workspace`,
+`--filter`): the frontend's candidate folds into the server's, which becomes high confidence and, when
+the build lives in `heroku-postbuild` or `render-build`, builds with that script. When the two build
+separately but talk to each other — the frontend's Vite `server.proxy` points at the API's port, it
+reads an `*_API_URL`, or the API reads `CORS_ORIGIN`, `FRONTEND_URL` or `CLIENT_URL` — they are
+companions: the API is selected, the frontend is ranked down, and preflight's
+`companion_service_not_deployed` names the root the second project deploys from.
+
+Not a service (`notDeployable`, `detect_not_deployable.go`): a package that publishes a library
+(`exports`, `types`, `files`, `peerDependencies`) and starts nothing, a `bin`-only command-line tool, a
+VS Code extension (`engines.vscode`), a browser extension (a `manifest_version` manifest, WXT, Plasmo,
+CRXJS), Electron and React Native or Expo apps without `react-native-web`, a GitHub Action
+(`action.yml`), a Python project with no framework and no entry point (`[project.scripts]` makes it a
+tool; a package's `__main__.py`, a Procfile or Dockerfile, or a dependency only a program has — a
+Discord or Telegram SDK, Celery, RQ, APScheduler, a WSGI or ASGI server — makes it a program), a
+notebook-only root, a Rust library crate, a Windows-only .NET program (.NET Framework,
+`-windows`, WinForms, WPF), a Go module with no main package outside its examples, and a Wails or Tauri
+shell. Android modules (`com.android.*` in a Gradle script), a Flutter app's native folders and the
+functions directories Supabase, Netlify and Firebase host are set aside rather than offered. Preflight's
+`source_not_a_service` is blocked when every candidate is one, or when the selected one is, while the
+plan is still detection's; a start command of the operator's own, or another build method (a Dockerfile,
+a static site), makes it a warning either way, because detection can be wrong about what a source is. A
+Tauri or Wails frontend is ranked down and warned (`desktop_frontend_only`): its calls into the shell
+have nothing to answer them in a browser. Expo with `react-native-web` builds its web target
+(`expo export --platform web` into `dist`, single-page fallback on); `expo.web.output: "server"` is a
+`recipe_unsupported` finding.
+
+Serverless and edge code (`detect_serverless.go`) is named rather than dropped: a Wrangler `main` is a
+Worker entry, which a container never runs. `edge_runtime_code_not_deployed` is blocked when the
+application has no server of its own — a static site, a Worker-only package, or a start command that
+runs the Worker entry itself — and a warning beside an application the recipe starts in Node. A `main`
+a framework's Cloudflare adapter writes (`.open-next/`, `dist/_worker.js`, `.svelte-kit/cloudflare/`,
+`.output/server/`) is evidence only: Next.js on OpenNext still builds and serves with `next start`. A
+Vite app with `@cloudflare/vite-plugin` serves `dist/client`, where the plugin writes the client; and
+Vercel `api/`,
+`netlify/functions` or Cloudflare Pages `functions/` beside a static site are listed by route in
+`serverless_functions_dropped`. The static server's single-page fallback is unchanged, so those routes
+answer with `index.html`.
+
+When the Git remote is the upstream repository of an application the template catalogue packages —
+n8n, Gitea, Uptime Kuma — detection offers the reviewed template, and a workflow that publishes the
+project's own image to `ghcr.io/<owner>/…` or `docker.io/<owner>/…` offers that image
+(`alternatives`; `source_has_packaged_release` or `source_publishes_image`, a warning). The project step
+links to `/deploy/new?source=template&template=<id>` or `?source=image&image=<ref>`. Everything detection
+recognised and deliberately did not offer is listed as `setAside` and shown under "Not offered", so an
+empty result can say what the repository is instead of "No deployable plan was detected".
+
+## Other platforms' deployment files
+
+A repository that ran somewhere else declares how it runs there, and detection reads those files as
+bounded data (64 KiB each, `detect_platform_manifests.go`; TOML through a line reader of the shapes
+these files use, YAML and JSON parsed): `fly.toml`, `render.yaml`, `railway.json`/`railway.toml`, Heroku
+`app.json` and `heroku.yml`, `nixpacks.toml`, `netlify.toml` and `_redirects`, `vercel.json`,
+DigitalOcean `.do/app.yaml`, Kamal `config/deploy.yml` (ERB tags stripped), `Aptfile`,
+`.readthedocs.yaml`, `firebase.json` hosting and a Hugging Face Space's README front matter. What they
+declare ranks below the operator's input and the Procfile and above a framework's defaults, and each
+candidate records the file, the facts and which it took (`platformManifests`):
+
+| Declared | Taken as |
+| --- | --- |
+| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with, with the detected schema step kept in front of it unless it applies the schema itself; it answers the start-command decisions |
+| build command | the build command when detection had none, with its dependency installs (`npm ci`, `pip install`, `bundle install`, …) removed — the recipe installs from the lockfile |
+| port (`internal_port`, `http_port`, Kamal `proxy.app_port`, Space `app_port`) | the port when the start command came from the same file, or when nothing named one |
+| publish directory (`publish`, `outputDirectory`, `staticPublishPath`, `output_dir`, hosting `public`) and a rewrite of every path to `/index.html` | the output directory and the single-page fallback of a static candidate |
+| health check path | evidence and `healthPath`; readiness detection reads the same files for the check ([Readiness](#readiness-workers-and-start-commands)) |
+| `generateValue`, `generator: "secret"` | a variable set up to be generated on the server when the project is created (`setup: generate`), unless the environment classification knows the framework's own shape for it |
+| secret env names, `sync: false`, `required` | a variable row that must be set |
+| accessories, add-ons, `fromDatabase`, `databases:` | a database suggestion on the declared variable |
+| worker, cron, Kamal roles, `[processes]` | [processes](#background-processes) |
+| release command (`release_command`, `preDeployCommand`, `PRE_DEPLOY` job) | a `release` process; `fly.toml`'s and `render.yaml`'s are also the candidate's release command ([Release commands](#release-commands)), and one no release task runs is `release_process_not_run` |
+| volumes and `[[mounts]]` | evidence and `volumes`; no mount is created from them yet |
+| `Aptfile`, `aptPkgs` | `platform_system_packages_ignored` (warning) for a recipe build |
+| redirect rules other than the SPA rewrite | `static_redirects_unsupported` (warning) |
+
+Values are never imported from these files: a secret is a name to fill in or generate, and plain values
+become examples only when they are not shaped like a host, an address or a URL — `PHX_HOST` and a Kamal
+accessory's IP belong to the old host. Kamal's `env.clear` brings examples only for framework toggles
+(`SOLID_QUEUE_IN_PUMA`, `WEB_CONCURRENCY`, `JOB_CONCURRENCY`, `RAILS_LOG_LEVEL`, …). Every command passes
+the same credential screen as the rest of detection. The TOML reader gathers a multi-line string or
+array line by line and stops at 256 lines, so an unterminated value ends the document instead of being
+rescanned to its end, and these files are read only within detection's time bound. A fact the result's
+validation would refuse — a process named with a space, a path with a newline in it — is dropped before
+the result is saved, so one odd file costs that fact and never the import.
+
+## Background processes
+
+A project runs one process. Detection records every other process the source declares or its framework
+implies on the candidate (`processes`, `detect_processes.go`), each with the command a second project
+from the same repository would start: the Procfile's lines; Celery's worker and, with a beat schedule or
+`django-celery-beat`, its beat (`celery -A <module> worker`, the module found where `Celery(` is
+assigned); an RQ worker on `REDIS_URL`; Dramatiq and arq workers by name; a Laravel queue worker when a
+job, mailable, notification or listener implements `ShouldQueue` and `QUEUE_CONNECTION` is not `sync`
+(`php artisan horizon` with Horizon, whose image then carries `pcntl` and `redis`), its scheduler when
+`routes/console.php` or the console kernel schedules anything, and Reverb's WebSocket server; a Symfony
+Messenger consumer; Sidekiq, Solid Queue, GoodJob, Resque and Delayed Job for Ruby; a BullMQ worker file
+the start command does not run; and the workers, cron jobs and roles of the platform files above.
+A process the Procfile declares replaces the framework's conventional one of the same kind (a Gemfile's
+Sidekiq beside `worker: bundle exec sidekiq` is one worker), two processes with the same command are
+one, and a Procfile command is held to the same 1,024-character bound and credential screen as a
+command from any other platform's file. Preflight raises `secondary_process_not_deployed_<name>`
+(warning) for each, unless the plan's start command is that process's own, which is the second
+project; a release process is not a project of its own but a [release task](#release-commands), and the
+project step lists only the others. Octane is recorded as an alternative start command, not a failure.
+
+## Ecosystems without a recipe
+
+A root the builder has no recipe for is still named (`detect_ecosystems.go`), with a low-confidence
+candidate whose framework is the language or framework and whose `recipeIssue` says what to commit —
+which preflight's `recipe_unsupported` shows instead of "No deployable plan was detected". Rails
+(`rails new` has generated a production Dockerfile since 7.1; older applications use `dockerfile-rails`),
+Hanami, Sinatra and Rack, Jekyll and Middleman; Phoenix (`mix phx.gen.release --docker`) and Elixir;
+Crystal, Haskell, Zig, Swift, Scala, Clojure, Gleam, F#, OCaml, Nim, Perl, Erlang, Dart, R Shiny and
+Plumber, C/C++ (CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. A web framework among the
+manifest's dependencies makes it a web service on its conventional port. A Rails, Hanami or Phoenix
+application owns its `package.json` (and `assets/package.json`): that asset pipeline is set aside rather
+than offered as a Node service — a CocoaPods or fastlane Gemfile beside a React Native app owns nothing.
+A site generator (Hugo, MkDocs, Jekyll, Middleman, Elm) owns a tooling-only `package.json` at its root
+the same way: a Hugo site with a Tailwind build used to be only a Node worker asking for a start command.
+With a Dockerfile at the same root the Dockerfile is the candidate, and it takes the framework, the
+processes and the database drivers. Every other language is named only when nothing else at its root
+is a candidate, and C/C++ and MkDocs never inside another candidate's root, where they are that
+application's vendored code or manual. Recipes for some of these are planned; each entry is removed when
+its recipe lands.
+
+## Submodules and Git LFS
+
+Detection parses `.gitmodules` and the LFS patterns of `.gitattributes` (`detect_git_extras.go`): each
+submodule's path and whether its URL is relative or on the repository's own host (`submoduleList`), and
+the files under the root that LFS tracks (`lfsFiles`, `lfsPaths`, which lists at most 256). Only what
+the build root holds matters: a submodule inside it, or the one it lies inside. A nested root's LFS count
+comes from the listed paths; when the repository tracks more files than are listed, a count of zero is
+unknown, and preflight warns that LFS files may deploy as pointer files instead of passing. The configure screen turns submodules on when every one under the root is on the source's own
+host, and LFS when files under the root are tracked, and both switches sit in the Source section beside
+the branch. Preflight's `git_submodules` is a decision only for a submodule on another host, a warning
+when a same-host one is left off, and a pass when none is under the root; `git_lfs` warns that
+LFS-tracked files deploy as pointer files when LFS is off, and `git_lfs_unavailable` is blocked when LFS
+is on and this host has no `git-lfs`, which is where the release would otherwise stop at acquiring the
+source. Evidence recorded before this (no `submodulesChecked`/`lfsChecked`) keeps the old decisions.
+
+## Case-mismatched imports
+
+The source detection already reads for its environment is also read for relative import specifiers
+(`import … from './x'`, `require('./x')`, dynamic `import()`), resolved against the file list with the
+bundlers' extension and `index` rules (a `.js` specifier may name a `.ts` file). An import with no exact
+match and exactly one file that differs only in letter case builds on macOS and Windows and fails on the
+Linux build: `import_case_mismatch` names the file, line and real name, blocked for a Node recipe and a
+warning for a Dockerfile. A PHP class whose file differs from Composer's PSR-4 expectation only in case
+is a warning: the optimized autoloader skips it. An alias, a generated file or a typo that matches
+nothing says nothing about case and is not reported.
+
 ## JavaScript and static output
 
 The lockfile selects npm, pnpm, Yarn or Bun. When lockfiles for more than one manager are committed,
@@ -480,8 +707,10 @@ inside them, and heredoc bodies.
   issue, no unresolved package manager), confidence, and intent: a production-named Dockerfile, then the
   plain Dockerfile, then the recipe; a Dockerfile that runs a dev server, or declares no `ARG` for a
   browser-public variable the source reads, ranks below the recipe. Different roots are different things,
-  so their best candidates compare only on whether they may be chosen and on confidence: a helper image
-  in `docker/db/` that builds does not beat the application whose recipe needs one decision. A Dockerfile
+  so their best candidates compare on whether they may be chosen, their standing and confidence, then
+  where they sit ([Repository shape](#repository-shape-and-candidate-selection)), never on which one
+  builds: a helper image in `docker/db/` or `tools/worker/` that builds does not beat the application
+  whose recipe needs one decision. A Dockerfile
   built on a database, cache or other backing image is low confidence. The winner is listed first with
   the reason (`selectionReason`, the `detection_selected` finding's measured text); only a true tie leaves
   the choice to the operator. A buildable Dockerfile beside a recipe blocked by competing lockfiles wins;
@@ -756,7 +985,8 @@ Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is prese
 `bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. The
 recipe links the public disk the way `php artisan storage:link` would (`public/storage` →
 `/app/storage/app/public`, unless the repository commits one), without booting the application in
-the build. A Laravel import's `APP_KEY` is generated on the server at commit (`base64:` over 32 random
+the build. With `laravel/horizon` the image also carries `pcntl` and `redis`, which Horizon's own
+manifest requires. A Laravel import's `APP_KEY` is generated on the server at commit (`base64:` over 32 random
 bytes), and the **Generate** button is offered on a self-issued name the operator types by hand — never
 on a provider's (`STRIPE_SECRET_KEY`, `AUTH_GITHUB_SECRET`, a client or webhook secret). Laravel's
 `.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`
@@ -848,7 +1078,8 @@ A script that serves HTTP itself (`web.run_app`, `uvicorn.run`, a webhook server
 128 KiB or a truncated walk left one of the root's source files unread, a Node bot stays web and asks
 whether it serves HTTP, and a Python root keeps its previous plan. A worker is at most medium
 confidence, so a web application in another root of the same repository still wins the selection (two
-high candidates tie and ask the operator to choose). Planned as web anyway, such a package gets
+high candidates in different roots are told apart by where they sit, and only a true tie asks the
+operator). Planned as web anyway, such a package gets
 `web_profile_without_listener`.
 
 **Start commands.** A container lives as long as its main process, so a start command that backgrounds
@@ -970,4 +1201,7 @@ complement the production-build browser gate; they do not constitute public prov
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
 (`frameworks_*_test.go`, `build_recipes_test.go`). Persistent state, schema tools, seeds and their
 findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
-`preflight_state_test.go` and `recipe_runtime_files_test.go`.
+`preflight_state_test.go` and `recipe_runtime_files_test.go`. Repository shape — ranking, decoys, static
+roots, split repositories, shapes that are not services, ecosystems without a recipe, processes, other
+platforms' files, submodules and LFS, case-mismatched imports and the preflight findings they raise — is
+covered by `detect_*_test.go` and `preflight_repo_shape_test.go` against written fixtures.

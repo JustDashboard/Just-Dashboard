@@ -11,9 +11,13 @@ import (
 // stopped on "choose one" every time, and the form quietly filled itself
 // from whichever candidate sorted first (Compose, which cannot build from a
 // Git source). Candidates for the same directory are compared on whether
-// each can be chosen on its own at all, whether it builds as detected, its
-// confidence, and what the repository says it intends; different
-// directories only on whether they can be chosen and their confidence.
+// each can be chosen on its own at all, whether the repository's shape ranks
+// it below the application (detect_repo_shape.go), whether it builds as
+// detected, its confidence, and what the repository says it intends.
+// Different directories are different things, so which one builds does not
+// count between them: whether each can be chosen, its standing, its
+// confidence, then where it sits — a monorepo's apps/ over its packages/, and
+// the shallower root, which a build of the repository starts from.
 
 type candidateScore struct {
 	selectable bool
@@ -22,6 +26,15 @@ type candidateScore struct {
 	preference int
 	// blocker is why the candidate cannot build as detected, for the reason.
 	blocker string
+	// tier is candidateTier: 1 for a candidate ranked below the
+	// application (an example, a docs site, the frontend of an API), 2
+	// otherwise. One that is not a service at all is not selectable.
+	tier int
+	// area and depth place a root: candidateArea and rootDepth.
+	root   string
+	area   int
+	depth  int
+	static bool
 }
 
 // publicBuildPrefixes name the variables a framework compiles into its
@@ -55,7 +68,11 @@ func reservedBuildArgName(name string) bool {
 }
 
 func scoreCandidate(candidate DetectedCandidate, only bool) candidateScore {
-	score := candidateScore{selectable: true, buildable: true, confidence: confidenceRank(candidate.Confidence)}
+	score := candidateScore{
+		selectable: candidate.NotDeployable == "", buildable: true, confidence: confidenceRank(candidate.Confidence),
+		tier: candidateTier(candidate), root: candidate.Root, area: candidateArea(candidate.Root), depth: rootDepth(candidate.Root),
+		static: candidate.BuildMethod == BuildStatic,
+	}
 	if issue, blocked := candidate.blockingImageIssue(); blocked {
 		score.buildable, score.blocker = false, issue.Detail
 	}
@@ -89,7 +106,7 @@ func scoreCandidate(candidate DetectedCandidate, only bool) candidateScore {
 		// Compose source, and the plan cannot build it until it is.
 		score.buildable = false
 		score.blocker = "it has to be deployed as a Compose source to be analysed"
-		score.selectable = only
+		score.selectable = score.selectable && only
 	default:
 		score.preference = 2
 	}
@@ -120,6 +137,9 @@ func (s candidateScore) outranksAtRoot(other candidateScore) int {
 	if result := compareFlags(s.selectable, other.selectable); result != 0 {
 		return result
 	}
+	if result := compareRanks(s.tier, other.tier); result != 0 {
+		return result
+	}
 	if result := compareFlags(s.buildable, other.buildable); result != 0 {
 		return result
 	}
@@ -132,13 +152,34 @@ func (s candidateScore) outranksAtRoot(other candidateScore) int {
 // outranksAcrossRoots compares the best candidates of two directories, which
 // are different things rather than two ways to build one: a helper image in
 // docker/db/ that builds is no better an answer than the application whose
-// recipe needs one decision, so only whether each can be chosen and how
-// strong its evidence is count, and anything closer is the operator's call.
+// recipe needs one decision, so buildability does not count. Whether each
+// can be chosen, its standing and how strong its evidence is do; then, for
+// two nested roots, where a monorepo keeps applications rather than
+// packages; then the shallower root, unless it is plain static files, which
+// say least of all about what the repository is for. Anything closer is the
+// operator's call.
 func (s candidateScore) outranksAcrossRoots(other candidateScore) int {
 	if result := compareFlags(s.selectable, other.selectable); result != 0 {
 		return result
 	}
-	return compareRanks(s.confidence, other.confidence)
+	if result := compareRanks(s.tier, other.tier); result != 0 {
+		return result
+	}
+	if result := compareRanks(s.confidence, other.confidence); result != 0 {
+		return result
+	}
+	if s.root != "" && other.root != "" {
+		if result := compareRanks(s.area, other.area); result != 0 {
+			return result
+		}
+	}
+	switch {
+	case s.depth < other.depth && !s.static:
+		return 1
+	case other.depth < s.depth && !other.static:
+		return -1
+	}
+	return 0
 }
 
 func compareFlags(a, b bool) int {
@@ -208,10 +249,13 @@ func rankCandidates(candidates []DetectedCandidate) (string, string) {
 	best := candidates[0]
 	bestScore := scores[best.ID]
 	if !bestScore.selectable {
-		if len(candidates) == 1 {
+		switch {
+		case best.NotDeployable != "" && len(candidates) == 1:
+			return "", rootLabel(best.Root) + " is " + notDeployableKinds[best.NotDeployable] + ", not a service"
+		case len(candidates) == 1:
 			return "", "only " + candidateLabel(best) + " was found, which is written for development; choose it to deploy it anyway"
 		}
-		return "", fmt.Sprintf("none of the %d candidates is chosen on its own: development Dockerfiles, or a Compose file that has to be deployed as a Compose source", len(candidates))
+		return "", fmt.Sprintf("none of the %d candidates is chosen on its own: what is not a service, development Dockerfiles, or a Compose file that has to be deployed as a Compose source", len(candidates))
 	}
 	tied := []string{}
 	if group := byRoot[best.Root]; len(group) > 1 && bestScore.outranksAtRoot(scores[group[1].ID]) == 0 {
@@ -225,6 +269,22 @@ func rankCandidates(candidates []DetectedCandidate) (string, string) {
 	if len(tied) > 0 {
 		return "", fmt.Sprintf("%s and %s are equally strong", candidateLabel(best), strings.Join(tied, ", "))
 	}
+	// A library's docs site or example app is what the operator may want,
+	// but it is not what the repository is; that is theirs to say.
+	if bestScore.tier == 1 || documentationCandidate(best) {
+		demoted := 0
+		for _, candidate := range candidates {
+			if candidate.NotDeployable != "" {
+				return "", candidateLabel(best) + " belongs to " + rootLabel(candidate.Root) + ", which is " + notDeployableKinds[candidate.NotDeployable] + "; choose it to deploy it anyway"
+			}
+			if candidateTier(candidate) == 1 {
+				demoted++
+			}
+		}
+		if demoted > 1 {
+			return "", fmt.Sprintf("the %d candidates are all ranked below an application; choose the one to deploy", demoted)
+		}
+	}
 	if len(candidates) == 1 {
 		return best.ID, "the only candidate: " + candidateLabel(best)
 	}
@@ -236,14 +296,24 @@ func rankCandidates(candidates []DetectedCandidate) (string, string) {
 	switch {
 	case runnerStartsDevServer:
 		reason += "it starts a development server (" + devServer + ")"
+	case !runnerScore.selectable && runnerUp.NotDeployable != "":
+		reason += rootLabel(runnerUp.Root) + " is " + notDeployableKinds[runnerUp.NotDeployable]
 	case !runnerScore.selectable:
 		reason += candidateLabel(runnerUp) + " is written for development"
 		if runnerUp.BuildMethod == BuildCompose {
 			reason = candidateLabel(best) + " over " + candidateLabel(runnerUp) + ": " + runnerScore.blocker
 		}
+	case bestScore.tier > runnerScore.tier:
+		reason += candidateLabel(runnerUp) + " is ranked below the application (" + runnerUp.Demotion + ")"
 	case sameRoot && bestScore.buildable && !runnerScore.buildable:
 		reason += candidateLabel(runnerUp) + " cannot build as detected; " + runnerScore.blocker
-	case bestScore.confidence != runnerScore.confidence || !sameRoot:
+	case bestScore.confidence != runnerScore.confidence:
+		reason += "stronger evidence"
+	case !sameRoot && best.Root != "" && runnerUp.Root != "" && bestScore.area != runnerScore.area:
+		reason += rootLabel(best.Root) + " is where the repository keeps its applications, not its shared packages"
+	case !sameRoot && bestScore.depth != runnerScore.depth:
+		reason += "it is the shallower root, which a build of the whole repository starts from"
+	case !sameRoot:
 		reason += "stronger evidence"
 	case best.BuildMethod == BuildDockerfile:
 		reason += "the repository's own Dockerfile builds it as written"

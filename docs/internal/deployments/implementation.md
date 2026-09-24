@@ -60,7 +60,8 @@ only renderer/executor/validation authority for their feature.
   fallback shelf for a blueprint the frontend does not name), a database and a Compose stack (paste,
   upload, Git, local). Choosing a
   source creates a draft, saves the intent and source, and runs detection in one action; when
-  detection is ambiguous the candidates are offered as a choice that re-runs detection with
+  detection finds more than one candidate they are offered ranked, each saying why it ranks where it
+  does (an example, a docs site, not a service), as a choice that re-runs detection with
   `selectedId`. The configure screen draws the plan beside the form — source → build → runtime →
   address, in the same `wire.tsx` vocabulary the project overview uses for a deployment that already
   exists, with a dashed ring for a step not yet decided and nothing pulsing, because a pulse means
@@ -86,9 +87,12 @@ only renderer/executor/validation authority for their feature.
   for no readiness gate), a Deno project (the port is `Deno.serve`'s own default) and a static site
   (a marker's root is the directory its files were found in, so the candidate's root *is* the one
   holding the `index.html`, which is what an empty output directory serves) record evidence instead;
-  a Dockerfile naming no port or several, an image this host holds no copy of, and a Compose file in
-  a Git checkout that is a deployment of its own (it is read for its services' shape only, and built
-  only as a Compose source) still owe one. Everything else that is open is carried by the plan
+  a Dockerfile naming no port or several, an image this host holds no copy of, a Compose file in a
+  Git checkout that is a deployment of its own (it is read for its services' shape only, and built only
+  as a Compose source), and a submodule on another host still owe one — a submodule on the
+  repository's own host and LFS files under the build root switch themselves on at inspection, in the
+  Source section beside the branch. A source that is not a service, or the upstream repository of an
+  application the template catalogue packages, also opens the project screen. Everything else that is open is carried by the plan
   rather than by prose, which is what lets it open the screen that owns the field: an unset
   `internalPort` opens the runtime screen (and the port field seeds the readiness check a gated
   profile needs, the way choosing the type does); a required plan variable with no reference, value
@@ -155,7 +159,9 @@ only renderer/executor/validation authority for their feature.
   documentation spells it (`frameworkLabel`), a Python recipe shows its interpreter field, and static
   output shows the single-page switch. `?repo=<clone url>&ref=<branch>` arrives on the Git tab with
   the URL filled in (only an `https://`, `ssh://` or `git@` URL is accepted), which is what a deploy
-  link in a README points at.
+  link in a README points at. `?template=<blueprint id>` (only an identifier's shape is taken) and
+  `?image=<reference>` arrive on those tabs with the blueprint chosen or the reference filled in, which
+  is where the project step sends the upstream repository of an application the catalogue packages.
   Reviewed blueprints deploy as image releases (below); game-server blueprints and blueprints that
   install configuration files or downloaded artifacts stay preview-only, the catalogue names the
   reason per blueprint, and direct API calls are refused with the same reason before deployment work
@@ -274,7 +280,8 @@ only renderer/executor/validation authority for their feature.
   Gradio from the manifests and finds the application object in the conventional entry files;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
   `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
-  process outranks every guess. The candidate carries `spaFallback` (a client-routed site's nginx
+  process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
+  `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
   never a refusal), `variables` (the environment names the source reads, with example values, where
   each was read, and how each is supplied and read — `setup`, `generateFormat`, `domainTemplate`,
@@ -317,14 +324,46 @@ only renderer/executor/validation authority for their feature.
   cannot redirect). Dockerfile candidates carry `dockerfileRole`, `dockerfileTarget`, `dockerfileArgs`
   (names and whether each has a default, is used in `FROM`, is consumed), `dockerfilePlatforms`,
   `imageBuildIssues` (`{code, severity, line, subject, detail}`, text that names lines, paths and
-  variables but never a value) and `releaseCommand`; the result carries `selectionReason`. Selection
-  (`detect_ranking.go`) ranks by selectability, buildability, confidence and same-root intent instead
-  of confidence alone, and lists the winner first. Preflight's `imageBuildFindings`
+  variables but never a value) and `releaseCommand`; the result carries `selectionReason`, the sentence
+  saying which rule decided. Selection (`detect_ranking.go`) ranks a directory's candidates by whether
+  each may be chosen on its own, its standing, buildability, confidence and intent, and directories by
+  their best candidate's selectability, standing and confidence, then a monorepo's application area and
+  the shallower root — never by which one builds — and lists the winner first. Preflight's `imageBuildFindings`
   (`preflight_image.go`) turns the evidence of the candidate the configuration still builds — same
   method, root and Dockerfile — into one finding per code; a Dockerfile detection never read is the
   warning `dockerfile_unchecked`. Compose sources gain build targets and arguments, optional variables,
   env files, platform evidence and a primary service (`compose_build.go`). The contract is in
   [the recipe guide](recipes.md#repository-dockerfiles-and-compose-files).
+- Detection reads the repository's shape as well as each root (`detect_*.go`; the contract is
+  [repository shape](recipes.md#repository-shape-and-candidate-selection)). Manifests are read
+  breadth-first before any source and the file bound counts only files opened, so bulk assets or
+  generated Go cannot hide the root manifest. The shape pass runs twice around the per-root passes:
+  first (`shapeCandidates`) it applies what the repository as a whole says — ecosystems, shapes that are
+  not services, static roots, other platforms' files, processes, decoys — so the state, readiness,
+  network and environment passes read each candidate as it will be offered, with another platform's
+  start command and port; last (`rankDetection`) it pairs a split frontend and API by the ports and
+  profiles those passes settled, and ranks. Candidates are ranked — a service above one ranked down
+  (`demotion`: an example, a docs site beside an app, static files inside a code root, a split
+  repository's frontend, a desktop shell's frontend), above one that is not a service
+  (`notDeployable`: a library, a CLI, an extension, a mobile or desktop app, notebooks, a GitHub
+  Action, a Windows-only program), by the ranking above — and `SelectedID` names the one that outranks
+  every other; ties are still the operator's. A candidate also carries `companions` (the other root of a split frontend and
+  API), `processes` (workers, schedulers, release commands, second servers), `platformManifests`,
+  `serverlessCode` and `importCaseMismatches`; a result carries `setAside` (what was recognised and not
+  offered, and why) and `alternatives` (a reviewed template or the project's published image), and
+  `gitRequirements` lists each submodule and the LFS-tracked files. All of it is bounded and
+  credential-screened by `validateRepoShapeEvidence` (anything it would refuse is dropped first by
+  `keepValidShape`, so one odd file never fails the import, and a verdict drawn from a file's absence
+  needs a walk that saw the whole root), and preflight turns it into findings before Deploy
+  (`preflight_repo_shape.go`): `source_not_a_service`, `static_candidate_nested`,
+  `selected_candidate_demoted`, `companion_service_not_deployed`, `desktop_frontend_only`,
+  `secondary_process_not_deployed_<name>`, `release_process_not_run`, `edge_runtime_code_not_deployed`,
+  `serverless_functions_dropped`, `import_case_mismatch`, `committed_virtualenv`,
+  `platform_system_packages_ignored`, `static_redirects_unsupported`, `source_has_packaged_release`,
+  `source_publishes_image`, and `git_submodules`/`git_lfs`/`git_lfs_unavailable` judged per build root,
+  with `git-lfs` observed on the host when LFS is included. One project still runs one process: a worker
+  or a split repository's other half is a second project from the same repository, which the findings
+  name with its root and start command.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's

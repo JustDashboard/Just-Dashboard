@@ -20,7 +20,7 @@ type nodeManifest struct {
 }
 
 func parseNodeManifest(content []byte, manifest *nodeManifest) bool {
-	return json.Unmarshal(content, manifest) == nil
+	return json.Unmarshal(manifestText(content), manifest) == nil
 }
 
 func (m nodeManifest) has(name string) bool {

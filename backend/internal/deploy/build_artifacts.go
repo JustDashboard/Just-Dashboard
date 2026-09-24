@@ -727,9 +727,14 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			if err != nil {
 				return "", err
 			}
+			source := "/app/" + filepath.ToSlash(output) + "/"
+			if output == "." {
+				lines = append(lines, packageRootSiteLine)
+				source = packageRootSite + "/"
+			}
 			lines = append(lines, "FROM "+immutableImageReference(static))
 			lines = append(lines, staticServerLines(config.SPAFallback)...)
-			lines = append(lines, "COPY --from=build /app/"+filepath.ToSlash(output)+"/ /usr/share/nginx/html/")
+			lines = append(lines, "COPY --from=build "+source+" /usr/share/nginx/html/")
 		} else {
 			if strings.TrimSpace(config.StartCommand) == "" {
 				return "", fmt.Errorf("%w: Node service recipe requires a start command", ErrUnsupportedBuilder)
@@ -817,7 +822,7 @@ func renderStaticDockerfile(config BuildPlanConfig, base ResolvedImage) (string,
 	output := strings.TrimSpace(config.OutputDirectory)
 	if output == "" {
 		output = "."
-	} else if !safeRelativePath(output) {
+	} else if !validOutputDirectory(output) {
 		return "", fmt.Errorf("%w: static output directory is invalid", ErrUnsupportedBuilder)
 	}
 	lines := append([]string{"# syntax=docker/dockerfile:1.10", "FROM " + immutableImageReference(base)}, staticServerLines(config.SPAFallback)...)

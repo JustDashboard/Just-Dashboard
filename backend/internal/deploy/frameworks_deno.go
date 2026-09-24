@@ -19,6 +19,7 @@ type denoConfig struct {
 // yields an empty configuration rather than an error, since the task names
 // are a convenience and the recipe can still run an entry file.
 func parseDenoConfig(content []byte) denoConfig {
+	content = manifestText(content)
 	var config denoConfig
 	if json.Unmarshal(content, &config) == nil {
 		return config

@@ -3457,6 +3457,28 @@ export type DeploymentDetectionCandidate = {
   imageBuildIssues?: DeploymentImageBuildIssue[]
   /** The command the repository declares runs once before each release. */
   releaseCommand?: string
+  /** Why this candidate is offered but never chosen over the application: an example, a docs site, the frontend of an API. */
+  demotion?: string
+  /** A shape nothing on this server can serve. */
+  notDeployable?: DeploymentNotDeployableKind
+  /** The desktop shell (tauri, wails) whose frontend this is. */
+  desktopShell?: string
+  /** The other roots of a repository split into a frontend and an API. */
+  companions?: string[]
+  /** What the source runs besides this candidate's own process. */
+  processes?: DeploymentDetectedProcess[]
+  /** What other platforms' deployment files declare for this candidate. */
+  platformManifests?: DeploymentPlatformManifest[]
+  /** Serverless or edge code a container build does not run. */
+  serverlessCode?: { platform: string; paths: string[]; entry?: string; blocking?: boolean }[]
+  /** Imports that resolve only on a case-insensitive disk. */
+  importCaseMismatches?: {
+    file: string
+    line: number
+    specifier: string
+    actual: string
+    language: "javascript" | "php"
+  }[]
 }
 
 export type DeploymentDockerfileArg = {
@@ -3472,6 +3494,47 @@ export type DeploymentImageBuildIssue = {
   line?: number
   subject?: string
   detail: string
+}
+
+export type DeploymentNotDeployableKind =
+  | "library"
+  | "cli"
+  | "editor-extension"
+  | "browser-extension"
+  | "github-action"
+  | "desktop-app"
+  | "mobile-app"
+  | "notebook"
+  | "windows-only"
+
+/** A process the source runs besides its main one: a queue worker, a scheduler, a release command. */
+export type DeploymentDetectedProcess = {
+  name: string
+  kind: "worker" | "scheduler" | "release" | "web"
+  command?: string
+  source: string
+  reason: string
+}
+
+/** Facts another platform's file (fly.toml, render.yaml, app.json, …) declares, and which were taken. */
+export type DeploymentPlatformManifest = {
+  file: string
+  platform: string
+  startCommand?: string
+  buildCommand?: string
+  outputDirectory?: string
+  port?: number
+  healthPath?: string
+  spaFallback?: boolean
+  dockerfile?: string
+  releaseCommand?: string
+  generatedVariables?: string[]
+  requiredVariables?: string[]
+  volumes?: string[]
+  systemPackages?: string[]
+  redirects?: number
+  toolchains?: string[]
+  applied?: string[]
 }
 
 export type DeploymentDetection = {
@@ -3527,7 +3590,21 @@ export type DeploymentDetection = {
   truncated: boolean
   truncatedReason?: string
   unavailable?: string
-  gitRequirements: { submodules: boolean; lfs: boolean }
+  gitRequirements: {
+    submodules: boolean
+    lfs: boolean
+    /** Each declared submodule, and whether the source's own access fetches it. */
+    submoduleList?: { path: string; sameSource: boolean }[]
+    submodulesChecked?: boolean
+    lfsChecked?: boolean
+    /** How many files LFS tracks, and (bounded) which. */
+    lfsFiles?: number
+    lfsPaths?: string[]
+  }
+  /** What detection recognised and deliberately did not offer, and why. */
+  setAside?: { path: string; reason: string; kind: string }[]
+  /** A reviewed template or the project's own published image of the same application. */
+  alternatives?: { kind: "template" | "image"; ref: string; label: string; evidence: string }[]
 }
 
 export type DeploymentBuildMethod =

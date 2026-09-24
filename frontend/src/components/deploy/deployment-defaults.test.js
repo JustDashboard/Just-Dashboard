@@ -8,6 +8,7 @@ import {
   connectedRepositoryRemote,
   defaultConfiguration,
   defaultReleaseTaskRunner,
+  detectedVariableDeclarations,
   dockerfileStageHint,
   discoveredEnvironmentRows,
   environmentRowsToSend,
@@ -938,5 +939,38 @@ describe("repository container definitions", () => {
     ).toBe("https://git.example.com/team/app.git")
     expect(connectedRepositoryRemote({ ...connected, provider: "gitea" })).toBeUndefined()
     expect(connectedRepositoryRemote({ kind: "git", mode: "git_url", url: "x" })).toBeUndefined()
+  })
+  // Detection marks what render.yaml's generateValue names as generated
+  // (detect_platform_manifests.go); the server mints it at commit, like every
+  // other detected secret, and the row says so instead of holding a value.
+  test("a secret another platform's file generates arrives generated", () => {
+    const detected = candidate({
+      variables: [
+        {
+          name: "JWT_SECRET",
+          sources: ["render.yaml"],
+          setup: "generate",
+          setupReason: "Render generates it",
+          generateLength: 64,
+          generateFormat: "hex",
+        },
+        { name: "STRIPE_KEY", sources: ["render.yaml"] },
+      ],
+      platformManifests: [
+        { file: "render.yaml", platform: "render", generatedVariables: ["JWT_SECRET"] },
+      ],
+    })
+    const rows = discoveredEnvironmentRows(detected)
+    expect(rows[0]).toMatchObject({ name: "JWT_SECRET", value: "", setup: "generate" })
+    expect(rows[1].value).toBe("")
+    expect(detectedVariableDeclarations(detected, "web")).toEqual([
+      {
+        name: "JWT_SECRET",
+        sensitivity: "secret",
+        scopes: ["runtime", "build"],
+        generate: 64,
+        generateFormat: "hex",
+      },
+    ])
   })
 })

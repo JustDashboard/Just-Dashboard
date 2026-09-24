@@ -262,6 +262,20 @@ type DetectedCandidate struct {
 	// ReleaseCommand is the one-off command the repository declares must run
 	// before each release starts (Procfile release:, fly.toml, render.yaml).
 	ReleaseCommand string `json:"releaseCommand,omitempty"`
+	// Repository shape (detect_repo_shape.go). Demotion says why a candidate
+	// is offered but never chosen over the application (an example, a docs
+	// site, the frontend of an API); NotDeployable names a shape nothing can
+	// serve (a library, an extension, a mobile app). Companions are the other
+	// roots of a split frontend and API; Processes are what the source runs
+	// besides this candidate's own process.
+	Demotion             string                     `json:"demotion,omitempty"`
+	NotDeployable        string                     `json:"notDeployable,omitempty"`
+	DesktopShell         string                     `json:"desktopShell,omitempty"`
+	Companions           []string                   `json:"companions,omitempty"`
+	Processes            []DetectedProcess          `json:"processes,omitempty"`
+	PlatformManifests    []DetectedPlatformManifest `json:"platformManifests,omitempty"`
+	ServerlessCode       []DetectedServerlessCode   `json:"serverlessCode,omitempty"`
+	ImportCaseMismatches []ImportCaseMismatch       `json:"importCaseMismatches,omitempty"`
 }
 
 // EnvironmentNote is a fact detection read from the source's configuration
@@ -347,6 +361,11 @@ type DetectionResult struct {
 	TruncatedReason string              `json:"truncatedReason,omitempty"`
 	Unavailable     string              `json:"unavailable,omitempty"`
 	GitRequirements GitRequirements     `json:"gitRequirements"`
+	// SetAside lists what detection recognised and deliberately did not
+	// offer; Alternatives a template or published image of the same
+	// application (detect_repo_shape.go).
+	SetAside     []DetectionSetAside    `json:"setAside,omitempty"`
+	Alternatives []DetectionAlternative `json:"alternatives,omitempty"`
 
 	// SelectionReason says why SelectedID won, or why nothing did.
 	SelectionReason string `json:"selectionReason,omitempty"`
@@ -355,6 +374,14 @@ type DetectionResult struct {
 type GitRequirements struct {
 	Submodules bool `json:"submodules"`
 	LFS        bool `json:"lfs"`
+	// SubmoduleList and the LFS file list say which build roots need them;
+	// the Checked flags distinguish "none under the root" from evidence
+	// recorded before detection read them (detect_git_extras.go).
+	SubmoduleList     []GitSubmodule `json:"submoduleList,omitempty"`
+	SubmodulesChecked bool           `json:"submodulesChecked,omitempty"`
+	LFSChecked        bool           `json:"lfsChecked,omitempty"`
+	LFSFiles          int            `json:"lfsFiles,omitempty"`
+	LFSPaths          []string       `json:"lfsPaths,omitempty"`
 }
 
 type BuildPlanConfig struct {
@@ -1060,10 +1087,13 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
 		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
 	}
-	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile, c.Build.OutputDirectory} {
+	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile} {
 		if path != "" && !safeRelativePath(path) {
 			return fmt.Errorf("build paths must remain inside the source root")
 		}
+	}
+	if c.Build.OutputDirectory != "" && !validOutputDirectory(c.Build.OutputDirectory) {
+		return fmt.Errorf("build paths must remain inside the source root")
 	}
 	if len(c.Build.BuildCommand) > 4096 || len(c.Build.StartCommand) > 4096 {
 		return fmt.Errorf("build or start command exceeds 4096 bytes")
@@ -1616,7 +1646,7 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			len(candidate.GoMinimumVersion) > 32 || (candidate.GoMinimumVersion != "" && !stableGoVersionRE.MatchString(candidate.GoMinimumVersion)) ||
 			(candidate.PackageManager != "" && !validNodePackageManager(candidate.PackageManager)) || len(candidate.PackageManagers) > 4 ||
 			slices.ContainsFunc(candidate.PackageManagers, func(manager string) bool { return !validNodePackageManager(manager) }) ||
-			(candidate.OutputDirectory != "" && !safeRelativePath(candidate.OutputDirectory)) ||
+			(candidate.OutputDirectory != "" && !validOutputDirectory(candidate.OutputDirectory)) ||
 			candidate.Port < 0 || candidate.Port > 65535 ||
 			len(candidate.Evidence) > 128 || len(candidate.NeedsDecision) > 128 {
 			return fmt.Errorf("%w: detected candidate is malformed", ErrInvalidPlan)
@@ -1693,7 +1723,7 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 	if !selected {
 		return fmt.Errorf("%w: selected detection candidate does not exist", ErrInvalidPlan)
 	}
-	return nil
+	return validateRepoShapeEvidence(detection)
 }
 
 var contentDigestRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+._-]{0,31}:[0-9a-f]{32,128}$`)

@@ -41,7 +41,6 @@ type rootStack struct {
 
 var (
 	gemLockSpecRE     = regexp.MustCompile(`(?m)^    ([A-Za-z0-9_.\-]+) \(([^)]*)\)`)
-	gemfileGemRE      = regexp.MustCompile(`(?m)^\s*gem\s+['"]([A-Za-z0-9_.\-]+)['"]`)
 	mixDepRE          = regexp.MustCompile(`\{\s*:([a-z0-9_]+)\s*,`)
 	nugetReferenceRE  = regexp.MustCompile(`(?i)<PackageReference\s+Include\s*=\s*"([^"]+)"`)
 	railsAppRE        = regexp.MustCompile(`<\s*Rails::Application\b`)
