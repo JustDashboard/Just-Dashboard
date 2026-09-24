@@ -315,7 +315,10 @@ only renderer/executor/validation authority for their feature.
   cannot be guaranteed — and detection runs the same check, so preflight says so before Deploy. A custom
   Dockerfile build receives `--target` for its chosen stage and `--build-arg NAME` only for plain,
   browser-public build variables it declares, with values in buildx's environment; a Compose service
-  build receives its own `target` and interpolated `args` the same way. Recipe and static builds write a
+  build receives its own `target` and `args` the same way, interpolated from the plain runtime and build
+  variables only, and refuses an argument or target that reads a secret (`composeBuildArgValues`), so no
+  secret ever becomes a build argument or argv. A browser-public value typed into a new project is
+  stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
   dashboard files stay out of the image whatever the repository's own ignore file says.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
@@ -334,9 +337,15 @@ only renderer/executor/validation authority for their feature.
   (a Compose release's primary service image) through the runtime owner (`release_task_image.go`,
   `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
   `release_task`-scoped ones as container environment, on the project's database networks (and the
-  preview network for an isolated preview), with the release's resource limits, no ports, mounts or
-  privileges, the image's entrypoint replaced by the command, and the container removed however the
-  task ends. A task without a runner is the historical `/bin/sh` over the immutable source workspace in
+  preview network for an isolated preview) or on the host's network when the release runs there, with
+  the release's resource limits, no ports, mounts or privileges, the image's entrypoint replaced by the
+  command, and the container removed however the task ends. The container carries
+  `io.just-dashboard.release-task`, so runtime observation leaves it out; `Server.Start` removes any a
+  previous process left before the engine resumes runs, a task removes a stale one of its own name
+  before it starts, and the step's cleanup records whether removal succeeded. A blank command is
+  refused by validation and, stored before that, fails the task instead of the executor. A Compose
+  release's image task runs outside the stack, which preflight names
+  (`release_task_outside_compose_stack`, blocked when the stack runs its own backing services). A task without a runner is the historical `/bin/sh` over the immutable source workspace in
   the dashboard's container, which has none of an application's dependencies; preflight refuses one
   that runs a tool only installed dependencies provide, or a program a PATH lookup in the dashboard
   does not find (`release_task_tool_missing`, a lookup that executes nothing), and a failed task that
@@ -355,9 +364,9 @@ only renderer/executor/validation authority for their feature.
 - Runtime activation consumes only an immutable release snapshot. Direct containers use the recorded
   config digest (or repository plus manifest digest); Compose uses an explicit stable project, the exact
   source file list, and a generated `0600` override that pins every service image with `pull_policy:
-  never`. The release's container identity and readiness target is the analysis's primary service — one
-  that builds or publishes a port, never a database — and a snapshot recorded before there was one keeps
-  its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
+  never`. The release's container identity and readiness target is the primary service — the one the
+  operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
+  never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
   file which is deleted on every exit path.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived

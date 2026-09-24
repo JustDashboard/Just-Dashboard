@@ -23,12 +23,15 @@ it to dependency installation instead. Build settings expose this choice for eac
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
 secret mappings; they retain their existing refusal of requested secrets. The one exception is a value
 the Dockerfile itself asks for and that is public by design: a **plain** build-scoped variable with a
-browser-public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `NUXT_PUBLIC_`, `REACT_APP_`) that the
-Dockerfile declares with `ARG` is passed as `--build-arg NAME`, the value only in buildx's process
-environment (`deploy/build_dockerfile_args.go`). Preflight lists what is passed
-(`dockerfile_build_args`) and warns about every other declared argument that will be empty
-(`dockerfile_arg_not_passed`); a secret, or a name that would replace the builder's own environment
-(`DOCKER_*`, `PATH`, …), never qualifies.
+browser-public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `NUXT_PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`)
+that the Dockerfile declares with `ARG` is passed as `--build-arg NAME`, the value only in buildx's
+process environment (`deploy/build_dockerfile_args.go`). A value typed into a new project's environment
+is stored secret, except one with a browser-public name that is not declared secret: the page's
+JavaScript carries it by design, and only a plain value can become a build argument. Preflight lists
+what is passed (`dockerfile_build_args`) and warns about every other declared argument that will be
+empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret); a secret, or a name that
+would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never qualifies. A build argument
+stays in the image's history, which is why a secret is never one.
 
 Neither generated Dockerfiles nor command arguments contain variable values. Logs redact exact values.
 An ephemeral mount does not prevent application build code from intentionally copying a value into its
@@ -74,10 +77,19 @@ The command a repository declares runs once before each release — a Procfile `
 it), or a Phoenix release's `rel/overlays/bin/migrate` — is the candidate's `releaseCommand`. The form
 plans it as a release task named `release` that runs **in the release image** (`runner: "image"`): one
 throwaway container of the candidate release's image, with the runtime variables the release starts
-with plus the task's own `release_task`-scoped ones, on the project's database networks, removed when
-it exits. A command with shell syntax runs through the image's `/bin/sh`; a plain one is executed
-directly, so an image without a shell still runs `bin/migrate`. Without such a task preflight warns
-`release_command_unmapped`. A task with no runner is the historical shell over the unbuilt checkout in
+with plus the task's own `release_task`-scoped ones, on the project's database networks — or on the
+host's network when the release runs there — removed when it exits. A command with shell syntax runs
+through the image's `/bin/sh`; a plain one is executed directly, so an image without a shell still runs
+`bin/migrate`. Its container is labelled as a release task, so it never counts as one of the release's
+services; one a stopped dashboard left behind is removed when the dashboard starts and before the task
+runs again, and the run records whether removal succeeded. Without such a task preflight warns
+`release_command_unmapped`. A new task defaults to the release image whenever the build makes one (not
+for `none` or legacy Compose, which refuse it). A Compose release's image task runs the primary
+service's image on its own, outside the stack — not on its network and without the service's
+`environment:` entries — which preflight names as `release_task_outside_compose_stack`: blocked when the
+stack runs its own database or cache, a warning otherwise; a migration against the stack's own database
+belongs in the Compose file (a one-off service the application `depends_on` with
+`condition: service_completed_successfully`, or the service's command). A task with no runner is the historical shell over the unbuilt checkout in
 the dashboard's own container; preflight refuses one that runs a tool only installed dependencies
 provide (`prisma`, `knex`, `alembic`, anything under `node_modules/.bin` or `.venv`) or a program the
 dashboard does not have — in its own image that includes `npx`, `python` and `bundle` — as
@@ -160,45 +172,68 @@ inside them, and heredoc bodies.
   `build.dockerfile` is its path relative to that context.
 - **Stage and port.** When the last stage is `dev`/`development`/`test`/`debug`, the candidate builds
   `production`/`prod`/`release`/`runner`/`runtime` (`build.target`, passed as `--target`; a Compose
-  service's own `target` wins). The port is the one TCP `EXPOSE` of the built stage and the stages it
+  service's own `target` wins). The stage is edited beside the Dockerfile path and cleared when the path
+  changes; detection records the file's stage names (`dockerfileStages`), and preflight refuses a stage
+  the file does not have (`dockerfile_target_missing`). The port is the one TCP `EXPOSE` of the built stage and the stages it
   derives from, resolving `$PORT`/`${PORT}` through the file's own `ARG`/`ENV` defaults and setting aside
   debugger and metrics ports (9229, 5005, 9464, 9090); anything else still asks.
-- **What the tree shows will fail** is recorded as the candidate's `imageBuildIssues` and becomes a
-  preflight finding of the same code: `dockerfile_refused` (a secret-named `ENV`/`ARG`, shell assignment
+- **What the tree shows will fail** is read only from the stages the build runs — the target, the
+  stages it is built `FROM`, and those it copies or mounts from; BuildKit skips every other one — except
+  that every `FROM` must resolve, used or not. It is recorded as the candidate's `imageBuildIssues` and
+  becomes a preflight finding of the same code: `dockerfile_refused` (a secret-named `ENV`/`ARG`, shell assignment
   or flag given a literal — not empty values, `$VAR` references, switches, numbers, the placeholder words
   Rails and Django use, or `*_FILE` paths; `SECRET_KEY_BASE_DUMMY=1` builds), `dockerfile_copy_source_missing`,
   `dockerfile_copy_ignored` (the context's `.dockerignore`, or `<Dockerfile>.dockerignore`, with BuildKit's
-  pattern rules), `dockerfile_arg_required` (an `ARG` without default in `FROM`), `dockerfile_ssh_mount`,
+  pattern rules), `dockerfile_arg_required` (an `ARG` without default in `FROM`, unless the expression
+  has its own, `${X:-d}`), `dockerfile_ssh_mount`,
   `dockerfile_standalone_missing` (a Next.js Dockerfile copying `.next/standalone` without
   `output: 'standalone'`), `dockerfile_dev_server` (warning), `script_crlf` and `script_not_executable`
   (the file an exec-form `ENTRYPOINT`/`CMD` or `RUN ./x` executes, or a recipe's start script, committed
-  with Windows line endings or without its executable bit, unless the Dockerfile fixes it). A
+  with Windows line endings or without its executable bit, unless the Dockerfile fixes it: a `chmod` of
+  it, a directory or a wildcard covering it, a separator after the operand included, or a `dos2unix` or
+  `sed` over it, a wildcard such as the Rails Windows template's `bin/*`, or its directory). A
   `FROM --platform=` for another architecture is `foreign_architecture_build`, blocked when this host has
   no binfmt emulator for it.
-- **Choosing.** Candidates are ranked by whether they may be chosen on their own, whether they build as
-  detected (no blocking issue, no recipe issue, no unresolved package manager), confidence, and — only
-  between candidates at the same root — intent: a production-named Dockerfile, then the plain
-  Dockerfile, then the recipe; a Dockerfile that runs a dev server, or declares no `ARG` for a
-  browser-public variable the source reads, ranks below the recipe. The winner is listed first with the
-  reason (`selectionReason`, the `detection_selected` finding's measured text); only a true tie leaves the
-  choice to the operator. A buildable Dockerfile beside a recipe blocked by competing lockfiles wins;
+- **Choosing.** Candidates for the same root — two ways to build one application — are ranked by
+  whether they may be chosen on their own, whether they build as detected (no blocking issue, no recipe
+  issue, no unresolved package manager), confidence, and intent: a production-named Dockerfile, then the
+  plain Dockerfile, then the recipe; a Dockerfile that runs a dev server, or declares no `ARG` for a
+  browser-public variable the source reads, ranks below the recipe. Different roots are different things,
+  so their best candidates compare only on whether they may be chosen and on confidence: a helper image
+  in `docker/db/` that builds does not beat the application whose recipe needs one decision. A Dockerfile
+  built on a database, cache or other backing image is low confidence. The winner is listed first with
+  the reason (`selectionReason`, the `detection_selected` finding's measured text); only a true tie leaves
+  the choice to the operator. A buildable Dockerfile beside a recipe blocked by competing lockfiles wins;
   preflight names a skipped Dockerfile's problem as `dockerfile_not_selected`.
 - **Compose files in a repository** are classified before they become candidates. One that runs only
   backing images (Postgres, MySQL, Redis, Mongo, Mailpit, MinIO, …) is not a candidate: its databases
-  become suggestions on the candidates beside it. One whose builds all come from paths the checkout lacks
+  become suggestions on the candidates beside it — unless the repository has nothing else to deploy, when
+  it is a low-confidence Compose candidate. One whose builds all come from paths the checkout lacks
   (Laravel Sail's `vendor/laravel/sail/runtimes`) is a low-confidence development stack. Any other is a
   Compose candidate that is chosen only when nothing else is there, because a Compose file in a Git
   source is analysed only as a Compose source: preflight blocks it as `compose_analysis_missing`, and the
-  project step offers to re-read the same repository as one.
-- **A Compose source** records each service's build `target` and `args` (resolved at build time from
-  the build-scoped values with Compose's own `${X:-default}` rules and passed like Dockerfile build
-  arguments), `platform`, `env_file` entries, and the platforms each image is published for. Variables
-  interpolated with a default are optional rows with the default as the example, never required secrets.
-  Preflight blocks a build context the checkout lacks (`compose_build_context_missing`), a required
-  `env_file` it lacks (`compose_env_file_missing`), a refused service Dockerfile, and an image with no
-  build for this host's architecture (`compose_image_platform_missing`). The primary service — the one
-  readiness and the release's container follow — builds or publishes a port, prefers `web`, `app`,
-  `frontend`, `server` or `api`, and is never a database.
+  project step offers to re-read the same repository — a Git URL, a connected repository with its
+  credential, or a local checkout — as one.
+- **A Compose source** records each service's build `target` and `args`, `platform`, `env_file` entries,
+  and the platforms each image is published for (read from the registry four lookups at a time, under one
+  15-second budget). Build arguments and targets are resolved at build time with Compose's own
+  `${X:-default}` rules from the **plain** runtime and build variables together — Compose reads one
+  environment for the whole file, and the form plans a Compose file's variables for runtime — and passed
+  like Dockerfile build arguments. An argument or target that reads a secret is refused, at preflight
+  (`compose_build_arg_secret`) and at the build, because a build argument stays in the image's history;
+  one whose variable is planned only for release tasks is empty (`compose_build_arg_unscoped`). A
+  browser-public Compose variable is planned plain. Variables interpolated with a default are optional
+  rows with the default as the example, never required secrets. Preflight blocks a build context the
+  checkout lacks (`compose_build_context_missing`), a required `env_file` it lacks
+  (`compose_env_file_missing`), a refused service Dockerfile, and an image with no build for this host's
+  architecture (`compose_image_platform_missing`, whose action suggests pinning `platform:` when an
+  emulator is installed; a service pinned to a platform its image offers is left to the emulation
+  check). The primary service — the one readiness, the release's container and its image release tasks
+  follow — builds or publishes a port, prefers `web`, `app`, `frontend`, `server` or `api`, and is never a
+  database; the operator can choose another (`build.primaryService`), and preflight refuses one the stack
+  no longer has (`compose_primary_service_missing`). A pasted or uploaded Compose file arrives without
+  the files around it, so a service it builds is refused before Deploy (`compose_build_without_checkout`)
+  instead of failing to find its Dockerfile.
 - **Languages without a recipe.** A Vapor or Hummingbird `Package.swift` with no Dockerfile is a
   low-confidence candidate whose `dockerfile_missing` finding says to commit the template's Dockerfile;
   with one, the Dockerfile is chosen over the template's Compose file. `Environment.get("X")` reads are
