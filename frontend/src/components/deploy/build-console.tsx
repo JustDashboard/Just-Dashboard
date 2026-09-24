@@ -101,6 +101,11 @@ export function transcriptSummary(rows: ConsoleRow[]) {
   return { lines, errors, perStep }
 }
 
+/** A console row's element id: its persisted sequence and its line in that chunk. */
+function lineAnchor(id: string) {
+  return `build-line-${id.replace(":", "-")}`
+}
+
 /** "+1:04", "+1:02:09": how far into the run a line was written. */
 function elapsed(ts: string, from: number) {
   const seconds = Math.max(0, Math.round((new Date(ts).getTime() - from) / 1000))
@@ -154,6 +159,7 @@ export function BuildConsole({
   selectedStep,
   onSelectStep,
   hidden,
+  focusLine,
 }: {
   /** The transcript as lines, read once by the page (`consoleRows`). */
   rows: ConsoleRow[]
@@ -175,6 +181,12 @@ export function BuildConsole({
   /** Keeps the console mounted while another run view is active, so its
    * search, wrap, follow and scroll position survive switching back. */
   hidden?: boolean
+  /**
+   * The persisted line a failure's cause points at. Each new value (the
+   * nonce changes on every press) clears the filters that could hide it and
+   * scrolls it into the middle of the console.
+   */
+  focusLine?: { seq: number; nonce: number }
 }) {
   const [query, setQuery] = useState("")
   const [errorsOnly, setErrorsOnly] = useState(false)
@@ -234,6 +246,22 @@ export function BuildConsole({
     body.current.scrollTop = body.current.scrollHeight
     followedTo.current = body.current.scrollTop
   }, [visible, follow])
+
+  // A search or the errors filter could hide the line; following would pull
+  // the console away from it again.
+  const [focused, setFocused] = useState<number>()
+  if (focusLine && focused !== focusLine.nonce) {
+    setFocused(focusLine.nonce)
+    setQuery("")
+    setErrorsOnly(false)
+    setFollow(false)
+  }
+  const focusSeq = focusLine ? `${focusLine.seq}:` : undefined
+  useEffect(() => {
+    if (!focusLine || hidden) return
+    const row = body.current?.querySelector<HTMLElement>(`#${lineAnchor(`${focusLine.seq}:0`)}`)
+    row?.scrollIntoView({ block: "center" })
+  }, [focusLine, hidden, visible])
 
   const plain = (list: ConsoleRow[]) =>
     list.map((row) => `[${clock(row.ts)}] ${row.line.text}`).join("\n")
@@ -407,6 +435,8 @@ export function BuildConsole({
                     {group.rows.map((row) => (
                       <TranscriptRow
                         key={row.id}
+                        anchor={lineAnchor(row.id)}
+                        marked={focusSeq !== undefined && row.id.startsWith(focusSeq)}
                         line={row.line}
                         wrap={wrap}
                         needle={needle}

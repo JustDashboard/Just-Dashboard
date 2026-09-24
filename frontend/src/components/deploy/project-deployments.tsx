@@ -53,6 +53,7 @@ import {
   useNow,
 } from "@/components/deploy/vocabulary"
 import { Insights } from "@/components/deploy/insights"
+import { deployWithCurrentSettings, runPlanIsStale } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 import { ProjectMark } from "@/components/deploy/project-mark"
@@ -346,6 +347,21 @@ export function ProjectDeployments() {
     return host ? [host] : []
   }, [project.operations, deployment.endpoint])
 
+  const deployCurrent = async (run: DeploymentEngineRun) => {
+    press(run, { verb: "deploy", word: "Starting…" })
+    try {
+      const created = await post<DeploymentEngineRun>(
+        `/deploy/${project.projectId}/environments/${run.environmentId}/runs`,
+        deployWithCurrentSettings(run, deployment),
+      )
+      answered(run.id)
+      router.push(`/deploy/${project.projectId}/runs/${created.id}`)
+    } catch (error) {
+      notify.error("Could not start deployment", error)
+      settle(run.id)
+    }
+  }
+
   const act = async (run: DeploymentEngineRun, verb: "cancel" | "retry") => {
     press(run, { verb, word: verb === "cancel" ? "Cancelling…" : "Starting…" })
     try {
@@ -375,12 +391,14 @@ export function ProjectDeployments() {
       url,
       can,
       working: busy,
+      stale: runPlanIsStale(run, deployment),
       on: {
         open: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
         visit: () => window.open(url, "_blank", "noopener,noreferrer"),
         redeploy: () => void project.start("redeploy"),
         retry: () => void act(run, "retry"),
         cancel: () => void act(run, "cancel"),
+        deploy: () => void deployCurrent(run),
       },
     }),
     ...releaseVerbs({

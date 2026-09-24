@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { FormEvent } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -248,18 +248,52 @@ function VariablesBody({
   // only, since those are the secrets — so a look at the source for the right
   // key does not mean starting the variable again.
   const draft = `deploy.${projectId}.${environmentId}.variables`
-  const [editorOpen, setEditorOpen] = useSessionState(`${draft}.open`, false)
+  // A failed run's remedy arrives as `?variable=NAME&scope=build[&value=…]`
+  // and opens the editor on it: an existing variable with the scope its step
+  // lacked added, or a new one with the value the server computed — a flag,
+  // never a secret. The address is what the editor opens on, and is then
+  // dropped so a reload does not open it again.
+  const search = useSearchParams()
+  const remedy = !compact && canEdit ? search.get("variable") : null
+  const remedyScope = SCOPES.find((entry) => entry.scope === search.get("scope"))?.scope
+  const remedyTarget = remedy
+    ? configuration.variables.find((variable) => variable.name === remedy)
+    : undefined
+  const remedyValue = remedy && !remedyTarget ? (search.get("value") ?? "") : ""
+  const [editorOpen, setEditorOpen] = useSessionState(`${draft}.open`, false, remedy ? true : null)
   const [importOpen, setImportOpen] = useSessionState(`${draft}.import`, false)
-  const [name, setName] = useSessionState(`${draft}.name`, "")
-  const [value, setValue] = useMemoryState(`${draft}.value`, "")
+  const [name, setName] = useSessionState(`${draft}.name`, "", remedy)
+  const [value, setValue] = useMemoryState(
+    `${draft}.value`,
+    "",
+    remedy
+      ? remedyTarget?.reference
+        ? referenceLiteral(remedyTarget.reference)
+        : remedyValue
+      : null,
+  )
   const [valueError, setValueError] = useState("")
   const [shown, setShown] = useState(false)
-  const [reference, setReference] = useSessionState(`${draft}.reference`, false)
+  const [reference, setReference] = useSessionState(
+    `${draft}.reference`,
+    false,
+    remedy ? Boolean(remedyTarget?.reference) : null,
+  )
   const [sensitivity, setSensitivity] = useSessionState<Sensitivity>(
     `${draft}.sensitivity`,
     "secret",
+    remedy ? (remedyTarget?.sensitivity ?? (remedyValue ? "plain" : "secret")) : null,
   )
-  const [scopes, setScopes] = useSessionState<Scope[]>(`${draft}.scopes`, ["runtime"])
+  const [scopes, setScopes] = useSessionState<Scope[]>(
+    `${draft}.scopes`,
+    ["runtime"],
+    remedy
+      ? [...new Set([...(remedyTarget?.scopes ?? []), ...(remedyScope ? [remedyScope] : [])])]
+      : null,
+  )
+  useEffect(() => {
+    if (remedy) router.replace(window.location.pathname, { scroll: false })
+  }, [remedy, router])
   const [query, setQuery] = useSessionState(`${draft}.query`, "")
   const [filter, setFilter] = useSessionState<Filter>(`${draft}.filter`, "all")
   const [busy, setBusy] = useState("")
@@ -272,6 +306,8 @@ function VariablesBody({
   const [editingName, setEditingName] = useSessionState<string | undefined>(
     `${draft}.editing`,
     undefined,
+    // "" is a new variable, overriding one this tab was editing before.
+    remedy ? (remedyTarget ? remedy : "") : null,
   )
   const [revealingIntoForm, setRevealingIntoForm] = useState(false)
   // Reveal/rotate/remove all write with `configuration.revision`, which only

@@ -29,6 +29,7 @@ import type {
   DeploymentOperations,
   DeploymentRelease,
   DeploymentRunEvent,
+  DeploymentRunSettingsDrift,
   DeploymentRunSnapshot,
   DeploymentRunsPage,
   DeploymentStepState,
@@ -87,6 +88,15 @@ import { useProjectNavScope } from "@/components/deploy/project-shell"
 import { RunMetrics } from "@/components/deploy/run-metrics"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import { releaseVerbs } from "@/components/deploy/run-verbs"
+import {
+  causeHeadline,
+  causeTitle,
+  deployWithCurrentSettings,
+  driftLine,
+  failureCause,
+  fixTarget,
+  runPlanIsStale,
+} from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 
@@ -139,7 +149,10 @@ export function RunPage() {
   const [liveSnapshot, setLiveSnapshot] = useState<DeploymentRunSnapshot>()
   const [events, setEvents] = useState<BuildLogEvent[]>([])
   const [selectedStepId, setSelectedStepId] = useState<number>()
-  const [working, setWorking] = useState<"cancel" | "retry" | "redeploy" | "pin">()
+  const [working, setWorking] = useState<"cancel" | "retry" | "redeploy" | "deploy" | "pin">()
+  // The transcript line a failure's cause points at, and a count so pressing
+  // "Show the line" twice scrolls to it twice.
+  const [focusLine, setFocusLine] = useState<{ seq: number; nonce: number }>()
   const [streamComplete, setStreamComplete] = useState(false)
   const [rollbackOpen, setRollbackOpen] = useState(false)
   const [compare, setCompare] = useState<{
@@ -208,6 +221,20 @@ export function RunPage() {
     0,
     [projectId],
     { enabled: validIds && rollbackOpen },
+  )
+  // Whether the settings have moved on since a run that can be retried: then
+  // a retry replays what failed, and the page offers the current settings
+  // first. Read again whenever a newer plan is saved.
+  const drift = usePoll(
+    (signal) =>
+      get<DeploymentRunSettingsDrift>(
+        `/deploy/${projectId}/runs/${runId}/settings-drift`,
+        undefined,
+        signal,
+      ),
+    0,
+    [projectId, runId, project.data?.deployment.desiredRevision],
+    { enabled: validIds && isRetryable(snapshot?.run.state) },
   )
   // A run is one of its project's Deployments, so the rail keeps the
   // project's panel the reader opened it from.
@@ -328,7 +355,14 @@ export function RunPage() {
   // as still going.
   const clock = !active && run.endedAt ? Math.min(now, Date.parse(run.endedAt)) : now
   const canRun = can("service.control")
-  const failedStep = attempts.find((step) => step.state === "failed" || step.state === "blocked")
+  const failure = failureCause(attempts)
+  const failedStep = failure?.step
+  const cause = failure?.cause
+  // A remedy is a settings change, which only an administrator can save.
+  const fix = cause?.fix && can("system.admin") ? fixTarget(projectId, cause.fix) : undefined
+  const stale =
+    isRetryable(run.state) && (drift.data ? drift.data.changed : runPlanIsStale(run, deployment))
+  const changedSince = isRetryable(run.state) ? driftLine(drift.data) : undefined
 
   const selected =
     attempts.find((step) => step.id === selectedStepId) ??
@@ -365,6 +399,21 @@ export function RunPage() {
       router.push(`/deploy/${projectId}/runs/${created.id}`)
     } catch (error) {
       notify.error("Could not retry deployment", error)
+      setWorking(undefined)
+    }
+  }
+
+  const deployCurrent = async () => {
+    if (working) return
+    setWorking("deploy")
+    try {
+      const created = await post<DeploymentEngineRun>(
+        `/deploy/${projectId}/environments/${run.environmentId}/runs`,
+        deployWithCurrentSettings(run, deployment),
+      )
+      router.push(`/deploy/${projectId}/runs/${created.id}`)
+    } catch (error) {
+      notify.error("Could not start deployment", error)
       setWorking(undefined)
     }
   }
@@ -407,9 +456,30 @@ export function RunPage() {
     setView("build")
   }
 
+  const showLine = () => {
+    if (!cause?.lineSeq) return
+    showFailure()
+    setFocusLine((current) => ({ seq: cause.lineSeq!, nonce: (current?.nonce ?? 0) + 1 }))
+  }
+
   // The header's buttons are the run's own verbs; the menu is the release's,
   // and the two ways out of the page.
   const menu: Verb[] = [
+    // With the settings changed since, a retry is the exception rather than
+    // the way forward, and it says what it replays.
+    ...(canRun && stale
+      ? [
+          {
+            key: "retry",
+            label: "Retry with the settings it used",
+            detail: "Run this deployment again with its own plan and variables, unchanged.",
+            icon: RefreshClockwise,
+            progressive: "Starting…",
+            disabled: working === "retry",
+            run: () => void retry(),
+          } satisfies Verb,
+        ]
+      : []),
     {
       key: "project",
       label: "Open project",
@@ -475,10 +545,16 @@ export function RunPage() {
                   {working === "cancel" ? "Cancelling…" : "Cancel"}
                 </Button>
               )}
-              {canRun && isRetryable(run.state) && (
+              {canRun && isRetryable(run.state) && !stale && (
                 <Button size="sm" pending={working === "retry"} onClick={retry}>
                   <RefreshClockwise className="size-3.5" />
                   {working === "retry" ? "Starting…" : "Retry"}
+                </Button>
+              )}
+              {canRun && stale && (
+                <Button size="sm" pending={working === "deploy"} onClick={deployCurrent}>
+                  <RefreshClockwise className="size-3.5" />
+                  {working === "deploy" ? "Starting…" : "Deploy with current settings"}
                 </Button>
               )}
               {canRun && run.state === "succeeded" && isLiveRelease && (
@@ -566,22 +642,56 @@ export function RunPage() {
               <span>
                 {run.state === "rolled_back"
                   ? `Rolled back — ${kept ? `release #${kept.number}` : "the previous release"} stayed live`
-                  : sentence(run.terminalCode || "deployment_failed")}
+                  : cause
+                    ? causeHeadline(cause)
+                    : causeTitle(run.terminalCode || "deployment_failed")}
               </span>
               {run.terminalCode && <Tag mono>{run.terminalCode}</Tag>}
             </span>
           }
         >
+          {cause?.subjects && cause.subjects.length > 0 && (
+            <p className="mb-1.5 flex flex-wrap gap-1.5" aria-label="Named by the failure">
+              {cause.subjects.map((subject) => (
+                <Tag key={subject} mono>
+                  {subject}
+                </Tag>
+              ))}
+            </p>
+          )}
           {run.terminalReason && <p>{run.terminalReason}</p>}
-          {failedStep && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-2.5 max-sm:w-full"
-              onClick={showFailure}
-            >
-              Show the failing step
-            </Button>
+          {changedSince && <p className="mt-1.5 text-hint text-muted-foreground">{changedSince}</p>}
+          {(fix || failedStep) && (
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {fix && (
+                // Once the settings have moved on, the header's deploy is the
+                // way forward and the fix is a place to check, not the command.
+                <Button
+                  size="sm"
+                  variant={stale ? "outline" : "default"}
+                  asChild
+                  className="max-sm:w-full"
+                >
+                  <Link href={fix.href}>{fix.label}</Link>
+                </Button>
+              )}
+              {cause?.lineSeq ? (
+                <Button variant="outline" size="sm" className="max-sm:w-full" onClick={showLine}>
+                  Show the line
+                </Button>
+              ) : (
+                failedStep && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="max-sm:w-full"
+                    onClick={showFailure}
+                  >
+                    Show the failing step
+                  </Button>
+                )
+              )}
+            </div>
           )}
         </Notice>
       ) : (run.state === "cancelled" || run.state === "superseded") && run.terminalReason ? (
@@ -700,6 +810,7 @@ export function RunPage() {
         now={clock}
         selectedStep={selectedStepId}
         onSelectStep={setSelectedStepId}
+        focusLine={focusLine}
       />
       {view === "runtime" && (
         <RunLogs
