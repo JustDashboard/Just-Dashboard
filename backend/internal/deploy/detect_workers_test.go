@@ -79,7 +79,7 @@ func TestBackgroundWorkersArePlannedWithoutAPort(t *testing.T) {
 			profile: ProfileWeb, confidence: ConfidenceMedium, start: "npm run start"},
 		{name: "a django project with celery stays web",
 			files:   map[string]string{"requirements.txt": "django==5.2\ncelery==5.4.0\n", "manage.py": "", "mysite/wsgi.py": "", "mysite/celery.py": "app = Celery('mysite')\n"},
-			profile: ProfileWeb, confidence: ConfidenceHigh, start: "python manage.py migrate --noinput && gunicorn mysite.wsgi:application --bind 0.0.0.0:8000"},
+			profile: ProfileWeb, confidence: ConfidenceHigh, start: "python manage.py migrate --noinput && gunicorn mysite.wsgi:application --bind 0.0.0.0:${PORT:-8000}"},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()

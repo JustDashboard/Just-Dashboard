@@ -218,10 +218,10 @@ var pythonFrameworks = []pythonFramework{
 			}
 			evidence := []DetectionEvidence{{Path: "manage.py", Reason: "Django project; migrations are applied before the server starts"}}
 			if strings.HasSuffix(module, ".asgi") && deps.has("uvicorn") {
-				return pythonResolution{Start: start + "uvicorn " + module + ":application --host 0.0.0.0 --port 8000", Evidence: evidence}
+				return pythonResolution{Start: start + "uvicorn " + module + ":application --host 0.0.0.0 --port ${PORT:-8000}", Evidence: evidence}
 			}
 			project := strings.TrimSuffix(strings.TrimSuffix(module, ".asgi"), ".wsgi")
-			return pythonResolution{Start: start + "gunicorn " + project + ".wsgi:application --bind 0.0.0.0:8000", Evidence: evidence}
+			return pythonResolution{Start: start + "gunicorn " + project + ".wsgi:application --bind 0.0.0.0:${PORT:-8000}", Evidence: evidence}
 		},
 	},
 	{
@@ -230,7 +230,7 @@ var pythonFrameworks = []pythonFramework{
 			for _, entry := range sortedPythonEntries(entries) {
 				if match := pythonFastAPIRE.FindSubmatch(entry.content); match != nil {
 					return pythonResolution{
-						Start:    "uvicorn " + pythonModule(entry.path) + ":" + string(match[1]) + " --host 0.0.0.0 --port 8000",
+						Start:    "uvicorn " + pythonModule(entry.path) + ":" + string(match[1]) + " --host 0.0.0.0 --port ${PORT:-8000}",
 						Evidence: []DetectionEvidence{{Path: entry.path, Reason: "FastAPI application object " + string(match[1])}},
 					}
 				}
@@ -244,7 +244,7 @@ var pythonFrameworks = []pythonFramework{
 			for _, entry := range sortedPythonEntries(entries) {
 				if match := pythonFlaskRE.FindSubmatch(entry.content); match != nil {
 					return pythonResolution{
-						Start:    "gunicorn --bind 0.0.0.0:8000 " + pythonModule(entry.path) + ":" + string(match[1]),
+						Start:    "gunicorn --bind 0.0.0.0:${PORT:-8000} " + pythonModule(entry.path) + ":" + string(match[1]),
 						Evidence: []DetectionEvidence{{Path: entry.path, Reason: "Flask application object " + string(match[1])}},
 					}
 				}
@@ -252,7 +252,7 @@ var pythonFrameworks = []pythonFramework{
 			for _, entry := range sortedPythonEntries(entries) {
 				if pythonFactoryRE.Match(entry.content) {
 					return pythonResolution{
-						Start:    "gunicorn --bind 0.0.0.0:8000 '" + pythonModule(entry.path) + ":create_app()'",
+						Start:    "gunicorn --bind 0.0.0.0:${PORT:-8000} '" + pythonModule(entry.path) + ":create_app()'",
 						Evidence: []DetectionEvidence{{Path: entry.path, Reason: "Flask application factory create_app"}},
 					}
 				}
@@ -266,7 +266,7 @@ var pythonFrameworks = []pythonFramework{
 			for _, entry := range sortedPythonEntries(entries) {
 				if pythonImports(entry.content, "streamlit") {
 					return pythonResolution{
-						Start:    "streamlit run " + entry.path + " --server.port 8501 --server.address 0.0.0.0 --server.headless true",
+						Start:    "streamlit run " + entry.path + " --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true",
 						Evidence: []DetectionEvidence{{Path: entry.path, Reason: "Streamlit application"}},
 					}
 				}

@@ -5,6 +5,7 @@ import {
   discoveredEnvironmentRows,
 } from "@/components/deploy/deployment-defaults"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
+import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
 import type {
   DeploymentConfiguration,
   DeploymentDetection,
@@ -402,13 +403,29 @@ function effectiveConfiguration(
   return defaultConfiguration(candidate?.profile ?? fallbackProfile, candidate, source, detection)
 }
 
-/** Match the saved plan so pruning an empty address never triggers another preflight. */
+/**
+ * Match the saved plan so pruning an empty address never triggers another preflight.
+ *
+ * A public URL detection made follow the primary domain (next-auth 4's
+ * NEXTAUTH_URL) is empty until there is a domain, and an empty value is worse
+ * than none: the runtime would inject `NEXTAUTH_URL=`, on which next-auth 4
+ * fails every sign-in request. Preflight names the variable while it is
+ * missing. A blueprint's variables are its reviewed definition's, kept as rendered.
+ */
 export function configurationForSave(
   configuration: DeploymentConfiguration,
+  source?: DeploymentDraftSource,
 ): DeploymentConfiguration {
+  const blueprint = source?.kind === "blueprint" || source?.mode === "blueprint"
   return {
     ...configuration,
     domains: configuration.domains.filter((domain) => domain.hostname.trim()),
+    variables: blueprint
+      ? configuration.variables
+      : configuration.variables.filter(
+          (variable) =>
+            !variable.domainTemplate || variable.value || variable.reference || variable.generate,
+        ),
     checks: configuration.checks.map((check) =>
       check.phase === "readiness" && check.kind === "http"
         ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
@@ -437,10 +454,11 @@ export function withSuggestedHostname(
     hostname.method === "none"
   )
     return configuration
-  return {
-    ...configuration,
-    domains: [{ hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" }],
-  }
+  // Through the same binding a typed domain goes through, so a public URL
+  // that follows the primary domain is filled from the suggested one too.
+  return synchronizePrimaryDomain(configuration, [
+    { hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" },
+  ])
 }
 
 /** Re-detection updates defaults; an explicit edit remains the operator's choice. */

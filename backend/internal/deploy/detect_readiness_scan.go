@@ -285,7 +285,7 @@ var (
 	pythonArqRE       = regexp.MustCompile(`(?m)^class\s+WorkerSettings\b`)
 	pythonSchedulerRE = regexp.MustCompile(`\bBlockingScheduler\(|\brun_pending\(`)
 	pythonModelLoadRE = regexp.MustCompile(`\b(?:\w+\.)*from_pretrained\(|\bpipeline\(|\bSentenceTransformer\(|\bCrossEncoder\(|\bwhisper\.load_model\(|\bWhisperModel\(|\bYOLO\(|\bhf_hub_download\(|\bsnapshot_download\(`)
-	goRouteRE         = regexp.MustCompile(`\b(?:HandleFunc|Handle|GET|Get|HEAD|Head|Any)\(\s*"(?:(?:GET|HEAD)\s+)?(/[^"\s]*)"`)
+	goHealthRouteRE   = regexp.MustCompile(`\b(?:HandleFunc|Handle|GET|Get|HEAD|Head|Any)\(\s*"(?:(?:GET|HEAD)\s+)?(/[^"\s]*)"`)
 	rustRouteRE       = regexp.MustCompile(`\.route\(\s*"(/[^"]*)"|#\[(?:get|head)\(\s*"(/[^"]*)"|\bweb::resource\(\s*"(/[^"]*)"|\.at\(\s*"(/[^"]*)"|\bwarp::path!?\(\s*"([A-Za-z0-9_-]+)"`)
 	jvmRouteRE        = regexp.MustCompile(`@(?:Get|Request)Mapping\(\s*(?:(?:value|path)\s*=\s*)?\{?\s*"(/?[^"]*)"|@Path\(\s*"(/?[^"]*)"\s*\)|\bget\(\s*"(/[^"]*)"`)
 	dotnetDeclaredRE  = regexp.MustCompile(`\b(?:MapHealthChecks|UseHealthChecks)\(\s*"(/[^"]*)"`)
@@ -363,7 +363,7 @@ func (s *readinessScanner) scan(rel, name string, content []byte) {
 	case ".py":
 		s.scanPython(rel, name, content)
 	case ".go":
-		s.scanCodeRoutes(rel, content, goRouteRE, "go", "Go")
+		s.scanCodeRoutes(rel, content, goHealthRouteRE, "go", "Go")
 	case ".rs":
 		s.scanCodeRoutes(rel, content, rustRouteRE, "rust", "Rust")
 	case ".java", ".kt":
@@ -835,7 +835,7 @@ func jvmSettings(name string, content []byte) map[string]string {
 	return settings
 }
 
-var jvmPlaceholderRE = regexp.MustCompile(`\$\{[^{}:]*:([^{}]*)\}`)
+var jvmConfigPlaceholderRE = regexp.MustCompile(`\$\{[^{}:]*:([^{}]*)\}`)
 
 // jvmPlaceholderDefault resolves Spring, Quarkus and Micronaut `${NAME:default}`
 // placeholders to their defaults, which is what the service uses unless the
@@ -843,7 +843,7 @@ var jvmPlaceholderRE = regexp.MustCompile(`\$\{[^{}:]*:([^{}]*)\}`)
 // the setting is unknown (javaReadiness).
 func jvmPlaceholderDefault(value string) string {
 	for range 4 {
-		resolved := jvmPlaceholderRE.ReplaceAllString(value, "$1")
+		resolved := jvmConfigPlaceholderRE.ReplaceAllString(value, "$1")
 		if resolved == value {
 			break
 		}

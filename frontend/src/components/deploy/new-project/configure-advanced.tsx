@@ -21,7 +21,11 @@ import { MountRows } from "@/components/deploy/settings/mounts"
 import { imageProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 import type { DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
-import type { WizardErrors } from "@/components/deploy/deployment-defaults"
+import {
+  DEFAULT_REQUEST_BODY_LIMIT,
+  MAX_REQUEST_BODY_MB,
+  type WizardErrors,
+} from "@/components/deploy/deployment-defaults"
 
 type Check = DeploymentConfiguration["checks"][number]
 type Mount = NonNullable<DeploymentConfiguration["runtime"]["mounts"]>[number]
@@ -175,6 +179,26 @@ export function RuntimeLimits({
             min={0}
             value={configuration.runtime.pidsLimit ?? 0}
             onChange={(event) => updateRuntime({ pidsLimit: Number(event.target.value) || 0 })}
+            className="font-mono"
+          />
+        </Field>
+      </FieldRow>
+      <FieldRow columns={3}>
+        <Field
+          label="Largest upload (MB)"
+          htmlFor="adv-max-body"
+          hint={`0 keeps the proxy's default: ${DEFAULT_REQUEST_BODY_LIMIT}. A set limit is refused with 413 on both.`}
+          error={errors.maxRequestBodyMb}
+        >
+          <Input
+            id="adv-max-body"
+            type="number"
+            min={0}
+            max={MAX_REQUEST_BODY_MB}
+            value={configuration.runtime.maxRequestBodyMb ?? 0}
+            onChange={(event) =>
+              updateRuntime({ maxRequestBodyMb: Number(event.target.value) || undefined })
+            }
             className="font-mono"
           />
         </Field>

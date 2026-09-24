@@ -132,6 +132,7 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("memory limit", memoryLimitLabel(fromSnapshot.Plan.MemoryMB), memoryLimitLabel(toSnapshot.Plan.MemoryMB))
 	field("cpu limit", cpuLimitLabel(fromSnapshot.Plan.CPUs), cpuLimitLabel(toSnapshot.Plan.CPUs))
 	field("pid limit", countLimitLabel(fromSnapshot.Plan.PidsLimit), countLimitLabel(toSnapshot.Plan.PidsLimit))
+	field("request body limit", fromSnapshot.Plan.requestBodyLimitLabel(), toSnapshot.Plan.requestBodyLimitLabel())
 	field("restart policy", fromSnapshot.Plan.EffectiveRestartPolicy(), toSnapshot.Plan.EffectiveRestartPolicy())
 	field("host network", boolLabel(fromSnapshot.Plan.HostNetwork), boolLabel(toSnapshot.Plan.HostNetwork))
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))

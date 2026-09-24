@@ -672,7 +672,7 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 				return "", fmt.Errorf("%w: Node service recipe requires a start command", ErrUnsupportedBuilder)
 			}
 			lines = append(lines, "FROM "+base, "WORKDIR /app", "ENV NODE_ENV=production")
-			for _, env := range defaults.Env {
+			for _, env := range nodeServerRuntimeEnv(recipe.node.name, defaults.Env) {
 				lines = append(lines, "ENV "+env)
 			}
 			lines = append(lines, "COPY --from=build /app /app", shellCMD(config.StartCommand))
@@ -711,7 +711,8 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 	case "python":
 		base := immutableImageReference(bases[0])
 		lines = append(lines, "FROM "+base, "WORKDIR /app",
-			"ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore")
+			"ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore",
+			pythonRecipeNetworkEnv())
 		for _, env := range recipe.python.env {
 			lines = append(lines, "ENV "+env)
 		}

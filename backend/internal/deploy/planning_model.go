@@ -224,6 +224,13 @@ type DetectedCandidate struct {
 	// StartDetaches is a start command that puts the application in the
 	// background, which detection could not rewrite into a foreground one.
 	StartDetaches *DetectedStartDetach `json:"startDetaches,omitempty"`
+	// Listen is what the source says about where its server listens — a
+	// port it fixes, whether it reads PORT, a loopback bind — for preflight
+	// to re-check against the plan without the source tree.
+	Listen *DetectedListen `json:"listen,omitempty"`
+	// NetworkVariables are plain runtime variables the deployment's place
+	// behind the managed proxy decides (AUTH_TRUST_HOST, NEXTAUTH_URL, HOST).
+	NetworkVariables []DetectedNetworkVariable `json:"networkVariables,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -332,6 +339,9 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// MaxRequestBodyMB is the largest request body the managed route lets
+	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
+	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
 }
 
 // PublishedPort is a container port published on the host next to the routed
@@ -1031,6 +1041,9 @@ func (c PlanConfiguration) Validate() error {
 	if c.Runtime.PidsLimit != 0 && (c.Runtime.PidsLimit < MinRuntimePids || c.Runtime.PidsLimit > MaxRuntimePids) {
 		return fmt.Errorf("runtime PID limit must be between %d and %d, or zero for no limit", MinRuntimePids, MaxRuntimePids)
 	}
+	if c.Runtime.MaxRequestBodyMB < 0 || c.Runtime.MaxRequestBodyMB > MaxRequestBodyMB {
+		return invalidField("runtime.maxRequestBodyMb", "request body limit must be between 1 and %d MB, or zero for the %d MB default", MaxRequestBodyMB, DefaultMaxRequestBodyMB)
+	}
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
 	}
@@ -1541,6 +1554,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		}
 		if err := validateDetectedServing(candidate); err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+		}
+		if err := validateNetworkFacts(candidate); err != nil {
+			return err
 		}
 	}
 	if !selected {

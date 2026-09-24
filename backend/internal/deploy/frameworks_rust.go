@@ -101,7 +101,8 @@ var rustWebFrameworks = []struct {
 	crate, name string
 	port        int
 }{
-	{"axum", "axum", 3000}, {"actix-web", "actix-web", 8080}, {"rocket", "rocket", 8000},
+	// Loco is built on axum, so it is recognised first.
+	{"loco-rs", "loco", 5150}, {"axum", "axum", 3000}, {"actix-web", "actix-web", 8080}, {"rocket", "rocket", 8000},
 	{"warp", "warp", 3030}, {"poem", "poem", 3000}, {"salvo", "salvo", 5800},
 }
 
@@ -185,6 +186,9 @@ type rustRecipe struct {
 	binary  string
 	version string
 	locked  bool
+	// framework decides whether the image needs Rocket's address and its
+	// default start Rocket's port bridge.
+	framework string
 }
 
 func selectRustRecipe(root string, config BuildPlanConfig) (rustRecipe, error) {
@@ -217,7 +221,14 @@ func selectRustRecipe(root string, config BuildPlanConfig) (rustRecipe, error) {
 	if err != nil {
 		return rustRecipe{}, err
 	}
-	return rustRecipe{binary: binary, version: version, locked: regularExists(root, "Cargo.lock")}, nil
+	recipe := rustRecipe{binary: binary, version: version, locked: regularExists(root, "Cargo.lock")}
+	for _, framework := range rustWebFrameworks {
+		if manifest.deps[framework.crate] {
+			recipe.framework = framework.name
+			break
+		}
+	}
+	return recipe, nil
 }
 
 func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
@@ -248,10 +259,16 @@ func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []Res
 		"USER app",
 		"COPY --from=build /out/app /app",
 	}
-	if strings.TrimSpace(config.StartCommand) == "" {
-		lines = append(lines, `ENTRYPOINT ["/app"]`)
-	} else {
+	if recipe.framework == "rocket" {
+		lines = append(lines, rocketAddressEnv)
+	}
+	switch {
+	case strings.TrimSpace(config.StartCommand) != "":
 		lines = append(lines, shellCMD(config.StartCommand))
+	case recipe.framework == "rocket":
+		lines = append(lines, shellCMD(rocketStart))
+	default:
+		lines = append(lines, `ENTRYPOINT ["/app"]`)
 	}
 	return lines, nil
 }

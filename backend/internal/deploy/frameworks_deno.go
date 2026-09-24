@@ -121,7 +121,10 @@ func (c denoConfig) task(name string) string {
 	return ""
 }
 
-var denoEntryFiles = []string{"main.ts", "server.ts", "mod.ts", "main.js", "server.js", "src/main.ts", "src/server.ts"}
+var denoEntryFiles = []string{
+	"main.ts", "server.ts", "mod.ts", "main.js", "server.js", "main.tsx", "index.ts", "app.ts",
+	"src/main.ts", "src/server.ts", "src/index.ts",
+}
 
 // denoCandidate builds the candidate for a root with a deno.json.
 func denoCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
@@ -164,9 +167,6 @@ func denoCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "add a start task to deno.json or choose the entry file to run")
 		}
 	}
-	candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
-		Path: joinRoot(marker.root, marker.denoJSONPath), Reason: "Deno.serve default port 8000",
-	})
 	return candidate
 }
 

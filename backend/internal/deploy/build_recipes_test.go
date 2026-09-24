@@ -33,8 +33,9 @@ func TestRecipesRenderFrameworkEnvironmentsEntriesAndFallbacks(t *testing.T) {
 			name:   "nuxt with a schema step still checks the entry",
 			files:  map[string]string{"package.json": `{"scripts":{"build":"nuxt build"},"dependencies":{"nuxt":"3"}}`, "pnpm-lock.yaml": "lockfileVersion: 9"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "pnpm run build", StartCommand: "pnpm exec prisma migrate deploy && node .output/server/index.mjs"},
-			want:   []string{"RUN test -f /app/.output/server/index.mjs || (echo 'Nuxt must produce"},
-			absent: []string{"ENV HOST"},
+			// Nitro binds the address in HOST, as every Node server's runtime
+			// stage now sets it.
+			want: []string{"RUN test -f /app/.output/server/index.mjs || (echo 'Nuxt must produce", "ENV HOST=0.0.0.0"},
 		},
 		{
 			name:   "custom start command skips the entry check",

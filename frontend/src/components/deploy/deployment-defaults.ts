@@ -13,6 +13,16 @@ import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
 
+/** The request-body ceiling a route gets when the plan names none, and the most it may name. */
+export const DEFAULT_MAX_REQUEST_BODY_MB = 64
+export const MAX_REQUEST_BODY_MB = 10240
+/**
+ * What zero means, which depends on the proxy: host nginx routes are given
+ * the 64 MB default because nginx's own refused a phone photo, while Caddy,
+ * which has no default limit, is left without one.
+ */
+export const DEFAULT_REQUEST_BODY_LIMIT = `${DEFAULT_MAX_REQUEST_BODY_MB} MB on nginx, no limit on Caddy`
+
 /**
  * The variables an application issues to itself — a session or signing
  * secret, an encryption key — as opposed to one a third party hands out. A
@@ -309,11 +319,31 @@ export function defaultConfiguration(
         required: true,
         reference: `\${{blueprint.${source?.blueprintId}-${name}-accepted}}`,
       })),
+      ...networkVariables(candidate),
     ],
     dependencies: [],
     checks: defaultChecks(profile, port, candidate?.readiness),
     domains: [],
   }
+}
+
+/**
+ * The variables the deployment's place behind the proxy decides — Auth.js's
+ * AUTH_TRUST_HOST, NEXTAUTH_URL following the primary domain, HOST for a
+ * server that binds it — as plain plan variables: visible in the plan, and
+ * removable like any other, rather than baked into the image.
+ */
+export function networkVariables(
+  candidate?: DeploymentDetectionCandidate,
+): DeploymentConfiguration["variables"] {
+  return (candidate?.networkVariables ?? []).map((variable) => ({
+    name: variable.name,
+    sensitivity: "plain" as const,
+    scopes: ["runtime"],
+    ...(variable.domainTemplate
+      ? { value: "", domainTemplate: variable.domainTemplate }
+      : { value: variable.value }),
+  }))
 }
 
 /**
@@ -419,7 +449,7 @@ export function discoveredEnvironmentRows(
   candidate?: DeploymentDetectionCandidate,
   random?: RandomBytes,
 ): EnvironmentRow[] {
-  const rows = (candidate?.variables ?? []).map((variable): EnvironmentRow => {
+  const rows = unplannedVariables(candidate).map((variable): EnvironmentRow => {
     // Laravel cannot answer a single request without its application key,
     // and the key is nothing but 32 random bytes — so the row arrives with
     // one, the way `php artisan key:generate` would have written it.
@@ -434,6 +464,20 @@ export function discoveredEnvironmentRows(
     }
   })
   return rows.length ? rows : [{ name: "", value: "" }]
+}
+
+/**
+ * The detected variables, less the ones the plan already answers as network
+ * variables. A public URL that follows the primary domain stays askable: with
+ * no domain planned it has no value, and the row is where one is typed.
+ */
+function unplannedVariables(candidate?: DeploymentDetectionCandidate) {
+  const planned = new Set(
+    (candidate?.networkVariables ?? [])
+      .filter((variable) => !variable.domainTemplate)
+      .map((variable) => variable.name),
+  )
+  return (candidate?.variables ?? []).filter((variable) => !planned.has(variable.name))
 }
 
 /**
@@ -462,6 +506,9 @@ export function validateConfiguration(
     ["hostPort", configuration.runtime.hostPort ?? 0],
   ] as const)
     if (value < 0 || value > 65535) errors[name] = "Use a port from 1 to 65535, or 0 for none."
+  const maxBody = configuration.runtime.maxRequestBodyMb ?? 0
+  if (maxBody < 0 || maxBody > MAX_REQUEST_BODY_MB)
+    errors.maxRequestBodyMb = `Use 1 to ${MAX_REQUEST_BODY_MB} MB, or 0 for the proxy's default (${DEFAULT_REQUEST_BODY_LIMIT}).`
   if (profile === "game" && !configuration.variables.some((variable) => variable.name === "EULA"))
     errors.eula = "Accept the Minecraft EULA before continuing."
   const names = new Set<string>()

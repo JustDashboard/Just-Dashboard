@@ -12,6 +12,8 @@ import (
 type OutputCause struct {
 	Code  string `json:"code"`
 	Table string `json:"table,omitempty"`
+	// Listener is the loopback address a loopback_only candidate listens on.
+	Listener string `json:"listener,omitempty"`
 }
 
 // A freshly linked database is empty, and an application that queries it
@@ -46,6 +48,8 @@ func (c *OutputCause) sentence() string {
 		return "the application's start command finished with exit code 0 instead of serving, so the container stopped; a start command must keep the server in the foreground — pm2 start, forever start, a trailing & and a one-off script all return at once (use pm2-runtime, or run the server directly)"
 	case "schema_missing":
 		return fmt.Sprintf("the application reports that table %s does not exist in its database, so the linked database has not received the application's schema; apply it before the application starts — for Prisma, `prisma migrate deploy`, or `prisma db push` when the project has no migrations", c.Table)
+	case "loopback_only":
+		return loopbackOnlySentence(c.Listener)
 	}
 	return ""
 }
@@ -53,10 +57,15 @@ func (c *OutputCause) sentence() string {
 // diagnosticsSuffix is what the candidate's own output adds to a failure
 // message: the one cause it proves, if any, and where the rest of it is.
 func diagnosticsSuffix(diagnostics *runtimeDiagnosticsEvidence) string {
-	if diagnostics == nil || diagnostics.Lines == 0 {
+	if diagnostics == nil {
 		return ""
 	}
-	suffix := "; the application's last output is in the build log"
+	suffix := ""
+	if diagnostics.Lines > 0 {
+		suffix = "; the application's last output is in the build log"
+	}
+	// A server listening on loopback often prints nothing about it, so its
+	// cause stands without any output behind it.
 	if cause := diagnostics.Cause.sentence(); cause != "" {
 		suffix = "; " + cause + suffix
 	}

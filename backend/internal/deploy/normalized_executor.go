@@ -132,6 +132,10 @@ type runtimeReleaseSnapshot struct {
 	Domains        []PlannedDomain           `json:"domains"`
 	PlanInputsHash string                    `json:"planInputsDigest"`
 	SourceIdentity SourceIdentity            `json:"sourceIdentity"`
+	// ProxyTrust names the forwarded-header trust settings the recipe image
+	// sets, which the runtime withdraws when the proxy does not front the
+	// release alone.
+	ProxyTrust []string `json:"proxyTrust,omitempty"`
 }
 
 func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExecution) StepResult {
@@ -490,6 +494,7 @@ func (e *NormalizedStepExecutor) renderRuntime(
 		Domains:        domains,
 		PlanInputsHash: plan.PlanInputsDigest,
 		SourceIdentity: plan.SourceIdentity,
+		ProxyTrust:     imageProxyTrust(built.Result.Prepared),
 	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
