@@ -26,33 +26,152 @@ secret mappings; they retain their existing refusal of requested secrets.
 Neither generated Dockerfiles nor command arguments contain variable values. Logs redact exact values.
 An ephemeral mount does not prevent application build code from intentionally copying a value into its
 output. In particular, Next.js `NEXT_PUBLIC_` values and Vite `VITE_` values embedded in browser assets
-are public, even if encrypted in the dashboard. Quick setup and the variable editor explain this.
+are public, even if encrypted in the dashboard. Quick setup labels such rows `public`, the variable
+editor gives a new browser-prefixed name Build and Runtime scope as a plain value, and preflight warns
+when one is secret-shaped and refuses a live Stripe secret key or a Supabase service_role token.
 See the upstream [Next.js environment contract](https://nextjs.org/docs/app/guides/environment-variables)
 and [Vite environment contract](https://vite.dev/guide/env-and-mode).
 
 ## Environment discovery and database suggestions
 
-Detection lists the variables a source expects so the configure form opens with them as rows. Names
-come from a documented template (`.env.example`, `.env.sample`, `.env.template`, `.env.dist`,
-`example.env` and the like) with the template's own value kept as the row's placeholder when it is not
-credential-shaped, from a committed `.env` (names only, never values), and from the code's own reads of
-its environment — `process.env.X`, `import.meta.env.X`, `Bun.env.X`, `Deno.env.get("X")`,
-`os.environ["X"]`, `os.getenv("X")`, `env("X")`, `config("X")`, `os.Getenv("X")`, `getenv("X")`,
-`ENV["X"]`. Tests, fixtures, documentation, migrations and generated files are not read, and names the
-platform supplies (`PORT`, `HOST`, `NODE_ENV`, …) are left out. The scan has its own budget (400 files,
+Detection lists the variables a source expects so the configure form opens with them as rows, and says
+how each is supplied so an imported project arrives configured rather than as blank rows. Names come
+from a documented template (`.env.example`, `.env.sample`, `.env.template`, `.env.dist`, `example.env`
+and the like) with the template's own value kept as the row's placeholder when it is not
+credential-shaped; from the committed files a framework loads with real values (`.env`, `.env.local`,
+`.env.production`, `.env.production.local`); from configuration templates (Spring and Quarkus
+`application*.properties|yml` placeholders `${X}` and `${X:default}`, HOCON `application.conf`
+`${X}`/`${?X}`, Rails ERB in `config/*.yml`, .NET `appsettings*.json` connection strings and empty
+leaves as `CONNECTIONSTRINGS__NAME` and `SECTION__KEY`); and from the code's own reads of its
+environment — `process.env.X`, `import.meta.env.X` (Vite's own `MODE`, `DEV`, `PROD`, `SSR`,
+`BASE_URL` excepted), `Bun.env.X`, `Deno.env.get("X")`, `os.environ["X"]`, `os.getenv("X")`,
+`env("X")`, `config("X")`, `os.Getenv("X")`, `getenv("X")`, `ENV["X"]`, `System.getenv("X")`, Spring
+`@Value("${X}")`, Scala `sys.env`, Rust `std::env::var`, `dotenvy::var`, `env!`/`option_env!` and clap
+`env = "X"`, .NET `Environment.GetEnvironmentVariable`, `Configuration["A:B"]` and
+`GetConnectionString("N")`, Elixir `System.get_env`/`fetch_env!`, Dart `Platform.environment`, Swift
+`Environment.get`, Haskell `getEnv`/`lookupEnv`, Gleam `envoy.get`, Go `env:"X"`/`envconfig:"X"`
+struct tags, pydantic-settings `BaseSettings` fields (upper-cased, behind `env_prefix` unless an alias
+names them), django-environ's `env.db()`/`env.cache()` and `dj_database_url.config()` (implicit
+`DATABASE_URL`/`CACHE_URL`), the bare `environ` imported from `os`, SvelteKit's `$env/static/*` imports
+and `$env/dynamic/*` reads, t3 `createEnv` schemas, Astro `envField` schemas, AdonisJS `Env.schema`
+and Nuxt `runtimeConfig` keys (`NUXT_API_SECRET`, `NUXT_PUBLIC_API_BASE`). Tests, fixtures,
+documentation, migrations and generated files are not read, and names the platform supplies (`PORT`,
+`NODE_ENV`, …) are left out; `DEBUG` is left out of JavaScript, where it is the `debug` package's, and
+kept from Python, where it is the framework's debug mode. The scan has its own budget (400 files,
 3 MiB) apart from detection's limits: a large repository stops contributing names quietly and is never
 reported truncated for it. The root's own template comes first in file order, then a committed `.env`,
 then what the repository documents above the root, then code references by name. Each row carries where
-it was read; a detected row left empty is skipped at submit, not set to an empty value, and the form
-says how many are unset.
+it was read; a detected row left empty and set up by nothing is skipped at submit, not set to an empty
+value, and the form says how many are unset.
+
+A committed real env file contributes its names and two facts derived from a value, never the value:
+whether it points at loopback (which inside the container is the app itself) and, for a database URL,
+the engine its scheme names.
+
+Each variable carries how it was read. `phase: build` marks a value read while the build runs — a
+framework config file (`next.config.*`, `vite.config.*`, `prisma.config.*`, …), a static env import, a
+compile-time macro, a browser prefix. `browserInlined` marks a value the framework compiles into the
+JavaScript every visitor downloads: the prefix the root's own framework inlines (`NEXT_PUBLIC_`,
+`VITE_`, SvelteKit's and Astro's `PUBLIC_`, `REACT_APP_`, `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_`,
+`VUE_APP_`, listed on the candidate as `browserPrefixes`), or a Vite `define` / `next.config` `env`
+block. `required` marks a read with no default where the application starts or builds — a Python
+subscript or default-less `env()`/`config()` at module level of a settings, config or entry module, a
+`BaseSettings` field with no default, Elixir `fetch_env!` or `|| raise` in `config/`, Rails
+`ENV.fetch` without a default in `config/`, a Spring or HOCON placeholder without a default, a Go
+`required` tag, a static env import, a t3, Astro or AdonisJS schema entry without `optional`.
+`requiredRead` is the same form somewhere that may only run on one path. `localhostIn` names the
+committed file whose value points at loopback.
+
+`setup` says how the dashboard supplies the value when nothing is typed (`detect_variables.go`):
+
+- `generate` — a self-issued secret, minted at commit on the server in its framework's shape and stored
+  sealed like any secret variable: Laravel's `APP_KEY` (`base64:` over 32 bytes), Auth.js
+  `AUTH_SECRET`/`NEXTAUTH_SECRET`, Better Auth, Payload, Rails' and Phoenix's `SECRET_KEY_BASE`,
+  Django's `SECRET_KEY`/`DJANGO_SECRET_KEY` (only when its settings read that exact name), Flask's,
+  Strapi's `APP_KEYS` (four keys) and salts, Directus `KEY`/`SECRET`, Medusa, AdonisJS, and
+  `SESSION_SECRET`/`COOKIE_SECRET`/`JWT_SECRET` beside the session or JWT library that signs with them.
+  Every rule is an exact name gated by the dependency that issues it to itself, so a provider's
+  credential — `STRIPE_SECRET_KEY`, `CLERK_SECRET_KEY`, `SUPABASE_JWT_SECRET`, `AUTH_GITHUB_SECRET` —
+  is never generated. A secret the framework reads internally (`SECRET_KEY_BASE` for Rails, Auth.js's
+  secret) is added even when no line of code names it.
+- `domain` — a self-URL bound to the planned domain through `domainTemplate`: `AUTH_URL`,
+  `NEXTAUTH_URL`, `BETTER_AUTH_URL`, SvelteKit adapter-node's `ORIGIN`, Laravel's `APP_URL`, Phoenix's
+  `PHX_HOST` (the bare hostname), Django's `CSRF_TRUSTED_ORIGINS` and `ALLOWED_HOSTS` (with `localhost`
+  and `127.0.0.1` kept so the readiness probe answers), `SITE_URL`, `PUBLIC_URL`, `BASE_URL` and
+  `NEXT_PUBLIC_APP_URL`/`SITE_URL`/`BASE_URL`, and any variable whose example is an http(s) URL on
+  loopback at the application's own port. Another port or a non-http scheme — `API_URL` on 8000,
+  `DATABASE_URL` — is never rebound.
+- `default` — a harmless documented setting: `LOG_LEVEL` (pinned to `info`), `SESSION_DRIVER`,
+  `DB_CONNECTION`, `DB_CLIENT`, `DATABASE_CLIENT` from the template; `HOST=0.0.0.0` where `HOST` is read
+  beside a listen; Django or Flask `DEBUG` off (`False`, or `0` for an `int()` read) where the settings
+  turn debug on by default; `SOLID_QUEUE_IN_PUMA=true` where Puma loads Solid Queue's plugin;
+  `AUTH_TRUST_HOST=true` for Auth.js v5, whose only ingress is the managed proxy. `NODE_ENV`, `PORT`
+  and loopback URLs are never filled.
+- `paste` — a secret only the operator holds: Rails' `RAILS_MASTER_KEY` beside committed credentials,
+  required when production sets `require_master_key`.
+
+The configure form declares each set-up variable in the plan (a generated secret, a plain value that
+follows the domain until edited, a default, a required name) and the environment row says so; a typed
+value wins at commit, and removing the row removes the declaration.
 
 The engines a source connects to are read from its dependencies (`pg`, `mysql2`, `mongoose`, `ioredis`,
-`psycopg`, `asyncpg`, `pymongo`, `redis`, `github.com/jackc/pgx`, …), from a Prisma datasource
-provider, and from variable names and example URLs (`REDIS_URL`, `MONGODB_URI`, `postgres://…`). Each
-engine quick setup can provision — `postgres`, `mysql`, `mariadb`, `redis`, `mongodb` — is offered as one
-button that opens the database sheet on that engine and the variable the connection belongs in
-(`DATABASE_URL` for a relational engine the dependencies name, or the documented name). SQLite names no
-engine.
+`psycopg`, `asyncpg`, `pymongo`, `redis`, `github.com/jackc/pgx`, …), from `Gemfile.lock`, `mix.exs`,
+`Cargo.toml` (sqlx, diesel and sea-orm features included), Maven and Gradle coordinates, `*.csproj`
+package references, `Package.swift`, `pubspec.yaml` and Composer (`predis/predis`, `ext-pdo_pgsql`,
+…), from a Prisma datasource provider, from variable names and example URLs (`REDIS_URL`,
+`MONGODB_URI`, `postgres://…`), and from a committed real env file's URL scheme. Each engine quick
+setup can provision — `postgres`, `mysql`, `mariadb`, `redis`, `mongodb` — is offered as one button
+that opens the database sheet on that engine and the variable the connection belongs in (`DATABASE_URL`
+for a relational engine the dependencies name, or the documented name). SQLite names no engine. A
+suggestion also carries:
+
+- `format` — the connection shape its consumer parses: `jdbc` for Spring (`SPRING_DATASOURCE_URL`, or
+  the placeholder `spring.datasource.url` reads), Quarkus and Micronaut, `adonet` for .NET
+  (`CONNECTIONSTRINGS__<NAME>` from `GetConnectionString`), `mysql2` for Rails before 7.2 on MySQL. The
+  link requests that shape, and the typed reference records it (`${{database.5.jdbc}}`).
+- `extensions` — `vector` or `postgis`, read from a Prisma `extensions` list or `Unsupported` type, the
+  first migrations' `CREATE EXTENSION`, Rails `enable_extension`, a drizzle `vector()` column, or a
+  library that needs one (pgvector, langchain-postgres, GeoAlchemy2, neighbor, PostGIS adapters). Quick
+  setup then preselects PostgreSQL with pgvector or PostGIS, since the official image ships neither.
+- `hosted` — a driver that only speaks its provider's protocol (Neon's HTTP or WebSocket driver,
+  `@vercel/postgres`, PlanetScale's HTTP driver, Prisma Accelerate, Upstash REST). An import seen in the
+  source is conclusive; a dependency alone is when no TCP driver is also declared. The form asks for the
+  provider's connection string and offers no local engine.
+- `alsoVariables` — Rails 8's `CACHE_`, `QUEUE_` and `CABLE_DATABASE_URL` when `config/database.yml`
+  declares those production databases; the link sets each to the same server under
+  `<database>_<name>`.
+
+Laravel's `DB_CONNECTION` suggestion targets `DB_URL` from Laravel 11 and `DATABASE_URL` before it,
+whichever the application's own `config/database.php` reads, else the framework constraint.
+
+Preflight answers all of this before the first build (`preflight_variables.go`): a cleared generated
+secret (`secret_unset_*`) and the generated ones (`secrets_generated`); a self-URL with no domain,
+bound to the planned one, or naming another host (`public_url_unbound_*`, `public_url_bound_*`,
+`public_url_mismatch_*`, and `phoenix_host_*` for `PHX_HOST`); a static env import or compile-time read
+with no build-scoped value (`build_variable_missing_*`, blocked) and browser variables that would build
+as undefined (`browser_variables_unbuilt`); a value, or a committed file's fallback, that points at
+loopback (`variable_points_to_localhost_*`, `build_inlines_localhost_*`, `host_variable_loopback_*`); a
+secret compiled into the browser bundle (`public_variable_secret_*`, blocked for a live Stripe secret
+key or a Supabase service_role token); documented or required-form variables left unset
+(`documented_variables_unset`, `variable_likely_required`); Rails without its secret or master key
+(`rails_secret_missing`, `rails_master_key_missing`); Django debug or a committed secret key
+(`django_insecure_settings`); build scripts that fetch from localhost (`build_fetches_localhost`); a
+hosted driver linked to a local database (`hosted_driver_local_database`); a URL where JDBC or ADO.NET
+is read (`database_url_format`); Rails' extra databases on quick-setup MySQL
+(`rails_multidb_create_denied`); a linked PostgreSQL without the schema's extension
+(`database_extension_missing`, blocked); MongoDB 5+ on a CPU without AVX or ARMv8.2 atomics
+(`database_cpu_unsupported`); a Laravel or Symfony start that migrates a database nobody linked
+(`database_required_for_start`, blocked); the callback, authorized-domain and webhook addresses to
+register with Auth.js providers, Better Auth, OmniAuth, django-allauth, Auth0, Clerk, Firebase, Supabase
+and Stripe (`external_callback_registration`); a Clerk production key issued for another domain
+(`clerk_key_domain_mismatch`, blocked); and a Phoenix release whose migrate overlay nothing runs
+(`migrations_not_run`). No finding repeats a secret value.
+
+When a candidate still fails its checks, its own output names the environment cause beside a missing
+table (`runtime_variable_cause.go`): a secret it stops without (Rails' `secret_key_base`, Django's
+`SECRET_KEY`, Auth.js's `MissingSecret`), Rails credentials it cannot decrypt, Auth.js's
+`UntrustedHost`, Phoenix refusing a socket origin or a `runtime.exs` variable, a missing `.env`, and a
+connection refused on loopback, by port — never the line it was read from.
 
 ## Procfile
 
@@ -174,6 +293,11 @@ explicit package choice for a repository with several mains. The historical dete
 command still executes, followed by the default output-producing build for compatibility. A custom start
 command replaces the default `/app` entrypoint and runs inside the unprivileged runtime container.
 
+A binary that loads `.env` and treats a missing file as fatal — `godotenv.Load()` followed by
+`log.Fatal`, `panic` or `os.Exit` — gets an empty `.env` in the runtime stage's working directory,
+created before the stage drops to its user. It carries no value, and godotenv never overrides a variable
+already in the environment, so the dashboard's values still win.
+
 This recipe uses `CGO_ENABLED=0`. Local non-test source importing `C`, unsupported source versions and
 explicit CGO-enabling commands produce actionable planning/preparation refusals. Dependencies needing
 CGO or more complex native-library/workspace arrangements require a Dockerfile; source scanning does
@@ -195,6 +319,9 @@ ask to confirm it; a crate with none is a worker that asks. A workspace without 
 When `package.default-run` is declared, it selects the served binary ahead of that fallback, including
 automatically discovered `src/bin` targets. This keeps a maintenance command from being launched in
 place of the HTTP service just because its `[[bin]]` appears first.
+
+A binary whose `src/main.rs` or `src/bin` entry calls `dotenvy::dotenv()` with `.expect`, `.unwrap()` or
+`?` gets the same empty `.env` as a Go one.
 
 ## Java and Kotlin
 
@@ -250,10 +377,12 @@ Composer runs from the `composer:2` image with `--no-dev --optimize-autoloader`;
 build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on the manifest's own
 runtime whose `public/build` is copied in. Laravel's start runs `php artisan migrate --force` first;
 Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is present. `storage/`,
-`bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. The
-configure form mints `APP_KEY` for a Laravel import (`base64:` over 32 random bytes) and offers a
-**Generate** button on any variable whose name ends in `SECRET`, `KEY` or `SECRET_KEY_BASE`. Laravel's
-`.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`.
+`bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. A
+Laravel import's `APP_KEY` is generated on the server at commit (`base64:` over 32 random bytes), and
+the **Generate** button is offered on a self-issued name the operator types by hand — never on a
+provider's (`STRIPE_SECRET_KEY`, `AUTH_GITHUB_SECRET`, a client or webhook secret). Laravel's
+`.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`
+(Laravel 11 and later) or `DATABASE_URL` (Laravel 10 and earlier).
 
 ## Verification
 

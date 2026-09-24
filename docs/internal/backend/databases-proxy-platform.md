@@ -148,6 +148,13 @@ distinct names before pulling images. Explicit names remain exact and provisioni
 an official image that finds a populated data directory skips initialisation, so the freshly generated
 password is never set and the server refuses every sign-in while looking reachable. The `/ping` reply's
 `error` is surfaced by both creation dialogs so an engine's own refusal is not reported as "not ready".
+Besides the five engines, provisioning offers `pgvector` (`pgvector/pgvector:pg16`) and `postgis`
+(`postgis/postgis:16-3.5-alpine`): the same PostgreSQL 16 contract with the extension a retrieval or
+geospatial schema creates on its first migration, which the official image lacks. Deployment setup
+preselects one when detection read that extension from the schema. `mongodb` is refused before any pull
+on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die with an illegal
+instruction. The URL read also takes `format` and `database`; see
+[deployment database networks](../deployments/database-networks.md).
 `/adopt` is idempotent by driver, address, database and login user: a matching connection gets that row
 back, and when the container's password differs the row is re-sealed in place while preserving its
 transport and query options (audited as `database.connection.refresh`, pool dropped). Different databases,

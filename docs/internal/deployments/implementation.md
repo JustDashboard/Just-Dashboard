@@ -139,8 +139,16 @@ only renderer/executor/validation authority for their feature.
   save credentials. Required-variable and reference-graph checks use the same effective values as commit.
   The environment section opens with the variables detection found the source reading — the template's
   example as the placeholder, the file it was read from beside the key — and a detected row left empty
-  is skipped at submit rather than set to nothing; each database the source connects to is one button
-  that opens the database sheet on that engine and variable. The framework is named as its own
+  and set up by nothing is skipped at submit rather than set to nothing. A row detection set up says
+  how the plan answers it (`detectedVariableDeclarations`): a secret generated when the project is
+  created (never shown in the browser), an address that follows the domain, a documented default, or a
+  secret to paste; a required name is declared required, a browser-compiled name is tagged `public`,
+  and a typed value pointing at localhost is flagged under the field. Review lists the generated
+  secrets by shape and the plain values the plan carries. Each database the source connects to is one
+  button that opens the database sheet on that engine (PostgreSQL with pgvector or PostGIS when the
+  schema needs one) and variable, in the connection shape the application parses; a hosted-only driver
+  asks for its provider's connection string instead, and a suggestion stays offered while the variable
+  holds only a localhost value. The framework is named as its own
   documentation spells it (`frameworkLabel`), a Python recipe shows its interpreter field, and static
   output shows the single-page switch. `?repo=<clone url>&ref=<branch>` arrives on the Git tab with
   the URL filled in (only an `https://`, `ssh://` or `git@` URL is accepted), which is what a deploy
@@ -262,9 +270,16 @@ only renderer/executor/validation authority for their feature.
   `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
   process outranks every guess. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
-  never a refusal), `variables` (the environment names the source reads, with example values and
-  where each was read — `env_discovery.go`) and `databases` (the engines its dependencies and
-  documented URLs name, each with the variable the connection belongs in). The closed recipe set is
+  never a refusal), `variables` (the environment names the source reads, with example values, where
+  each was read, and how each is supplied and read — `setup`, `generateFormat`, `domainTemplate`,
+  `defaultValue`, `phase`, `browserInlined`, `required`, `requiredRead`, `localhostIn`;
+  `env_discovery.go`, `env_discovery_languages.go`, `detect_variables.go`), `databases` (the engines
+  its manifests and documented URLs name, each with the variable the connection belongs in and its
+  `format`, `extensions`, `hosted` driver and Rails `alsoVariables`; `detect_databases.go`),
+  `browserPrefixes` and `environmentNotes` (facts preflight answers: a committed Django key, a fatal
+  dotenv load, an identity provider's callback, Rails credentials). A Dockerfile candidate at a Rails
+  or Phoenix root is named that framework, and Phoenix's release image gets port 4000 when it exposes
+  none. `validateDetectedEnvironment` bounds every added field like the rest of a saved detection. The closed recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
@@ -288,7 +303,9 @@ only renderer/executor/validation authority for their feature.
   and `schema_step` (pass) when one does; no linked database means no finding. Changing the package
   manager rewrites the chained binary runner with the script runner.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
-  Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
+  Docker/Compose availability, proxy inventory, bounded DNS lookups, the CPU's `avx`/`atomics` flags
+  from `/proc/cpuinfo`, and — for a linked PostgreSQL — one bounded `pg_available_extensions` read
+  through the dashboard's own pool. It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
   plan excludes raw observed import material and accepts only typed secret references.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
@@ -691,8 +708,12 @@ only renderer/executor/validation authority for their feature.
   (refused for secrets and for anything shaped like a reference). A `secret` input is deferred to the
   Variables screen as a required secret variable, never accepted in `blueprintInputs`; Mongo Express
   uses this for its MongoDB URI and offers the MongoDB connection sheet. Declared generated secrets become
-  `PlannedVariable.generate` (16–128 characters, secret only) and commit produces each value from
-  `crypto/rand` so it exists only sealed, revealed through the audited reveal route. Preflight accepts a
+  `PlannedVariable.generate` (16–128, secret only) with an optional `generateFormat` (`hex`, `base64`,
+  `laravel`, `keylist`; empty is alphanumeric, and the length counts random bytes for the base64
+  shapes), and commit produces each value from `crypto/rand` so it exists only sealed, revealed through
+  the audited reveal route. A detected self-issued secret is declared the same way, and Generate or
+  Rotate in the Variables settings keeps the shape the environment's recorded detection gives the
+  name, so a rotated Laravel `APP_KEY` keeps its `base64:` prefix. Preflight accepts a
   literal, generated, referenced or encrypted draft value for a required variable, and a managed `docker_volume` that Docker has not
   created yet passes as `storage_pending_creation` (Docker creates it on first start); a linked or
   uninspectable volume still blocks. Default automation presets that need a backup job arrive paused so
