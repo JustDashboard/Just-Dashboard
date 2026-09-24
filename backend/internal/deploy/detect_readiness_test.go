@@ -136,6 +136,35 @@ func TestDetectedReadinessFollowsWhatTheSourceDeclares(t *testing.T) {
 			files: map[string]string{"pom.xml": "<project><dependencies><dependency><artifactId>spring-boot-starter-web</artifactId></dependency><dependency><artifactId>spring-boot-starter-actuator</artifactId></dependency></dependencies><parent><artifactId>spring-boot-starter-parent</artifactId></parent></project>",
 				"src/main/resources/application.yml": "server:\n  servlet:\n    context-path: /shop\n"},
 			kind: "http", path: "/shop/actuator/health", source: readinessFromFramework, attempts: 40, interval: 3},
+		{name: "spring actuator under a context path placeholder takes its default", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-web spring-boot-starter-actuator</project>",
+				"src/main/resources/application.properties": "server.port=${PORT:8080}\nserver.servlet.context-path=${CONTEXT_PATH:/api}\n"},
+			kind: "http", path: "/api/actuator/health", source: readinessFromFramework, attempts: 40, interval: 3},
+		{name: "spring actuator under a placeholder with no default answers anything", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-web spring-boot-starter-actuator</project>",
+				"src/main/resources/application.properties": "server.servlet.context-path=${CONTEXT_PATH}\n"},
+			kind: "http", path: "/", any: true, source: readinessFromConvention, attempts: 40, interval: 3, evidence: "no default"},
+		{name: "spring actuator ignores a later profile document", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-web spring-boot-starter-actuator</project>",
+				"src/main/resources/application.yml": "---\nspring:\n  application:\n    name: shop\n---\nspring:\n  config:\n    activate:\n      on-profile: local\nserver:\n  servlet:\n    context-path: /local\n"},
+			kind: "http", path: "/actuator/health", source: readinessFromFramework, attempts: 40, interval: 3},
+		{name: "spring actuator ignores a later properties document", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-web spring-boot-starter-actuator</project>",
+				"src/main/resources/application.properties": "management.endpoints.web.base-path=/manage\n#---\nspring.config.activate.on-profile=local\nmanagement.endpoints.web.base-path=/local\n"},
+			kind: "http", path: "/manage/health", source: readinessFromFramework, attempts: 40, interval: 3},
+		{name: "spring webflux actuator under its base path", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-webflux spring-boot-starter-actuator</project>",
+				"src/main/resources/application.properties": "spring.webflux.base-path=/svc\n"},
+			kind: "http", path: "/svc/actuator/health", source: readinessFromFramework, attempts: 40, interval: 3},
+		{name: "spring health route in code under the context path", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-web</project>",
+				"src/main/resources/application.properties":       "server.servlet.context-path=/api\n",
+				"src/main/java/com/example/HealthController.java": "@RestController\nclass HealthController {\n  @GetMapping(\"/health\")\n  String health() { return \"ok\"; }\n}\n"},
+			kind: "http", path: "/api/health", any: true, source: readinessFromCode, attempts: 40, interval: 3},
+		{name: "spring REST API with a root context path", method: BuildRecipe,
+			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-web</project>",
+				"src/main/resources/application.properties": "server.servlet.context-path=/\n"},
+			kind: "http", path: "/", any: true, source: readinessFromConvention, attempts: 40, interval: 3},
 		{name: "spring actuator behind spring security answers anything", method: BuildRecipe,
 			files: map[string]string{"pom.xml": "<project>spring-boot spring-boot-starter-actuator spring-boot-starter-security</project>"},
 			kind:  "http", path: "/actuator/health", any: true, source: readinessFromFramework, attempts: 40, interval: 3},
@@ -293,6 +322,31 @@ func TestDetectedReadinessReadsHostAndHTTPSSettings(t *testing.T) {
 	if dynamic == nil || dynamic.AllowedHostsSource != "" || dynamic.HTTPSRedirect == "" || dynamic.HTTPSRedirectIgnoresProxy {
 		t.Fatalf("dynamic django = %+v", dynamic)
 	}
+	// The module wsgi.py names only imports its base, which holds the list.
+	split := fixtureCandidate(t, detectFixture(t, map[string]string{
+		"requirements.txt": "django==5.2\n", "manage.py": "",
+		"mysite/wsgi.py":                "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'mysite.settings.production')\n",
+		"mysite/settings/__init__.py":   "",
+		"mysite/settings/base.py":       "ALLOWED_HOSTS = ['example.org']\n",
+		"mysite/settings/production.py": "from .base import *  # noqa\n",
+	}), BuildRecipe).Readiness
+	if split == nil || strings.Join(split.AllowedHosts, ",") != "example.org" || split.AllowedHostsSource != "ALLOWED_HOSTS in mysite/settings/base.py" {
+		t.Fatalf("split django = %+v", split)
+	}
+	// With DEBUG on, an empty list allows the local names.
+	for settings, hosts := range map[string]string{
+		"DEBUG = True\nALLOWED_HOSTS = []\n":                                ".localhost,127.0.0.1,[::1]",
+		"DEBUG = False\nALLOWED_HOSTS = []\n":                               "",
+		"DEBUG = os.environ.get('DEBUG') == '1'\nALLOWED_HOSTS = []\n":      "",
+		"DEBUG = True  # local only\nALLOWED_HOSTS = ['app.example.com']\n": "app.example.com",
+	} {
+		readiness := fixtureCandidate(t, detectFixture(t, map[string]string{
+			"requirements.txt": "django==5.2\n", "manage.py": "", "mysite/wsgi.py": "", "mysite/settings.py": settings,
+		}), BuildRecipe).Readiness
+		if readiness == nil || readiness.AllowedHostsSource == "" || strings.Join(readiness.AllowedHosts, ",") != hosts {
+			t.Fatalf("%q: %+v", settings, readiness)
+		}
+	}
 }
 
 func TestDetectedReadinessRecordsTheModelCache(t *testing.T) {
@@ -408,5 +462,21 @@ func TestReadinessScannerMarksRootsItDidNotReadCompletely(t *testing.T) {
 	}
 	if !full.forRoot("bot", roots).has(factSourceUnread) {
 		t.Fatal("a dropped fact went unnoticed")
+	}
+}
+
+func TestReadinessSkippedPathKeepsJVMPackages(t *testing.T) {
+	t.Parallel()
+	for rel, skipped := range map[string]bool{
+		"src/main/java/com/example/demo/HealthController.java": false,
+		"api/src/main/kotlin/com/example/Health.kt":            false,
+		"examples/basic/src/main/java/App.java":                true,
+		"src/test/java/com/example/HealthTest.java":            true,
+		"examples/server.js":                                   true,
+		"src/server.ts":                                        false,
+	} {
+		if got := readinessSkippedPath(rel); got != skipped {
+			t.Fatalf("%s: skipped %v", rel, got)
+		}
 	}
 }

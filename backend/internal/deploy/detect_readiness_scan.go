@@ -63,7 +63,12 @@ const (
 	factDjangoSSL      = "django_ssl_redirect"
 	factDjangoProxySSL = "django_proxy_ssl_header"
 	factDjangoURL      = "django_url"
-	factJVMSetting     = "jvm_setting"
+	factDjangoDebug    = "django_debug"
+	// A settings module is recorded by its path alone, so the module
+	// DJANGO_SETTINGS_MODULE names is found even when it only imports
+	// another (djangoSettingsFile).
+	factDjangoSettingsFile = "django_settings_file"
+	factJVMSetting         = "jvm_setting"
 	// A root holds a file the scanner wanted and did not read, so what it
 	// did not find there may still be in the source (forRoot).
 	factSourceUnread = "source_unread"
@@ -108,6 +113,9 @@ func (s *readinessScanner) visit(file, rel string) {
 	}
 	if routeFileCandidate(rel, name) {
 		s.add(readinessFact{file: rel, kind: factRouteFile, value: rel})
+	}
+	if djangoSettingsPath(rel, name) {
+		s.add(readinessFact{file: rel, kind: factDjangoSettingsFile})
 	}
 	config := readinessConfigFile(rel, name)
 	if !config && !readinessSourceFile(name) {
@@ -154,7 +162,15 @@ func (s *readinessScanner) add(fact readinessFact) {
 // readinessSkippedPath leaves out what is not the application: tests,
 // fixtures, examples and documentation, as environment discovery does.
 func readinessSkippedPath(rel string) bool {
-	for _, segment := range strings.Split(path.Dir(rel), "/") {
+	directory := "/" + path.Dir(rel) + "/"
+	// Below a JVM source root the directories are a package name, and
+	// com.example is the one Spring Initializr gives every new project.
+	for _, sourceRoot := range []string{"/src/main/java/", "/src/main/kotlin/"} {
+		if index := strings.Index(directory, sourceRoot); index >= 0 {
+			directory = directory[:index+1]
+		}
+	}
+	for _, segment := range strings.Split(strings.Trim(directory, "/"), "/") {
 		if envSkippedDirs[segment] {
 			return true
 		}
@@ -178,14 +194,20 @@ func readinessConfigFile(rel, name string) bool {
 	}
 	switch name {
 	case "fly.toml", "render.yaml", "render.yml", "railway.json", "railway.toml", "program.cs", "startup.cs",
-		"settings.py", "urls.py", "wsgi.py", "asgi.py", "manage.py":
+		"urls.py", "wsgi.py", "asgi.py", "manage.py":
 		return true
 	}
 	if strings.HasPrefix(name, "next.config.") {
 		return true
 	}
-	// A settings package: settings/production.py and its siblings.
-	return strings.HasSuffix(name, ".py") && path.Base(path.Dir(rel)) == "settings"
+	return djangoSettingsPath(rel, name)
+}
+
+// djangoSettingsPath is a Django settings module by its name: settings.py,
+// a sibling such as settings_prod.py, or a module of a settings package
+// (settings/production.py).
+func djangoSettingsPath(rel, name string) bool {
+	return strings.HasSuffix(name, ".py") && (strings.HasPrefix(name, "settings") || path.Base(path.Dir(rel)) == "settings")
 }
 
 func readinessSourceFile(name string) bool {
@@ -284,6 +306,7 @@ var (
 	djangoHostsRE     = regexp.MustCompile(`(?m)^ALLOWED_HOSTS\s*(?::[^=\n]+)?=\s*[\[(]([^\])]*)[\])]\s*$`)
 	djangoSSLRE       = regexp.MustCompile(`(?m)^SECURE_SSL_REDIRECT\s*=\s*True\b`)
 	djangoProxySSLRE  = regexp.MustCompile(`(?m)^SECURE_PROXY_SSL_HEADER\s*=`)
+	djangoDebugRE     = regexp.MustCompile(`(?m)^DEBUG\s*(?::[^=\n]+)?=\s*([^#\n]*)`)
 	djangoModuleRE    = regexp.MustCompile(`DJANGO_SETTINGS_MODULE['"]\s*,\s*['"]([\w.]+)['"]`)
 	djangoPathRE      = regexp.MustCompile(`\b(?:path|re_path)\(\s*r?['"]\^?([^'"$]*)\$?['"]\s*,\s*((?:[^()\n]|\([^()\n]*\)){0,160})`)
 )
@@ -427,7 +450,7 @@ func (s *readinessScanner) scanPython(rel, name string, content []byte) {
 	if match := djangoModuleRE.FindSubmatch(content); match != nil {
 		s.add(readinessFact{file: rel, kind: factDjangoSettings, value: string(match[1])})
 	}
-	if name == "settings.py" || path.Base(path.Dir(rel)) == "settings" {
+	if djangoSettingsPath(rel, name) {
 		s.scanDjangoSettings(rel, content)
 	}
 	if name == "urls.py" {
@@ -645,6 +668,11 @@ func (s *readinessScanner) scanDjangoSettings(rel string, content []byte) {
 	if djangoProxySSLRE.Match(content) {
 		s.add(readinessFact{file: rel, kind: factDjangoProxySSL})
 	}
+	// Any assignment is recorded, so one read from the environment hides a
+	// literal True in the base module it overrides.
+	if match := djangoDebugRE.FindSubmatch(content); match != nil {
+		s.add(readinessFact{file: rel, kind: factDjangoDebug, value: strings.TrimSpace(string(match[1]))})
+	}
 }
 
 // scanDjangoURLs records the routes a urls.py declares: the root, a health
@@ -732,9 +760,12 @@ func kamalHealthcheckPath(content []byte) string {
 // context paths and the management endpoint's base path and port. A
 // properties file is key=value lines; a YAML file is flattened by
 // indentation, which is enough for the nested-map shape these keys take.
+// Only the first document counts: a later one (`---` in YAML, `#---` in a
+// properties file) is a profile the default run does not activate. A
+// placeholder resolves to its default (jvmPlaceholderDefault).
 func jvmSettings(name string, content []byte) map[string]string {
 	wanted := map[string]bool{
-		"server.servlet.context-path": true, "management.endpoints.web.base-path": true,
+		"server.servlet.context-path": true, "spring.webflux.base-path": true, "management.endpoints.web.base-path": true,
 		"management.server.port": true, "management.server.base-path": true,
 		"quarkus.http.root-path": true, "quarkus.http.non-application-root-path": true,
 		"quarkus.smallrye-health.root-path": true, "micronaut.server.context-path": true,
@@ -743,6 +774,9 @@ func jvmSettings(name string, content []byte) map[string]string {
 	if strings.HasSuffix(name, ".properties") {
 		for _, raw := range strings.Split(string(content), "\n") {
 			line := strings.TrimSpace(raw)
+			if line == "#---" || line == "!---" {
+				break
+			}
 			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
 				continue
 			}
@@ -752,7 +786,7 @@ func jvmSettings(name string, content []byte) map[string]string {
 			}
 			key = strings.TrimSpace(key)
 			if found && wanted[key] {
-				settings[key] = strings.TrimSpace(value)
+				settings[key] = jvmPlaceholderDefault(strings.TrimSpace(value))
 			}
 		}
 		return settings
@@ -762,14 +796,18 @@ func jvmSettings(name string, content []byte) map[string]string {
 		key    string
 	}
 	var stack []level
+	content = bytes.TrimLeft(content, " \t\r\n")
+	// A leading marker opens the first document rather than ending it.
+	if rest, found := bytes.CutPrefix(content, []byte("---")); found && (len(rest) == 0 || rest[0] == '\n' || rest[0] == '\r') {
+		content = rest
+	}
 	for _, raw := range strings.Split(string(content), "\n") {
 		trimmed := strings.TrimSpace(raw)
+		if trimmed == "---" || strings.HasPrefix(trimmed, "--- ") {
+			break
+		}
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "-") {
 			continue
-		}
-		if trimmed == "---" {
-			// A second document is another profile; the default one decides.
-			break
 		}
 		indent := len(raw) - len(strings.TrimLeft(raw, " "))
 		key, value, found := strings.Cut(trimmed, ":")
@@ -791,8 +829,25 @@ func jvmSettings(name string, content []byte) map[string]string {
 			continue
 		}
 		if wanted[full] {
-			settings[full] = value
+			settings[full] = jvmPlaceholderDefault(value)
 		}
 	}
 	return settings
+}
+
+var jvmPlaceholderRE = regexp.MustCompile(`\$\{[^{}:]*:([^{}]*)\}`)
+
+// jvmPlaceholderDefault resolves Spring, Quarkus and Micronaut `${NAME:default}`
+// placeholders to their defaults, which is what the service uses unless the
+// operator sets NAME. A placeholder with no default is left in the value, and
+// the setting is unknown (javaReadiness).
+func jvmPlaceholderDefault(value string) string {
+	for range 4 {
+		resolved := jvmPlaceholderRE.ReplaceAllString(value, "$1")
+		if resolved == value {
+			break
+		}
+		value = resolved
+	}
+	return value
 }

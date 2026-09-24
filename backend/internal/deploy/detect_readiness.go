@@ -668,7 +668,7 @@ func djangoSettingsFacts(facts rootFacts, settings, kind string) []readinessFact
 		return own
 	}
 	directory := path.Dir(settings)
-	for _, base := range []string{"base.py", "common.py", "defaults.py", "__init__.py"} {
+	for _, base := range []string{"base.py", "common.py", "defaults.py", "__init__.py", "settings.py"} {
 		if file := path.Join(directory, base); file != settings {
 			if inherited := facts.inFile(file, kind); len(inherited) > 0 {
 				return inherited
@@ -683,6 +683,11 @@ func addDjangoConcerns(readiness *DetectedReadiness, facts rootFacts) {
 	if hosts := djangoSettingsFacts(facts, settings, factDjangoHosts); len(hosts) > 0 {
 		readiness.AllowedHosts = strings.Fields(hosts[0].value)
 		readiness.AllowedHostsSource = "ALLOWED_HOSTS in " + hosts[0].file
+		// With DEBUG on, Django reads an empty list as the local names.
+		if debug := djangoSettingsFacts(facts, settings, factDjangoDebug); len(readiness.AllowedHosts) == 0 && len(debug) > 0 && debug[0].value == "True" {
+			readiness.AllowedHosts = []string{".localhost", "127.0.0.1", "[::1]"}
+			readiness.AllowedHostsSource += " (empty, with DEBUG = True)"
+		}
 	}
 	if redirect := djangoSettingsFacts(facts, settings, factDjangoSSL); len(redirect) > 0 {
 		readiness.HTTPSRedirect = "SECURE_SSL_REDIRECT in " + redirect[0].file
@@ -704,7 +709,8 @@ func addRailsConcerns(readiness *DetectedReadiness, facts rootFacts) {
 }
 
 // javaReadiness maps the health modules a JVM build declares to their
-// endpoints, under the context path the service's configuration sets.
+// endpoints, under the context path the service's configuration sets; a
+// health route found in code is served under that path too.
 func javaReadiness(marker *detectedMarkers, facts rootFacts) *DetectedReadiness {
 	build := string(marker.pomXML) + string(marker.gradleBuild)
 	settings := map[string]string{}
@@ -713,7 +719,24 @@ func javaReadiness(marker *detectedMarkers, facts rootFacts) *DetectedReadiness 
 			settings[fact.label] = fact.value
 		}
 	}
-	context := firstNonEmpty(settings["server.servlet.context-path"], settings["micronaut.server.context-path"])
+	context := firstNonEmpty(settings["server.servlet.context-path"], settings["spring.webflux.base-path"],
+		settings["micronaut.server.context-path"], settings["quarkus.http.root-path"])
+	// A setting that moves the endpoint but names a variable with no default
+	// is decided at deploy time. The framework's path would then be a guess a
+	// healthy service may answer 404, so readiness asks only for an answer.
+	for _, key := range []string{
+		"server.servlet.context-path", "spring.webflux.base-path", "micronaut.server.context-path",
+		"management.endpoints.web.base-path", "quarkus.http.root-path", "quarkus.http.non-application-root-path",
+		"quarkus.smallrye-health.root-path",
+	} {
+		if strings.Contains(settings[key], "${") {
+			readiness := declaredOrCodeReadiness(facts, "the JVM service", "", "jvm")
+			if readiness.Source == readinessFromConvention {
+				readiness.Evidence = key + " is set from a variable with no default; any answer from / shows the JVM service is serving"
+			}
+			return readiness
+		}
+	}
 	switch {
 	case strings.Contains(build, "spring-boot-starter-actuator") && settings["management.server.port"] == "":
 		route := joinURLPath(context, firstNonEmpty(settings["management.endpoints.web.base-path"], "/actuator"), "health")
@@ -738,8 +761,12 @@ func javaReadiness(marker *detectedMarkers, facts rootFacts) *DetectedReadiness 
 		return strictReadiness(joinURLPath(context, "health"), readinessFromFramework, "Micronaut management health endpoint (micronaut-management)")
 	}
 	readiness := declaredOrCodeReadiness(facts, "the JVM service", "", "jvm")
-	if readiness.Source == readinessFromConvention && context != "" {
-		readiness.Path = joinURLPath(context) + "/"
+	switch {
+	case context == "":
+	case readiness.Source == readinessFromConvention:
+		readiness.Path = strings.TrimSuffix(joinURLPath(context), "/") + "/"
+	case readiness.Source == readinessFromCode:
+		readiness.Path = joinURLPath(context, readiness.Path)
 	}
 	return readiness
 }
