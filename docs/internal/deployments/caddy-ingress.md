@@ -55,6 +55,8 @@ the plan names one. Caddy itself sets no request-body limit, so a route whose pl
 directive and behaves as before; the host-nginx driver, whose own default is 1 MB, always writes
 `client_max_body_size` (64 MB unless the plan says otherwise). A route written before the limit existed
 keeps its bytes until the next activation rewrites it; the reconcile pass does not add the directive.
+Because zero means different things on the two drivers, preflight's `request_body_limit`, release
+comparison and the settings hints state it as "64 MB on nginx, no limit on Caddy" rather than one number.
 
 ## Certificates and application networking
 

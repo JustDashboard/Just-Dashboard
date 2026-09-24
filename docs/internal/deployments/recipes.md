@@ -81,9 +81,12 @@ readiness timeout that named neither. Detection now reads, as bounded text and n
   `listen({ port, host })` (shorthand followed to its constant), `Bun.serve`/`Deno.serve` options, Hono's
   `serve`, a PORT read and its `|| 5000` fallback, `process.env.HOST || 'localhost'`, Fastify and Nest's
   Fastify adapter (both bind localhost when given no host); Go main-package `Run(":8080")`,
-  `ListenAndServe`, `net.Listen`, `Addr:` and gin's argument-less `Run()` (PORT, else 8080); Rust
-  `bind("127.0.0.1:3000")`, `bind(("0.0.0.0", 8080))`, `SocketAddr::from(([0,0,0,0], N))`, warp's `run`;
-  Python `app.run(...)` and `uvicorn.run(...)` (both 127.0.0.1 without `host=`); Vert.x `listen(8888)`,
+  `ListenAndServe`, `Serve`, `net.Listen`, the `Addr:` of an `http.Server`/`fasthttp.Server` literal (a
+  client's options, such as go-redis's, are not listeners) and gin's argument-less `Run()` (PORT, else
+  8080) — test files excluded; Rust `bind("127.0.0.1:3000")`, `bind(("0.0.0.0", 8080))`,
+  `bind(&"…".parse()…)`, `SocketAddr::from(([0,0,0,0], N))`, warp's `run` (never `String::from` or a
+  client's `new`); Python `app.run(...)`, `socketio.run(...)` and `uvicorn.run(...)` (all 127.0.0.1
+  without `host=`, and 5000, 5000 and 8000 without `port=`, since none reads PORT); Vert.x `listen(8888)`,
   Javalin `start(7070)`, Ktor `embeddedServer(port = …)`; `app.Run("http://localhost:5000")`, `UseUrls`,
   `ListenLocalhost` in `Program.cs`.
 - **Configuration**: `server.port`/`server.address` (Spring, Helidon), `quarkus.http.port`,
@@ -91,13 +94,27 @@ readiness timeout that named neither. Detection now reads, as bounded text and n
   `appsettings(.Production).json` Kestrel endpoints and `Urls`, `gunicorn.conf.py`, a Dockerfile's final
   `ENV PORT=`/`ARG PORT=` when it has no single `EXPOSE`, and Phoenix's `config/runtime.exs` PORT default.
 
+A listen address is read only when it is one whole string literal, or an identifier assigned exactly
+one: `":" + port` names neither a port nor a host. A listen call whose address the scan cannot read —
+`http.Server{Addr: ":" + port}` with `srv.ListenAndServe()`, `cfg.Addr`, an address from a variable — may
+well be on every interface, so it counts as an open listener. A listener on loopback beside such a call,
+or beside a PORT read while it fixes a port of its own, is a side listener (a debug or admin endpoint):
+its port is never the candidate's, and its loopback is a warning, never certain. A loopback
+`http.ListenAndServe(…, nil)` in a main package that imports `net/http/pprof` is the profiling endpoint
+and is not read at all.
+
 The port precedence is the command's explicit port, then a configured port (a suggestion when the
 recipe bridges it onto PORT, fixed otherwise), then a code literal when the code never reads PORT, then
 a PORT read's own fallback, then the framework default. The candidate carries the result as `listen`
 (`port`/`portFrom` for a port the source fixes, `readsPort`, `loopback`/`loopbackFrom`,
 `loopbackCertain`, `loopbackRecipeFix`, `loopbackVariable`, `unbridged`), each fact naming its file and
 line, and evidence lines say the same. Preflight re-checks it against the plan — a replaced start command
-is read on its own — and raises:
+is read on its own — and raises the findings below. A loopback read from code is certain only for the
+code the detected plan runs: a start command that no longer runs the same package script (a
+package-manager switch keeps it), a different build method, and every Dockerfile candidate (whose image
+runs its own `CMD`, and whose code loopback on a port other than its `EXPOSE` is dropped as fronted) turn
+the blocker into a warning, which is also how an operator stops a detection they know to be wrong from
+blocking.
 
 | Code | Severity | When |
 | --- | --- | --- |
@@ -108,9 +125,11 @@ is read on its own — and raises:
 | `listen_endpoints_unbridged` | warning | several Kestrel endpoints, or an HTTPS one, keep their own addresses |
 | `start_command_dev_server` | warning | a Python recipe runs `runserver`, `flask run`, `fastapi dev` or `--reload` |
 | `proxy_headers_trusted` | pass | the recipe or a plan variable makes the app believe the proxy's forwarded headers |
-| `forwarded_headers_untrusted` | warning | that trust is withdrawn because the port is published on every interface |
+| `forwarded_headers_untrusted` | warning | the port is reachable without the proxy (a `0.0.0.0`/`::` bind, host networking, or the application's port published again on every interface): the recipe's trust is withdrawn, and a plan variable such as `AUTH_TRUST_HOST` is named as still trusted |
 | `proxy_trust_variable_missing` | warning | a variable detection proposed for proxy trust (`AUTH_TRUST_HOST`) was removed |
-| `request_body_limit` | pass | the plan has a route: the largest upload the proxy lets through |
+| `public_url_variable_missing` | warning | `NEXTAUTH_URL` (next-auth 4) is missing or empty; the action names the value the primary domain gives |
+| `public_url_variable_stale` | warning | `NEXTAUTH_URL` names another host than the primary domain (only the host is echoed) |
+| `request_body_limit` | pass | the plan has a route: the largest upload the proxy lets through, zero being 64 MB on nginx and no limit on Caddy |
 
 What the recipes write so the server listens where the proxy reaches it and believes the headers it
 sends, without asking:
@@ -119,13 +138,20 @@ sends, without asking:
   Adonis and `process.env.HOST || 'localhost'` bind it, and it is inert where unused (Next.js does not
   read `HOST`). **SvelteKit adapter-node** also gets `PROTOCOL_HEADER=x-forwarded-proto`,
   `HOST_HEADER=x-forwarded-host`, `ADDRESS_HEADER=x-forwarded-for` and `XFF_DEPTH=1`, so form actions are
-  not refused as cross-site and `getClientAddress` is the visitor's. A start whose script is a bare
+  not refused as cross-site and `getClientAddress` is the visitor's. adapter-node's `getClientAddress`
+  throws when `ADDRESS_HEADER` names a header a request lacks, so the setting is only kept where every
+  request carries it: the runtime withdraws it (below) from a release with no route, and a readiness
+  probe that connects to the candidate directly must send `X-Forwarded-For`, or an app that calls
+  `getClientAddress` in its hooks answers the probe with 500. A start whose script is a bare
   `vite preview`/`astro preview` becomes `<runner> vite preview … --host 0.0.0.0`.
 - **Auth.js**: `next-auth` 5 (or `beta`) and `@auth/*` get a plain plan variable `AUTH_TRUST_HOST=true`,
   without which every request is refused as an untrusted host; `next-auth` 4 gets `NEXTAUTH_URL` with the
-  domain template `{{scheme}}://{{hostname}}`, which follows the primary domain. Both are visible,
-  removable plan variables (`networkVariables` on the candidate) for every build method, including a
-  Dockerfile beside the package, rather than image settings.
+  domain template `{{scheme}}://{{hostname}}`, which follows the primary domain, the suggested one
+  included. Both are visible, removable plan variables (`networkVariables` on the candidate) for every
+  build method, including a Dockerfile beside the package, rather than image settings. A plan with no
+  domain saves no `NEXTAUTH_URL` at all — next-auth 4 fails every sign-in request on an empty one — and
+  its environment row stays askable; preflight warns while it is missing. A domain changed later in the
+  project's settings does not rewrite it; `public_url_variable_stale` says so.
 - **Python** images set `FORWARDED_ALLOW_IPS=*` (gunicorn, uvicorn and the uvicorn inside Gradio,
   Chainlit and NiceGUI read it; their default trusts only 127.0.0.1, and the proxy is not 127.0.0.1),
   `UVICORN_HOST=0.0.0.0` and `FLASK_RUN_HOST=0.0.0.0` (both default to 127.0.0.1; an explicit `--host`
@@ -140,12 +166,16 @@ sends, without asking:
   Go or Rust recipe — gets a `HOST=0.0.0.0` plan variable instead. HOST is never injected globally: some
   applications use it as their public hostname.
 
-Trusting forwarded headers is safe only while the proxy is the only way in: it replaces whatever a client
-sent. A plan that publishes the container on `0.0.0.0`/`::` is reachable directly, so the runtime writes
-the withdrawn value of every trust setting (`FORWARDED_ALLOW_IPS=127.0.0.1`,
-`ASPNETCORE_FORWARDEDHEADERS_ENABLED=false`, `SERVER_FORWARD_HEADERS_STRATEGY=none`, the Quarkus
-switches `false`, SvelteKit's three header variables empty) unless the plan sets the variable itself, and
-preflight says so. Host networking is left unchanged.
+Trusting forwarded headers is safe only while the proxy fronts the release alone: it replaces whatever a
+client sent. The release records which trust settings its recipe image sets. When the release has no
+route (nothing adds the headers), or its port is reachable directly (a `0.0.0.0`/`::` bind, host
+networking, or the application's port published again on every interface), the runtime writes the
+withdrawn value of each recorded setting (`FORWARDED_ALLOW_IPS=127.0.0.1`,
+`ASPNETCORE_FORWARDEDHEADERS_ENABLED=false`, `SERVER_FORWARD_HEADERS_STRATEGY=none`, the Quarkus switches
+`false`, SvelteKit's `PROTOCOL_HEADER` and `ADDRESS_HEADER` empty and `HOST_HEADER=host`, adapter-node's
+own default — before 5.5 an empty one made every origin `https://undefined`) unless the plan sets the
+variable itself, and preflight says so. A repository's own Dockerfile, a pulled image and an adopted
+container record nothing, so what their authors bake in is never overridden.
 
 When a candidate fails its readiness gate anyway, the diagnosis also reads its listening sockets: the
 runtime owner runs `cat /proc/net/tcp /proc/net/tcp6` inside the candidate's own container (closed
@@ -273,8 +303,11 @@ A module whose main package serves HTTP — `gin`, `echo`, `fiber`, `chi`, `gori
 `go.mod`, or `net/http` in the main package — is a web candidate with the framework and the port its
 main package names (`Run(":8081")`, `ListenAndServe(":9000", …)`), or 8080 with the evidence "follows
 PORT" when it reads PORT, so it gets a readiness gate and a suggested hostname instead of an unset port.
-A gRPC or other listener keeps the service profile with its port. Several main packages are the
-recipe's own question and name no port.
+That gate is the detected readiness check ("Readiness, workers and start commands"), which counts any
+answer from an API with no page at `/`; a 2xx-only check on `/` would fail it. A `net/http` main package
+(no web framework in `go.mod`) whose every registered route is `/metrics`, `/debug/…` or a health
+endpoint is a worker with a side port and keeps the service profile, as does a gRPC or other listener,
+each with its port. Several main packages are the recipe's own question and name no port.
 
 This recipe uses `CGO_ENABLED=0`. Local non-test source importing `C`, unsupported source versions and
 explicit CGO-enabling commands produce actionable planning/preparation refusals. Dependencies needing

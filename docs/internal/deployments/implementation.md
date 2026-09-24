@@ -270,8 +270,9 @@ only renderer/executor/validation authority for their feature.
   variables the proxy decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`, which
   the form seeds as removable plan variables). Preflight re-checks `listen` against the plan
   (`preflight_network.go`: `listen_loopback`, `port_hardcoded`, `proxy_headers_trusted`,
-  `forwarded_headers_untrusted`, `request_body_limit` and the rest, listed in the recipe guide), so a
-  loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed recipe set is
+  `forwarded_headers_untrusted`, `public_url_variable_missing`, `request_body_limit` and the rest,
+  listed in the recipe guide), so a certain loopback bind is a blocker before Deploy rather than a
+  readiness timeout after it. The closed recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
@@ -357,9 +358,13 @@ only renderer/executor/validation authority for their feature.
   This keeps application startup aligned with Docker publication; the host port may still move. The
   recipes switch framework trust of the proxy's `X-Forwarded-*` headers on (`FORWARDED_ALLOW_IPS=*`,
   `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, `SERVER_FORWARD_HEADERS_STRATEGY`, Quarkus proxy forwarding,
-  SvelteKit's header variables), which is safe while the proxy is the only way in; a plan that publishes
-  on `0.0.0.0`/`::` is reachable directly, so `containerRuntimeEnvironment` writes each setting's
-  withdrawn value unless the plan sets the variable itself (`network_trust.go`).
+  SvelteKit's header variables), which is safe only while the proxy fronts the release alone. The
+  release's runtime snapshot records which of those settings the recipe image's final stage sets
+  (`proxyTrust`, read from the rendered Dockerfile by `imageProxyTrust`); a repository Dockerfile, a
+  pulled image or an adopted container records none. When the release has no route, or its port is
+  reachable directly (a `0.0.0.0`/`::` bind, host networking, or the application's port published again
+  on every interface), `startContainer` writes the withdrawn value of each recorded setting unless the
+  plan sets the variable itself (`network_trust.go`). Nothing is written over a user's own image.
 - HTTP/TCP readiness checks follow the recorded runtime publication when a saved check refers to the
   primary service's original internal or requested host port. Explicit unrelated ports, remote hosts
   and full URLs retain their configured targets. Quick deploy leaves the check port unset to follow
@@ -377,12 +382,13 @@ only renderer/executor/validation authority for their feature.
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
   moves only after required readiness/smoke checks pass.
-- A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240; zero is
-  64 MB). nginx's own default is 1 MB, which refused a phone photo before the application saw it, so an
-  nginx route always writes `client_max_body_size`; Caddy has no default limit, so a Caddy route writes
-  `request_body { max_size }` only when the plan names one. The project's Runtime settings (Where it
-  listens) and the new-project limits fold edit it; preflight's `request_body_limit` pass states it, and
-  release comparison lists a change.
+- A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
+  proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
+  before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the
+  plan names a limit); Caddy has no default limit, so a Caddy route writes `request_body { max_size }`
+  only when the plan names one and otherwise stays unlimited, as before. The project's Runtime settings
+  (Where it listens) and the new-project limits fold edit it; preflight's `request_body_limit` pass and
+  release comparison state it, zero as "64 MB on nginx, no limit on Caddy".
 - Deployment-owned nginx cutover is serialized and snapshots the prior bytes, mode and exact symlink
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation
